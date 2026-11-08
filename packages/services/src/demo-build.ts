@@ -75,8 +75,8 @@ import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 
-/** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1». */
-const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio" }
+/** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */
+const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio", optical: "Sala de examen" }
 
 /**
  * El motor de las demos para presentar (ADR 0096). Arma una clínica inventada

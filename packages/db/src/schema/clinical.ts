@@ -1139,7 +1139,7 @@ export const treatmentTemplate = catalogSchema.table(
   },
   (table) => [
     uniqueIndex("treatment_template_key_uidx").on(table.key),
-    check("treatment_template_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("treatment_template_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check("treatment_template_usual_sessions_check", sql`${table.usualSessions} BETWEEN 1 AND 60`),
   ],
 )

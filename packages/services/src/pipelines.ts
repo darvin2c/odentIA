@@ -36,10 +36,17 @@ const MEDICAL_MOMENT_NAMES: Partial<Record<SaleMoment, string>> = {
   evaluacion_agendada: "Consulta agendada",
 }
 
+/** En vistIA se agenda un examen de la vista y lo que se envía es una cotización de lentes. */
+const OPTICAL_MOMENT_NAMES: Partial<Record<SaleMoment, string>> = {
+  evaluacion_agendada: "Examen agendado",
+  presupuesto_enviado: "Cotización enviada",
+}
+
 /** Los nombres propios de cada producto; lo que no dice, el de `SALE_MOMENT_NAMES`. */
 const MOMENT_NAMES_BY_PRODUCT: Record<ClinicalProduct, Partial<Record<SaleMoment, string>>> = {
   dental: {},
   medical: MEDICAL_MOMENT_NAMES,
+  optical: OPTICAL_MOMENT_NAMES,
 }
 
 /** Orden de los pasos: una oportunidad avanza sola solo hacia adelante. */

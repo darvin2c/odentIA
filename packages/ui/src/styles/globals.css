@@ -291,10 +291,44 @@
 }
 
 /*
+ * vistIA (plan «vistIA: plan para ópticas», decisión 2): el mismo sistema en
+ * verde, lejos del turquesa de odentIA y del morado de latidIA. Como en
+ * latidIA, solo cambian la identidad, el primario y el acento del agente. El
+ * verde de éxito sigue siendo el de los estados: más oscuro y siempre con su
+ * ícono o su texto.
+ */
+:root[data-brand="vistia"],
+:root[data-brand="vistia"] .theme-light {
+    --identity-accent: #15803d;
+    --primary: #15803d;
+    --primary-soft: #dcfce7;
+    --primary-soft-foreground: #166534;
+    --ring: #15803d;
+    --sidebar-primary: #15803d;
+    --sidebar-ring: #15803d;
+    --agent-soft: #f0fdf4;
+    --agent-border: #bbf7d0;
+}
+
+:root.dark[data-brand="vistia"] {
+    --identity-accent: #4ade80;
+    --primary: #4ade80;
+    --primary-foreground: #052e16;
+    --primary-soft: #123821;
+    --primary-soft-foreground: #bbf7d0;
+    --ring: #4ade80;
+    --sidebar-primary: #4ade80;
+    --sidebar-primary-foreground: #052e16;
+    --sidebar-ring: #4ade80;
+    --agent-soft: #0f2a1a;
+    --agent-border: #1f4d33;
+}
+
+/*
  * La administración (lienzo «Administración en negro», aprobado el
  * 2026-10-26): neutra y formal, en negro, grafito, gris y blanco. El color
  * queda solo para distinguir el producto de cada clínica (`--product-*`:
- * odentIA en celeste, latidIA en lila); los estados conservan el suyo porque
+ * odentIA en celeste, latidIA en lila, vistIA en verde); los estados conservan el suyo porque
  * avisan algo. La app la pone con `<html data-brand="admin">`.
  */
 :root[data-brand="admin"] {
@@ -336,6 +370,9 @@
     --product-medical: #6d3fc0;
     --product-medical-soft: #ece4fb;
     --product-medical-foreground: #4c2a8a;
+    --product-optical: #15803d;
+    --product-optical-soft: #dcfce7;
+    --product-optical-foreground: #166534;
 }
 
 :root.dark[data-brand="admin"] {
@@ -378,6 +415,9 @@
     --product-medical: #b79cf0;
     --product-medical-soft: #2e1a55;
     --product-medical-foreground: #cbb6f5;
+    --product-optical: #4ade80;
+    --product-optical-soft: #123821;
+    --product-optical-foreground: #bbf7d0;
 }
 
 @layer base {

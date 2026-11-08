@@ -22,11 +22,11 @@ import type { ClinicalProduct } from "./products.js"
 /** El color tal como se guarda: seis cifras hexadecimales en minúsculas. */
 export const BRAND_COLOR_PATTERN = /^#[0-9a-f]{6}$/
 
-/** El color de fábrica de cada producto: el primario de odentIA y el de latidIA en `globals.css`. */
-export const PRODUCT_BRAND_COLORS = { dental: "#0e7490", medical: "#6d3fc0" } as const satisfies Record<ClinicalProduct, string>
+/** El color de fábrica de cada producto: el primario de odentIA, el de latidIA y el de vistIA en `globals.css`. */
+export const PRODUCT_BRAND_COLORS = { dental: "#0e7490", medical: "#6d3fc0", optical: "#15803d" } as const satisfies Record<ClinicalProduct, string>
 
 /** Cómo se llama el color de fábrica de cada producto entre los sugeridos. */
-const FACTORY_COLOR_NAME: Record<ClinicalProduct, string> = { dental: "Turquesa", medical: "Morado" }
+const FACTORY_COLOR_NAME: Record<ClinicalProduct, string> = { dental: "Turquesa", medical: "Morado", optical: "Verde" }
 
 /**
  * Los sugeridos: los más usados en salud, ordenados por familia. Rojo y ámbar no se
@@ -48,16 +48,15 @@ export const SUGGESTED_BRAND_COLORS: ReadonlyArray<{ hex: string; name: string }
 ]
 
 /**
- * Los sugeridos de un producto, con el de fábrica marcado: en su lugar si está
- * entre los sugeridos (el turquesa de odentIA) o, si no, primero y en lugar del
- * sugerido de su mismo nombre (en latidIA, su morado en lugar del otro morado).
+ * Los sugeridos de un producto, con el de fábrica marcado y primero: si está
+ * entre los sugeridos se mueve adelante (el turquesa de odentIA ya lo está; el
+ * verde de vistIA pasa adelante) y, si no, va primero en lugar del sugerido de su
+ * mismo nombre (en latidIA, su morado en lugar del otro morado).
  */
 export function suggestedBrandColors(product: ClinicalProduct): Array<{ hex: string; name: string; factory: boolean }> {
   const factory = PRODUCT_BRAND_COLORS[product]
-  if (SUGGESTED_BRAND_COLORS.some((color) => color.hex === factory))
-    return SUGGESTED_BRAND_COLORS.map((color) => ({ ...color, factory: color.hex === factory }))
   const name = FACTORY_COLOR_NAME[product]
-  const rest = SUGGESTED_BRAND_COLORS.filter((color) => color.name !== name)
+  const rest = SUGGESTED_BRAND_COLORS.filter((color) => color.hex !== factory && color.name !== name)
   return [{ hex: factory, name, factory: true }, ...rest.map((color) => ({ ...color, factory: false }))]
 }
 

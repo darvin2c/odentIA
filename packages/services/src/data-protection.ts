@@ -25,7 +25,11 @@ import { clinicToday } from "./inventory-stock.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE, orgProduct } from "./locale.js"
 
 /** Lo de la historia que nombra el registro de tratamiento, en cada producto. */
-const RECORD_DETAIL: Record<ClinicalProduct, string> = { dental: "odontograma", medical: "examen físico" }
+const RECORD_DETAIL: Record<ClinicalProduct, string> = {
+  dental: "odontograma",
+  medical: "examen físico",
+  optical: "examen de la vista",
+}
 
 export interface DataProtectionActivity {
   id: "atender" | "citas" | "conversar" | "cobrar" | "novedades"

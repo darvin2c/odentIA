@@ -108,6 +108,13 @@ const PRODUCT_EXAMPLES: Record<ClinicalProduct, Partial<Record<MessageVariable, 
     presupuesto: "Chequeo preventivo",
     oportunidad: "Chequeo preventivo",
   },
+  optical: {
+    lugar: "Óptica Clara, sede Centro",
+    clinica: "Óptica Clara",
+    control: "Control anual de la vista",
+    presupuesto: "Lentes progresivos",
+    oportunidad: "Lentes progresivos",
+  },
 }
 
 /** Los valores de ejemplo de cada dato, con los del producto. */
@@ -373,9 +380,10 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
 }
 
 /**
- * Lo que cambia en un producto (issue 229): latidIA invita a volver al año
- * (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
- * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia.
+ * Lo que cambia en un producto (issue 229): latidIA y vistIA invitan a volver al
+ * año (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
+ * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia. La de
+ * vistIA habla del examen de la vista: es el control que la óptica ofrece.
  */
 const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>> = {
   dental: {},
@@ -383,6 +391,12 @@ const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessage
     invitar_a_volver: {
       template: "latidia_invitar_a_volver_v1",
       body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para tu control?",
+    },
+  },
+  optical: {
+    invitar_a_volver: {
+      template: "vistia_invitar_a_volver_v1",
+      body: "Hola, {{1}}. Ya pasó un año desde tu último examen de la vista en {{2}}. ¿Te buscamos un horario para revisarla?",
     },
   },
 }

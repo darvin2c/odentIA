@@ -39,7 +39,7 @@ import { CircleAlert, ListChecks } from "lucide-react"
 import * as React from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
-import { countByProduct, matchesProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
+import { countByProduct, matchesProduct, perProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { webUrl } from "../../lib/host"
 import { WaitlistKpisSkeleton, WaitlistPageSkeleton, WaitlistSkeleton } from "../../components/skeletons/waitlist"
 
@@ -127,8 +127,8 @@ const modeShape = z.enum(["invitacion", "abierta"])
 const pagePayload = z.object({
   rows: z.array(row),
   counts: z.record(z.string(), z.number()),
-  seats: z.object({ dental: seatsShape, medical: seatsShape }),
-  modes: z.object({ dental: modeShape, medical: modeShape }),
+  seats: perProduct(seatsShape),
+  modes: perProduct(modeShape),
   answerDays: z.number(),
 })
 type Seats = z.infer<typeof seatsShape>
