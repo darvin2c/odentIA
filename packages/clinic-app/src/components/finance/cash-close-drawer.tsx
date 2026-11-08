@@ -603,13 +603,19 @@ export function CashMoveDrawer({
   locale,
   open,
   onClose,
+  initialAmountCents,
 }: {
   branchId: string
-  /** Moneda de la clínica, mientras llega la de la caja. */
+  /** Moneda de la clínica, mientras llega la de la caja. Con otra moneda, la caja que se abre. */
   currency: string
   locale: string
   open: boolean
   onClose: () => void
+  /**
+   * Lo que falta en la caja, cuando se abre desde un gasto o un pago que no alcanza: se propone
+   * ingresarlo, y al guardar se vuelve a lo que se estaba escribiendo.
+   */
+  initialAmountCents?: number
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
@@ -677,9 +683,13 @@ export function CashMoveDrawer({
 
   useEffect(() => {
     if (!open) return
-    form.reset(MOVE_DEFAULTS)
+    form.reset(
+      initialAmountCents && initialAmountCents > 0
+        ? { ...MOVE_DEFAULTS, kind: "aporte", amount: formatMoneyInput(initialAmountCents, currency, locale) }
+        : MOVE_DEFAULTS,
+    )
     setBox(currency)
-  }, [open, branchId, currency, form])
+  }, [open, branchId, currency, form, initialAmountCents, locale])
 
   const values = useStore(form.store, (s) => s.values)
   const cents = centsOf(values.amount)
