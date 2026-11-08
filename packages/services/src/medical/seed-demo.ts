@@ -30,7 +30,6 @@ import {
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import * as dicomParser from "dicom-parser"
 import { and, eq, inArray } from "drizzle-orm"
 import sharp from "sharp"
 import { upsertAgentConfig } from "../agentConfig.js"
@@ -61,6 +60,7 @@ import {
 import type { Storage } from "../storage.js"
 import { DEMO_CT, demoCtSeries } from "./demo-imaging.js"
 import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
+import { dicomParser } from "./dicom-parser.js"
 
 export const MEDICAL_DEMO_ORG = "seed-org-consultorio-san-martin"
 export const VELA_ID = "seed-user-vela"
