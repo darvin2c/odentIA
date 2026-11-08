@@ -9,7 +9,7 @@ import {
   WEBCHAT_CHANNEL,
   type WebchatConnectionConfig,
 } from "@odentia/channels"
-import { normalizePhone } from "@odentia/clinical"
+import { brandPalette, normalizePhone, PRODUCT_BRAND_COLORS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
@@ -19,6 +19,7 @@ import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getAgentConfig } from "./agentConfig.js"
 import { findClinicName } from "./automation-routing.js"
+import { getClinicBrandColor } from "./clinic-identity.js"
 import { createConnection, setConnectionStatus } from "./connections.js"
 import { updateContact } from "./contacts.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
@@ -49,7 +50,6 @@ export type { WebchatConnectionConfig }
 /** Re-export del canal lógico para rutas y seeds. */
 export { WEBCHAT_CHANNEL }
 
-const DEFAULT_COLOR = "#0f766e"
 export const WEBCHAT_DEFAULT_GREETING = "Hola, ¿en qué podemos ayudarte?"
 /** «escribiendo…» mientras Sofi atiende lo último que escribió, como mucho este rato. */
 const TYPING_MS = 90_000
@@ -113,7 +113,6 @@ export interface ClinicWebchat {
   active: boolean
   /** La línea para pegar en el sitio; nula sin dirección pública configurada. */
   script: string | null
-  color: string
   greeting: string
   notifyUrl: string | null
   /** El primer sitio permitido donde ya cargó: «Instalado en sonrisa.pe». */
@@ -195,7 +194,6 @@ async function clinicWebchatView(
     id: row.id,
     active: row.status === "active",
     script: origin ? `<script src="${origin}/chat.js" async></script>` : null,
-    color: config.widgetColor ?? DEFAULT_COLOR,
     greeting: config.greeting ?? WEBCHAT_DEFAULT_GREETING,
     notifyUrl: config.notifyUrl ?? null,
     installedOn: views.find((site) => site.status === "permitido")?.origin ?? null,
@@ -203,17 +201,19 @@ async function clinicWebchatView(
   }
 }
 
-/** Color, saludo y aviso al sitio («Opciones avanzadas»). Cambiarlos no obliga a volver a pegar la línea. */
+/**
+ * Saludo y aviso al sitio («Opciones avanzadas»). Cambiarlos no obliga a volver a pegar
+ * la línea. El color ya no es del chat: es el de la marca de la clínica (ADR 0157).
+ */
 export async function updateClinicWebchat(
   tx: Db,
   orgId: string,
   secretsKey: Buffer,
   actorUserId: string | null,
-  patch: { color?: string; greeting?: string | null; notifyUrl?: string | null },
+  patch: { greeting?: string | null; notifyUrl?: string | null },
 ): Promise<ClinicWebchat> {
   const row = await requireClinicWebchat(tx, orgId)
   const next: Record<string, unknown> = { ...readConfig(row, secretsKey) }
-  if (patch.color !== undefined) next["widgetColor"] = patch.color
   if (patch.greeting !== undefined) next["greeting"] = patch.greeting?.trim() || undefined
   if (patch.notifyUrl !== undefined) next["notifyUrl"] = patch.notifyUrl?.trim() || undefined
   let valid: WebchatConnectionConfig
@@ -356,7 +356,10 @@ export interface WebchatAppearance {
   subtitle: string
   /** Quién firma el saludo y las respuestas automáticas: Sofi, o la clínica si Sofi no atiende el chat. */
   assistant: string
+  /** El botón y la cabecera: el color de la marca de la clínica (o el del producto), exacto si se lee. */
   color: string
+  /** El texto sobre ese color: blanco u oscuro, el que se lea. */
+  textColor: string
   greeting: string
 }
 
@@ -364,11 +367,14 @@ export async function webchatAppearance(tx: Db, orgId: string, found: PublicWebc
   const cfg = await getAgentConfig(tx, orgId)
   const attends = cfg.enabled
   const clinicName = (await findClinicName(tx, orgId)) ?? "La clínica"
+  const { brandColor, product } = await getClinicBrandColor(tx, orgId)
+  const { light } = brandPalette(brandColor ?? PRODUCT_BRAND_COLORS[product])
   return {
     clinicName,
     subtitle: attends ? `Te responde ${cfg.personaName} al momento` : "Te respondemos lo antes posible",
     assistant: attends ? cfg.personaName : clinicName,
-    color: found.config.widgetColor ?? DEFAULT_COLOR,
+    color: light.fill,
+    textColor: light.fillForeground,
     greeting: found.config.greeting ?? WEBCHAT_DEFAULT_GREETING,
   }
 }

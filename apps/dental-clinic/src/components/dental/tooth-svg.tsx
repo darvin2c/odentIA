@@ -809,12 +809,14 @@ export function ToothSVG({
   )
 
   const tileClass = `flex min-h-11 min-w-11 cursor-pointer flex-col items-center gap-0.5 rounded-md border bg-background p-1 transition-colors ${
-    selected ? "border-violet-700 ring-2 ring-violet-600" : "hover:ring-2 hover:ring-ring"
+    selected ? "border-violet-700 ring-2 ring-violet-600" : "hover:ring-2 hover:ring-muted-foreground/50"
   } ${disabled ? "cursor-not-allowed opacity-60" : ""}`
 
   // El foco usa contorno y no anillo: así convive con el anillo violeta de la selección.
+  // Al pasar el mouse, un anillo gris: nunca el color de la clínica, que podría ser rojo o azul
+  // como los hallazgos de la norma (ADR 0157).
   const archClass = `rounded bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-    selected ? "ring-2 ring-violet-600" : disabled ? "" : "hover:ring-2 hover:ring-ring"
+    selected ? "ring-2 ring-violet-600" : disabled ? "" : "hover:ring-2 hover:ring-muted-foreground/50"
   } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`
 
   if (!isTile && mode === "static") {
@@ -868,7 +870,7 @@ export function ToothSVG({
       onClick={handleSelect}
       title={title}
       data-tooth={toothNumber}
-      className={`${tileClass} ${disabled ? "" : "hover:ring-2 hover:ring-ring"}`}
+      className={`${tileClass} ${disabled ? "" : "hover:ring-2 hover:ring-muted-foreground/50"}`}
     >
       {canvas}
       <button

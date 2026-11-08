@@ -234,6 +234,8 @@ export interface ConsentLetterhead {
   branchName: string | null
   address: string | null
   phone: string | null
+  /** El color de la marca en el papel (ADR 0157): la línea y las iniciales. Sin él, tinta. */
+  brandInk?: string | null
 }
 
 /** Lo fijo de la hoja que se firma: el membrete, la declaración que se guarda y la nota del nivel de firma. */

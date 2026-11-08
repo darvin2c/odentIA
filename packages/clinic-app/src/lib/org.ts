@@ -52,6 +52,8 @@ export interface OrgProfile {
   diagnosisSystem: string | null
   /** Logo público de la clínica (se sube en «Datos de la clínica»); null si no tiene. */
   logo?: string | null
+  /** El color de la marca (ADR 0157); null: el del producto. */
+  brandColor?: string | null
   /** El producto de la clínica (ADR 0079): cada app abre solo las suyas. */
   product?: ClinicalProduct
   /** Teléfono para urgencias (E.164); null si no lo registró. */

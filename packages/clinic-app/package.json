@@ -16,6 +16,7 @@
     "./lib/api": "./src/lib/api.ts",
     "./lib/branded-qr": "./src/lib/branded-qr.ts",
     "./lib/budgets": "./src/lib/budgets.ts",
+    "./lib/clinic-color": "./src/lib/clinic-color.ts",
     "./lib/new-version": "./src/lib/new-version.ts",
     "./lib/clinical-journey": "./src/lib/clinical-journey.ts",
     "./lib/crm": "./src/lib/crm.ts",

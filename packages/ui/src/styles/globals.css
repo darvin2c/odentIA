@@ -44,6 +44,9 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-primary-fill: var(--primary-fill);
+    --color-primary-fill-foreground: var(--primary-fill-foreground);
+    --color-primary-fill-hover: var(--primary-fill-hover);
     --color-primary-soft: var(--primary-soft);
     --color-primary-soft-foreground: var(--primary-soft-foreground);
     --color-popover-foreground: var(--popover-foreground);
@@ -121,6 +124,13 @@
     /* Marca */
     --primary: #0e7490;
     --primary-foreground: #ffffff;
+    /* El relleno del botón principal: el primario, salvo un color de clínica claro
+     * (ADR 0157), que se conserva exacto con letra oscura. El primario es siempre el
+     * tono legible para textos, bordes y foco. */
+    --primary-fill: var(--primary);
+    --primary-fill-foreground: var(--primary-foreground);
+    /* Al pasar el mouse se aleja de la letra: más oscuro con letra blanca, más claro con oscura. */
+    --primary-fill-hover: color-mix(in oklab, var(--primary-fill), black 12%);
     --primary-soft: #d9eff5;
     --primary-soft-foreground: #0b5568;
     --ring: #0e7490;

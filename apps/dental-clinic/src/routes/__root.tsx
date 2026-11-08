@@ -1,4 +1,5 @@
 import { Toaster } from "@odentia/ui"
+import { clinicColorStyles, loadClinicAppearance } from "@odentia/clinic-app/lib/clinic-color"
 import { watchNewVersion } from "@odentia/clinic-app/lib/new-version"
 import { createQueryClient } from "@odentia/clinic-app/lib/query-client"
 import { QueryClientProvider } from "@tanstack/react-query"
@@ -9,7 +10,11 @@ import faviconIco from "../../../../assets/brand/favicon.ico?url"
 import appCss from "../styles/app.css?url"
 
 export const Route = createRootRoute({
-  head: () => ({
+  // El color de la marca de la clínica (ADR 0157): una vez por carga, y de nuevo solo al cambiarlo.
+  loader: () => loadClinicAppearance(),
+  staleTime: Number.POSITIVE_INFINITY,
+  head: ({ loaderData }) => ({
+    styles: clinicColorStyles(loaderData),
     meta: [
       { charSet: "utf-8" },
       // `resizes-content`: al abrir el teclado del celular la página se achica y la caja de texto queda a la vista.
