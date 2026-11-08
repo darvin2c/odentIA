@@ -4476,7 +4476,7 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
     .where(and(...shiftFilters))
   const voidedTickets = await voidedTicketsOfDay(tx, orgId, branchRow.id, start, end, query.currency)
   if (shifts.length === 0)
-    return { branchId: branchRow.id, day: query.day, timezone, movements: [], voidedTickets }
+    return { branchId: branchRow.id, day: query.day, timezone, movements: [], voidedTickets, voidedMovements: [] }
   const shiftIds = shifts.map((s) => s.id)
   const movements = await tx
     .select()
@@ -4497,7 +4497,63 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
     timezone,
     movements: await withTicketOrigin(tx, orgId, await withoutCommissionPayees(tx, orgId, movements)),
     voidedTickets,
+    voidedMovements: await voidedCommissionReturnsOfDay(tx, orgId, shiftIds, start, end),
   }
+}
+
+/**
+ * Lo devuelto de comisiones en efectivo que entró ese día y después se anuló, con la caja aún abierta: como
+ * un ticket anulado, sigue a la vista, tachado y con su motivo, sin sumar. Quien contó ese efectivo ve por
+ * qué ya no está. Sin a quién (caja no lo ve): el concepto es el mismo de la caja.
+ */
+export interface VoidedMovementOfDay {
+  id: string
+  kind: string
+  direction: string
+  concept: string
+  currency: string
+  amountCents: number
+  createdAt: Date
+  voidedAt: Date
+  voidReason: string | null
+}
+
+async function voidedCommissionReturnsOfDay(
+  tx: Db,
+  orgId: string,
+  shiftIds: string[],
+  start: Date,
+  end: Date,
+): Promise<VoidedMovementOfDay[]> {
+  if (shiftIds.length === 0) return []
+  const rows = await tx
+    .select({ movement: cashMovement })
+    .from(cashMovement)
+    .innerJoin(
+      commissionSettlement,
+      and(eq(commissionSettlement.organizationId, orgId), eq(commissionSettlement.cashMovementId, cashMovement.id)),
+    )
+    .where(
+      and(
+        eq(cashMovement.organizationId, orgId),
+        inArray(cashMovement.shiftId, shiftIds),
+        isNotNull(cashMovement.voidedAt),
+        gte(cashMovement.createdAt, start),
+        lte(cashMovement.createdAt, end),
+      ),
+    )
+    .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
+  return rows.map(({ movement }) => ({
+    id: movement.id,
+    kind: movement.kind,
+    direction: movement.direction,
+    concept: COMMISSION_RETURNS_CONCEPT,
+    currency: movement.currency,
+    amountCents: movement.amountCents,
+    createdAt: movement.createdAt,
+    voidedAt: movement.voidedAt as Date,
+    voidReason: movement.voidReason,
+  }))
 }
 
 /**

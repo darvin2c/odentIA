@@ -181,6 +181,13 @@ it("«lo devolvió» en efectivo entra a la caja sin su nombre y deja la deuda e
   await f.run((tx) => voidCommissionSettlement(tx, "org_a", admin, done.settlement.id, { reason: "Era de otro" }))
   expect(await inDrawer()).toBe(drawer)
   expect(await viewOf(now)).toMatchObject({ adjustmentCents: 30000, owedCents: 30000 })
+  expect((await viewOf(before)).debtClosures).toEqual([])
+  // En Caja no desaparece: como un ticket anulado, sigue a la vista con su motivo, sin sumar y sin a quién.
+  const afterVoid = await f.run((tx) => getDayMovements(tx, "org_a", { branchId, day: today }))
+  expect(afterVoid.movements.find((m) => m.id === done.movementId)).toBeUndefined()
+  expect(afterVoid.voidedMovements).toEqual([
+    expect.objectContaining({ id: done.movementId, concept: "Devolución de comisiones", amountCents: 30000, direction: "ingreso", voidReason: "Era de otro" }),
+  ])
   const voidNotice = await ownerDb.execute<{ title: string }>(
     sql`select title from workspace_notification where organization_id = 'org_a' and dedupe_key = ${`commission-voided:${done.settlement.id}`}`,
   )

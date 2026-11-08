@@ -103,6 +103,7 @@ import {
   formatDayMonth,
   formatDayShort,
   groupDayMovements,
+  voidedCashNote,
   invalidateFinance,
   isForbidden,
   joinList,
@@ -875,7 +876,7 @@ function CashTab({
   })
 
   const entries = useMemo(
-    () => groupDayMovements(dayBody?.movements ?? [], dayBody?.voidedTickets ?? []),
+    () => groupDayMovements(dayBody?.movements ?? [], dayBody?.voidedTickets ?? [], dayBody?.voidedMovements ?? []),
     [dayBody],
   )
   const attended = debts.data?.data.data ?? []
@@ -914,7 +915,7 @@ function CashTab({
     return `${head}Último cierre: ${momentShort(spokenMoment(last.closedAt, locale, zone))}, ${lowerFirst(differenceLabel(last.differenceCents, inBox))}`
   }
   const ticketCount = entries.filter((entry) => entry.type === "cobro" && !entry.voided).length
-  const expenseCount = entries.filter((entry) => entry.type === "gasto").length
+  const expenseCount = entries.filter((entry) => entry.type === "gasto" && !entry.voided).length
   const openedDay = state?.openedAt ? spokenMoment(state.openedAt, locale, zone) : null
   // Lo de hoy es lo de la sede menos lo de antes: cuenta también a quien no cupo en la lista.
   const attendedTotal = debts.data?.data.total ?? attended.length
@@ -989,6 +990,9 @@ function CashTab({
               }
               locale={locale}
               otherBox={boxes.find((other) => other.code !== box.code)?.code ?? null}
+              voidedNote={voidedCashNote(dayBody?.voidedMovements, box.state.currency, (cents) =>
+                formatMoney(cents, box.state?.currency ?? box.code, locale),
+              )}
               // «Ver cobros» abre lo mismo que suma la tarjeta: desde el último cierre si la caja va de varios días.
               onShowTickets={() =>
                 onShowTickets(
@@ -1180,6 +1184,7 @@ function CashBoxFigures({
   collectedTitle,
   locale,
   otherBox,
+  voidedNote,
   onShowTickets,
 }: {
   state: CashState
@@ -1189,6 +1194,8 @@ function CashBoxFigures({
   locale: string
   /** La otra caja de la sede, para decir el vuelto cruzado; nula con una moneda. */
   otherBox: string | null
+  /** Lo anulado hoy que ya no suma (lo devuelto de comisiones): quien contó ese efectivo ve por qué. */
+  voidedNote?: string | null
   onShowTickets: () => void
 }) {
   const money = (cents: number) => formatMoney(cents, state.currency, locale)
@@ -1216,6 +1223,7 @@ function CashBoxFigures({
               ? "Sin efectivo desde el último cierre."
               : "La caja se abre sola con el primer cobro.")}
         </p>
+        {voidedNote ? <p className="mt-1 text-sm text-muted-foreground">{voidedNote}</p> : null}
       </div>
       {others.map((row) => (
         <div
@@ -1287,7 +1295,7 @@ function MovementLine({
   let amountCents: number
   let leaves = false
   let open: (() => void) | null = null
-  const voided = entry.type === "cobro" ? entry.voided : null
+  const voided = entry.voided
   if (entry.type === "cobro") {
     const { ticketId } = entry
     if (ticketId) open = () => onOpenTicket(ticketId)
