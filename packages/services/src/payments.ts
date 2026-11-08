@@ -379,7 +379,7 @@ export async function createCharge(
         // Lo cobrado de un tratamiento incluye lo devuelto (ADR 0068): una
         // devolución no deja «por generar» lo que ya se cobró.
         amountCents:
-          sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents}`.mapWith(
+          sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents} + ${patientCharge.discountCents}`.mapWith(
             Number,
           ),
         encounterProcedureId: patientCharge.encounterProcedureId,
@@ -469,8 +469,9 @@ export async function createCharge(
         source.procedure.serviceId,
         amountCents,
       )
-      // El precio fijo manda; el «desde» ya validó el final contra su mínimo.
-      if (snapshot.mode === "fixed") amountCents = snapshot.priceCents
+      // El precio fijo manda, por unidad: tres resinas son tres veces su precio. El «desde» ya
+      // validó el final contra su mínimo.
+      if (snapshot.mode === "fixed") amountCents = snapshot.priceCents * (source.procedure.quantity ?? 1)
       promotionId = input.promotionId
       promotionName = snapshot.promotionName
     }
@@ -720,12 +721,13 @@ async function chargeServiceId(
   tx: Db,
   orgId: string,
   charge: { budgetItemId: string | null; encounterProcedureId: string | null },
-): Promise<{ serviceId: string | null; sourcePriceCents: number | null }> {
+): Promise<{ serviceId: string | null; sourcePriceCents: number | null; quantity: number }> {
   if (charge.encounterProcedureId) {
     const [procedure] = await tx
       .select({
         serviceId: encounterProcedure.serviceId,
         priceCents: encounterProcedure.priceCents,
+        quantity: encounterProcedure.quantity,
       })
       .from(encounterProcedure)
       .where(
@@ -737,6 +739,7 @@ async function chargeServiceId(
     return {
       serviceId: procedure?.serviceId ?? null,
       sourcePriceCents: procedure?.priceCents ?? null,
+      quantity: procedure?.quantity ?? 1,
     }
   }
   if (charge.budgetItemId) {
@@ -752,9 +755,9 @@ async function chargeServiceId(
           eq(treatmentBudgetItem.organizationId, orgId),
         ),
       )
-    return { serviceId: line?.serviceId ?? null, sourcePriceCents: line?.priceCents ?? null }
+    return { serviceId: line?.serviceId ?? null, sourcePriceCents: line?.priceCents ?? null, quantity: 1 }
   }
-  return { serviceId: null, sourcePriceCents: null }
+  return { serviceId: null, sourcePriceCents: null, quantity: 1 }
 }
 
 /**
@@ -798,7 +801,7 @@ export async function updateCharge(
   // Motivo: lo escribe la persona o lo da la promoción aplicada.
   let reasonText = input.reason?.trim() ? reason(input.reason) : null
   if (input.promotionId) {
-    const { serviceId } = await chargeServiceId(tx, orgId, current)
+    const { serviceId, quantity } = await chargeServiceId(tx, orgId, current)
     if (!serviceId) throw validation("La promoción solo aplica a conceptos con servicio")
     const snapshot = await requirePromotionPrice(
       tx,
@@ -813,7 +816,7 @@ export async function updateCharge(
     if (
       snapshot.mode === "from" &&
       snapshot.floorCents != null &&
-      snapshot.priceCents < snapshot.floorCents &&
+      snapshot.priceCents < snapshot.floorCents * quantity &&
       !reasonText
     )
       throw invalidField(
@@ -854,7 +857,8 @@ export async function updateCharge(
       })
       return gone
     }
-    patch.amountCents = snapshot.priceCents
+    // El precio fijo es por unidad; el «desde» ya es el precio final del concepto.
+    patch.amountCents = snapshot.mode === "fixed" ? snapshot.priceCents * quantity : snapshot.priceCents
     patch.promotionId = snapshot.promotionId
     patch.promotionName = snapshot.promotionName
   } else if (input.promotionId === null && current.promotionId) {
@@ -878,6 +882,10 @@ export async function updateCharge(
     throw validation("Indique el nuevo importe, la nueva descripción o una promoción")
   if (!reasonText) throw invalidField("reason", "El motivo del cambio es obligatorio")
   patch.editReason = reasonText
+  // Lo que se le baja queda como descontado (y lo que se le vuelve a subir lo resta): así la
+  // sesión siguiente de un tratamiento no vuelve a cobrar la diferencia.
+  if (patch.amountCents !== undefined)
+    patch.discountCents = Math.max(0, current.discountCents + current.amountCents - patch.amountCents)
   const [row] = await tx
     .update(patientCharge)
     .set({ ...patch, updatedAt: new Date() })
@@ -2901,6 +2909,7 @@ export async function returnFromTicket(
           productQuantity: keptQuantity,
           originalChargeId: original,
           returnedCents: charge.returnedCents + item.amountCents,
+          discountCents: charge.discountCents,
           // Lo que queda conserva el impuesto con que se vendió y cómo se reparte su comisión.
           taxCategory: charge.taxCategory,
           taxBps: charge.taxBps,

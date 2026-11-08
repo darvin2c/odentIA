@@ -1,0 +1,2 @@
+ALTER TABLE "patient_charge" ADD COLUMN "discount_cents" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "patient_charge" ADD CONSTRAINT "patient_charge_discount_check" CHECK ("patient_charge"."discount_cents" >= 0);
