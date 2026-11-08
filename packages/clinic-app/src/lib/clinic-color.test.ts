@@ -20,8 +20,8 @@ describe("el color de la clínica en la cabecera", () => {
     // `:root:root:root` (0,3,0) pesa más que `:root[data-brand="latidia"]` (0,2,0) y que `.dark`.
     expect(css).toContain(`:root:root:root,:root:root:root .theme-light{--primary:${light.primary};`)
     expect(css).toContain(`:root:root:root.dark{--primary:${dark.primary};`)
-    // Lo que se ve como papel sigue claro con la app en oscuro.
-    expect(css).toContain(`:root:root:root.dark .theme-light{--primary:${light.primary};`)
+    // Lo que se ve como papel sigue claro con la app en oscuro: su regla pesa más que la de `.dark` en la raíz.
+    expect(css).toContain(`:root:root:root .theme-light{--primary:${light.primary};`)
     // El botón conserva el celeste exacto con letra oscura; el texto usa el tono legible.
     expect(css).toContain("--primary-fill:#7cc4ec;--primary-fill-foreground:#0f172a")
     // Lo del asistente sigue a la clínica; los estados y la identidad del producto no se tocan.

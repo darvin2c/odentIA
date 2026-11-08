@@ -114,7 +114,8 @@ export function OdontogramArch({
             strokeWidth={gum.width}
             strokeLinecap="round"
             strokeLinejoin="round"
-            className={gum.inner ? "stroke-primary-soft/40" : "stroke-primary-soft/70"}
+            // La encía en el tono de odentIA, no en el de la clínica (ADR 0157): el odontograma no cambia.
+            className={gum.inner ? "stroke-[color-mix(in_oklab,var(--identity-accent)_10%,transparent)]" : "stroke-[color-mix(in_oklab,var(--identity-accent)_20%,transparent)]"}
           />
         ))}
         <line x1={W / 2} x2={W / 2} y1={H / 2 - 0.03 * H} y2={H / 2 + 0.03 * H} className="stroke-border" />

@@ -1,4 +1,4 @@
-import { type BrandTokens, brandPalette } from "@odentia/clinical"
+import { BRAND_COLOR_PATTERN, type BrandTokens, brandPalette } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { orgSlugFromHostname, requestHostname } from "./host"
 
@@ -16,18 +16,38 @@ export interface ClinicAppearance {
   brandColor: string | null
 }
 
-/** Lo pide la raíz en cada carga de página; si la API no responde, queda el color del producto. */
+/** Una página no espera al color: pasado este rato sale con el del producto. */
+const APPEARANCE_TIMEOUT_MS = 1500
+
+/**
+ * En el navegador, lo que respondió el servidor vale para toda la pestaña: la raíz no
+ * vuelve a pedirlo en cada navegación. Lo que falló no se guarda, así la siguiente
+ * navegación lo intenta otra vez en vez de quedar con el color del producto.
+ */
+let known: ClinicAppearance | null = null
+
+/** Lo pide la raíz; si la API no responde a tiempo, queda el color del producto y se reintenta después. */
 export async function loadClinicAppearance(): Promise<ClinicAppearance> {
+  const browser = typeof window !== "undefined"
+  if (browser && known) return known
   const slug = orgSlugFromHostname(requestHostname())
   if (!slug) return { brandColor: null }
   try {
     const { data } = await apiFetch<{ data: ClinicAppearance }>(`/api/public/appearance/${encodeURIComponent(slug)}`, {
       cache: "no-store",
+      signal: AbortSignal.timeout(APPEARANCE_TIMEOUT_MS),
     })
-    return { brandColor: data.brandColor ?? null }
+    const appearance = { brandColor: data.brandColor ?? null }
+    if (browser) known = appearance
+    return appearance
   } catch {
     return { brandColor: null }
   }
+}
+
+/** Al guardar el color: la próxima carga de la raíz lo vuelve a pedir. */
+export function forgetClinicAppearance(): void {
+  known = null
 }
 
 function tokens(t: BrandTokens): string {
@@ -51,16 +71,12 @@ function tokens(t: BrandTokens): string {
 /**
  * Las reglas del color de la clínica. `:root:root:root` pesa más que `[data-brand]` y
  * que `.dark`, así no depende del orden de las hojas. Lo que se ve como papel
- * (`.theme-light`) queda claro también con la app en oscuro.
+ * (`.theme-light`) queda claro también con la app en oscuro: `.dark` solo va en la raíz.
  */
 export function clinicColorCss(brandColor: string | null | undefined): string | null {
-  if (!brandColor || !/^#[0-9a-f]{6}$/.test(brandColor)) return null
+  if (!brandColor || !BRAND_COLOR_PATTERN.test(brandColor)) return null
   const { light, dark } = brandPalette(brandColor)
-  return (
-    `:root:root:root,:root:root:root .theme-light{${tokens(light)}}` +
-    `:root:root:root.dark{${tokens(dark)}}` +
-    `:root:root:root.dark .theme-light{${tokens(light)}}`
-  )
+  return `:root:root:root,:root:root:root .theme-light{${tokens(light)}}:root:root:root.dark{${tokens(dark)}}`
 }
 
 /** Para el `head` de la raíz: el `<style>` del color, o nada. */

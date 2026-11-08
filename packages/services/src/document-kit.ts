@@ -20,7 +20,7 @@
 
 import { readFileSync } from "node:fs"
 import fontkit, { type Font } from "@pdf-lib/fontkit"
-import { type SignatureStrokes, signaturePath } from "@odentia/clinical"
+import { BRAND_COLOR_PATTERN, type SignatureStrokes, signaturePath } from "@odentia/clinical"
 import {
   degrees,
   LineCapStyle,
@@ -1685,7 +1685,7 @@ export class DocumentKit {
   /** La línea del membrete y el cuadro de iniciales: el color de la marca o, sin él, tinta. */
   private get brandInk(): RGB {
     const ink = this.clinic.brandInk
-    return ink && /^#[0-9a-f]{6}$/.test(ink) ? hex(Number.parseInt(ink.slice(1), 16)) : this.tones.ink
+    return ink && BRAND_COLOR_PATTERN.test(ink) ? hex(Number.parseInt(ink.slice(1), 16)) : this.tones.ink
   }
 
   private thermalLetterhead(): void {

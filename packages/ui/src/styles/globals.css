@@ -186,6 +186,10 @@
 }
 
 .dark {
+    /* Un bloque en oscuro dentro de la app (un visor) lleva su relleno con su primario. */
+    --primary-fill: var(--primary);
+    --primary-fill-foreground: var(--primary-foreground);
+    --primary-fill-hover: color-mix(in oklab, var(--primary-fill), black 12%);
     --canvas: #0c1118;
     --background: #0c1118;
     --foreground: #f1f5f9;

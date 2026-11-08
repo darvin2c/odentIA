@@ -9,10 +9,11 @@ import {
 import { Button, cn, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useRouter } from "@tanstack/react-router"
+import { rootRouteId, useRouter } from "@tanstack/react-router"
 import { Check, TriangleAlert } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { forgetClinicAppearance } from "../../lib/clinic-color"
 import { productUi } from "../../product/product-ui"
 
 /** Cómo se llama el color de fábrica de cada producto, para «Volver al …». */
@@ -101,8 +102,9 @@ export function ClinicBrandColorSettings({
     onSuccess: async (_result, color) => {
       setError(null)
       await queryClient.invalidateQueries({ queryKey: ["org-profile"] })
-      // La raíz vuelve a pedir el color: la app cambia sin recargar.
-      await router.invalidate()
+      // Solo la raíz vuelve a pedir el color: la app cambia sin recargar ni volver a cargar la página.
+      forgetClinicAppearance()
+      await router.invalidate({ filter: (match) => match.routeId === rootRouteId })
       toast.success(color === factory ? `Volvió el ${FACTORY_WORDS[product].color} de ${FACTORY_WORDS[product].brand}` : "Color guardado. Tus pacientes ya lo ven.")
     },
     onError: (cause) => setError(submitErrorMessage(cause)),
@@ -143,9 +145,11 @@ export function ClinicBrandColorSettings({
         aria-pressed={selected}
         aria-label={name}
         title={wide ? undefined : name}
+        // Mientras guarda no se elige otro: lo elegido en la espera se perdería al llegar lo guardado.
+        disabled={save.isPending}
         onClick={() => pick(hex)}
         className={cn(
-          "flex min-h-11 items-center gap-2.5 rounded-xl bg-card transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
+          "flex min-h-11 items-center gap-2.5 rounded-xl bg-card transition-shadow disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
           wide ? "pr-3.5 pl-1.5" : "size-11 justify-center p-1",
           selected ? "border-2 border-foreground" : "border border-input hover:border-foreground/40",
         )}
@@ -215,6 +219,7 @@ export function ClinicBrandColorSettings({
                     type="color"
                     value={chosen}
                     onChange={(event) => pick(event.target.value.toLowerCase())}
+                    disabled={save.isPending}
                     className="h-11 w-16 cursor-pointer rounded-lg border border-input bg-card p-0.5"
                   />
                 </div>
@@ -226,6 +231,7 @@ export function ClinicBrandColorSettings({
                     id={`${id}-code`}
                     value={code}
                     onChange={(event) => onCode(event.target.value)}
+                    disabled={save.isPending}
                     // Al salir del campo con un código que no es un color, se dice ahí mismo.
                     onBlur={() => setCodeError(codeProblem(code))}
                     aria-invalid={codeError ? true : undefined}
