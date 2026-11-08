@@ -24,6 +24,9 @@ describe("brandPalette", () => {
     for (const hex of sampleColors()) {
       const { light, dark, paper } = brandPalette(hex)
       expect(contrastRatio(light.primary, "#ffffff"), `${hex} texto en claro`).toBeGreaterThanOrEqual(4.5)
+      // También sobre lo secundario (botón secundario, menú al pasar el mouse), lo más exigente.
+      expect(contrastRatio(light.primary, "#e8eef4"), `${hex} texto sobre secundario`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(dark.primary, "#263041"), `${hex} texto oscuro sobre secundario`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fill, light.fillForeground), `${hex} botón en claro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fillHover, light.fillForeground), `${hex} botón al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.fillHover, dark.fillForeground), `${hex} botón oscuro al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
@@ -71,7 +74,7 @@ describe("brandPalette", () => {
       expect(contrastRatio(light.fill, "#ffffff"), hex).toBeGreaterThanOrEqual(4.5)
     }
     // Sigue siendo naranja: un punto más tostado.
-    expect(brandPalette("#ea580c").light.fill).toBe(brandPalette("#ea580c").light.primary)
+    expect(brandPalette("#ea580c").light.fill).toBe("#cc4d0a")
   })
 
   it("un color claro, que habría que cambiar demasiado, sigue exacto con letra oscura", () => {

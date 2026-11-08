@@ -68,6 +68,13 @@ const INK: Rgb = [15, 23, 42]
 /** Fondo y tarjeta de la app en oscuro (`--background`, `--card`). */
 const DARK_BG: Rgb = [12, 17, 24]
 const DARK_CARD: Rgb = [23, 30, 43]
+/**
+ * La superficie más exigente donde va texto del color: `--secondary` (botón secundario,
+ * menú al pasar el mouse). Es la más oscura en claro y la más clara en oscuro, así que si
+ * se lee ahí, se lee sobre el fondo, la tarjeta y lo apagado.
+ */
+const LIGHT_SECONDARY: Rgb = [232, 238, 244]
+const DARK_SECONDARY: Rgb = [38, 48, 65]
 const TEXT = 4.5
 
 function rgbOf(hex: string): Rgb {
@@ -199,7 +206,7 @@ function fillWithText(base: Rgb, dark: Rgb): { fill: Rgb; text: string } | null 
 }
 
 function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
-  const primary = shiftUntil(base, BLACK, WHITE, TEXT)
+  const primary = shiftUntil(base, BLACK, LIGHT_SECONDARY, TEXT)
   const chosen = nearWhite ? null : fillWithText(base, INK)
   const fill = chosen?.fill ?? primary
   const fillForeground = chosen?.text ?? hexOf(WHITE)
@@ -219,8 +226,8 @@ function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
 }
 
 function darkTokens(base: Rgb): BrandTokens {
-  // Legible también sobre la tarjeta, que es un poco más clara que el fondo.
-  const primary = shiftUntil(base, WHITE, DARK_CARD, TEXT)
+  // Legible también sobre lo secundario, la superficie más clara del modo oscuro.
+  const primary = shiftUntil(base, WHITE, DARK_SECONDARY, TEXT)
   const onPrimary = shiftUntil(mix(primary, BLACK, 0.82), BLACK, primary, TEXT)
   // El color de la clínica solo si se distingue del fondo oscuro y tiene una letra que se lea;
   // si no, el tono claro del primario con su letra oscura.
@@ -272,7 +279,8 @@ export function brandPalette(hex: string): BrandPalette {
     light,
     dark: darkTokens(base),
     paper: light.primary,
-    lightened: !nearWhite && light.primary !== hex,
+    // Solo se avisa cuando se nota: un color claro, que no sostiene la letra blanca.
+    lightened: !nearWhite && contrastOf(base, WHITE) < TEXT,
     nearWhite,
     reddish: saturation > 0.35 && (hue >= 345 || hue <= 15),
   }
