@@ -463,6 +463,13 @@
       "when": 1794146019772,
       "tag": "0065_deuda_del_profesional",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794150517020,
+      "tag": "0066_argos_lee_lo_mismo",
+      "breakpoints": true
     }
   ]
 }

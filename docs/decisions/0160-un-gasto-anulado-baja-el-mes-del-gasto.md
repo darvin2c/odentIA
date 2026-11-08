@@ -26,7 +26,7 @@ Lo mismo pasaba con «Lo que deja», con la cifra «Lo gastado» que responde Ar
 ## Consecuencias
 
 - Reportes › Finanzas, «Lo que deja», la cifra «Lo gastado» de Argos y sus listas dicen lo mismo que Gastos. Un tipo de gasto ya no puede quedar en negativo.
-- **Pendiente, sin cambiar:** la vista `argos.gastos` (migraciones 0001 y 0045) y su descripción en `argos-catalog.ts` siguen con la regla vieja: el gasto en su fecha y su anulación, negativa, en la suya. Cuando Argos responde con su propia consulta sobre esa vista, puede dar la cifra vieja. Cambiar lo que lee el modelo pide medir a Argos, con su costo, y queda para otro cambio.
+- La vista `argos.gastos` sigue la misma regla desde la migración 0066: un gasto anulado no está en ninguna fila, y su descripción en `argos-catalog.ts` lo dice.
 
 ## Referencias
 
