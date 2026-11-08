@@ -447,8 +447,8 @@ describe("el comprobante por correo, sin «Tus papeles»", () => {
     const { c, p } = await withTicket()
     const own = await run(c, (tx) => issuePersonalLink(tx, c.orgId, { contactId: p.contactId, patientId: p.patientId }, { secretsKey: KEY }))
     const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, own.token))
-    // Solo queda el campo vacío, para la página anterior mientras dura el despliegue.
-    expect(view.papers).toEqual([])
+    // Ni siquiera el campo: la compatibilidad de despliegue ya se quitó.
+    expect(view).not.toHaveProperty("papers")
     // Le sigue sirviendo «Tus mensajes», no un papel para descargar.
     expect(view.messages).not.toBeNull()
   })

@@ -85,12 +85,9 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
     if (!sends(memberRole)) return deny(c, "clinical.read")
     const query = z.object({ patientId: z.uuid() }).safeParse(c.req.query())
     if (!query.success) return validationError(c, query.error.issues)
-    return runService(c, 200, async () => ({
-      ...(await withOrgContext(deps.db, orgId, (tx) => getPortalAccessSummary(tx, orgId, query.data.patientId))),
-      // Compatibilidad con la pantalla anterior mientras dura el despliegue (la leía para «Qué verá»);
-      // ya no decide nada: se quita en la entrega siguiente.
-      rights: { canShareBudgets: true, canShareAccount: true, canShareDocuments: true },
-    }))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getPortalAccessSummary(tx, orgId, query.data.patientId)),
+    )
   })
 
   app.post("/access", async (c) => {
