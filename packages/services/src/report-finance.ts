@@ -109,10 +109,27 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       left join org_profile op on op.organization_id = l.organization_id
       where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null
         and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
+    ), discounted as materialized (
+      -- Lo que un pago descontó (de cobros anulados después de pagados) no salió: «pagado» es el
+      -- dinero que salió, como en Finanzas. Cuenta en el mes de los cobros de ese pago.
+      select s.currency::text as currency, ${frozenValueSql(sql`l.commission_cents`, currency)} as discount,
+        (select min(c2.occurred_at) from commission_settlement_line c2
+          where c2.organization_id = s.organization_id and c2.settlement_id = s.id and c2.kind = 'cobro' and c2.voided_at is null) as at,
+        s.professional_user_id as user_id
+      from commission_settlement_line l
+      join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
+      join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      left join org_profile op on op.organization_id = l.organization_id
+      where l.organization_id = ${orgId} and l.kind = 'ajuste' and l.voided_at is null ${branch}
     ), commission_line as materialized (
       select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
         f.commission::numeric as paid, 0::numeric as fresh, f.currency
       from frozen f
+      union all
+      select d.user_id, d.at, 0::numeric, 0::numeric, -d.discount, 0::numeric, d.currency
+      from discounted d
+      where d.at >= ${at(hull.start)} and d.at < ${at(hull.end)}
       union all
       select cl.professional_user_id, cl.at, cl.value, cl.commission, 0, cl.commission, cl.currency
       from ${commissionLiveIn(orgId, hull.start, hull.end)} cl
@@ -993,6 +1010,29 @@ export async function myAttendedUnpaid(
 }
 
 /**
+ * Lo que falta pagar por mes y en total: lo nuevo de cada profesional menos lo que se le descuenta,
+ * repartido del mes más antiguo al más nuevo (como se irá pagando), así los meses suman el total.
+ */
+export function owedMonthsOf(
+  rows: Array<{ month: string; userId: string; cents: number }>,
+  adjustments: Map<string, number>,
+): { byMonth: Map<string, { cents: number; professionals: number }>; owedCents: number } {
+  const byMonth = new Map<string, { cents: number; professionals: number }>()
+  const left = new Map(adjustments)
+  let owedCents = 0
+  for (const row of [...rows].sort((a, b) => a.month.localeCompare(b.month))) {
+    const discount = Math.min(row.cents, left.get(row.userId) ?? 0)
+    left.set(row.userId, (left.get(row.userId) ?? 0) - discount)
+    const due = row.cents - discount
+    owedCents += due
+    if (due === 0) continue
+    const month = byMonth.get(row.month) ?? { cents: 0, professionals: 0 }
+    byMonth.set(row.month, { cents: month.cents + due, professionals: month.professionals + 1 })
+  }
+  return { byMonth, owedCents }
+}
+
+/**
  * Lo que falta pagar de comisiones, de todos los meses, en una sola pasada por `commission_live`:
  * cada mes con lo que la lista de ese mes dice que falta (lo nuevo de cada profesional menos lo
  * que se le descuenta, nunca menos de cero) y el total, con lo que se descuenta una sola vez por
@@ -1010,19 +1050,10 @@ export async function commissionsOwedByMonth(tx: Db, orgId: string, now: Date = 
     group by 1, 2, 3`)
   const owedIn = async (currency: string) => {
     const adjustments = await pendingCommissionAdjustments(tx, orgId, currency)
-    const byMonth = new Map<string, { cents: number; professionals: number }>()
-    const byUser = new Map<string, number>()
-    for (const row of rows) {
-      if (row.currency !== currency) continue
-      const fresh = safeCents(row.cents)
-      byUser.set(row.userId, (byUser.get(row.userId) ?? 0) + fresh)
-      // Como la lista del mes: lo que se le descuenta a alguien baja lo suyo de ese mes, nunca de otro.
-      const due = Math.max(0, fresh - (adjustments.get(row.userId) ?? 0))
-      if (due === 0) continue
-      const month = byMonth.get(row.month) ?? { cents: 0, professionals: 0 }
-      byMonth.set(row.month, { cents: month.cents + due, professionals: month.professionals + 1 })
-    }
-    const owedCents = [...byUser].reduce((total, [userId, fresh]) => total + Math.max(0, fresh - (adjustments.get(userId) ?? 0)), 0)
+    const { byMonth, owedCents } = owedMonthsOf(
+      rows.filter((item) => item.currency === currency).map((row) => ({ month: row.month, userId: row.userId, cents: safeCents(row.cents) })),
+      adjustments,
+    )
     return {
       currency,
       owedCents,

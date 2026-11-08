@@ -270,6 +270,9 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(settledUp.adjustments).toHaveLength(0)
   // «Ya pagado» es el dinero que salió: 1 000 + 600 + 500, no la comisión de cobros ya descontados.
   expect(settledUp).toMatchObject({ pendingCents: 0, paidCents: 2100, status: "pagado" })
+  // Reportes dice lo mismo: el dinero que salió, sin lo que se descontó (una sola cuenta).
+  const reported = await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))
+  expect(reported.commissions.paidCents).toBe(2100)
   // El segundo pago no se anula mientras el tercero tenga descontado un cobro suyo.
   await expect(
     f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, second.settlement.id, { reason: "Prueba" })),
