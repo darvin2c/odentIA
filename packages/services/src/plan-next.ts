@@ -443,7 +443,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       detail: null,
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
-        ? { label: numbered ? `Reservar la sesión ${n}` : "Reservar cita", planItemIds: [item.id], serviceId: item.serviceId }
+        ? { label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión", planItemIds: [item.id], serviceId: item.serviceId }
         : null,
     }
   }
@@ -485,8 +485,13 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       kind: "agendar",
       text,
       detail: [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null].filter(Boolean).join(" · ") || null,
+      // Dice qué reserva: «Reservar cita» a secas es el de la cabecera (segunda mesa del 8 nov).
       action: can("appointments.write")
-        ? { label: "Reservar cita", planItemIds: toStart.map((item) => item.id), serviceId: toStart[0]?.serviceId ?? null }
+        ? {
+            label: context.budgetRequired ? "Reservar lo aceptado" : "Reservar lo indicado",
+            planItemIds: toStart.map((item) => item.id),
+            serviceId: toStart[0]?.serviceId ?? null,
+          }
         : null,
     }
   }

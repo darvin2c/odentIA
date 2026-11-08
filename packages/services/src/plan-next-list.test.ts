@@ -127,7 +127,7 @@ it("la lista: el control vencido primero, lo aceptado con sus nombres, quién in
     detail: expect.stringMatching(/^Tocaba el .* · lo indicó Clínico el .* en la atención por «Dolor en la 46»$/),
     action: { label: "Reservar el control", followUpId: overdue.id },
   })
-  expect(steps[1]).toMatchObject({ detail: expect.stringMatching(/^Tratamiento propio · respondió el /), action: { label: "Reservar cita" } })
+  expect(steps[1]).toMatchObject({ detail: expect.stringMatching(/^Tratamiento propio · respondió el /), action: { label: "Reservar lo aceptado" } })
 
   // Recepción: lo mismo, sin el motivo de la atención (es de la historia).
   const forReception = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, reception))

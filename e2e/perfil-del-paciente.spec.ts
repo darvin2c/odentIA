@@ -72,6 +72,8 @@ test("ficha: «Qué sigue» junta la próxima cita, el presupuesto y el control;
     title: "Profilaxis semestral",
     dueAt: due.toISOString(),
   }, 201)
+  // Indicado en su última atención: la fila dice quién y cuándo, y a quien lee la historia, el motivo.
+  await fixtureDb.update(clinicalFollowUp).set({ originEncounterId: ids.encounterId }).where(eq(clinicalFollowUp.id, control.id))
 
   // 1. Una sola lista: arriba, que no tiene cita; debajo, el presupuesto y el control, cada uno con su botón.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
@@ -81,7 +83,7 @@ test("ficha: «Qué sigue» junta la próxima cita, el presupuesto y el control;
   await expect(rows).toHaveCount(2)
   await expect(rows.nth(0)).toContainText("Entregado · espera respuesta")
   await expect(rows.nth(1)).toContainText("Profilaxis semestral · por reservar")
-  await expect(rows.nth(1)).toContainText(/Toca el \d{1,2} \S+/)
+  await expect(rows.nth(1)).toContainText(/Toca el \d{1,2} \S+ · lo indicó .+ el \d{1,2} \S+ en la atención por «/)
   // Ya no hay tarjetas sueltas de la cita y el control, ni un «Reservar cita» repetido.
   await expect(page.getByRole("heading", { name: "Próxima cita", exact: true })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Próximo control", exact: true })).toHaveCount(0)
@@ -132,7 +134,7 @@ test("ficha: «Qué sigue» junta la próxima cita, el presupuesto y el control;
     })
     .where(eq(appointment.id, visit.id))
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  await expect(next).toContainText(/Próxima cita: Hoy \d\d:\d\d · Llegó \d\d:\d\d · espera/)
+  await expect(next).toContainText(/Su cita de hoy: Hoy \d\d:\d\d · Llegó \d\d:\d\d · espera/)
   await expect(next).not.toContainText("Sin cita por venir")
   const today = rows.filter({ hasText: "Profilaxis semestral" })
   await expect(today).toContainText(/se cumple con su atención de hoy/)

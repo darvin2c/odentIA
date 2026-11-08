@@ -12,7 +12,7 @@
  * La pantalla no deduce nada: cada rol recibe lo suyo (caja, sin agenda ni
  * control) y el botón solo si puede hacerlo.
  */
-import { Button, cn } from "@odentia/ui"
+import { Button } from "@odentia/ui"
 import { SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useId } from "react"
@@ -54,23 +54,19 @@ export function NextUpCard({
   /** Para «Nueva cita»: la persona ya puesta. */
   patientName: string
   upcoming: UpcomingState | null
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const titleId = useId()
   const query = usePlanNextSteps(patientId)
   const steps = query.data?.data ?? []
   // «Ver la cita» de la próxima cita ya está arriba: la fila que diría lo mismo no lo repite.
   const shownAction = (step: (typeof steps)[number]) =>
     step.action && !(step.action.appointmentId && step.action.appointmentId === upcoming?.appointment?.id) ? step.action : null
-  // El color llama a actuar: solo si la primera fila tiene algo que hacer aquí, y ese botón va destacado.
-  const actionable = Boolean(steps[0] && shownAction(steps[0]))
+  // Quien no ve la agenda (caja) y no tiene nada en el plan: la tarjeta no dice nada útil.
+  if (!upcoming && query.isSuccess && steps.length === 0) return null
+  // Sin color ni botón destacado: el principal es el de la cabecera, y el primero de la
+  // lista puede no estar disponible (enviar sin WhatsApp ni correo; segunda mesa del 8 nov).
   return (
-    <section
-      aria-labelledby={titleId}
-      className={cn(
-        "flex min-w-0 flex-col gap-3 rounded-xl border p-6",
-        actionable ? "border-primary/40 bg-primary/5" : "elevated bg-card",
-      )}
-    >
+    <section aria-labelledby={titleId} className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-6">
       <div className="flex min-w-0 flex-col gap-1">
         {/* El alto de las otras tarjetas del Resumen: su esqueleto no salta. */}
         <div className="flex min-h-8 items-center">
@@ -90,9 +86,9 @@ export function NextUpCard({
         <p className="text-sm text-muted-foreground">Nada por hacer en su plan.</p>
       ) : (
         <ul className="flex flex-col divide-y">
-          {steps.map((step, index) => (
+          {steps.map((step) => (
             <li
-              key={`${step.kind}-${step.action?.followUpId ?? step.action?.budgetId ?? step.action?.planItemIds?.join() ?? index}`}
+              key={`${step.kind}-${step.action?.followUpId ?? step.action?.budgetId ?? step.action?.planItemIds?.join() ?? step.text}`}
               className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
             >
               {/* El texto tiene un ancho mínimo: el botón baja de línea en vez de dejarlo en una columna. */}
@@ -105,7 +101,7 @@ export function NextUpCard({
                   patient={{ id: patientId, name: patientName }}
                   step={step}
                   size="sm"
-                  variant={index === 0 ? "default" : "outline"}
+                  variant="outline"
                 />
               ) : null}
             </li>
@@ -136,10 +132,12 @@ function UpcomingLine({ appointment, loading, failed, onRetry, now }: UpcomingSt
   const at = new Date(now)
   const line = appointmentLine(appointment, at)
   // Confirmada o por confirmar, salvo que ya esté aquí (la línea ya dice su momento).
-  const state = isInClinic(appointment, at.getTime()) ? null : visitName(appointment.visit)
+  const here = isInClinic(appointment, at.getTime())
+  const state = here ? null : visitName(appointment.visit)
   return (
     <p className="text-sm">
-      <span className="text-muted-foreground">Próxima cita: </span>
+      {/* Ya en la clínica no es «la próxima»: es la de ahora. */}
+      <span className="text-muted-foreground">{here ? "Su cita de hoy: " : "Próxima cita: "}</span>
       {[line, state].filter(Boolean).join(" · ")}
       {" · "}
       <Button type="button" variant="link" className="h-auto p-0" onClick={() => openAppointmentAnywhere(appointment.id)}>

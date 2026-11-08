@@ -25,7 +25,7 @@ function Fact({ label, width = "w-32" }: { label?: string; width?: string }) {
   )
 }
 
-/** `PlanNextCard`: la franja «Qué sigue». */
+/** `PlanNextCard`: la franja «Qué sigue» del Plan. */
 export function PlanNextSkeleton() {
   return (
     <section className="elevated flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
