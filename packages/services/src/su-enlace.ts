@@ -31,6 +31,9 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import { appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
+  CONSENT_TO_SIGN_MESSAGE_KEY,
+  CONSENT_TO_SIGN_SUBJECT,
+  type MessageSpec,
   NOTICE_PURPOSE,
   PERSONAL_LINK_MESSAGE_KEY,
   PERSONAL_LINK_SUBJECT,
@@ -104,7 +107,7 @@ import {
   toPortalBudget,
 } from "./portal.js"
 import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
-import { personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
+import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
 
@@ -1622,6 +1625,79 @@ export async function sendPersonalLink(
   input: { patientId: string; requestId?: string | null },
   deps: { secretsKey: Buffer },
 ): Promise<PersonalLinkSent> {
+  return sendLinkMessage(tx, orgId, actorUserId, input, deps)
+}
+
+/**
+ * «Firma tu consentimiento» (entrega 2, decisión 9): lo que sale con «Enviar para firmar»,
+ * a la persona o a quien decide por el paciente, con la regla de siempre. Abre directo la
+ * hoja (`abre=firma`) y no dice nada clínico: la clínica, de quién es la cita y cuándo, y
+ * que es un consentimiento para leer y firmar. Mientras WhatsApp no aprueba su plantilla
+ * (o no hay por dónde mandarlo), sale «Su enlace», como antes. Una misma `requestId` no lo
+ * envía dos veces.
+ */
+export async function sendConsentToSign(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { patientId: string; consentId: string; requestId?: string | null },
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkSent> {
+  return sendLinkMessage(tx, orgId, actorUserId, input, deps)
+}
+
+/** «tu cita del jueves 13 de noviembre», «la cita de Mateo del…» o, sin cita, «tu próxima cita». */
+async function appointmentWords(
+  tx: Db,
+  orgId: string,
+  input: { patientId: string; consentId: string; recipientContactId: string },
+): Promise<string> {
+  const [consent] = await tx
+    .select({ planItemId: consentDocument.planItemId })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.organizationId, orgId), eq(consentDocument.id, input.consentId)))
+    .limit(1)
+  let when = consent?.planItemId ? await appointmentOfPlanItem(tx, orgId, consent.planItemId) : null
+  if (!when) {
+    const [next] = await tx
+      .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
+      .from(appointment)
+      .innerJoin(branch, eq(branch.id, appointment.branchId))
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.patientId, input.patientId),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          gt(appointment.startsAt, new Date()),
+        ),
+      )
+      .orderBy(asc(appointment.startsAt))
+      .limit(1)
+    const region = await findOrgLocale(tx, orgId)
+    when = next ? { startsAt: next.startsAt.toISOString(), timeZone: next.timeZone ?? region.timezone } : null
+  }
+  // A quien decide por otro, de quién es: solo su primer nombre.
+  const self = (await patientPersonId(tx, orgId, input.patientId)) === input.recipientContactId
+  const whose = self ? "tu" : "la"
+  const of = self ? "" : ` de ${(await patientFirstNameOf(tx, orgId, input.patientId)) ?? "tu familiar"}`
+  if (!when) return `${whose} próxima cita${of}`
+  const { locale } = await findOrgLocale(tx, orgId)
+  const day = new Intl.DateTimeFormat(locale, {
+    timeZone: when.timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(when.startsAt))
+  return `${whose} cita${of} del ${day}`
+}
+
+async function sendLinkMessage(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { patientId: string; requestId?: string | null; consentId?: string },
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkSent> {
   if (input.requestId) {
     const lockKey = `su-enlace-envio:${orgId}:${input.requestId}`
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`)
@@ -1649,11 +1725,32 @@ export async function sendPersonalLink(
     }
   }
   const recipient = await serviceRecipient(tx, orgId, input.patientId)
-  const { spec, params, text } = await personalLinkMessage(tx, orgId, recipient.displayName)
-  const route = await openRoute(tx, orgId, recipient.contactId, spec, {
-    purpose: NOTICE_PURPOSE,
-    initiative: "equipo",
-  })
+  const gate = { purpose: NOTICE_PURPOSE, initiative: "equipo" } as const
+  let message: {
+    spec: MessageSpec
+    params: string[]
+    text: string
+    abre: PersonalLinkTarget
+    subject: string
+  } = { ...(await personalLinkMessage(tx, orgId, recipient.displayName)), abre: "pendientes", subject: PERSONAL_LINK_SUBJECT }
+  if (input.consentId) {
+    // «Firma tu consentimiento» si tiene por dónde salir; si no, «Su enlace» como antes.
+    const spec = await currentCatalogMessage(tx, orgId, CONSENT_TO_SIGN_MESSAGE_KEY)
+    if (!("cause" in (await previewRoute(tx, orgId, recipient.contactId, spec, gate)))) {
+      const rendered = renderMessage(spec, {
+        persona: firstName({ givenNames: null, displayName: recipient.displayName }),
+        clinica: await findClinicName(tx, orgId),
+        cita_de: await appointmentWords(tx, orgId, {
+          patientId: input.patientId,
+          consentId: input.consentId,
+          recipientContactId: recipient.contactId,
+        }),
+      })
+      message = { spec, ...rendered, abre: "firma", subject: CONSENT_TO_SIGN_SUBJECT }
+    }
+  }
+  const { spec, params, text } = message
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, gate)
   if ("cause" in route) {
     if (route.cause === "sin_permiso") throw new ServiceError("LINK_OPTED_OUT", 409, OPTED_OUT)
     throw new ServiceError("LINK_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}`)
@@ -1672,8 +1769,8 @@ export async function sendPersonalLink(
     },
     deps,
   )
-  // En el mensaje no queda el token: lo pone el worker al enviarlo. Abre «Tus pendientes».
-  const url = await personalLinkMessageUrl(tx, orgId, link.linkId, "pendientes")
+  // En el mensaje no queda el token: lo pone el worker al enviarlo. Abre lo suyo.
+  const url = await personalLinkMessageUrl(tx, orgId, link.linkId, message.abre)
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   let sent: { id: string }
   if (route.via === "plantilla" && route.template) {
@@ -1701,7 +1798,7 @@ export async function sendPersonalLink(
         type: "text",
         text:
           route.via === "correo"
-            ? `${PERSONAL_LINK_SUBJECT} · ${await findClinicName(tx, orgId)}\n\n${body}`
+            ? `${message.subject} · ${await findClinicName(tx, orgId)}\n\n${body}`
             : body,
       },
     })
@@ -1727,6 +1824,8 @@ export async function sendPersonalLink(
       channel: route.channel,
       via: route.via,
       recipientName: recipient.displayName,
+      message: spec.key,
+      ...(input.consentId ? { consentId: input.consentId } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
     },
   })

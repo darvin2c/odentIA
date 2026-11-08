@@ -63,6 +63,7 @@ import {
   getPersonalLinkDataForm,
   getPersonalLinkView,
   personalLinkForEmailToken,
+  sendConsentToSign,
   sendPersonalLink,
   signPersonalLinkConsent,
   submitPersonalLinkData,
@@ -1105,6 +1106,58 @@ it("el enlace que envía el equipo queda unido a su conversación: lo que haga a
       .from(message)
       .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out"), eq(message.senderKind, "user")))
     expect(sent).toEqual([{ fromAction: true }])
+  } finally {
+    configurePublicLinks(null)
+  }
+})
+
+/** Una plantilla aprobada en el WhatsApp que comparten las pruebas de este archivo, mientras dura la prueba. */
+async function approveTemplate(name: string, variables: number) {
+  const [connection] = await ownerDb
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, ORG), eq(channelConnection.channel, "whatsapp")))
+  await ownerDb.insert(channelTemplate).values({
+    organizationId: ORG, connectionId: connection!.id, name, language: "es", status: "aprobada", category: "utility", body: "Hola, {{1}}.", variables,
+  })
+  onTestFinished(async () => {
+    await ownerDb.delete(channelTemplate).where(and(eq(channelTemplate.organizationId, ORG), eq(channelTemplate.name, name)))
+  })
+}
+
+it("«Firma tu consentimiento»: abre directo la hoja, no dice nada clínico y, mientras no lo aprueban, sale «Su enlace»", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    // Escribió hace dos días: por WhatsApp solo sale un mensaje aprobado.
+    const lucia = await consentInChat(f, TWO_DAYS_AGO())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+    await approveTemplate("odentia_su_enlace_v1", 2)
+    const sentOut = () =>
+      ownerDb
+        .select({ templateName: message.templateName, body: message.body, templateLink: message.templateLink })
+        .from(message)
+        .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out")))
+    await f.run((tx) => sendConsentToSign(tx, ORG, f.actor, { patientId: lucia.patientId, consentId: lucia.consentId }, { secretsKey: KEY }))
+    expect((await sentOut()).map((row) => row.templateName)).toEqual(["odentia_su_enlace_v1"])
+    // Aprobado el suyo, sale ese: de qué clínica, para cuándo y qué es; nunca el procedimiento.
+    await approveTemplate("odentia_consentimiento_por_firmar_v1", 3)
+    await f.run((tx) => sendConsentToSign(tx, ORG, f.actor, { patientId: lucia.patientId, consentId: lucia.consentId }, { secretsKey: KEY }))
+    const own = (await sentOut()).find((row) => row.templateName === "odentia_consentimiento_por_firmar_v1")
+    expect(own?.body).toMatch(/te envía un consentimiento para leer y firmar antes de tu próxima cita\. Lo encuentras aquí\.$/)
+    expect(own?.body).not.toMatch(/Exodoncia|38/)
+    expect(own?.templateLink).toMatch(/^\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
+
+    // Dentro de las 24 horas sale escrito, con la dirección que abre la hoja.
+    const ana = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, ana.consentId))
+    await f.run((tx) => sendConsentToSign(tx, ORG, f.actor, { patientId: ana.patientId, consentId: ana.consentId }, { secretsKey: KEY }))
+    const [text] = await ownerDb
+      .select({ body: message.body })
+      .from(message)
+      .where(and(eq(message.conversationId, ana.conversationId), eq(message.direction, "out")))
+    expect(text?.body).toMatch(/Leer y firmar: https:\/\/norte\.odentia\.test\/pendientes\?abre=firma&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
+    expect(text?.body).not.toContain("Exodoncia")
   } finally {
     configurePublicLinks(null)
   }

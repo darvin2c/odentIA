@@ -11,7 +11,7 @@ import {
   confirmLinkSignedConsent,
   consentDocumentPatientId,
   markConsentSentByLink,
-  sendPersonalLink,
+  sendConsentToSign,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -1053,8 +1053,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     })
   })
 
-  // Antes de llegar (decisión 3): se envía a firmar por «Su enlace» de la
-  // persona (o de su representante legal), con la regla de envío de siempre.
+  // Antes de llegar (decisión 3): se envía a firmar a la persona (o a su representante
+  // legal) con «Firma tu consentimiento», que abre directo la hoja; sin aprobar, «Su enlace».
   app.post("/consents/:id/send-link", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
@@ -1065,11 +1065,11 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { requestId: parsed.data.requestId ?? null })
-        return sendPersonalLink(
+        return sendConsentToSign(
           tx,
           orgId,
           userId,
-          { patientId: consent.patientId, requestId: parsed.data.requestId ?? null },
+          { patientId: consent.patientId, consentId: consent.id, requestId: parsed.data.requestId ?? null },
           { secretsKey: deps.secretsKey },
         )
       }),
