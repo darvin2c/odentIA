@@ -1,4 +1,4 @@
-# 0162 · Antes de atender se pide lo que no se preguntó de su salud
+# 0163 · Antes de atender se pide lo que no se preguntó de su salud
 
 Fecha: 2026-11-08 · Estado: aceptada · Amplía el aviso de alergias de la atención (ADR 0072)
 
