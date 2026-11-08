@@ -51,8 +51,18 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «Ninguno». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
+            a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "lo piensa con la muela") } : {}),
+          },
+        ]
+      // En un consultorio son opciones, no caminos de una pieza.
+      if (faq.q === "¿Cómo anoto que dijo que sí en la consulta, sin imprimir ni enviar?")
+        return [
+          {
+            ...faq,
+            a: faq.a
+              .replace("con caminos, eliges el camino,", "con opciones, eliges la opción,")
+              .replace("sin caminos,", "sin opciones,"),
           },
         ]
       // Lo indicado nace aceptado: los caminos no se marcan en la atención, solo en el presupuesto.

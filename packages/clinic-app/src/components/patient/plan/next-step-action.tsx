@@ -5,12 +5,12 @@
  * control abre su reserva. Es el mismo botón en la lista de Pacientes, el
  * Resumen y el Plan; nadie sale de donde estaba.
  */
-import { Button, buttonVariants, toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import { DetailDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { type ComponentProps, useEffect, useState } from "react"
 import {
+  BUDGET_ANSWERABLE_STATUSES,
   budgetNumberLabel,
   fetchBudgetDetail,
   PLAN_QUERY_KEYS,
@@ -25,7 +25,7 @@ import { usePermission } from "../../../lib/crm"
 import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { FollowUpScheduler } from "../follow-up-scheduler"
-import { totalsWords, useBudgetFormat } from "./budget-parts"
+import { useBudgetFormat } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
 
@@ -97,20 +97,26 @@ export function NextStepButton({
 }
 
 /**
- * «¿Qué respondió?» al lado: el mismo bloque de la tarjeta del presupuesto, sin
- * cambios. Al anotar la respuesta se cierra y «Qué sigue» se pone al día.
+ * «¿Qué respondió?» (o «Anotar su respuesta», en la atención) en un solo cajón:
+ * qué responde, cada tratamiento y quién decide, sin pasar por otro bloque. Al
+ * guardar se cierra y «Qué sigue» se pone al día. Con `inPerson`, el presupuesto
+ * que se le acaba de mostrar queda entregado al anotar, sin enviarle nada.
  */
 export function BudgetAnswerDrawer({
   patientId,
   budgetId,
+  inPerson = false,
   onClose,
 }: {
   patientId: string
   budgetId: string
+  inPerson?: boolean
   onClose: () => void
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const queryClient = useQueryClient()
   const format = useBudgetFormat()
+  const canDecide = usePermission("budgets.decide")
+  const canSend = usePermission("budgets.send")
   const query = useQuery({
     queryKey: ["budget", patientId, budgetId],
     queryFn: () => fetchBudgetDetail(patientId, budgetId),
@@ -124,50 +130,118 @@ export function BudgetAnswerDrawer({
       ),
       queryClient.invalidateQueries({ queryKey: ["people"] }),
     ])
-    onClose()
     return result
   }
-  // El bloque ya se titula «¿Qué respondió?»: el cajón dice de qué presupuesto se trata.
-  const description = budget
-    ? [
-        budget.presentedAt ? format.day(budget.presentedAt) : null,
-        totalsWords(budget, budget.currency, format.money, "…"),
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : undefined
+  if (query.isError)
+    return (
+      <DetailDrawer
+        open
+        title="Presupuesto"
+        error="No se pudo leer el presupuesto. Ciérralo y vuelve a intentarlo."
+        onClose={onClose}
+      >
+        {null}
+      </DetailDrawer>
+    )
+  if (!budget)
+    return (
+      <DetailDrawer open title="Presupuesto" isLoading onClose={onClose}>
+        {null}
+      </DetailDrawer>
+    )
+  // Ya respondió (por su enlace, el chat u otra pantalla) o no se puede anotar: se dice, no se abre vacío.
+  const answerable =
+    BUDGET_ANSWERABLE_STATUSES.includes(budget.status) || (inPerson && budget.status === "borrador")
+  if (!answerable || !canDecide || (budget.status === "borrador" && !canSend))
+    return (
+      <DetailDrawer open title={budgetNumberLabel(budget.budgetNumber)} description={budget.stateText} onClose={onClose}>
+        <p className="text-sm text-muted-foreground">
+          {!answerable
+            ? "Este presupuesto ya no espera respuesta: su estado está arriba."
+            : "Tu rol no anota la respuesta de este presupuesto."}
+        </p>
+      </DetailDrawer>
+    )
   return (
-    <DetailDrawer
-      open
-      title={budget ? budgetNumberLabel(budget.budgetNumber) : "Presupuesto"}
-      description={description}
-      isLoading={query.isPending}
-      error={
-        query.isError ? "No se pudo leer el presupuesto. Ciérralo y vuelve a intentarlo." : null
-      }
+    <BudgetResponse
+      patientId={patientId}
+      budget={budget}
+      money={format.money}
+      formatDay={(iso) => format.day(iso)}
+      runWrite={runWrite}
+      direct
+      inPerson={inPerson}
       onClose={onClose}
-      actions={
-        <Link
-          to="/patients/$patientId"
-          params={{ patientId }}
-          search={{ tab: "plan", budgetId }}
-          className={buttonVariants({ variant: "ghost" })}
-          onClick={onClose}
-        >
-          Ver el presupuesto en Plan
-        </Link>
-      }
-    >
-      {budget ? (
-        <BudgetResponse
-          patientId={patientId}
-          budget={budget}
-          money={format.money}
-          formatDay={(iso) => format.day(iso)}
-          runWrite={runWrite}
-        />
+    />
+  )
+}
+
+/**
+ * «Anotar su respuesta» del presupuesto que se le muestra en la atención: abre el
+ * cajón de su respuesta sin imprimir ni enviar. Pide entregar y anotar respuestas.
+ * La revisión de un presupuesto ya respondido se entrega antes, y se dice ahí.
+ */
+export function AnswerInPersonButton({
+  patientId,
+  budgetId,
+  beforeOpen,
+  onOpen,
+  size = "sm",
+  variant = "outline",
+}: {
+  patientId: string
+  budgetId: string
+  /** Lo escrito en la atención se guarda antes de abrir. */
+  beforeOpen?: () => Promise<void>
+  /** Quien muestra el botón abre el cajón (desde un diálogo que se cierra al abrirlo). */
+  onOpen?: () => void
+  size?: ComponentProps<typeof Button>["size"]
+  variant?: ComponentProps<typeof Button>["variant"]
+}): React.JSX.Element | null {
+  const canDecide = usePermission("budgets.decide")
+  const canSend = usePermission("budgets.send")
+  const [open, setOpen] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const query = useQuery({
+    queryKey: ["budget", patientId, budgetId],
+    queryFn: () => fetchBudgetDetail(patientId, budgetId),
+    enabled: canDecide && canSend,
+  })
+  if (!canDecide || !canSend) return null
+  const budget = query.data?.data
+  if (budget?.supersedesBudgetId)
+    return (
+      <p className="basis-full text-sm text-muted-foreground">
+        Es una revisión: entrégala (imprímela o envíala) y después anota qué respondió.
+      </p>
+    )
+  return (
+    <>
+      <Button
+        type="button"
+        size={size}
+        variant={variant}
+        className="min-h-11 sm:min-h-8"
+        disabled={opening}
+        onClick={async () => {
+          setOpening(true)
+          try {
+            await beforeOpen?.()
+            if (onOpen) onOpen()
+            else setOpen(true)
+          } catch {
+            // Lo escrito no se guardó: la atención ya lo dice junto a su campo.
+          } finally {
+            setOpening(false)
+          }
+        }}
+      >
+        Anotar su respuesta
+      </Button>
+      {open ? (
+        <BudgetAnswerDrawer patientId={patientId} budgetId={budgetId} inPerson onClose={() => setOpen(false)} />
       ) : null}
-    </DetailDrawer>
+    </>
   )
 }
 

@@ -45,6 +45,7 @@ import { EncounterTreatments } from "./encounter-treatments"
 import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
 import { BudgetShowActions } from "./plan/budget-show"
+import { AnswerInPersonButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
   groupPlanPaths,
@@ -651,6 +652,7 @@ export function EncounterBudgetSend({
             beforeSend={beforeWrite}
             reviewable
           />
+          <AnswerInPersonButton patientId={patientId} budgetId={step.action.budgetId} beforeOpen={beforeWrite} />
         </div>
       </div>
     )
@@ -659,7 +661,8 @@ export function EncounterBudgetSend({
     <BlockPart title="Presupuesto por enviar">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-          {step.detail ?? "Ya está armado y nadie lo envió."} Lo que indiques hoy se suma al firmar.
+          {step.detail ?? "Ya está armado y nadie lo envió."} Lo que indiques hoy se suma al firmar. Si ya te
+          respondió, anota su respuesta sin imprimir ni enviar.
         </p>
         <BudgetSendButton
           patientId={patientId}
@@ -674,6 +677,7 @@ export function EncounterBudgetSend({
           patientName={patientName}
           beforeWrite={beforeWrite}
         />
+        <AnswerInPersonButton patientId={patientId} budgetId={step.action.budgetId} beforeOpen={beforeWrite} />
       </div>
     </BlockPart>
   )

@@ -13,12 +13,14 @@ import { useEffect, useRef, useState } from "react"
 import { apiFetchBytes } from "../../../lib/api"
 import { budgetPdfUrl, deliverBudgetApi, PLAN_QUERY_KEYS } from "../../../lib/budgets"
 import { BudgetSendButton } from "./budget-send"
+import { AnswerInPersonButton, BudgetAnswerDrawer } from "./next-step-action"
 
 /**
- * «Mostrar a {nombre}» e «Imprimir» del presupuesto en borrador, sin salir de
- * la atención (issue 109, paso 2). Mostrar abre el mismo PDF que recibirá a
- * pantalla completa y no entrega nada: sigue en borrador. Imprimir lo entrega,
- * como «Imprimir y entregar» del Plan; enviar, como siempre, con su botón.
+ * «Mostrar a {nombre}» e «Imprimir y entregar» del presupuesto en borrador, sin
+ * salir de la atención. Mostrar abre el mismo PDF que recibirá a pantalla completa
+ * y no entrega nada: sigue en borrador. Desde ahí, lo principal es anotar qué
+ * respondió (queda entregado en consulta, sin enviarle nada); imprimir lo entrega,
+ * como en el Plan; enviar, como siempre, con su botón.
  */
 export function BudgetShowActions({
   patientId,
@@ -36,6 +38,7 @@ export function BudgetShowActions({
   const [pdf, setPdf] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [printing, setPrinting] = useState(false)
+  const [answering, setAnswering] = useState(false)
   const firstName = patientName.split(" ")[0] || patientName
   // Lo escrito se guarda antes de leer el PDF; la función cambia en cada render y no debe volver a pedirlo.
   const save = useRef(beforeWrite)
@@ -113,7 +116,7 @@ export function BudgetShowActions({
           pending={printing}
           onClick={() => void print()}
         >
-          Imprimir
+          Imprimir y entregar
         </SubmitButton>
       </div>
       {error && !open ? (
@@ -126,7 +129,8 @@ export function BudgetShowActions({
           <DialogHeader>
             <DialogTitle>Presupuesto para {patientName}</DialogTitle>
             <DialogDescription>
-              Lo mismo que recibirá en su PDF. Mostrarlo no le envía nada: sigue en borrador.
+              Lo mismo que recibirá en su PDF. Mostrarlo no le envía nada. Si anotas su respuesta, queda entregado en
+              consulta.
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-muted/30">
@@ -150,18 +154,33 @@ export function BudgetShowActions({
               pending={printing}
               onClick={() => void print()}
             >
-              Imprimir
+              Imprimir y entregar
             </SubmitButton>
             <BudgetSendButton
               patientId={patientId}
               budgetId={budgetId}
               beforeSend={beforeWrite}
               onSent={() => setOpen(false)}
+              variant="outline"
               reviewable
+            />
+            <AnswerInPersonButton
+              patientId={patientId}
+              budgetId={budgetId}
+              size="default"
+              variant="default"
+              beforeOpen={beforeWrite}
+              onOpen={() => {
+                setOpen(false)
+                setAnswering(true)
+              }}
             />
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {answering ? (
+        <BudgetAnswerDrawer patientId={patientId} budgetId={budgetId} inPerson onClose={() => setAnswering(false)} />
+      ) : null}
     </>
   )
 }
