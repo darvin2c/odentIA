@@ -4509,6 +4509,30 @@ if (pedroRiosPerson) {
     ),
   )
   console.log(`«Tus pendientes» de Pedro Ríos (dental-smile): /pendientes?token=${pedroLink.token}`)
+  // A Pedro le falta su fecha y su documento: el consentimiento que se le envió se lee
+  // en su teléfono y dice, antes de leer, que lo firma en su cita (ADR 0157).
+  const [endodontics] = await db
+    .select({ id: consentTemplate.id })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, ORG_A),
+        eq(consentTemplate.key, "endodoncia"),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  if (endodontics) {
+    await db.transaction(async (tx) => {
+      const toRead = await createConsentDocument(tx, ORG_A, ANA_ID, {
+        templateId: endodontics.id,
+        patientId: pedroRios.id,
+        procedureRef: "Endodoncia pieza 46",
+      })
+      await markConsentSentByLink(tx, ORG_A, ANA_ID, toRead.id)
+    })
+    console.log(`Su consentimiento, para leer y firmar en la cita: /pendientes?abre=firma&token=${pedroLink.token}`)
+  }
 }
 // Un familiar sin autorización (ADR 0157): Jorge, hermano de Rosa, quedó vinculado
 // a ella sin ninguna facultad y tiene un enlace de antes. Abierto, no le muestra la
@@ -4544,8 +4568,14 @@ if (pedroRiosPerson) {
       ),
     )
     .limit(1)
-  if (exodonciaPending)
+  if (exodonciaPending) {
     await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
+    // Lo que abre «Firma tu consentimiento»: la hoja directo, con «‹ Tus pendientes» arriba.
+    const rosaLink = await db.transaction((tx) =>
+      issuePersonalLink(tx, ORG_A, { contactId: domainSeed.contactId, patientId: domainSeed.patientId, createdBy: ANA_ID }, { secretsKey }),
+    )
+    console.log(`«Firma tu consentimiento» de Rosa (dental-smile): /pendientes?abre=firma&token=${rosaLink.token}`)
+  }
   // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo. Rosa
   // está hoy en atención (su borrador de hoy): al abrirla, arriba sale para confirmarlo ahí.
   const [implant] = await db

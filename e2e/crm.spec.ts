@@ -761,9 +761,11 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   expect(ics).toMatch(/\r\nSUMMARY:Cita en [^\r]+\r\n/)
   expect(ics).not.toContain("Consulta")
 
-  // El enlace no reserva dos veces: al volver es «Su enlace», con «Tu cita», y desde ahí se cambia o se cancela.
+  // El enlace no reserva dos veces: al volver lleva a «Tus pendientes», con «Tu cita», y desde ahí se cambia o se cancela.
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${token}`))
+  await expect(page).toHaveURL(new RegExp(`/pendientes\\?token=${token}$`))
+  await expect(page.getByRole("heading", { level: 1, name: "Tus pendientes" })).toBeVisible()
   const yourAppointment = page.getByRole("region", { name: "Tu cita" })
   await expect(yourAppointment).toBeVisible()
   const firstStart = rows[0]!.startsAt.toISOString()
