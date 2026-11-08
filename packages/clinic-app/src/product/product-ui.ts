@@ -281,13 +281,15 @@ export interface ProductDocumentsUi {
   usePapers(patientId: string): ProductPapers
   /**
    * Los tipos de imagen que se suben y, si cambia, cómo se nombra cada categoría (latidIA: «Imagen
-   * diagnóstica»). `studies`: si guarda la tomografía como estudio y la abre en su visor (odentIA; latidIA
-   * todavía no, ADR 0147).
+   * diagnóstica»). `tomography`: con qué tipo de imagen guarda la tomografía como estudio (el mismo
+   * que el servidor) y cómo la abre su visor: «cbct», la dental, con panorámica, arco y piezas y
+   * los brillos de cada estudio; «ct», la médica, en cortes y con las ventanas en unidades
+   * Hounsfield (ADR 0154). null: no la guarda.
    */
   imaging: {
     types: readonly ImagingType[]
     categoryLabels: Readonly<Record<string, string>>
-    studies: boolean
+    tomography: { imageType: string; kind: "cbct" | "ct" } | null
   }
   /** Si emite descansos médicos (latidIA, decisión 8 del issue 229): «Nuevo», su filtro y su fila. */
   medicalLeave: boolean
@@ -535,7 +537,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     documents: {
       kind: null,
       usePapers: () => NO_PAPERS,
-      imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {}, studies: true },
+      imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {}, tomography: { imageType: "tomografia", kind: "cbct" } },
       medicalLeave: false,
     },
     health: { asksPregnancy: true, InterviewSections: () => null, validate: () => ({}), Summary: () => null },

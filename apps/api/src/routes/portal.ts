@@ -22,11 +22,11 @@ import { portalAccessInput, portalIdInput, portalPolicyInput } from "./portal-in
  * acceso», «Enviar nuevo enlace» y «Quitar acceso».
  * - Dar el acceso (comprobar su identidad), mostrar el QR, decir el código y
  *   quitarlo es de quien puede ver la historia (`clinical.read`: la dueña, el
- *   administrador, el odontólogo o el médico; ADR 0154): el portal entrega toda
+ *   administrador, el odontólogo o el médico; ADR 0155): el portal entrega toda
  *   su historia documental. Recepción (`patients.write`) solo envía el enlace de
  *   un acceso ya dado por su WhatsApp, con el código en otro mensaje a la
  *   persona: nunca le llegan a su pantalla.
- * - Lo que verá no lo elige quien da el acceso (ADR 0154): todo lo suyo, con el
+ * - Lo que verá no lo elige quien da el acceso (ADR 0155): todo lo suyo, con el
  *   límite de la clínica en Configuración.
  * - El token crudo solo viaja en el QR (una vez) o en el mensaje a la persona;
  *   el código de 6 dígitos vuelve a quien da el acceso, para decírselo aparte.
@@ -129,7 +129,7 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
     )
   })
 
-  // «Cambiar» de la pantalla anterior: ya no se elige qué verá (ADR 0154). Responde mientras
+  // «Cambiar» de la pantalla anterior: ya no se elige qué verá (ADR 0155). Responde mientras
   // dura el despliegue, para que una pestaña abierta con la versión anterior lo diga; se quita después.
   app.patch("/access/:id", (c) =>
     c.json(errorBody(c, "GONE", "Ya no se elige qué verá: ve todo lo suyo. Recarga la página."), 410),

@@ -517,7 +517,7 @@ it("dar acceso en un paso: su documento entero a la vista, ve todo lo suyo sin e
   expect(summary.candidates).toEqual([
     expect.objectContaining({ contactId: con.personId, relation: "self", document: "DNI 47120836", whatsappReady: false }),
   ])
-  // Lo que verá ya no depende de los permisos de quien da el acceso (ADR 0154).
+  // Lo que verá ya no depende de los permisos de quien da el acceso (ADR 0155).
   const rights = NO_RIGHTS
   // Sin marcar la comprobación no se da.
   expect(

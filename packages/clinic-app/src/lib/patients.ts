@@ -316,7 +316,7 @@ export interface PatientDocument {
   reportStatus?: string | null
   retiredAt?: string | null
   retireReason?: string | null
-  /** «No mostrar en su portal»: desde cuándo está oculto; nulo, se ve (ADR 0154). */
+  /** «No mostrar en su portal»: desde cuándo está oculto; nulo, se ve (ADR 0155). */
   portalHiddenAt?: string | null
   encounterId: string | null
   planItemId: string | null

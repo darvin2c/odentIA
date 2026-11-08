@@ -76,7 +76,7 @@ function fakeMeta(override?: (call: Call) => Answer) {
     if (call.url.includes("fields=quality_rating")) {
       return { json: { quality_rating: "GREEN", whatsapp_business_manager_messaging_limit: "TIER_250" } }
     }
-    // El PDF de muestra del mensaje con documento, con la carga reanudable de la app de odentIA (ADR 0154).
+    // El PDF de muestra del mensaje con documento, con la carga reanudable de la app de odentIA (ADR 0155).
     if (path.endsWith("/uploads")) return { json: { id: "upload:SESION" } }
     if (path.endsWith("/upload:SESION")) return { json: { h: "4::MUESTRA" } }
     if (path.endsWith("/message_templates")) {
@@ -270,7 +270,7 @@ describe("conectar con Facebook", () => {
       "GET /7001/message_templates",
       // Los once del agente sin «Su enlace», «Retomar la conversación» y «Ver respuesta» (R1 del pulido de la Bandeja).
       ...Array<string>(14).fill("POST /7001/message_templates"),
-      // «Documento listo» sube antes su PDF de muestra con la app de odentIA (ADR 0154).
+      // «Documento listo» sube antes su PDF de muestra con la app de odentIA (ADR 0155).
       "POST /APP1/uploads",
       "POST /upload:SESION",
       "POST /7001/message_templates",

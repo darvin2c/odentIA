@@ -37,8 +37,6 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
       if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
         return []
-      // latidIA todavía no guarda la tomografía en la ficha.
-      if (/tomografía/.test(faq.q)) return []
       // Las sesiones de un consultorio son de una terapia, sin pieza.
       if (faq.q === "¿Cómo llevo un tratamiento de varias sesiones?")
         return [
@@ -66,13 +64,17 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer") } : {}),
           },
         ]
-      if (faq.q === "¿Cómo cierro una orden de imagen con su resultado?")
+      // La tomografía médica se ve en cortes, con sus series y sus ventanas (ADR 0154): sin panorámica,
+      // pieza ni arco, y sin «Guardar en tu atención de hoy», que sale de la panorámica.
+      if (faq.q === "¿Cómo veo una tomografía?")
         return [
           {
             ...faq,
-            a: "En su página › Clínica › Documentos › Órdenes, «Subir resultado». «Ya está en la ficha» elige la imagen que ya se subió y la une a la orden sin copiarla. «Archivo nuevo» sube una imagen, un PDF o el archivo DICOM de una radiografía. De una tomografía, sube su informe en PDF. La orden queda «Con resultado».",
+            a: "En su página › Clínica › Documentos, «Ver» la abre a toda la ventana, en «Cortes»: desde arriba, de frente y de lado. Si el estudio trae varias series (sin contraste, fases, el topograma), «Serie» arriba elige cuál ver; abre en la de más cortes. «Ventana» cambia lo que se ve: «Del archivo», Pulmón, Partes blandas, Hueso y Cerebro, o «Ajuste fino». «3D» sirve para explicarla, no para medir. «Medir» marca dos puntos y «Ángulo», tres: quedan con tu nombre en esa serie y son orientativas; el diagnóstico es el informe del radiólogo. «Informe y datos» muestra el informe y la toma sin salir de la imagen.",
+            forms: ["como veo una tomografia", "tomografia en 3d", "como mido en la tomografia", "series de la tomografia", "ventana de pulmon", "ventana de la tomografia"],
           },
         ]
+      if (/Guardar en tu atención de hoy/.test(faq.q)) return []
       if (faq.q === "¿Qué le doy al paciente para su seguro?")
         return [{ ...faq, a: faq.a.replace("; el odontograma, a color", "") }]
       if (faq.q === "¿Dónde quedaron los contactos?")

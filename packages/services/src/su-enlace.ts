@@ -179,7 +179,7 @@ export interface PersonalLinkView {
   questionnaire: { title: string } | null
   /**
    * «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien
-   * decide por él). La receta y el comprobante ya no están aquí (ADR 0154): le
+   * decide por él). La receta y el comprobante ya no están aquí (ADR 0155): le
    * llegan en PDF por su chat o su correo, y están en su portal.
    */
   messages: PersonalLinkMessages | null

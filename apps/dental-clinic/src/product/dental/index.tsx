@@ -180,7 +180,7 @@ export const dentalUi: ProductUi = {
     kind: { filter: "odontogramas", label: "Odontogramas", nouns: ["odontograma", "odontogramas"] },
     usePapers: useSignedOdontogramPapers,
     // Los de la boca, como siempre.
-    imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {}, studies: true },
+    imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {}, tomography: { imageType: "tomografia", kind: "cbct" } },
     medicalLeave: false,
   },
   encounter: dentalEncounter,

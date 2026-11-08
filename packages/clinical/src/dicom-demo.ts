@@ -138,6 +138,12 @@ export interface DemoCtSliceInput {
   studyDate?: string
   patientName?: string
   institution?: string
+  /** Series Description (0008,103E), como la escribe el centro («Fase venosa»). */
+  seriesDescription?: string
+  /** Series Number (0020,0011). */
+  seriesNumber?: number
+  /** El topograma: Image Type con LOCALIZER (PS3.3 C.8.2.1.1.1), una imagen plana de guía. */
+  localizer?: boolean
 }
 
 /**
@@ -163,16 +169,19 @@ export function encodeDemoCtSlice(input: DemoCtSliceInput): Uint8Array {
   const dataset = concat([
     // Los textos van en UTF-8 (PS3.5 §6.1.2.3): el origen puede llevar tildes.
     element(0x0008, 0x0005, text("CS", "ISO_IR 192")),
+    element(0x0008, 0x0008, text("CS", input.localizer ? "ORIGINAL\\PRIMARY\\LOCALIZER" : "ORIGINAL\\PRIMARY\\AXIAL")),
     element(0x0008, 0x0016, text("UI", CT_SOP_CLASS)),
     element(0x0008, 0x0018, text("UI", input.sopUid)),
     element(0x0008, 0x0020, text("DA", input.studyDate ?? "20260312")),
     element(0x0008, 0x0060, text("CS", "CT")),
     element(0x0008, 0x0070, text("LO", "DEMO Odentia32")),
     element(0x0008, 0x0080, text("LO", input.institution ?? "Centro de imagenes de demostracion")),
+    ...(input.seriesDescription ? [element(0x0008, 0x103e, text("LO", input.seriesDescription))] : []),
     element(0x0010, 0x0010, text("PN", input.patientName ?? "DEMO^PACIENTE")),
     element(0x0018, 0x0050, text("DS", ds(input.voxelMm))),
     element(0x0020, 0x000d, text("UI", input.studyUid)),
     element(0x0020, 0x000e, text("UI", input.seriesUid)),
+    ...(input.seriesNumber !== undefined ? [element(0x0020, 0x0011, text("IS", String(input.seriesNumber)))] : []),
     element(0x0020, 0x0013, text("IS", String(input.instanceNumber))),
     element(0x0020, 0x0032, text("DS", `${ds(px)}\\${ds(py)}\\${ds(pz)}`)),
     element(0x0020, 0x0037, text("DS", "1\\0\\0\\0\\1\\0")),

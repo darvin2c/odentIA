@@ -96,7 +96,7 @@ async function buildOutbound(
   const to = row.conversation.externalThreadId
   const m = row.message
   if (m.contentType === "template") {
-    // Una plantilla con documento lleva su PDF en el encabezado (ADR 0154), firmado como un adjunto.
+    // Una plantilla con documento lleva su PDF en el encabezado (ADR 0155), firmado como un adjunto.
     const [doc] = Array.isArray(m.attachments) ? m.attachments : []
     const document = isMediaAttachment(doc)
       ? { url: await deps.storage.attachmentUrl(doc.objectKey, 3600), filename: doc.filename }

@@ -11,7 +11,7 @@ export const portalPolicyInput = z.strictObject({
 })
 /**
  * «Dar acceso al portal» en un paso: quién entra, la comprobación y cómo le
- * llega. Lo que verá ya no se elige (ADR 0154): `scope` se acepta para los
+ * llega. Lo que verá ya no se elige (ADR 0155): `scope` se acepta para los
  * clientes de antes y se ignora.
  */
 export const portalAccessInput = z.strictObject({

@@ -281,7 +281,7 @@ export function DocumentUploadDialog({
     onChange: () => void onSuccess(),
   })
   const [noStudy, setNoStudy] = useState(false)
-  // latidIA aún no guarda la tomografía: se dice antes de subir, sin cientos de cortes sueltos.
+  // Un producto que no guarda la tomografía lo dice antes de subir, sin cientos de cortes sueltos.
   const [studyNotStored, setStudyNotStored] = useState(false)
   const [files, setFiles] = useState<Record<string, RowFile>>({})
   const [rejected, setRejected] = useState<string[]>([])
@@ -600,7 +600,7 @@ export function DocumentUploadDialog({
       open={open}
       onClose={close}
       title="Subir imágenes o documentos"
-      description={`JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo y 30 MB la radiografía DICOM${storesTomography() ? "; la tomografía, hasta 1 GB" : ""}. El formato se verifica por contenido. Sin atención queda como General.`}
+      description={`JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo y 30 MB la radiografía DICOM${storesTomography() ? "; la tomografía, hasta 1,5 GB" : ""}. El formato se verifica por contenido. Sin atención queda como General.`}
       onSubmit={(event) => {
         targets.current = new Set(pendingKeys)
         surface.onSubmit(event)
@@ -668,7 +668,7 @@ export function DocumentUploadDialog({
                         onSelect={(selection) => void select(selection)}
                         hint={
                           storesTomography()
-                            ? "Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo, 30 MB la radiografía DICOM y 1 GB la tomografía."
+                            ? "Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo, 30 MB la radiografía DICOM y 1,5 GB la tomografía."
                             : "Fotos, PDF y radiografías. Hasta 10 MB por archivo y 30 MB la radiografía DICOM."
                         }
                       />

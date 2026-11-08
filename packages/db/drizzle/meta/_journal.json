@@ -411,15 +411,22 @@
     {
       "idx": 58,
       "version": "7",
-      "when": 1794086097583,
-      "tag": "0058_oculto_en_su_portal",
+      "when": 1794080912386,
+      "tag": "0058_serie_de_la_medida",
       "breakpoints": true
     },
     {
       "idx": 59,
       "version": "7",
-      "when": 1794086100547,
-      "tag": "0059_plantilla_con_documento",
+      "when": 1794115447419,
+      "tag": "0059_oculto_en_su_portal",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794115449609,
+      "tag": "0060_plantilla_con_documento",
       "breakpoints": true
     }
   ]

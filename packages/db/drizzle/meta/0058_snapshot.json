@@ -1,5 +1,5 @@
 {
-  "id": "698203b2-92ec-491a-9fa8-43b51a9bccf7",
+  "id": "c5d60c5e-294c-4ed5-a5c3-61bc2c3dd6fc",
   "prevId": "c291344e-ca40-462e-acf6-e8b58650fb09",
   "version": "7",
   "dialect": "postgresql",
@@ -14287,6 +14287,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "series_instance_uid": {
+          "name": "series_instance_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "points": {
           "name": "points",
           "type": "jsonb",
@@ -17198,18 +17204,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "portal_hidden_at": {
-          "name": "portal_hidden_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "portal_hidden_by": {
-          "name": "portal_hidden_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -17310,30 +17304,12 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "patient_document_portal_hidden_by_user_id_fk": {
-          "name": "patient_document_portal_hidden_by_user_id_fk",
-          "tableFrom": "patient_document",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "portal_hidden_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "patient_document_portal_hidden_check": {
-          "name": "patient_document_portal_hidden_check",
-          "value": "(\"patient_document\".\"portal_hidden_at\" IS NULL) = (\"patient_document\".\"portal_hidden_by\" IS NULL)"
-        },
         "patient_document_image_type_check": {
           "name": "patient_document_image_type_check",
           "value": "\"patient_document\".\"image_type\" IS NULL OR \"patient_document\".\"category\" IN ('radiografia','foto_clinica')"
