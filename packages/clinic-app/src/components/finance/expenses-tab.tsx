@@ -25,6 +25,13 @@ import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance
 import { FixedOfMonth, RecurringDueSection, useRecurringMonth } from "./recurring-due"
 import { useActiveBranch } from "../../lib/active-branch"
 import { VoidDrawer } from "./void-drawer"
+
+const MONTH_WORDS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
+
+/** «noviembre» de `2026-11`. */
+function monthOfKey(key: string): string {
+  return MONTH_WORDS[Number(key.slice(5, 7)) - 1] ?? key
+}
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { expenseRateWords } from "../../lib/expense-exchange"
@@ -410,11 +417,15 @@ export function ExpensesTab({
       <VoidDrawer
         open={voiding !== null}
         title="Anular gasto"
-        description={
+        description={[
           voiding?.fromCash
             ? "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja si aún no se cerró."
-            : "Queda en el historial con su motivo y deja de sumar en el mes."
-        }
+            : "Queda en el historial con su motivo y deja de sumar en el mes.",
+          // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
+          voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         onClose={() => setVoiding(null)}
         onConfirm={async (reason) => {
           if (voiding) await voidMutation.mutateAsync({ id: voiding.id, reason })
