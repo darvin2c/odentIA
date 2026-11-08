@@ -2,6 +2,7 @@
 
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { createPortal } from "react-dom"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { DataTable, DataTableSkeleton } from "./data-table.js"
 import type { DataTableView } from "./data-table-view.js"
@@ -189,6 +190,34 @@ describe("DataTable en lista", () => {
 
     fireEvent.click(screen.getAllByText("Completar")[0])
     expect(onRowClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("lo que una celda abre en un portal (un cajón) no abre la fila, ni un click con Ctrl", () => {
+    const onRowClick = vi.fn()
+    const columns: ColumnDef<Task>[] = [
+      {
+        accessorKey: "title",
+        header: "Título",
+        cell: ({ row }) => (
+          <>
+            {row.original.title}
+            {row.index === 0 ? createPortal(<p>Formulario abierto</p>, document.body) : null}
+          </>
+        ),
+      },
+      ...taskColumns.slice(1),
+    ]
+    for (const view of ["list", "table"] as const) {
+      onRowClick.mockClear()
+      const { unmount } = render(<TaskTable view={view} columns={columns} onRowClick={onRowClick} />)
+      // React sube el click del portal hasta la fila aunque en el DOM esté fuera de ella.
+      fireEvent.click(screen.getByText("Formulario abierto"))
+      fireEvent.click(screen.getByText("Llamar a Ana"), { ctrlKey: true })
+      expect(onRowClick, view).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByText("Llamar a Ana"))
+      expect(onRowClick, view).toHaveBeenCalledWith(tasks[0])
+      unmount()
+    }
   })
 
   it("conserva el seleccionar-todas de la columna de selección", () => {

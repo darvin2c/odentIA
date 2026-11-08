@@ -73,7 +73,8 @@ export function PersonAvatar({
       {src ? <AvatarImage src={src} alt={decorative ? "" : `Foto de ${name}`} /> : null}
       <AvatarFallback
         className={cn(
-          "bg-primary-soft font-semibold text-primary-soft-foreground",
+          // Gris y no el color de la marca: se repite fila a fila (ADR 0162).
+          "bg-muted font-semibold text-muted-foreground",
           fallbackClassName,
         )}
       >

@@ -240,7 +240,7 @@ function PeoplePage() {
             <Link
               to="/people/$personId"
               params={{ personId: row.original.id }}
-              className="font-medium text-primary hover:underline"
+              className="font-semibold text-foreground underline-offset-4 hover:underline"
             >
               {row.original.displayName}
             </Link>
@@ -455,7 +455,12 @@ function PeoplePage() {
             </p>
           ) : null}
           <div aria-busy={query.isPlaceholderData === true}>
-            <DataTable table={table} isFetching={query.isFetching} />
+            <DataTable
+              table={table}
+              isFetching={query.isFetching}
+              // Toda la fila abre a la persona: el nombre ya no va en color y en el teléfono no hay mouse.
+              onRowClick={(row) => void navigate({ to: "/people/$personId", params: { personId: row.id } })}
+            />
           </div>
           {query.isError ? (
             <p role="alert" className="text-sm text-destructive">

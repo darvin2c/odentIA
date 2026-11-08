@@ -121,7 +121,7 @@ export function PersonConversations({ person }: { person: PersonPage }) {
               {spokenWithConversation.map((other) => (
                 <li key={other.personId}>
                   {speaksForWords(person.sex)}{" "}
-                  <PersonLink contactId={other.personId} isPatient={other.isPatient}>
+                  <PersonLink contactId={other.personId} isPatient={other.isPatient} inText>
                     {other.displayName}
                   </PersonLink>
                   {" · "}

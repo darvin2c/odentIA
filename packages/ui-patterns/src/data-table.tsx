@@ -23,7 +23,7 @@ import { DataRefreshMarker } from "./loading-state.js"
 import {
   columnLabel,
   type DataTableView,
-  isInteractiveTarget,
+  opensRow,
   resolveViewColumns,
   useResolvedView,
   type ViewColumns,
@@ -198,11 +198,11 @@ function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refres
               return (
                 <TableRow
                   key={row.id}
-                  className={cn(onRowClick && "cursor-pointer", active && activeRowClass)}
+                  // Con el foco en el nombre, la fila se marca como al pasar el mouse: toda ella abre el registro.
+                  className={cn(onRowClick && "cursor-pointer has-[:focus-visible]:bg-muted/50", active && activeRowClass)}
                   {...activeRowProps(active)}
                   onClick={(event) => {
-                    if (!onRowClick) return
-                    if (isInteractiveTarget(event.target)) return
+                    if (!onRowClick || !opensRow(event)) return
                     onRowClick(row.original)
                   }}
                 >
@@ -423,7 +423,7 @@ function rowClickHandler<TData>(
 ): React.MouseEventHandler | undefined {
   if (!onRowClick) return undefined
   return (event) => {
-    if (isInteractiveTarget(event.target)) return
+    if (!opensRow(event)) return
     onRowClick(row.original)
   }
 }
