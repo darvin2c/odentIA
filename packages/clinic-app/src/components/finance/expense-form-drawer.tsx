@@ -63,7 +63,7 @@ import {
 } from "../../lib/finance-cash"
 import { type PurchaseBalance, purchaseOrderLabel } from "../../lib/reports"
 import { MoneyInput } from "../inventory/fields"
-import { ChoiceChips } from "./cash-close-drawer"
+import { CashMoveDrawer, ChoiceChips } from "./cash-close-drawer"
 import { ExpenseMoneyFields } from "./expense-money-fields"
 
 /** Dónde se registra el gasto: la sede y el formato de la clínica. */
@@ -244,6 +244,9 @@ export function ExpenseFormDrawer({
   // Lo que se vio de la compra al elegirla: si cambia mientras tanto, el servidor lo dice.
   const [seen, setSeen] = useState<{ due: number; paid: number } | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
+  // «Ingresar lo que falta»: el cajón del efectivo se apila encima, sin tocar el gasto.
+  const [cashOpen, setCashOpen] = useState(false)
+  const canMoveCash = canWrite
   const currencies = second ? [place.currency, second.currency] : []
 
   const form = useAppForm({
@@ -281,7 +284,7 @@ export function ExpenseFormDrawer({
         else if (after !== null && after < 0 && state && !annotatesOnly(value))
           // El freno se queda (el efectivo nunca queda negativo), pero dice qué
           // hacer: quitar la casilla dejaría «fuera de la caja» lo que salió de ella.
-          fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagarlo todo con el efectivo. Si el dinero está en el cajón, regístralo antes en Finanzas con «Ingresar o retirar efectivo». Si una parte se pagó por otro medio, anótala como otro gasto.`
+          fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagarlo todo con el efectivo. Si el dinero está en el cajón, ingrésalo a la caja con el botón de abajo. Si una parte se pagó por otro medio, anótala como otro gasto.`
         if (paid.tenderError) fields.tender = paid.tenderError
         if (paid.rateError) fields.rate = paid.rateError
         if (value.spentDay > today && !annotatesOnly(value)) fields.spentDay = "La fecha del gasto no puede ser futura."
@@ -763,6 +766,14 @@ export function ExpenseFormDrawer({
             </FormChoiceField>
           )}
         </form.AppField>
+        {after !== null && after < 0 && !otherBranch && canMoveCash ? (
+          // Lo que falta se ingresa encima, sin salir: al guardarlo, el gasto sigue como estaba.
+          <div>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
+              Ingresar {formatMoney(-after, paid.payIn, locale)} a la caja
+            </Button>
+          </div>
+        ) : null}
           </>
         )}
         {!chosen && !(asksSalesTaxNow && values.salesTax === "cobros") ? (
@@ -963,6 +974,14 @@ export function ExpenseFormDrawer({
           </p>
         ) : null}
       </div>
+      <CashMoveDrawer
+        branchId={branchId}
+        currency={paid.payIn}
+        locale={locale}
+        open={cashOpen}
+        onClose={() => setCashOpen(false)}
+        initialAmountCents={after !== null && after < 0 ? -after : undefined}
+      />
     </FormDrawer>
   )
 }

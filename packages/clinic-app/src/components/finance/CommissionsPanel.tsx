@@ -81,6 +81,7 @@ import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
 import { ChoiceButtons } from "../choice-buttons"
 import { ServiceSelect } from "../service-select"
+import { CashMoveDrawer } from "./cash-close-drawer"
 
 // La ruta de Comisiones lo importa desde aquí.
 export { MonthPicker } from "./MonthPicker"
@@ -1519,7 +1520,7 @@ function PayDrawer({
         if (pickBranch && !value.branchId) fields.branchId = "Elige la sede del gasto."
         // Mismo freno que en un gasto: el efectivo nunca queda negativo, y se dice qué hacer.
         if (value.fromCash && cashState && cashState.cashOnHandCents < detail.pendingCents)
-          fields.fromCash = `En la caja solo hay ${formatMoney(cashState.cashOnHandCents, detail.currency, detail.locale)}: no alcanza para pagarlo con el efectivo. Si el dinero está en el cajón, regístralo antes en Finanzas con «Ingresar o retirar efectivo». Si se pagó por transferencia, deja la casilla sin marcar.`
+          fields.fromCash = `En la caja solo hay ${formatMoney(cashState.cashOnHandCents, detail.currency, detail.locale)}: no alcanza para pagarlo con el efectivo. Si el dinero está en el cajón, ingrésalo a la caja con el botón de abajo. Si se pagó por transferencia, deja la casilla sin marcar.`
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
@@ -1558,6 +1559,7 @@ function PayDrawer({
   const cash = useCashState(cashBranch, open && canUseCash, detail.currency)
   const cashState = cash.data?.data ?? null
   const cashAfter = cashState ? cashState.cashOnHandCents - detail.pendingCents : null
+  const [cashOpen, setCashOpen] = useState(false)
 
   // La sede activa es la propuesta; si llega tarde no pisa lo ya elegido.
   useEffect(() => {
@@ -1660,10 +1662,26 @@ function PayDrawer({
             )}
           </form.AppField>
         ) : null}
+        {canUseCash && fromCash && cashAfter !== null && cashAfter < 0 ? (
+          // Lo que falta se ingresa encima, sin salir: al guardarlo, el pago sigue como estaba.
+          <div>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
+              Ingresar {formatMoney(-cashAfter, detail.currency, detail.locale)} a la caja
+            </Button>
+          </div>
+        ) : null}
         <form.AppField name="notes">
           {(field) => <field.TextareaField label="Nota (opcional)" rows={2} maxLength={2000} />}
         </form.AppField>
       </div>
+      <CashMoveDrawer
+        branchId={cashBranch}
+        currency={detail.currency}
+        locale={detail.locale}
+        open={cashOpen}
+        onClose={() => setCashOpen(false)}
+        initialAmountCents={cashAfter !== null && cashAfter < 0 ? -cashAfter : undefined}
+      />
     </FormDrawer>
   )
 }

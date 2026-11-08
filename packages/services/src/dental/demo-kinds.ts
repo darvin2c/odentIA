@@ -14,13 +14,14 @@ const DENTAL_EXPENSES: DemoKindRecipe["expenses"] = [
   {
     category: "Personal",
     concept: "Planilla del mes",
-    cents: 4_200_00,
-    perStaffCents: 2_100_00,
+    cents: 3_000_00,
+    // El sueldo base de cada profesional, con su nombre (va junto a su comisión).
+    perStaffCents: 900_00,
     day: 28,
   },
   { category: "Alquiler", concept: "Alquiler del local", rent: true, day: 1 },
   { category: "Laboratorio", concept: "Coronas y prótesis", revenueShare: 0.09, day: 20 },
-  { category: "Materiales", concept: "Insumos", revenueShare: 0.06, day: 12 },
+  { category: "Materiales", concept: "Insumos", revenueShare: 0.05, day: 12 },
   { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00, day: 18 },
 ]
 
