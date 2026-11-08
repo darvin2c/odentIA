@@ -23,6 +23,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { useMemo, useState } from "react"
 import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
 import { FixedOfMonth, RecurringDueSection, useRecurringMonth } from "./recurring-due"
+import { useActiveBranch } from "../../lib/active-branch"
 import { VoidDrawer } from "./void-drawer"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
@@ -101,6 +102,9 @@ export function ExpensesTab({
   })
   // Lo que se repite: «Por pagar» y «Lo fijo del mes».
   const recurring = useRecurringMonth(branchId, month, true)
+  // Con varias sedes, lo fijo de toda la clínica: lo que cuesta mantenerla al mes.
+  const severalBranches = useActiveBranch().branches.length > 1
+  const wholeClinic = useRecurringMonth("", month, severalBranches)
   const voidMutation = useMutation({
     mutationFn: (input: { id: string; reason: string }) => voidExpenseApi(input.id, input.reason),
     onSuccess: () => {
@@ -306,7 +310,11 @@ export function ExpensesTab({
           <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
             {formatMoney(data.totalCents, data.currency || currency, locale)}
           </p>
-          <FixedOfMonth data={recurring.data?.data} locale={locale} />
+          <FixedOfMonth
+            data={recurring.data?.data}
+            wholeClinic={severalBranches ? wholeClinic.data?.data : undefined}
+            locale={locale}
+          />
           {data.byCategory.length > 0 ? (
             <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-4 sm:grid-cols-3 lg:grid-cols-5">
               {data.byCategory.map((entry) => (

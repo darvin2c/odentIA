@@ -986,10 +986,34 @@ function PayablesCard({ data }: { data: ReportFinance }) {
               <strong className="tabular-nums">{money(fixed.cents)}</strong>
             </span>
             <span className="text-[13px] text-muted-foreground">
-              {fixed.count === 1 ? "1 sin pagar" : `${fixed.count} sin pagar`} ·{" "}
-              <Link to="/finance" search={{ tab: "gastos" }} className="font-bold text-primary-soft-foreground">
-                Pagar en Gastos
-              </Link>
+              {(fixed.byBranch ?? []).length > 1 ? (
+                // Cada sede con lo suyo: Gastos muestra lo de la sede elegida.
+                (fixed.byBranch ?? []).map((own, index) => (
+                  <span key={own.branchId}>
+                    {index > 0 ? " · " : ""}
+                    {own.count === 1 ? "1 sin pagar" : `${own.count} sin pagar`} en {own.branchName}:{" "}
+                    <Link
+                      to="/finance"
+                      search={{ tab: "gastos", branch: own.branchId }}
+                      className="font-bold text-primary-soft-foreground"
+                    >
+                      Pagar en Gastos
+                    </Link>
+                  </span>
+                ))
+              ) : (
+                <>
+                  {fixed.count === 1 ? "1 sin pagar" : `${fixed.count} sin pagar`}
+                  {fixed.byBranch?.[0] ? ` en ${fixed.byBranch[0].branchName}` : ""} ·{" "}
+                  <Link
+                    to="/finance"
+                    search={{ tab: "gastos", ...(fixed.byBranch?.[0] ? { branch: fixed.byBranch[0].branchId } : {}) }}
+                    className="font-bold text-primary-soft-foreground"
+                  >
+                    Pagar en Gastos
+                  </Link>
+                </>
+              )}
             </span>
           </li>
         ) : null}

@@ -18,8 +18,8 @@ import { type MoneyFraction, roundMoneyValue, sumMoneyValues } from "@odentia/cl
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { expense, expenseRecurring, expenseRecurringSkip, RECURRING_EVERY_MONTHS } from "@odentia/db/schema/finance"
-import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, isNull, sql } from "drizzle-orm"
+import { auditEvent, branch } from "@odentia/db/schema/org"
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
   addMonthKey,
@@ -617,14 +617,19 @@ export async function listRecurringPeople(tx: Db, orgId: string) {
 /**
  * Lo fijo vencido y sin pagar a un momento (Reportes › Lo que debes): ocurrencias
  * de hasta 12 meses atrás cuyo día ya pasó, sin «este mes no» y sin un gasto
- * vigente pagado antes de ese momento. Al cambio de hoy: aún se debe.
+ * vigente pagado antes de ese momento. Al cambio de hoy: aún se debe. También
+ * por sede (`byBranch`): Gastos se mira por sede, y el enlace lleva a la suya.
  */
 export async function fixedOwedAt(
   tx: Db,
   orgId: string,
   at: Date,
   options: { branchId?: string } = {},
-): Promise<{ cents: number; count: number }> {
+): Promise<{
+  cents: number
+  count: number
+  byBranch: Array<{ branchId: string; branchName: string; cents: number; count: number }>
+}> {
   const zone = await getOrgLocale(tx, orgId)
   const money = orgMoneyOf(zone)
   const day = reportDayOf(zone.timezone, at)
@@ -638,5 +643,22 @@ export async function fixedOwedAt(
   ).filter((item) => !item.skipped && item.dueOn < day && !(item.paid && item.paid.spentAt < at))
   // Lo pagado después de ese momento aún se debía entonces: cuenta con lo que se propone pagar.
   const owed = list.map((item) => ({ ...item, paid: null }))
-  return { cents: occurrencesCents(owed, money), count: owed.length }
+  const branchIds = [...new Set(owed.map((item) => item.template.branchId))]
+  const names = new Map(
+    branchIds.length
+      ? (
+          await tx
+            .select({ id: branch.id, name: branch.name })
+            .from(branch)
+            .where(and(eq(branch.organizationId, orgId), inArray(branch.id, branchIds)))
+        ).map((row) => [row.id, row.name])
+      : [],
+  )
+  const byBranch = branchIds
+    .map((id) => {
+      const own = owed.filter((item) => item.template.branchId === id)
+      return { branchId: id, branchName: names.get(id) ?? "", cents: occurrencesCents(own, money), count: own.length }
+    })
+    .sort((a, b) => b.cents - a.cents || a.branchName.localeCompare(b.branchName))
+  return { cents: occurrencesCents(owed, money), count: owed.length, byBranch }
 }
