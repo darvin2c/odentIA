@@ -749,6 +749,18 @@ describe(`una demo de clínica general pequeña (odentIA, semilla ${DENTAL})`, (
         where ep.organization_id = ${demo.organizationId}
           and (pi.service_id <> ep.service_id or pi.patient_id <> e.patient_id or pi.decision_status <> 'aceptado')`),
     ).toBe(0)
+    // Lo aceptado hace más de dos meses casi todo se hizo: una demo de ventas no muestra
+    // abandono masivo (revisión del 7 nov). Se deja una minoría, cerca de uno de cada ocho.
+    const [old] = await ownerDb.execute<{ total: number; done: number }>(sql`
+      select count(*)::int as total,
+        count(*) filter (where exists (select 1 from encounter_procedure ep
+          where ep.organization_id = pi.organization_id and ep.plan_item_id = pi.id and ep.voided_at is null))::int as done
+      from treatment_plan_item pi
+      join treatment_budget b on b.organization_id = pi.organization_id and b.id = pi.budget_id
+      where pi.organization_id = ${demo.organizationId} and pi.decision_status = 'aceptado'
+        and b.decided_at < now() - interval '64 days'`)
+    expect(old?.total ?? 0).toBeGreaterThan(0)
+    expect((old?.done ?? 0) / (old?.total ?? 1)).toBeGreaterThanOrEqual(0.8)
     // Su cargo dice de qué tratamiento es.
     expect(
       await count(sql`select count(*)::int as n from patient_charge c

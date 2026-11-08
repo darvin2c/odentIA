@@ -758,33 +758,36 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   }
 
   // --- Citas, llegadas y atenciones cerradas -----------------------------------------------
-  for (const batch of chunks(visits)) {
-    await tx.insert(appointment).values(
-      batch.map((visit) => {
-        const endsAt = new Date(visit.startsAt.getTime() + visit.service.durationMin * 60_000)
-        const attended = visit.status === "atendida"
-        return {
-          id: visit.id,
-          organizationId: input.orgId,
-          branchId: visit.branchId,
-          roomId: visit.roomId,
-          patientId: patientOf(visit.patientIndex),
-          professionalUserId: visit.professional.userId,
-          serviceId: visit.service.id,
-          serviceName: visit.service.name,
-          startsAt: visit.startsAt,
-          endsAt,
-          durationMin: visit.service.durationMin,
-          status: visit.status,
-          source: visit.source,
-          // Lo que agendó el agente o el enlace sale de la conversación de la persona.
-          conversationId: visit.source === "recepcion" ? null : (conversationOf.get(visit.patientIndex) ?? null),
-          ...(attended ? { arrivedAt: new Date(visit.startsAt.getTime() - random.int(0, 10) * 60_000), arrivedBy: input.ownerUserId } : {}),
-          createdAt: new Date(visit.startsAt.getTime() - random.int(1, 14) * 86_400_000),
-        }
-      }),
-    )
+  const insertAppointments = async (list: PlannedVisit[]): Promise<void> => {
+    for (const batch of chunks(list)) {
+      await tx.insert(appointment).values(
+        batch.map((visit) => {
+          const endsAt = new Date(visit.startsAt.getTime() + visit.service.durationMin * 60_000)
+          const attended = visit.status === "atendida"
+          return {
+            id: visit.id,
+            organizationId: input.orgId,
+            branchId: visit.branchId,
+            roomId: visit.roomId,
+            patientId: patientOf(visit.patientIndex),
+            professionalUserId: visit.professional.userId,
+            serviceId: visit.service.id,
+            serviceName: visit.service.name,
+            startsAt: visit.startsAt,
+            endsAt,
+            durationMin: visit.service.durationMin,
+            status: visit.status,
+            source: visit.source,
+            // Lo que agendó el agente o el enlace sale de la conversación de la persona.
+            conversationId: visit.source === "recepcion" ? null : (conversationOf.get(visit.patientIndex) ?? null),
+            ...(attended ? { arrivedAt: new Date(visit.startsAt.getTime() - random.int(0, 10) * 60_000), arrivedBy: input.ownerUserId } : {}),
+            createdAt: new Date(visit.startsAt.getTime() - random.int(1, 14) * 86_400_000),
+          }
+        }),
+      )
+    }
   }
+  await insertAppointments(visits)
   // Una atención por cita atendida. La base admite un solo borrador por persona:
   // se cierran por rondas, la primera visita de cada persona, luego la segunda…
   const attended = visits.filter((visit) => visit.status === "atendida")
@@ -833,10 +836,9 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       acceptedOf.set(line.patientId, list)
     }
   }
-  for (const [roundIndex, round] of rounds.entries()) {
-    // Los presupuestos nacen de las evaluaciones, que son la primera visita: después de la
-    // primera ronda ya existen, y las visitas siguientes pueden hacer lo aceptado.
-    if (roundIndex === 1) await seedBudgetsOnce()
+  /** Las visitas que vienen a hacer un tratamiento aceptado (abajo): ya saben cuál. */
+  const plannedItem = new Map<string, string>()
+  const attendRound = async (round: PlannedVisit[]): Promise<void> => {
     for (const batch of chunks(round)) {
       const rows = batch.map((visit) => {
         // La llegada es anterior al inicio: la espera en sala queda medida.
@@ -847,7 +849,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           note,
           id: randomUUID(),
           procedureId: randomUUID(),
-          planItemId: carriedBy(visit, startedAt),
+          planItemId: plannedItem.get(visit.id) ?? carriedBy(visit, startedAt),
           startedAt,
           endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000),
         }
@@ -936,6 +938,89 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       })
     }
   }
+  for (const [roundIndex, round] of rounds.entries()) {
+    // Los presupuestos nacen de las evaluaciones, que son la primera visita: después de la
+    // primera ronda ya existen, y las visitas siguientes pueden hacer lo aceptado.
+    if (roundIndex === 1) await seedBudgetsOnce()
+    await attendRound(round)
+  }
+  await seedBudgetsOnce()
+
+  // --- Lo aceptado hace tiempo se hizo -------------------------------------------------------
+  // Una demo de ventas no muestra abandono masivo (revisión del 7 nov): de lo aceptado hace
+  // más de dos meses que ninguna visita de la agenda hizo, cerca de uno de cada ocho se dejó
+  // (el avance lo dice suspendido o cancelado) y el resto tuvo su visita, con su
+  // procedimiento, su cargo y su cobro. Quien lo atiende da ese servicio a esa persona; la
+  // visita va al cierre de su día, después de la agenda, para no pisar otra cita.
+  const later = generator((recipe.seed ?? 20_261_018) + 2_026)
+  const indexOf = new Map(patientIds.map((id, index) => [id, index] as const))
+  const nextFree = new Map<string, number>()
+  const extraVisits: PlannedVisit[] = []
+  for (const [patientId, lines] of acceptedOf) {
+    const patientIndex = indexOf.get(patientId)
+    if (patientIndex === undefined) continue
+    for (const line of lines) {
+      if (line.decidedAt.getTime() >= historyEnd - 60 * 86_400_000) continue
+      if (later.chance(0.12)) continue
+      const service = input.services.find((item) => item.id === line.serviceId)
+      if (!service) continue
+      let placed: PlannedVisit | null = null
+      for (let tries = 0; tries < 21 && !placed; tries += 1) {
+        const day = new Date(line.decidedAt.getTime() + (later.int(3, 14) + tries) * 86_400_000)
+        if (day.getTime() >= historyEnd) break
+        const { weekday, monthDay } = localDay(new Date(day.getTime() + 12 * 3_600_000), timezone)
+        if (weekday === 0 || holidaySet.has(monthDay)) continue
+        const [year, month, date] = reportDayOf(timezone, day).split("-").map(Number) as [number, number, number]
+        const evening = localDayStart(timezone, year, month, date).getTime() + 18 * 3_600_000
+        for (const [professionalIndex, professional] of input.professionals.entries()) {
+          if (!professional.weekdays.includes(weekday)) continue
+          const mine = offer[professionalIndex]
+          if (!mine?.followUp.some((item) => item.id === service.id)) continue
+          const branch = input.branches.find((item) => item.id === professional.branchId)
+          if (!branch) continue
+          const roomId = branch.roomIds[professionalIndex % branch.roomIds.length] as string
+          const keys = [`p:${professional.userId}:${evening}`, `r:${roomId}:${evening}`]
+          const startsAt = new Date(Math.max(evening, ...keys.map((key) => nextFree.get(key) ?? evening)))
+          if (startsAt.getTime() >= historyEnd || !fits([professional.who, service.who], personOf(patientIndex), startsAt)) continue
+          const ends = startsAt.getTime() + service.durationMin * 60_000
+          for (const key of keys) nextFree.set(key, ends)
+          placed = {
+            id: randomUUID(),
+            patientIndex,
+            professional,
+            branchId: branch.id,
+            roomId,
+            service,
+            startsAt,
+            status: "atendida",
+            source: "recepcion",
+            waitMinutes: later.int(2, 12),
+            quantity: 1,
+          }
+          break
+        }
+      }
+      if (!placed) continue
+      plannedItem.set(placed.id, line.planItemId)
+      extraVisits.push(placed)
+    }
+  }
+  if (extraVisits.length > 0) {
+    extraVisits.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+    await insertAppointments(extraVisits)
+    visits.push(...extraVisits)
+    // Un borrador por persona a la vez: por rondas, como la agenda.
+    const extraRounds: PlannedVisit[][] = []
+    const count = new Map<number, number>()
+    for (const visit of extraVisits) {
+      const round = count.get(visit.patientIndex) ?? 0
+      count.set(visit.patientIndex, round + 1)
+      const list = extraRounds[round] ?? []
+      list.push(visit)
+      extraRounds[round] = list
+    }
+    for (const round of extraRounds) await attendRound(round)
+  }
 
   // --- Cargos y cobros ------------------------------------------------------------------------
   // Cada tratamiento atendido deja su cargo. Casi todo se paga ese día; algunos
@@ -1017,8 +1102,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   })
 
   // Los presupuestos (tres de cada cuatro evaluaciones de personas nuevas) nacen después
-  // de la primera ronda de atenciones, arriba; con una sola ronda, aquí.
-  await seedBudgetsOnce()
+  // de la primera ronda de atenciones, arriba.
 
   // --- Gastos del mes, por sede -------------------------------------------------------------
   const income = new Map<string, number>()
