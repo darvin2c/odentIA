@@ -2457,9 +2457,46 @@ export interface SignConsentByLinkInput {
 }
 
 /**
+ * Por qué no se firma desde el teléfono (decisión 3 de la entrega 2): `menor` (es la propia
+ * persona y es menor de edad), `sin-fecha` (el paciente no tiene fecha de nacimiento: no se
+ * sabe si es mayor de edad) o `sin-documento` (la ficha de quien firma, paciente o
+ * representante, no tiene su documento: el que escriba no se compararía con nada). Nulo si
+ * se puede. No mira la facultad de un representante: eso lo dice `requireDecisionContact`.
+ */
+export type RemoteSignBlock = "menor" | "sin-fecha" | "sin-documento"
+
+export async function remoteSignBlock(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  signerContactId: string,
+): Promise<RemoteSignBlock | null> {
+  const linked = await requireLinkedActiveContact(tx, orgId, patientId, signerContactId)
+  const subject = await requirePatient(tx, orgId, patientId)
+  if (linked.relationship === "self" && (await patientIsMinor(tx, orgId, patientId))) return "menor"
+  if (!subject.birthDate) return "sin-fecha"
+  if (!linked.contact.docNumber) return "sin-documento"
+  return null
+}
+
+/** Lo que dice el servidor si se intenta igual: la consecuencia, no la causa técnica. */
+function remoteSignRefusal(block: RemoteSignBlock, asRepresentative: boolean, patientFirst: string): ServiceError {
+  if (block === "menor")
+    return conflict("SIGNER_NOT_AUTHORIZED", "Como es menor de edad, lo firma su madre, padre o tutor, en su cita o desde su teléfono")
+  return conflict(
+    "SIGNER_NOT_AUTHORIZED",
+    asRepresentative
+      ? `Este lo firmas tú en la cita de ${patientFirst}, antes de empezar.`
+      : "Este lo firmas en tu cita, antes de empezar.",
+  )
+}
+
+/**
  * La persona firma en su enlace, antes de llegar: la propia persona si es
- * mayor de edad o su representante legal vigente, nunca otra. Escribe su
- * documento como comprobación. Queda pendiente hasta que el profesional, en
+ * mayor de edad o su representante legal vigente, nunca otra, y solo si su
+ * ficha tiene el documento con que comparar y el paciente su fecha de
+ * nacimiento (`remoteSignBlock`). Escribe su documento como comprobación. Queda
+ * pendiente hasta que el profesional, en
  * la cita, la informe y lo confirme con su perfil (`confirmLinkSignedConsent`).
  * Nivel de firma: simple, por enlace.
  */
@@ -2488,26 +2525,21 @@ export async function signConsentByLink(
   const now = new Date()
   const minor = await patientIsMinor(tx, orgId, current.patientId)
   const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, signerContactId)
-  let signerKind: "paciente" | "representante"
-  let verified: { displayName: string; docNumber: string | null; docType: string | null }
-  if (linked.relationship === "self") {
-    if (minor) throw conflict("SIGNER_NOT_AUTHORIZED", "Como es menor de edad, lo firma su madre, padre o tutor")
-    // Sin su fecha de nacimiento no se sabe si es mayor de edad: lo firma en la clínica.
-    if (!subject.birthDate) {
-      throw conflict("SIGNER_NOT_AUTHORIZED", "Para firmar aquí la clínica necesita tu fecha de nacimiento. Lo firmas en tu cita.")
-    }
-    signerKind = "paciente"
-    verified = linked.contact
-  } else {
-    signerKind = "representante"
-    // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
-    verified = await requireDecisionContact(tx, orgId, current.patientId, signerContactId)
+  const signerKind: "paciente" | "representante" = linked.relationship === "self" ? "paciente" : "representante"
+  // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
+  if (signerKind === "representante") await requireDecisionContact(tx, orgId, current.patientId, signerContactId)
+  // Sin documento con que comparar, sin fecha de nacimiento o menor: lo firma en la cita.
+  const block = await remoteSignBlock(tx, orgId, current.patientId, signerContactId)
+  if (block) {
+    const first = (subject.givenNames ?? subject.displayName).trim().split(/\s+/)[0] ?? ""
+    throw remoteSignRefusal(block, signerKind === "representante", first)
   }
+  const verified = linked.contact
   const typed = assertOptionalText(input.docNumber, "Tu documento", 40)
   if (!typed) throw invalidField("docNumber", "Escribe tu documento")
-  if (verified.docNumber && !sameDocument(typed, verified.docNumber))
+  if (!verified.docNumber || !sameDocument(typed, verified.docNumber))
     throw invalidField("docNumber", "Ese documento no coincide con el que tenemos registrado")
-  const signerDoc = verified.docNumber ? `${verified.docType ?? ""} ${verified.docNumber}`.trim() : typed
+  const signerDoc = `${verified.docType ?? ""} ${verified.docNumber}`.trim()
   const signatureData = assertSignatureData(input.signatureData)
   const [row] = await tx
     .update(consentDocument)

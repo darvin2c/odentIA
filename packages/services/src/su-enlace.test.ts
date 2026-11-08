@@ -433,7 +433,9 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   // Sin enviarlo a firmar, no aparece en su enlace (solo «Tus mensajes», ADR 0040).
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([{ id: consent.id, title: "Exodoncia" }])
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([
+    { id: consent.id, title: "Exodoncia", procedureRef: "Exodoncia de la pieza 38", appointment: null, signable: true, why: null },
+  ])
   // Lee la misma hoja que el papel: la pieza, el diagnóstico, la declaración que acepta y el pie de firma.
   const sheet = await f.run((tx) => getPersonalLinkConsent(tx, ORG, link.token, consent.id))
   expect(sheet).toMatchObject({
@@ -566,6 +568,77 @@ async function consentInChat(f: Awaited<ReturnType<typeof clinicalFixture>>, wro
 }
 
 const FINGER = { strokes: [[[10, 10], [200, 120]]] }
+
+/** Un consentimiento enviado a firmar por enlace para ese paciente. */
+async function sentToSign(f: Awaited<ReturnType<typeof clinicalFixture>>, patientId: string) {
+  const draft = await f.run((tx) =>
+    createConsentTemplate(tx, ORG, f.actor, {
+      key: `t-${randomUUID().slice(0, 8)}`,
+      title: "Exodoncia",
+      sections: { procedure: "Extracción con anestesia local.", benefits: ["Quitar el dolor"], risks: ["Sangrado"], alternatives: ["Endodoncia"], consequences: "Puede avanzar." },
+    }),
+  )
+  const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
+  const consent = await f.run((tx) =>
+    createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId, procedureRef: "Exodoncia de la pieza 38" }),
+  )
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
+  return consent.id
+}
+
+it("sin documento en la ficha de quien firma, sin fecha de nacimiento o menor: se lee la hoja y se firma en la cita", async () => {
+  const f = await clinicalFixture()
+  // Adulta sin documento en su ficha: cualquier número que escriba no se compara con nada.
+  const ana = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, { displayName: "Ana Soto", givenNames: "Ana", familyName: "Soto", birthDate: "1990-01-01", phone: "+51911000111" }),
+  )
+  const anaPerson = (await f.run((tx) => patientPersonId(tx, ORG, ana.id)))!
+  const anaConsent = await sentToSign(f, ana.id)
+  const anaLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: anaPerson, patientId: ana.id }, { secretsKey: KEY }))
+  await expect(
+    f.run((tx) => signPersonalLinkConsent(tx, ORG, anaLink.token, anaConsent, { docNumber: "12345678", comprehensionConfirmed: true, signatureData: FINGER })),
+  ).rejects.toMatchObject({ code: "SIGNER_NOT_AUTHORIZED", message: expect.stringContaining("en tu cita") })
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, anaLink.token, anaConsent))).toMatchObject({
+    signable: false,
+    why: "sin-documento",
+    speaksTo: "paciente",
+    patientFirstName: "Ana",
+    procedureRef: "Exodoncia de la pieza 38",
+  })
+  const [unsigned] = await ownerDb.select({ personSignedAt: consentDocument.personSignedAt }).from(consentDocument).where(eq(consentDocument.id, anaConsent))
+  expect(unsigned?.personSignedAt).toBeNull()
+
+  // Sin fecha de nacimiento no se sabe si es mayor de edad.
+  const beto = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, { displayName: "Beto Paz", givenNames: "Beto", familyName: "Paz", docType: "DNI", docNumber: "40000123", phone: "+51911000222" }),
+  )
+  const betoPerson = (await f.run((tx) => patientPersonId(tx, ORG, beto.id)))!
+  const betoConsent = await sentToSign(f, beto.id)
+  const betoLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: betoPerson, patientId: beto.id }, { secretsKey: KEY }))
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, betoLink.token, betoConsent))).toMatchObject({ signable: false, why: "sin-fecha" })
+
+  // Mateo, de 8 años: su madre decide por él. Sin su documento en la ficha, lo firma ella en la cita.
+  const mateo = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, { displayName: "Mateo Ruiz", givenNames: "Mateo", familyName: "Ruiz", birthDate: `${new Date().getUTCFullYear() - 8}-03-10` }),
+  )
+  const [madre] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Ruiz", givenNames: "Rosa" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: mateo.id, contactId: madre!.id, relationship: "guardian", createdBy: f.actor })
+  await ownerDb.insert(patientResponsibility).values({ organizationId: ORG, patientId: mateo.id, contactId: madre!.id, kind: "representante_legal", startsAt: "2020-01-01" })
+  const mateoConsent = await sentToSign(f, mateo.id)
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: madre!.id, patientId: mateo.id }, { secretsKey: KEY }))
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, hers.token, mateoConsent))).toMatchObject({
+    signable: false, why: "sin-documento", speaksTo: "representante", patientFirstName: "Mateo", minor: true,
+  })
+  await expect(
+    f.run((tx) => signPersonalLinkConsent(tx, ORG, hers.token, mateoConsent, { docNumber: "41111111", comprehensionConfirmed: true, signatureData: FINGER })),
+  ).rejects.toMatchObject({ code: "SIGNER_NOT_AUTHORIZED" })
+  // Con su documento en la ficha, la madre sí lo firma desde su teléfono.
+  await ownerDb.update(contact).set({ docType: "DNI", docNumber: "41111111" }).where(eq(contact.id, madre!.id))
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, hers.token, mateoConsent))).toMatchObject({ signable: true, why: null })
+  await f.run((tx) => signPersonalLinkConsent(tx, ORG, hers.token, mateoConsent, { docNumber: "41111111", comprehensionConfirmed: true, signatureData: FINGER }))
+  const [signed] = await ownerDb.select({ signerKind: consentDocument.signerKind }).from(consentDocument).where(eq(consentDocument.id, mateoConsent))
+  expect(signed?.signerKind).toBe("representante")
+})
 
 async function agentTexts(conversationId: string) {
   const rows = await ownerDb

@@ -20,14 +20,15 @@ import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
 import {
+  appointmentPlanItem,
   patient,
   patientDataConsent,
   patientResponsibility,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
-import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import { getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
   NOTICE_PURPOSE,
@@ -69,6 +70,8 @@ import {
 import {
   CONSENT_SIGNATURE_WORDS,
   consentDiagnosisTitles,
+  type RemoteSignBlock,
+  remoteSignBlock,
   type SignatureEvidence,
   signConsentByLink,
 } from "./clinical-forms.js"
@@ -110,9 +113,22 @@ import { createTask } from "./tasks.js"
  * aparte. Nunca se muestra lo guardado: de sus datos solo qué falta.
  */
 
+/** La cita para la que es algo: día y hora en la zona de su sede. */
+export interface PersonalLinkWhen {
+  startsAt: string
+  timeZone: string
+}
+
 export interface PersonalLinkConsent {
   id: string
   title: string
+  /** Lo que se consiente, como en el papel: «Exodoncia de la pieza 38» (U6). Solo en la página, nunca en un mensaje. */
+  procedureRef: string | null
+  /** La cita para la que es: la que lleva su tratamiento o, sin ella, la próxima del paciente. */
+  appointment: PersonalLinkWhen | null
+  /** Se puede firmar desde el teléfono; si no, se lee y se firma en la cita (`why`). */
+  signable: boolean
+  why: RemoteSignBlock | null
 }
 
 /**
@@ -309,6 +325,40 @@ async function budgetsOf(
   return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
+/** La próxima cita en pie que lleva ese tratamiento, en la zona de su sede. */
+async function appointmentOfPlanItem(
+  tx: Db,
+  orgId: string,
+  planItemId: string,
+): Promise<PersonalLinkWhen | null> {
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
+    .from(appointmentPlanItem)
+    .innerJoin(
+      appointment,
+      and(
+        eq(appointment.organizationId, appointmentPlanItem.organizationId),
+        eq(appointment.id, appointmentPlanItem.appointmentId),
+      ),
+    )
+    .innerJoin(branch, eq(branch.id, appointment.branchId))
+    .where(
+      and(
+        eq(appointmentPlanItem.organizationId, orgId),
+        eq(appointmentPlanItem.planItemId, planItemId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt))
+    .limit(1)
+  if (!row) return null
+  return {
+    startsAt: row.startsAt.toISOString(),
+    timeZone: row.timeZone ?? (await findOrgLocale(tx, orgId)).timezone,
+  }
+}
+
 async function consentsOf(
   tx: Db,
   orgId: string,
@@ -316,7 +366,12 @@ async function consentsOf(
 ): Promise<PersonalLinkConsent[]> {
   if (!link.patientId || !link.decides || link.expired) return []
   const rows = await tx
-    .select({ id: consentDocument.id, title: consentDocument.titleSnapshot })
+    .select({
+      id: consentDocument.id,
+      title: consentDocument.titleSnapshot,
+      procedureRef: consentDocument.procedureRef,
+      planItemId: consentDocument.planItemId,
+    })
     .from(consentDocument)
     .where(
       and(
@@ -328,7 +383,26 @@ async function consentsOf(
       ),
     )
     .orderBy(asc(consentDocument.createdAt))
-  return rows
+  if (rows.length === 0) return []
+  // Quién firma y qué le falta no cambia de un consentimiento a otro.
+  const why = await remoteSignBlock(tx, orgId, link.patientId, link.row.contactId)
+  const next = link.appointment
+    ? await appointmentView(tx, orgId, link.appointment.id).then((view) =>
+        view && !view.cancelled ? { startsAt: view.startsAt, timeZone: view.timeZone } : null,
+      )
+    : null
+  const out: PersonalLinkConsent[] = []
+  for (const row of rows) {
+    out.push({
+      id: row.id,
+      title: row.title,
+      procedureRef: row.procedureRef,
+      appointment: (row.planItemId ? await appointmentOfPlanItem(tx, orgId, row.planItemId) : null) ?? next,
+      signable: why === null,
+      why,
+    })
+  }
+  return out
 }
 
 /**
@@ -1214,6 +1288,19 @@ export interface PersonalLinkConsentView {
   minor: boolean
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
+  /**
+   * Se firma desde el teléfono. Si no (`why`), la hoja se lee entera y el aviso va arriba:
+   * «Este lo firmas en tu cita» o, a quien decide por el paciente, «Este lo firmas tú en la
+   * cita de Mateo»; el servidor tampoco acepta la firma.
+   */
+  signable: boolean
+  why: RemoteSignBlock | null
+  /** A quién le habla la página: al paciente o a quien decide por él (`patientFirstName`). */
+  speaksTo: "paciente" | "representante"
+  /** Primer nombre del paciente: «Consentimiento de Mateo», «la cita de Mateo». */
+  patientFirstName: string
+  /** La cita para la que es (U6). */
+  appointment: PersonalLinkWhen | null
 }
 
 async function requireLinkConsent(
@@ -1223,14 +1310,15 @@ async function requireLinkConsent(
   consentId: string,
 ) {
   const consents = await consentsOf(tx, orgId, link)
-  if (!consents.some((item) => item.id === consentId)) throw linkExpired()
+  const listed = consents.find((item) => item.id === consentId)
+  if (!listed) throw linkExpired()
   const [doc] = await tx
     .select()
     .from(consentDocument)
     .where(and(eq(consentDocument.organizationId, orgId), eq(consentDocument.id, consentId)))
     .limit(1)
   if (!doc) throw notFound("Consentimiento")
-  return doc
+  return { doc, listed }
 }
 
 /** Lo que lee antes de firmar en su enlace. */
@@ -1242,7 +1330,7 @@ export async function getPersonalLinkConsent(
 ): Promise<PersonalLinkConsentView> {
   const link = await requireLiveLink(tx, orgId, token)
   if (!link.patientId) throw linkExpired()
-  const doc = await requireLinkConsent(tx, orgId, link, consentId)
+  const { doc, listed } = await requireLinkConsent(tx, orgId, link, consentId)
   const [signer] = await tx
     .select({ name: contact.displayName, docType: contact.docType })
     .from(contact)
@@ -1250,7 +1338,7 @@ export async function getPersonalLinkConsent(
     .limit(1)
   const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
   const [person] = await tx
-    .select({ name: contact.displayName, patientNumber: patient.patientNumber })
+    .select({ name: contact.displayName, givenNames: contact.givenNames, patientNumber: patient.patientNumber })
     .from(patient)
     .innerJoin(contact, joinPatientPerson())
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, doc.patientId)))
@@ -1281,6 +1369,11 @@ export async function getPersonalLinkConsent(
       // Solo el tipo («DNI», «Pasaporte»): el número lo escribe la persona.
       documentLabel: signer?.docType ? documentText(signer.docType, "").trim() : null,
     },
+    signable: listed.signable,
+    why: listed.why,
+    speaksTo: self ? "paciente" : "representante",
+    patientFirstName: (person?.givenNames ?? person?.name ?? "").trim().split(/\s+/)[0] ?? "",
+    appointment: listed.appointment,
   }
 }
 
