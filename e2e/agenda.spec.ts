@@ -690,8 +690,10 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
   // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
   await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()
-  // El aviso previo que pide WhatsApp para los mensajes de su cita (ADR 0040): se le dice y queda guardado.
-  await expect(page.getByText("Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»")).toBeVisible()
+  // El aviso previo que pide WhatsApp para los mensajes de su cita (ADR 0040) solo se dice si de verdad saldrán
+  // (B2): en una clínica nueva Sofi y Argos están apagados, así que no se le promete ni se anota que se le dijo.
+  await expect(page.getByText("Esta clínica no envía hoy los recordatorios por WhatsApp: no se lo prometas.")).toBeVisible()
+  await expect(page.getByText(/^Díselo: «Te escribiremos por WhatsApp/)).toHaveCount(0)
   // Lo único que se le pregunta: novedades y promociones, sin nada marcado y con «Sí» primero.
   const promotions = page.getByRole("group", { name: /^¿Acepta recibir novedades y promociones( de .+)? por WhatsApp\?$/ })
   await expect(promotions).toBeVisible()
@@ -729,8 +731,8 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
     page, "GET", `/api/agent/admin/people/${rosaPerson.personId}/permissions`, owner.org.slug,
   )
   expect(said.find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "telefono" })
-  // Se le dijo que le escribirían por WhatsApp sobre su cita: queda guardado, por teléfono.
-  expect(said.find((row) => row.purpose === "recordatorio")).toMatchObject({ granted: true, source: "telefono" })
+  // No se le dijo que le escribirían por WhatsApp sobre su cita: no queda anotado como dicho por teléfono.
+  expect(said.find((row) => row.purpose === "recordatorio")).toMatchObject({ granted: null, source: null })
   const rosaFicha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${people[0]!.id}`, owner.org.slug)
   expect(rosaFicha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
 

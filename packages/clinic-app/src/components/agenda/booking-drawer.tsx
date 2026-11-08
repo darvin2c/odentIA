@@ -253,7 +253,8 @@ export function BookingDrawer({
         ? "Su número de WhatsApp ya es de otra persona de la clínica: no se movió. Revísalo en su página antes de escribirle."
         : null
     // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono: los mensajes
-    // de su cita (se le dijo que le escribirán por WhatsApp) y su respuesta a novedades y promociones.
+    // de su cita solo si se le dijo que le escribirán por WhatsApp (B2, como `saveLinkConsents` en su
+    // enlace) y su respuesta a novedades y promociones.
     await (async () => {
       const personId =
         seed.person?.contactId ??
@@ -263,7 +264,7 @@ export function BookingDrawer({
           method: "POST",
           body: JSON.stringify({ tipo, recibir, source: "telefono" }),
         })
-      await permission("recordatorio", true)
+      if (remindersByWhatsApp) await permission("recordatorio", true)
       if (value.generalConsent !== null) await permission("novedades", value.generalConsent)
     })().catch(() => {
       consentNote.current = "No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes."
