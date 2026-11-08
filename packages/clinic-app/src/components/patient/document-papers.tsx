@@ -104,7 +104,7 @@ function sentDay(iso: string): string {
 /**
  * «Ya se le envió el 6 nov por WhatsApp: avísale que no la use.» Una receta
  * anulada que ya salió sigue limpia en su chat: el sello solo cubre lo que se
- * descarga después (ADR 0152). No frena nada: se dice donde se decide.
+ * descarga después (ADR 0154). No frena nada: se dice donde se decide.
  */
 function useSentWarning(patientId: string, prescriptionId: string, enabled: boolean): string | null {
   const sent = useQuery({

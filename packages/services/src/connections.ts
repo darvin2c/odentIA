@@ -462,7 +462,7 @@ export interface ConnectionDeps {
   webhookBaseUrl?: string
   /**
    * El id de la app de Meta de odentIA: sube el PDF de muestra del mensaje con
-   * documento en las conexiones de «Conectar con Facebook» (ADR 0152).
+   * documento en las conexiones de «Conectar con Facebook» (ADR 0154).
    */
   metaAppId?: string
 }

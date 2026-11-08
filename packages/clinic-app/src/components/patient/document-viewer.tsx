@@ -579,7 +579,7 @@ function DocumentViewer({
       setActionPending(false)
     }
   }
-  // «No mostrar en su portal» (ADR 0152): reversible y sin confirmar; vale para todo acceso.
+  // «No mostrar en su portal» (ADR 0154): reversible y sin confirmar; vale para todo acceso.
   const setPortalHidden = (hidden: boolean) =>
     runAction(
       () =>

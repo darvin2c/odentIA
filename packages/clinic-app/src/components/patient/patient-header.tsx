@@ -176,7 +176,7 @@ export function PersonHeader({
   const canReadChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
   const canRegisterResponsible = usePermission("patients.write")
-  // El portal lo da quien ve la historia y lo envía también recepción (ADR 0152).
+  // El portal lo da quien ve la historia y lo envía también recepción (ADR 0154).
   const canPortal = usePermission("clinical.read") || canRegisterResponsible
   const openWide = useOpenWide()
   const openPanel = useOpenRecordPanel()
@@ -373,7 +373,7 @@ export function PersonHeader({
                     <DropdownMenuItem
                       onClick={() => {
                         setMenuOpen(false)
-                        // La misma sección de Datos, con su estado primero (ADR 0152).
+                        // La misma sección de Datos, con su estado primero (ADR 0154).
                         openWide({ id: "portal" })
                       }}
                     >

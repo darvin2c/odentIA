@@ -14,7 +14,7 @@ export interface CrmDeps {
   webhookBaseUrl: string
   /**
    * El id de la app de Meta de odentIA, si «Conectar con Facebook» está
-   * configurado: sube el PDF de muestra del mensaje con documento (ADR 0152).
+   * configurado: sube el PDF de muestra del mensaje con documento (ADR 0154).
    */
   metaAppId?: string
 }

@@ -107,7 +107,7 @@ function fakeMeta(override?: (call: Call) => { status?: number; json: unknown } 
     if (call.url.includes("fields=quality_rating")) {
       return { json: { id: "PNID", quality_rating: "GREEN", whatsapp_business_manager_messaging_limit: "TIER_2K" } }
     }
-    // La muestra del mensaje con documento (ADR 0152): la app de la clave y la carga reanudable.
+    // La muestra del mensaje con documento (ADR 0154): la app de la clave y la carga reanudable.
     if (call.url.includes("/app?fields=id")) return { json: { id: "APP-PROPIA" } }
     // La revisión de la clave de la app propia queda sin comprobar, como sin esa respuesta.
     if (call.url.includes("/debug_token")) return { json: { data: { is_valid: false } } }

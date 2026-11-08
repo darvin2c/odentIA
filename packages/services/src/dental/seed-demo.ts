@@ -3016,7 +3016,7 @@ await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
   reason: "Se reprogramará tras la primera sesión de endodoncia.",
 })
 
-// Su portal (ADR 0152): Rosa ve sus radiografías informadas, sus recetas (la
+// Su portal (ADR 0154): Rosa ve sus radiografías informadas, sus recetas (la
 // anulada, marcada) y sus papeles; la foto intraoral se ocultó con «No mostrar
 // en su portal» y la periapical sin informe todavía no se ve.
 {

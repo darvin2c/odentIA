@@ -10,7 +10,7 @@
  *   de los dos, solo se imprime y se dice. Cada envío entrega lo que dice: el
  *   PDF. Pasadas las 24 horas de WhatsApp sale con «Documento listo», el
  *   mensaje aprobado con el PDF en su encabezado; si aún no está aprobado, el
- *   cajón lo dice y queda el correo o imprimir (ADR 0152).
+ *   cajón lo dice y queda el correo o imprimir (ADR 0154).
  * - El nombre del archivo es neutro («Receta-12.pdf»): se ve en la
  *   notificación del teléfono y no debe decir nada clínico.
  * - El envío es el mismo de los documentos de cobro (`deliverDocumentPdf`): el
@@ -498,7 +498,7 @@ export async function healthDocumentPatientOfMessage(
 /**
  * La última vez que este papel salió hacia la persona: cuándo, por dónde y a
  * quién. Sirve para avisar, al anular una receta ya enviada, que el PDF que
- * tiene en su chat ya no vale (ADR 0152). Nulo si nunca se envió.
+ * tiene en su chat ya no vale (ADR 0154). Nulo si nunca se envió.
  */
 export async function lastHealthDocumentSend(
   tx: Db,

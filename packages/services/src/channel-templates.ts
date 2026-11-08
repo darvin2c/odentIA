@@ -162,7 +162,7 @@ export const UNSUPPORTED_WORDS: Record<string, string> = {
  * (ADR 0040): lo que WhatsApp cuenta como promoción, si se pidió como otra
  * cosa, solo sale a quien aceptó novedades (`contactId`, la persona del hilo).
  * Una con documento en el encabezado solo sale con el documento (`document`,
- * ADR 0152); las de terceros con otro encabezado, nunca.
+ * ADR 0154); las de terceros con otro encabezado, nunca.
  */
 export async function assertTemplateSendable(
   tx: Db,

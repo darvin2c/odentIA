@@ -463,7 +463,7 @@ export const BUDGET_READY_SUBJECT = "Tu presupuesto está listo"
  * por completar, un consentimiento por firmar) y lleva solo el botón que lo
  * abre. Es un aviso, como el de su cita (ADR 0040): no pide permiso y solo
  * deja de salir con «No quiero ningún mensaje». Los papeles ya no salen por
- * aquí: van con «Documento listo» (ADR 0152).
+ * aquí: van con «Documento listo» (ADR 0154).
  */
 export const PERSONAL_LINK_MESSAGE_KEY = "su_enlace"
 export const PERSONAL_LINK_MESSAGE: MessageSpec = {
@@ -496,7 +496,7 @@ export const LINK_RECEIVED_MESSAGE: MessageSpec = {
 }
 
 /**
- * «Documento listo» (ADR 0152): el papel que envía el equipo (receta, orden,
+ * «Documento listo» (ADR 0154): el papel que envía el equipo (receta, orden,
  * descanso, hoja de atención, consentimiento firmado o comprobante) a quien no
  * escribió en las últimas 24 horas, con el PDF en el encabezado. Dentro de las
  * 24 horas o por correo sale el PDF con su texto, sin plantilla. El texto no

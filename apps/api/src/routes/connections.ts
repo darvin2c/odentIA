@@ -69,7 +69,7 @@ export function createConnectionsRoute(deps: CrmDeps) {
     webhookBaseUrl: deps.webhookBaseUrl,
     ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
   }
-  // La muestra del mensaje con documento se sube con la misma app en todas las rutas (ADR 0152).
+  // La muestra del mensaje con documento se sube con la misma app en todas las rutas (ADR 0154).
   const writeDeps = {
     fetch,
     validateExternal: deps.validateExternal,

@@ -187,7 +187,7 @@ export interface IssuePortalLinkInput {
   contactId: string
   conversationId: string
   /**
-   * Ya no se elige (ADR 0152): el portal muestra todo lo suyo con el límite de
+   * Ya no se elige (ADR 0154): el portal muestra todo lo suyo con el límite de
    * la clínica. Se acepta y se ignora, para los clientes de antes.
    */
   scope?: {
@@ -235,7 +235,7 @@ export async function requireActiveGrant(
 
 /**
  * Lo que ve un acceso al portal: todo lo suyo, con el límite que fija la
- * clínica en Configuración (ADR 0152). Ya no lo elige quien da el acceso, ni
+ * clínica en Configuración (ADR 0154). Ya no lo elige quien da el acceso, ni
  * lo recortan sus permisos: el paciente ve lo suyo porque es suyo, y lo que
  * protege es la identidad comprobada en persona y la regla de lo terminado.
  */
@@ -345,7 +345,7 @@ export async function issuePortalLink(
     linkUrl: (rawLinkToken: string) => string
     /**
      * El código va a la persona en otro mensaje de su chat (lo envió recepción,
-     * que no lo ve, ADR 0152). Sin esto, el código se lo dice en persona quien da el acceso.
+     * que no lo ve, ADR 0154). Sin esto, el código se lo dice en persona quien da el acceso.
      */
     pinInChat?: boolean
   },
@@ -501,7 +501,7 @@ export async function issuePortalLink(
 export interface IssuePortalActivationQrInput {
   patientId: string
   contactId: string
-  /** Ya no se elige (ADR 0152): se acepta y se ignora. */
+  /** Ya no se elige (ADR 0154): se acepta y se ignora. */
   scope?: IssuePortalLinkInput["scope"]
   idempotencyKey?: string
 }
@@ -845,7 +845,7 @@ export interface PortalContext {
  * Valida el token de sesión en cada lectura: portal habilitado, revocación,
  * expiración, fichas activas, vínculo + grant vigente, sesión atada al grant
  * vigente (nunca a uno anterior reemitido), passkey no revocada y alcance
- * efectivo: el que deja ver la clínica hoy (ADR 0152).
+ * efectivo: el que deja ver la clínica hoy (ADR 0154).
  */
 export async function requirePortalSession(
   tx: Db,
@@ -891,7 +891,7 @@ export async function requirePortalSession(
       throw conflict("PORTAL_REVOKED", "Esta sesión fue revocada")
     }
   }
-  // Todo lo suyo, con el límite de la clínica (ADR 0152): ni el enlace ni el
+  // Todo lo suyo, con el límite de la clínica (ADR 0154): ni el enlace ni el
   // acceso guardan ya una elección propia que lo recorte.
   const effective = portalScopeOf(policy)
   let effectiveRow = session

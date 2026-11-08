@@ -15,7 +15,7 @@ export interface AutomationWorkerDeps {
    * demostración las deja «en revisión» sin llamar a nadie.
    */
   senderMode: "mock" | "live"
-  /** El id de la app de Meta de odentIA: sube el PDF de muestra del mensaje con documento (ADR 0152). */
+  /** El id de la app de Meta de odentIA: sube el PDF de muestra del mensaje con documento (ADR 0154). */
   metaAppId?: string
   /** Lee lo último que escribió la persona antes de escribirle por un seguimiento. */
   alreadyTold?: TickDeps["alreadyTold"]

@@ -291,7 +291,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await expect(byAgent.getByRole("listitem")).toHaveCount(14)
   // «Retomar una oportunidad» viene escrito como los demás del agente.
   await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("En revisión")
-  // …y «Documento listo», que lleva el PDF de cada envío (ADR 0152).
+  // …y «Documento listo», que lleva el PDF de cada envío (ADR 0154).
   await expect(byTeam.getByRole("listitem")).toHaveCount(6)
   const linkReceived = byTeam.getByRole("listitem").filter({ hasText: "Recibido desde su enlace" })
   await expect(linkReceived).toContainText("En revisión")

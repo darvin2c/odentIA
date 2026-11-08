@@ -208,7 +208,7 @@ export interface DocumentChannelOption {
   reason: string | null
   /** Qué le llega si sale por aquí («Le llega el PDF en su chat»). */
   note?: string | null
-  /** Pasaron 24 horas: sale con el mensaje aprobado para documentos (ADR 0152). */
+  /** Pasaron 24 horas: sale con el mensaje aprobado para documentos (ADR 0154). */
   viaTemplate?: boolean
   hasThread: boolean
   isPreferred: boolean
@@ -224,7 +224,7 @@ const ARRIVES = {
 
 /**
  * Pasaron 24 horas de WhatsApp: el documento sale con «Documento listo», el
- * mensaje aprobado con el PDF en su encabezado (ADR 0152). Lo dice la misma
+ * mensaje aprobado con el PDF en su encabezado (ADR 0154). Lo dice la misma
  * regla de toda plantilla (`assertTemplateSendable`); si no sirve, por qué, y
  * qué se puede hacer mientras tanto.
  */
@@ -484,7 +484,7 @@ export async function getDocumentSendOptions(
     tx,
     orgId,
     recipient,
-    // De los documentos de cobro, solo el comprobante sale con «Documento listo» (ADR 0152).
+    // De los documentos de cobro, solo el comprobante sale con «Documento listo» (ADR 0154).
     { documentTemplate: documentType === "ticket" },
   )
   const proposed = proposeChannel(channels, {
@@ -521,7 +521,7 @@ export async function documentChannelsFor(
   recipient: Pick<DocumentRecipient, "contactId" | "email">,
   /**
    * `documentTemplate`: pasadas las 24 horas, WhatsApp sirve con «Documento
-   * listo» (ADR 0152). Solo los papeles decididos lo piden: receta, orden,
+   * listo» (ADR 0154). Solo los papeles decididos lo piden: receta, orden,
    * descanso, hoja de atención, consentimiento firmado y comprobante.
    */
   sendOptions: { documentTemplate?: boolean } = {},
@@ -1124,7 +1124,7 @@ export async function deliverDocumentPdf(
     exactAddress?: boolean
     /** Quién lo deja en el hilo: una persona del equipo o el agente. */
     senderKind?: "user" | "agent"
-    /** Pasadas las 24 horas, con «Documento listo» (solo los papeles decididos, ADR 0152). */
+    /** Pasadas las 24 horas, con «Documento listo» (solo los papeles decididos, ADR 0154). */
     allowTemplate?: boolean
   },
   deps: SendDeps,
@@ -1166,7 +1166,7 @@ export async function deliverDocumentPdf(
       recipientContactId: DOCUMENT_OPTED_OUT,
     })
   }
-  // Pasadas las 24 horas de WhatsApp: el PDF va en el encabezado de «Documento listo» (ADR 0152).
+  // Pasadas las 24 horas de WhatsApp: el PDF va en el encabezado de «Documento listo» (ADR 0154).
   // Se decide antes de subir el PDF: si no puede salir, no queda un archivo suelto en el almacenamiento.
   const outside = input.allowTemplate ? await whatsappOutsideWindow(tx, orgId, conversationId) : null
   const template = outside
@@ -1476,7 +1476,7 @@ const RECEIPT_WORDS: Record<
 
 /**
  * Al cobrar, el comprobante (el ticket) sale solo por correo a quien pagó o a
- * la persona (decisión 20 v2) y queda en su portal (ADR 0152). Por WhatsApp no se
+ * la persona (decisión 20 v2) y queda en su portal (ADR 0154). Por WhatsApp no se
  * envía: solo si la persona lo pide en el chat, y entonces lo manda el agente
  * en esa conversación (`sendReceiptInConversation`). Sin correo no sale nada y
  * Caja lo dice. Es un aviso de lo que pasó: solo lo frena «No quiero ningún mensaje».
