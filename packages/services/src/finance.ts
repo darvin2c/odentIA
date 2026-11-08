@@ -2752,6 +2752,22 @@ export interface CommissionAdjustment {
   commissionCents: number
   /** Cuándo se pagó la comisión que ahora se descuenta. */
   paidAt: Date | null
+  /** Cuándo fue el cobro anulado: su mes es el del pago que lo pagó, donde se explica lo que cierre la deuda. */
+  occurredAt: Date
+}
+
+/**
+ * Lo que cerró, en un mes, la deuda de sus cobros anulados después de pagados: lo devolvió o la clínica lo
+ * dio por saldado (ADR 0157). Explica por qué «Ya pagado» es mayor que la comisión del mes. `cents` es la
+ * parte de los cobros de ese mes: una deuda de varios meses se explica en cada uno con la suya.
+ */
+export interface CommissionDebtClosure {
+  settlementId: string
+  kind: "devuelto" | "saldado"
+  cents: number
+  settledAt: Date | null
+  /** De lo saldado, el motivo. */
+  notes: string | null
 }
 
 export type CommissionStatus = "por_pagar" | "pagado" | "sin_cobros" | "por_descontar"
@@ -2763,6 +2779,8 @@ interface FrozenLine {
   currency: string
   /** Un pago, o lo que cerró una deuda: devuelto o saldado (ADR 0157). */
   kind: string
+  /** La nota del registro: de lo saldado, su motivo. */
+  notes: string | null
   promotionName: string | null
 }
 
@@ -2774,6 +2792,7 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
       settledAt: commissionSettlement.settledAt,
       currency: commissionSettlement.currency,
       kind: commissionSettlement.kind,
+      notes: commissionSettlement.notes,
       promotionName: patientCharge.promotionName,
     })
     .from(commissionSettlementLine)
@@ -3011,10 +3030,33 @@ async function monthView(
         description: f.line.description,
         commissionCents: f.line.commissionCents - (discounted.get(lineKey(appId, f.line.slice)) ?? 0),
         paidAt: f.settledAt,
+        occurredAt: f.line.occurredAt,
       }
     })
     .filter((adjustment) => adjustment.commissionCents > 0)
     .sort((a, b) => (a.paidAt?.getTime() ?? 0) - (b.paidAt?.getTime() ?? 0) || (a.applicationId < b.applicationId ? -1 : 1))
+  // Lo devuelto o saldado de los cobros anulados de este mes: por sus líneas, no por el mes en que se
+  // archivó, así cada mes explica su parte aunque la deuda juntara cobros de varios meses.
+  const monthCobroKeys = new Set(
+    frozenCobros.filter((f) => inMonth(f.line.occurredAt)).map((f) => lineKey(f.line.applicationId as string, f.line.slice)),
+  )
+  const closures = new Map<string, CommissionDebtClosure>()
+  for (const f of frozen) {
+    if (f.line.kind !== "ajuste" || !f.line.applicationId || (f.kind !== "devuelto" && f.kind !== "saldado")) continue
+    if (!monthCobroKeys.has(lineKey(f.line.applicationId, f.line.slice))) continue
+    const closure = closures.get(f.line.settlementId) ?? {
+      settlementId: f.line.settlementId,
+      kind: f.kind,
+      cents: 0,
+      settledAt: f.settledAt,
+      notes: f.notes,
+    }
+    closure.cents += f.line.commissionCents
+    closures.set(f.line.settlementId, closure)
+  }
+  const debtClosures = [...closures.values()].sort(
+    (a, b) => (a.settledAt?.getTime() ?? 0) - (b.settledAt?.getTime() ?? 0) || (a.settlementId < b.settlementId ? -1 : 1),
+  )
   const counted = lines.filter((line) => !line.voidedAfterPaid)
   const fresh = lines.filter((line) => !line.settled)
   const paid = lines.filter((line) => line.settled)
@@ -3111,6 +3153,8 @@ async function monthView(
     discountFrom,
     /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
     discountedCents,
+    /** Lo devuelto o saldado de los cobros anulados de este mes: por qué «Ya pagado» supera la comisión. */
+    debtClosures,
     lastPaidAt,
     status,
     /** Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no). */
@@ -3574,7 +3618,10 @@ export const COMMISSION_FORGIVE_REASON_MAX = 200
 
 export interface SettleCommissionDebtInput {
   professionalUserId: string
-  /** El mes desde donde se registra: queda entre sus pagos. La deuda es del profesional, de cualquier mes. */
+  /**
+   * El mes desde donde se mira: solo sirve para leer la deuda, que es del profesional y de cualquier mes. El
+   * registro se archiva en el mes de los cobros anulados que la originaron, mire desde donde se mire.
+   */
   year: number
   month: number
   /** La moneda de la deuda (cada una aparte); sin ella, la del negocio. */
@@ -3634,6 +3681,10 @@ export async function settleCommissionDebt(
       "Lo que debe cambió mientras lo revisabas: vuelve a mirarlo antes de registrarlo",
     )
   const at = new Date()
+  // Se archiva en el mes de los cobros anulados que originaron la deuda (el del pago que los pagó), no en
+  // el que se tenía abierto: ahí se explica por qué «Ya pagado» supera la comisión. Si la deuda junta
+  // cobros de varios meses, en el del más reciente; cada mes igual explica su parte (`debtClosures`).
+  const period = debtPeriod(view.adjustments, view.timezone)
   // En efectivo, entra a la caja de la sede en su moneda: la abre si hace falta, como un cobro.
   let movementId: string | null = null
   if (inCash) {
@@ -3671,8 +3722,8 @@ export async function settleCommissionDebt(
     .values({
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
-      periodYear: input.year,
-      periodMonth: input.month,
+      periodYear: period.year,
+      periodMonth: period.month,
       base: "cobrado",
       currency: view.currency,
       rateBps: null,
@@ -3728,11 +3779,21 @@ export async function settleCommissionDebt(
         input.kind === "devuelto"
           ? `${amount} de comisiones ya pagadas de cobros que después se anularon. Ya no debes nada en esa moneda.`
           : `${amount} de comisiones ya pagadas de cobros que después se anularon. Ya no debes nada en esa moneda. Motivo: ${notes}`.slice(0, 500),
-      href: `/commissions?year=${input.year}&month=${input.month}`,
+      href: `/commissions?year=${period.year}&month=${period.month}`,
       permission: "commissions.read",
       actorUserId,
     })
   return { settlement, movementId }
+}
+
+/** El mes de los cobros anulados de una deuda, en la zona de la clínica: el del más reciente. */
+function debtPeriod(adjustments: CommissionAdjustment[], timezone: string): { year: number; month: number } {
+  const latest = adjustments.reduce<Date | null>(
+    (last, adjustment) => (!last || adjustment.occurredAt > last ? adjustment.occurredAt : last),
+    null,
+  )
+  const key = dayKeyIn(latest ?? new Date(), timezone)
+  return { year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) }
 }
 
 /**

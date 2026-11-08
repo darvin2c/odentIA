@@ -148,9 +148,21 @@ it("«lo devolvió» en efectivo entra a la caja sin su nombre y deja la deuda e
   expect(professionals.rows.find((row) => row.userId === f.actor)?.discountCents ?? 0).toBe(0)
   const owedMonths = await f.run((tx) => commissionsOwedByMonth(tx, "org_a"))
   expect(owedMonths.months.find((m) => m.year === before.year && m.month === before.month)?.cents).toBeGreaterThanOrEqual(15000)
-  // Queda entre los pagos del mes, con quién lo registró, y al profesional se le avisa.
-  const payments = await f.run((tx) => listCommissionSettlements(tx, "org_a", { professionalUserId: f.actor, ...now }))
-  expect(payments).toEqual([expect.objectContaining({ id: done.settlement.id, kind: "devuelto", settledByName: "Administración deuda" })])
+  // Se registró mirando este mes, pero queda en el mes de los cobros anulados, el del pago que los pagó: ahí
+  // se explica por qué «Ya pagado» (300) supera la comisión (150). No depende del mes que se tenía abierto.
+  expect(done.settlement).toMatchObject({ periodYear: before.year, periodMonth: before.month })
+  const payments = await f.run((tx) => listCommissionSettlements(tx, "org_a", { professionalUserId: f.actor, ...before }))
+  expect(payments.map((p) => p.kind).sort()).toEqual(["devuelto", "pago"])
+  expect(payments.find((p) => p.kind === "devuelto")).toMatchObject({ id: done.settlement.id, settledByName: "Administración deuda" })
+  expect(await f.run((tx) => listCommissionSettlements(tx, "org_a", { professionalUserId: f.actor, ...now }))).toEqual([])
+  expect(previous).toMatchObject({ paidCents: 30000, commissionCents: 15000 })
+  expect(previous.debtClosures).toEqual([
+    expect.objectContaining({ settlementId: done.settlement.id, kind: "devuelto", cents: 30000, settledAt: expect.any(Date) }),
+  ])
+  // Este mes no tiene esos cobros: no explica nada.
+  expect((await viewOf(now)).debtClosures).toEqual([])
+  // «Mis honorarios» de ese mes lo lista junto a sus pagos (la pantalla pide los registros del mes).
+  expect(mine.debtClosures).toEqual([expect.objectContaining({ kind: "devuelto", cents: 30000 })])
   const notice = await ownerDb.execute<{ title: string }>(
     sql`select title from workspace_notification where organization_id = 'org_a' and dedupe_key = ${`commission-debt:${done.settlement.id}`}`,
   )
@@ -185,6 +197,11 @@ it("devuelto por transferencia no toca la caja, y darlo por saldado pide su moti
   await expect(forgive("x".repeat(201))).rejects.toMatchObject({ fields: { notes: expect.stringContaining("200") } })
   const forgiven = await forgive("Ya no trabaja aquí")
   expect(forgiven.settlement).toMatchObject({ kind: "saldado", methodTypeCode: null, cashMovementId: null, notes: "Ya no trabaja aquí" })
+  // Desde el mes que sea, queda en el de los cobros anulados, con su motivo para explicarlo.
+  expect(forgiven.settlement).toMatchObject({ periodYear: before.year, periodMonth: before.month })
+  expect((await viewOf(before)).debtClosures).toEqual([
+    expect.objectContaining({ kind: "saldado", cents: 30000, notes: "Ya no trabaja aquí" }),
+  ])
   expect(forgiven.movementId).toBeNull()
   expect(await inDrawer()).toBe(drawer)
   expect(await viewOf(now)).toMatchObject({ adjustmentCents: 0, owedCents: 0 })
