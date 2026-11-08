@@ -86,17 +86,18 @@ async function owing() {
 it("la deuda de otro mes dice de qué pago se descuenta, y la fila del mes dice lo que se descuenta", async () => {
   const { f, now, before, viewOf } = await owing()
   // Este mes no tiene cobros: lo que debe espera… pero hay un mes con cobros por pagar, el anterior.
-  expect(await viewOf(now)).toMatchObject({ adjustmentCents: 30000, discountCents: 0, owedCents: 30000, discountFrom: before })
+  // Ese pago alcanza a descontar 150 de los 300: el resto espera a los siguientes.
+  expect(await viewOf(now)).toMatchObject({ adjustmentCents: 30000, discountCents: 0, owedCents: 30000, discountFrom: { ...before, cents: 15000 } })
   // El mes anterior descuenta lo que alcanza de su cobro por pagar y no tiene otro de donde descontar el resto.
   expect(await viewOf(before)).toMatchObject({ discountCents: 15000, pendingCents: 0, owedCents: 15000, discountFrom: null, status: "por_descontar" })
   // La fila de la lista lleva lo que se descuenta: sin esto, la diferencia parecía ya pagada. «Ya pagado»
   // es el pago del cobro que después se anuló.
   const row = (await f.run((tx) => listMonthCommissions(tx, "org_a", before))).find((item) => item.professionalUserId === f.actor)
-  expect(row).toMatchObject({ commissionCents: 15000, pendingCents: 0, paidCents: 30000, discountCents: 15000 })
+  expect(row).toMatchObject({ commissionCents: 15000, pendingCents: 0, paidCents: 30000, discountCents: 15000, owedCents: 15000, discountFrom: null })
   // Los cobros del mes: el anulado se cuenta aparte.
   const lines = (await viewOf(before)).lines
   expect(lines.filter((line) => line.voidedAfterPaid)).toEqual([
-    expect.objectContaining({ commissionCents: 30000, owedLeftCents: 30000, owedClosedBy: null }),
+    expect.objectContaining({ commissionCents: 30000, owedLeftCents: 30000, owedClosedBy: null, owedPartlyDiscounted: false }),
   ])
 })
 

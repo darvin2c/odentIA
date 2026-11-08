@@ -121,7 +121,8 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       left join org_profile op on op.organization_id = l.organization_id
-      where l.organization_id = ${orgId} and l.kind = 'ajuste' and l.voided_at is null ${branch}
+      -- Solo lo descontado en un pago: lo devuelto o saldado (ADR 0157) no baja lo que salió en pagos.
+      where l.organization_id = ${orgId} and l.kind = 'ajuste' and l.voided_at is null and s.kind = 'pago' ${branch}
     ), commission_line as materialized (
       select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
         f.commission::numeric as paid, 0::numeric as fresh, f.currency

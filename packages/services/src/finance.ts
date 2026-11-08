@@ -2737,6 +2737,8 @@ export interface CommissionLine {
    * un pago; `devuelto`, lo devolvió; `saldado`, la clínica lo dio por saldado. Nulo mientras deba.
    */
   owedClosedBy: "pago" | "devuelto" | "saldado" | null
+  /** Lo devuelto o saldado cerró solo lo que quedaba: antes, una parte se descontó de un pago. */
+  owedPartlyDiscounted: boolean
 }
 
 /** Comisión ya pagada por un cobro que después se anuló. */
@@ -2888,13 +2890,12 @@ async function monthView(
   // Lo ya descontado de cada cobro anulado después de pagado: un descuento puede repartirse en varios pagos,
   // y lo que queda puede cerrarse porque lo devolvió o porque la clínica lo dio por saldado (ADR 0157).
   const discounted = new Map<string, number>()
-  const closedBy = new Map<string, { kind: string; at: number }>()
+  const closedBy = new Map<string, Set<string>>()
   for (const f of frozen)
     if (f.line.kind === "ajuste" && f.line.applicationId) {
       const key = lineKey(f.line.applicationId, f.line.slice)
       discounted.set(key, (discounted.get(key) ?? 0) + f.line.commissionCents)
-      const at = f.settledAt?.getTime() ?? 0
-      if (!closedBy.has(key) || (closedBy.get(key)?.at ?? 0) <= at) closedBy.set(key, { kind: f.kind, at })
+      closedBy.set(key, (closedBy.get(key) ?? new Set<string>()).add(f.kind))
     }
   // Cobros pagados cuya aplicación ya no está en pie (cualquier mes y moneda).
   const paidIds = allFrozenCobros.map((f) => f.line.applicationId as string)
@@ -2936,7 +2937,9 @@ async function monthView(
     const voidedAfterPaid = !stillLive.has(appId)
     const key = lineKey(appId, f.line.slice)
     const owedLeftCents = voidedAfterPaid ? Math.max(0, f.line.commissionCents - (discounted.get(key) ?? 0)) : 0
-    const closer = closedBy.get(key)?.kind
+    // Cómo se cerró: lo devuelto o lo saldado manda; si además una parte se descontó de un pago, se dice.
+    const kinds = closedBy.get(key) ?? new Set<string>()
+    const closer = kinds.has("devuelto") ? "devuelto" : kinds.has("saldado") ? "saldado" : "pago"
     lines.push({
       applicationId: appId,
       chargeId: f.line.chargeId ?? "",
@@ -2957,12 +2960,8 @@ async function monthView(
       paidAt: f.settledAt,
       voidedAfterPaid,
       owedLeftCents,
-      owedClosedBy:
-        voidedAfterPaid && owedLeftCents === 0 && f.line.commissionCents > 0
-          ? closer === "devuelto" || closer === "saldado"
-            ? closer
-            : "pago"
-          : null,
+      owedClosedBy: voidedAfterPaid && owedLeftCents === 0 && f.line.commissionCents > 0 ? closer : null,
+      owedPartlyDiscounted: closer !== "pago" && kinds.has("pago"),
     })
     if (stillLive.has(appId)) baseValues.push({ num: BigInt(f.line.baseCents), den: 1n })
   }
@@ -2990,6 +2989,7 @@ async function monthView(
       voidedAfterPaid: false,
       owedLeftCents: 0,
       owedClosedBy: null,
+      owedPartlyDiscounted: false,
     })
   }
   lines.sort(
@@ -3031,7 +3031,7 @@ async function monthView(
         where a.organization_id = s.organization_id and a.settlement_id = s.id and a.kind = 'ajuste' and a.voided_at is null)), 0)::text as discounted
     from commission_settlement s
     where s.organization_id = ${orgId} and s.professional_user_id = ${query.professionalUserId}
-      and s.voided_at is null and s.currency = ${unit}
+      and s.voided_at is null and s.currency = ${unit} and s.kind = 'pago'
       and exists (select 1 from commission_settlement_line l where l.organization_id = s.organization_id and l.settlement_id = s.id
         and l.kind = 'cobro' and l.voided_at is null and l.occurred_at >= ${start.toISOString()}::timestamptz and l.occurred_at < ${end.toISOString()}::timestamptz)`)
   const paidCents = Number(settledMonth?.paid ?? 0)
@@ -3064,8 +3064,9 @@ async function monthView(
   const owedCents = adjustmentCents - discountCents
   // Lo que este mes no alcanza a descontar se descuenta del pago de otro mes con cobros por pagar en esta
   // moneda: se dice cuál (el más antiguo). Sin ninguno, espera cobros nuevos.
-  const discountFrom =
-    owedCents > 0 ? await otherMonthToPay(tx, orgId, query.professionalUserId, unit, timezone, { start, end }) : null
+  const toPay = owedCents > 0 ? await otherMonthToPay(tx, orgId, query.professionalUserId, unit, timezone, { start, end }) : null
+  // Lo que ese pago alcanza a descontar: si es menos de lo que debe, el resto espera a los siguientes.
+  const discountFrom = toPay ? { year: toPay.year, month: toPay.month, cents: Math.min(owedCents, toPay.freshCents) } : null
   return {
     professionalUserId: query.professionalUserId,
     professionalName: professionalNames.get(query.professionalUserId) ?? null,
@@ -3103,7 +3104,10 @@ async function monthView(
      * próximo pago en esta moneda.
      */
     owedCents,
-    /** Con algo que deber después de este mes: el mes más antiguo con cobros por pagar de donde se descuenta. */
+    /**
+     * Con algo que deber después de este mes: el mes más antiguo con cobros por pagar de donde se descuenta,
+     * y cuánto alcanza a descontar ese pago (`cents`, menos que `owedCents` si no alcanza para todo).
+     */
     discountFrom,
     /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
     discountedCents,
@@ -3127,14 +3131,16 @@ async function otherMonthToPay(
   unit: string,
   timezone: string,
   skip: { start: Date; end: Date },
-): Promise<{ year: number; month: number } | null> {
-  const [row] = await tx.execute<{ month: string }>(sql`
-    select to_char(l.at at time zone ${timezone}, 'YYYY-MM') as month
+): Promise<{ year: number; month: number; freshCents: number } | null> {
+  const [row] = await tx.execute<{ month: string; fresh: string }>(sql`
+    select to_char(l.at at time zone ${timezone}, 'YYYY-MM') as month, round(sum(l.own_commission))::text as fresh
     from ${commissionLiveIn(orgId, new Date(Date.UTC(2000, 0, 1)), new Date(), sql`and professional_user_id = ${professionalUserId} and currency = ${unit}`)} l
     where l.has_rule and l.own_commission > 0
       and not (l.at >= ${skip.start.toISOString()}::timestamptz and l.at < ${skip.end.toISOString()}::timestamptz)
-    order by l.at limit 1`)
-  return row ? { year: Number(row.month.slice(0, 4)), month: Number(row.month.slice(5, 7)) } : null
+    group by 1 order by 1 limit 1`)
+  return row
+    ? { year: Number(row.month.slice(0, 4)), month: Number(row.month.slice(5, 7)), freshCents: Number(row.fresh) }
+    : null
 }
 
 export type MonthCommissionsView = Awaited<ReturnType<typeof monthView>>
@@ -3201,6 +3207,8 @@ function commissionSummary(view: MonthCommissionsView) {
     /** Lo que el próximo pago de este mes descuenta de comisiones ya pagadas de cobros anulados. */
     discountCents: view.discountCents,
     owedCents: view.owedCents,
+    /** De qué pago se descuenta lo que debe después de este mes (el mismo dato del detalle). */
+    discountFrom: view.discountFrom,
     lastPaidAt: view.lastPaidAt,
     status: view.status,
   }
