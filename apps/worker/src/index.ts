@@ -199,6 +199,7 @@ const queues: QueueDef[] = [
         publicBaseUrl: env.WEB_URL,
         storage,
         senderMode: env.CHANNEL_SENDER_MODE,
+        ...(env.META_APP_ID.trim() ? { metaAppId: env.META_APP_ID.trim() } : {}),
         alreadyTold: createAlreadyTold(db, {
           secretsKey,
           platform: agentRuntime.platform,
