@@ -124,7 +124,8 @@ export function BudgetAnswerDrawer({
   const budget = query.data?.data ?? null
   const runWrite = async <T,>(operation: () => Promise<T>): Promise<T> => {
     const result = await operation()
-    await Promise.all([
+    // Se cierra sin esperar la lectura nueva: el cajón no alcanza a decir que ya respondió.
+    void Promise.all([
       ...PLAN_QUERY_KEYS.map((key) =>
         queryClient.invalidateQueries({ queryKey: [key, patientId] }),
       ),
@@ -209,6 +210,8 @@ export function AnswerInPersonButton({
   })
   if (!canDecide || !canSend) return null
   const budget = query.data?.data
+  // Entregar es de quien lo preparó (el servidor lo exige): el de un colega se anota después de entregado.
+  if (budget && budget.canChange === false) return null
   if (budget?.supersedesBudgetId)
     return (
       <p className="basis-full text-sm text-muted-foreground">

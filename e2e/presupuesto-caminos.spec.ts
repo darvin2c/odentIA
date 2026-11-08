@@ -88,7 +88,7 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
 
   // «¿Qué respondió?» de «Qué sigue» abre directo su cajón: acepta la limpieza y lo de la 46 lo piensa, sin elegir.
   await page.getByRole("button", { name: "¿Qué respondió?", exact: true }).first().click()
-  const drawer = surface(page, { name: /¿Qué acepta/ })
+  const drawer = surface(page, { name: /^¿Qué respondió / })
   await expect(drawer.getByText(/Va en (los dos|todos los) caminos/)).toBeVisible()
   // Lo común: la limpieza y la endodoncia de la 36 las acepta.
   for (const group of await drawer.getByRole("group", { name: /^Respuesta para / }).all())

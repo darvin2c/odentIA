@@ -328,12 +328,15 @@ function PathChoice({
   currency,
   control,
   disabled,
+  onPicked,
 }: {
   paths: BudgetPaths["paths"]
   money: Money
   currency: string
   control: FieldControl
   disabled: boolean
+  /** Al elegir un camino: lo común sin marcar se acepta con él (se puede cambiar). */
+  onPicked?: (value: string) => void
 }): React.JSX.Element {
   const field = useFieldContext<string>()
   const item = "flex w-full min-h-11 cursor-pointer items-start gap-3 rounded-xl border bg-card p-3 text-sm font-normal has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary-soft"
@@ -345,8 +348,10 @@ function PathChoice({
       value={field.state.value}
       disabled={disabled}
       onValueChange={(value) => {
-        field.handleChange(typeof value === "string" ? value : "")
+        const picked = typeof value === "string" ? value : ""
+        field.handleChange(picked)
         field.handleBlur()
+        onPicked?.(picked)
       }}
     >
       {paths.map(({ option, own }) => {
@@ -402,10 +407,20 @@ function AnsweredBy({
   formatDay: (iso: string) => string
 }): React.JSX.Element | null {
   const decides = budget.acceptedByName
-  if (budget.decisionSignedAt)
+  const signedText = budget.decisionSignedAt
+    ? `${decides ? `Firmó ${decides}` : "Firmó quien decide"} en la clínica, el ${formatDay(budget.decisionSignedAt)}`
+    : null
+  // La firma cubre su momento: si respondió algo después, eso se dice aparte.
+  const signedLast =
+    budget.decisionSignedAt != null &&
+    budget.decidedAt != null &&
+    new Date(budget.decisionSignedAt).getTime() === new Date(budget.decidedAt).getTime()
+  if (signedText && signedLast) return <p className="text-sm text-muted-foreground">{signedText}.</p>
+  if (signedText)
     return (
       <p className="text-sm text-muted-foreground">
-        {decides ? `Firmó ${decides}` : "Firmó quien decide"} en la clínica, el {formatDay(budget.decisionSignedAt)}.
+        {signedText}, lo que aceptó entonces. Lo de después no lleva su firma
+        {budget.decidedVia === "clinica" && budget.decidedByName ? `: lo anotó ${budget.decidedByName}` : ""}.
       </p>
     )
   if (budget.decidedVia === "clinica")
@@ -684,6 +699,8 @@ export function BudgetResponse({
   /** Responder lo pendiente de una vez: misma respuesta para todo lo que espera, sin elegir camino. */
   const answerAll = (answer: Answer): Promise<boolean> => {
     mode.current = answer
+    wantsSign.current = false
+    signedStrokes.current = null
     form.setFieldValue("optionId", "")
     form.setFieldValue(
       "decisions",
@@ -868,7 +885,10 @@ export function BudgetResponse({
     wantsSign.current = true
     signedStrokes.current = null
     mode.current = "panel"
-    void submitForm(form, { fieldMap })
+    // Si falta marcar algo, no se abre la tablet ni queda pedida la firma para otro envío.
+    void submitForm(form, { fieldMap }).then((ok) => {
+      if (!ok) wantsSign.current = false
+    })
   }
   const signingScreen =
     signing && decider ? (
@@ -922,7 +942,7 @@ export function BudgetResponse({
     <FormDrawer
       {...surface}
       open
-      title={patientShortName ? `¿Qué acepta ${patientShortName}?` : "¿Qué acepta la persona?"}
+      title={patientShortName ? `¿Qué respondió ${patientShortName}?` : "¿Qué respondió la persona?"}
       description={
         paths
           ? `${budgetNumberLabel(budget.budgetNumber)}. ${
@@ -942,22 +962,28 @@ export function BudgetResponse({
         signedStrokes.current = null
         surface.onSubmit(event)
       }}
+      // Mientras se sabe quién decide, no se guarda: sin esa lista la respuesta quedaría sin nadie.
+      isLoading={decidersLoading}
       onClose={() => {
         if (saving) return
+        wantsSign.current = false
         setDrawerOpen(false)
         if (direct) onClose?.()
       }}
     >
+      {decidersError ? (
+        <ErrorState
+          title="No se pudo cargar quién decide"
+          error={decidersError instanceof ApiError ? decidersError.shape : null}
+          onRetry={() => {
+            void patientQuery.refetch()
+            void responsibilitiesQuery.refetch()
+          }}
+        />
+      ) : null}
       {paths ? (
         <>
-          {paths.common.length > 0 ? (
-            <section aria-labelledby={`${uid}-common`} className="flex flex-col gap-2">
-              <h3 id={`${uid}-common`} className="text-sm font-semibold">
-                {commonTitle}
-              </h3>
-              <ul className="flex flex-col divide-y rounded-xl border">{paths.common.map((line) => lineRow(line))}</ul>
-            </section>
-          ) : null}
+          {/* Lo principal primero: qué camino; después lo que va en todos. */}
           {pathOpen ? (
             <form.AppField name="optionId">
               {(field) => (
@@ -969,11 +995,30 @@ export function BudgetResponse({
                       currency={budget.currency}
                       control={control}
                       disabled={saving}
+                      onPicked={(value) => {
+                        if (!paths.paths.some((path) => path.option.id === value)) return
+                        form.setFieldValue(
+                          "decisions",
+                          decisionValues.map((entry) =>
+                            entry.decision === "" && openCommon.some((line) => line.planItemId === entry.planItemId)
+                              ? { ...entry, decision: "aceptado" as const }
+                              : entry,
+                          ),
+                        )
+                      }}
                     />
                   )}
                 </field.Group>
               )}
             </form.AppField>
+          ) : null}
+          {paths.common.length > 0 ? (
+            <section aria-labelledby={`${uid}-common`} className="flex flex-col gap-2">
+              <h3 id={`${uid}-common`} className="text-sm font-semibold">
+                {commonTitle}
+              </h3>
+              <ul className="flex flex-col divide-y rounded-xl border">{paths.common.map((line) => lineRow(line))}</ul>
+            </section>
           ) : null}
           {picked && picked.own.length > 0 ? (
             <section aria-labelledby={`${uid}-path`} className="flex flex-col gap-2">
@@ -1071,9 +1116,8 @@ export function BudgetResponse({
             }`}
       </p>
       <p className="text-sm text-muted-foreground">
-        {draftInPerson ? "Al guardar queda entregado en consulta, sin enviarle nada. " : ""}
-        Lo aceptado no se cambia aquí: si hay un error, el {appWords().clinician.one} lo corrige con una revisión
-        del presupuesto.
+        {draftInPerson ? "Al guardar queda entregado, sin enviarle nada. " : ""}
+        Si algo quedó mal, se corrige creando una revisión del presupuesto.
       </p>
     </FormDrawer>
   ) : null

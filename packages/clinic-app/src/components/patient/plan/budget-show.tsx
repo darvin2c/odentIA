@@ -108,6 +108,8 @@ export function BudgetShowActions({
         >
           Mostrar a {firstName}
         </Button>
+        {/* Lo que sigue a mostrárselo: anotar lo que respondió, sin imprimir ni enviar. */}
+        <AnswerInPersonButton patientId={patientId} budgetId={budgetId} beforeOpen={beforeWrite} />
         <SubmitButton
           type="button"
           size="sm"

@@ -45,7 +45,6 @@ import { EncounterTreatments } from "./encounter-treatments"
 import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
 import { BudgetShowActions } from "./plan/budget-show"
-import { AnswerInPersonButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
   groupPlanPaths,
@@ -652,7 +651,6 @@ export function EncounterBudgetSend({
             beforeSend={beforeWrite}
             reviewable
           />
-          <AnswerInPersonButton patientId={patientId} budgetId={step.action.budgetId} beforeOpen={beforeWrite} />
         </div>
       </div>
     )
@@ -677,7 +675,6 @@ export function EncounterBudgetSend({
           patientName={patientName}
           beforeWrite={beforeWrite}
         />
-        <AnswerInPersonButton patientId={patientId} budgetId={step.action.budgetId} beforeOpen={beforeWrite} />
       </div>
     </BlockPart>
   )

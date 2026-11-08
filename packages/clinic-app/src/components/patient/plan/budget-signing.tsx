@@ -7,7 +7,7 @@
  * firma. Es opcional: volver deja el cajón como estaba para guardar sin firma.
  */
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle } from "@odentia/ui"
-import { ConfirmDialog, LoadingState } from "@odentia/ui-patterns"
+import { ConfirmDialog, ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch, apiFetchBytes } from "../../../lib/api"
@@ -127,6 +127,9 @@ export function BudgetSigningScreen({
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-3 py-6 text-lg sm:px-6">
             {frame.isPending ? (
               <LoadingState message="Preparando la hoja…" />
+            ) : frame.isError ? (
+              // Sin la hoja no se firma: la declaración es parte de lo que acepta.
+              <ErrorState title="No se pudo preparar la hoja" onRetry={() => void frame.refetch()} />
             ) : step === "sign" ? (
               <article
                 aria-labelledby={`${ids}-title`}
@@ -228,9 +231,21 @@ export function BudgetSigningScreen({
                 <p>
                   <strong>Firmó {signer.name}.</strong>
                 </p>
+                <dl className="flex flex-col gap-1 rounded-lg border bg-card p-4 text-base">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="text-muted-foreground">Acepta</dt>
+                    <dd className="font-semibold tabular-nums">{accepting}</dd>
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="text-muted-foreground">Decide</dt>
+                    <dd>
+                      {signer.name}, {signer.role.toLowerCase()}
+                    </dd>
+                  </div>
+                </dl>
                 <p className="text-base text-muted-foreground">
-                  Al guardar, su respuesta queda con su firma y su presupuesto la muestra. Si algo no está bien, vuelve
-                  a la firma o sal sin firma: la respuesta sigue sin guardar.
+                  Falta guardar: con «Guardar con su firma» su respuesta queda anotada y su presupuesto muestra la
+                  firma. Si la firma no quedó bien, «Volver a la firma».
                 </p>
               </div>
             )}
@@ -239,12 +254,22 @@ export function BudgetSigningScreen({
 
         <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t bg-popover px-6 py-4">
           {step === "sign" ? (
-            <Button type="button" size="lg" disabled={frame.isPending} onClick={done}>
+            <Button type="button" size="lg" disabled={!frame.data} onClick={done}>
               Listo
             </Button>
           ) : (
             <>
-              <Button type="button" size="lg" variant="outline" disabled={saving} onClick={() => setStep("sign")}>
+              <Button
+                type="button"
+                size="lg"
+                variant="outline"
+                disabled={saving}
+                onClick={() => {
+                  // El recuadro vuelve en blanco: lo firmado antes no se guarda sin verse.
+                  setStrokes([])
+                  setStep("sign")
+                }}
+              >
                 Volver a la firma
               </Button>
               <Button type="button" size="lg" disabled={saving} onClick={() => onSave(strokes)}>

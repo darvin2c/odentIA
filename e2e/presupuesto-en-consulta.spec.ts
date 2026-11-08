@@ -66,10 +66,10 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
   await anotar.click()
 
   // Un solo cajón: el tratamiento con sus tres respuestas y quién decide.
-  const drawer = surface(page, { name: /¿Qué acepta/ })
+  const drawer = surface(page, { name: /^¿Qué respondió / })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText("Decide", { exact: true })).toBeVisible()
-  await expect(drawer.getByText(/queda entregado en consulta, sin enviarle nada/)).toBeVisible()
+  await expect(drawer.getByText(/Al guardar queda entregado, sin enviarle nada/)).toBeVisible()
   await drawer.getByRole("group", { name: /^Respuesta para / }).getByRole("button", { name: "Acepta", exact: true }).click()
   await expect(drawer.getByText(/Quedará como «Aceptó todo», anotado por ti/)).toBeVisible()
   await shot("cajon-acepta")
@@ -80,7 +80,7 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
   const tablet = page.getByRole("dialog", { name: /^Firma de Lucía/ })
   await expect(tablet.getByRole("heading", { name: "Su decisión" })).toBeVisible()
   await expect(tablet.getByText("Aceptado", { exact: true })).toBeVisible()
-  await expect(tablet.getByText(/Acepto lo que dice «Aceptado»/)).toBeVisible()
+  await expect(tablet.getByText(/Acepto los tratamientos que dicen «Aceptado»/)).toBeVisible()
   // «Listo» sin firma no avanza: lo dice junto al recuadro.
   await tablet.getByRole("button", { name: "Listo", exact: true }).click()
   await expect(tablet.getByRole("alert")).toHaveText(/Falta la firma de Lucía/)
@@ -114,7 +114,7 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
   }, 201)
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=plan&planId=${ids.planId}&budgetId=${draft.id}`))
   await page.getByRole("button", { name: "Anotar su respuesta", exact: true }).first().click()
-  const plan = surface(page, { name: /¿Qué acepta/ })
+  const plan = surface(page, { name: /^¿Qué respondió / })
   await plan.getByRole("group", { name: /^Respuesta para / }).getByRole("button", { name: "Acepta", exact: true }).click()
   await page.screenshot({ path: testInfo.outputPath("cajon-telefono.png") })
   await plan.getByRole("button", { name: "Guardar la respuesta", exact: true }).click()
