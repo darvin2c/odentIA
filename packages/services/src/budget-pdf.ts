@@ -18,6 +18,7 @@ import {
   type PatientGuide,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import type { BudgetDecisionSignature } from "@odentia/db/schema/clinical"
 import {
   type BudgetPrintLine,
   type BudgetPrintOption,
@@ -315,9 +316,11 @@ function yourDecision(
   kit.heading("Su decisión", { size: SIZE.h2small, before: 0, after: 6 })
 
   if (snap.decisionWords) {
-    const { text, by, at } = snap.decisionWords
+    const { text, by, at, notedBy, signature, signatureNote } = snap.decisionWords
     kit.panel({
-      body: [text, by, at ? dayTimeWords(at, zone) : null].filter(Boolean).join(" · "),
+      body: [text, by, notedBy ? `lo anotó ${notedBy}` : null, at ? dayTimeWords(at, zone) : null]
+        .filter(Boolean)
+        .join(" · "),
       size: SIZE.table,
     })
     kit.gap(8)
@@ -334,6 +337,7 @@ function yourDecision(
         budgetAnswerText(line.decision),
       ]),
     })
+    if (signature) signedDecision(kit, signature, at, zone, signatureNote)
     return
   }
 
@@ -446,6 +450,45 @@ function yourDecision(
       leading: 1.4,
     })
     kit.y = Math.min(kit.y, bottom)
+  }
+}
+
+/**
+ * La firma de quien decide, tomada en la tablet: la declaración que aceptó, su
+ * firma sobre la línea y, debajo, su nombre y en calidad de qué decide. Lo mismo
+ * que vio al firmar.
+ */
+function signedDecision(
+  kit: DocumentKit,
+  signature: BudgetDecisionSignature,
+  at: Date | null,
+  zone: BudgetSnapshot["org"],
+  note: string | null,
+) {
+  kit.ensure(130)
+  kit.gap(10)
+  kit.text(signature.declaration, { size: SIZE.second, tone: "soft" })
+  const half = (kit.width - 21) / 2
+  const lineY = kit.y - 44
+  kit.drawStrokes(signature.strokes, kit.left, lineY + 2, half, 38)
+  kit.page.drawLine({
+    start: { x: kit.left, y: lineY },
+    end: { x: kit.left + half, y: lineY },
+    thickness: 0.75,
+    color: kit.color("ink"),
+  })
+  kit.y = lineY - 3
+  kit.text(signature.signerName, { size: SIZE.dense, face: "sansSemi", width: half, leading: 1.4 })
+  kit.text(
+    [
+      signature.signerKind === "representante" ? "Representante legal" : "Paciente",
+      at ? `firmó en la clínica, ${dayTimeWords(at, zone)}` : "firmó en la clínica",
+    ].join(" · "),
+    { size: SIZE.second, tone: "gray", width: half, leading: 1.4 },
+  )
+  if (note) {
+    kit.gap(6)
+    kit.text(note, { size: SIZE.second, tone: "gray" })
   }
 }
 

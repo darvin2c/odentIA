@@ -15,6 +15,7 @@ import {
   duplicateBudgetOption,
   getBudgetDetail,
   getBudgetPresentation,
+  getBudgetSignFrame,
   listBudgets,
   placeBudgetPath,
   operationBodySchema,
@@ -59,7 +60,11 @@ function forbid(c: Context) {
  * - POST /:id/budgets/:budgetId/options/:optionId/duplicate | recommend | remove (solo borrador)
  * - POST /:id/budgets/paths { encounterId, planItemId, path: "nuevo" | "todos" | 1 | 2 | 3 }
  *   (en la atención: el camino de lo indicado hoy; `clinical.write` y `budgets.write`)
- * - POST /:id/budgets/:budgetId/decision { optionId?, decisions, decidedByContactId?, decisionNote? }
+ * - POST /:id/budgets/:budgetId/decision { optionId?, decisions, decidedByContactId?, decisionNote?,
+ *   inPerson?, signature? } (`inPerson`: respondió en la atención; un borrador se entrega
+ *   ahí mismo y pide además `budgets.send`. `signature`: firmó en la tablet)
+ * - GET /:id/budgets/:budgetId/sign-sheet → membrete, declaración y nota de la hoja que
+ *   firma quien decide en la tablet (`budgets.decide`; nada clínico)
  * - POST /:id/budgets/:budgetId/cancel {}
  * - POST /:id/budgets/:budgetId/revise { itemIds, title?, notes?, reason }
  * Permisos (decisión 4): lectura `budgets.read`; armar y cambiar precios
@@ -524,17 +529,28 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     })
   }
 
+  // Lo fijo de la hoja que firma quien decide: lo lee quien anota la respuesta.
+  app.get("/:id/budgets/:budgetId/sign-sheet", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.decide")) return forbid(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getBudgetSignFrame(tx, orgId)))
+  })
+
   app.post("/:id/budgets/:budgetId/decision", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "budgets.decide")) return forbid(c)
     const parsed = budgetDecisionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { inPerson, ...input } = parsed.data
+    // Respondió en la atención: entregar el borrador es del permiso de entregar.
+    if (inPerson && !canAccess(memberRole, "budgets.send")) return forbid(c)
     return runService(c, 200, async () =>
       economicView(
         memberRole,
         await withOrgContext(deps.db, orgId, (tx) =>
-          decideBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
+          decideBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), input, {
             memberRole,
+            inPerson: inPerson === true,
           }),
         ),
       ),

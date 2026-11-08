@@ -1393,6 +1393,19 @@ export interface BudgetDeliveredSnapshot {
   consents: Array<{ title: string; risks: string[]; alternatives: string[]; consequences: string }>
 }
 
+/**
+ * La firma de quien decide al aceptar en la clínica: trazos en el recuadro de
+ * 0 a 1000, como los del consentimiento; su nombre, en calidad de qué decide y la
+ * declaración que aceptó, copiados al firmar (el PDF no depende de lo de hoy).
+ */
+export interface BudgetDecisionSignature {
+  strokes: number[][][]
+  signerName: string
+  /** 'paciente' o 'representante'. */
+  signerKind: string
+  declaration: string
+}
+
 export const treatmentBudget = pgTable(
   "treatment_budget",
   {
@@ -1432,10 +1445,21 @@ export const treatmentBudget = pgTable(
     decidedBy: text("decided_by").references(() => user.id),
     /** Por dónde respondió: 'enlace', 'portal', 'conversacion' o 'clinica'. Nulo en lo decidido antes. */
     decidedVia: text("decided_via"),
+    /**
+     * La firma de quien decide sobre lo que aceptó en la clínica (opcional): sus
+     * trazos, su nombre y la declaración que aceptó, copiada al firmar. Sin ella,
+     * la respuesta anotada por el equipo es su palabra, no la de la persona.
+     */
+    decisionSignature: jsonb("decision_signature").$type<BudgetDecisionSignature>(),
+    decisionSignedAt: timestamp("decision_signed_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
+    check(
+      "treatment_budget_decision_signature_check",
+      sql`(${table.decisionSignature} IS NULL) = (${table.decisionSignedAt} IS NULL)`,
+    ),
     check(
       "treatment_budget_decided_via_check",
       sql`${table.decidedVia} IS NULL OR ${table.decidedVia} IN ('enlace','portal','conversacion','clinica')`,
