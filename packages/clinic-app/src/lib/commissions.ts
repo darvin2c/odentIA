@@ -175,7 +175,7 @@ export interface CommissionSummary {
   discountFrom?: DiscountFrom | null
   /**
    * Lo que le debe a la clínica después del próximo pago: comisiones ya pagadas de cobros que
-   * después se devolvieron, sin cobros nuevos en esta moneda de donde descontarlas.
+   * después se anularon, sin cobros nuevos en esta moneda de donde descontarlas.
    */
   owedCents?: number
   lastPaidAt: string | null
@@ -244,6 +244,90 @@ export function discountFromWords(
     : `Se descuentan ${formatMoney(from.cents, view.currency, locale)} del pago de ${month}, que tiene cobros por pagar, y el resto, de los próximos pagos.`
 }
 
+/**
+ * La fila de un mes en una moneda: con un pago a cuenta o un descuento, lo que falta pagar; si no, lo que
+ * le corresponde. La misma cifra en la lista de la clínica y en «Mis honorarios › Meses anteriores».
+ */
+export function summaryAmountWords(
+  view: Pick<CommissionSummary, "status" | "paidCents" | "discountCents" | "pendingCents" | "commissionCents" | "currency">,
+  locale: string,
+): string {
+  return view.status === "por_pagar" && (view.paidCents > 0 || (view.discountCents ?? 0) > 0)
+    ? `Falta ${formatMoney(view.pendingCents, view.currency, locale)}`
+    : formatMoney(view.commissionCents, view.currency, locale)
+}
+
+/**
+ * Lo que se descuenta en una moneda de comisiones ya pagadas, en una frase: «S/ 210.00 por descontar»,
+ * con lo que queda para los próximos pagos o de qué pago se descuenta. Nulo si no hay nada.
+ */
+export function summaryDiscountWords(
+  view: Pick<CommissionSummary, "discountCents" | "owedCents" | "pendingCents" | "currency" | "discountFrom">,
+  locale: string,
+): string | null {
+  const discount = view.discountCents ?? 0
+  const owed = view.owedCents ?? 0
+  const money = (cents: number) => formatMoney(cents, view.currency, locale)
+  if (discount > 0) return `${money(discount)} por descontar${owed > 0 ? ` este mes y ${money(owed)} en los próximos pagos` : ""}`
+  if (owed <= 0 || view.pendingCents > 0) return null
+  const from = view.discountFrom
+  return from
+    ? `${money(owed)} por descontar, desde el pago de ${monthLabel(from, locale).toLocaleLowerCase(locale)}`
+    : `${money(owed)} por descontar del próximo pago`
+}
+
+/**
+ * «Mis honorarios › Meses anteriores»: lo que debe es suyo, no de cada mes, así que se reparte una sola vez
+ * entre los meses con algo por pagar, del más antiguo al más nuevo (el pago de donde se descuenta primero).
+ * Cada mes, cada moneda, lleva lo que le toca: la misma deuda no se repite en cada fila.
+ *
+ * - `owed`: lo que debe hoy en cada moneda (`adjustmentCents` del mes que se mira).
+ * - Devuelve, por `año-mes-moneda`, lo que se descuenta de ese mes y lo que falta pagarle en él.
+ */
+export function previousMonthsDiscounts(
+  previous: ReadonlyArray<CommissionSummary>,
+  owed: ReadonlyMap<string, number>,
+): Map<string, { discountCents: number; pendingCents: number }> {
+  const left = new Map(owed)
+  const out = new Map<string, { discountCents: number; pendingCents: number }>()
+  const views = previous
+    .flatMap((month) => [month, ...(month.others ?? [])])
+    .sort((a, b) => a.year - b.year || a.month - b.month)
+  for (const view of views) {
+    // Lo nuevo del mes, sin pagar: lo que el servidor dice que falta más lo que él ya descontaba.
+    const fresh = Math.max(0, view.pendingCents) + (view.discountCents ?? 0)
+    const discount = Math.min(fresh, left.get(view.currency) ?? 0)
+    left.set(view.currency, (left.get(view.currency) ?? 0) - discount)
+    out.set(`${view.year}-${view.month}-${view.currency}`, { discountCents: discount, pendingCents: fresh - discount })
+  }
+  return out
+}
+
+/** Lo que cerró, en un mes, la deuda de sus cobros anulados después de pagados (ver el servidor). */
+export interface CommissionDebtClosure {
+  settlementId: string
+  kind: "devuelto" | "saldado"
+  cents: number
+  settledAt: string | null
+  notes: string | null
+}
+
+/**
+ * Por qué «Ya pagado» supera la comisión del mes: «Devolvió S/ 210.00 el 8 de noviembre» o «Se dio por
+ * saldado S/ 210.00 el 8 de noviembre: <motivo>».
+ */
+export function debtClosureWords(
+  closure: CommissionDebtClosure,
+  currency: string,
+  locale: string,
+  day: (iso: string) => string,
+): string {
+  const amount = formatMoney(closure.cents, currency, locale)
+  const on = closure.settledAt ? ` el ${day(closure.settledAt)}` : ""
+  if (closure.kind === "devuelto") return `Devolvió ${amount}${on}`
+  return `Se dio por saldado ${amount}${on}${closure.notes ? `: ${closure.notes}` : ""}`
+}
+
 /** Comisión ya pagada por un cobro que después se anuló. */
 export interface CommissionAdjustment {
   applicationId: string
@@ -265,6 +349,8 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   discountCents: number
   /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
   discountedCents: number
+  /** Lo devuelto o saldado de los cobros anulados de este mes: por qué «Ya pagado» supera la comisión. */
+  debtClosures?: CommissionDebtClosure[]
   /** Con algo que deber después de este mes: el pago de otro mes de donde se descuenta. */
   discountFrom?: DiscountFrom | null
   /**

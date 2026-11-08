@@ -959,6 +959,16 @@ async function ticketClosedAfter(
   return hasClosureSince(tx, orgId, ticket.branchId, units, ticket.createdAt)
 }
 
+/** Lo mismo, por su id: si ya cerró una caja después del ticket, solo administración lo anula. */
+export async function isTicketClosedAfter(tx: Db, orgId: string, ticketId: string): Promise<boolean> {
+  const [ticket] = await tx
+    .select({ id: paymentTicket.id, branchId: paymentTicket.branchId, currency: paymentTicket.currency, createdAt: paymentTicket.createdAt })
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.id, ticketId)))
+  if (!ticket) throw notFound("Ticket")
+  return ticketClosedAfter(tx, orgId, ticket)
+}
+
 /** Siguiente número de ticket de la organización, sin saltos: vive en la misma transacción. */
 async function nextTicketNumber(tx: Db, orgId: string): Promise<number> {
   // La fila nace sin competir: dos primeros cobros simultáneos de la clínica

@@ -974,7 +974,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Anulo el ticket o hago una devolución?",
-        a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket.",
+        a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket. Si la comisión de ese cobro ya se le pagó al profesional, el aviso de «Anular ticket» lo dice: no frena la anulación, y lo pagado queda por descontar de su próximo pago.",
       },
       {
         q: "¿Dónde busco un ticket de otro día?",
@@ -1117,7 +1117,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago.",
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago. Se guardan en el mes de los cobros anulados, desde el mes que lo registres: ahí, junto a «Ya pagado», se lee «Devolvió …» o «Se dio por saldado …», y en «Mis honorarios» va junto a sus pagos. Si se anula lo devuelto en efectivo con la caja aún abierta, en Caja queda tachado como anulado en Comisiones y deja de sumar; con la caja ya cerrada, sale de la de hoy como «Compensación por anulación».",
         forms: [
           "descuento de comisión",
           "devolución y comisión",
@@ -1904,10 +1904,13 @@ export function helpTopic(
 }
 
 /** Cómo se llega a la pantalla, dicho como en el menú: «Configuración › Horarios y ausencias». */
-export function helpTopicLabel(topic: HelpTopic): string {
-  return topic.parent && topic.parent !== topic.title
-    ? `${topic.parent} › ${topic.title}`
-    : topic.title
+export function helpTopicLabel(
+  topic: HelpTopic,
+  /** Quien solo ve lo suyo llega por su entrada del menú (`menuLabel`): se nombra como la ve. */
+  options: { own?: boolean } = {},
+): string {
+  const title = options.own && topic.menuLabel ? topic.menuLabel : topic.title
+  return topic.parent && topic.parent !== title ? `${topic.parent} › ${title}` : title
 }
 
 /** El tema de la pantalla donde está la persona: el de la ruta más larga que coincide. */

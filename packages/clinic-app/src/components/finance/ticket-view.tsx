@@ -37,6 +37,7 @@ import {
   dayInTimezone,
   fetchPatientAccount3,
   fetchTicketReturnable,
+  paidCommissionWarnings,
   formatAmountPlain,
   formatDayLongLocale,
   formatTimeShortLocale,
@@ -753,6 +754,11 @@ export function TicketView({
                 </li>
               ) : null}
               {methods.length === 0 ? <li>No sale dinero de la caja.</li> : null}
+              {returnable.data
+                ? paidCommissionWarnings(returnable.data.data, (cents, code) => formatMoney(cents, code, format)).map((text) => (
+                    <li key={text}>{text}</li>
+                  ))
+                : null}
             </ul>
           </div>
           {paidByCard ? (

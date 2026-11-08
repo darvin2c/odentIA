@@ -4,7 +4,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
+import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, isTicketClosedAfter, paidCommissionsOfTicket, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
 import type { Context } from "hono"
 
 function forbid(c: Context) {
@@ -282,11 +282,25 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
   })
   // Qué se puede devolver de un ticket: sus conceptos como están hoy y sus medios.
   app.get("/:id/tickets/:ticketId/returnable", async c => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const params = z.object({id:z.uuid(),ticketId:z.uuid()}).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
-      getTicketReturnable(tx, orgId, params.data.id, params.data.ticketId)))
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx => {
+      const returnable = await getTicketReturnable(tx, orgId, params.data.id, params.data.ticketId)
+      // Para el aviso de «Anular ticket»: si su comisión ya se pagó, quedará por descontar. Solo lo ve quien
+      // puede anular ese ticket (con devoluciones ya no se anula; tras un cierre, solo administración): si
+      // no, caja podría mirar cualquier ticket antes y después de un pago y deducir de quién era. Con
+      // nombres e importes, solo quien administra comisiones; caja, solo que alguna ya se pagó.
+      if (returnable.voided || returnable.returns.length > 0 || !canAccess(memberRole, "finance.write")) return returnable
+      if (!canAccess(memberRole, "finance.admin") && (await isTicketClosedAfter(tx, orgId, params.data.ticketId)))
+        return returnable
+      const paid = await paidCommissionsOfTicket(tx, orgId, params.data.ticketId)
+      return {
+        ...returnable,
+        commissionPaid: paid.length > 0,
+        ...(canAccess(memberRole, "commissions.write") ? { paidCommissions: paid } : {}),
+      }
+    }))
   })
   // Devolver: la venta queda en pie y la devolución la rebaja; se le paga en el
   // mismo paso o queda a favor. Cualquier día: el dinero sale de la caja de hoy.
