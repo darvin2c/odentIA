@@ -173,3 +173,12 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(documentFilterFromSearch("documentos", "otro")).toBeUndefined()
   })
 })
+
+// QA del 6 nov (B8): `?tab=datos` abría el Resumen.
+describe("el nombre de un área en el enlace", () => {
+  it("abre su primera sección", () => {
+    expect(sectionFromSearch("datos")).toBe("filiacion")
+    expect(sectionFromSearch("cobros")).toBe("cuenta")
+    expect(sectionFromSearch("clinica")).toBe("antecedentes")
+  })
+})
