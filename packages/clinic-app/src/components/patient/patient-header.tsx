@@ -175,7 +175,7 @@ export function PersonHeader({
   const canReadChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
   const canRegisterResponsible = usePermission("patients.write")
-  // El portal lo da quien ve la historia y lo envía también recepción (ADR 0156).
+  // El portal lo dan recepción y quien ve la historia, todos igual (ADR 0156).
   const canPortal = usePermission("clinical.read") || canRegisterResponsible
   const openWide = useOpenWide()
   const openPanel = useOpenRecordPanel()

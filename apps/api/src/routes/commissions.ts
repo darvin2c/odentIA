@@ -5,7 +5,8 @@
  * - `commissions.read`: cada profesional ve solo las suyas (`/my`, `/monthly`
  *   y `/payments` propios).
  * - `commissions.write` (administración): ve a todos, fija el porcentaje,
- *   registra el pago y lo anula.
+ *   registra el pago y lo anula, y cierra lo que un profesional debe (lo
+ *   devolvió o se da por saldado, ADR 0157).
  */
 import { withOrgContext } from "@odentia/db"
 import { Hono } from "hono"
@@ -20,6 +21,7 @@ import {
   listCommissionSettlements,
   listMonthCommissions,
   payMonthCommission,
+  settleCommissionDebt,
   commissionsOwedByMonth,
   myAttendedUnpaid,
   setCommissionException,
@@ -176,7 +178,7 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => ({
         ...(await getMyCommissions(tx, orgId, userId, parsed.data)),
-        // Lo atendido que aún no se cobra: su comisión llega cuando se cobre.
+        // Lo atendido que aún no se cobra, de quien pregunta: el servicio y el día, sin paciente ni importe.
         attended: await myAttendedUnpaid(tx, orgId, userId, parsed.data),
       })),
     )
@@ -220,6 +222,33 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     if (parsed.data.fromCash && !canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => payMonthCommission(tx, orgId, userId, parsed.data)),
+    )
+  })
+
+  // --- Lo que el profesional debe: lo devolvió o se da por saldado (ADR 0157) ------------
+  app.post("/debt", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write")) return forbid(c)
+    const parsed = z
+      .object({
+        professionalUserId: z.string().min(1),
+        year: z.number().int().min(2000).max(2100),
+        month: z.number().int().min(1).max(12),
+        currency: currencyCode.optional(),
+        kind: z.enum(["devuelto", "saldado"], "Elige qué pasó con lo que debe."),
+        methodTypeCode: z.enum(["10", "30", "48"], "Elige cómo lo devolvió.").optional(),
+        branchId: z.uuid("Elige la sede de la caja.").optional(),
+        notes: z.string().max(2000, "Escribe la nota en 2000 caracteres como máximo.").nullish(),
+        expectedCents: z.number().int().positive().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    // Que entre a la caja es mover efectivo: pide lo mismo que sacar de ella el pago.
+    if (parsed.data.kind === "devuelto" && parsed.data.methodTypeCode === "10" && !canAccess(memberRole, "finance.write"))
+      return forbid(c)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => settleCommissionDebt(tx, orgId, userId, parsed.data)),
     )
   })
 

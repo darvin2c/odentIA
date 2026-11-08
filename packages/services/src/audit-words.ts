@@ -323,6 +323,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "cash.movement_voided": say("Anuló un movimiento de caja"),
   "cash.payment_registered": say("Registró un cobro en caja"),
   "cash.egreso_recorded": say("Registró una salida de caja"),
+  "cash.commission_returned": say("Registró en la caja la devolución de comisiones"),
   "charge.created": say("Registró un cargo"),
   "charge.edited": say("Cambió un cargo"),
   "charge.voided": say("Anuló un cargo"),
@@ -340,6 +341,9 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "finance.expense_gap_dismissed": say("Dijo que un mes no tuvo un tipo de gasto"),
   "finance.commission_paid": say("Registró el pago de una comisión"),
   "finance.commission_payment_voided": say("Anuló el pago de una comisión"),
+  "finance.commission_debt_returned": say("Registró que un profesional devolvió comisiones que debía"),
+  "finance.commission_debt_forgiven": say("Dio por saldadas comisiones que un profesional debía"),
+  "finance.commission_debt_voided": say("Anuló lo que cerró la deuda de comisiones de un profesional"),
   "finance.rule_created": say("Creó una regla de comisión"),
   "finance.rule_updated": say("Cambió una regla de comisión"),
   "budget.created": say("Creó un presupuesto"),
@@ -667,6 +671,7 @@ const FOLLOWER_ACTIONS: ReadonlySet<string> = new Set([
   "payment.application_voided",
   "cash.payment_registered",
   "cash.movement_voided",
+  "cash.commission_returned",
   "charge.returned",
 ])
 

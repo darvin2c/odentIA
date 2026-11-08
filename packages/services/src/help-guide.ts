@@ -28,6 +28,11 @@ export interface HelpTopic {
   alsoAt?: string[]
   /** Nombre con el que el sistema la llama (el del menú). */
   title: string
+  /**
+   * El nombre de su entrada del menú, si no es el del tema: quien llega por ahí solo ve lo suyo
+   * («Mis honorarios» del profesional, en el tema de Comisiones que también es de administración).
+   */
+  menuLabel?: string
   /** Sección del menú o de Configuración donde está. */
   parent: string | null
   /** Para qué sirve, en una o dos frases. */
@@ -489,7 +494,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
-        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
         forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones"],
       },
       {
@@ -583,7 +588,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si cambio un precio después de enviarlo?",
-        a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Mientras no responda, se cobra lo que ya había aceptado.",
+        a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Si todavía no eligió camino, la revisión lleva todos los caminos: desmarca solo lo que ya no le ofreces. Mientras no responda, se cobra lo que ya había aceptado.",
         forms: ["revisión del presupuesto", "subir un precio", "cambiar el precio", "nuevo precio"],
       },
       {
@@ -666,8 +671,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "Lo da quien puede ver su historia (el odontólogo, el administrador o la dueña), porque el portal le muestra sus documentos. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Recepción no da el acceso: cuando ya lo tiene, le envía el enlace por su WhatsApp y el código le llega en otro mensaje, sin verlo. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
-        forms: ["recepcion no puede dar acceso al portal", "quien da acceso al portal"],
+        a: "Lo puede dar recepción, el odontólogo, el administrador o la dueña. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
+        forms: ["recepcion puede dar acceso al portal", "quien da acceso al portal"],
       },
       {
         q: "¿Qué ve el paciente en su portal?",
@@ -681,7 +686,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Quien ve la historia puede mostrarle el QR y decirle el código; recepción se lo envía por su WhatsApp, con el código en otro mensaje que no ve. «Quitar acceso» (quien ve la historia) cierra todo, también su acceso guardado.",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Puedes mostrarle el QR o enviárselo por su WhatsApp, y el código se lo dices tú. «Quitar acceso» cierra todo, también su acceso guardado.",
       },
     ],
   },
@@ -1072,14 +1077,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: "comisiones",
     path: "/commissions",
     title: "Comisiones",
+    menuLabel: "Mis honorarios",
     parent: "Gestión",
     purpose:
-      "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró, y el registro de su pago. Quien administra lo ve también como pestaña de Finanzas.",
+      "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró, y el registro de su pago. Quien administra lo ve como pestaña de Finanzas; cada profesional ve lo suyo en «Mis honorarios».",
     terms: [
       "comisión",
       "porcentaje",
       "pago a profesionales",
       "honorarios",
+      "mis honorarios",
+      "recibo por honorarios",
       "liquidación",
       "mis comisiones",
       "cuánto le toca",
@@ -1087,22 +1095,29 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo se calcula la comisión?",
-        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis comisiones» dice cuánto de lo atendido del mes falta cobrar. Una venta suelta, sin atención, no es de ningún profesional. Va en la moneda de lo cobrado: lo que se cobra en dólares le da su comisión en dólares, y se le paga en dólares, aparte de lo de soles. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
+        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis honorarios» dice cuánto de lo atendido del mes falta cobrar, cada moneda aparte, y qué servicios son, con su fecha. Una venta suelta, sin atención, no es de ningún profesional. Va en la moneda de lo cobrado: lo que se cobra en dólares le da su comisión en dólares, y se le paga en dólares, aparte de lo de soles. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
         forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención", "comisión en dólares"],
       },
       {
         q: "¿Cómo registro el pago de una comisión?",
-        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel. Si otros meses tienen cobros sin pagar, arriba de la lista se dice cuánto falta en total y cada mes lleva a su lista.",
+        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel como liquidación de honorarios, para que el profesional haga su recibo. Si otros meses tienen cobros sin pagar, arriba de la lista se dice cuánto falta en total y cada mes lleva a su lista.",
         forms: ["pagar comisión", "pagar al doctor", "liquidar comisiones", "anular pago de comisión", "imprimir liquidación"],
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Si no tiene cobros nuevos de donde descontarlo, su fila dice cuánto queda «por descontar del próximo pago»: se descuenta solo, sin hacer nada.",
-        forms: ["descuento de comisión", "devolución y comisión", "cobro anulado comisión"],
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago.",
+        forms: [
+          "descuento de comisión",
+          "devolución y comisión",
+          "cobro anulado comisión",
+          "el doctor devolvió la comisión",
+          "perdonar lo que debe el doctor",
+          "dar por saldada la comisión",
+        ],
       },
       {
         q: "¿Quién ve las comisiones?",
-        a: "Quien administra ve las de todos y las paga. Cada profesional ve solo las suyas en «Mis comisiones», con sus pagos y descuentos. Caja no ve cuánto gana cada uno: en Gastos ve una sola fila por sede con el total pagado en comisiones.",
+        a: "Quien administra ve las de todos y las paga. Cada profesional ve solo lo suyo en «Mis honorarios», con sus pagos y descuentos; de lo atendido que aún no se cobra ve el servicio y la fecha, sin el paciente ni lo que debe. Caja no ve cuánto gana cada uno: en Gastos ve una sola fila por sede con el total pagado en comisiones.",
         forms: ["quién ve mis comisiones", "caja ve comisiones", "ver comisiones de otro doctor"],
       },
       {
@@ -1117,8 +1132,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
-        a: "Un tratamiento de varias sesiones reparte cada cobro en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas.",
-        forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento"],
+        a: "Desde el plan de tratamiento, con sus sesiones previstas: cada cobro se reparte en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas. Un servicio registrado directo en la atención, sin plan, se cobra entero y su comisión es toda de quien lo registró: para repartirlo, ponlo en el plan con sus sesiones antes de atender.",
+        forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento", "repartir un tratamiento entre doctores"],
       },
     ],
     writePermission: "commissions.write",
@@ -1254,6 +1269,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo se ven los dólares en Reportes?",
         a: "Si la clínica cobra en otra moneda, lo que ya pasó (cobrado, gastos, lo que deja y comisiones) va en la moneda del negocio, con lo que valió el día que se cobró o se pagó: no se mueve aunque cambie el cambio de hoy. «Te deben» va por moneda, con un total aproximado al cambio de hoy, y quien debe en las dos cuenta como una persona. No incluye lo que ganes o pierdas al cambiar dólares: eso queda para tu contador.",
         forms: ["dolares en reportes", "reportes con dos monedas", "cuanto vale lo cobrado en dolares"],
+      },
+      {
+        q: "¿En qué mes cuenta un gasto que anulo después?",
+        a: "En ninguno: anular un gasto es decir que no ocurrió. Deja de contar en el mes de su fecha aunque lo anules meses después, y Gastos y Reportes dicen lo mismo de ese mes, también en «Lo que deja». Si salió del efectivo de una caja ya cerrada, ese efectivo vuelve a la caja del día en que lo anulas.",
+        forms: ["gasto anulado en reportes", "anule un gasto del mes pasado", "por que cambio lo que deja de un mes pasado"],
       },
       {
         q: "¿Qué es el resumen del lunes?",

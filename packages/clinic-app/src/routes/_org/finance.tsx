@@ -33,6 +33,7 @@ import {
 } from "@odentia/ui"
 import {
   DetailDrawer,
+  DraftKeptInPage,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -76,7 +77,7 @@ import {
 import { useActiveBranch } from "../../lib/active-branch"
 import { compareMonths, FIRST_YEAR, plainAmount } from "../../lib/commissions"
 import { useCan, usePermission } from "../../lib/crm"
-import { COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions } from "../../lib/screen-rules"
+import { COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions, MY_COMMISSIONS_TITLE } from "../../lib/screen-rules"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   CLOSURES_PAGE,
@@ -150,6 +151,8 @@ const LIST_KEYS = [
   "resultado",
 ] as const
 type ListKey = (typeof LIST_KEYS)[number]
+/** La sede de la dirección (`useActiveBranch`): cambiarla con un cajón a medias pregunta. */
+const BRANCH_KEY = ["branch"] as const
 
 type FinanceSearch = {
   /** Sección; `cierres` es la lista de cierres anteriores, dentro de Caja. */
@@ -407,7 +410,7 @@ function FinanceWorkspace() {
           <>
             {view === "comisiones" ? (
               <p className="min-w-0">
-                {canCommissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : "Mis comisiones"}
+                {canCommissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : MY_COMMISSIONS_TITLE}
               </p>
             ) : sede.branches.length > 0 && branchId ? (
               <BranchSwitcher
@@ -608,7 +611,10 @@ function FinanceWorkspace() {
       ) : null}
 
       {ws ? (
-        <>
+        // Los cajones viven aquí, fuera de las pestañas: cambiar de pestaña no pierde lo escrito y no
+        // pregunta. Salir de Finanzas sí, y cambiar de sede también: los cajones de caja vuelven a
+        // empezar y un gasto o un cobro a medias se guardaría en la otra sede.
+        <DraftKeptInPage unlessChanges={BRANCH_KEY}>
           <CollectDrawer
             patientId={collecting?.patient?.id ?? null}
             patientName={collecting?.patient?.name}
@@ -648,7 +654,7 @@ function FinanceWorkspace() {
               setSearch({ cierre: windowId })
             }}
           />
-        </>
+        </DraftKeptInPage>
       ) : null}
 
       {prof ? (
@@ -1313,10 +1319,16 @@ function MovementLine({
     amountCents = entry.totalCents
   } else {
     amountCents = entry.amountCents
-    leaves = entry.type === "vuelto" ? entry.leaves : entry.type !== "aporte"
+    // Lo que vuelve de un gasto entra: el signo lo da la dirección del movimiento.
+    leaves = entry.leaves
     if (entry.type === "gasto") {
       title = `Gasto: ${entry.concept}`
-      subtitle = entry.fromCash ? "Salió del efectivo" : `Pagado con ${entry.method ?? "otro medio"}`
+      // Lo que vuelve de un gasto (su compensación, o lo que un profesional devolvió de su comisión) entra.
+      subtitle = !entry.leaves
+        ? "Entró al efectivo"
+        : entry.fromCash
+          ? "Salió del efectivo"
+          : `Pagado con ${entry.method ?? "otro medio"}`
     } else if (entry.type === "aporte") {
       title = "Ingreso de efectivo"
       subtitle = entry.concept

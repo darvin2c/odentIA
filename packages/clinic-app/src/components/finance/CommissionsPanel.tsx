@@ -67,9 +67,16 @@ import {
   percentLabel,
   plainAmount,
   rateBpsFromPercent,
+  RETURN_METHODS,
+  type ReturnMethod,
+  returnMethodWords,
+  discountFromWords,
+  FORGIVE_REASON_MAX,
   type CommissionException,
   setCommissionExceptionApi,
   setCommissionRateApi,
+  settleCommissionDebtApi,
+  showAllLabel,
   voidCommissionPaymentApi,
   type YearMonth,
 } from "../../lib/commissions"
@@ -212,7 +219,8 @@ function printLiquidation(
   const holder = el("div")
   holder.id = LIQUIDATION_HOLDER_ID
   holder.append(
-    el("h1", `Liquidación de comisiones · ${monthLabel(period, locale)}${heading ? ` · ${heading.toLocaleLowerCase(locale)}` : ""}`),
+    // Para el profesional son sus honorarios (en Perú entrega recibo por honorarios); la administración sigue diciendo comisiones.
+    el("h1", `Liquidación de honorarios · ${monthLabel(period, locale)}${heading ? ` · ${heading.toLocaleLowerCase(locale)}` : ""}`),
   )
   holder.append(el("p", name))
   const table = el("table")
@@ -291,6 +299,34 @@ function countedLines(detail: MonthlyCommissions): CommissionLine[] {
   return detail.lines.filter((line) => !line.voidedAfterPaid)
 }
 
+/** Lo mismo, dicho al profesional en «Mis honorarios». */
+function myPaymentTitle(payment: CommissionPayment, day: (iso: string) => string): string {
+  const on = payment.settledAt ? day(payment.settledAt) : null
+  if (payment.kind === "devuelto") return on ? `Devolviste el ${on}` : "Devolviste"
+  if (payment.kind === "saldado") return on ? `La clínica lo dio por saldado el ${on}` : "La clínica lo dio por saldado"
+  if (payment.commissionCents === 0) return `Descuento del ${on ?? "mes"}`
+  return `Pago del ${on ?? "mes"}`
+}
+
+/** Lo que cerró una deuda (lo devolvió o se dio por saldado), no un pago. */
+function isDebtRecord(payment: CommissionPayment): boolean {
+  return payment.kind === "devuelto" || payment.kind === "saldado"
+}
+
+/** Qué fue cada fila de los pagos, en una frase: un pago, un descuento, lo devuelto o lo saldado. */
+function paymentTitle(payment: CommissionPayment, day: (iso: string) => string): string {
+  const on = payment.settledAt ? ` el ${day(payment.settledAt)}` : ""
+  if (payment.kind === "devuelto") {
+    const how = returnMethodWords(payment.methodTypeCode)
+    return `Lo devolvió${on}${how ? `, ${how}` : ""}`
+  }
+  if (payment.kind === "saldado")
+    return `Dado por saldado${on}${payment.settledByName ? ` por ${payment.settledByName}` : ""}`
+  // Un descuento que cubrió todo lo del mes: no salió dinero.
+  if (payment.commissionCents === 0) return payment.settledAt ? `Descontado${on}, sin pago` : "Descuento registrado, sin pago"
+  return payment.settledAt ? `Pagado${on}` : "Pago registrado"
+}
+
 // --- Administración: el mes de toda la clínica ---------------------------------------
 
 export function CommissionsAdminPanel({
@@ -357,16 +393,24 @@ export function CommissionsAdminPanel({
   })
 
   const rows = monthQuery.data?.data ?? []
-  // Lo del mes entre todos, en cada moneda: nunca se suman monedas distintas.
-  const monthTotals: Array<{ currency: string; pendingCents: number; commissionCents: number }> = []
+  // Lo del mes entre todos, en cada moneda: nunca se suman monedas distintas. Lo que se descuenta de
+  // comisiones ya pagadas va aparte: no es dinero pagado.
+  const monthTotals: Array<{ currency: string; pendingCents: number; commissionCents: number; discountCents: number }> = []
   for (const view of rows.flatMap((row) => [row, ...(row.others ?? [])])) {
     const total = monthTotals.find((item) => item.currency === view.currency)
     if (total) {
       total.pendingCents += Math.max(0, view.pendingCents)
       total.commissionCents += view.commissionCents
+      total.discountCents += view.discountCents ?? 0
     } else
-      monthTotals.push({ currency: view.currency, pendingCents: Math.max(0, view.pendingCents), commissionCents: view.commissionCents })
+      monthTotals.push({
+        currency: view.currency,
+        pendingCents: Math.max(0, view.pendingCents),
+        commissionCents: view.commissionCents,
+        discountCents: view.discountCents ?? 0,
+      })
   }
+  const monthDiscounts = monthTotals.filter((total) => total.discountCents > 0)
   // La clínica cobra en dos monedas: toda cifra lleva su símbolo.
   const twoCurrencies = monthTotals.length > 1
   const hasSecond = useOrgSecondCurrency() !== null
@@ -413,7 +457,14 @@ export function CommissionsAdminPanel({
               locale,
             )}
           </span>{" "}
-          de {amountsWords(monthTotals.map((total) => ({ cents: total.commissionCents, currency: total.currency })), locale)} ·{" "}
+          de {amountsWords(monthTotals.map((total) => ({ cents: total.commissionCents, currency: total.currency })), locale)}
+          {monthDiscounts.length > 0
+            ? ` · se descuentan ${amountsWords(
+                monthDiscounts.map((total) => ({ cents: total.discountCents, currency: total.currency })),
+                locale,
+              )} de comisiones ya pagadas de cobros anulados`
+            : ""}
+          {" · "}
           {owingPeople === 1 ? "1 profesional" : `${owingPeople} profesionales`}
         </p>
       ) : null}
@@ -486,7 +537,22 @@ export function CommissionsAdminPanel({
               const name = row.professionalName ?? "Profesional fuera del equipo"
               const selected = row.professionalUserId === selectedId
               const views = summaryCurrencies(row)
-              const owes = views.filter((view) => (view.owedCents ?? 0) > 0 && view.pendingCents <= 0)
+              // Lo que se descuenta de comisiones ya pagadas, en cada moneda: no es algo que pagar ni ya pagado.
+              const discounts = views.flatMap((view) => {
+                const discount = view.discountCents ?? 0
+                const owed = view.owedCents ?? 0
+                const money = (cents: number) => formatMoney(cents, view.currency, locale)
+                if (discount > 0)
+                  return [`${money(discount)} por descontar${owed > 0 ? ` este mes y ${money(owed)} en los próximos pagos` : ""}`]
+                if (owed <= 0 || view.pendingCents > 0) return []
+                // Lo mismo que dice su detalle: de qué pago se descuenta.
+                const from = view.discountFrom
+                return [
+                  from
+                    ? `${money(owed)} por descontar, desde el pago de ${monthLabel(from, locale).toLocaleLowerCase(locale)}`
+                    : `${money(owed)} por descontar del próximo pago`,
+                ]
+              })
               // Lo que pide atención primero: lo que falta pagar en alguna moneda.
               const leading = views.find((view) => view.status === "por_pagar") ?? views[0] ?? row
               return (
@@ -516,19 +582,16 @@ export function CommissionsAdminPanel({
                         {row.exceptionCount ? ` (+${row.exceptionCount === 1 ? "1 servicio aparte" : `${row.exceptionCount} servicios aparte`})` : ""}
                         {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
-                      {owes.length > 0 ? (
-                        // No es algo que pagar: se descuenta solo del próximo pago.
-                        <span className="text-sm text-muted-foreground">
-                          {amountsWords(owes.map((view) => ({ cents: view.owedCents ?? 0, currency: view.currency })), locale)} por
-                          descontar del próximo pago
-                        </span>
+                      {discounts.length > 0 ? (
+                        // No es algo que pagar: se descuenta solo, de este pago o del próximo.
+                        <span className="text-sm text-muted-foreground">{discounts.join(" · ")}</span>
                       ) : null}
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1">
-                      {/* Con un pago a cuenta, lo que importa es lo que falta. Una cifra por moneda, apiladas. */}
+                      {/* Con un pago a cuenta o un descuento, lo que importa es lo que falta. Una cifra por moneda, apiladas. */}
                       {views.map((view) => (
                         <span key={view.currency} className="text-base font-semibold text-foreground tabular-nums">
-                          {view.status === "por_pagar" && view.paidCents > 0
+                          {view.status === "por_pagar" && (view.paidCents > 0 || (view.discountCents ?? 0) > 0)
                             ? `Falta ${formatMoney(view.pendingCents, view.currency, locale)}`
                             : formatMoney(view.commissionCents, view.currency, locale)}
                           {/* Con dos monedas, la que ya se pagó lo dice: el estado de abajo es el de la que falta. */}
@@ -759,17 +822,12 @@ function ProfessionalDetailBody({
                       payment.voidedAt && "text-muted-foreground line-through",
                     )}
                   >
-                    {payment.commissionCents === 0
-                      ? // Un descuento que cubrió todo lo del mes: no salió dinero.
-                        payment.settledAt
-                        ? `Descontado el ${day(payment.settledAt)}, sin pago`
-                        : "Descuento registrado, sin pago"
-                      : payment.settledAt
-                        ? `Pagado el ${day(payment.settledAt)}`
-                        : "Pago registrado"}
+                    {paymentTitle(payment, day)}
                   </span>
                   {payment.notes ? (
-                    <span className="block text-muted-foreground">{payment.notes}</span>
+                    <span className="block text-muted-foreground">
+                      {payment.kind === "saldado" ? `Motivo: ${payment.notes}` : payment.notes}
+                    </span>
                   ) : null}
                   {payment.voidedAt ? (
                     <span className="block text-muted-foreground">
@@ -794,7 +852,7 @@ function ProfessionalDetailBody({
                     size="sm"
                     onClick={() => setVoiding(payment)}
                   >
-                    Anular pago
+                    {isDebtRecord(payment) ? "Anular" : "Anular pago"}
                   </Button>
                 ) : null}
               </li>
@@ -860,6 +918,8 @@ function CommissionCurrencyBlock({
   const payHintId = useId()
   const [showAll, setShowAll] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
+  // Lo que debe: lo devolvió o se da por saldado.
+  const [debtMode, setDebtMode] = useState<"devuelto" | "saldado" | null>(null)
   const locale = view.locale
   const day = (iso: string): string => dayLabel(iso, locale, zone, period.year)
   const money = (cents: number): string => formatMoney(cents, view.currency, locale)
@@ -873,6 +933,10 @@ function CommissionCurrencyBlock({
   const partial = view.paidCents > 0 || view.discountCents > 0
   // Lo que queda por descontar después de este pago, para el siguiente.
   const discountLeft = view.adjustmentCents - view.discountCents
+  const inCurrency = heading ? ` en ${currencyWord(view.currency, locale)}` : ""
+  // De qué pago se descuenta lo que este mes no alcanza: el de otro mes con cobros por pagar, si hay.
+  const discountMonth = view.discountFrom ? monthLabel(view.discountFrom, locale).toLocaleLowerCase(locale) : null
+  const discountWhole = view.discountFrom ? view.discountFrom.cents >= (view.owedCents ?? 0) : false
   // El botón deshabilitado siempre dice por qué; el de solo descontar, qué va a pasar.
   const payHint = discountOnly
     ? `Lo de este mes (${money(view.discountCents)}) se descuenta de comisiones ya pagadas de cobros que después se anularon: no sale dinero.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
@@ -881,7 +945,9 @@ function CommissionCurrencyBlock({
         ? `Quedan ${money(discountLeft)} por descontar en los próximos pagos.`
         : null
       : (view.owedCents ?? 0) > 0
-        ? `${money(view.owedCents ?? 0)} por descontar del próximo pago${heading ? ` en ${currencyWord(view.currency, locale)}` : ""}: se le pagó la comisión de cobros que después se devolvieron y aún no hay cobros nuevos de donde descontarla. No hay que hacer nada: se descuenta sola.`
+        ? discountMonth
+          ? `${money(view.owedCents ?? 0)} por descontar${inCurrency}: se le pagó la comisión de cobros que después se devolvieron. ${discountFromWords(view, locale)}`
+          : `${money(view.owedCents ?? 0)} por descontar del próximo pago${inCurrency}: se le pagó la comisión de cobros que después se devolvieron y aún no hay cobros nuevos de donde descontarla. Se descuenta sola; si ya lo devolvió o la clínica lo perdona, regístralo en «Por descontar».`
         : view.status === "pagado"
         ? `No queda nada por pagar de este mes${heading ? ` en ${currencyWord(view.currency, locale)}` : ""}.`
         : view.rateBps === 0 && view.baseCents > 0
@@ -966,7 +1032,7 @@ function CommissionCurrencyBlock({
                 aria-expanded={showAll}
                 onClick={() => setShowAll((value) => !value)}
               >
-                {showAll ? "Ver menos" : `Ver los ${sorted.length} cobros`}
+                {showAll ? "Ver menos" : showAllLabel(sorted)}
               </Button>
             </div>
           ) : null}
@@ -977,8 +1043,9 @@ function CommissionCurrencyBlock({
         <section aria-label="Por descontar" className="flex min-w-0 flex-col gap-2">
           <h3 className="text-sm font-semibold">Por descontar</h3>
           <p className="text-sm text-muted-foreground">
-            Comisiones ya pagadas de cobros que después se anularon. Se descuentan de los próximos
-            pagos que registres, de este mes o de otro, hasta completarse.
+            Debe {money(view.adjustmentCents)}: comisiones ya pagadas de cobros que después se anularon. Se
+            descuentan de los próximos pagos que registres, de este mes o de otro, hasta completarse.
+            {canWrite ? " Si ya lo devolvió, o si la clínica lo perdona, regístralo aquí y deja de descontarse." : ""}
           </p>
           <ul className="flex min-w-0 flex-col divide-y rounded-lg border">
             {view.adjustments.map((adjustment) => (
@@ -1000,6 +1067,16 @@ function CommissionCurrencyBlock({
               </li>
             ))}
           </ul>
+          {canWrite ? (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setDebtMode("devuelto")}>
+                Registrar que lo devolvió
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setDebtMode("saldado")}>
+                Darlo por saldado
+              </Button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -1066,7 +1143,13 @@ function CommissionCurrencyBlock({
         ) : !payable && (view.owedCents ?? 0) > 0 ? (
           // No es un error ni algo que pagar: se descuenta solo del próximo pago.
           <div className="flex items-baseline justify-between gap-3">
-            <dt className="font-semibold">Por descontar del próximo pago</dt>
+            <dt className="font-semibold">
+              {discountMonth
+                ? discountWhole
+                  ? `Por descontar del pago de ${discountMonth}`
+                  : `Por descontar, desde el pago de ${discountMonth}`
+                : "Por descontar del próximo pago"}
+            </dt>
             <dd className="font-semibold tabular-nums">{money(view.owedCents ?? 0)}</dd>
           </div>
         ) : null}
@@ -1103,6 +1186,14 @@ function CommissionCurrencyBlock({
       <PayDrawer
         open={payOpen}
         onClose={() => setPayOpen(false)}
+        detail={view}
+        name={name}
+        period={period}
+        currencyNamed={heading !== null}
+      />
+      <DebtDrawer
+        mode={debtMode}
+        onClose={() => setDebtMode(null)}
         detail={view}
         name={name}
         period={period}
@@ -1727,6 +1818,220 @@ function PayDrawer({
   )
 }
 
+// --- Lo que debe: lo devolvió o se da por saldado --------------------------------------
+
+/**
+ * Cierra lo que el profesional le debe a la clínica en una moneda (comisiones ya pagadas de cobros
+ * que después se anularon), sin esperar a descontarlo de un pago. «Lo devolvió»: con su medio; en
+ * efectivo entra a la caja de la sede, que no dice de quién es. «Darlo por saldado»: la clínica lo
+ * perdona, con un motivo corto, sin mover dinero. Lo decide y lo guarda el servidor.
+ */
+function DebtDrawer({
+  mode,
+  onClose,
+  detail,
+  name,
+  period,
+  currencyNamed = false,
+}: {
+  mode: "devuelto" | "saldado" | null
+  onClose: () => void
+  detail: MonthlyCommissions
+  name: string
+  period: YearMonth
+  /** Hay más de una moneda: lo que debe y la caja se dicen con la suya. */
+  currencyNamed?: boolean
+}) {
+  const queryClient = useQueryClient()
+  const sede = useActiveBranch()
+  const defaultBranch = sede.branchId ?? sede.branches[0]?.id ?? ""
+  const open = mode !== null
+  // El texto conserva lo último mientras el cajón termina de cerrarse.
+  const shownMode = useRef(mode)
+  if (mode) shownMode.current = mode
+  const kind = shownMode.current ?? "devuelto"
+  // Que entre a la caja es mover efectivo: lo ofrece solo a quien registra gastos, como al pagar.
+  const canUseCash = usePermission("finance.write")
+  const methods = canUseCash ? RETURN_METHODS : RETURN_METHODS.filter((option) => option.value !== "10")
+  const pickBranch = sede.branches.length > 1
+  const owedText = formatMoney(detail.adjustmentCents, detail.currency, detail.locale)
+  const inCurrency = currencyNamed ? ` en ${currencyWord(detail.currency, detail.locale)}` : ""
+
+  const refresh = (): void => {
+    void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
+    void queryClient.invalidateQueries({ queryKey: ["monthly-finance-result"] })
+  }
+  const form = useAppForm({
+    defaultValues: { method: "" as ReturnMethod | "", branchId: "", notes: "" },
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        const notes = value.notes.trim()
+        if (kind === "devuelto") {
+          if (!value.method) fields.method = "Elige cómo lo devolvió."
+          if (value.method === "10" && pickBranch && !value.branchId) fields.branchId = "Elige la sede de la caja."
+        } else if (!notes) fields.notes = "Escribe el motivo."
+        else if (notes.length > FORGIVE_REASON_MAX)
+          fields.notes = `Escribe el motivo en ${FORGIVE_REASON_MAX} caracteres como máximo.`
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const notes = value.notes.trim()
+      const toCash = kind === "devuelto" && value.method === "10"
+      try {
+        const result = await settleCommissionDebtApi({
+          ...period,
+          professionalUserId: detail.professionalUserId,
+          // Cada moneda aparte, en la suya.
+          currency: detail.currency,
+          kind,
+          ...(kind === "devuelto" && value.method ? { methodTypeCode: value.method } : {}),
+          ...(toCash ? { branchId: value.branchId || defaultBranch } : {}),
+          ...(notes ? { notes } : {}),
+          expectedCents: detail.adjustmentCents,
+        })
+        refresh()
+        if (toCash) invalidateFinance(queryClient)
+        // Se dice lo que el servidor registró de verdad.
+        const done = formatMoney(result.data.settlement.commissionCents, result.data.settlement.currency, detail.locale)
+        toast.success(
+          kind === "devuelto" ? `Registrado: devolvió ${done} y ya no debe nada` : `Dado por saldado: ${done}. Ya no debe nada`,
+        )
+        onClose()
+      } catch (err) {
+        refresh()
+        throw err
+      }
+    },
+  })
+  const surface = useFormSurface(form, { formMessage: financeFormMessage, fieldMap: { methodTypeCode: "method" } })
+  const method = useStore(form.store, (state) => state.values.method)
+  const branchId = useStore(form.store, (state) => state.values.branchId)
+  const cashBranch = branchId || defaultBranch
+  const inCash = kind === "devuelto" && method === "10"
+  const cash = useCashState(cashBranch, open && inCash && canUseCash, detail.currency)
+  const cashState = cash.data?.data ?? null
+  const branchName = sede.branches.find((branch) => branch.id === cashBranch)?.name ?? ""
+
+  // La sede activa es la propuesta; si llega tarde no pisa lo ya elegido.
+  useEffect(() => {
+    if (open && !form.getFieldValue("branchId") && defaultBranch)
+      form.setFieldValue("branchId", defaultBranch, { dontUpdateMeta: true })
+  }, [open, defaultBranch, form])
+  useEffect(() => {
+    if (open) return
+    form.reset({ method: "", branchId: "", notes: "" })
+  }, [open, form])
+
+  return (
+    <FormDrawer
+      {...surface}
+      dock={false}
+      open={open}
+      onClose={onClose}
+      title={kind === "devuelto" ? "Registrar que lo devolvió" : "Darlo por saldado"}
+      description={
+        kind === "devuelto"
+          ? `${name} devolvió ${owedText}${inCurrency} de comisiones ya pagadas de cobros que después se anularon.`
+          : `La clínica perdona ${owedText}${inCurrency} que ${name} debe de comisiones ya pagadas de cobros que después se anularon.`
+      }
+      submitLabel={kind === "devuelto" ? `Registrar la devolución de ${owedText}` : "Darlo por saldado"}
+      // En efectivo y sin ninguna sede no hay caja donde entre; el motivo está a la vista.
+      submitDisabled={inCash && !cashBranch}
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-muted-foreground">
+          {kind === "devuelto"
+            ? "Ya no debe nada: deja de descontarse de sus próximos pagos. Si te equivocas, puedes anularlo con su motivo."
+            : "No se mueve dinero. Ya no debe nada: deja de descontarse de sus próximos pagos, y queda registrado quién lo decidió y cuándo. Si te equivocas, puedes anularlo con su motivo."}
+        </p>
+        {kind === "devuelto" ? (
+          <>
+            <form.AppField name="method">
+              {(field) => (
+                <field.Group legend="Cómo lo devolvió" className="gap-3">
+                  {(control) => (
+                    <ChoiceButtons
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      tone="primary"
+                      value={field.state.value || null}
+                      options={methods}
+                      onChange={(next) => field.handleChange(next)}
+                    />
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
+            {inCash && pickBranch ? (
+              <form.AppField name="branchId">
+                {(field) => (
+                  <field.Control label="Caja de la sede" description="El efectivo entra a la caja de esta sede.">
+                    {(control) => (
+                      <ChoiceSelect
+                        id={control.id}
+                        name={control.name}
+                        value={field.state.value}
+                        placeholder="Elige la sede"
+                        required
+                        aria-invalid={control.invalid || undefined}
+                        aria-describedby={control.describedBy}
+                        onBlur={control.onBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      >
+                        {sede.branches.map((branch) => (
+                          <option key={branch.id} value={branch.id}>
+                            {branch.name}
+                          </option>
+                        ))}
+                      </ChoiceSelect>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            ) : null}
+            {inCash ? (
+              cashBranch ? (
+                <p className="text-sm">
+                  Entra al efectivo de la caja{currencyNamed ? ` de ${currencyWord(detail.currency, detail.locale)}` : ""}
+                  {branchName ? ` de ${branchName}` : ""} como «Devolución de comisiones», sin su nombre
+                  {cashState
+                    ? `: la caja queda en ${formatMoney(cashState.cashOnHandCents + detail.adjustmentCents, detail.currency, detail.locale)}.`
+                    : "."}
+                </p>
+              ) : (
+                <p role="alert" className="text-sm text-destructive">
+                  No hay una sede activa con una caja donde entre el efectivo.
+                </p>
+              )
+            ) : method ? (
+              <p className="text-sm text-muted-foreground">No toca la caja.</p>
+            ) : null}
+            <form.AppField name="notes">
+              {(field) => <field.TextareaField label="Nota (opcional)" rows={2} maxLength={2000} />}
+            </form.AppField>
+          </>
+        ) : (
+          <form.AppField name="notes">
+            {(field) => (
+              <field.TextareaField
+                label="Motivo"
+                description="Corto: por qué la clínica lo perdona. Lo ven quien administra las comisiones y el profesional."
+                rows={2}
+                maxLength={FORGIVE_REASON_MAX}
+                aria-required
+              />
+            )}
+          </form.AppField>
+        )}
+      </div>
+    </FormDrawer>
+  )
+}
+
 // --- Anular un pago registrado --------------------------------------------------------
 
 function VoidPaymentDrawer({
@@ -1757,9 +2062,15 @@ function VoidPaymentDrawer({
       try {
         await voidCommissionPaymentApi(payment?.id ?? "", value.reason.trim())
         refresh()
-        // Si salió de la caja, anularlo la devuelve.
+        // Si salió de la caja (o entró, lo devuelto), anularlo lo revierte.
         invalidateFinance(queryClient)
-        toast.success("Pago anulado: sus cobros vuelven a quedar por pagar")
+        toast.success(
+          payment?.kind === "devuelto"
+            ? "Anulado: vuelve a deber lo que había devuelto"
+            : payment?.kind === "saldado"
+              ? "Anulado: vuelve a deber lo que se había dado por saldado"
+              : "Pago anulado: sus cobros vuelven a quedar por pagar",
+        )
         onClose()
       } catch (err) {
         refresh()
@@ -1780,6 +2091,7 @@ function VoidPaymentDrawer({
   const last = shown.current
   const amount = last ? formatMoney(last.commissionCents, last.currency, locale) : ""
   const paidOn = last?.settledAt ? ` del ${dayLabel(last.settledAt, locale, timeZone)}` : ""
+  const kind = last?.kind ?? "pago"
 
   return (
     <FormDrawer
@@ -1787,14 +2099,23 @@ function VoidPaymentDrawer({
       dock={false}
       open={open}
       onClose={onClose}
-      title="Anular pago"
-      description={`El pago de ${amount}${paidOn} a ${name}.`}
-      submitLabel="Anular pago"
+      title={kind === "devuelto" ? "Anular la devolución" : kind === "saldado" ? "Anular «Dado por saldado»" : "Anular pago"}
+      description={
+        kind === "devuelto"
+          ? `Lo que devolvió ${name}${paidOn}: ${amount}.`
+          : kind === "saldado"
+            ? `Lo que se dio por saldado a ${name}${paidOn}: ${amount}.`
+            : `El pago de ${amount}${paidOn} a ${name}.`
+      }
+      submitLabel={kind === "pago" ? "Anular pago" : "Anular"}
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
-          Se anula el pago (y su gasto, si salió dinero). Sus cobros vuelven a quedar por pagar. La
-          anulación queda registrada con su motivo.
+          {kind === "devuelto"
+            ? "Vuelve a deber lo que había devuelto, y se descuenta de sus próximos pagos. Si entró a la caja, sale de ella. La anulación queda registrada con su motivo."
+            : kind === "saldado"
+              ? "Vuelve a deber lo que se había dado por saldado, y se descuenta de sus próximos pagos. La anulación queda registrada con su motivo."
+              : "Se anula el pago (y su gasto, si salió dinero). Sus cobros vuelven a quedar por pagar. La anulación queda registrada con su motivo."}
         </p>
         <form.AppField name="reason">
           {(field) => (
@@ -1815,7 +2136,7 @@ const voidReasonSchema = z.object({
     .max(2000, "Escribe el motivo en 2000 caracteres como máximo."),
 })
 
-// --- Mis comisiones (cada profesional, primero en teléfono) ----------------------------
+// --- Mis honorarios (cada profesional, primero en teléfono) ----------------------------
 
 export function MyCommissionsPanel({
   period,
@@ -1836,6 +2157,9 @@ export function MyCommissionsPanel({
   const periodKey = `${period.year}-${period.month}`
   const [expandedFor, setExpandedFor] = useState<string | null>(null)
   const showAll = expandedFor === periodKey
+  // La lista de lo atendido sin cobrar, igual: se despliega por mes.
+  const [attendedFor, setAttendedFor] = useState<string | null>(null)
+  const showAttended = attendedFor === periodKey
   const query = useQuery({
     queryKey: commissionKeys.mine(period),
     queryFn: () => fetchMyCommissions(period),
@@ -1851,7 +2175,7 @@ export function MyCommissionsPanel({
 
   if (query.isPending) {
     return (
-      <SkeletonRegion message="Cargando comisiones…">
+      <SkeletonRegion message="Cargando honorarios…">
         <MyCommissionsSkeleton />
       </SkeletonRegion>
     )
@@ -1880,6 +2204,10 @@ export function MyCommissionsPanel({
   const rates = new Set(counted.map((line) => line.rateBps))
   const singleRate = rates.size === 1 ? [...rates][0] : rates.size === 0 ? mine.rateBps : null
   const isCurrent = compareMonths(period, currentMonth) === 0
+  // Lo atendido sin cobrar, cada moneda aparte; sin porcentaje fijado no hay «tu parte» que esperar.
+  const unpaid = mine.hasRate ? (mine.attended?.currencies ?? []).filter((item) => item.unpaidCents > 0) : []
+  const unpaidItems = unpaid.length > 0 ? (mine.attended?.items ?? []) : []
+  const firstUnpaid = unpaid[0]
   // Lo que falta descontarle es suyo, no del mes: se le dice aunque este mes ya esté saldado.
   const pendingDiscount =
     mine.adjustmentCents > mine.discountCents
@@ -1956,22 +2284,12 @@ export function MyCommissionsPanel({
             </span>
           </p>
         ))}
-        {mine.hasRate && mine.attended && mine.attended.unpaidCents > 0 ? (
-          // Lo atendido que aún no se cobra: no se perdió; comisiona en el mes en que se cobre.
-          <p className="mt-2 text-sm text-muted-foreground">
-            De lo que atendiste este mes, aún no se cobra:{" "}
-            <span className="font-medium text-foreground tabular-nums">{plain(mine.attended.unpaidCents)}</span>. Su comisión
-            cuenta en el mes en que se cobre.
-          </p>
-        ) : null}
         {(myPayments.data?.data ?? []).length > 0 ? (
           <ul aria-label="Mis pagos de este mes" className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
             {(myPayments.data?.data ?? []).map((payment) => (
               <li key={payment.id} className="flex min-w-0 items-baseline justify-between gap-3">
                 <span className={payment.voidedAt ? "text-muted-foreground line-through" : ""}>
-                  {payment.commissionCents === 0
-                    ? `Descuento del ${payment.settledAt ? dayLabel(payment.settledAt, format, zone, period.year) : "mes"}`
-                    : `Pago del ${payment.settledAt ? dayLabel(payment.settledAt, format, zone, period.year) : "mes"}`}
+                  {myPaymentTitle(payment, (iso) => dayLabel(iso, format, zone, period.year))}
                   {payment.voidedAt ? `, anulado el ${dayLabel(payment.voidedAt, format, zone, period.year)}` : ""}
                 </span>
                 <span className={`shrink-0 tabular-nums ${payment.voidedAt ? "text-muted-foreground line-through" : "font-medium"}`}>
@@ -2013,8 +2331,19 @@ export function MyCommissionsPanel({
                       )}
                     </p>
                     {line.voidedAfterPaid ? (
-                      <p className="mt-1 text-sm text-destructive">
-                        El cobro se anuló después de pagarte: se descuenta de tu siguiente pago.
+                      // Mientras lo debe, en rojo; ya cerrado, cómo se cerró.
+                      <p className={cn("mt-1 text-sm", line.owedClosedBy ? "text-muted-foreground" : "text-destructive")}>
+                        {line.owedClosedBy === "devuelto"
+                          ? line.owedPartlyDiscounted
+                            ? "El cobro se anuló después de pagarte: una parte se descontó de un pago y el resto lo devolviste."
+                            : "El cobro se anuló después de pagarte: ya devolviste esa comisión."
+                          : line.owedClosedBy === "saldado"
+                            ? line.owedPartlyDiscounted
+                              ? "El cobro se anuló después de pagarte: una parte se descontó de un pago y la clínica dio por saldado el resto."
+                              : "El cobro se anuló después de pagarte: la clínica lo dio por saldado."
+                            : line.owedClosedBy === "pago"
+                              ? "El cobro se anuló después de pagarte: ya se descontó de un pago."
+                              : "El cobro se anuló después de pagarte: se descuenta de tu siguiente pago."}
                       </p>
                     ) : line.settled ? (
                       <p className="mt-1 text-sm text-muted-foreground">
@@ -2041,16 +2370,78 @@ export function MyCommissionsPanel({
                   aria-expanded={showAll}
                   onClick={() => setExpandedFor(showAll ? null : periodKey)}
                 >
-                  {showAll ? "Ver menos" : `Ver los ${sorted.length} cobros`}
+                  {showAll ? "Ver menos" : showAllLabel(sorted)}
                 </Button>
               </div>
             ) : null}
           </>
         )}
-        <p className="text-sm text-muted-foreground">
-          Cuenta lo que ya se cobró de lo que atendiste. Lo atendido que aún no se cobra entra
-          cuando el paciente pague.
-        </p>
+        {firstUnpaid ? (
+          // Lo atendido que aún no se cobra va aquí, lejos de «Me corresponde»: no es lo que gana,
+          // es de lo que saldrá su parte. Solo el servicio y el día: sin paciente ni importe de cada uno.
+          <div className="flex min-w-0 flex-col gap-1 text-sm">
+            <p>
+              <span className="text-muted-foreground">Atendido y aún sin cobrar: </span>
+              <span className="font-medium tabular-nums">{formatMoney(firstUnpaid.unpaidCents, firstUnpaid.currency, format)}</span>.
+              {unpaid.length === 1 ? <span className="text-muted-foreground"> Tu parte llega cuando se cobre.</span> : null}
+            </p>
+            {unpaid.slice(1).map((item) => (
+              // Cada moneda aparte: nunca se suman.
+              <p key={item.currency}>
+                <span className="text-muted-foreground">En {currencyWord(item.currency, format)}: </span>
+                <span className="font-medium tabular-nums">{formatMoney(item.unpaidCents, item.currency, format)}</span>.
+              </p>
+            ))}
+            {unpaid.length > 1 ? <p className="text-muted-foreground">Tu parte llega cuando se cobre.</p> : null}
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={showAttended}
+                aria-controls={`sin-cobrar-${periodKey}`}
+                onClick={() => setAttendedFor(showAttended ? null : periodKey)}
+              >
+                {showAttended ? "Ver menos" : unpaidItems.length === 1 ? "Ver el servicio" : `Ver los ${unpaidItems.length} servicios`}
+              </Button>
+            </div>
+            {showAttended ? (
+              <div id={`sin-cobrar-${periodKey}`} className="flex min-w-0 flex-col gap-2">
+                {unpaid.map((group) => (
+                  <div key={group.currency} className="flex min-w-0 flex-col gap-1">
+                    {unpaid.length > 1 ? (
+                      <p className="text-xs font-medium text-muted-foreground">En {currencyWord(group.currency, format)}</p>
+                    ) : null}
+                    <ul
+                      aria-label={
+                        unpaid.length > 1
+                          ? `Atendido y aún sin cobrar en ${currencyWord(group.currency, format)}`
+                          : "Atendido y aún sin cobrar"
+                      }
+                      className="elevated flex min-w-0 flex-col divide-y rounded-xl border bg-card"
+                    >
+                      {unpaidItems
+                        .filter((item) => item.currency === group.currency)
+                        .map((item) => (
+                          <li key={item.id} className="flex min-w-0 items-baseline justify-between gap-3 px-4 py-2">
+                            <span className="min-w-0 break-words">{item.description}</span>
+                            <span className="shrink-0 text-muted-foreground">
+                              {dayLabel(item.attendedAt, format, zone, period.year)}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Cuenta lo que ya se cobró de lo que atendiste. Lo atendido que aún no se cobra entra
+            cuando el paciente pague.
+          </p>
+        )}
       </section>
 
       {mine.previous.length > 0 ? (

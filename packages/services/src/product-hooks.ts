@@ -377,8 +377,13 @@ export interface ProductHooks {
   /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
+   * `finishingPlanItemIds`: lo que llega hoy a sus sesiones previstas y la firma
+   * terminará si nadie dice «Falta otra sesión» (ADR 0161); se cuenta como hecho.
    */
-  closingParts(tx: Db, moment: Omit<EncounterMoment, "actorUserId">): Promise<ProductParts>
+  closingParts(
+    tx: Db,
+    moment: Omit<EncounterMoment, "actorUserId"> & { finishingPlanItemIds: string[] },
+  ): Promise<ProductParts>
   /** Lo que el producto agrega al detalle de la atención (odentIA: sus hallazgos del odontograma). */
   encounterDetailParts(tx: Db, moment: Omit<EncounterMoment, "actorUserId">): Promise<ProductParts>
   /** Al firmar la atención, ya cerrada: lo que el producto deja hecho, y lo que el cierre informa. */

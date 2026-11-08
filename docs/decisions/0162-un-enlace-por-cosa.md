@@ -1,4 +1,4 @@
-# 0157 · Un enlace por cosa: el destino va en la dirección
+# 0162 · Un enlace por cosa: el destino va en la dirección
 
 Fecha: 2026-11-08 · Estado: aceptada · Sustituye en [0037](0037-su-enlace-y-portal-en-un-paso.md) la parte de «Su enlace» (una página con todo, «Un enlace por cosa» descartado) · Precisa [0156](0156-cada-envio-manda-el-pdf-y-el-portal-muestra-todo-lo-suyo.md)
 

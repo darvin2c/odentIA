@@ -121,7 +121,8 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       left join org_profile op on op.organization_id = l.organization_id
-      where l.organization_id = ${orgId} and l.kind = 'ajuste' and l.voided_at is null ${branch}
+      -- Solo lo descontado en un pago: lo devuelto o saldado (ADR 0157) no baja lo que salió en pagos.
+      where l.organization_id = ${orgId} and l.kind = 'ajuste' and l.voided_at is null and s.kind = 'pago' ${branch}
     ), commission_line as materialized (
       select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
         f.commission::numeric as paid, 0::numeric as fresh, f.currency
@@ -374,10 +375,11 @@ export interface ExpenseTotals {
 }
 
 /**
- * Lo gastado de varios tramos en una consulta, con la regla de Finanzas: los
- * gastos del tramo que siguen en pie al cerrarlo, menos los de antes que se
- * anularon en el tramo. Con su valor congelado, en moneda del negocio; solo lo viejo
- * en otra moneda, sin valor ni factor, va aparte en su moneda.
+ * Lo gastado de varios tramos en una consulta, con la regla de Finanzas › Gastos
+ * (`getMonthExpenses`): los gastos con fecha en el tramo que no están anulados.
+ * Anular es decir que el gasto no ocurrió, así que baja el mes del gasto, no el
+ * de la anulación (ADR 0160). Con su valor congelado, en moneda del negocio; solo
+ * lo viejo en otra moneda, sin valor ni factor, va aparte en su moneda.
  */
 export async function expensesMany(tx: Db, orgId: string, spans: Span[], options: { branchId?: string } = {}): Promise<ExpenseTotals[][]> {
   const branch = options.branchId ? sql`and e.branch_id = ${options.branchId}` : sql``
@@ -400,10 +402,7 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
     join lateral (
       select e.currency::text as currency, e.category, ${kind} as kind, e.amount_cents::bigint as cents, e.amount_cents, e.business_cents from expense e
       where e.organization_id = ${orgId} and e.spent_at >= b.start_at and e.spent_at < b.end_at
-        and (e.voided_at is null or e.voided_at >= b.end_at) ${branch}
-      union all
-      select e.currency::text, e.category, ${kind}, -e.amount_cents::bigint, e.amount_cents, e.business_cents from expense e
-      where e.organization_id = ${orgId} and e.spent_at < b.start_at and e.voided_at >= b.start_at and e.voided_at < b.end_at ${branch}
+        and e.voided_at is null ${branch}
     ) x on true
     cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as value) v
     group by b.idx, 2, x.category, x.kind`)
@@ -985,27 +984,25 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
  * atendió sin cobrar todavía. Cuadra con Finanzas › Comisiones.
  */
 /**
- * Lo que atendió cada profesional en un tramo (precio × cantidad, al cambio de hoy) y lo que de
- * eso sigue sin cobrar hoy. Lo usan Reportes › Comisiones y «Mis comisiones» (lo propio).
+ * Cada servicio atendido en un tramo, en su moneda: lo atendido (precio × cantidad) y lo que de
+ * eso sigue sin cobrar hoy. La misma cuenta para Reportes (por profesional, al cambio de hoy) y
+ * para «Mis honorarios» (lo propio, servicio por servicio). Pide `op` en la consulta.
  */
-export async function attendedMany(
-  tx: Db,
+function attendedProceduresSql(
   orgId: string,
   { start, end }: { start: Date; end: Date },
-  { branchId, professionalUserId }: { branchId?: string; professionalUserId?: string } = {},
-) {
-  return tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
-    select e.professional_user_id as "userId", u.name,
-      round(sum(${todayValueSql(sql`ep.price_cents::bigint * ep.quantity`, sql`ep.currency`)}))::text as cents,
+  { branchId, professionalUserId }: { branchId?: string; professionalUserId?: string },
+): SQL {
+  return sql`(
+    select ep.id, e.professional_user_id as user_id, ep.description, e.started_at, ep.currency,
+      ep.price_cents::bigint * ep.quantity as cents,
       -- Una sesión de un tratamiento ya cargado (el cargo es de todo el tratamiento) no queda por cobrar aparte.
-      round(sum(${todayValueSql(sql`case when ch.charges > 0 then ch.unpaid
+      case when ch.charges > 0 then ch.unpaid
         when ep.plan_item_id is not null and exists (select 1 from patient_charge c2 where c2.organization_id = ep.organization_id
           and c2.plan_item_id = ep.plan_item_id and c2.voided_at is null) then 0
-        else ep.price_cents::bigint * ep.quantity end`, sql`ep.currency`)}))::text as unpaid
+        else ep.price_cents::bigint * ep.quantity end as unpaid
     from encounter_procedure ep
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
-    join "user" u on u.id = e.professional_user_id
-    cross join ${orgMoneySql(orgId)}
     left join lateral (
       -- Los cargos vigentes del procedimiento, juntos: con más de uno, lo atendido no se suma dos veces.
       select count(*) as charges, sum(greatest(c.amount_cents - coalesce(ap.applied, 0), 0)) as unpaid
@@ -1022,28 +1019,72 @@ export async function attendedMany(
       and e.finalized_at >= ${at(start)} and e.finalized_at < ${at(end)}
       ${branchId ? sql`and e.branch_id = ${branchId}` : sql``}
       ${professionalUserId ? sql`and e.professional_user_id = ${professionalUserId}` : sql``}
-    group by e.professional_user_id, u.name`)
+  )`
 }
 
 /**
- * «Mis comisiones»: lo que la persona atendió en el mes y aún no se cobra. Su comisión llega
- * cuando se cobre; se dice para que no parezca que lo atendido se perdió.
+ * Lo que atendió cada profesional en un tramo (precio × cantidad, al cambio de hoy) y lo que de
+ * eso sigue sin cobrar hoy. Lo usa Reportes › Comisiones.
+ */
+export async function attendedMany(
+  tx: Db,
+  orgId: string,
+  window: { start: Date; end: Date },
+  filters: { branchId?: string; professionalUserId?: string } = {},
+) {
+  return tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
+    select l.user_id as "userId", u.name,
+      round(sum(${todayValueSql(sql`l.cents`, sql`l.currency`)}))::text as cents,
+      round(sum(${todayValueSql(sql`l.unpaid`, sql`l.currency`)}))::text as unpaid
+    from ${orgMoneySql(orgId)}
+    cross join lateral ${attendedProceduresSql(orgId, window, filters)} l
+    join "user" u on u.id = l.user_id
+    group by l.user_id, u.name`)
+}
+
+/** Lo atendido del mes que aún no se cobra, en «Mis honorarios»: cada moneda aparte y cada servicio. */
+export interface MyAttendedUnpaid {
+  /** Lo que falta cobrar en cada moneda, en esa moneda: nunca se suman ni se convierten. */
+  currencies: Array<{ currency: string; unpaidCents: number }>
+  /**
+   * Cada servicio con algo por cobrar: solo el servicio, el día de la atención y su moneda. Sin
+   * paciente ni importe: lo financiero de cada paciente es de caja y administración, no de clínica.
+   */
+  items: Array<{ id: string; description: string; attendedAt: string; currency: string }>
+}
+
+/**
+ * «Mis honorarios»: lo que la persona atendió en el mes y aún no se cobra. Su parte llega
+ * cuando se cobre; se dice para que no parezca que lo atendido se perdió. Siempre de `userId`:
+ * la ruta lo toma de la sesión, nunca del pedido.
  */
 export async function myAttendedUnpaid(
   tx: Db,
   orgId: string,
   userId: string,
   period: { year: number; month: number },
-): Promise<{ attendedCents: number; unpaidCents: number }> {
+): Promise<MyAttendedUnpaid> {
   const zone = await getOrgLocale(tx, orgId)
   const next = addMonths(period, 1)
-  const [row] = await attendedMany(
-    tx,
-    orgId,
-    { start: monthStart(zone.timezone, period.year, period.month), end: monthStart(zone.timezone, next.year, next.month) },
-    { professionalUserId: userId },
-  )
-  return { attendedCents: safeCents(row?.cents), unpaidCents: safeCents(row?.unpaid) }
+  const window = { start: monthStart(zone.timezone, period.year, period.month), end: monthStart(zone.timezone, next.year, next.month) }
+  const rows = await tx.execute<{ id: string; description: string; attendedAt: Date | string; currency: string; unpaid: string }>(sql`
+    select l.id, l.description, l.started_at as "attendedAt", l.currency, l.unpaid::text as unpaid
+    from ${orgMoneySql(orgId)}
+    cross join lateral ${attendedProceduresSql(orgId, window, { professionalUserId: userId })} l
+    where l.unpaid > 0
+    -- La moneda del negocio primero; dentro de cada una, lo más reciente arriba.
+    order by (l.currency = op.currency) desc, l.currency, l.started_at desc, l.id`)
+  const currencies = new Map<string, number>()
+  for (const row of rows) currencies.set(row.currency, (currencies.get(row.currency) ?? 0) + safeCents(row.unpaid))
+  return {
+    currencies: [...currencies].map(([currency, unpaidCents]) => ({ currency, unpaidCents })),
+    items: rows.map((row) => ({
+      id: row.id,
+      description: row.description,
+      attendedAt: new Date(row.attendedAt).toISOString(),
+      currency: row.currency,
+    })),
+  }
 }
 
 /**

@@ -55,7 +55,7 @@ describe("la guía coincide con el código", () => {
       const topic = HELP_TOPICS.find((candidate) => candidate.path === item.to)
       expect(topic, `Falta el tema de ${item.label} (${item.to})`).toBeTruthy()
       // La entrada «Configuración» del menú lleva a su primera sección: vale el nombre de la sección o el del grupo.
-      expect([topic?.title, topic?.parent], item.to).toContain(item.label)
+      expect([topic?.title, topic?.menuLabel, topic?.parent], item.to).toContain(item.label)
     }
   })
 

@@ -344,6 +344,16 @@ export async function createCharge(
         "BUDGET_NOT_ACCEPTED",
         "La línea no pertenece a una propuesta aceptada vigente",
       )
+    // Lo que se cobra por sesión se debe al firmar cada visita (`finalizeEncounter`), que no mira lo
+    // cargado antes desde la línea: ese cargo era la misma sesión dos veces. Lo que se paga antes
+    // entra como adelanto, a favor, y cancela la visita al cobrarla; su comisión es la del cobro de
+    // esa visita, de quien la hizo (ADR 0159).
+    if (source.line.billingMode === "session")
+      throw conflict(
+        "CHARGED_PER_VISIT",
+        "Esto se cobra por sesión: cada visita se carga sola al firmar su atención. Si la persona paga antes, regístralo como adelanto.",
+        "budgetItemId",
+      )
     if (planItemId && planItemId !== source.line.planItemId)
       throw validation("El cargo conserva el tratamiento de su fuente")
     planItemId = source.line.planItemId
@@ -363,17 +373,15 @@ export async function createCharge(
         ),
       )
     const itemPrice = pricedItem?.priceCents ?? null
-    // Por tratamiento, se reparte entre sus sesiones. Por sesión no: firmar cada visita genera su
-    // propio cargo, que es el que comisiona; darle comisión también al adelanto la pagaría dos veces.
-    prepaidSessions = source.line.billingMode === "session" ? null : Math.max(1, pricedItem?.plannedSessions ?? 1)
+    // Su comisión se reparte entre las sesiones previstas del tratamiento.
+    prepaidSessions = Math.max(1, pricedItem?.plannedSessions ?? 1)
     description = source.line.title
     unit = source.line.currency
     if (input.currency && input.currency !== unit)
       throw conflict("CURRENCY_MISMATCH", "La moneda no coincide con la propuesta")
     // El cargo respeta el precio acordado de la línea, no la tarifa: una
     // revisión crea otra línea del mismo tratamiento y solo habilita la
-    // diferencia. En modo sesión cada visita cobra el precio por sesión con
-    // tope de visitas planificadas.
+    // diferencia.
     const generated = await tx
       .select({
         // Lo cobrado de un tratamiento incluye lo devuelto (ADR 0068): una
@@ -382,7 +390,6 @@ export async function createCharge(
           sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents} + ${patientCharge.discountCents}`.mapWith(
             Number,
           ),
-        encounterProcedureId: patientCharge.encounterProcedureId,
       })
       .from(patientCharge)
       .where(
@@ -394,36 +401,19 @@ export async function createCharge(
           isNull(patientCharge.voidedAt),
         ),
       )
-    // En sesión cada visita atendida cuenta (acto no nulo), igual que el cierre clínico.
-    const visitCount = generated.filter((g) => g.encounterProcedureId !== null).length
-    if (source.line.billingMode === "session") {
-      const planned = source.line.sessionsPlanned ?? 1
-      if (visitCount >= planned)
-        throw conflict(
-          "CHARGE_EXCEEDS_BUDGET",
-          "El tratamiento ya tiene cobradas sus visitas planificadas",
-        )
-      const sessionPrice = source.line.priceCents ?? itemPrice ?? 0
-      if (sessionPrice <= 0)
-        throw conflict("CHARGE_EXCEEDS_BUDGET", "La línea no tiene precio por sesión acordado")
-      amountCents ??= sessionPrice
-      if (amountCents > sessionPrice)
-        throw conflict("CHARGE_EXCEEDS_BUDGET", "El cargo supera el precio por sesión acordado")
-    } else {
-      const agreed = source.line.priceCents ?? itemPrice ?? 0
-      const remaining = agreed - sum(generated)
-      if (remaining <= 0)
-        throw conflict(
-          "CHARGE_EXCEEDS_BUDGET",
-          "El tratamiento ya tiene cargado el importe acordado",
-        )
-      amountCents ??= remaining
-      if (amountCents > remaining)
-        throw conflict(
-          "CHARGE_EXCEEDS_BUDGET",
-          "El cargo supera el importe pendiente de generar de este tratamiento",
-        )
-    }
+    const agreed = source.line.priceCents ?? itemPrice ?? 0
+    const remaining = agreed - sum(generated)
+    if (remaining <= 0)
+      throw conflict(
+        "CHARGE_EXCEEDS_BUDGET",
+        "El tratamiento ya tiene cargado el importe acordado",
+      )
+    amountCents ??= remaining
+    if (amountCents > remaining)
+      throw conflict(
+        "CHARGE_EXCEEDS_BUDGET",
+        "El cargo supera el importe pendiente de generar de este tratamiento",
+      )
   } else if (input.encounterProcedureId) {
     const [source] = await tx
       .select({ procedure: encounterProcedure, branchId: encounter.branchId })

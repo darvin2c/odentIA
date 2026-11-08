@@ -3321,16 +3321,14 @@ export async function reviseBudget(
     }
   }
   // Cada camino que conserva algún tratamiento; lo nuevo entra a todos.
-  // Un camino se conserva si algo propio suyo (no lo común) sigue en la revisión.
+  // Un camino sale solo si se desmarcó todo lo propio suyo (no lo común). El
+  // que solo lleva lo común (otro camino lo amplía) sigue mientras vaya algo suyo.
   const common = commonPlanItems(oldLines, sources.length)
-  const kept = sources.filter((source) =>
-    oldLines.some(
-      (line) =>
-        line.optionId === source.id &&
-        input.itemIds.includes(line.planItemId) &&
-        (sources.length === 1 || !common.has(line.planItemId)),
-    ),
-  )
+  const kept = sources.filter((source) => {
+    const mine = oldLines.filter((line) => line.optionId === source.id)
+    const own = mine.filter((line) => sources.length === 1 || !common.has(line.planItemId))
+    return (own.length > 0 ? own : mine).some((line) => input.itemIds.includes(line.planItemId))
+  })
   // Lo hecho o cobrado conserva lo acordado tal cual (también una promoción que ya terminó).
   const used = await usedPlanItems(tx, orgId, patientId, input.itemIds)
   const plan = kept.length > 0 ? kept : sources.slice(0, 1)

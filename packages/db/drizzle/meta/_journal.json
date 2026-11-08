@@ -460,8 +460,15 @@
     {
       "idx": 65,
       "version": "7",
-      "when": 1794146377249,
-      "tag": "0065_confirmado_en_la_atencion",
+      "when": 1794146019772,
+      "tag": "0065_deuda_del_profesional",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794152140418,
+      "tag": "0066_confirmado_en_la_atencion",
       "breakpoints": true
     }
   ]

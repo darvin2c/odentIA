@@ -1,0 +1,9 @@
+ALTER TABLE "commission_settlement" ADD COLUMN "kind" text DEFAULT 'pago' NOT NULL;--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD COLUMN "method_type_code" text;--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD COLUMN "cash_movement_id" uuid;--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD CONSTRAINT "commission_settlement_cash_movement_id_cash_movement_id_fk" FOREIGN KEY ("cash_movement_id") REFERENCES "public"."cash_movement"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD CONSTRAINT "commission_settlement_kind_check" CHECK ("commission_settlement"."kind" IN ('pago','devuelto','saldado'));--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD CONSTRAINT "commission_settlement_method_check" CHECK (("commission_settlement"."kind" = 'devuelto') = ("commission_settlement"."method_type_code" IS NOT NULL) AND ("commission_settlement"."method_type_code" IS NULL OR "commission_settlement"."method_type_code" IN ('10','30','48')));--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD CONSTRAINT "commission_settlement_cash_check" CHECK ("commission_settlement"."cash_movement_id" IS NULL OR ("commission_settlement"."kind" = 'devuelto' AND "commission_settlement"."method_type_code" = '10'));--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD CONSTRAINT "commission_settlement_forgiven_check" CHECK ("commission_settlement"."kind" <> 'saldado' OR length(trim(coalesce("commission_settlement"."notes", ''))) > 0);--> statement-breakpoint
+ALTER TABLE "commission_settlement" ADD CONSTRAINT "commission_settlement_debt_expense_check" CHECK ("commission_settlement"."kind" = 'pago' OR "commission_settlement"."expense_id" IS NULL);

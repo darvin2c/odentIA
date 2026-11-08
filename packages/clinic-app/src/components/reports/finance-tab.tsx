@@ -433,11 +433,9 @@ function Cascade({ data }: { data: ReportFinance }) {
       value: item.cents,
       kind: "less" as const,
       note:
-        item.cents < 0
-          ? `En el periodo se anularon más gastos de ${item.category} de periodos anteriores de los que se registraron: suma a lo que deja.`
-          : item.category === "Materiales"
-            ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
-            : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
+        item.category === "Materiales"
+          ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
+          : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
       link: canFinance ? (
         <Link to="/finance" search={gastosSearch} className="font-bold text-primary-soft-foreground underline-offset-2 hover:underline">
           Ver los gastos

@@ -48,11 +48,10 @@ export function PatientPortalAccessSection({
   /** Sin «Su enlace»: abierta desde «Portal del paciente» del «…», que ya tiene el suyo. */
   withLink?: boolean
 }) {
-  // Dar el acceso, mostrar el QR, decir el código y quitarlo es de quien ve la historia
-  // (ADR 0156); recepción solo envía el enlace de un acceso ya dado por su WhatsApp.
-  const canGive = usePermission("clinical.read")
+  // Recepción, la dueña, el administrador y el odontólogo o el médico: todos lo mismo.
+  const canRead = usePermission("clinical.read")
   const canEditRecord = usePermission("patients.write")
-  const canManage = canGive || canEditRecord
+  const canManage = canRead || canEditRecord
   const canConfigure = usePermission("settings.write")
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -129,8 +128,8 @@ export function PatientPortalAccessSection({
           <EmptyState
             title="Sin acceso al portal"
             description="Con el portal ve lo suyo cuando quiera, desde su teléfono. Se da en persona, con su documento."
-            actionLabel={canGive && summary.candidates.length > 0 ? "Dar acceso al portal" : undefined}
-            onAction={canGive && summary.candidates.length > 0 ? () => setDrawer({ kind: "give" }) : undefined}
+            actionLabel={summary.candidates.length > 0 ? "Dar acceso al portal" : undefined}
+            onAction={summary.candidates.length > 0 ? () => setDrawer({ kind: "give" }) : undefined}
           />
         ) : (
           <ul className="flex flex-col divide-y rounded-lg border">
@@ -157,23 +156,16 @@ export function PatientPortalAccessSection({
                   <Button type="button" variant={row.reentryRequested ? "default" : "outline"} size="sm" onClick={() => setDrawer({ kind: "resend", row })}>
                     Enviar nuevo enlace
                   </Button>
-                  {canGive ? (
-                    <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setRevoking(row)}>
-                      Quitar acceso
-                    </Button>
-                  ) : null}
+                  <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setRevoking(row)}>
+                    Quitar acceso
+                  </Button>
                 </div>
               </li>
             ))}
           </ul>
         )}
         <p className="text-sm text-muted-foreground">{portalSeesText(summary.allowedScope)}</p>
-        {!canGive ? (
-          <p className="text-sm text-muted-foreground">
-            El acceso lo da quien puede ver la historia, porque el portal muestra sus documentos. Tú puedes enviarle el enlace por su WhatsApp.
-          </p>
-        ) : null}
-        {canGive && summary.access.length > 0 && pendingCandidates.length > 0 ? (
+        {summary.access.length > 0 && pendingCandidates.length > 0 ? (
           <Button type="button" variant="outline" className="self-start" onClick={() => setDrawer({ kind: "give" })}>
             Dar acceso a otra persona
           </Button>
@@ -319,7 +311,6 @@ function AccessDrawer({
   mode: AccessMode
   onClose: () => void
 }) {
-  const canGive = usePermission("clinical.read")
   const free = summary.candidates.filter((candidate) => !summary.access.some((row) => row.contactId === candidate.contactId))
   const navigate = useNavigate()
   const [given, setGiven] = useState<PortalAccessGiven | null>(null)
@@ -333,8 +324,7 @@ function AccessDrawer({
     defaultValues: {
       contactId: mode.kind === "give" ? (free[0]?.contactId ?? "") : mode.row.contactId,
       identityChecked: false,
-      // Recepción solo envía por su WhatsApp: el QR y el código no van a su pantalla.
-      delivery: (canGive ? "qr" : "whatsapp") as "qr" | "whatsapp",
+      delivery: "qr" as "qr" | "whatsapp",
     },
     validators: { onSubmit: accessSchema(mode, summary) },
     onSubmit: async ({ value }) => {
@@ -362,9 +352,7 @@ function AccessDrawer({
       title={title}
       description={
         mode.kind === "resend"
-          ? canGive
-            ? "Para volver a entrar. Su acceso sigue vigente: no hace falta volver a comprobar su identidad. El enlace anterior y las sesiones abiertas dejan de servir."
-            : "Le llegan por su WhatsApp el enlace y, en otro mensaje, su código: no los verás. El enlace anterior y las sesiones abiertas dejan de servir."
+          ? "Para volver a entrar. Su acceso sigue vigente: no hace falta volver a comprobar su identidad. El enlace anterior y las sesiones abiertas dejan de servir."
           : undefined
       }
       submitLabel={mode.kind === "give" ? "Dar acceso" : "Enviar"}
@@ -456,12 +444,10 @@ function AccessDrawer({
                       field.handleBlur()
                     }}
                   >
-                      {canGive ? (
-                        <label htmlFor="portal-delivery-qr" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-                          <RadioGroupItem id="portal-delivery-qr" value="qr" />
-                          Está aquí: mostrar QR
-                        </label>
-                      ) : null}
+                    <label htmlFor="portal-delivery-qr" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+                      <RadioGroupItem id="portal-delivery-qr" value="qr" />
+                      Está aquí: mostrar QR
+                    </label>
                     <label htmlFor="portal-delivery-whatsapp" className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
                       <RadioGroupItem id="portal-delivery-whatsapp" value="whatsapp" disabled={!whatsappReady} className="mt-0.5" />
                       <span className="flex flex-col gap-0.5">
@@ -473,9 +459,7 @@ function AccessDrawer({
                     </label>
                   </RadioGroup>
                     <FieldDescription>
-                      {canGive
-                        ? "El código de 6 dígitos se lo dices tú, en persona o por llamada."
-                        : "El código de 6 dígitos le llega en otro mensaje de su WhatsApp."}
+                      El código de 6 dígitos se lo dices tú, en persona o por llamada.
                     </FieldDescription>
                 </>
               )}

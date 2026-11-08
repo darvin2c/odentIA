@@ -93,7 +93,8 @@ export function EncounterTreatments({
       <div className="flex flex-col gap-1.5">
         <h3 className="font-heading text-base font-medium">Hecho hoy</h3>
         <p className="text-sm text-muted-foreground">
-          ¿Hiciste la sesión de hoy? Regístrala. «Completar» solo cuando terminaste el tratamiento.
+          ¿Hiciste la sesión de hoy? Regístrala. Lo que con ella llega a sus sesiones previstas
+          queda realizado al firmar; «Completar» lo termina antes.
         </p>
       </div>
 

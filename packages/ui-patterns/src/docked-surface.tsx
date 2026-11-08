@@ -5,6 +5,7 @@ import {
   SideColumn,
   type SideColumnWidth,
   SideDockPortal,
+  useDraftKeptInPage,
   useSideColumnWidth,
   useSideDock,
   useSideDockDraftGuard,
@@ -104,6 +105,7 @@ function DockedColumn({
 }: Pick<DockedSurfaceProps, "bounds" | "children"> & { dirty: boolean }) {
   const [width, resize] = useSideColumnWidth(`odentia.side-panel.${bounds.initial}`, bounds)
   const DraftGuard = useSideDockDraftGuard()
+  const keptInPage = useDraftKeptInPage()
   const ref = React.useRef<HTMLElement | null>(null)
   // Muchas pantallas no informan `isDirty` (en un cajón modal no hacía falta):
   // haber escrito algo aquí dentro ya cuenta como cambios pendientes.
@@ -173,7 +175,7 @@ function DockedColumn({
       >
         {children}
       </div>
-      {DraftGuard ? <DraftGuard dirty={armed && (dirty || touched)} /> : null}
+      {DraftGuard ? <DraftGuard dirty={armed && (dirty || touched)} keptInPage={keptInPage} /> : null}
     </SideColumn>
   )
 }
