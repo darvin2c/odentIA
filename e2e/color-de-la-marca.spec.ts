@@ -81,6 +81,13 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await testInfo.attach("chat-web", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await gotoHydrated(page, tenant(org.slug, "/settings"))
 
+  // Un naranja fuerte lleva letra blanca: el botón se tuesta apenas en vez de cambiar a letra oscura.
+  await block.getByRole("button", { name: "Naranja", exact: true }).click()
+  const atender = block.getByText("Atender", { exact: true })
+  expect(await atender.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(255, 255, 255)")
+  expect(await atender.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(204, 77, 10)")
+  await testInfo.attach("naranja", { body: await block.screenshot(), contentType: "image/png" })
+
   // Un celeste claro: el botón lo conserva exacto con letra oscura y el texto usa un tono legible.
   await block.getByRole("button", { name: "Elegir otro color" }).click()
   const code = block.getByLabel("Código, si lo tienes")
