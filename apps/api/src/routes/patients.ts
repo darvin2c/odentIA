@@ -42,6 +42,7 @@ import {
   getPatientSummary,
   getTimeline,
   getPlanNextStep,
+  getPlanNextSteps,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
@@ -918,6 +919,20 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       withOrgContext(deps.db, orgId, (tx) =>
         getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
       ),
+    )
+  })
+  // Todo lo que sigue, en una lista (el Resumen): la misma regla y el mismo permiso.
+  app.get("/:id/next-steps", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
+    }
+    return runService(c, 200, async () =>
+      (
+        await withOrgContext(deps.db, orgId, (tx) =>
+          getPlanNextSteps(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+        )
+      ).steps,
     )
   })
 

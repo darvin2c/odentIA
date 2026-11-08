@@ -15,6 +15,7 @@ import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import {
+  appointmentServesControl,
   controlWindowStart,
   isOverdueToday,
   LIVE_APPOINTMENT_STATUSES,
@@ -462,7 +463,7 @@ export async function listFollowUps(
   const { timezone } = await findOrgLocale(tx, orgId)
   const now = new Date()
   const [next] = await tx
-    .select({ startsAt: appointment.startsAt })
+    .select({ id: appointment.id, startsAt: appointment.startsAt })
     .from(appointment)
     .where(
       and(
@@ -481,5 +482,13 @@ export async function listFollowUps(
     overdue: isOverdueToday(row, next?.startsAt ?? null, today?.startsAt ?? null, timezone, now),
     /** La cita viva de hoy con la que se cumple al firmarse (`servedToday`); nula si no. */
     servedToday: servedToday(row, today?.startsAt ?? null, timezone, now) ? today : null,
+    /**
+     * Su próxima cita, si le sirve sin ser la suya (`appointmentServesControl`): el Plan
+     * dice lo mismo que «Qué sigue» y el Resumen (QA del 8 nov, M6).
+     */
+    servedBy:
+      row.status === "pendiente" && next && appointmentServesControl(row, next.startsAt, timezone)
+        ? { id: next.id, startsAt: next.startsAt }
+        : null,
   }))
 }
