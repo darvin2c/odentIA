@@ -3272,7 +3272,11 @@ export interface PublicLinkInfo {
   stops: UnsubscribeWords | null
 }
 
-/** Información mínima del enlace: nunca incluye paciente ni contacto. */
+/**
+ * Información mínima del enlace de baja (`/baja/:token`): nunca incluye paciente ni contacto.
+ * Solo responde por una baja: los botones «Confirmar» y «Cancelar» del correo van a su enlace
+ * (`personalLinkForEmailToken`), que mira la facultad de hoy. Vencido, no dice cuándo es la cita.
+ */
 export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLinkInfo> {
   const [link] = await tx
     .select()
@@ -3281,10 +3285,12 @@ export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLi
     .limit(1)
   if (!link) throw notFound("Enlace")
   const purpose = assertLinkPurpose(link.purpose)
+  // Un token de confirmar o cancelar (también uno vencido al quitar el enlace) no se lee por aquí.
+  if (purpose !== "baja") throw notFound("Enlace")
   const expired = link.expiresAt.getTime() < Date.now()
   let when: string | null = null
   let timeZone = NEUTRAL_TIMEZONE
-  if (link.appointmentId) {
+  if (link.appointmentId && !expired) {
     const [appt] = await tx
       .select({
         startsAt: appointment.startsAt,

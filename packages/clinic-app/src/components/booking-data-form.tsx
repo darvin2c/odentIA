@@ -42,7 +42,6 @@ import {
   BirthDateInput,
   clearSubmitErrors,
   ErrorState,
-  internationalText,
   LoadingState,
   PhoneInput,
   SubmitButton,
@@ -1255,7 +1254,8 @@ export function YouReview({
   clinicName: string
   slug: string
 }) {
-  const phoneShown = you.phone ? internationalText(you.phone) : null
+  // Llega abreviado («•••701»): se muestra tal cual.
+  const phoneShown = you.phone
   const asks = (field: YouField) => fields.includes(field)
   const whatsappLine = asks("phone")
     ? "Te escribiremos por WhatsApp a este número sobre esta cita: la confirmación, los recordatorios y los cambios."

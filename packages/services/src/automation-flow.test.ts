@@ -1005,9 +1005,11 @@ describe("los enlaces del correo pasan por la agenda", () => {
   })
 
   it("la baja del enlace apaga solo el tipo de mensaje de ese correo", async () => {
-    const { c, p, bajaToken } = await remindedByEmail()
+    const { c, p, bajaToken, confirmToken } = await remindedByEmail()
     // La página dice el tipo que apaga (el del recordatorio), no «todos los mensajes».
     expect((await run(c, (tx) => getPublicLinkInfo(tx, bajaToken))).stops).toEqual(UNSUBSCRIBE_WORDS.recordatorio)
+    // Por esta página solo se lee una baja: el botón «Confirmar» de un correo viejo no dice el día ni la hora.
+    await expect(run(c, (tx) => getPublicLinkInfo(tx, confirmToken))).rejects.toMatchObject({ code: "NOT_FOUND" })
     await run(c, (tx) => unsubscribeByToken(tx, bajaToken))
     expect(await run(c, (tx) => getMessagePermissions(tx, c.orgId, p.contactId))).toMatchObject([
       { purpose: "recordatorio", granted: false, source: "baja" },

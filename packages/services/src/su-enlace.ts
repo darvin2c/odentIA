@@ -29,7 +29,7 @@ import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
-import { appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
+import { adminRuntime, appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
   CONSENT_TO_SIGN_MESSAGE_KEY,
   CONSENT_TO_SIGN_SUBJECT,
@@ -164,7 +164,7 @@ export type PersonalLinkClosedReason = "hecho" | "vencido" | "cita-pasada" | "qu
  */
 export interface PersonalLinkResend {
   channel: "whatsapp" | "correo"
-  /** «•••701» o «e•••@gmail.com»; vacío si no hay qué mostrar. */
+  /** «•••701» o «e•••@g•••.com»; vacío si no hay qué mostrar. */
   to: string
   /** Cuándo salió el que se le envió hoy; nulo si aún puede pedir uno. */
   sentAt: string | null
@@ -215,6 +215,7 @@ export interface PersonalLinkView {
    * que tiene su chat, no quién es. Sus nombres y apellidos, para que corrija
    * el que no es suyo (`PersonalLinkDataInput.name`).
    */
+  /** `document` y `phone` van abreviados («DNI ••••8912», «•••701»): para reconocerlos, no para leerlos. */
   you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
   /**
    * Lo que aún no aceptó o no respondió: se le pide en el mismo paso en que
@@ -321,7 +322,8 @@ async function youOf(
           givenNames: person.givenNames ?? null,
           familyName: person.familyName ?? null,
           document: shortDocument(person.docType, person.docNumber),
-          phone: person.phone ?? null,
+          // Enmascarado, como «Enviarme uno nuevo»: quien tiene el token (quizá el representante) no ve el número entero.
+          phone: maskedAddress("whatsapp", person.phone ?? null) || null,
         }
       : null,
     // También al cambiar su cita o agendar lo aceptado: lo que no respondió se le pregunta ahí.
@@ -1881,7 +1883,11 @@ async function sendLinkMessage(
 /** La traza de «Enviarme uno nuevo»: cuenta para el tope del día y dice cuándo salió. */
 const RESENT_ACTION = "personal_link.resent"
 
-/** «•••701» de un celular o «e•••@gmail.com» de un correo: lo justo para reconocerlo. */
+/**
+ * «•••701» de un celular o «e•••@g•••.com» de un correo: lo justo para que lo reconozca quien
+ * ya lo sabe. El dominio tampoco va entero: en un dominio propio (`familia-quispe.pe`) bastaría
+ * para saber de quién es.
+ */
 export function maskedAddress(channel: "whatsapp" | "correo", value: string | null): string {
   if (!value) return ""
   if (channel === "whatsapp") {
@@ -1889,7 +1895,11 @@ export function maskedAddress(channel: "whatsapp" | "correo", value: string | nu
     return digits.length >= 3 ? `•••${digits.slice(-3)}` : ""
   }
   const [user, domain] = value.split("@")
-  return user && domain ? `${user.slice(0, 1)}•••@${domain}` : ""
+  if (!user || !domain) return ""
+  const dot = domain.lastIndexOf(".")
+  const host = dot > 0 ? domain.slice(0, dot) : domain
+  const tld = dot > 0 ? domain.slice(dot) : ""
+  return `${user.slice(0, 1)}•••@${host.slice(0, 1)}•••${tld}`
 }
 
 /** El que se le envió hoy (en el día de la clínica) a esa persona por ese paciente, o el que salió desde ese enlace. */
@@ -1943,6 +1953,10 @@ async function addressOf(tx: Db, orgId: string, contactId: string, channel: "wha
  */
 async function resendOffer(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkResend | null> {
   if (!link.patientId || !link.decides) return null
+  // Sale sin nadie del equipo, a nombre de Sofi (como lo que hace en el enlace, `tellConversation`):
+  // con Sofi apagada o los agentes en pausa no sale, y la página le dice que escriba a la clínica.
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn || runtime.agentsPaused) return null
   if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) return null
   try {
     await serviceRecipient(tx, orgId, link.patientId, link.row.contactId)
@@ -1959,7 +1973,8 @@ async function resendOffer(tx: Db, orgId: string, link: ResolvedPersonalLink): P
 
 /** La cita del enlace ya pasó y era lo que lo mantenía vivo. */
 async function ownAppointmentPassed(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkWhen | null> {
-  if (!link.row.appointmentId) return null
+  // Sin facultad sobre la cita (S3) tampoco se le dice cuándo fue.
+  if (!link.row.appointmentId || !link.handlesAppointment) return null
   const [row] = await tx
     .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
     .from(appointment)
@@ -2080,8 +2095,8 @@ export async function showPersonalLink(
 
 /**
  * Los enlaces de confirmar o cancelar de un correo (`/c/:token`) solo llevan a
- * «Su enlace» (ADR 0037): con el token del correo, aún vigente, se da el
- * enlace de esa persona con esa cita, donde confirma, cambia o cancela.
+ * «Su enlace» (ADR 0037): con el token del correo, aún vigente y sin usar, se da
+ * el enlace de esa persona con esa cita, donde confirma, cambia o cancela.
  */
 export async function personalLinkForEmailToken(
   tx: Db,
@@ -2102,6 +2117,8 @@ export async function personalLinkForEmailToken(
     row.purpose === "baja" ||
     !row.appointmentId ||
     !row.contactId ||
+    // Usado: al mover, cancelar o atender la cita sus botones quedan usados y ya no emiten nada.
+    row.usedAt !== null ||
     row.expiresAt.getTime() <= Date.now()
   ) {
     throw linkExpired()

@@ -525,7 +525,9 @@ async function bookingLinkFor(
 /**
  * Quien abre el enlace puede ver y manejar la cita del paciente: la propia persona, su
  * representante legal vigente o un autorizado de información vigente, lo mismo que pide el
- * chat (`resolveAgentPatientContext`). Un vínculo sin autorización (una tía) no.
+ * chat (`resolveAgentPatientContext`). Un vínculo sin autorización (una tía) no. Solo eso es
+ * «no autorizado»: otro error (el paciente o el contacto ya no existen o no están activos)
+ * sigue su curso con su propia causa, para que nadie lo lea como falta de autorización.
  */
 export async function contactHandlesAppointment(
   tx: Db,
@@ -536,7 +538,7 @@ export async function contactHandlesAppointment(
   return resolveAgentPatientContext(tx, orgId, contactId, patientId).then(
     () => true,
     (error: unknown) => {
-      if (error instanceof ServiceError) return false
+      if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") return false
       throw error
     },
   )

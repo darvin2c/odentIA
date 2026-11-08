@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { PersonalLinkView } from "../../lib/booking-link"
+import { type PersonalLinkView, withLinkViewDefaults } from "../../lib/booking-link"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { unsignableWords } from "./link-steps"
 import { validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
@@ -83,5 +83,19 @@ describe("sin firmar desde el teléfono", () => {
     expect(unsignableWords({ why: "sin-documento", speaksTo: "representante", patientFirstName: "Mateo" }).notice).toBe("Este lo firmas tú en la cita de Mateo, antes de empezar.")
     expect(unsignableWords({ why: "menor", speaksTo: "paciente", patientFirstName: "Mateo" }).inPlace).toBe("Lo firma tu madre, padre o tutor en tu cita")
     expect(unsignableWords({ why: "sin-fecha", speaksTo: "paciente", patientFirstName: "Rosa" }).inPlace).toBe("Lo firmas en tu cita")
+  })
+})
+
+describe("mientras dura la entrega", () => {
+  it("la vista de la API anterior, sin los campos nuevos, no rompe la página ni ofrece «Reservar otra»", () => {
+    const { toSchedule, another, confirmVia, remindersVia, closed, ...old } = view({
+      consents: [{ id: "c1", title: "Exodoncia" } as PersonalLinkView["consents"][number]],
+    })
+    const ready = withLinkViewDefaults(old as PersonalLinkView)
+    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null })
+    // Antes se firmaba siempre desde el teléfono.
+    expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
+    expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()
+    expect(() => whatFollows(old as PersonalLinkView, { key: "datos", at: THURSDAY })).toThrow()
   })
 })

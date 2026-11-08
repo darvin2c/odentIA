@@ -64,6 +64,7 @@ export interface PersonalLinkView {
   /** Qué falta de sus datos y si se le pregunta su salud (opcional); `missing` vacío: solo su salud. */
   data: { missing: MissingDatum[]; health: boolean } | null
   /** Quien ya es paciente, al reservar: lo que ya sabemos, con el documento abreviado; sus nombres, para corregirlos. */
+  /** `document` y `phone` llegan abreviados del servidor («DNI ••••8912», «•••701»): se muestran tal cual. */
   you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
   /**
    * Lo que aún no aceptó (el aviso) o no respondió (promociones): se pide en el mismo paso.
@@ -162,8 +163,33 @@ async function publicFetch<T>(url: string, init?: RequestInit): Promise<T> {
 const base = (slug: string) => `${API_URL}/api/public/booking/${encodeURIComponent(slug)}`
 const post = <T>(url: string, body: unknown) => publicFetch<T>(url, { method: "POST", body: JSON.stringify(body) })
 
-export function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
-  return publicFetch(`${base(slug)}?token=${encodeURIComponent(token)}`)
+/**
+ * Mientras dura una entrega la página puede llegar antes que la API (Cloudflare y el VPS se
+ * publican por separado): lo que la API anterior aún no devuelve llega vacío, así la página no
+ * se rompe ni ofrece lo que esa API no sabe hacer («Reservar otra» sin `another`). Lo de antes
+ * se firmaba siempre desde el teléfono: sin `signable`, se puede firmar.
+ */
+export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
+  return {
+    ...view,
+    consents: (view.consents ?? []).map((consent) => ({
+      ...consent,
+      procedureRef: consent.procedureRef ?? null,
+      appointment: consent.appointment ?? null,
+      signable: consent.signable ?? true,
+      why: consent.why ?? null,
+    })),
+    toSchedule: view.toSchedule ?? [],
+    another: view.another ?? null,
+    confirmVia: view.confirmVia ?? null,
+    remindersVia: view.remindersVia ?? null,
+    closed: view.closed ?? null,
+  }
+}
+
+export async function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
+  const result = await publicFetch<{ data: PersonalLinkView }>(`${base(slug)}?token=${encodeURIComponent(token)}`)
+  return { ...result, data: withLinkViewDefaults(result.data) }
 }
 
 /** A dónde lleva el enlace corto para llegar a una sede (`/llegar/<sede>`). */

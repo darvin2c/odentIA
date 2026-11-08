@@ -4,7 +4,6 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  internationalText,
   LoadingState,
   PageShell,
   SubmitButton,
@@ -287,7 +286,7 @@ function messagesSummary(view: PersonalLinkView, messages: PersonalLinkMessages)
     const phone = view.you?.phone ?? null
     parts.push(
       view.remindersVia === "whatsapp"
-        ? `Te escribimos por WhatsApp${phone ? ` al ${internationalText(phone)}` : ""} sobre tus citas.`
+        ? `Te escribimos por WhatsApp${phone ? ` al ${phone}` : ""} sobre tus citas.`
         : view.remindersVia === "correo"
           ? "Te escribimos por correo sobre tus citas."
           : "Recordatorios de tus citas: sí.",

@@ -17,12 +17,13 @@ import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
 import { expect, it, onTestFinished, vi } from "vitest"
 import { createRoom } from "./appointments.js"
-import { setMessageChoice } from "./automation.js"
+import { invalidateAppointmentTokens, setMessageChoice } from "./automation.js"
 import { listApprovedMessages } from "./clinic-messages.js"
 import {
   cancelBookingLinkAppointment,
   changeBookingLinkAppointment,
   confirmBookingLinkAppointment,
+  contactHandlesAppointment,
   createBookingLink,
   issueAgendaLink,
   issuePersonalLink,
@@ -64,6 +65,7 @@ import {
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkView,
+  maskedAddress,
   personalLinkForEmailToken,
   resendPersonalLink,
   sendConsentToSign,
@@ -114,6 +116,11 @@ it("uno por persona; «Tus datos» pide solo lo que falta, se envía una vez y n
   // Nada de lo guardado viaja a la página: ni su celular ni su apellido.
   expect(JSON.stringify(view)).not.toContain("987111222")
   expect(JSON.stringify(view)).not.toContain("Ríos")
+  // Tampoco cuando el enlace ofrece reservar y muestra «Tus datos»: el celular va abreviado.
+  const booking = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: pedro.personId, patientId: pedro.patientId, booking: true }, { secretsKey: KEY }))
+  const bookingView = await f.run((tx) => getPersonalLinkView(tx, ORG, booking.token))
+  expect(bookingView.you?.phone).toBe("•••222")
+  expect(JSON.stringify(bookingView)).not.toContain("987111222")
 
   // Lo que no falta no se toca aunque venga en el envío.
   await f.run((tx) =>
@@ -309,6 +316,11 @@ it("S3: un familiar sin autorización no ve ni maneja la cita, tampoco con un en
   await expect(
     f.run((tx) => issueAgendaLink(tx, ORG, { conversationId, patientId: f.patient.id }, { secretsKey: KEY })),
   ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  // Solo la falta de autorización es «no autorizado»: un contacto desactivado no se disfraza de eso.
+  expect(await f.run((tx) => contactHandlesAppointment(tx, ORG, tia!.id, f.patient.id))).toBe(false)
+  const [primo] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Luis Primo", isActive: false }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: primo!.id, relationship: "family", createdBy: f.actor })
+  await expect(f.run((tx) => contactHandlesAppointment(tx, ORG, primo!.id, f.patient.id))).rejects.toMatchObject({ code: "NOT_FOUND" })
   // Con su autorización vigente sí ve la cita (y nada más que la cita).
   await f.run((tx) =>
     grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: tia!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }),
@@ -361,6 +373,13 @@ it("S4: «Quitar enlace» y terminar el vínculo vencen los botones del correo; 
     await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, tias, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
     const issued = await ownerDb.select({ id: appointmentBookingLink.id }).from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, tia!.id))
     expect(issued).toEqual([])
+
+    // Usado (la cita se movió, se canceló o se atendió: `invalidateAppointmentTokens`), ya no emite ni alarga «Su enlace».
+    await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id }, { secretsKey: KEY }))
+    const used = await emailToken(appointmentId, personId, "confirm")
+    expect((await f.run((tx) => personalLinkForEmailToken(tx, ORG, used, { secretsKey: KEY }))).token).toMatch(/^[0-9a-f]{64}$/)
+    await f.run((tx) => invalidateAppointmentTokens(tx, ORG, appointmentId))
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, used, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
   } finally {
     configurePublicLinks(null)
   }
@@ -1553,6 +1572,32 @@ it("«Enviarme uno nuevo»: desde un enlace vencido le llega otro a su canal, un
     await expire(aunt.linkId)
     expect((await f.run((tx) => getPersonalLinkView(tx, ORG, aunt.token))).closed?.resend ?? null).toBeNull()
     await expect(f.run((tx) => resendPersonalLink(tx, ORG, aunt.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+
+    // S3: sin facultad sobre la cita, tampoco le dice cuándo fue la que ya pasó.
+    const passed = await upcomingAppointment(f, lucia.patientId)
+    await ownerDb.update(appointment).set({ startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(Date.now() - 1_800_000) }).where(eq(appointment.id, passed))
+    const withPast = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: lucia.patientId, appointmentId: passed }, { secretsKey: KEY }))
+    await ownerDb.update(appointmentBookingLink).set({ expiresAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(appointmentBookingLink.id, withPast.linkId))
+    const auntClosed = (await f.run((tx) => getPersonalLinkView(tx, ORG, withPast.token))).closed
+    expect(auntClosed?.reason).not.toBe("cita-pasada")
+    expect(auntClosed?.appointment ?? null).toBeNull()
+
+    // Con Sofi apagada (o los agentes en pausa) no se ofrece ni sale: la página le dice que escriba a la clínica.
+    const off = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, off.consentId))
+    const offLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: off.personId, patientId: off.patientId }, { secretsKey: KEY }))
+    await expire(offLink.linkId)
+    await setSofi(false)
+    try {
+      expect((await f.run((tx) => getPersonalLinkView(tx, ORG, offLink.token))).closed).toMatchObject({ reason: "vencido", resend: null })
+      await expect(f.run((tx) => resendPersonalLink(tx, ORG, offLink.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+    } finally {
+      await setSofi(true)
+    }
+
+    // El correo enmascarado no deja ver el dominio, que en uno propio diría de quién es.
+    expect(maskedAddress("correo", "elsa@familia-quispe.pe")).toBe("e•••@f•••.pe")
+    expect(maskedAddress("correo", "rosa@gmail.com")).toBe("r•••@g•••.com")
   } finally {
     configurePublicLinks(null)
   }
