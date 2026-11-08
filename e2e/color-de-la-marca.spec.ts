@@ -128,7 +128,8 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await block.getByRole("button", { name: "Naranja", exact: true }).click()
   await block.getByRole("button", { name: "Usar este color" }).click()
   await expect.poll(() => token(page, "--canvas")).toBe("#fbf7f6")
-  expect(await token(page, "--card")).toBe("#ffffff")
+  // La hoja compilada escribe el blanco corto.
+  expect(["#fff", "#ffffff"]).toContain(await token(page, "--card"))
   expect(await token(page, "--muted-foreground")).toBe("#5a524f")
   await testInfo.attach("naranja-claro", { body: await page.screenshot(), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
