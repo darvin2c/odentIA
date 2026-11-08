@@ -1,6 +1,6 @@
 /**
  * Esqueletos de Comisiones, con las clases de `finance/CommissionsPanel.tsx`:
- * «Mis comisiones» (lo que me corresponde, de qué sale y los meses anteriores)
+ * «Mis honorarios» (lo que me corresponde, de qué sale y los meses anteriores)
  * y el mes de toda la clínica (una fila por profesional).
  */
 import { Skeleton } from "@odentia/ui"

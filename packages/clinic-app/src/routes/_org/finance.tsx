@@ -77,7 +77,7 @@ import {
 import { useActiveBranch } from "../../lib/active-branch"
 import { compareMonths, FIRST_YEAR, plainAmount } from "../../lib/commissions"
 import { useCan, usePermission } from "../../lib/crm"
-import { COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions } from "../../lib/screen-rules"
+import { COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions, MY_COMMISSIONS_TITLE } from "../../lib/screen-rules"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   CLOSURES_PAGE,
@@ -410,7 +410,7 @@ function FinanceWorkspace() {
           <>
             {view === "comisiones" ? (
               <p className="min-w-0">
-                {canCommissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : "Mis comisiones"}
+                {canCommissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : MY_COMMISSIONS_TITLE}
               </p>
             ) : sede.branches.length > 0 && branchId ? (
               <BranchSwitcher

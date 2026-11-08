@@ -229,7 +229,9 @@ export function withGuideName(question: string, personaName: string | null | und
 
 /** Lo que se le pregunta a una pantalla por su nombre: «Agenda», «¿Qué es Configuración › Etapas de venta?». */
 const screenAsks = (topic: HelpTopic) =>
-  [topic.title, helpTopicLabel(topic)].flatMap((name) => [name, `¿Qué es ${name}?`]).map(normalizeForSearch)
+  [topic.title, helpTopicLabel(topic), ...(topic.menuLabel ? [topic.menuLabel] : [])]
+    .flatMap((name) => [name, `¿Qué es ${name}?`])
+    .map(normalizeForSearch)
 
 /**
  * Lo escrito igual que en la guía responde sin modelo: una pregunta frecuente o
@@ -478,7 +480,9 @@ export function describeHelpScreen(
   screen: string,
   topics?: readonly HelpTopic[],
 ): { title: string | null; suggestions: string[] } {
-  return { title: helpTopicForScreen(screen, topics)?.title ?? null, suggestions: helpSuggestions(screen, topics) }
+  // En la pantalla se nombra como la llama su menú («Mis honorarios»), no como el tema.
+  const topic = helpTopicForScreen(screen, topics)
+  return { title: topic ? (topic.menuLabel ?? topic.title) : null, suggestions: helpSuggestions(screen, topics) }
 }
 
 /* ---------- Enviar a odentIA ---------- */
