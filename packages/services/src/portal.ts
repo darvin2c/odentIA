@@ -1390,7 +1390,7 @@ export interface PortalBudgetView {
   decidedAt: Date | null
   acceptedByName: string | null
   decisionNote: string | null
-  /** El estado con su nombre de siempre («Enviado · espera respuesta», «Aceptó 2 de 3»). */
+  /** El estado con su nombre de siempre («Entregado · espera respuesta», «Aceptó 2 de 3»). */
   stateText: string
   /** AAAA-MM-DD; imprimir o mostrarlo vencido no impide aceptar. */
   validUntil: string | null

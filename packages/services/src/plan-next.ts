@@ -13,7 +13,7 @@
  *    lo empezado va antes que lo aceptado sin empezar (QA del 8 nov, X5): con
  *    una endodoncia a medias sin cita, «Falta la cita de la próxima sesión»
  *    gana a la corona que va después.
- * 3. Lo que espera respuesta: «Enviado · espera respuesta» o «Lo está pensando».
+ * 3. Lo que espera respuesta: «Entregado · espera respuesta» o «Lo está pensando».
  * 4. Un tratamiento en curso sin cita para su próxima sesión, o uno que ya
  *    tiene su primera cita y le faltan sesiones por reservar (`canBookAnother`):
  *    «Falta la cita de la próxima sesión: Endodoncia · sesión 2 de 2».
@@ -434,10 +434,10 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   // 3. Lo que espera respuesta (una sola regla: `budgetAwaitsAnswer`).
   const awaiting = budgets.filter((budget) => budget.awaitsAnswer).at(-1)
   if (awaiting) {
-    const sent = awaiting.presentedAt ? `Enviado el ${day(awaiting.presentedAt)}` : null
+    const sent = awaiting.presentedAt ? `Entregado el ${day(awaiting.presentedAt)}` : null
     return {
       kind: "respuesta",
-      text: awaiting.status === "presentado" ? "Enviado · espera respuesta" : "Lo está pensando",
+      text: awaiting.status === "presentado" ? "Entregado · espera respuesta" : "Lo está pensando",
       detail: [budgetLine(awaiting, locale), sent, startedFirst ? `también falta la cita de la próxima sesión de ${startedFirst.title}` : null]
         .filter(Boolean)
         .join(" · "),

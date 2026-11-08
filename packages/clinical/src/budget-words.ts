@@ -43,7 +43,7 @@ function choosingPath(options: readonly WordOption[] | undefined): boolean {
   return !!options && options.length > 1 && !options.some((option) => option.decision === "elegida")
 }
 
-/** «Por enviar», «Enviado · espera respuesta», «Aceptó 2 de 3»… */
+/** «Por enviar», «Entregado · espera respuesta», «Aceptó 2 de 3»… */
 export function budgetStateText(budget: {
   status: string
   items: readonly WordLine[]
@@ -53,7 +53,8 @@ export function budgetStateText(budget: {
     case "borrador":
       return "Por enviar"
     case "presentado":
-      return "Enviado · espera respuesta"
+      // Impreso, enviado o mostrado en consulta: «Entregado» no supone un canal.
+      return "Entregado · espera respuesta"
     case "pospuesto":
       return "Lo está pensando"
     case "aceptado":
@@ -109,3 +110,11 @@ export function budgetOptionLabel(position: number): string {
 
 /** Cuántas opciones admite un presupuesto. */
 export const BUDGET_OPTIONS_MAX = 3
+
+/**
+ * Lo que acepta quien firma el presupuesto en la clínica: la misma frase en la
+ * tablet y en su hoja (se copia al firmar). La firma es opcional; sin ella, la
+ * respuesta es la palabra de quien la anotó.
+ */
+export const BUDGET_SIGN_DECLARATION =
+  "Me explicaron este presupuesto, sus precios y sus condiciones. Acepto lo que dice «Aceptado»; lo demás queda como se indica."
