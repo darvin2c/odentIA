@@ -620,6 +620,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
       },
       {
+        q: "¿Por qué la atención me pide sus enfermedades y su medicación?",
+        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+        forms: [
+          "por que me pide antecedentes",
+          "aviso de enfermedades y medicacion",
+          "asa antes de la anestesia",
+          "donde pongo la clasificacion asa",
+          "niega enfermedades",
+          "no toma medicacion",
+        ],
+      },
+      {
         q: "¿Cómo dicto una atención?",
         a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
         forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],

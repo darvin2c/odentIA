@@ -263,6 +263,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     periodontal: null,
     // Sin sede ni servicios con materiales, no anuncia ningún descuento.
     materials: null,
+    // La persona nueva: nunca se le preguntó por su salud; sin anestesia, nada más que decir.
+    health: { gaps: ["allergies", "conditions", "medications", "asa"], anesthetics: [] },
     // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?».
     sessions: { finishing: [], continuing: [], notRegistered: [] },
     // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.

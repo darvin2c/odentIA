@@ -12,8 +12,10 @@ import {
 import { formatDate, formatDateTime } from "../../lib/clinical-journey"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
-import { type Encounter, fetchPatientHealth, type PatientFull } from "../../lib/patients"
-import { AllergyReviewNotice } from "./allergies-card"
+import { clinicToday } from "../../lib/inventory"
+import { asaLabel, type Encounter, fetchPatientHealth, isCurrentMedication, type PatientFull } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
+import { HealthReviewNotice } from "./health-review-notice"
 
 /** Respuesta en palabras: «Sí», la lista unida o el texto tal cual. */
 function answerText(value: unknown): string {
@@ -118,11 +120,11 @@ export function DeclaredQuestionnaireNotice({
 }
 
 /**
- * Sus alergias, al abrir la atención (tablero 7): si nunca se revisaron o pasaron
- * 6 meses, pide preguntarle por alergias nuevas con «Sin cambios» y «Agregar
- * alergia». Solo para quien lleva la atención.
+ * Su salud, al abrir la atención: alergias sin revisar (o de hace 6 meses) y
+ * enfermedades o medicación que nunca se le preguntaron, con su respuesta a un
+ * toque (`HealthReviewNotice`). Solo para quien lleva la atención.
  */
-export function EncounterAllergyReview({
+export function EncounterHealthReview({
   patientId,
   patient,
   disabled,
@@ -137,7 +139,7 @@ export function EncounterAllergyReview({
   })
   if (!health.data) return null
   return (
-    <AllergyReviewNotice
+    <HealthReviewNotice
       patientId={patientId}
       patientName={patient.patient.displayName}
       health={health.data.data}
@@ -176,6 +178,11 @@ export function EncounterContextBody({
   const data = health.data.data
   const allergies = data.allergies.filter((allergy) => allergy.isActive)
   const conditions = data.conditions.filter((condition) => condition.isActive !== false && condition.status !== "resuelta")
+  // La que toma: sin fin o con fin desde hoy, como en la receta; la ya terminada no se dice como actual.
+  const today = clinicToday()
+  const medications = data.medications.filter((medication) => isCurrentMedication(medication, today))
+  const asa = asaLabel(data.asaClass)
+  const showsAsa = productUi().health.showsAsa || asa !== null
   return (
     <div className="flex flex-col gap-5 text-sm">
       <section className="flex flex-col gap-1">
@@ -200,7 +207,14 @@ export function EncounterContextBody({
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Enfermedades</h3>
         {conditions.length === 0 ? (
-          <p className="text-muted-foreground">Sin enfermedades registradas.</p>
+          // Como las alergias: «niega» solo si se le preguntó; si no, se dice que no se preguntó.
+          <p className="text-muted-foreground">
+            {data.reviewStatus.conditions === "none"
+              ? "Niega enfermedades."
+              : data.reviewStatus.conditions === "recorded"
+                ? "Sin enfermedades activas."
+                : "Aún no se le preguntó por sus enfermedades."}
+          </p>
         ) : (
           <ul className="flex flex-col gap-1">
             {conditions.map((condition) => (
@@ -214,11 +228,17 @@ export function EncounterContextBody({
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Medicación</h3>
-        {data.medications.length === 0 ? (
-          <p className="text-muted-foreground">Sin medicación registrada.</p>
+        {medications.length === 0 ? (
+          <p className="text-muted-foreground">
+            {data.reviewStatus.medications === "none"
+              ? "No toma medicación."
+              : data.reviewStatus.medications === "recorded"
+                ? "Sin medicación vigente."
+                : "Aún no se le preguntó por su medicación."}
+          </p>
         ) : (
           <ul className="flex flex-col gap-1">
-            {data.medications.map((medication) => (
+            {medications.map((medication) => (
               <li key={medication.id}>
                 {medication.name}
                 {medication.dose ? ` · ${medication.dose}` : ""}
@@ -228,6 +248,12 @@ export function EncounterContextBody({
           </ul>
         )}
       </section>
+      {showsAsa ? (
+        <section className="flex flex-col gap-1">
+          <h3 className="font-medium">Riesgo anestésico</h3>
+          <p className={asa ? undefined : "text-muted-foreground"}>{asa ?? "ASA sin clasificar."}</p>
+        </section>
+      ) : null}
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Última atención</h3>
         {last.isPending ? (

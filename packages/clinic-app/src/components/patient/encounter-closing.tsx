@@ -34,6 +34,7 @@ import {
   type ClosingRequirement,
   type ClosingSession,
   controlDaySaid,
+  type HealthGap,
   type SignatureRegistration,
   signatureRegistrationErrors,
 } from "../../lib/encounters"
@@ -514,6 +515,61 @@ export function ClosingSessions({
   )
 }
 
+const HEALTH_GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
+  allergies: "sus alergias",
+  conditions: "sus enfermedades",
+  medications: "su medicación",
+}
+
+function listWords(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? ""
+  return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
+}
+
+/** «sus alergias, sus enfermedades y su medicación»: lo que se le pregunta (la ASA no se pregunta, se clasifica). */
+export function healthGapWords(gaps: readonly HealthGap[]): string {
+  return listWords(gaps.flatMap((gap) => (gap === "asa" ? [] : [HEALTH_GAP_WORDS[gap]])))
+}
+
+/**
+ * Con anestesia y algo por saber de su salud, el cierre lo dice junto a los
+ * materiales (QA del 8 nov, A2): avisa y deja firmar; la firma guarda lo que
+ * faltaba. Sin anestesia, lo que falta va en «Sin registrar».
+ */
+export function AnesthesiaHealthLine({
+  anesthetics,
+  gaps,
+  onComplete,
+  disabled = false,
+}: {
+  anesthetics: readonly string[]
+  gaps: readonly HealthGap[]
+  /** «Completar en Antecedentes»: los abre encima de la atención. */
+  onComplete?: () => void
+  disabled?: boolean
+}): React.JSX.Element | null {
+  if (anesthetics.length === 0 || gaps.length === 0) return null
+  const asked = healthGapWords(gaps)
+  const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
+    .filter(Boolean)
+    .join("; ")
+  return (
+    <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-medium">Anestesia con su salud por completar</span>
+        <span className="text-xs text-muted-foreground">
+          Se usa {listWords(anesthetics)}. Falta {missing}. Puedes firmar igual: queda anotado lo que faltaba.
+        </span>
+      </div>
+      {onComplete ? (
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onComplete}>
+          Completar en Antecedentes
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 export function EncounterClosingDialog({
   open,
   form,
@@ -540,6 +596,8 @@ export function EncounterClosingDialog({
   onSessionAnswer,
   children,
   nextVisit = null,
+  healthGaps = [],
+  onCompleteHealth,
 }: {
   open: boolean
   form: ClosingForm
@@ -585,6 +643,10 @@ export function EncounterClosingDialog({
   children?: React.ReactNode
   /** «¿Cuándo vuelve?», justo encima de firmar. */
   nextVisit?: React.ReactNode
+  /** Lo que falta saber de su salud, como lo dice el servidor (odentIA también cuenta la ASA). */
+  healthGaps?: HealthGap[]
+  /** «Completar en Antecedentes» desde la línea de anestesia. */
+  onCompleteHealth?: () => void
 }): React.JSX.Element {
   const ids = useId()
   const ProductClosing = productUi().encounter.Closing
@@ -659,6 +721,12 @@ export function EncounterClosingDialog({
                   {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
                 </p>
               ) : null}
+              <AnesthesiaHealthLine
+                anesthetics={closing?.health?.anesthetics ?? []}
+                gaps={healthGaps}
+                onComplete={onCompleteHealth}
+                disabled={busy}
+              />
               {consents.map((need) => {
                 const line = consentLine(need, who)
                 return (
