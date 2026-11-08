@@ -219,7 +219,8 @@ function printLiquidation(
   const holder = el("div")
   holder.id = LIQUIDATION_HOLDER_ID
   holder.append(
-    el("h1", `Liquidación de comisiones · ${monthLabel(period, locale)}${heading ? ` · ${heading.toLocaleLowerCase(locale)}` : ""}`),
+    // Para el profesional son sus honorarios (en Perú entrega recibo por honorarios); la administración sigue diciendo comisiones.
+    el("h1", `Liquidación de honorarios · ${monthLabel(period, locale)}${heading ? ` · ${heading.toLocaleLowerCase(locale)}` : ""}`),
   )
   holder.append(el("p", name))
   const table = el("table")
@@ -2135,7 +2136,7 @@ const voidReasonSchema = z.object({
     .max(2000, "Escribe el motivo en 2000 caracteres como máximo."),
 })
 
-// --- Mis comisiones (cada profesional, primero en teléfono) ----------------------------
+// --- Mis honorarios (cada profesional, primero en teléfono) ----------------------------
 
 export function MyCommissionsPanel({
   period,
@@ -2156,6 +2157,9 @@ export function MyCommissionsPanel({
   const periodKey = `${period.year}-${period.month}`
   const [expandedFor, setExpandedFor] = useState<string | null>(null)
   const showAll = expandedFor === periodKey
+  // La lista de lo atendido sin cobrar, igual: se despliega por mes.
+  const [attendedFor, setAttendedFor] = useState<string | null>(null)
+  const showAttended = attendedFor === periodKey
   const query = useQuery({
     queryKey: commissionKeys.mine(period),
     queryFn: () => fetchMyCommissions(period),
@@ -2171,7 +2175,7 @@ export function MyCommissionsPanel({
 
   if (query.isPending) {
     return (
-      <SkeletonRegion message="Cargando comisiones…">
+      <SkeletonRegion message="Cargando honorarios…">
         <MyCommissionsSkeleton />
       </SkeletonRegion>
     )
@@ -2200,6 +2204,10 @@ export function MyCommissionsPanel({
   const rates = new Set(counted.map((line) => line.rateBps))
   const singleRate = rates.size === 1 ? [...rates][0] : rates.size === 0 ? mine.rateBps : null
   const isCurrent = compareMonths(period, currentMonth) === 0
+  // Lo atendido sin cobrar, cada moneda aparte; sin porcentaje fijado no hay «tu parte» que esperar.
+  const unpaid = mine.hasRate ? (mine.attended?.currencies ?? []).filter((item) => item.unpaidCents > 0) : []
+  const unpaidItems = unpaid.length > 0 ? (mine.attended?.items ?? []) : []
+  const firstUnpaid = unpaid[0]
   // Lo que falta descontarle es suyo, no del mes: se le dice aunque este mes ya esté saldado.
   const pendingDiscount =
     mine.adjustmentCents > mine.discountCents
@@ -2276,14 +2284,6 @@ export function MyCommissionsPanel({
             </span>
           </p>
         ))}
-        {mine.hasRate && mine.attended && mine.attended.unpaidCents > 0 ? (
-          // Lo atendido que aún no se cobra: no se perdió; comisiona en el mes en que se cobre.
-          <p className="mt-2 text-sm text-muted-foreground">
-            De lo que atendiste este mes, aún no se cobra:{" "}
-            <span className="font-medium text-foreground tabular-nums">{plain(mine.attended.unpaidCents)}</span>. Su comisión
-            cuenta en el mes en que se cobre.
-          </p>
-        ) : null}
         {(myPayments.data?.data ?? []).length > 0 ? (
           <ul aria-label="Mis pagos de este mes" className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
             {(myPayments.data?.data ?? []).map((payment) => (
@@ -2376,10 +2376,72 @@ export function MyCommissionsPanel({
             ) : null}
           </>
         )}
-        <p className="text-sm text-muted-foreground">
-          Cuenta lo que ya se cobró de lo que atendiste. Lo atendido que aún no se cobra entra
-          cuando el paciente pague.
-        </p>
+        {firstUnpaid ? (
+          // Lo atendido que aún no se cobra va aquí, lejos de «Me corresponde»: no es lo que gana,
+          // es de lo que saldrá su parte. Solo el servicio y el día: sin paciente ni importe de cada uno.
+          <div className="flex min-w-0 flex-col gap-1 text-sm">
+            <p>
+              <span className="text-muted-foreground">Atendido y aún sin cobrar: </span>
+              <span className="font-medium tabular-nums">{formatMoney(firstUnpaid.unpaidCents, firstUnpaid.currency, format)}</span>.
+              {unpaid.length === 1 ? <span className="text-muted-foreground"> Tu parte llega cuando se cobre.</span> : null}
+            </p>
+            {unpaid.slice(1).map((item) => (
+              // Cada moneda aparte: nunca se suman.
+              <p key={item.currency}>
+                <span className="text-muted-foreground">En {currencyWord(item.currency, format)}: </span>
+                <span className="font-medium tabular-nums">{formatMoney(item.unpaidCents, item.currency, format)}</span>.
+              </p>
+            ))}
+            {unpaid.length > 1 ? <p className="text-muted-foreground">Tu parte llega cuando se cobre.</p> : null}
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={showAttended}
+                aria-controls={`sin-cobrar-${periodKey}`}
+                onClick={() => setAttendedFor(showAttended ? null : periodKey)}
+              >
+                {showAttended ? "Ver menos" : unpaidItems.length === 1 ? "Ver el servicio" : `Ver los ${unpaidItems.length} servicios`}
+              </Button>
+            </div>
+            {showAttended ? (
+              <div id={`sin-cobrar-${periodKey}`} className="flex min-w-0 flex-col gap-2">
+                {unpaid.map((group) => (
+                  <div key={group.currency} className="flex min-w-0 flex-col gap-1">
+                    {unpaid.length > 1 ? (
+                      <p className="text-xs font-medium text-muted-foreground">En {currencyWord(group.currency, format)}</p>
+                    ) : null}
+                    <ul
+                      aria-label={
+                        unpaid.length > 1
+                          ? `Atendido y aún sin cobrar en ${currencyWord(group.currency, format)}`
+                          : "Atendido y aún sin cobrar"
+                      }
+                      className="elevated flex min-w-0 flex-col divide-y rounded-xl border bg-card"
+                    >
+                      {unpaidItems
+                        .filter((item) => item.currency === group.currency)
+                        .map((item) => (
+                          <li key={item.id} className="flex min-w-0 items-baseline justify-between gap-3 px-4 py-2">
+                            <span className="min-w-0 break-words">{item.description}</span>
+                            <span className="shrink-0 text-muted-foreground">
+                              {dayLabel(item.attendedAt, format, zone, period.year)}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Cuenta lo que ya se cobró de lo que atendiste. Lo atendido que aún no se cobra entra
+            cuando el paciente pague.
+          </p>
+        )}
       </section>
 
       {mine.previous.length > 0 ? (

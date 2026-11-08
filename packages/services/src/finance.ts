@@ -2201,7 +2201,7 @@ export async function setCommissionRate(
     before: current?.rateBps ?? null,
     after: input.rateBps,
   })
-  // Al profesional se le dice, sin pedirle nada: es lo que va a ver en «Mis comisiones».
+  // Al profesional se le dice, sin pedirle nada: es lo que va a ver en «Mis honorarios».
   if (anyGeneral && input.professionalUserId !== actorUserId) {
     const zone = await getOrgLocale(tx, orgId)
     await createWorkspaceNotification(tx, orgId, {

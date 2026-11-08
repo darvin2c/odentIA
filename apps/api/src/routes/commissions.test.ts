@@ -175,6 +175,35 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
   expect((await app.request("/commissions/unassigned")).status).toBe(403)
 })
 
+it("lo atendido sin cobrar de «Mis honorarios» es siempre de quien pregunta", async () => {
+  // La otra profesional atendió una corona en septiembre que aún no se cobra.
+  const [patient] = await ownerDb.execute<{ id: string }>(sql`
+    with pp as (insert into "contact" ("organization_id", "display_name") values (${ORG}, 'Paciente de la otra') returning "id")
+    insert into "patient" ("organization_id", "person_id", "patient_number") select ${ORG}, pp."id", 901 from pp returning "id"`)
+  const [visit] = await ownerDb.execute<{ id: string }>(sql`
+    insert into "encounter" ("organization_id", "patient_id", "professional_user_id", "started_at")
+    values (${ORG}, ${patient!.id}, ${OTHER}, '2026-09-10T15:00:00Z')
+    returning "id"`)
+  await ownerDb.execute(sql`
+    insert into "encounter_procedure" ("organization_id", "encounter_id", "description", "price_cents", "currency", "created_by")
+    values (${ORG}, ${visit!.id}, 'Corona de la otra', 50000, 'PEN', ${OTHER})`)
+  await ownerDb.execute(sql`
+    update "encounter" set "status" = 'finalizada', "finalized_at" = '2026-09-10T16:00:00Z', "signer_name" = 'Otra API', "signer_registration" = '12345'
+    where "id" = ${visit!.id}`)
+  const attendedOf = async (app: Hono, query = "") => {
+    const response = await app.request(`/commissions/my?year=2026&month=9${query}`)
+    expect(response.status).toBe(200)
+    return ((await response.json()) as { data: { attended: { currencies: unknown[]; items: Array<{ description: string }> } } }).data.attended
+  }
+  // Ella lo ve: el servicio, sin el paciente.
+  const hers = await attendedOf(buildApp("clinician", OTHER))
+  expect(hers.items.map((item) => item.description)).toEqual(["Corona de la otra"])
+  expect(JSON.stringify(hers)).not.toContain("Paciente de la otra")
+  // Otro profesional no, ni aunque pida el de ella: la ruta usa la sesión, no el pedido.
+  const mine = await attendedOf(buildApp("clinician", PROFESSIONAL), `&professionalUserId=${OTHER}`)
+  expect(mine).toEqual({ currencies: [], items: [] })
+})
+
 it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el resultado", async () => {
   const admin = buildApp("admin", OWNER)
   const rate = await admin.request("/commissions/rates", {

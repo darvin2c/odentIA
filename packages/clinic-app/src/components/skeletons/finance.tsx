@@ -7,7 +7,7 @@ import { ParamTabs } from "./param-tabs"
 import { Button, Skeleton, TabsContent, TabsList, TabsTrigger, useIsMobile } from "@odentia/ui"
 import { ArrowLeft } from "lucide-react"
 import { useCan, useMyUserId, useOrgMembers } from "../../lib/crm"
-import { commissionsHeading, COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions } from "../../lib/screen-rules"
+import { commissionsHeading, COMMISSIONS_ADMIN_SUBTITLE, financeAccess, MY_COMMISSIONS_TITLE, financeHeader, financePhoneActions } from "../../lib/screen-rules"
 import { CommissionsMonthSkeleton, MyCommissionsSkeleton } from "./commissions"
 import { LabeledTableSkeleton } from "./labeled-table"
 import { FilterBarShell, TextLine, TextLines, useSearchValue } from "./list-bar"
@@ -320,7 +320,7 @@ function ClosuresTabSkeleton() {
 
 // --- La sección -----------------------------------------------------------------------------
 
-/** Lo mismo que elige la pantalla: el mes de la clínica, «Mis comisiones» o, sin permiso, nada que esperar. */
+/** Lo mismo que elige la pantalla: el mes de la clínica, «Mis honorarios» o, sin permiso, nada que esperar. */
 function CommissionsSectionSkeleton() {
   const access = financeAccess(useCan())
   if (!access.commissions) return null
@@ -417,7 +417,7 @@ export function FinancePageSkeleton({ section }: { section?: FinanceStrip } = {}
       <div className="flex flex-col gap-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
           {view === "comisiones" ? (
-            <p className="min-w-0">{access.commissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : "Mis comisiones"}</p>
+            <p className="min-w-0">{access.commissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : MY_COMMISSIONS_TITLE}</p>
           ) : (
             <TextLine width="w-32" />
           )}

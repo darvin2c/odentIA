@@ -178,7 +178,7 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => ({
         ...(await getMyCommissions(tx, orgId, userId, parsed.data)),
-        // Lo atendido que aún no se cobra: su comisión llega cuando se cobre.
+        // Lo atendido que aún no se cobra, de quien pregunta: el servicio y el día, sin paciente ni importe.
         attended: await myAttendedUnpaid(tx, orgId, userId, parsed.data),
       })),
     )

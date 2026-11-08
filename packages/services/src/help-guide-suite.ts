@@ -171,9 +171,10 @@ export function describeHelpSearch(product: string, topics: readonly HelpTopic[]
 
     it("nombrar una pantalla como el menú lleva a ella", () => {
       for (const topic of topics) {
-        for (const question of [topic.title, `¿Dónde está ${topic.title}?`, `¿Dónde veo ${topic.title}?`, `¿Qué es ${topic.title}?`, `¿Para qué sirve ${topic.title}?`]) {
-          expect(first(question), question).toBe(topic.id)
-        }
+        for (const name of [topic.title, ...(topic.menuLabel ? [topic.menuLabel] : [])])
+          for (const question of [name, `¿Dónde está ${name}?`, `¿Dónde veo ${name}?`, `¿Qué es ${name}?`, `¿Para qué sirve ${name}?`]) {
+            expect(first(question), question).toBe(topic.id)
+          }
       }
     })
 
