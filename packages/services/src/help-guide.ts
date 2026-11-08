@@ -1288,12 +1288,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Datos de la clínica",
     parent: SETTINGS,
     purpose:
-      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes) y su logo, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
+      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo y el color de su marca, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
     terms: [
       "organización",
       "nombre de la clínica",
       "nombre comercial",
       "logo",
+      "color de la marca",
+      "colores de la clínica",
+      "color",
       "ruc",
       "moneda",
       "zona horaria",
@@ -1315,6 +1318,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Qué nombre de la clínica ven mis pacientes?",
         a: "El nombre comercial, en todo: WhatsApp, «Su enlace», el portal, el registro, el chat de la web y los PDF. La razón social va solo en el comprobante y en los papeles legales. El nombre comercial es obligatorio y se cambia en «Datos de la clínica»; ahí mismo subes el logo, que ven al abrir su registro y su enlace.",
+      },
+      {
+        q: "¿Puedo poner el color de mi clínica?",
+        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos, y «Elegir otro color» abre la paleta o recibe el código de tu marca. Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va solo en la línea bajo el logo. Cualquier color vale: si es claro, los botones lo usan tal cual con letra oscura y los enlaces usan un tono más oscuro para que se lean; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Los colores de error, listo y aviso no cambian, y los documentos que ya enviaste quedan como salieron. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
       },
       {
         q: "¿Trabajo con la CIE-10 o con la CIE-11?",
@@ -1794,7 +1801,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Chat web",
     parent: INTEGRATIONS,
     purpose:
-      "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el color o el saludo no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
+      "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el saludo o el color de tu marca (en «Datos de la clínica») no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
     terms: [
       "widget",
       "chat en mi página",

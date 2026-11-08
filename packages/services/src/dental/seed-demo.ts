@@ -875,6 +875,9 @@ await db.insert(orgProfile).values([
     diagnosisSystem: "ICD-10",
     // El que da el agente ante una urgencia (ADR 0050); la clínica B no tiene y ve el aviso.
     emergencyPhone: "+5115550123",
+    // El color de su marca (ADR 0157): la app, lo del paciente, el chat y la línea del papel
+    // salen en su azul. Clínica Norte queda con el de fábrica, para ver los dos casos.
+    brandColor: "#1d5fa8",
   },
   {
     organizationId: ORG_B,
