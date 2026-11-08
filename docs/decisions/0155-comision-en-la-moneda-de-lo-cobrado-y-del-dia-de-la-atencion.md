@@ -21,7 +21,7 @@ Fecha: 2026-11-08 · Estado: aceptada · Decisiones del dueño del 7 y 8 nov, de
 - **Lo que no tenía lugar, a la vista:**
   - La fila del profesional dice cuánto queda «por descontar del próximo pago» en esa moneda, y se descuenta solo.
   - La lista del mes dice lo cobrado de sesiones que aún nadie hace, y aparte lo de tratamientos cancelados, que no es comisión de nadie (`unassignedCommissionSessions`).
-- No se puede quitar la segunda moneda mientras queden comisiones sin pagar en ella. Lo que el profesional debe en esa moneda no lo impide, porque hoy no hay cómo saldarlo a mano (pendiente).
+- No se puede quitar la segunda moneda mientras queden comisiones sin pagar en ella. Lo que el profesional debe en esa moneda no lo impide, porque hoy no hay cómo saldarlo a mano (pendiente; desde ADR 0157 se puede cerrar a mano, y pedirlo aquí sigue pendiente).
 
 ## Alternativas descartadas
 
@@ -35,7 +35,7 @@ Fecha: 2026-11-08 · Estado: aceptada · Decisiones del dueño del 7 y 8 nov, de
 - Las líneas aún sin pagar de atenciones anteriores a un cambio de regla pasan a la regla de su atención. Como las versiones existen desde el 7 de noviembre, es poco.
 - Pagar en dólares con el efectivo de la caja de soles no se puede: si no hay dólares en la caja, se paga por transferencia.
 - Quedan pendientes:
-  - cobrarle al médico lo que debe o darlo por saldado;
+  - cobrarle al médico lo que debe o darlo por saldado (resuelto en ADR 0157);
   - un ajuste a mano con motivo, para un trabajo rehecho o un bono;
   - decidir si se llama «honorarios»;
   - la retención del 8 %.

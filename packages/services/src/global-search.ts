@@ -566,7 +566,7 @@ export async function searchEverything(
     const commissions = await rows(sql`
       select cs.id, cs.professional_user_id, cs.period_year, cs.period_month, cs.commission_cents, cs.currency, cs.status, u.name
       from commission_settlement cs join "user" u on u.id = cs.professional_user_id
-      where cs.organization_id = ${orgId} and cs.voided_at is null
+      where cs.organization_id = ${orgId} and cs.voided_at is null and cs.kind = 'pago'
         ${seesAllCommissions ? sql`` : sql`and cs.professional_user_id = ${input.viewer.userId}`}
         and ${foldedWordsMatch([sql`u.name`, sql`'comision'`], q)}
       order by cs.period_year desc, cs.period_month desc limit ${PER_TYPE}`)

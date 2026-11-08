@@ -442,6 +442,13 @@
       "when": 1794119526713,
       "tag": "0062_se_paga_al_mes_siguiente",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1794145016474,
+      "tag": "0063_deuda_del_profesional",
+      "breakpoints": true
     }
   ]
 }
