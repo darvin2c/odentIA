@@ -152,6 +152,46 @@ it("indica sin elegir plan: el plan abierto nace con la atención y recibe lo si
   ).rejects.toMatchObject({ code: "ITEM_CLOSED" })
 })
 
+// QA del 6 nov (M12): la resina hecha hoy dejaba cerrado el plan y la siguiente
+// indicación de la misma atención abría otro, así que lo de hoy salía en
+// «Planes anteriores» y el plan decía «0 de 1».
+it("lo indicado en la misma atención va a su plan aunque lo de hoy ya esté hecho; un plan con algo por hacer no es anterior", async () => {
+  await ownerDb.execute(
+    sql`insert into "user" (id,name,email) values ('m12-actor','Clínico','m12@example.test')`,
+  )
+  const [patient] = await ownerDb.execute<{ id: string }>(
+    sql`with pp as (insert into contact (organization_id,display_name) values ('org_a','Paciente misma atención') returning id) insert into patient (organization_id,person_id,patient_number) select 'org_a',pp.id,3 from pp returning id`,
+  )
+  const [service] = await ownerDb.execute<{ id: string }>(
+    sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Resina','general','custom',90000,'PEN') returning id`,
+  )
+  const [encounter] = await ownerDb.execute<{ id: string }>(
+    sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient.id},'m12-actor') returning id`,
+  )
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
+  const args = ["org_a", "m12-actor", patient.id] as const
+  const indication = { serviceId: service.id, sourceEncounterId: encounter.id }
+  const hecha = await run((tx) => addPlanItem(tx, ...args, indication))
+  // La resina de la 36 quedó hecha en esta misma atención: el plan ya no tiene nada por hacer.
+  await ownerDb.execute(sql`update treatment_plan_item set status = 'realizado' where id = ${hecha.id}`)
+  const siguiente = await run((tx) => addPlanItem(tx, ...args, indication))
+  expect(siguiente.planId).toBe(hecha.planId)
+  const plans = await run((tx) => listTreatmentPlans(tx, "org_a", patient.id))
+  expect(plans).toHaveLength(1)
+  expect(plans[0]).toMatchObject({ isOpen: true, active: true, totalItems: 2 })
+
+  // Dos planes con algo por hacer (de antes de que hubiera uno solo): ninguno es anterior.
+  await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${encounter.id}`)
+  const [otra] = await ownerDb.execute<{ id: string }>(
+    sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient.id},'m12-actor') returning id`,
+  )
+  const viejo = await run((tx) => createTreatmentPlan(tx, ...args, { title: "Plan anterior", originEncounterId: otra.id }))
+  await run((tx) => addPlanItem(tx, ...args, { serviceId: service.id, sourceEncounterId: otra.id, planId: viejo.id }))
+  const both = await run((tx) => listTreatmentPlans(tx, "org_a", patient.id))
+  expect(both.map((row) => row.active)).toEqual([true, true])
+  expect(both.filter((row) => row.isOpen)).toHaveLength(1)
+})
+
 it("una sesión anulada no deja completar el tratamiento, y anular la atención devuelve lo completado en ella", async () => {
   await ownerDb.execute(
     sql`insert into "user" (id,name,email) values ('clinical-void','Clínico','clinical-void@example.test') on conflict do nothing`,

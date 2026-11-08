@@ -73,6 +73,7 @@ import {
   type SearchResult,
   type SearchType,
   saveHiddenTypes,
+  searchStatusText,
   targetHref,
   targetVerb,
   looksLikeQuestion,
@@ -725,10 +726,10 @@ function GlobalSearchDialog({
         ) : null}
         <p role="status" className="sr-only">
           {typing && data
-            ? `${data.owners.filter((owner) => owner.kind === "persona").length} personas, ${
-                data.owners.reduce((sum, owner) => sum + 1 + owner.items.length, 0) +
-                data.meaning.length
-              } resultados`
+            ? searchStatusText(
+                data.owners.filter((owner) => owner.kind === "persona").length,
+                data.owners.reduce((sum, owner) => sum + 1 + owner.items.length, 0) + data.meaning.length,
+              )
             : ""}
         </p>
         {typing && search.isFetching && data ? (

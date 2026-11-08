@@ -645,6 +645,31 @@ export interface AccountCobro {
   payments: AccountCobroPayment[]
   /** Devoluciones de este ticket (ADR 0068): con alguna, ya no se anula. */
   returns?: TicketReturnSummary[]
+  /** Lo que se devolvió de lo que este cobro dejó a favor («Devolver dinero»). */
+  refunds?: AccountCobroRefund[]
+}
+
+export interface AccountCobroRefund {
+  id: string
+  amountCents: number
+  currency: string
+  refundedAt: string
+  reason: string
+}
+
+/**
+ * Lo devuelto de un cobro, dicho junto a él: «Se devolvieron S/ 20.00 el 6 de
+ * noviembre · Devolución parcial del adelanto». El ticket sigue diciendo lo que
+ * dijo al emitirse; la cuenta dice adónde fue el dinero (QA del 6 nov, M14).
+ */
+export function refundLines(
+  refunds: readonly AccountCobroRefund[] | undefined,
+  money: (cents: number, currency: string) => string,
+  day: (iso: string) => string,
+): string[] {
+  return (refunds ?? []).map(
+    (refund) => `Se devolvieron ${money(refund.amountCents, refund.currency)} el ${day(refund.refundedAt)} · ${refund.reason}`,
+  )
 }
 
 /** Pagos pre-ticket (origen histórico): solo lectura, no imprimibles. */

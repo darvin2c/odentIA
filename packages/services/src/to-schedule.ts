@@ -269,6 +269,85 @@ export function isControlWindowOpen(
   return dayKeyIn(controlWindowStart(control), timezone) <= today && dayKeyIn(control.createdAt, timezone) < today
 }
 
+/**
+ * Una cita por venir le sirve al control pendiente: cae, en días de la zona de
+ * la clínica, desde que abre su ventana. Al firmar esa atención el control se
+ * cumple, así que no está «por reservar». La usan «Qué sigue» y el Resumen.
+ */
+export function appointmentServesControl(
+  control: { dueAt: Date; createdAt: Date },
+  appointmentAt: Date,
+  timezone: string,
+): boolean {
+  return dayKeyIn(appointmentAt, timezone) >= dayKeyIn(controlWindowStart(control), timezone)
+}
+
+/**
+ * La persona tiene hoy una cita viva (por venir hoy, en la sala o en atención) y
+ * la ventana del control ya abrió: al firmar su atención de hoy el control se
+ * cumple (ADR 0152). No está «vencido» ni falta reservarle nada, aunque la hora
+ * de esa cita ya haya pasado (revisión del 7 nov: la ficha decía «Control vencido
+ * · sin cita por venir» a quien estaba en la sala). `todayAt` es el inicio de la
+ * primera cita viva de hoy (`todayLiveAppointments`).
+ */
+export function servedToday(
+  control: { status: string; dueAt: Date; createdAt: Date },
+  todayAt: Date | null,
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  return (
+    control.status === "pendiente" &&
+    todayAt !== null &&
+    dayKeyIn(todayAt, timezone) === dayKeyIn(now, timezone) &&
+    isControlWindowOpen(control, timezone, now)
+  )
+}
+
+/** Vencido sin cita y sin cumplirse hoy: `isOverdueControl` salvo que se cumpla con su atención de hoy. */
+export function isOverdueToday(
+  control: { status: string; dueAt: Date; createdAt: Date },
+  nextAppointmentAt: Date | null,
+  todayAt: Date | null,
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  return isOverdueControl(control, nextAppointmentAt, timezone, now) && !servedToday(control, todayAt, timezone, now)
+}
+
+/** La primera cita viva de hoy de cada persona, en la zona de la clínica (la haya pasado su hora o no). */
+export async function todayLiveAppointments(
+  tx: Db,
+  orgId: string,
+  patientIds: readonly string[],
+  timezone: string,
+): Promise<Map<string, { id: string; startsAt: Date }>> {
+  const ids = [...new Set(patientIds)]
+  if (ids.length === 0) return new Map()
+  const rows = await tx.execute<{ id: string; patientId: string; startsAt: Date | string }>(sql`
+    select distinct on (patient_id) id, patient_id as "patientId", starts_at as "startsAt" from appointment
+    where organization_id = ${orgId} and patient_id in (${list(ids)})
+      and status in (${list(LIVE_APPOINTMENT_STATUSES)})
+      and (starts_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date
+    order by patient_id, starts_at`)
+  return new Map(rows.map((row) => [row.patientId, { id: row.id, startsAt: new Date(row.startsAt) }]))
+}
+
+/**
+ * El próximo control de la persona, con el orden de «Qué sigue»: primero el
+ * que falta reservar (pendiente) y, entre iguales, el de fecha más cercana.
+ * Solo cuentan los abiertos (pendiente o programado).
+ */
+export function nextControlOf<T extends { status: string; dueAt: Date }>(controls: readonly T[]): T | null {
+  const open = controls.filter((control) => control.status === "pendiente" || control.status === "programado")
+  return (
+    [...open].sort(
+      (a, b) =>
+        Number(b.status === "pendiente") - Number(a.status === "pendiente") || a.dueAt.getTime() - b.dueAt.getTime(),
+    )[0] ?? null
+  )
+}
+
 /** `controlWindowStart` en SQL, sobre una fila de `clinical_follow_up` (o un alias). */
 export function controlWindowStartSql(control: { dueAt: SQLWrapper; createdAt: SQLWrapper }): SQL {
   return sql`greatest(${control.createdAt}, ${control.dueAt} - greatest(interval '2 days', (${control.dueAt} - ${control.createdAt}) * 0.25))`

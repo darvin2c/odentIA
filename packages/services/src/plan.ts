@@ -640,10 +640,12 @@ export async function findOpenPlan(tx: Db, orgId: string, patientId: string): Pr
 }
 
 /**
- * El plan donde se indica: el pedido (del mismo paciente) o el abierto; si no
- * hay ninguno, nace uno con la atención como origen. La atención borrador ya
- * está bloqueada por quien llama, así que dos indicaciones a la vez no abren
- * dos planes.
+ * El plan donde se indica: el pedido (del mismo paciente), el que nació en esta
+ * misma atención (aunque lo de hoy ya esté todo realizado: una resina hecha y
+ * otra indicada en la misma atención son el mismo plan, QA del 6 nov) o el
+ * abierto; si no hay ninguno, nace uno con la atención como origen. La atención
+ * borrador ya está bloqueada por quien llama, así que dos indicaciones a la vez
+ * no abren dos planes.
  */
 async function planForIndication(
   tx: Db,
@@ -654,6 +656,20 @@ async function planForIndication(
   planId: string | null | undefined,
 ): Promise<TreatmentPlanRow> {
   if (planId?.trim()) return lockPlanRow(tx, orgId, patientId, planId.trim())
+  const [born] = await tx
+    .select({ id: treatmentPlan.id })
+    .from(treatmentPlan)
+    .where(
+      and(
+        eq(treatmentPlan.organizationId, orgId),
+        eq(treatmentPlan.patientId, patientId),
+        eq(treatmentPlan.originEncounterId, encounterId),
+        eq(treatmentPlan.isLegacy, false),
+      ),
+    )
+    .orderBy(desc(treatmentPlan.createdAt), desc(treatmentPlan.id))
+    .limit(1)
+  if (born) return lockPlanRow(tx, orgId, patientId, born.id)
   const open = await findOpenPlan(tx, orgId, patientId)
   if (open) return lockPlanRow(tx, orgId, patientId, open.id)
   const created = await createTreatmentPlan(tx, orgId, actorUserId, patientId, {
@@ -675,6 +691,12 @@ export async function listTreatmentPlans(
     pendingItems: number
     /** El plan abierto de la persona: el que recibe las indicaciones nuevas. */
     isOpen: boolean
+    /**
+     * Le queda algo por hacer (`isPlanOpen`). Puede haber más de uno (planes
+     * de antes de que hubiera uno solo): ninguno es «anterior» mientras le
+     * quede algo por hacer.
+     */
+    active: boolean
   }>
 > {
   await requirePatient(tx, orgId, patientId)
@@ -714,6 +736,7 @@ export async function listTreatmentPlans(
       totalItems: statuses.length,
       pendingItems: statuses.filter((s) => s === "pendiente" || s === "programado").length,
       isOpen: open?.id === plan.id,
+      active: open?.id === plan.id || isPlanOpen(plan, statuses),
     }
   })
 }

@@ -195,11 +195,12 @@ export function EncounterPlanPanel({
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead,
   })
-  const openPlan = (plansQuery.data?.data ?? []).find((row) => row.isOpen) ?? null
+  // Los planes con algo por hacer, no solo el que recibe lo nuevo (QA del 6 nov, M12 y M13).
+  const current = (plansQuery.data?.data ?? []).filter((row) => row.isOpen || row.active)
   const today = new Set(indicatedItems.map((item) => item.id))
-  // El plan en corto: lo abierto del plan vigente, con lo de hoy primero.
+  // El plan en corto: lo abierto de los planes vigentes, con lo de hoy primero.
   const brief = (itemsQuery.data?.data ?? [])
-    .filter((item) => item.planId === openPlan?.plan.id && !CLOSED.has(item.status))
+    .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
   const [indicating, setIndicating] = useState(autoOpen)
 

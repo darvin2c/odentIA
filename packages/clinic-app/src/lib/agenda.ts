@@ -137,6 +137,15 @@ export function visitName(visit: AppointmentVisit): string {
   return SCHEDULE_STATE_LABELS[VISIT_STATE[visit]]
 }
 
+/**
+ * Su hora pasó sin llegada ni atención: la Agenda la pone en «Ya pasaron · sin
+ * cerrar» y pide «Registrar la atención» o «No vino». Nadie la marca sola.
+ */
+export function isUnclosed(item: { visit: AppointmentVisit; endsAt: string }, now: string): boolean {
+  return (item.visit === "por_confirmar" || item.visit === "confirmada") && Date.parse(item.endsAt) <= Date.parse(now)
+}
+
+
 /** El estado para el icono y el color de la rejilla, la lista y el cajón. */
 export function visitState(visit: AppointmentVisit): ScheduleState {
   return VISIT_STATE[visit]

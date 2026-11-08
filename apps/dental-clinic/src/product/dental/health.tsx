@@ -25,6 +25,21 @@ import { useState } from "react"
 
 type Rec = Record<string, unknown>
 
+/** Lo que muestra cada lista con su nombre; sin `items`, Base UI mostraría la clave guardada. */
+const EXPERIENCE_ITEMS: Record<string, string> = {
+  "sin-indicar": "Sin indicar",
+  positiva: "Positiva",
+  regular: "Regular",
+  traumatica: "Traumática",
+}
+const ANXIETY_ITEMS: Record<string, string> = {
+  "sin-indicar": "Sin indicar",
+  ninguna: "Ninguna",
+  leve: "Leve",
+  moderada: "Moderada",
+  alta: "Alta",
+}
+
 function strOf(v: unknown): string {
   return typeof v === "string" ? v : typeof v === "number" ? String(v) : ""
 }
@@ -118,6 +133,8 @@ function DentalInterviewSections({
           <Field data-invalid={experiencia.invalid}>
             <FieldLabel htmlFor={fid("od-exp")}>Experiencia previa</FieldLabel>
             <Select
+              // Con sus nombres: sin ellos, el campo muestra la clave («sin-indicar», QA del 6 nov).
+              items={EXPERIENCE_ITEMS}
               value={
                 strOf(odontologicos["experienciaPrevia"]) === ""
                   ? "sin-indicar"
@@ -151,6 +168,7 @@ function DentalInterviewSections({
           <Field data-invalid={ansiedad.invalid}>
             <FieldLabel htmlFor={fid("od-ans")}>Ansiedad dental</FieldLabel>
             <Select
+              items={ANXIETY_ITEMS}
               value={
                 strOf(odontologicos["ansiedadDental"]) === ""
                   ? "sin-indicar"

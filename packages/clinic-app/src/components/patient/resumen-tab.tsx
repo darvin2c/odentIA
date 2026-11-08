@@ -1,6 +1,6 @@
 import { formatMoney } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
-import { AgentMark, EmptyState } from "@odentia/ui-patterns"
+import { AgentMark, EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
@@ -22,10 +22,12 @@ import { attendWord } from "../../lib/patient-overview"
 import { useCollectFlow } from "./collect-flow"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
+import { NextControlAction, nextControlDetail, useNextControl } from "./next-control"
 import { NextStepButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import { PersonalLinkActions } from "./send-personal-link"
 import { useOpenWide, type WideTarget } from "./wide-section"
+import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 
 interface Pending {
   id: string
@@ -59,7 +61,18 @@ export function SummaryCard({
   )
 }
 
-function PendingList({ pending }: { pending: Pending[] }) {
+/**
+ * La lista de pendientes. Mientras alguna consulta todavía responde, no dice
+ * «Sin pendientes»: lo que recepción mira de reojo no puede afirmar que no hay
+ * nada antes de saberlo (QA del 6 nov, M9).
+ */
+export function PendingList({ pending, loading = false }: { pending: Pending[]; loading?: boolean }) {
+  if (pending.length === 0 && loading)
+    return (
+      <SkeletonRegion message="Consultando pendientes…">
+        <LastVisitLinesSkeleton />
+      </SkeletonRegion>
+    )
   if (pending.length === 0)
     return (
       <EmptyState
@@ -88,6 +101,11 @@ function PendingList({ pending }: { pending: Pending[] }) {
           {item.stacked ? <div className="basis-full">{item.action}</div> : item.action}
         </li>
       ))}
+      {loading ? (
+        <li className="py-3 text-sm text-muted-foreground" role="status">
+          Consultando si hay más…
+        </li>
+      ) : null}
     </ul>
   )
 }
@@ -109,7 +127,7 @@ export function PatientPendingCard({
   patientId: string
   detail: PatientFull
   /** Lo clínico ya leído por el Resumen de quien atiende (no se pide aquí). */
-  clinical?: { summary?: PatientSummary; health?: PatientHealth | null }
+  clinical?: { summary?: PatientSummary; health?: PatientHealth | null; loading?: boolean }
 }) {
   const openWide = useOpenWide()
   const archived = usePersonArchived()
@@ -173,6 +191,8 @@ export function PatientPendingCard({
     queryFn: () => fetchConsents({ patientId }),
     enabled: canSign && pendingConsents.length > 0,
   })
+  // El próximo control vencido sin cita va aquí; el que no venció, en su propia fila del Resumen.
+  const nextControl = useNextControl(patientId)
   const [signingId, setSigningId] = useState<string | null>(null)
   const consentOf = (id: string) => consents.data?.data.find((row) => row.id === id) ?? null
   const signing = signingId ? consentOf(signingId) : null
@@ -265,6 +285,13 @@ export function PatientPendingCard({
         open("Ver el plan", { id: "plan" })
       ),
     })
+  if (nextControl.control && nextControl.place === "pendientes")
+    pending.push({
+      id: `control-${nextControl.control.id}`,
+      title: `Control vencido: ${nextControl.control.title}`,
+      detail: `${nextControlDetail(nextControl.control)}.`,
+      action: <NextControlAction patientId={patientId} control={nextControl.control} />,
+    })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
     // El saldo descuenta lo que tiene a favor (decisión 22).
     if (balance.porCobrar > 0)
@@ -336,7 +363,17 @@ export function PatientPendingCard({
         ) : null
       }
     >
-      <PendingList pending={pending} />
+      <PendingList
+        pending={pending}
+        loading={
+          Boolean(clinical?.loading) ||
+          accountQuery.isLoading ||
+          proposalsQuery.isLoading ||
+          tasksQuery.isLoading ||
+          nextStepQuery.isLoading ||
+          nextControl.loading
+        }
+      />
       {collect.surfaces}
       <ConsentSigningScreen
         open={signing !== null}

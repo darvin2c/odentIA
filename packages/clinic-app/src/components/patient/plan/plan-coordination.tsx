@@ -126,7 +126,9 @@ export function CoordinationControls({
                   <span className="text-muted-foreground">
                     {live && control.appointment
                       ? `Con cita · ${formatDateTime(control.appointment.startsAt)}`
-                      : `Por reservar · desde el ${formatDate(control.dueAt)}`}
+                      : control.overdue
+                        ? `Vencido · tocaba el ${formatDate(control.dueAt)}`
+                        : `Por reservar · desde el ${formatDate(control.dueAt)}`}
                   </span>
                 </div>
                 {live && control.appointment ? (

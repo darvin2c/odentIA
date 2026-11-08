@@ -54,6 +54,7 @@ import {
   fetchTicketReceipt,
   formatAmountPlain,
   formatDayLongLocale,
+  refundLines,
   formatDateTimeShortLocale,
   invalidatePatientAccount,
   refundApi,
@@ -617,6 +618,11 @@ export function AccountTab({
                             .filter(Boolean)
                             .join(" · ")}
                     </p>
+                    {refundLines(row.refunds, money, (iso) => formatDayLongLocale(iso, locale, timeZone)).map((line) => (
+                      <p key={line} className="break-words text-sm">
+                        {line}
+                      </p>
+                    ))}
                   </div>
                   <span
                     className={cn(

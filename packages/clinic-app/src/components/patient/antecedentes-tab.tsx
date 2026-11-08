@@ -166,6 +166,14 @@ const ASA_OPTIONS: Array<[string, string]> = [
   ["VI", "ASA VI · muerte cerebral (donante)"],
 ]
 
+/** «ASA II · enfermedad sistémica leve» de lo guardado; null sin clasificar (QA del 6 nov: no salía en ningún resumen). */
+export function asaLabel(value: string | null | undefined): string | null {
+  return ASA_OPTIONS.find(([key]) => key === value)?.[1] ?? null
+}
+
+/** Embarazo con su nombre; sin `items`, Base UI mostraría la clave («sin-responder»). */
+const PREGNANCY_ITEMS: Record<string, string> = { "sin-responder": "Sin responder", si: "Sí", no: "No" }
+
 /** Lo guardado, como lo edita el formulario. */
 function buildDrafts(health: PatientHealth): HealthFormValues {
   const interview = (health.latestAnamnesis?.answers ?? {}) as Rec
@@ -866,6 +874,8 @@ export function AntecedentesTab({
                       <Field>
                         <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
                         <Select
+                          // Con sus nombres: sin ellos, el campo muestra la clave («sin-responder», QA del 6 nov).
+                          items={PREGNANCY_ITEMS}
                           value={
                             personales["embarazo"] === true
                               ? "si"
@@ -1076,7 +1086,7 @@ function AntecedentesSummary({
   saved: HealthFormValues
   pendingReview: boolean
 }): React.JSX.Element {
-  const { conditions, medications, reviewStatus: review, bloodGroup } = saved
+  const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
   const activeCon = conditions.filter((r) => r.status === "activa")
   const activeMed = medications.filter((r) => r.endDate === "")
   const rows: Array<{ title: string; state: HealthReviewState; detail: string }> = [
@@ -1117,6 +1127,9 @@ function AntecedentesSummary({
             Declarado · pendiente
           </Badge>
         ) : null}
+        <span className="text-sm text-muted-foreground">
+          Clasificación ASA: {asaLabel(asaClass) ?? "sin clasificar"}
+        </span>
       </div>
       {rows.map((row) => (
         <div key={row.title} className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
