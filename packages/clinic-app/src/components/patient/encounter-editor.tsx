@@ -501,6 +501,8 @@ export function EncounterEditor({
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
   // Lo que el cierre hizo con sus controles: «Atención finalizada» dice qué verá recepción.
   const [finalizedControls, setFinalizedControls] = useState<FinalizedControls | null>(null)
+  /** Lo que la firma iba a terminar y no pudo: sigue en curso, con su motivo. */
+  const [finalizedKeptOpen, setFinalizedKeptOpen] = useState<Array<{ planItemId: string; title: string; reason: string }>>([])
   // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
@@ -1052,6 +1054,7 @@ export function EncounterEditor({
     setFinalizedBudget(null)
     setFinalizedMaterials(null)
     setFinalizedControls(null)
+    setFinalizedKeptOpen([])
     setCorrectingMaterials(false)
     setMaterialsCorrected(false)
     setBudgetSent(false)
@@ -1075,6 +1078,8 @@ export function EncounterEditor({
   const finalizeWith = async (value: ClosingValues): Promise<void> => {
     if (childCountRef.current > 0) return
     const signIds = signIdsRef.current
+    // Lo que el cierre pregunta hoy; con lo dictado, el cierre ya confirmado.
+    let askedSessions = closingQuery.data?.data.sessions
     signIdsRef.current = null
     setFinalizing(true)
     try {
@@ -1104,6 +1109,7 @@ export function EncounterEditor({
           queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
           staleTime: 0,
         })
+        askedSessions = fresh.data.sessions
         const newlyFinishing = (fresh.data.sessions?.finishing ?? []).some((session) => !shown.has(session.planItemId))
         // Con consentimientos por firmar, o algo que la firma terminaría sin haberlo
         // mostrado, sigue al cierre: ahí se firman o se dice por qué no, y «¿Terminaste?»
@@ -1124,6 +1130,7 @@ export function EncounterEditor({
           budget: FinalizedBudget | null
           materials?: FinalizedMaterials | null
           controls?: FinalizedControls
+          keptOpen?: Array<{ planItemId: string; title: string; reason: string }>
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1132,7 +1139,7 @@ export function EncounterEditor({
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
           // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
-          ...sessionAnswerBody(sessionAnswers, closingQuery.data?.data.sessions),
+          ...sessionAnswerBody(sessionAnswers, askedSessions),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
           ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
         }),
@@ -1144,6 +1151,7 @@ export function EncounterEditor({
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedMaterials(result.data.materials ?? null)
       setFinalizedControls(result.data.controls ?? null)
+      setFinalizedKeptOpen(result.data.keptOpen ?? [])
       setFinalizedBilling(result.data.billing)
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
@@ -2710,6 +2718,16 @@ export function EncounterEditor({
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
+          ) : null}
+          {/* Lo que se iba a terminar al firmar y no se pudo: sigue en curso, y se dice por qué. */}
+          {finalizedKeptOpen.length > 0 ? (
+            <ul role="status" className="flex flex-col gap-1 text-sm text-warning">
+              {finalizedKeptOpen.map((item) => (
+                <li key={item.planItemId}>
+                  «{item.title}» sigue en curso: {item.reason}.
+                </li>
+              ))}
+            </ul>
           ) : null}
           {skippedLines.length > 0 ? (
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">

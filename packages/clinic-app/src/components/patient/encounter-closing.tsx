@@ -641,7 +641,7 @@ export function EncounterClosingDialog({
                   ))}
                 </ul>
               ) : null}
-              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {/* «¿Terminaste?» antes de lo que cambia con su respuesta (el odontograma que se firma). */}
               {closing?.sessions && onSessionAnswer ? (
                 <ClosingSessions
                   sessions={closing.sessions}
@@ -651,6 +651,7 @@ export function EncounterClosingDialog({
                   disabled={busy}
                 />
               ) : null}
+              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
               {materials && materials.items.length > 0 ? (
                 <p className="rounded-lg border p-3">
                   <span className="font-medium">Materiales</span>

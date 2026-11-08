@@ -1655,11 +1655,21 @@ export interface FinalizeBillingLine {
   reason: SkippedCharge["reason"] | null
 }
 
+/** Lo que llegaba a sus sesiones previstas y la firma no pudo terminar: sigue en curso. */
+export interface SessionKeptOpen {
+  planItemId: string
+  title: string
+  /** Por qué no se pudo (el mensaje del servicio). */
+  reason: string
+}
+
 /** Lo que informa el cierre; el producto agrega lo suyo (odentIA: el odontograma que firmó). */
 export type FinalizeEncounterResult = FinalizeEncounterBase & ProductParts
 
 export interface FinalizeEncounterBase {
   encounter: EncounterRow
+  /** Lo que se iba a terminar al firmar (ADR 0161) y quedó en curso, con su motivo. */
+  keptOpen: SessionKeptOpen[]
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
@@ -2218,7 +2228,7 @@ async function applySessionAnswers(
   encounterId: string,
   input: FinalizeEncounterInput,
   sessions: ClosingCheckBase["sessions"],
-): Promise<() => Promise<void>> {
+): Promise<{ addSessions: () => Promise<void>; keptOpen: SessionKeptOpen[] }> {
   const chosen = [...new Set(input.completePlanItemIds ?? [])]
   const addSession = [...new Set(input.addSessionPlanItemIds ?? [])]
   if (chosen.some((id) => addSession.includes(id)))
@@ -2234,18 +2244,26 @@ async function applySessionAnswers(
     await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId })
   // Lo que llega a sus previstas se termina salvo «Falta otra sesión». Lo que viene
   // elegido no frena la firma: si algo impide completarlo (un presupuesto anulado
-  // a medias), queda en curso como antes, igual que si se hubiera dicho que sigue.
+  // a medias), queda en curso como antes y el resultado lo dice. La traza distingue
+  // lo terminado sin respuesta de «Sí, terminar».
+  const keptOpen: SessionKeptOpen[] = []
   for (const session of sessions.finishing) {
     if (chosen.includes(session.planItemId) || addSession.includes(session.planItemId)) continue
     try {
-      await tx.transaction((inner) =>
-        setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId }),
-      )
+      await tx.transaction(async (inner) => {
+        await setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId })
+        await audit(inner as Db, orgId, actorUserId, "plan.item_completed_on_sign", "treatment_plan_item", session.planItemId, {
+          patientId,
+          encounterId,
+          sessions: { n: session.n, m: session.m },
+        })
+      })
     } catch (error) {
       if (!(error instanceof ServiceError)) throw error
+      keptOpen.push({ planItemId: session.planItemId, title: session.title, reason: error.message })
     }
   }
-  return async () => {
+  const addSessions = async () => {
     for (const itemId of addSession) {
       const [current] = await tx
         .select({ plannedSessions: treatmentPlanItem.plannedSessions })
@@ -2259,6 +2277,7 @@ async function applySessionAnswers(
       })
     }
   }
+  return { addSessions, keptOpen }
 }
 
 export async function finalizeEncounter(
@@ -2322,7 +2341,7 @@ export async function finalizeEncounter(
   // «¿Terminaste?» (lo respondido, o «Sí, terminar» si nadie lo cambió), en la misma
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
-  const addSessions = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
   const procedures = await tx
     .select()
     .from(encounterProcedure)
@@ -2610,6 +2629,7 @@ export async function finalizeEncounter(
     budget,
     materials,
     controls: { next: nextControl, fulfilled },
+    keptOpen,
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
