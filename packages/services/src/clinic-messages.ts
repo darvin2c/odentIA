@@ -2113,6 +2113,23 @@ const LINK_RECEIVED_EVERY_MS = 24 * 60 * 60 * 1000
  * deja responderle con texto (ADR 0129). Si no se puede enviar, no pasa nada más:
  * lo que hizo ya vale, la nota está en el caso y su página se lo confirma.
  */
+/**
+ * «Recibido desde su enlace» saldría por esa conversación: la persona no pidió ningún
+ * mensaje de menos y el mensaje está aprobado. Lo lee la página para no prometer un
+ * mensaje que no saldrá (B2); el tope de uno al día no cuenta: ya se le avisó.
+ */
+export async function linkReceivedNoticeReady(tx: Db, orgId: string, conversationId: string): Promise<boolean> {
+  const [person] = await tx
+    .select({ contactId: conversation.contactId, connectionId: conversation.channelConnectionId })
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!person) return false
+  if (!(await mayWriteFirst(tx, orgId, person.contactId, NOTICE_PURPOSE))) return false
+  const template = await findMessageTemplate(tx, orgId, person.connectionId, LINK_RECEIVED_MESSAGE_KEY)
+  return template?.status === "aprobada"
+}
+
 export async function sendLinkReceivedNotice(
   tx: Db,
   orgId: string,

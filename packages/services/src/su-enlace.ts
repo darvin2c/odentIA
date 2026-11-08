@@ -29,7 +29,7 @@ import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
-import { getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
+import { appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
   NOTICE_PURPOSE,
   PERSONAL_LINK_MESSAGE_KEY,
@@ -45,9 +45,12 @@ import {
   type BookingLinkAppointment,
   type BookingLinkBranch,
   bookingContext,
+  type BookAnother,
+  bookAnotherOf,
   clinicNameOf,
   contactHandlesAppointment,
-  hasSchedulableItems,
+  linkReplyVia,
+  schedulableItemsOf,
   issuePersonalLink,
   linkContactFirstName,
   linkExpired,
@@ -194,6 +197,20 @@ export interface PersonalLinkView {
   consents: PersonalLinkConsent[]
   /** «Antes de tu cita», si hay uno por responder. */
   questionnaire: { title: string } | null
+  /**
+   * M3: lo que aceptó de su presupuesto y aún no tiene cita, «Lo que aceptaste, por
+   * agendar»; se agenda con `planItemIds` al reservar. Solo a quien decide por el paciente.
+   */
+  toSchedule: Array<{ planItemId: string; title: string }>
+  /** «Reservar otra» en «Tu cita» (`another: true` al reservar): citas por venir y el tope. Nulo si no le corresponde. */
+  another: BookAnother | null
+  /**
+   * B2: por dónde se le confirma lo que haga aquí, solo si de verdad sale (`linkReplyVia`);
+   * nulo: queda anotado y no se le escribe, y la página no lo promete.
+   */
+  confirmVia: "whatsapp" | "chat" | "correo" | null
+  /** B2: por dónde le llegan los recordatorios de su cita; nulo si no le llegarán. */
+  remindersVia: "whatsapp" | "correo" | null
   /**
    * «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien
    * decide por él). La receta y el comprobante ya no están aquí (ADR 0156): le
@@ -479,6 +496,10 @@ export async function getPersonalLinkView(
     budgets: [],
     consents: [],
     questionnaire: null,
+    toSchedule: [],
+    another: null,
+    confirmVia: null,
+    remindersVia: null,
     messages: null,
     papers: [],
   }
@@ -492,16 +513,15 @@ export async function getPersonalLinkView(
   const consents = await consentsOf(tx, orgId, link)
   const questionnaire = await questionnaireOf(tx, orgId, link)
   const messages = await messagesOf(tx, orgId, link)
-  // Las sedes, para reservar o para agendar lo aceptado de su presupuesto (también después de responderlo).
-  const schedulable =
-    !link.canBook &&
-    budgets.length === 0 &&
-    link.patientId !== null &&
-    link.decides &&
-    !link.expired &&
-    (await hasSchedulableItems(tx, orgId, link.patientId))
+  // M3: lo aceptado y sin cita, a quien decide por el paciente.
+  const toSchedule =
+    link.patientId !== null && link.decides && !link.expired
+      ? await schedulableItemsOf(tx, orgId, link.patientId)
+      : []
+  const another = appointment ? await bookAnotherOf(tx, orgId, link) : null
+  // Las sedes, para reservar, para agendar lo aceptado de su presupuesto (también después de responderlo) o para otra cita.
   const context =
-    link.canBook || budgets.length > 0 || schedulable
+    link.canBook || budgets.length > 0 || toSchedule.length > 0 || another?.allowed
       ? await bookingContext(tx, orgId, link.row)
       : null
   // «Tus mensajes» siempre sirve a quien los recibe: el enlace no vence por no tener otra cosa pendiente.
@@ -513,6 +533,7 @@ export async function getPersonalLinkView(
     budgets.length === 0 &&
     consents.length === 0 &&
     !questionnaire &&
+    toSchedule.length === 0 &&
     !messages
   if (nothing) return empty
   const self = link.patientId
@@ -539,6 +560,10 @@ export async function getPersonalLinkView(
     budgets,
     consents,
     questionnaire,
+    toSchedule,
+    another,
+    confirmVia: await linkReplyVia(tx, orgId, link.row),
+    remindersVia: link.handlesAppointment ? await appointmentRemindersVia(tx, orgId, link.row.contactId) : null,
     messages,
     papers: [],
   }
@@ -1092,6 +1117,8 @@ export interface PersonalLinkReservation {
   professionalUserId: string
   roomId?: string
   planItemIds?: string[]
+  /** «Reservar otra» desde «Tu cita» (`PersonalLinkView.another`). */
+  another?: boolean
   /** Quien ya es paciente: lo que faltaba y lo que acepta, guardado en el mismo paso. */
   you?: PersonalLinkDataInput
 }
@@ -1190,7 +1217,7 @@ export async function bookedDataLink(
     },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token)
+  const url = await personalLinkUrl(tx, orgId, link.token, missing.length > 0 ? "datos" : "pendientes")
   return url ? { missing: missing.map((item) => item.label.toLowerCase()), url } : null
 }
 
@@ -1645,8 +1672,8 @@ export async function sendPersonalLink(
     },
     deps,
   )
-  // En el mensaje no queda el token: lo pone el worker al enviarlo.
-  const url = await personalLinkMessageUrl(tx, orgId, link.linkId)
+  // En el mensaje no queda el token: lo pone el worker al enviarlo. Abre «Tus pendientes».
+  const url = await personalLinkMessageUrl(tx, orgId, link.linkId, "pendientes")
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   let sent: { id: string }
   if (route.via === "plantilla" && route.template) {
@@ -1733,7 +1760,7 @@ export async function showPersonalLink(
     { contactId: recipient.contactId, patientId, createdBy: actorUserId, booking: false },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token)
+  const url = await personalLinkUrl(tx, orgId, link.token, "pendientes")
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -1794,5 +1821,5 @@ export async function personalLinkForEmailToken(
     { contactId: row.contactId, patientId: appt.patientId, appointmentId: row.appointmentId },
     deps,
   )
-  return { token: link.token, url: await personalLinkUrl(tx, orgId, link.token) }
+  return { token: link.token, url: await personalLinkUrl(tx, orgId, link.token, "cita") }
 }

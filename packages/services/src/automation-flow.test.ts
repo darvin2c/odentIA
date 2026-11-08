@@ -415,7 +415,7 @@ describe("por dónde le llega a cada persona", () => {
     // «Confirmar», «Cancelar» y la baja van a la página de la clínica, que es donde viven.
     expect(sent.body).toMatch(/Para confirmar: https:\/\/auto-\S+\.odentia\.test\/c\/\S+\nSi no podrás ir: https:\/\/auto-\S+\.odentia\.test\/c\/\S+/)
     // Al pie, su página «Tus mensajes»; la baja de un toque va en la cabecera del correo (ADR 0040).
-    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}#mensajes$/)
+    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=mensajes&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
     expect(sent.listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.odentia\.test\/baja\/\S+$/)
     expect(sent.replyButtons).toBeNull()
     const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, sent.conversationId))
@@ -1821,7 +1821,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const body = (await messageOf(job!.sentMessageId)).body ?? ""
     expect(body.split("\n")[0]).toBe("¿Seguimos conversando? · Clínica Sonríe")
     expect(body).toContain("Hola, Jorge. Te escribimos de Clínica Sonríe sobre tu consulta de «Blanqueamiento». ¿Seguimos conversando?")
-    expect(body).toMatch(/Elegir mis mensajes: \S+#mensajes$/)
+    expect(body).toMatch(/Elegir mis mensajes: \S+\/pendientes\?abre=mensajes&token=\S+$/)
     expect((await messageOf(job!.sentMessageId)).listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.odentia\.test\/baja\/\S+$/)
   })
 

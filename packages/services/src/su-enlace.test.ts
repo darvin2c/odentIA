@@ -1177,7 +1177,7 @@ it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace»
     })
     const redirect = await f.run((tx) => personalLinkForEmailToken(tx, ORG, raw, { secretsKey: KEY }))
     // La dirección es la de la clínica, con su subdominio, y el enlace muestra esa cita.
-    expect(redirect.url).toBe(`https://norte.odentia.test/reserva?token=${redirect.token}`)
+    expect(redirect.url).toBe(`https://norte.odentia.test/pendientes?abre=cita&token=${redirect.token}`)
     const view = await f.run((tx) => getPersonalLinkView(tx, ORG, redirect.token))
     expect(view.appointment).toMatchObject({ canConfirm: true, canChange: true, branchName: "Centro" })
     // Un token vencido, o uno que no existe, ya no lleva a ningún lado.
@@ -1225,6 +1225,51 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
   const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id }, { secretsKey: KEY }))
   await expect(f.run((tx) => reserveBookingLink(tx, ORG, hers.token, pick(second)))).rejects.toMatchObject({ code: "PORTAL_FORBIDDEN" })
+})
+
+it("«Reservar otra»: quien decide reserva otra cita desde «Tu cita», hasta el tope de citas por venir", async () => {
+  const f = await clinicalFixture()
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+  const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" }).returning({ id: branch.id })
+  const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  await f.run((tx) =>
+    setProfessionalSchedule(tx, ORG, f.actor, {
+      branchId: site!.id,
+      professionalUserId: f.actor,
+      rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
+    }),
+  )
+  const startsAt = new Date(Date.now() + 5 * 86_400_000)
+  await ownerDb.insert(appointment).values({
+    organizationId: ORG, branchId: site!.id, patientId: f.patient.id, professionalUserId: f.actor, roomId: room.id,
+    startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
+  })
+  // Su enlace para ver su cita: no ofrece reservar, pero sí otra cita con tope.
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, booking: false }, { secretsKey: KEY }))
+  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(view).toMatchObject({ booking: null, another: { upcoming: 1, cap: 2, allowed: true }, toSchedule: [], confirmVia: null, remindersVia: null })
+  expect(view.branches.map((row) => row.id)).toContain(site!.id)
+  const from = new Date(Date.now() + 2 * 86_400_000)
+  from.setUTCHours(5, 0, 0, 0)
+  const range = { branchId: site!.id, from: from.toISOString(), to: new Date(from.getTime() + 86_400_000).toISOString() }
+  // Sin «otra», el enlace no reserva.
+  const { slots } = await f.run((tx) => listBookingLinkSlots(tx, ORG, link.token, { ...range, another: true }))
+  const [first, second] = slots
+  if (!first || !second) throw new Error("Sin horarios")
+  const pick = (slot: typeof first) => ({ branchId: site!.id, startsAt: slot.startsAt, professionalUserId: slot.professionalUserId, ...(slot.roomId ? { roomId: slot.roomId } : {}) })
+  await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, pick(first)))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  await f.run((tx) => reserveBookingLink(tx, ORG, link.token, { ...pick(first), another: true }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).another).toEqual({ upcoming: 2, cap: 2, allowed: false })
+  // Llegó al tope: la tercera la agenda recepción.
+  await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, { ...pick(second), another: true }))).rejects.toMatchObject({
+    code: "BOOKING_ANOTHER_LIMIT",
+  })
+  // Quien no decide por el paciente no reserva otra, aunque esté autorizado a ver su cita.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  await f.run((tx) => grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: tia!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }))
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).another).toBeNull()
 })
 
 it("«Tus datos y tu salud»: la salud se pregunta solo si nadie la registró y entra declarada", async () => {

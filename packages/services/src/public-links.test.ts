@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clinicOrigin, panelOrigin, productDomainOf } from "./public-links.js"
+import { clinicOrigin, panelOrigin, personalLinkAddress, productDomainOf } from "./public-links.js"
 
 const config = {
   webURL: "https://app.odentia32.com",
@@ -34,5 +34,16 @@ describe("la dirección de cada clínica, en el dominio de su producto (decisió
       "https://app.odentia32.com",
     )
     expect(panelOrigin("medical", null)).toBeNull()
+  })
+})
+
+describe("un enlace por cosa: el destino va en la dirección, con el token al final", () => {
+  const origin = "https://sonrie.odentia32.com"
+  it("«Elige tu cita», la lista «Tus pendientes» o directo una cosa", () => {
+    expect(personalLinkAddress(origin, "t0k")).toBe(`${origin}/reserva?token=t0k`)
+    expect(personalLinkAddress(origin, "t0k", "pendientes")).toBe(`${origin}/pendientes?token=t0k`)
+    expect(personalLinkAddress(origin, "t0k", "firma")).toBe(`${origin}/pendientes?abre=firma&token=t0k`)
+    // El botón de una plantilla lleva el token como único dato, al final.
+    expect(personalLinkAddress(origin, "{{1}}", "cita").endsWith("&token={{1}}")).toBe(true)
   })
 })

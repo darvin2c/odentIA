@@ -1047,6 +1047,49 @@ async function enabledLine(tx: Db, orgId: string, kind: AutomationKind): Promise
 }
 
 /**
+ * B2: por dónde le llegarán a esta persona los recordatorios de su cita, solo si de verdad
+ * salen: «Recordar la cita» prendida, Sofi y Argos encendidos y sin pausa, sin haberlos
+ * apagado y con una vía (`previewMessageRoute`, la misma regla de cada envío). Nulo: no le
+ * llegarán, y ni la página ni recepción lo prometen.
+ */
+export async function appointmentRemindersVia(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+): Promise<"whatsapp" | "correo" | null> {
+  if (!(await enabledLine(tx, orgId, "recordatorio_cita"))) return null
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn || !runtime.adminOn || runtime.agentsPaused) return null
+  if (!(await mayWriteFirst(tx, orgId, contactId, "recordatorio"))) return null
+  const route = await previewMessageRoute(tx, orgId, contactId, await currentAutomationMessage(tx, orgId, "recordatorio_cita"))
+  if ("cause" in route) return null
+  return route.channel === "whatsapp" ? "whatsapp" : "correo"
+}
+
+/**
+ * Lo mismo para quien aún no está registrado (lo reserva recepción con su teléfono): le
+ * llegarían por WhatsApp si la clínica tiene uno conectado y los recordatorios salen.
+ * Sin correo aún, no hay otra vía. Nulo: recepción no le dice «te escribiremos por WhatsApp».
+ */
+export async function newPersonRemindersVia(tx: Db, orgId: string): Promise<"whatsapp" | null> {
+  if (!(await enabledLine(tx, orgId, "recordatorio_cita"))) return null
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn || !runtime.adminOn || runtime.agentsPaused) return null
+  const [connection] = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .limit(1)
+  return connection ? "whatsapp" : null
+}
+
+/**
  * Cita que sigue sin confirmar después del primer recordatorio de «Recordar la
  * cita»: en pie, por venir, sin confirmar y con un recordatorio que ya salió.
  * La insistencia del agente es el aviso siguiente (tres horas antes); además
@@ -1920,8 +1963,8 @@ async function confirmedReminderFor(
       { contactId, patientId, appointmentId: lead.appointmentId },
       { secretsKey: deps.secretsKey },
     )
-    // En el mensaje no queda el token: lo pone el worker al enviarlo.
-    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
+    // En el mensaje no queda el token: lo pone el worker al enviarlo. «Cambiar mi cita» abre su cita.
+    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId, "cita")
     if (url) link = { token: personalLinkRef(issued.linkId), url }
   }
   if (route.via === "plantilla" && !link) return null
@@ -3428,10 +3471,10 @@ export async function messageChoicesUrl(
     { contactId, patientId: patientId ?? (await ownPatientOf(tx, orgId, contactId)) },
     deps,
   )
-  const url = options.raw
-    ? await personalLinkUrl(tx, orgId, link.token)
-    : await personalLinkMessageUrl(tx, orgId, link.linkId)
-  return url ? `${url}#mensajes` : null
+  // Abre directo «Tus mensajes» (`abre=mensajes`); los enlaces de antes llevaban `#mensajes`.
+  return options.raw
+    ? personalLinkUrl(tx, orgId, link.token, "mensajes")
+    : personalLinkMessageUrl(tx, orgId, link.linkId, "mensajes")
 }
 
 async function contactFirstName(tx: Db, orgId: string, contactId: string): Promise<string | null> {

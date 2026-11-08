@@ -358,7 +358,7 @@ export async function sendBudget(
   })
   const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   // En el mensaje no queda el token: lo pone el worker al enviarlo.
-  const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId) : null
+  const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId, "presupuesto") : null
   let sent: { conversationId: string; messageId: string }
   if (route.via === "plantilla" && route.template) {
     // Pasadas las 24 horas solo sale el mensaje aprobado, con el botón de su enlace.

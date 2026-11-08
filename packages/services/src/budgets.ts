@@ -3903,7 +3903,7 @@ export async function getBudgetPrintPayload(
       { contactId: opts.linkContactId, patientId },
       { secretsKey: key },
     )
-    if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token)
+    if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token, "presupuesto")
   }
   return {
     changes: await revisionChangesOf(tx, orgId, patientId, budget),

@@ -172,6 +172,14 @@ export function BookingDrawer({
     enabled: registering && (can("crm.read") || can("settings.read")),
     retry: false,
   })
+  // Solo se le dice «te escribiremos por WhatsApp» si de verdad saldrán los recordatorios (B2).
+  const remindersQuery = useQuery({
+    queryKey: ["appointments", "reminders-via"],
+    queryFn: () => apiFetch<{ data: { via: "whatsapp" | null } }>("/api/appointments/reminders-via"),
+    enabled: registering,
+    retry: false,
+  })
+  const remindersByWhatsApp = remindersQuery.data?.data.via === "whatsapp"
 
   // Lo que se avisa después de reservar y no debe perderse con el toast.
   const consentNote = React.useRef<string | null>(null)
@@ -634,10 +642,16 @@ export function BookingDrawer({
                   ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
-              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. */}
-              <p className="text-xs text-muted-foreground">
-                Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
-              </p>
+              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. Solo si saldrán. */}
+              {remindersByWhatsApp ? (
+                <p className="text-xs text-muted-foreground">
+                  Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
+                </p>
+              ) : remindersQuery.isSuccess ? (
+                <p className="text-xs text-muted-foreground">
+                  Esta clínica no envía hoy los recordatorios por WhatsApp: no se lo prometas.
+                </p>
+              ) : null}
               <form.AppField name="generalConsent">
                 {(field) => (
                   <field.Group

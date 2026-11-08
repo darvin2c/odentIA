@@ -169,7 +169,7 @@ describe("tres tipos de mensaje y los avisos de lo que pasó", () => {
     expect(await may(c, p.contactId, "avisos")).toBe(true)
     expect(await may(c, p.contactId, "seguimiento")).toBe(true)
     const reply = (await lastOut(p.conversationId))?.body ?? ""
-    expect(reply).toMatch(/^Listo, Lucía, ya no te enviaremos recordatorios\. Si tu cita cambia, te avisamos igual\.\n\nElegir mis mensajes: https:\/\/msg-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}#mensajes$/)
+    expect(reply).toMatch(/^Listo, Lucía, ya no te enviaremos recordatorios\. Si tu cita cambia, te avisamos igual\.\n\nElegir mis mensajes: https:\/\/msg-\S+\.odentia\.test\/pendientes\?abre=mensajes&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
     // Los avisos de la cita ya no llevan botón de baja.
     for (const key of ["aviso_cita_reservada", "aviso_cita_movida", "aviso_cita_cancelada", "aviso_cita_reservada_datos"] as AutomationMessageKey[]) {
       expect(AUTOMATION_MESSAGES[key].buttons.some((button) => button.action === "baja"), key).toBe(false)
@@ -206,7 +206,7 @@ describe("tres tipos de mensaje y los avisos de lo que pasó", () => {
     // Sin tipo, solo su página para que elija ella.
     const page = await choose(null)
     expect(page.changed).toEqual([])
-    expect(page.reply).toMatch(/^Lucía, aquí puedes elegir qué mensajes recibes de la clínica\.\n\nElegir mis mensajes: https:\/\/\S+\/reserva\?token=[0-9a-f]{64}#mensajes$/)
+    expect(page.reply).toMatch(/^Lucía, aquí puedes elegir qué mensajes recibes de la clínica\.\n\nElegir mis mensajes: https:\/\/\S+\/pendientes\?abre=mensajes&token=[0-9a-f]{64}$/)
     const off = await choose("recordatorio")
     expect(off.reply).toMatch(/^Listo, Lucía, ya no te enviaremos recordatorios\. Si tu cita cambia, te avisamos igual\./)
     expect(await may(c, p.contactId, "recordatorio")).toBe(false)
