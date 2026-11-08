@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto"
+import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
@@ -7,8 +9,10 @@ import {
   createEncounter,
   finalizeEncounter,
 } from "./encounters.js"
+import { createPaymentMethod } from "./payment-methods.js"
+import { collectCharge, createCharge, getAccountSummary } from "./payments.js"
 import { addPlanItem } from "./plan.js"
-import { appDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
 interface AttendCtx {
@@ -44,7 +48,7 @@ async function sessionFixture(plannedSessions: number, priceCents = 15000) {
       decisions: [{ planItemId: item.id, decision: "aceptado" }],
     }),
   )
-  return { f, item }
+  return { f, item, lineId: budget.items.find((l) => l.planItemId === item.id)!.id }
 }
 
 async function attendOnce(
@@ -101,4 +105,27 @@ it("el cierre describe lo cobrado y lo no cobrable", async () => {
   expect(result.charges).toHaveLength(1)
   expect(result.skippedCharges).toMatchObject([{ reason: "free_act" }])
   expect(result.billing.lines).toHaveLength(2)
+})
+
+it("lo que se cobra por sesión no se carga desde el presupuesto antes de la visita: la visita se debe una sola vez", async () => {
+  const { f, item, lineId } = await sessionFixture(3, 15000)
+  // Un cargo de la línea antes de la visita: firmarla volvía a cargar la misma sesión.
+  const early = await f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: lineId })).catch((error: unknown) => error)
+  // Lo que la persona paga antes queda como adelanto, a favor.
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId: site!.id,
+      advanceCents: 15000,
+      payments: [{ paymentMethodId: cash.id, amountCents: 15000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const first = await attendOnce(f, item.id, f.encounter.id)
+  expect(first.charges.map((charge) => charge.amountCents)).toEqual([15000])
+  // Se debe la sesión una vez, y el adelanto la cubre.
+  const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.byCurrency.find((row) => row.currency === "PEN")).toMatchObject({ porCobrar: 15000, aFavor: 15000, saldo: 0 })
+  expect(early).toMatchObject({ code: "CHARGED_PER_VISIT", status: 409 })
 })

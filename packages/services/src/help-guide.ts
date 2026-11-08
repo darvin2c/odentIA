@@ -588,7 +588,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si cambio un precio después de enviarlo?",
-        a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Mientras no responda, se cobra lo que ya había aceptado.",
+        a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Si todavía no eligió camino, la revisión lleva todos los caminos: desmarca solo lo que ya no le ofreces. Mientras no responda, se cobra lo que ya había aceptado.",
         forms: ["revisión del presupuesto", "subir un precio", "cambiar el precio", "nuevo precio"],
       },
       {
@@ -1262,6 +1262,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo se ven los dólares en Reportes?",
         a: "Si la clínica cobra en otra moneda, lo que ya pasó (cobrado, gastos, lo que deja y comisiones) va en la moneda del negocio, con lo que valió el día que se cobró o se pagó: no se mueve aunque cambie el cambio de hoy. «Te deben» va por moneda, con un total aproximado al cambio de hoy, y quien debe en las dos cuenta como una persona. No incluye lo que ganes o pierdas al cambiar dólares: eso queda para tu contador.",
         forms: ["dolares en reportes", "reportes con dos monedas", "cuanto vale lo cobrado en dolares"],
+      },
+      {
+        q: "¿En qué mes cuenta un gasto que anulo después?",
+        a: "En ninguno: anular un gasto es decir que no ocurrió. Deja de contar en el mes de su fecha aunque lo anules meses después, y Gastos y Reportes dicen lo mismo de ese mes, también en «Lo que deja». Si salió del efectivo de una caja ya cerrada, ese efectivo vuelve a la caja del día en que lo anulas.",
+        forms: ["gasto anulado en reportes", "anule un gasto del mes pasado", "por que cambio lo que deja de un mes pasado"],
       },
       {
         q: "¿Qué es el resumen del lunes?",

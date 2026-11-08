@@ -2399,7 +2399,9 @@ export async function finalizeEncounter(
   //   activo del mismo tratamiento; el importe respeta el total acordado).
   // - Modo `session`: un cargo por visita atendida al precio de sesión
   //   acordado, con tope de visitas previstas y sin duplicar el acto
-  //   (anti-doble-cargo por procedimiento). La deuda nace por visita.
+  //   (anti-doble-cargo por procedimiento). La deuda nace por visita: su
+  //   línea no se carga antes (`createCharge` lo rechaza, ADR 0159), y lo
+  //   pagado antes es un adelanto a favor que cancela este cargo al cobrarlo.
   const charges: FinalizeEncounterResult["charges"] = []
   const skippedCharges: SkippedCharge[] = []
   const billingLines: FinalizeBillingLine[] = []

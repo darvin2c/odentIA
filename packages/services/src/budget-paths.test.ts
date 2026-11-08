@@ -13,9 +13,12 @@ import { expect, it } from "vitest"
 import { placeBudgetPath } from "./budget-paths.js"
 import { previewBudgetSend } from "./budget-send.js"
 import {
+  addBudgetItems,
   adjustBudgetLines,
+  createBudget,
   decideBudget,
   deliverBudget,
+  duplicateBudgetOption,
   findDraftBudget,
   getBudgetDetail,
   listBudgets,
@@ -229,6 +232,40 @@ it("la revisión de un presupuesto con caminos sin elegir lleva los dos caminos"
   expect(revision.options.map((option) => option.lineCount)).toEqual(
     draft.options.map((option) => option.lineCount),
   )
+})
+
+it("la revisión sin camino elegido no pierde el camino que solo lleva lo común", async () => {
+  const { f, resina, profilaxis, exodoncia } = await ana()
+  // La opción A es la base (resina y profilaxis); la B la duplica y suma la exodoncia.
+  const base = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [resina.id, profilaxis.id] }))
+  const a = base.options[0]!
+  const two = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, base.id, a.id))
+  const b = two.options.find((option) => option.id !== a.id)!
+  await f.run((tx) => addBudgetItems(tx, ...f.args, base.id, { itemIds: [exodoncia.id], optionId: b.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, base.id))
+  const revision = await f.run((tx) =>
+    reviseBudget(tx, ...f.args, base.id, {
+      itemIds: [resina.id, profilaxis.id, exodoncia.id],
+      reason: "Cambia la vigencia",
+    }),
+  )
+  expect(revision.options.map((option) => option.lineCount)).toEqual([2, 3])
+})
+
+it("la revisión sin camino elegido quita el camino del que se desmarcó todo lo suyo", async () => {
+  const { f, exodoncia } = await ana()
+  const draft = await f.run((tx) =>
+    placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }),
+  )
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  const revision = await f.run((tx) =>
+    reviseBudget(tx, ...f.args, draft.id, {
+      itemIds: [...new Set(draft.items.map((line) => line.planItemId))].filter((id) => id !== exodoncia.id),
+      reason: "Ya no se ofrece la exodoncia",
+    }),
+  )
+  expect(revision.options).toHaveLength(1)
+  expect(revision.items.some((line) => line.planItemId === exodoncia.id)).toBe(false)
 })
 
 it("el odontólogo lee el presupuesto de su colega, pero no lo envía", async () => {

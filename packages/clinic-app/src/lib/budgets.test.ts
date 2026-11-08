@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, commonPlanItemIds } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, commonPlanItemIds, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -112,5 +112,87 @@ describe("budgetPaths", () => {
     expect(view.common.map((entry) => entry.planItemId)).toEqual(["resina"])
     expect(view.paths[1]?.own.map((entry) => entry.planItemId)).toEqual(["profilaxis", "exodoncia", "implante"])
     expect(view.exclusive.filter((entry) => entry.planItemId === "profilaxis")).toHaveLength(1)
+  })
+})
+
+describe("revisionScope", () => {
+  const ids = (lines: readonly BudgetLine[]) => lines.map((entry) => entry.planItemId)
+  const shape = (scope: ReturnType<typeof revisionScope>) =>
+    scope.groups.map((group) => [group.options.map((entry) => entry.id), ids(group.lines)])
+
+  it("sin camino elegido lleva todos los caminos: lo común una vez y lo de cada camino", () => {
+    const scope = revisionScope(ana)
+    expect(ids(scope.lines)).toEqual(["resina", "profilaxis", "endodoncia", "corona", "exodoncia", "implante"])
+    expect(shape(scope)).toEqual([
+      [["conservar", "extraer"], ["resina", "profilaxis"]],
+      [["conservar"], ["endodoncia", "corona"]],
+      [["extraer"], ["exodoncia", "implante"]],
+    ])
+  })
+
+  it("con un camino elegido lleva solo ese", () => {
+    const options = ana.options.map((entry) =>
+      entry.id === "extraer" ? { ...entry, decision: "elegida" } : { ...entry, decision: "no_elegida" },
+    )
+    const scope = revisionScope({ ...ana, options })
+    expect(ids(scope.lines)).toEqual(["resina", "profilaxis", "exodoncia", "implante"])
+    expect(scope.groups).toEqual([{ options: [], lines: scope.lines }])
+  })
+
+  it("un tratamiento con otro precio en cada camino se manda una vez, bajo los dos caminos", () => {
+    const items = ana.items.map((entry) =>
+      entry.optionId === "extraer" && entry.planItemId === "profilaxis" ? { ...entry, priceCents: 60_00 } : entry,
+    )
+    const scope = revisionScope({ ...ana, items })
+    expect(new Set(ids(scope.lines)).size).toBe(scope.lines.length)
+    // No es común para el servidor, pero va en los dos: desmarcarlo lo saca de los dos.
+    expect(shape(scope)[0]).toEqual([["conservar", "extraer"], ["resina", "profilaxis"]])
+    // La línea que se muestra es la de la opción que vale.
+    expect(scope.lines.find((entry) => entry.planItemId === "profilaxis")?.priceCents).toBe(80_00)
+  })
+
+  it("con tres caminos, lo que va en dos tiene su grupo y ningún grupo queda vacío", () => {
+    const three = {
+      options: [option("a", 1, { isRecommended: true }), option("b", 2), option("c", 3)],
+      items: [line("a", "x", 100), line("b", "x", 100), line("c", "x", 100), line("a", "y", 50), line("b", "y", 50), line("c", "z", 70)],
+    }
+    expect(shape(revisionScope(three))).toEqual([
+      [["a", "b", "c"], ["x"]],
+      [["c"], ["z"]],
+      [["a", "b"], ["y"]],
+    ])
+  })
+
+  it("con una sola opción lleva sus líneas", () => {
+    const only = { options: [option("unica", 1, { isRecommended: true })], items: [line("unica", "resina", 150_00)] }
+    expect(ids(revisionScope(only).lines)).toEqual(["resina"])
+  })
+})
+
+describe("revisionDroppedOptions", () => {
+  const all = ["resina", "profilaxis", "endodoncia", "corona", "exodoncia", "implante"]
+  const without = (...ids: string[]) => new Set(all.filter((id) => !ids.includes(id)))
+
+  it("con todo marcado no sale ninguna; sin lo propio de un camino, sale ese", () => {
+    expect([...revisionDroppedOptions(ana, new Set(all))]).toEqual([])
+    expect([...revisionDroppedOptions(ana, without("exodoncia"))]).toEqual([])
+    expect([...revisionDroppedOptions(ana, without("exodoncia", "implante"))]).toEqual(["extraer"])
+    // Desmarcar lo común no quita ningún camino.
+    expect([...revisionDroppedOptions(ana, without("resina", "profilaxis"))]).toEqual([])
+  })
+
+  it("el camino que solo lleva lo común sigue mientras vaya algo suyo", () => {
+    const subset = {
+      options: [option("base", 1, { isRecommended: true }), option("mas", 2)],
+      items: [line("base", "resina", 100), line("mas", "resina", 100), line("mas", "exodoncia", 50)],
+    }
+    expect([...revisionDroppedOptions(subset, new Set(["resina", "exodoncia"]))]).toEqual([])
+    expect([...revisionDroppedOptions(subset, new Set(["resina"]))]).toEqual(["mas"])
+  })
+
+  it("si salieran todas no avisa (el servidor deja la primera); con un camino elegido no aplica", () => {
+    expect([...revisionDroppedOptions(ana, new Set(["resina"]))]).toEqual([])
+    const options = ana.options.map((entry) => (entry.id === "extraer" ? { ...entry, decision: "elegida" } : entry))
+    expect([...revisionDroppedOptions({ ...ana, options }, new Set(["resina"]))]).toEqual([])
   })
 })

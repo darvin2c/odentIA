@@ -8,7 +8,7 @@ import {
   AlertDialogTitle,
   Button,
 } from "@odentia/ui"
-import { useDraftBlocker } from "@odentia/ui-patterns"
+import { type KeptInPage, useDraftBlocker } from "@odentia/ui-patterns"
 import { useEffect, useRef, useState } from "react"
 
 /** Compara valores de formulario, no metadatos de interacción ni orden de claves. */
@@ -22,8 +22,11 @@ export function sameDraft(left: unknown, right: unknown): boolean {
   return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameDraft(a[key], b[key]))
 }
 
-/** El formulario conserva sus valores; el guard solo retiene el destino pendiente. */
-export function usePageDraftGuard(dirty: boolean) {
+/**
+ * El formulario conserva sus valores; el guard solo retiene el destino pendiente.
+ * Con `keptInPage` solo pregunta al ir a otra ruta (`useDraftBlocker`).
+ */
+export function usePageDraftGuard(dirty: boolean, options: { keptInPage?: KeptInPage | null } = {}) {
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
   const [leave, setLeave] = useState<(() => void) | null>(null)
@@ -33,6 +36,7 @@ export function usePageDraftGuard(dirty: boolean) {
     disabled: !dirty,
     enableBeforeUnload: false,
     shouldBlockFn: () => dirtyRef.current,
+    keptInPage: options.keptInPage,
   })
 
   useEffect(() => {
@@ -94,6 +98,6 @@ export function usePageDraftGuard(dirty: boolean) {
   }
 }
 
-export function PageDraftGuard({ dirty }: { dirty: boolean }) {
-  return usePageDraftGuard(dirty).dialog
+export function PageDraftGuard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: KeptInPage | null }) {
+  return usePageDraftGuard(dirty, { keptInPage }).dialog
 }
