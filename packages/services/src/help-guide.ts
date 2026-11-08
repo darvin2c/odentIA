@@ -1105,8 +1105,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Si no tiene cobros nuevos de donde descontarlo, su fila dice cuánto queda «por descontar del próximo pago»: se descuenta solo, sin hacer nada.",
-        forms: ["descuento de comisión", "devolución y comisión", "cobro anulado comisión"],
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago.",
+        forms: [
+          "descuento de comisión",
+          "devolución y comisión",
+          "cobro anulado comisión",
+          "el doctor devolvió la comisión",
+          "perdonar lo que debe el doctor",
+          "dar por saldada la comisión",
+        ],
       },
       {
         q: "¿Quién ve las comisiones?",
