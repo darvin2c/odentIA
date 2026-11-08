@@ -1,5 +1,5 @@
 import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
-import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
+import { internationalText, SkeletonRegion, useScheduleNow } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
@@ -34,7 +34,8 @@ import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
 import { storesTomography } from "../patient/document-labels"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
-import { NextControlCard } from "../patient/next-control"
+import { NextControlCard, useNextControl } from "../patient/next-control"
+import { controlNeedsBooking } from "../../lib/clinical-journey"
 import { PlanNextCard } from "../patient/plan/plan-next"
 import {
   ClinicalAlertsCard,
@@ -156,7 +157,12 @@ export function PersonSummary({
     retry: false,
   })
 
-  const upcoming = appointments.data ? nextAppointment(appointments.data.data) : null
+  // El reloj de la Agenda: quien está en la sala sigue en la sala y su espera avanza.
+  const now = useScheduleNow()
+  const upcoming = appointments.data ? nextAppointment(appointments.data.data, Date.parse(now)) : null
+  // Con un control por reservar, «Reservar cita» va en su fila (o en «Qué sigue»), no también aquí.
+  const nextControl = useNextControl(patientId ?? "", Boolean(patientId))
+  const controlToBook = nextControl.control !== null && controlNeedsBooking(nextControl.control)
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
     (balance) => balance.porCobrar > 0,
   )
@@ -230,6 +236,8 @@ export function PersonSummary({
               loading={canAppointments && appointments.isPending}
               failed={!canAppointments || appointments.isError}
               phone={phoneLine}
+              bookElsewhere={controlToBook}
+              now={now}
             />
           </div>
           {/* El próximo control en su propia fila: «Qué sigue» dice una sola cosa (QA del 6 nov). */}
@@ -300,7 +308,7 @@ export function PersonSummary({
                     : upcoming
                       ? (
                           <>
-                            {appointmentLine(upcoming)}
+                            {appointmentLine(upcoming, new Date(now))}
                             {" · "}
                             <Button
                               type="button"

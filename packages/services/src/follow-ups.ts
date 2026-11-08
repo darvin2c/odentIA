@@ -14,7 +14,13 @@ import { assertOpenDraft, requireEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
-import { controlWindowStart } from "./to-schedule.js"
+import {
+  controlWindowStart,
+  isOverdueToday,
+  LIVE_APPOINTMENT_STATUSES,
+  servedToday,
+  todayLiveAppointments,
+} from "./to-schedule.js"
 
 export type ScheduleFollowUpInput =
   | { appointmentId: string }
@@ -451,5 +457,29 @@ export async function listFollowUps(
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
-  return rows.map(present)
+  // Si venció o se cumple hoy, con las reglas de «Qué sigue» (revisión del 7 nov): el Plan
+  // dice «Vencido» con la misma regla que el Resumen y «Control vencido».
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const now = new Date()
+  const [next] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, [...LIVE_APPOINTMENT_STATUSES]),
+        sql`${appointment.startsAt} > ${now.toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(asc(appointment.startsAt))
+    .limit(1)
+  const today = (await todayLiveAppointments(tx, orgId, [patientId], timezone)).get(patientId) ?? null
+  return rows.map(present).map((row) => ({
+    ...row,
+    /** Vencido sin cita y sin cumplirse con su atención de hoy (`isOverdueToday`). */
+    overdue: isOverdueToday(row, next?.startsAt ?? null, today?.startsAt ?? null, timezone, now),
+    /** La cita viva de hoy con la que se cumple al firmarse (`servedToday`); nula si no. */
+    servedToday: servedToday(row, today?.startsAt ?? null, timezone, now) ? today : null,
+  }))
 }

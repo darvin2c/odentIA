@@ -317,6 +317,8 @@ export function UpcomingCard({
   loading,
   failed,
   phone,
+  bookElsewhere = false,
+  now,
 }: {
   patientId: string
   /** Para «Nueva cita»: la persona ya puesta. */
@@ -326,8 +328,15 @@ export function UpcomingCard({
   failed: boolean
   /** «Teléfono +51 987 654 305 · WhatsApp», ya dicho. */
   phone: string
+  /**
+   * Hay un control por reservar: «Reservar cita» va en su fila y aquí no se repite
+   * (ya está en la cabecera; revisión del 7 nov).
+   */
+  bookElsewhere?: boolean
+  /** El reloj de la Agenda (`useScheduleNow`): «espera N min» avanza solo. */
+  now: string
 }): React.JSX.Element {
-  const canBook = usePermission("appointments.write")
+  const canBook = usePermission("appointments.write") && !bookElsewhere
   const archived = usePersonArchived()
   return (
     <SummaryCard
@@ -347,7 +356,7 @@ export function UpcomingCard({
           <p className="text-muted-foreground">No disponible</p>
         ) : upcoming ? (
           <p className="line-clamp-2 font-medium">
-            {appointmentLine(upcoming)}
+            {appointmentLine(upcoming, new Date(now))}
           </p>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2">

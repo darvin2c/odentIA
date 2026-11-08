@@ -139,6 +139,28 @@ export interface FollowUp {
   branchId: string | null
   /** Desde cuándo una visita lo cumple: «Usar esa cita» ofrece las citas desde ahí. */
   windowFrom: string
+  /** Vencido sin cita y sin cumplirse con su atención de hoy: lo decide el servidor. */
+  overdue?: boolean
+  /** La cita viva de hoy con la que se cumple al firmarse; nula si no. */
+  servedToday?: { id: string; startsAt: string } | null
+}
+
+/**
+ * Una fecha de control en el formato corto de la ficha: «18 nov» y, si no es de
+ * este año, «18 nov 2027», en la zona de la clínica (revisión del 7 nov).
+ */
+export function controlDay(iso: string, now: Date = new Date()): string {
+  const timeZone = activeOrgTimeZone()
+  const yearOf = (date: Date) => new Intl.DateTimeFormat("en-CA", { year: "numeric", timeZone }).format(date)
+  const date = new Date(iso)
+  return date
+    .toLocaleDateString(activeOrgLocale(), {
+      day: "numeric",
+      month: "short",
+      ...(yearOf(date) !== yearOf(now) ? { year: "numeric" } : {}),
+      timeZone,
+    })
+    .replace(".", "")
 }
 
 /** Situación de la reserva, independiente del cierre clínico del control. */
@@ -214,7 +236,7 @@ export function scheduleFollowUpApi(
 /** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
 export type SchedulableControl = Pick<
   FollowUp,
-  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom"
+  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom" | "overdue"
 >
 
 /**
@@ -246,7 +268,14 @@ export interface NextControl {
   dueAt: string
   status: string
   overdue: boolean
+  /** Se cumple con su atención de hoy: está hoy en la clínica o tiene su cita de hoy. */
+  today?: boolean
   appointment: { id: string; startsAt: string } | null
+}
+
+/** Falta reservarle la cita: no tiene una que lo cumpla, ni la de hoy. */
+export function controlNeedsBooking(control: NextControl): boolean {
+  return !control.appointment && (control.status === "pendiente" || control.status === "programado")
 }
 
 /** Dónde dice el Resumen el próximo control (QA del 6 nov, X3). */

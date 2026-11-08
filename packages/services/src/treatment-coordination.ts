@@ -19,7 +19,6 @@ import { scheduledItems } from "./plan-next.js"
 import { listPlanItems } from "./plan.js"
 import {
   appointmentServesControl,
-  isOverdueControl,
   isToSchedule,
   LIVE_APPOINTMENT_STATUSES,
   nextControlOf,
@@ -43,6 +42,8 @@ export interface CoordinationFollowUp {
   branchId: string | null
   /** Desde cuándo una visita lo cumple: «Usar esa cita» ofrece las citas desde ahí. */
   windowFrom: Date
+  /** Vencido sin cita y sin cumplirse hoy: el Plan lo dice «Vencido», como el Resumen. */
+  overdue: boolean
 }
 
 /**
@@ -55,8 +56,10 @@ export interface NextControl {
   title: string
   dueAt: Date
   status: string
-  /** Vencido sin cita: pendiente, su día ya pasó y no tiene ninguna cita por venir. */
+  /** Vencido sin cita: pendiente, su día ya pasó, no tiene ninguna cita por venir y no se cumple hoy. */
   overdue: boolean
+  /** Se cumple con su atención de hoy: tiene hoy una cita viva desde que abrió su ventana. */
+  today: boolean
   /**
    * La cita que lo cumple: la suya si está reservado, o la próxima cita de la
    * persona si cae desde que abre su ventana. Nula: falta reservarla.
@@ -91,7 +94,7 @@ export interface TreatmentCoordination {
 }
 
 function toCoordinationFollowUp(
-  row: Awaited<ReturnType<typeof listFollowUps>>[number],
+  row: Awaited<ReturnType<typeof listFollowUps>>[number] | Awaited<ReturnType<typeof scheduleFollowUp>>,
 ): CoordinationFollowUp {
   return {
     id: row.id,
@@ -103,6 +106,7 @@ function toCoordinationFollowUp(
     appointment: row.appointment,
     branchId: row.branchId,
     windowFrom: row.windowFrom,
+    overdue: "overdue" in row ? Boolean(row.overdue) : false,
   }
 }
 
@@ -193,8 +197,9 @@ async function nextControlFor(
     title: control.title,
     dueAt: control.dueAt,
     status: control.status,
-    overdue: isOverdueControl(control, next?.startsAt ?? null, timezone),
-    appointment: own ?? serving,
+    overdue: control.overdue,
+    today: control.servedToday !== null,
+    appointment: control.servedToday ?? own ?? serving,
   }
 }
 

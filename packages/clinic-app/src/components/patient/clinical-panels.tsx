@@ -391,11 +391,12 @@ export function ControlesPanel({
             <li key={row.id} className="flex flex-col gap-2 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{row.title}</span>
-                <Badge variant={statusBadge(row.status)}>
-                  {FOLLOW_UP_STATUS_LABELS[row.status]}
+                {/* Vencido con la misma regla del Resumen y de «Control vencido» (revisión del 7 nov). */}
+                <Badge variant={row.overdue ? "destructive" : statusBadge(row.status)}>
+                  {row.overdue ? "Vencido" : FOLLOW_UP_STATUS_LABELS[row.status]}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
-                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto {formatDate(row.dueAt)}
+                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · {row.overdue ? "tocaba el" : "previsto"} {formatDate(row.dueAt)}
                   {row.legacyScheduledAt && !row.appointment
                     ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
                     : ""}

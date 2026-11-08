@@ -8,7 +8,7 @@
 import { Button } from "@odentia/ui"
 import { zonedDateOf } from "@odentia/ui-patterns"
 import { useState } from "react"
-import { formatDate, type NextControl, nextControlPlace } from "../../lib/clinical-journey"
+import { controlDay, controlNeedsBooking, type NextControl, nextControlPlace } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { activeOrgTimeZone } from "../../lib/locale"
 import { appointmentWhen } from "../../lib/patient-appointments"
@@ -19,24 +19,29 @@ import { usePlanNextStep } from "./plan/plan-next"
 import { useTreatmentCoordination } from "./plan/plan-coordination"
 import { SummaryCard } from "./resumen-tab"
 
-/** «Toca el 12/05/2027» o «Tocaba el …» si su día ya pasó; con su cita, cuándo es. */
+/**
+ * «Toca el 18 nov» o «Tocaba el …» si su día ya pasó, y qué lo cumple: su
+ * atención de hoy, su cita, o que falta reservarla. Un control reservado cuya
+ * cita ya no está en pie dice «sin cita reservada» (revisión del 7 nov).
+ */
 export function nextControlDetail(control: NextControl, now: Date = new Date()): string {
   const timeZone = activeOrgTimeZone()
   const past = control.overdue || zonedDateOf(control.dueAt, timeZone) < zonedDateOf(now.toISOString(), timeZone)
-  const due = `${past ? "Tocaba el" : "Toca el"} ${formatDate(control.dueAt)}`
-  if (control.appointment)
-    return `${due} · cita el ${appointmentWhen(control.appointment)}`
+  const due = `${past ? "Tocaba el" : "Toca el"} ${controlDay(control.dueAt, now)}`
+  if (control.today) return `${due} · se cumple con su atención de hoy`
+  if (control.appointment) return `${due} · cita el ${appointmentWhen(control.appointment)}`
+  if (control.status === "programado") return `${due} · sin cita reservada`
   return control.overdue ? `${due} · sin cita por venir` : `${due} · falta reservar la cita`
 }
 
 /** El próximo control y dónde va en el Resumen; nada mientras «Qué sigue» o el control cargan. */
-export function useNextControl(patientId: string): {
+export function useNextControl(patientId: string, enabled = true): {
   control: NextControl | null
   place: ReturnType<typeof nextControlPlace>
   /** Todavía se pregunta: «Pendientes» no dice que no hay nada. */
   loading: boolean
 } {
-  const canRead = usePermission("appointments.read")
+  const canRead = usePermission("appointments.read") && enabled
   const coordination = useTreatmentCoordination(patientId, canRead)
   const nextStep = usePlanNextStep(patientId, canRead)
   const loading = coordination.isLoading || nextStep.isLoading
@@ -64,7 +69,7 @@ export function NextControlAction({
       </Button>
     )
   }
-  if (!canBook || archived || control.status !== "pendiente") return null
+  if (!canBook || archived || !controlNeedsBooking(control)) return null
   return (
     <>
       <Button type="button" size="sm" variant="outline" onClick={() => setScheduling(true)}>
