@@ -556,7 +556,7 @@ it("los papeles de salud van solo a la persona adulta o a su representante legal
   )
   expect(options.recipient?.displayName).toBe("Marta Tutora")
   expect(options.channels.every((c) => c.channel === "whatsapp" || c.channel === "email")).toBe(true)
-  expect(options.printOnly).toMatch(/solo se puede imprimir/)
+  expect(options.printOnly).toMatch(/imprímelo/)
   // Nunca a quien no es la persona ni su representante.
   await expect(
     v.run((tx) =>

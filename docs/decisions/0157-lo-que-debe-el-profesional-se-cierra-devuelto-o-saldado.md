@@ -28,6 +28,6 @@ Si un cobro se anula o se devuelve después de pagada su comisión, el profesion
 
 ## Referencias
 
-- `packages/db/drizzle/0063_deuda_del_profesional.sql`
+- `packages/db/drizzle/0065_deuda_del_profesional.sql`
 - `packages/services/src/finance.ts` (`settleCommissionDebt`, `voidCommissionSettlement`, `monthView`)
 - `packages/services/src/finance-commission-debt.test.ts`

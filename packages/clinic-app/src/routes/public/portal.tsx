@@ -36,7 +36,7 @@ import {
 } from "../../components/public/week-slots"
 import { ApiError } from "../../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
-import { setOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
 import {
   cancelPortalAppointmentApi,
   closePortalSessionApi,
@@ -47,13 +47,16 @@ import {
   fetchPortalAccount,
   fetchPortalAppointments,
   fetchPortalBudgets,
-  fetchPortalDocuments,
-  fetchPortalDocumentUrl,
+  fetchPortalPaperFileUrl,
+  fetchPortalPaperPdf,
+  fetchPortalPapers,
   fetchPortalQuestionnaire,
   fetchPortalRescheduleSlots,
   fetchPortalSession,
   fetchPublicPortalPolicyApi,
   formatPortalDate,
+  type PortalPaper,
+  sentenceEnd,
   formatPortalMoney,
   portalTotalsText,
   listMyPortalGrantsApi,
@@ -543,14 +546,16 @@ function PortalDashboard({
   setOrgLocale(info.locale, info.timeZone)
   const scope = info.session.scope
   const offerSave = !skipSave && !info.accessSaved && !info.remembered && (firstEntry || info.session.authMethod === "enlace_pin")
-  const nothing = !scope.appointments && !scope.budgets && !scope.account && scope.documents.length === 0
+  const nothing = !scope.appointments && !scope.budgets && !scope.account && !scope.papers
 
   return (
     <PageShell maxWidth="md">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <h1 className="text-xl font-semibold">Hola, {info.patientName}</h1>
-          <p className="text-sm text-muted-foreground">Tu sesión en este teléfono termina el {formatPortalDate(info.session.expiresAt)}.</p>
+          <p className="text-sm text-muted-foreground">
+            {sentenceEnd(`Tu sesión en este teléfono termina el ${formatPortalDate(info.session.expiresAt)}`)}
+          </p>
         </div>
         <Button type="button" variant="outline" className="min-h-11" disabled={close.isPending} onClick={() => close.mutate()}>
           Cerrar sesión
@@ -572,17 +577,13 @@ function PortalDashboard({
         {scope.appointments ? <NextAppointment sessionToken={sessionToken} /> : null}
         {scope.appointments ? <QuestionnaireBlock sessionToken={sessionToken} /> : null}
         {scope.budgets ? <BudgetsBlock sessionToken={sessionToken} /> : null}
-        {scope.documents.length > 0 ? (
-          <Block title="Tus documentos">
-            <DocumentsBlock sessionToken={sessionToken} />
-          </Block>
-        ) : null}
+        {scope.papers ? <DocumentsBlock sessionToken={sessionToken} /> : null}
         {scope.account ? (
           <Block title="Tu cuenta">
             <AccountBlock sessionToken={sessionToken} />
           </Block>
         ) : null}
-        {nothing ? <EmptyState title="Aún no hay nada que ver" description="Pide en recepción que te den acceso a tus citas, presupuestos o documentos." /> : null}
+        {nothing ? <EmptyState title="Aún no hay nada que ver" description="La clínica todavía no muestra nada en su portal." /> : null}
       </div>
     </PageShell>
   )
@@ -1010,63 +1011,124 @@ function QuestionnaireForm({
   )
 }
 
+/** Cuántos se ven de entrada: lo más reciente; el resto, con «Ver todos». */
+const PAPERS_FIRST = 10
+
+/**
+ * «Tus documentos» (ADR 0156): todo lo suyo, lo más reciente primero, con su
+ * tipo y la etiqueta en texto («Anulada», «Vencida», «Nuevo»), los 10 últimos y
+ * «Ver todos». Cada fila se toca entera y abre el papel: el PDF o la imagen.
+ * Lo arma el servidor; aquí no se decide nada.
+ */
 function DocumentsBlock({ sessionToken }: { sessionToken: string }) {
-  const documentsQuery = useQuery({
-    queryKey: ["portal-documents", sessionToken],
-    queryFn: () => fetchPortalDocuments(sessionToken),
+  const papersQuery = useQuery({
+    queryKey: ["portal-papers", sessionToken],
+    queryFn: () => fetchPortalPapers(sessionToken),
     retry: false,
   })
   const [opening, setOpening] = useState("")
   const [openError, setOpenError] = useState<string | null>(null)
+  const [all, setAll] = useState(false)
+  const items = papersQuery.data ?? []
+  const fresh = items.filter((paper) => paper.isNew).length
+  const title = "Tus documentos"
 
-  if (documentsQuery.isPending)
-    return (
-      <SkeletonRegion message="Cargando tus documentos…">
-        <PortalDocumentsSkeleton />
-      </SkeletonRegion>
-    )
-  if (documentsQuery.isError) {
-    return <ErrorState title="No pudimos cargar tus documentos" message={portalErrorMessage(documentsQuery.error)} onRetry={() => documentsQuery.refetch()} />
-  }
-  const items = documentsQuery.data
-  if (items.length === 0) {
-    return <EmptyState title="Sin documentos" description="No hay documentos autorizados en tu acceso." />
-  }
-
-  async function openDocument(id: string) {
-    setOpening(id)
+  async function openPaper(paper: PortalPaper) {
+    const key = `${paper.kind}:${paper.id}`
+    // La pestaña se abre en el toque, para que el teléfono no la bloquee.
+    const tab = window.open("", "_blank")
+    if (tab) tab.opener = null
+    setOpening(key)
     setOpenError(null)
     try {
-      const { url } = await fetchPortalDocumentUrl(sessionToken, id)
-      window.open(url, "_blank", "noopener,noreferrer")
+      const url =
+        paper.kind === "archivo"
+          ? (await fetchPortalPaperFileUrl(sessionToken, paper.id)).url
+          : URL.createObjectURL(await fetchPortalPaperPdf(sessionToken, paper))
+      if (tab && !tab.closed) tab.location.href = url
+      else window.open(url, "_blank", "noopener,noreferrer")
+      if (url.startsWith("blob:")) window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000)
     } catch (error) {
+      if (tab && !tab.closed) tab.close()
       setOpenError(portalErrorMessage(error))
     } finally {
       setOpening("")
     }
   }
 
-  return (
+  const body = papersQuery.isPending ? (
+    <SkeletonRegion message="Cargando tus documentos…">
+      <PortalDocumentsSkeleton />
+    </SkeletonRegion>
+  ) : papersQuery.isError ? (
+    <ErrorState title="No pudimos cargar tus documentos" message={portalErrorMessage(papersQuery.error)} onRetry={() => papersQuery.refetch()} />
+  ) : items.length === 0 ? (
+    <EmptyState
+      title="Aún no hay documentos"
+      description="Aquí aparecerán tus recetas, órdenes, comprobantes e imágenes cuando la clínica los emita."
+    />
+  ) : (
     <div className="grid gap-2">
-      {openError && <ErrorState title="No se pudo abrir el documento" message={openError} />}
-      {items.map((doc) => (
-        <div key={doc.id} className="flex flex-wrap items-center gap-3 rounded-md border p-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{doc.label}</p>
-            <p className="text-xs text-muted-foreground">
-              {doc.category} · {formatPortalDate(doc.createdAt)}
-            </p>
-          </div>
-          <Button variant="outline" size="sm" disabled={opening === doc.id} onClick={() => void openDocument(doc.id)}>
-            {opening === doc.id ? "Abriendo…" : "Abrir"}
-          </Button>
-        </div>
-      ))}
-      <p className="text-xs text-muted-foreground">
-        Cada apertura genera un enlace válido por 5 minutos y queda registrada.
-      </p>
+      {openError ? <ErrorState title="No se pudo abrir" message={`${openError} Vuelve a tocar.`} /> : null}
+      <ul className="grid gap-2">
+        {(all ? items : items.slice(0, PAPERS_FIRST)).map((paper) => {
+          const key = `${paper.kind}:${paper.id}`
+          return (
+            <li key={key}>
+              <button
+                type="button"
+                disabled={opening === key}
+                onClick={() => void openPaper(paper)}
+                className="flex min-h-11 w-full min-w-0 items-start gap-3 rounded-md border p-3 text-left hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="line-clamp-2 break-words text-sm font-medium">{paper.title}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>
+                      {paper.type} · {formatPortalDay(paper.at)}
+                    </span>
+                    {paper.stateWord ? <Badge variant="outline">{paper.stateWord}</Badge> : null}
+                    {paper.isNew ? <Badge variant="secondary">Nuevo</Badge> : null}
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm font-medium text-primary">
+                  {opening === key ? "Abriendo…" : "Ver"}
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {!all && items.length > PAPERS_FIRST ? (
+        <Button type="button" variant="ghost" className="min-h-11 self-start" onClick={() => setAll(true)}>
+          Ver todos ({items.length})
+        </Button>
+      ) : null}
     </div>
   )
+
+  return (
+    <section aria-label={title} className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-semibold">{title}</h2>
+        {fresh > 0 ? (
+          <span className="text-sm text-muted-foreground">
+            · {fresh === 1 ? "1 nuevo" : `${fresh} nuevos`}
+          </span>
+        ) : null}
+      </div>
+      {body}
+    </section>
+  )
+}
+
+/** «6 nov 2026»: el día de un documento, sin la hora. */
+function formatPortalDay(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium", timeZone: activeOrgTimeZone() })
+  } catch {
+    return formatPortalDate(iso)
+  }
 }
 
 function AccountBlock({ sessionToken }: { sessionToken: string }) {
