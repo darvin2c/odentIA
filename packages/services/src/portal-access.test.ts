@@ -493,7 +493,7 @@ async function adultWithDocument(number: number, doc: string | null): Promise<{ 
   return { patientId: created!.id, personId }
 }
 
-it("dar acceso en un paso: su documento a la vista, recepción comparte presupuestos y el código va aparte", async () => {
+it("dar acceso en un paso: su documento entero a la vista, ve todo lo suyo sin elegir y el código va aparte", async () => {
   const sin = await adultWithDocument(9301, null)
   // Sin documento no se puede comprobar su identidad.
   expect(
@@ -513,11 +513,12 @@ it("dar acceso en un paso: su documento a la vista, recepción comparte presupue
 
   const con = await adultWithDocument(9302, "47120836")
   const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, con.patientId))
-  // El documento se dice con su tipo y sin el número entero.
+  // El documento se dice con su tipo y su número entero, para compararlo con el que tiene en la mano.
   expect(summary.candidates).toEqual([
-    expect.objectContaining({ contactId: con.personId, relation: "self", document: "DNI 4•••••36", whatsappReady: false }),
+    expect.objectContaining({ contactId: con.personId, relation: "self", document: "DNI 47120836", whatsappReady: false }),
   ])
-  const rights = { canShareBudgets: true, canShareAccount: false, canShareDocuments: false }
+  // Lo que verá ya no depende de los permisos de quien da el acceso (ADR 0156).
+  const rights = NO_RIGHTS
   // Sin marcar la comprobación no se da.
   expect(
     await errorCode(
@@ -533,21 +534,6 @@ it("dar acceso en un paso: su documento a la vista, recepción comparte presupue
       ),
     ),
   ).toBe("VALIDATION")
-  // La cuenta pide caja: recepción no la comparte.
-  expect(
-    await errorCode(
-      withOrgContext(appDb, ORG, (tx) =>
-        givePortalAccess(
-          tx,
-          ORG,
-          ACTOR,
-          con.patientId,
-          { contactId: con.personId, scope: { appointments: true, account: true }, identityChecked: true, delivery: "qr" },
-          { linkUrl: (token) => `https://portal.test/a/${token}`, ...rights },
-        ),
-      ),
-    ),
-  ).toBe("PORTAL_FORBIDDEN")
   const given = await withOrgContext(appDb, ORG, (tx) =>
     givePortalAccess(
       tx,
@@ -566,7 +552,64 @@ it("dar acceso en un paso: su documento a la vista, recepción comparte presupue
   expect(after.access).toEqual([
     expect.objectContaining({ contactId: con.personId, relation: "self", saved: false, lastEntryAt: null }),
   ])
-  expect(after.access[0]?.scope).toMatchObject({ appointments: true, budgets: true, account: false })
+  // Todo lo suyo, con el límite de la clínica: también la cuenta y sus documentos, sin elegirlos.
+  expect(after.access[0]?.scope).toMatchObject({ appointments: true, budgets: true, account: true, papers: true })
+})
+
+it("«Enviar nuevo enlace» deja sin efecto el enlace anterior que no se usó", async () => {
+  const rosa = await adultWithDocument(9304, "40000005")
+  const grant = await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, {
+      patientId: rosa.patientId,
+      contactId: rosa.personId,
+      verifiedMethod: "presencial_documento",
+    }),
+  )
+  const deliver = { linkUrl: (token: string) => `https://portal.test/a/${token}` }
+  const first = await withOrgContext(appDb, ORG, (tx) => resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, deliver))
+  const second = await withOrgContext(appDb, ORG, (tx) => resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, deliver))
+  const tokenOf = (url: string | null) => url?.split("/a/")[1] ?? ""
+  const links = await withOrgContext(appDb, ORG, (tx) =>
+    tx
+      .select({ status: portalLink.status, tokenHash: portalLink.tokenHash })
+      .from(portalLink)
+      .where(and(eq(portalLink.patientId, rosa.patientId), eq(portalLink.contactId, rosa.personId))),
+  )
+  const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex")
+  expect(links.find((row) => row.tokenHash === hash(tokenOf(first.activationUrlOnce)))?.status).toBe("revocado")
+  expect(links.find((row) => row.tokenHash === hash(tokenOf(second.activationUrlOnce)))?.status).toBe("pendiente")
+  // El QR viejo ya no abre el portal, aunque se escriba bien el código.
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, tokenOf(first.activationUrlOnce), { pin: first.pinOnce ?? "" })),
+    ),
+  ).not.toBe("OK")
+
+  // La sesión abierta con el enlace anterior (el teléfono perdido) también se cierra.
+  const opened = await withOrgContext(appDb, ORG, (tx) =>
+    exchangePortalToken(tx, ORG, tokenOf(second.activationUrlOnce), { pin: second.pinOnce ?? "" }),
+  )
+  expect(await errorCode(withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, opened.sessionToken)))).toBe("OK")
+  await withOrgContext(appDb, ORG, (tx) => resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, deliver))
+  expect(await errorCode(withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, opened.sessionToken)))).toBe("PORTAL_REVOKED")
+})
+
+it("cada uso del portal no reescribe la sesión ni deja actividad a nombre de quien dio el acceso", async () => {
+  const ana = await adultWithDocument(9305, "40000006")
+  const grant = await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, { patientId: ana.patientId, contactId: ana.personId, verifiedMethod: "presencial_documento" }),
+  )
+  const given = await withOrgContext(appDb, ORG, (tx) =>
+    resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, { linkUrl: (token) => `https://portal.test/a/${token}` }),
+  )
+  const opened = await withOrgContext(appDb, ORG, (tx) =>
+    exchangePortalToken(tx, ORG, given.activationUrlOnce?.split("/a/")[1] ?? "", { pin: given.pinOnce ?? "" }),
+  )
+  for (let i = 0; i < 3; i++) await withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, opened.sessionToken))
+  const refreshed = await ownerDb.execute<{ n: number }>(
+    sql`select count(*)::int as n from audit_event where organization_id = ${ORG} and action = 'portal.session_scope_refreshed' and entity_id = ${opened.session.id}`,
+  )
+  expect(Number((refreshed as unknown as Array<{ n: number }>)[0]?.n)).toBeLessThanOrEqual(1)
 })
 
 it("pedir volver al portal por el chat deja el pedido en «Te espera» y lo atiende una persona", async () => {
@@ -594,9 +637,12 @@ it("pedir volver al portal por el chat deja el pedido en «Te espera» y lo atie
   // El mismo pedido repetido el mismo día no deja otra fila.
   await withOrgContext(appDb, ORG, (tx) => requestPortalReentry(tx, ORG, { contactId: lucia.personId, conversationId: conv!.id }))
   const access: WorkspaceAccess = {
-    patients: true, appointments: false, conversations: false, tasks: true, finance: false, clinical: false,
+    patients: true, appointments: false, conversations: false, tasks: true, finance: false, clinical: true,
     crm: true, agent: false, allTasks: true, configure: false, ownAppointments: false,
   }
+  // Recepción también lo atiende: envía el enlace nuevo por su WhatsApp, sin ver el enlace ni el código.
+  const reception = await withOrgContext(appDb, ORG, (tx) => getWorkspaceHome(tx, ORG, ACTOR, { ...access, clinical: false }))
+  expect(reception.waiting.some((row) => row.kind === "portalReentry")).toBe(true)
   const home = await withOrgContext(appDb, ORG, (tx) => getWorkspaceHome(tx, ORG, ACTOR, access))
   const rows = home.waiting.filter((row) => row.kind === "portalReentry")
   expect(rows).toEqual([expect.objectContaining({ patientId: lucia.patientId, grantId: grant.id })])
@@ -662,4 +708,46 @@ it("la hija cumple 18: la representación de menor termina y su madre ya no entr
   // Ya no es candidata a entrar por ella: ahora entra la propia hija.
   const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, daughter))
   expect(summary.candidates.map((row) => row.contactId)).not.toContain(contactId)
+})
+
+it("recepción envía el enlace por su WhatsApp: el enlace y el código van a la persona y a su pantalla no vuelve ninguno", async () => {
+  const eva = await adultWithDocument(9306, "40000007")
+  const grant = await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, { patientId: eva.patientId, contactId: eva.personId, verifiedMethod: "presencial_documento" }),
+  )
+  const [wa] = await ownerDb
+    .insert(channelConnection)
+    .values({
+      organizationId: ORG,
+      channel: "whatsapp",
+      provider: "whatsapp_cloud_api",
+      displayName: "WA Portal",
+      configEncrypted: "x",
+      webhookSecret: "s",
+      status: "active",
+    })
+    .returning({ id: channelConnection.id })
+  const [chat] = await ownerDb
+    .insert(conversation)
+    .values({ organizationId: ORG, contactId: eva.personId, channelConnectionId: wa!.id, externalThreadId: "wa:51900000007", status: "open", lastInboundAt: new Date() })
+    .returning({ id: conversation.id })
+  const deliver = { linkUrl: (token: string) => `https://portal.test/a/${token}` }
+  // Sin ver la historia no se muestra el QR.
+  expect(
+    await errorCode(withOrgContext(appDb, ORG, (tx) => resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr", staffSees: false }, deliver))),
+  ).toBe("PORTAL_FORBIDDEN")
+  const sent = await withOrgContext(appDb, ORG, (tx) =>
+    resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "whatsapp", staffSees: false }, deliver),
+  )
+  expect(sent).toMatchObject({ activationUrlOnce: null, pinOnce: null })
+  expect(JSON.stringify(sent)).not.toContain("portal.test")
+  const bodies = (
+    await ownerDb.select({ body: message.body }).from(message).where(eq(message.conversationId, chat!.id))
+  ).map((row) => row.body ?? "")
+  // Dos mensajes a la persona: el enlace (sin el código) y el código (sin el enlace).
+  const link = bodies.find((body) => body.includes("https://portal.test/a/"))
+  const pin = bodies.find((body) => body.startsWith("Tu código para entrar al portal"))
+  expect(link).toBeDefined()
+  expect(link).not.toContain(pin?.match(/[0-9]{6}/)?.[0] ?? "sin código")
+  expect(pin).toBeDefined()
 })

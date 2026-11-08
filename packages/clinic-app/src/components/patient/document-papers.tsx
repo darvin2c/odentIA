@@ -33,12 +33,14 @@ import {
 } from "../../lib/clinical-forms"
 import {
   cancelPrescriptionApi,
+  fetchPrescriptions,
   formatDate,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { CHANNEL_WORDS, fetchHealthDocumentSent } from "../../lib/encounter-documents"
 import { usePermission } from "../../lib/crm"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { cancelMedicalLeaveApi, type MedicalLeave } from "../../lib/medical-leaves"
 import { appWords } from "../../lib/product-words"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
@@ -86,16 +88,50 @@ const reasonSchema = z.object({
     .max(2000, "Escribe como mucho 2000 caracteres."),
 })
 
+/** «6 nov»: el día de un envío, en la zona de la clínica. */
+function sentDay(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(activeOrgLocale(), {
+      day: "numeric",
+      month: "short",
+      timeZone: activeOrgTimeZone(),
+    })
+  } catch {
+    return formatDate(iso)
+  }
+}
+
+/**
+ * «Ya se le envió el 6 nov por WhatsApp: avísale que no la use.» Una receta
+ * anulada que ya salió sigue limpia en su chat: el sello solo cubre lo que se
+ * descarga después (ADR 0156). No frena nada: se dice donde se decide.
+ */
+function useSentWarning(patientId: string, prescriptionId: string, enabled: boolean): string | null {
+  const sent = useQuery({
+    queryKey: ["health-document-sent", patientId, "prescription", prescriptionId],
+    queryFn: () => fetchHealthDocumentSent(patientId, { documentType: "prescription", documentId: prescriptionId }),
+    enabled,
+  })
+  const last = sent.data?.data
+  if (!last) return null
+  const channel = CHANNEL_WORDS[last.channel] ?? last.channel
+  const to = last.recipientName ? ` a ${last.recipientName}` : ""
+  return `Ya se le envió el ${sentDay(last.at)} por ${channel}${to}: avísale que no la use.`
+}
+
 /** Anular con motivo: la receta o el descanso conservan su contenido y quedan con sello. */
 function CancelWithReason({
   title,
   description,
+  warning,
   mutationFn,
   onClose,
   onDone,
 }: {
   title: string
   description: string
+  /** Lo que conviene saber antes de anular (ya se le envió); no frena nada. */
+  warning?: string | null
   mutationFn: (reason: string) => Promise<unknown>
   onClose: () => void
   onDone: () => void | Promise<void>
@@ -122,6 +158,11 @@ function CancelWithReason({
         if (!surface.isSubmitting) onClose()
       }}
     >
+      {warning ? (
+        <p role="status" className="rounded-md bg-warning-soft p-3 text-sm">
+          {warning}
+        </p>
+      ) : null}
       <form.AppField name="reason">
         {(field) => <field.TextareaField label="Motivo de anulación" maxLength={2000} />}
       </form.AppField>
@@ -140,7 +181,26 @@ export function PrescriptionPaper({
   const refresh = useRefreshPapers(patientId, onChanged)
   const [sending, setSending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  // La receta que la reemplaza, para ofrecer enviarla desde la anulada.
+  const [sendingNewer, setSendingNewer] = useState<string | null>(null)
   const issued = prescription.status === "emitida"
+  const sentWarning = useSentWarning(patientId, prescription.id, canWrite && (cancelling || !issued))
+  const others = useQuery({
+    queryKey: ["prescriptions", patientId],
+    queryFn: () => fetchPrescriptions(patientId),
+    enabled: canWrite && !issued && !!sentWarning,
+  })
+  // La que la reemplaza: emitida después en la misma atención o para el mismo tratamiento; no
+  // cualquier receta posterior (la de otro problema no es «la nueva»).
+  const newer = (others.data?.data ?? [])
+    .filter(
+      (item) =>
+        item.status === "emitida" &&
+        item.issuedAt > prescription.issuedAt &&
+        ((prescription.encounterId !== null && item.encounterId === prescription.encounterId) ||
+          (prescription.planItemId !== null && item.planItemId === prescription.planItemId)),
+    )
+    .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))[0]
   const menu: RowActionItem[] =
     canWrite && issued
       ? [
@@ -171,10 +231,23 @@ export function PrescriptionPaper({
       page={page}
       onClose={onClose}
       notice={
-        prescription.cancelReason || prescription.allergyOverrideReason || prescription.alertsSeen?.length ? (
+        prescription.cancelReason ||
+        prescription.allergyOverrideReason ||
+        prescription.alertsSeen?.length ||
+        (!issued && sentWarning) ? (
           <>
             {prescription.cancelReason ? (
               <p className="text-muted-foreground">Anulada: {prescription.cancelReason}</p>
+            ) : null}
+            {!issued && sentWarning ? (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-md bg-warning-soft p-3">
+                <p className="min-w-0 flex-1">{sentWarning}</p>
+                {newer ? (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setSendingNewer(newer.id)}>
+                    Enviar la receta N.º {newer.prescriptionNumber}
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             <PrescriptionAlertsSeen prescription={prescription} />
           </>
@@ -190,10 +263,20 @@ export function PrescriptionPaper({
           onClose={() => setSending(false)}
         />
       ) : null}
+      {sendingNewer ? (
+        <HealthDocumentSendDrawer
+          open
+          patientId={patientId}
+          documentType="prescription"
+          documentId={sendingNewer}
+          onClose={() => setSendingNewer(null)}
+        />
+      ) : null}
       {cancelling ? (
         <CancelWithReason
           title="Anular receta"
           description="La receta conserva su contenido original y el motivo de anulación."
+          warning={sentWarning}
           mutationFn={(reason) => cancelPrescriptionApi(patientId, prescription.id, { reason })}
           onClose={() => setCancelling(false)}
           onDone={refresh}

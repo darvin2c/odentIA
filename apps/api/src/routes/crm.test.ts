@@ -27,6 +27,7 @@ import type { CrmDeps } from "./helpers.js"
 import { createOpportunitiesRoute } from "./opportunities.js"
 import { createPipelinesRoute } from "./pipelines.js"
 import { createTasksRoute } from "./tasks.js"
+import { createPortalRoute } from "./portal.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("ee".repeat(32))
@@ -84,6 +85,7 @@ function buildApp(role: string, llm: PlatformLlm = { fake: true }): Hono {
   app.route("/agent", createAgentRoute({ ...deps, llm, ownerDb }))
   app.route("/agent", createAgentOpsRoute({ ...deps, llm, ownerDb }))
   app.route("/tasks", createTasksRoute(deps))
+  app.route("/portal", createPortalRoute({ db: appDb, webURL: "https://app.example.com" }))
   return app
 }
 
@@ -868,8 +870,9 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(wa).toMatchObject({
     webhookVerifiedAt: null,
     health: null,
-    // Los cinco con el botón de «Su enlace» no se piden sin la dirección pública de la clínica.
-    messages: { aprobados: 0, enRevision: 14, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 5 },
+    // Los cinco con el botón de «Su enlace» no se piden sin la dirección pública de la clínica,
+    // y «Documento listo» espera el perfil de la clínica para armar su PDF de muestra (ADR 0156).
+    messages: { aprobados: 0, enRevision: 14, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 6 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -943,6 +946,8 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["ver_respuesta", "plan"],
     // «Recibido desde su enlace» lo envía el sistema cuando WhatsApp ya no deja responderle (ADR 0129).
     ["enlace_recibido", "plan"],
+    // «Documento listo» lleva el PDF de un papel a quien no escribió en 24 horas (ADR 0156).
+    ["documento_listo", "plan"],
   ])
   expect((await reception.request(base)).status).toBe(403)
 
@@ -982,7 +987,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(19)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(20)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {
@@ -1197,4 +1202,34 @@ it("Spam y Bloquear: «Es spam» lo usa quien escribe en conversaciones; bloquea
     data: { agentReplies: boolean; topic: boolean }
   }
   expect(back.data).toEqual({ agentReplies: false, topic: false })
+})
+
+it("el acceso al portal lo da quien ve la historia; recepción solo lo envía por WhatsApp, sin ver el enlace ni el código", async () => {
+  const someone = randomUUID()
+  const json = { "content-type": "application/json" }
+  const give = (app: Hono) =>
+    app.request("/portal/access", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ patientId: someone, contactId: someone, identityChecked: true, delivery: "qr" }),
+    })
+  const resend = (app: Hono, delivery: "qr" | "whatsapp") =>
+    app.request(`/portal/access/${someone}/resend`, { method: "POST", headers: json, body: JSON.stringify({ delivery }) })
+  // Caja no lo ve ni lo envía.
+  const cashier = buildApp("cashier")
+  expect((await cashier.request(`/portal/access?patientId=${someone}`)).status).toBe(403)
+  expect((await resend(cashier, "whatsapp")).status).toBe(403)
+  // Recepción: ve la fila y envía por WhatsApp; no da el acceso, no muestra el QR ni lo quita.
+  const reception = buildApp("reception")
+  expect((await reception.request(`/portal/access?patientId=${someone}`)).status).not.toBe(403)
+  expect((await give(reception)).status).toBe(403)
+  expect((await resend(reception, "qr")).status).toBe(403)
+  expect((await resend(reception, "whatsapp")).status).not.toBe(403)
+  expect((await reception.request(`/portal/access/${someone}/revoke`, { method: "POST" })).status).toBe(403)
+  // Quien lee la historia (odontólogo, médico o la dueña) lo da y muestra el QR: llega al servicio.
+  for (const role of ["clinician", "owner"]) {
+    const app = buildApp(role)
+    expect((await give(app)).status).not.toBe(403)
+    expect((await resend(app, "qr")).status).not.toBe(403)
+  }
 })

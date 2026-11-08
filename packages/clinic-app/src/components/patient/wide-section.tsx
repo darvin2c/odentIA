@@ -12,6 +12,9 @@ const DocumentosSection = lazy(() => import("./documentos-panel").then((m) => ({
 const HistoriaTab = lazy(() => import("./historia-tab").then((m) => ({ default: m.HistoriaTab })))
 const PlanTab = lazy(() => import("./plan-tab").then((m) => ({ default: m.PlanTab })))
 const ResponsablesTab = lazy(() => import("./responsables-tab").then((m) => ({ default: m.ResponsablesTab })))
+const PortalSection = lazy(() =>
+  import("../portal/portal-access-section").then((m) => ({ default: m.PatientPortalAccessSection })),
+)
 
 /** Qué sección abrir encima y, si hace falta, en qué parte de ella. */
 export interface WideTarget {
@@ -43,6 +46,8 @@ export function useOpenWide(): ((target: WideTarget) => void) | null {
 }
 
 function sectionName(id: string): string {
+  // Desde el «…» de la ficha se abre solo el portal: su enlace tiene su propia entrada.
+  if (id === "portal") return "Portal del paciente"
   if (isPatientSectionId(id)) return sectionOf(id).label
   return productUi().record.sections.find((item) => item.id === id)?.label ?? id
 }
@@ -112,6 +117,7 @@ export function WideSectionProvider({
     if (target.id === "plan")
       return <PlanTab patientId={patientId} patientName={name} initialBudgetId={target.budgetId} initialItemId={target.itemId} />
     if (target.id === "responsables") return <ResponsablesTab patientId={patientId} startGranting={target.grant} />
+    if (target.id === "portal") return <PortalSection patientId={patientId} withLink={false} />
     if (!own) return null
     return own.render({
       patientId,

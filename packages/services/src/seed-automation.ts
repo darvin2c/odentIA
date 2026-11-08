@@ -73,6 +73,8 @@ export async function seedChannelTemplates(
     ver_respuesta: { status: "aprobada", since: lastWeek },
     // Aprobado: quien completa algo en su enlace pasadas las 24 horas recibe el agradecimiento.
     enlace_recibido: { status: "aprobada", since: lastWeek },
+    // Aprobado: una receta o un comprobante enviados pasadas las 24 horas salen con su PDF (ADR 0156).
+    documento_listo: { status: "aprobada", since: lastWeek },
   }
   for (const key of CATALOG_MESSAGE_KEYS) {
     const spec = catalogMessageOf(key)
@@ -87,6 +89,8 @@ export async function seedChannelTemplates(
       variables: spec.variables.length,
       buttons: spec.buttons.map((button) => button.title),
       messageKey: key,
+      // Como la lee la cuenta: el de documentos solo sale con su PDF.
+      unsupported: spec.header ? "encabezado_documento" : null,
       requestedAt: lastWeek,
     })
   }

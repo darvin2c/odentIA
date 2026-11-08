@@ -1353,6 +1353,8 @@ export interface PatientDocumentWithContext {
   retiredAt: Date | null
   retiredBy: string | null
   retireReason: string | null
+  /** «No mostrar en su portal» (ADR 0156): desde cuándo está oculto; nulo, se ve. */
+  portalHiddenAt: Date | null
   encounterId: string | null
   planItemId: string | null
   budgetId: string | null
@@ -1564,6 +1566,7 @@ function mergeDocumentContext(
     retiredAt: doc.retiredAt,
     retiredBy: doc.retiredBy,
     retireReason: doc.retireReason,
+    portalHiddenAt: doc.portalHiddenAt,
     encounterId: ctx?.encounterId ?? null,
     planItemId: ctx?.planItemId ?? null,
     budgetId: ctx?.budgetId ?? null,
@@ -1968,6 +1971,69 @@ export async function setDocumentReportStatus(
     row!,
     await currentDocumentContext(tx, orgId, patientId, documentId, false),
   )
+}
+
+/**
+ * «No mostrar en su portal» (ADR 0156): la clínica oculta un archivo subido o
+ * una imagen del portal del paciente, para todo acceso de hoy y de mañana, y lo
+ * vuelve a mostrar sin pedir nada. Lo cambia quien escribe en la historia
+ * (`clinical.write`, en la ruta) y queda su traza. Retirado, ya no cambia.
+ */
+export async function setDocumentPortalVisibility(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: { hidden: boolean },
+): Promise<PatientDocumentWithContext> {
+  await requirePatient(tx, orgId, patientId)
+  if (typeof input.hidden !== "boolean") throw invalidField("hidden", "Di si se oculta o se muestra")
+  const current = await requireDocumentRow(tx, orgId, patientId, documentId)
+  if (current.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado")
+  // El PDF de un consentimiento (y su revocación o su hoja escaneada) va dentro del
+  // consentimiento: ocultar el archivo no lo sacaría del portal, así que no se promete.
+  const [inside] = await tx
+    .select({ id: consentDocument.id })
+    .from(consentDocument)
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        or(
+          eq(consentDocument.pdfDocumentId, documentId),
+          eq(consentDocument.revokePdfDocumentId, documentId),
+          eq(consentDocument.paperDocumentId, documentId),
+        ),
+      ),
+    )
+    .limit(1)
+  if (inside)
+    throw new ServiceError(
+      "DOCUMENT_INSIDE_PAPER",
+      409,
+      "Este archivo va dentro de su consentimiento: en su portal se ve el consentimiento, no el archivo suelto",
+    )
+  const hiddenNow = current.portalHiddenAt !== null
+  if (hiddenNow === input.hidden) return getPatientDocument(tx, orgId, patientId, documentId)
+  await tx
+    .update(patientDocument)
+    .set(
+      input.hidden
+        ? { portalHiddenAt: new Date(), portalHiddenBy: actorUserId }
+        : { portalHiddenAt: null, portalHiddenBy: null },
+    )
+    .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    input.hidden ? "document.portal_hidden" : "document.portal_shown",
+    "patient_document",
+    documentId,
+    { patientId },
+  )
+  return getPatientDocument(tx, orgId, patientId, documentId)
 }
 
 export async function getPatientDocument(

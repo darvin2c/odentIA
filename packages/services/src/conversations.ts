@@ -774,6 +774,8 @@ export type OutboundContent =
       /** Token de «Su enlace» para el botón que lo abre (ADR 0037). */
       link?: string
       preview?: string
+      /** El PDF del encabezado de una plantilla con documento (ADR 0156): queda como su adjunto. */
+      document?: AttachmentRef
     }
   | { type: "media"; attachment: AttachmentRef; caption?: string }
 
@@ -981,7 +983,12 @@ export async function sendOutbound(
       templateLink: content.type === "template" ? (content.link ?? null) : null,
       replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
       listUnsubscribe: content.type === "text" ? (content.listUnsubscribe ?? null) : null,
-      attachments: content.type === "media" ? [content.attachment] : [],
+      attachments:
+        content.type === "media"
+          ? [content.attachment]
+          : content.type === "template" && content.document
+            ? [content.document]
+            : [],
       replyToMessageId: input.replyToMessageId ?? null,
       status: hold ? "held" : "queued",
       held: hold,
@@ -1056,6 +1063,8 @@ export async function sendTemplateOutbound(
     preview?: string
     /** Sale de un botón, sin que nadie lo escriba (`sendOutbound`). */
     fromAction?: boolean
+    /** El PDF del encabezado, si la plantilla lleva documento (ADR 0156). */
+    document?: AttachmentRef
   },
 ): Promise<MessageItem> {
   // Abierta o cerrada: el envío (sendOutbound) la reabre si hace falta.
@@ -1072,6 +1081,7 @@ export async function sendTemplateOutbound(
     params: input.params.length,
     category: input.category,
     contactId: row.contactId,
+    document: !!input.document,
   })
   // Sin texto armado por quien envía, se arma con el cuerpo del catálogo.
   const preview =
@@ -1092,6 +1102,7 @@ export async function sendTemplateOutbound(
       ...(input.buttons?.length ? { buttons: input.buttons } : {}),
       ...(input.link ? { link: input.link } : {}),
       ...(preview ? { preview } : {}),
+      ...(input.document ? { document: input.document } : {}),
     },
   })
 }

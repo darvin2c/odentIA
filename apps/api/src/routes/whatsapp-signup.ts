@@ -102,6 +102,8 @@ export function createWhatsAppSignupRoute(deps: WhatsAppSignupDeps) {
     fetch: fetchImpl,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
+    // El PDF de muestra del mensaje con documento se sube con la app de odentIA (ADR 0156).
+    ...(meta ? { metaAppId: meta.appId } : {}),
   }
 
   const forbidden = (c: Context, permission: "settings.read" | "settings.write") => {
