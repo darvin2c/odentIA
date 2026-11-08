@@ -33,6 +33,7 @@ import {
 } from "@odentia/ui"
 import {
   DetailDrawer,
+  DraftKeptInPage,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -150,6 +151,8 @@ const LIST_KEYS = [
   "resultado",
 ] as const
 type ListKey = (typeof LIST_KEYS)[number]
+/** La sede de la dirección (`useActiveBranch`): cambiarla con un cajón a medias pregunta. */
+const BRANCH_KEY = ["branch"] as const
 
 type FinanceSearch = {
   /** Sección; `cierres` es la lista de cierres anteriores, dentro de Caja. */
@@ -608,7 +611,10 @@ function FinanceWorkspace() {
       ) : null}
 
       {ws ? (
-        <>
+        // Los cajones viven aquí, fuera de las pestañas: cambiar de pestaña no pierde lo escrito y no
+        // pregunta. Salir de Finanzas sí, y cambiar de sede también: los cajones de caja vuelven a
+        // empezar y un gasto o un cobro a medias se guardaría en la otra sede.
+        <DraftKeptInPage unlessChanges={BRANCH_KEY}>
           <CollectDrawer
             patientId={collecting?.patient?.id ?? null}
             patientName={collecting?.patient?.name}
@@ -648,7 +654,7 @@ function FinanceWorkspace() {
               setSearch({ cierre: windowId })
             }}
           />
-        </>
+        </DraftKeptInPage>
       ) : null}
 
       {prof ? (

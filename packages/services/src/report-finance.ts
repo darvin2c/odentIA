@@ -374,10 +374,11 @@ export interface ExpenseTotals {
 }
 
 /**
- * Lo gastado de varios tramos en una consulta, con la regla de Finanzas: los
- * gastos del tramo que siguen en pie al cerrarlo, menos los de antes que se
- * anularon en el tramo. Con su valor congelado, en moneda del negocio; solo lo viejo
- * en otra moneda, sin valor ni factor, va aparte en su moneda.
+ * Lo gastado de varios tramos en una consulta, con la regla de Finanzas › Gastos
+ * (`getMonthExpenses`): los gastos con fecha en el tramo que no están anulados.
+ * Anular es decir que el gasto no ocurrió, así que baja el mes del gasto, no el
+ * de la anulación (ADR 0160). Con su valor congelado, en moneda del negocio; solo
+ * lo viejo en otra moneda, sin valor ni factor, va aparte en su moneda.
  */
 export async function expensesMany(tx: Db, orgId: string, spans: Span[], options: { branchId?: string } = {}): Promise<ExpenseTotals[][]> {
   const branch = options.branchId ? sql`and e.branch_id = ${options.branchId}` : sql``
@@ -400,10 +401,7 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
     join lateral (
       select e.currency::text as currency, e.category, ${kind} as kind, e.amount_cents::bigint as cents, e.amount_cents, e.business_cents from expense e
       where e.organization_id = ${orgId} and e.spent_at >= b.start_at and e.spent_at < b.end_at
-        and (e.voided_at is null or e.voided_at >= b.end_at) ${branch}
-      union all
-      select e.currency::text, e.category, ${kind}, -e.amount_cents::bigint, e.amount_cents, e.business_cents from expense e
-      where e.organization_id = ${orgId} and e.spent_at < b.start_at and e.voided_at >= b.start_at and e.voided_at < b.end_at ${branch}
+        and e.voided_at is null ${branch}
     ) x on true
     cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as value) v
     group by b.idx, 2, x.category, x.kind`)

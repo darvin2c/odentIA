@@ -108,7 +108,7 @@ export {
   PagePending,
   SkeletonRegion,
 } from "./loading-state.js"
-export { useDraftBlocker } from "./draft-blocker.js"
+export { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
 export {
   type DetailMode,
   type DetailPanelSize,
@@ -138,6 +138,7 @@ export {
 } from "./image-adjust.js"
 export {
   type DraftGuardComponent,
+  DraftKeptInPage,
   SideColumn,
   type SideColumnProps,
   type SideColumnWidth,
@@ -147,6 +148,7 @@ export {
   SideDockScopeProvider,
   SideDockSlot,
   useSideColumnWidth,
+  useDraftKeptInPage,
   useSideDock,
   useSideDockScope,
   useSidebarWidth,
