@@ -201,9 +201,11 @@ export function ConversationList({
           selected ? "bg-muted shadow-[inset_3px_0_0_0_var(--color-foreground)]" : "hover:bg-muted/70"
         }`}
       >
+        {/* Las iniciales en gris, no en el color de la marca (ADR 0162); `secondary` y no `muted`,
+            porque la fila elegida ya es `bg-muted` y el círculo se perdería. */}
         <span
           aria-hidden
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[13px] font-semibold text-primary-soft-foreground"
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-[13px] font-semibold text-muted-foreground"
         >
           {initials || "?"}
         </span>

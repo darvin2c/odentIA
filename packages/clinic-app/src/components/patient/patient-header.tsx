@@ -410,7 +410,7 @@ export function PersonHeader({
             {speaksFor.map((other, index) => (
               <span key={other.personId}>
                 {index > 0 ? ", " : ""}
-                <PersonLink contactId={other.personId} isPatient={other.isPatient}>
+                <PersonLink contactId={other.personId} isPatient={other.isPatient} inText>
                   {other.displayName}
                 </PersonLink>
                 <span className="text-muted-foreground">

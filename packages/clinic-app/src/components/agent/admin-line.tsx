@@ -161,7 +161,7 @@ function PersonRow({ row, lineName }: { row: AdminPersonRow; lineName?: string }
     <li className="flex flex-col gap-0.5 px-3 py-2 text-sm">
       <span className="flex flex-wrap items-baseline justify-between gap-x-3">
         {row.patientId || row.contactId ? (
-          <PersonLink contactId={row.contactId} patientId={row.patientId} className="font-semibold text-primary hover:underline">
+          <PersonLink contactId={row.contactId} patientId={row.patientId}>
             {row.personName}
           </PersonLink>
         ) : (

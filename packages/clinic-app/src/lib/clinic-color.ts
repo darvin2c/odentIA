@@ -7,9 +7,9 @@ import { orgSlugFromHostname, requestHostname } from "./host"
  *
  * La raíz de cada app lo pide al servidor y lo escribe en el `<head>` del primer
  * pintado, así nada parpadea en el color del producto. Redefine el bloque «Marca» de
- * `globals.css` (y el tinte del agente, que sigue a la clínica) y los grises, en el tono
- * de la marca y muy suaves: estados, gráficos, el papel y la identidad de odentIA o
- * latidIA no cambian. Sin color elegido no se escribe nada y queda el del producto.
+ * `globals.css` (y el tinte del agente, que sigue a la clínica): los grises, los estados,
+ * los gráficos, el papel y la identidad de odentIA o latidIA no cambian. Sin color elegido
+ * no se escribe nada y queda el del producto.
  */
 
 export interface ClinicAppearance {
@@ -68,26 +68,19 @@ function tokens(t: BrandTokens): string {
   ].join(";")
 }
 
-/** Los grises con sus nombres de `globals.css`. */
-function grays(values: Record<string, string>): string {
-  return Object.entries(values)
-    .map(([name, value]) => `--${name}:${value}`)
-    .join(";")
-}
-
 /**
  * Las reglas del color de la clínica. `:root:root:root` pesa más que `[data-brand]` y
- * que `.dark`, así no depende del orden de las hojas. Los grises van solo en la raíz:
- * lo que se ve como papel (`.theme-light`) declara los suyos y sigue blanco, también con
- * la app en oscuro (`.dark` solo va en la raíz).
+ * que `.dark`, así no depende del orden de las hojas. Solo el color: los grises son los
+ * de `globals.css`, sin tono, iguales para toda clínica. Lo que se ve como papel
+ * (`.theme-light`) lleva el color en claro también con la app en oscuro.
  */
 export function clinicColorCss(brandColor: string | null | undefined): string | null {
   if (!brandColor || !BRAND_COLOR_PATTERN.test(brandColor)) return null
-  const { light, dark, neutrals } = brandPalette(brandColor)
+  const { light, dark } = brandPalette(brandColor)
   return (
-    `:root:root:root{${tokens(light)};${grays(neutrals.light)}}` +
+    `:root:root:root{${tokens(light)}}` +
     `:root:root:root .theme-light{${tokens(light)}}` +
-    `:root:root:root.dark{${tokens(dark)};${grays(neutrals.dark)}}`
+    `:root:root:root.dark{${tokens(dark)}}`
   )
 }
 
