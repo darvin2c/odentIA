@@ -1,6 +1,6 @@
 # 0156 · Cada envío manda el PDF y el portal muestra todo lo suyo
 
-Fecha: 2026-11-07 · Estado: aceptada · Precisa [0037](0037-su-enlace-y-portal-en-un-paso.md) y [0040](0040-el-agente-no-elige-plantillas-la-categoria-manda-tres-tipos-de-mensaje.md) (su decisión 8, «Tus papeles», queda sustituida)
+Fecha: 2026-11-07 · Estado: aceptada · Precisa [0037](0037-su-enlace-y-portal-en-un-paso.md) y [0040](0040-el-agente-no-elige-plantillas-la-categoria-manda-tres-tipos-de-mensaje.md) (su decisión 8, «Tus papeles», queda sustituida) · Precisada por [0157](0157-un-enlace-por-cosa.md) (se quitó la compatibilidad de despliegue)
 
 ## Problema
 
