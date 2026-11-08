@@ -71,7 +71,7 @@ export interface Budget {
   decisionNote: string | null
   /** Presupuesto al que esta revisión sustituye (sus tratamientos se eligen al crearla). */
   supersedesBudgetId?: string | null
-  /** Cuándo se entregó al paciente (impreso o enviado). */
+  /** Cuándo se entregó al paciente (impreso, enviado o mostrado en la atención). */
   presentedAt?: string | null
   /** «Lo vio en el portal el …»: la última vez que lo abrió en el portal (ADR 0037). */
   seenInPortalAt?: string | null
@@ -83,6 +83,12 @@ export interface Budget {
   hasFindings?: boolean
   decidedAt: string | null
   decidedBy?: string | null
+  /** Quién del equipo anotó la respuesta: sin firma, es su palabra. */
+  decidedByName?: string | null
+  /** Por dónde respondió: «enlace», «portal», «conversacion» o «clinica». */
+  decidedVia?: string | null
+  /** Firmó en la tablet quien decide (la firma no viaja: está en su hoja). */
+  decisionSignedAt?: string | null
   createdBy?: string | null
   createdAt: string
   updatedAt?: string
@@ -381,7 +387,7 @@ export function budgetStatusLabel(status: string): string {
     case "borrador":
       return "Por enviar"
     case "presentado":
-      return "Enviado · espera respuesta"
+      return "Entregado · espera respuesta"
     case "pospuesto":
       return "Lo está pensando"
     case "aceptado":
@@ -415,7 +421,7 @@ export function planDecisionLabel(decision: string | null | undefined): string {
 
 /**
  * Lo que se dice de un tratamiento en el Plan: su respuesta si ya respondió;
- * si no, en qué está su presupuesto («Por enviar», «Enviado · espera
+ * si no, en qué está su presupuesto («Por enviar», «Entregado · espera
  * respuesta») o que aún no tiene uno.
  */
 export function itemStateText(
@@ -672,6 +678,10 @@ export interface DecideBudgetBody {
   decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
   decidedByContactId?: string | null
   decisionNote?: string | null
+  /** Se le mostró en la atención: un presupuesto por entregar queda entregado al anotar. */
+  inPerson?: boolean
+  /** Firmó en la tablet quien decide: sus trazos. */
+  signature?: { strokes: number[][][] } | null
 }
 
 export function decideBudgetApi(
@@ -745,6 +755,8 @@ export interface PlanNextStep {
     followUpId?: string
     appointmentId?: string
   } | null
+  /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
+  alsoToSchedule?: string[]
 }
 
 export function fetchPlanNextStep(patientId: string): Promise<{ data: PlanNextStep }> {

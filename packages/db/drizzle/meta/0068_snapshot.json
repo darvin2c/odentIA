@@ -1,5 +1,5 @@
 {
-  "id": "66c886ac-f369-4bb1-852d-eaa7cdccd1af",
+  "id": "6f15fc40-5758-4655-a53b-68ee36427d0b",
   "prevId": "aeaa9ba5-b18b-400c-bd83-5f1d6da5b29d",
   "version": "7",
   "dialect": "postgresql",
@@ -9999,12 +9999,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "informed_encounter_id": {
-          "name": "informed_encounter_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10205,23 +10199,6 @@
           "columnsTo": [
             "system_key",
             "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "consent_document_informed_encounter_fk": {
-          "name": "consent_document_informed_encounter_fk",
-          "tableFrom": "consent_document",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "informed_encounter_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -21740,6 +21717,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "decision_signature": {
+          "name": "decision_signature",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_signed_at": {
+          "name": "decision_signed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -22001,6 +21990,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "treatment_budget_decision_signature_check": {
+          "name": "treatment_budget_decision_signature_check",
+          "value": "(\"treatment_budget\".\"decision_signature\" IS NULL) = (\"treatment_budget\".\"decision_signed_at\" IS NULL)"
+        },
         "treatment_budget_decided_via_check": {
           "name": "treatment_budget_decided_via_check",
           "value": "\"treatment_budget\".\"decided_via\" IS NULL OR \"treatment_budget\".\"decided_via\" IN ('enlace','portal','conversacion','clinica')"

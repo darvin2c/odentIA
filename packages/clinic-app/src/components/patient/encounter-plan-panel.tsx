@@ -659,7 +659,8 @@ export function EncounterBudgetSend({
     <BlockPart title="Presupuesto por enviar">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-          {step.detail ?? "Ya está armado y nadie lo envió."} Lo que indiques hoy se suma al firmar.
+          {step.detail ?? "Ya está armado y nadie lo envió."} Lo que indiques hoy se suma al firmar. Si ya te
+          respondió, anota su respuesta sin imprimir ni enviar.
         </p>
         <BudgetSendButton
           patientId={patientId}

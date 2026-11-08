@@ -133,6 +133,7 @@ export function BookingDrawer({
   onPreview,
   onClose,
   onSaved,
+  dock = true,
 }: {
   seed: BookingSeed
   branchId: string
@@ -146,6 +147,8 @@ export function BookingDrawer({
   onPreview: (preview: SchedulePreview | null) => void
   onClose: () => void
   onSaved: (appointment: AgendaAppointment) => Promise<void>
+  /** Abierto encima de una ventana (el cierre de la atención): cajón, nunca columna lateral. */
+  dock?: boolean
 }) {
   // Con más de una sede, se dice en cuál se reserva (la que se eligió en la Agenda).
   const branchList =
@@ -414,11 +417,36 @@ export function BookingDrawer({
     items.filter((row) => (row.serviceId ?? "") === id).map((row) => row.id)
   /** El servicio que se puso solo: si cambia de persona, era de la anterior. */
   const autoService = React.useRef<string | null>(null)
+  /** Lo eligió la persona en «Servicio»: marcar tratamientos ya no lo cambia. */
+  const serviceByHand = React.useRef(false)
+  /**
+   * Marcar o desmarcar en «Para esta cita»: si todo lo marcado es de un mismo
+   * servicio y nadie eligió otro a mano, el servicio (y lo que dura la cita) lo
+   * sigue (QA del 8 nov, B16). Con un hueco o un profesional ya elegidos no se
+   * cambia, como al abrir: podría no atenderlo.
+   */
+  const markItems = (ids: string[]) => {
+    setMarked({ patientId: values.patientId, ids })
+    if (serviceByHand.current || seed.startsAt || seed.professionalUserId || when.professionalFilter) return
+    const services = [...new Set(toSchedule.filter((row) => ids.includes(row.id)).map((row) => row.serviceId ?? ""))]
+    const next = services.length === 1 ? services[0] : undefined
+    if (!next || next === values.serviceId) return
+    autoService.current = next
+    form.setFieldValue("serviceId", next, { dontUpdateMeta: true })
+    // Con un hueco ya elegido, el bloque toma lo que dura el servicio nuevo.
+    if (when.shown)
+      void queryClient
+        .fetchQuery({ queryKey: ["services", "one", next], queryFn: () => fetchService(next), staleTime: 60_000 })
+        .then((found) => when.resize(found.data.durationMin ?? defaultMinutes))
+        .catch(() => undefined)
+  }
   // Al conocer lo aceptado de la persona, vienen marcados los del primer servicio: varios
   // servicios en una cita corta no caben, y lo demás queda a la vista para marcarlo.
   // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada persona.
   React.useEffect(() => {
     if (!coordinationQuery.data || marked?.patientId === values.patientId) return
+    // Otra persona: el servicio que se eligió a mano era para la anterior.
+    serviceByHand.current = false
     const chosen = values.serviceId === autoService.current ? "" : values.serviceId
     const fromSeed = toSchedule.find((row) => seed.planItemIds?.includes(row.id))
     const first = chosen || (fromSeed ?? toSchedule[0])?.serviceId || ""
@@ -575,7 +603,7 @@ export function BookingDrawer({
         title="Nueva cita"
         description={`${bookingBranch ? `En ${bookingBranch}. ` : ""}Elige a quién y cuándo. La ${appWords().room.one} se asigna con el hueco.`}
         onClose={onClose}
-
+        dock={dock}
         submitLabel={submitLabel}
       >
         <div className="grid gap-4">
@@ -742,12 +770,11 @@ export function BookingDrawer({
                       id={`cita-tratamiento-${index}`}
                       checked={row.ids.every((id) => markedIds.includes(id))}
                       onCheckedChange={(checked) =>
-                        setMarked({
-                          patientId: values.patientId,
-                          ids: checked
+                        markItems(
+                          checked
                             ? [...markedIds.filter((id) => !row.ids.includes(id)), ...row.ids]
                             : markedIds.filter((id) => !row.ids.includes(id)),
-                        })
+                        )
                       }
                     />
                     <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
@@ -779,6 +806,7 @@ export function BookingDrawer({
                       if (next) queryClient.setQueryData(["services", "one", next.id], { data: next })
                       field.handleChange(next?.id ?? "")
                       autoService.current = null
+                      serviceByHand.current = Boolean(next)
                       // Otro servicio marca lo suyo; lo demás sigue a la vista.
                       if (coordinationQuery.data) setMarked({ patientId: values.patientId, ids: itemsOfService(next?.id ?? "") })
                       // Con servicio, el bloque toma lo que dura el servicio.

@@ -29,4 +29,4 @@ Cada mensaje abría la misma página, «Su enlace», con todo lo pendiente: quie
 
 ## Referencias
 
-`packages/services/src/public-links.ts` (`personalLinkAddress`), `booking-links.ts` (`contactHandlesAppointment`, `bookAnotherOf`), `pair-access.ts` (`expireEmailAppointmentTokens`), `clinical-forms.ts` (`remoteSignBlock`, `confirmLinkSignedConsent`, `listLinkSignedToConfirm`), `su-enlace.ts` (`sendConsentToSign`), `automation.ts` (`pendingNoticesFor`), `automation-messages.ts` (`CONSENT_TO_SIGN_MESSAGE`, `REMINDER_PENDING_KEY`), migración `0068_confirmado_en_la_atencion`.
+`packages/services/src/public-links.ts` (`personalLinkAddress`), `booking-links.ts` (`contactHandlesAppointment`, `bookAnotherOf`), `pair-access.ts` (`expireEmailAppointmentTokens`), `clinical-forms.ts` (`remoteSignBlock`, `confirmLinkSignedConsent`, `listLinkSignedToConfirm`), `su-enlace.ts` (`sendConsentToSign`), `automation.ts` (`pendingNoticesFor`), `automation-messages.ts` (`CONSENT_TO_SIGN_MESSAGE`, `REMINDER_PENDING_KEY`), migración `0069_confirmado_en_la_atencion`.

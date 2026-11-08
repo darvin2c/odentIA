@@ -481,8 +481,15 @@
     {
       "idx": 68,
       "version": "7",
-      "when": 1794161187182,
-      "tag": "0068_confirmado_en_la_atencion",
+      "when": 1794164867778,
+      "tag": "0068_firma_del_presupuesto",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794171725963,
+      "tag": "0069_confirmado_en_la_atencion",
       "breakpoints": true
     }
   ]

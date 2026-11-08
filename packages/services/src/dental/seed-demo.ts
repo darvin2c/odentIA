@@ -3528,10 +3528,20 @@ const andresBudget = await createBudget(db, ORG_A, ANA_ID, andres.id, {
   itemIds: [endo21.id],
   title: "Endodoncia pieza 21",
 })
-await deliverBudget(db, ORG_A, ANA_ID, andres.id, andresBudget.id)
-await decideBudget(db, ORG_A, ANA_ID, andres.id, andresBudget.id, {
-  decisions: [{ planItemId: endo21.id, decision: "aceptado" }],
-})
+// Se lo mostraron en la atención y aceptó ahí: se entregó al anotar y lo firmó en la tablet.
+await decideBudget(
+  db,
+  ORG_A,
+  ANA_ID,
+  andres.id,
+  andresBudget.id,
+  {
+    decisions: [{ planItemId: endo21.id, decision: "aceptado" }],
+    decidedByContactId: andres.personId,
+    signature: { strokes: demoSignatureStrokes("Andrés Vilca") },
+  },
+  { inPerson: true },
+)
 await updateEncounterDraft(db, ORG_A, ANA_ID, andres.id, andresSesion1.id, {
   evolution: "Apertura y conductometría de la 21; medicación entre sesiones y obturación provisional.",
 })

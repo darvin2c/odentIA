@@ -74,7 +74,7 @@ test("ficha: el próximo control en el Resumen, vencido en Pendientes, y el de q
 
   // 1. «Qué sigue» dice el presupuesto y el control va en su propia fila, con «Reservar cita».
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  await expect(page.getByText("Enviado · espera respuesta")).toBeVisible()
+  await expect(page.getByText("Entregado · espera respuesta")).toBeVisible()
   const next = card(page, "Próximo control")
   await expect(next).toContainText("Profilaxis semestral")
   await expect(next).toContainText(/Toca el \d{1,2} \S+ · falta reservar la cita/)

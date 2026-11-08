@@ -36,6 +36,8 @@ type FieldKind =
   | { kind: "decisionList"; maxItems: number; values: readonly [string, ...string[]] }
   /** Sí o no. */
   | { kind: "flag" }
+  /** Una firma con el dedo: sus trazos en el recuadro, de 0 a 1000 (los límites finos, en el servicio). */
+  | { kind: "signature" }
 
 export type OperationField = FieldKind & {
   label: string
@@ -211,6 +213,8 @@ export const OPERATIONS = {
       },
       decidedByContactId: { kind: "uuid", label: "Quién decidió", description: "La persona o su representante legal vigente; cuando lo anota el agente, quien escribe en la conversación.", body: "optional", nullable: true, agent: "context" },
       decisionNote: { kind: "text", max: 4000, label: "Nota", description: "Lo que añade quien anota la respuesta.", body: "optional", nullable: true, agent: "person" },
+      inPerson: { kind: "flag", label: "En consulta", description: "Se le mostró en la atención y respondió ahí: un presupuesto por entregar queda entregado al anotar, sin enviar nada.", body: "optional", agent: "person" },
+      signature: { kind: "signature", label: "Firma de quien decide", description: "La firma en la tablet de la clínica, opcional, sobre lo que acepta.", body: "optional", nullable: true, agent: "person" },
     },
   },
   "oportunidad.crear": {
@@ -469,7 +473,9 @@ type ValueOf<F> = F extends { kind: "int" } | { kind: "decimal" }
         ? string[]
         : F extends { kind: "flag" }
           ? boolean
-          : string
+          : F extends { kind: "signature" }
+            ? { strokes: number[][][] }
+            : string
 
 type Fields<O extends OperationId> = (typeof OPERATIONS)[O]["fields"]
 type KeysWhere<F, C> = { [K in keyof F]: F[K] extends C ? K : never }[keyof F]
@@ -529,6 +535,10 @@ function fieldSchema(field: OperationField): z.ZodType {
         .max(field.maxItems)
     case "flag":
       return z.boolean()
+    case "signature":
+      return z.strictObject({
+        strokes: z.array(z.array(z.array(z.number().min(0).max(1000)).length(2)).max(5000)).min(1).max(500),
+      })
   }
 }
 
