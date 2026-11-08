@@ -535,6 +535,10 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "purchase_order.credit_use_voided": say("Anuló el uso de lo que tenía a favor con un proveedor"),
   // Configuración
   "org_profile.upsert": say("Cambió los datos de la clínica"),
+  "org_profile.logo_set": say("Cambió el logo de la clínica"),
+  "org_profile.logo_removed": say("Quitó el logo de la clínica"),
+  "org_profile.brand_color_set": say("Cambió el color de la marca de la clínica"),
+  "org_profile.brand_color_removed": say("Volvió al color con el que viene la app"),
   "settings.region_updated": say("Cambió el país, la moneda o el formato de la clínica"),
   "settings.exchange_rate_updated": say("Cambió la otra moneda de la clínica o el cambio de hoy"),
   "settings.diagnosis_system_changed": say("Cambió la lista de diagnósticos de la clínica"),

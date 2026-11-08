@@ -7,7 +7,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow-xs hover:bg-[color-mix(in_oklab,var(--primary),black_12%)]",
+        // El relleno, no el primario: con un color de clínica claro el botón lo conserva exacto, con letra oscura.
+        default: "bg-primary-fill text-primary-fill-foreground shadow-xs hover:bg-primary-fill-hover",
         outline:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklab,var(--secondary),var(--foreground)_6%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         secondary:
