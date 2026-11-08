@@ -41,9 +41,27 @@ interface SideDockState {
 
 /**
  * Aviso de «salir sin guardar» de la app (depende de su router): lo monta la
- * superficie de la columna mientras tiene cambios pendientes.
+ * superficie de la columna mientras tiene cambios pendientes. Con
+ * `keptInPage`, navegar sin cambiar de ruta (otra pestaña, otro filtro) no
+ * pregunta: la pantalla sigue montada y lo escrito sigue ahí.
  */
-export type DraftGuardComponent = React.ComponentType<{ dirty: boolean }>
+export type DraftGuardComponent = React.ComponentType<{ dirty: boolean; keptInPage?: boolean }>
+
+const DraftKeptInPageContext = React.createContext(false)
+
+/**
+ * Para una pantalla que mantiene montadas sus superficies mientras no cambie
+ * de ruta: sus pestañas y filtros solo cambian la búsqueda de la dirección.
+ * Ahí el aviso de «salir sin guardar» de la columna solo pregunta al salir a
+ * otra ruta, que es cuando se perdería lo escrito.
+ */
+export function DraftKeptInPage({ children }: { children: React.ReactNode }) {
+  return <DraftKeptInPageContext.Provider value>{children}</DraftKeptInPageContext.Provider>
+}
+
+export function useDraftKeptInPage(): boolean {
+  return React.useContext(DraftKeptInPageContext)
+}
 
 /**
  * Dónde se está renderizando: la página, la columna lateral, un cajón, o una

@@ -33,6 +33,7 @@ import {
 } from "@odentia/ui"
 import {
   DetailDrawer,
+  DraftKeptInPage,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -608,7 +609,9 @@ function FinanceWorkspace() {
       ) : null}
 
       {ws ? (
-        <>
+        // Los cajones viven aquí, fuera de las pestañas: cambiar de pestaña no pierde lo escrito y no
+        // pregunta; salir de Finanzas a otra pantalla sí.
+        <DraftKeptInPage>
           <CollectDrawer
             patientId={collecting?.patient?.id ?? null}
             patientName={collecting?.patient?.name}
@@ -648,7 +651,7 @@ function FinanceWorkspace() {
               setSearch({ cierre: windowId })
             }}
           />
-        </>
+        </DraftKeptInPage>
       ) : null}
 
       {prof ? (
