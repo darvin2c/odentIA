@@ -797,16 +797,63 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     list.push(visit)
     rounds[round] = list
   }
-  const done: Array<{ visit: PlannedVisit; encounterId: string; procedureId: string; endedAt: Date }> = []
-  for (const round of rounds) {
+  const done: Array<{ visit: PlannedVisit; encounterId: string; procedureId: string; endedAt: Date; planItemId: string | null }> = []
+  // Lo aceptado de cada presupuesto, por persona: la visita que lo hace lleva su
+  // tratamiento, como cuando se atiende en la app. Sin esto el plan decía
+  // «Realizado · 0 de 1 sesión · sin cargos» con el ticket de esa endodoncia
+  // en Cobros (QA del 6 nov, D5).
+  let budgets = 0
+  const acceptedOf = new Map<string, Array<{ planItemId: string; serviceId: string; decidedAt: Date }>>()
+  const carriedBy = (visit: PlannedVisit, startedAt: Date): string | null => {
+    const lines = acceptedOf.get(patientOf(visit.patientIndex)) ?? []
+    const index = lines.findIndex((line) => line.serviceId === visit.service.id && line.decidedAt.getTime() < startedAt.getTime())
+    if (index < 0) return null
+    const [line] = lines.splice(index, 1)
+    return line?.planItemId ?? null
+  }
+  let budgetsSeeded = recipe.budgets === false
+  const seedBudgetsOnce = async (): Promise<void> => {
+    if (budgetsSeeded) return
+    budgetsSeeded = true
+    const seeded = await seedBudgets(tx, {
+      orgId: input.orgId,
+      currency,
+      // Su propio generador: los presupuestos no mueven el azar de la agenda ni de los cobros.
+      random: generator((recipe.seed ?? 20_261_018) + 1_093),
+      historyEnd,
+      services: input.services.filter((service) => !service.firstVisit),
+      evaluations: done
+        .filter((item) => item.visit.service.firstVisit && item.visit.patientIndex >= input.patientIds.length)
+        .map((item) => ({ patientId: patientOf(item.visit.patientIndex), professionalUserId: item.visit.professional.userId, encounterId: item.encounterId, endedAt: item.endedAt })),
+    })
+    budgets = seeded.count
+    for (const line of seeded.accepted) {
+      const list = acceptedOf.get(line.patientId) ?? []
+      list.push(line)
+      acceptedOf.set(line.patientId, list)
+    }
+  }
+  for (const [roundIndex, round] of rounds.entries()) {
+    // Los presupuestos nacen de las evaluaciones, que son la primera visita: después de la
+    // primera ronda ya existen, y las visitas siguientes pueden hacer lo aceptado.
+    if (roundIndex === 1) await seedBudgetsOnce()
     for (const batch of chunks(round)) {
       const rows = batch.map((visit) => {
         // La llegada es anterior al inicio: la espera en sala queda medida.
         const startedAt = new Date(visit.startsAt.getTime() + Math.max(1, visit.waitMinutes - 5) * 60_000)
         const note = recipe.note ? recipe.note(visit.service, random, personOf(visit.patientIndex), startedAt) : null
-        return { visit, note, id: randomUUID(), procedureId: randomUUID(), startedAt, endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000) }
+        return {
+          visit,
+          note,
+          id: randomUUID(),
+          procedureId: randomUUID(),
+          planItemId: carriedBy(visit, startedAt),
+          startedAt,
+          endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000),
+        }
       })
-      for (const row of rows) done.push({ visit: row.visit, encounterId: row.id, procedureId: row.procedureId, endedAt: row.endedAt })
+      for (const row of rows)
+        done.push({ visit: row.visit, encounterId: row.id, procedureId: row.procedureId, endedAt: row.endedAt, planItemId: row.planItemId })
       await tx.insert(encounter).values(
         rows.map((row) => ({
           id: row.id,
@@ -851,6 +898,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           organizationId: input.orgId,
           encounterId: row.id,
           serviceId: row.visit.service.id,
+          planItemId: row.planItemId,
           description: row.visit.service.name,
           quantity: row.visit.quantity,
           priceCents: row.visit.service.priceCents,
@@ -935,6 +983,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       organizationId: input.orgId,
       patientId: patientOf(visit.patientIndex),
       encounterProcedureId: item.procedureId,
+      // El cargo es del tratamiento que la visita hizo: el recorrido dice qué se pagó.
+      planItemId: item.planItemId,
       branchId: visit.branchId,
       description: visit.service.name,
       amountCents: cents,
@@ -966,17 +1016,9 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     cashierUserId: input.ownerUserId,
   })
 
-  // --- Presupuestos: tres de cada cuatro evaluaciones de personas nuevas terminan en uno -----
-  const budgets = recipe.budgets === false ? 0 : await seedBudgets(tx, {
-    orgId: input.orgId,
-    currency,
-    random,
-    historyEnd,
-    services: input.services.filter((service) => !service.firstVisit),
-    evaluations: done
-      .filter((item) => item.visit.service.firstVisit && item.visit.patientIndex >= input.patientIds.length)
-      .map((item) => ({ patientId: patientOf(item.visit.patientIndex), professionalUserId: item.visit.professional.userId, encounterId: item.encounterId, endedAt: item.endedAt })),
-  })
+  // Los presupuestos (tres de cada cuatro evaluaciones de personas nuevas) nacen después
+  // de la primera ronda de atenciones, arriba; con una sola ronda, aquí.
+  await seedBudgetsOnce()
 
   // --- Gastos del mes, por sede -------------------------------------------------------------
   const income = new Map<string, number>()
@@ -1100,10 +1142,10 @@ async function seedBudgets(
     services: ReportsSeedInput["services"]
     evaluations: Array<{ patientId: string; professionalUserId: string; encounterId: string; endedAt: Date }>
   },
-): Promise<number> {
+): Promise<{ count: number; accepted: Array<{ planItemId: string; patientId: string; serviceId: string; decidedAt: Date }> }> {
   const { random } = input
   const chosen = input.evaluations.filter(() => random.chance(0.75))
-  if (chosen.length === 0) return 0
+  if (chosen.length === 0) return { count: 0, accepted: [] }
   const [counter] = await tx
     .insert(orgCounter)
     .values({ organizationId: input.orgId, key: "budget", value: chosen.length })
@@ -1256,5 +1298,12 @@ async function seedBudgets(
         sql`, `,
       )}) as v(id, status, presented_at, decided_at)
       where t.organization_id = ${input.orgId} and t.id = v.id`)
-  return plans.length
+  const accepted = plans.flatMap((plan) =>
+    plan.decidedAt && (plan.outcome === "aceptado" || plan.outcome === "parcial")
+      ? plan.lines
+          .filter((line) => line.decision === "aceptado")
+          .map((line) => ({ planItemId: line.planItemId, patientId: plan.evaluation.patientId, serviceId: line.service.id, decidedAt: plan.decidedAt as Date }))
+      : [],
+  )
+  return { count: plans.length, accepted }
 }

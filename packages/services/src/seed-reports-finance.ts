@@ -543,12 +543,15 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       budgets += 1
     }
   }
-  // Lo aceptado hace más de dos meses ya se hizo: la historia lo atendió en sus citas. Sin
-  // esto, «Lo que viene» contaría como pendiente todo lo aceptado en dos años.
+  // Lo aceptado hace más de dos meses que una atención de la historia hizo ya está hecho; lo
+  // que ninguna hizo lo decide el avance (seed-reports-progress): nunca «realizado» sin sesión
+  // (QA del 6 nov, D5). Sin esto, «Lo que viene» contaría como pendiente todo lo aceptado.
   await tx.execute(sql`
     update treatment_plan_item pi set status = 'realizado'
     from treatment_budget_item i join treatment_budget b on b.organization_id = i.organization_id and b.id = i.budget_id
     where pi.organization_id = ${orgId} and pi.id = i.plan_item_id and pi.status = 'pendiente'
-      and i.decision = 'aceptado' and b.status in ('aceptado','parcial') and b.decided_at < now() - interval '60 days'`)
+      and i.decision = 'aceptado' and b.status in ('aceptado','parcial') and b.decided_at < now() - interval '60 days'
+      and exists (select 1 from encounter_procedure ep where ep.organization_id = pi.organization_id
+        and ep.plan_item_id = pi.id and ep.voided_at is null)`)
   return { settlements, orders, budgets }
 }
