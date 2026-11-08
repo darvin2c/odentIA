@@ -7,6 +7,14 @@
 import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
 import { formatMoney } from "@odentia/clinical"
 
+/**
+ * Lo que oye el lector de pantalla al buscar: «1 persona, 2 resultados», con
+ * cada palabra concordando con su número (QA del 6 nov, B8: «1 personas»).
+ */
+export function searchStatusText(people: number, results: number): string {
+  return `${people} ${people === 1 ? "persona" : "personas"}, ${results} ${results === 1 ? "resultado" : "resultados"}`
+}
+
 export const SEARCH_TYPES = [
   "persona",
   "cita",

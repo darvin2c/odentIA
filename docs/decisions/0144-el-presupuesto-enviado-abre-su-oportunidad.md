@@ -4,6 +4,8 @@ Fecha: 2026-11-06 · Estado: aceptada · Precisa a [0028](0028-ventas-que-se-mue
 
 Precisada por [0153](0153-presupuesto-con-caminos.md): aceptado en parte con algo que espera respuesta, la oportunidad sigue abierta; se decide al final.
 
+Precisada el 2026-11-07 (QA del perfil del paciente, X7, y su revisión): «la más reciente» es la abierta más reciente de la persona que no está unida a otro presupuesto, sea cual sea su servicio. La ficha mostraba como de un tratamiento la oportunidad de otro presupuesto; y exigir el mismo servicio dejaba abierta la que anotó el agente y abría otra cuando lo presentado no repetía su servicio (interés «Ortodoncia», presupuesto «Brackets metálicos»). Si no hay ninguna, se abre la suya.
+
 ## Problema
 
 Con la 0028, una oportunidad nace cuando la persona pide algo concreto (la anota el agente) o cuando el equipo la crea, y avanza sola con la cita, el presupuesto y su respuesta. Lo que se vende en el sillón quedaba fuera: el odontólogo indica, arma y entrega el presupuesto sin que nadie haya preguntado antes, y el tablero no se enteraba. Oportunidades decía que había menos ventas en curso de las que había.
@@ -25,7 +27,7 @@ Al resolverlo aparecen otros huecos, porque desde ahora casi toda venta tiene un
 - **A qué oportunidad se une un presupuesto**, en este orden:
   1. la que ya es suya o del que reemplaza (una revisión sigue con la de su original);
   2. la del mismo tratamiento: de la persona o la que anotó sin paciente su apoderada (`guardian`) que no tiene ficha propia, que pasa a llevar al paciente; esta nunca cuenta como «la más reciente». Una madre que también es paciente pregunta por lo suyo: paciente ≠ interlocutor ≠ responsable;
-  3. la más reciente de la persona, como en la 0028, aunque sea de otro tratamiento.
+  3. la más reciente de la persona que no está unida a otro presupuesto, sea cual sea su servicio (ver la precisión de arriba).
   Nunca una que espera la respuesta a otro presupuesto (`budgetAwaitsAnswerSql`): un presupuesto que espera respuesta es su propio interés.
 - **Una revisión de lo que ya tuvo su oportunidad es la misma venta** (las versiones conservan el número): sigue con la suya si está abierta; si se perdió (no respondió, el precio, la rechazó), la reabre, porque es otra oportunidad de cerrarla; si se ganó, no toma otra ni abre una. Al decidirla se busca en toda la familia (ella y la versión que reemplaza).
 - **Reenviar no abre otra.** Reenviar no vuelve a entregar, y la oportunidad ya unida al presupuesto es la primera que se elige.
@@ -54,7 +56,7 @@ Al resolverlo aparecen otros huecos, porque desde ahora casi toda venta tiene un
 
 - El tablero y su total muestran también lo que se presupuestó en la clínica, sin trabajo de nadie; «Te espera» y «Retomar un presupuesto» siguen igual.
 - Una persona puede tener a la vez una oportunidad por presupuesto pendiente, además de las que anotó el agente.
-- Sacrificio: el presupuesto que se une a la más reciente de otro interés (por ejemplo, la que anotó el agente por un blanqueamiento) conserva el título de esa oportunidad; la 0028 lo decidió así y no se reabre aquí.
+- Sacrificio: el presupuesto que se une a la más reciente de otro interés (por ejemplo, la que anotó el agente por un blanqueamiento) conserva el título de esa oportunidad, como decidió la 0028. Nunca toma la que ya es de otro presupuesto.
 - Lo que nadie respondió sale del tablero abierto a los 30 días de vencido y cuenta como perdido por «No responde» en el tablero y en Argos; Reportes no lee oportunidades.
 - Se revisa si las clínicas piden que una de estas oportunidades quede a cargo de alguien al nacer.
 

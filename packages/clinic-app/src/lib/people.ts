@@ -352,3 +352,20 @@ export function daysSince(iso: string | null, now = Date.now()): number | null {
   if (Number.isNaN(time)) return null
   return Math.max(0, Math.floor((now - time) / 86_400_000))
 }
+
+/**
+ * Una fecha de la lista de Pacientes: «vie, 21 nov» en la zona y el idioma de
+ * la clínica y, si no es de este año, con el año («vie, 21 nov 2025»): sin él,
+ * una visita del año pasado parecía de este mes (QA del 6 nov, B10).
+ */
+export function listDay(iso: string, locale: string | undefined, timeZone: string, now: Date = new Date()): string {
+  const yearOf = (date: Date) => new Intl.DateTimeFormat("en-CA", { year: "numeric", timeZone }).format(date)
+  const date = new Date(iso)
+  return date.toLocaleDateString(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(yearOf(date) !== yearOf(now) ? { year: "numeric" } : {}),
+    timeZone,
+  })
+}

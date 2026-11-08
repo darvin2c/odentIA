@@ -28,7 +28,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans } from "../../lib/budgets"
 import { useMyUserId, usePermission } from "../../lib/crm"
-import type { PatientSummary, PlanItem } from "../../lib/patients"
+import { type PatientSummary, type PlanItem, splitPlans } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { PlanPhasesSkeleton } from "../skeletons/person-sections"
 import { productUi } from "../../product/product-ui"
@@ -115,9 +115,9 @@ export function PlanTab({
 
   const plans = plansQuery.data?.data ?? []
   const items = useMemo(() => itemsQuery.data?.data ?? [], [itemsQuery.data])
-  const openPlan = plans.find((row) => row.isOpen) ?? plans.at(-1) ?? null
-  const openItems = openPlan ? items.filter((item) => item.planId === openPlan.plan.id) : []
-  const previous = plans.filter((row) => row.plan.id !== openPlan?.plan.id && row.totalItems > 0)
+  // Vigentes, todos los que tienen algo por hacer; anteriores, solo los terminados.
+  const { current, previous } = splitPlans(plans)
+  const openItems = items.filter((item) => current.some((row) => row.plan.id === item.planId))
   const schedule = useScheduleAccepted({ id: patientId, name: patientName })
   // La misma regla de «Qué sigue»: lo aceptado sin cita también se agenda desde la tarjeta del presupuesto.
   const nextStep = usePlanNextStep(patientId).data?.data ?? null

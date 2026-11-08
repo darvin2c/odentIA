@@ -39,11 +39,13 @@ import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
 import {
+  appointmentServesControl,
   canBookAnother,
-  controlWindowStart,
   dayKeyIn,
   isOverdueControl,
   isToSchedule,
+  servedToday,
+  todayLiveAppointments,
   LIVE_APPOINTMENT_STATUSES,
   type SessionCount,
   sessionCountsOf,
@@ -170,6 +172,7 @@ export async function getPlanNextStep(
     )
     .orderBy(asc(appointment.startsAt))
     .limit(1)
+  const today = (await todayLiveAppointments(tx, orgId, [patientId], context.timezone)).get(patientId) ?? null
   return planNextStepFrom(
     {
       name: firstName(person),
@@ -180,6 +183,7 @@ export async function getPlanNextStep(
       control,
       nextAppointmentAt: next?.startsAt ?? null,
       nextAppointmentId: next?.id ?? null,
+      today,
     },
     context,
     can,
@@ -264,6 +268,7 @@ export async function planNextStepsOf(
     itemsOf.set(item.patientId, list)
   }
   const controlOf = new Map(controls.map((row) => [row.patientId, row]))
+  const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   for (const person of people) {
     out.set(
       person.id,
@@ -277,6 +282,7 @@ export async function planNextStepsOf(
           control: controlOf.get(person.id),
           nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
           nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
+          today: todayOf.get(person.id) ?? null,
         },
         context,
         can,
@@ -322,11 +328,13 @@ interface PlanFacts {
   /** Su próxima cita, aunque no lleve lo aceptado. */
   nextAppointmentAt?: Date | null
   nextAppointmentId?: string | null
+  /** Su primera cita viva de hoy (por venir, en la sala o en atención). */
+  today?: { id: string; startsAt: Date } | null
 }
 
 /** La regla de «Qué sigue», en el orden fijo de arriba. Sin consultas: decide con lo cargado. */
 function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
-  const { name, budgets, items, withAppointment, sessions, control, nextAppointmentAt, nextAppointmentId } = facts
+  const { name, budgets, items, withAppointment, sessions, control, nextAppointmentAt, nextAppointmentId, today } = facts
   const { locale, timezone } = context
   const day = (date: Date) => dayWords(date, locale, timezone)
   const dayKey = (date: Date) => dayKeyIn(date, timezone)
@@ -415,9 +423,19 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
 
   // 5. El próximo control.
   if (control) {
+    // Hoy tiene una cita viva desde que abrió su ventana: al firmar esa atención se cumple
+    // (`servedToday`), aunque ya esté en la sala y la hora de la cita haya pasado.
+    if (today && servedToday(control, today.startsAt, timezone)) {
+      return {
+        kind: "control",
+        text: `${control.title} · se cumple con su atención de hoy`,
+        detail: `${dayKey(control.dueAt) >= dayKey(new Date()) ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
+        action: can("appointments.read") ? { label: "Ver la cita", appointmentId: today.id } : null,
+      }
+    }
     // A un control le sirve cualquier visita desde que abre su ventana (ADR 0152): con una cita por venir
     // desde ahí, no está «por reservar», porque al firmar esa atención se cumple.
-    if (control.status === "pendiente" && nextAppointmentAt && dayKey(nextAppointmentAt) >= dayKey(controlWindowStart(control))) {
+    if (control.status === "pendiente" && nextAppointmentAt && appointmentServesControl(control, nextAppointmentAt, timezone)) {
       return {
         kind: "control",
         text: `${control.title} · tiene cita el ${day(nextAppointmentAt)}`,

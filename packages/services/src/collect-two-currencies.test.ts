@@ -789,6 +789,10 @@ it("adelanto cruzado: S/ 2,000 a 3.75 quedan USD 533.33, y se devuelven los S/ 2
   })
   account = await c.run((tx) => getAccountSummary(tx, c.orgId, c.patient.id))
   expect(account.byCurrency.find((row) => row.currency === "USD")).toMatchObject({ aFavor: 0 })
+  // La cuenta dice lo devuelto como salió de la caja, en soles (revisión del 7 nov).
+  expect(account.cobros.find((row) => row.ticketId === paid.ticket.id)?.refunds).toMatchObject([
+    { amountCents: 200000, currency: "PEN", reason: "No se hará el tratamiento" },
+  ])
 })
 
 it("el saldo a favor en dólares cancela lo que se debe en dólares, sin pedir cambio", async () => {

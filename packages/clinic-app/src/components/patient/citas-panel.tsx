@@ -1,11 +1,13 @@
 import { Badge, Button } from "@odentia/ui"
-import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
+import { EmptyState, SkeletonRegion, useScheduleNow } from "@odentia/ui-patterns"
 import { CalendarDays } from "lucide-react"
 import { useId } from "react"
-import { type AgendaAppointment, visitName } from "../../lib/agenda"
+import type { AgendaAppointment } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
 import {
+  appointmentVisitWord,
   appointmentWhen,
+  isPastUnclosed,
   isUpcoming,
   usePatientAppointments,
 } from "../../lib/patient-appointments"
@@ -14,13 +16,15 @@ import { QueryErrorState } from "../../lib/query-error"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { CitasSkeleton } from "../skeletons/person-sections"
 
-function statusVariant(appointment: AgendaAppointment): "success" | "warning" | "outline" | "soft" {
+function statusVariant(appointment: AgendaAppointment, now: number): "success" | "warning" | "outline" | "soft" {
+  // Ya pasó sin cerrarse: falta decir si vino (QA del 6 nov, U9).
+  if (isPastUnclosed(appointment, now)) return "warning"
   if (appointment.status === "confirmada" || appointment.status === "atendida") return "success"
   if (appointment.status === "no_asistio" || appointment.status === "cancelada") return "warning"
-  return isUpcoming(appointment) ? "soft" : "outline"
+  return isUpcoming(appointment, now) ? "soft" : "outline"
 }
 
-function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
+function AppointmentRow({ appointment, now }: { appointment: AgendaAppointment; now: number }) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
       <div className="flex min-w-0 flex-col">
@@ -32,8 +36,8 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención». */}
-        <Badge variant={statusVariant(appointment)}>{visitName(appointment.visit)}</Badge>
+        {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención», y «Sin cerrar» la que ya pasó sin cerrarse. */}
+        <Badge variant={statusVariant(appointment, now)}>{appointmentVisitWord(appointment, now)}</Badge>
         {/* La cita se abre al lado, con sus acciones de siempre: la pestaña sigue a la vista. */}
         <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(appointment.id)}>
           Ver la cita
@@ -51,6 +55,8 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
   const archived = usePersonArchived()
   const canWrite = usePermission("appointments.write") && !archived
   const query = usePatientAppointments(patientId, canRead)
+  // El mismo reloj de la Agenda: lo que pasó de hora cambia solo, sin recargar.
+  const now = Date.parse(useScheduleNow())
   // «Nueva cita» al lado: la pestaña Citas sigue a la vista.
   const book = () => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true, conversationId })
 
@@ -73,10 +79,10 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
 
   const all = query.data.data
   const upcoming = all
-    .filter((item) => isUpcoming(item))
+    .filter((item) => isUpcoming(item, now))
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
   const past = all
-    .filter((item) => !isUpcoming(item))
+    .filter((item) => !isUpcoming(item, now))
     .sort((a, b) => b.startsAt.localeCompare(a.startsAt))
 
   if (all.length === 0)
@@ -108,7 +114,7 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
         ) : (
           <ul className="mt-2 flex flex-col divide-y">
             {upcoming.map((appointment) => (
-              <AppointmentRow key={appointment.id} appointment={appointment} />
+              <AppointmentRow key={appointment.id} appointment={appointment} now={now} />
             ))}
           </ul>
         )}
@@ -123,7 +129,7 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
           </h2>
           <ul className="mt-2 flex flex-col divide-y">
             {past.map((appointment) => (
-              <AppointmentRow key={appointment.id} appointment={appointment} />
+              <AppointmentRow key={appointment.id} appointment={appointment} now={now} />
             ))}
           </ul>
         </section>

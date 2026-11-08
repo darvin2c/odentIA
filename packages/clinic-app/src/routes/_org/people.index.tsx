@@ -36,7 +36,7 @@ import { timeAgo, useCan, usePermission } from "../../lib/crm"
 import { peopleHeader, peopleSubtitle } from "../../lib/screen-rules"
 import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
 import { channelLabel } from "../../lib/channels"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { hcLabel } from "../../lib/patients"
 import {
   isPeopleShortcut,
@@ -48,6 +48,7 @@ import {
   type PersonListItem,
   attentionWords,
   daysSince,
+  listDay,
   personShapeKey,
   personShapeOf,
   situationAction,
@@ -107,9 +108,9 @@ function InvitedToReturnButton({ personId }: { personId: string }) {
   )
 }
 
-/** Fecha corta en la zona y el idioma de la clínica. */
+/** Fecha corta en la zona y el idioma de la clínica, con el año si no es de este. */
 function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(activeOrgLocale(), { weekday: "short", day: "numeric", month: "short" })
+  return listDay(iso, activeOrgLocale(), activeOrgTimeZone())
 }
 
 function PeoplePage() {

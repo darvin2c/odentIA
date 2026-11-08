@@ -5,9 +5,14 @@
  * y ninguna atención de la historia gastó materiales: «¿cuántos tratamientos
  * están en proceso?» o «¿qué materiales se usan más?» no tienen con qué
  * responderse.
- * - Avance: lo aceptado de la historia y de las promociones toma fecha de
- *   inicio y de fin; parte queda en curso y parte suspendido o cancelado ya
- *   empezado, con su motivo.
+ * - Avance: lo aceptado de la historia y de las promociones dice lo que pasó
+ *   de verdad. Lo que una atención hizo (su procedimiento lleva el tratamiento)
+ *   queda realizado con las fechas de esa atención, o en curso si es una
+ *   endodoncia o una corona de hace poco (una sesión de dos). Lo que ninguna
+ *   atención hizo nunca figura realizado ni empezado (QA del 6 nov, D5: «Realizado
+ *   · 0 de 1 sesión · sin cargos» y una limpieza atendida y pagada «Cancelado»):
+ *   lo de hace más de dos meses se dejó (suspendido o cancelado, con su motivo)
+ *   y lo reciente sigue por hacer.
  * - Materiales: resina, endodoncia y exodoncia con los suyos, una reposición
  *   recibida hace 100 días en cada sede y las atenciones de esos servicios de
  *   los últimos 90 días descontadas, cada movimiento con la fecha de su
@@ -81,9 +86,26 @@ export async function seedReportsProgress(tx: Db, input: ReportsProgressSeedInpu
   // --- Avance de lo aceptado ---------------------------------------------------------------
   // Solo la historia («Plan de tratamiento» con su atención de origen) y las promociones;
   // lo agendado y lo de la demostración queda como está.
-  const accepted = await tx.execute<{ id: string; status: string; code: string | null; decidedAt: Date | string; number: number; title: string }>(sql`
-    select distinct on (pi.id) pi.id, pi.status, s.code, b.decided_at as "decidedAt", b.budget_number as number, pi.title
+  const accepted = await tx.execute<{
+    id: string
+    status: string
+    code: string | null
+    decidedAt: Date | string
+    number: number
+    title: string
+    sessions: number
+    firstAt: Date | string | null
+    lastAt: Date | string | null
+  }>(sql`
+    select distinct on (pi.id) pi.id, pi.status, s.code, b.decided_at as "decidedAt", b.budget_number as number, pi.title,
+      done.sessions, done.first_at as "firstAt", done.last_at as "lastAt"
     from treatment_plan_item pi
+    cross join lateral (
+      select count(distinct ep.encounter_id)::int as sessions, min(e.started_at) as first_at, max(coalesce(e.ended_at, e.finalized_at)) as last_at
+      from encounter_procedure ep
+      join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada'
+      where ep.organization_id = pi.organization_id and ep.plan_item_id = pi.id and ep.voided_at is null
+    ) done
     join treatment_plan p on p.organization_id = pi.organization_id and p.id = pi.plan_id
     join treatment_budget_item i on i.organization_id = pi.organization_id and i.plan_item_id = pi.id and i.decision = 'aceptado'
     join treatment_budget b on b.organization_id = i.organization_id and b.id = i.budget_id
@@ -95,41 +117,45 @@ export async function seedReportsProgress(tx: Db, input: ReportsProgressSeedInpu
       and not exists (select 1 from appointment_plan_item a where a.organization_id = pi.organization_id and a.plan_item_id = pi.id)
     order by pi.id, b.decided_at`)
   const ordered = [...accepted].sort((a, b) => a.number - b.number || a.title.localeCompare(b.title))
-  const done = (code: string | null, startedAt: Date): Progress => {
-    const [min, max] = SPAN_DAYS[code ?? ""] ?? [0, 3]
-    const completedAt = new Date(startedAt.getTime() + random.int(min, max) * DAY_MS + random.int(1, 3) * 3_600_000)
-    return completedAt.getTime() > historyEnd
-      ? { status: "en_curso", startedAt, completedAt: null, reason: null }
-      : { status: "realizado", startedAt, completedAt, reason: null }
-  }
-  const updates: Array<{ id: string } & Progress> = []
+  const updates: Array<{ id: string; plannedSessions: number | null } & Progress> = []
   for (const row of ordered) {
-    const startedAt = new Date(new Date(row.decidedAt).getTime() + random.int(0, 14) * DAY_MS + random.int(1, 6) * 3_600_000)
     const roll = random.next()
-    // Lo aceptado hace más de dos meses ya figura hecho: casi todo se termina y unos pocos se dejaron.
-    if (row.status === "realizado") {
-      if (roll < 0.06) updates.push({ id: row.id, status: "suspendido", startedAt, completedAt: null, reason: random.pick(PAUSED) })
-      else if (roll < 0.1) updates.push({ id: row.id, status: "cancelado", startedAt, completedAt: null, reason: random.pick(DROPPED) })
-      else updates.push({ id: row.id, ...done(row.code, startedAt) })
+    if (row.sessions > 0 && row.firstAt && row.lastAt) {
+      // Lo hizo una atención: con sus fechas. Una endodoncia o una corona de hace poco sigue
+      // en curso, con su segunda sesión por hacer.
+      const startedAt = new Date(row.firstAt)
+      const lastAt = new Date(row.lastAt)
+      const [, max] = SPAN_DAYS[row.code ?? ""] ?? [0, 0]
+      if (max >= 21 && lastAt.getTime() + max * DAY_MS > historyEnd)
+        updates.push({ id: row.id, status: "en_curso", startedAt, completedAt: null, reason: null, plannedSessions: row.sessions + 1 })
+      else updates.push({ id: row.id, status: "realizado", startedAt, completedAt: lastAt, reason: null, plannedSessions: null })
       continue
     }
-    // Lo aceptado hace poco: lo que aún no empezó se queda pendiente.
-    if (startedAt.getTime() > historyEnd) continue
-    if (roll < 0.4) updates.push({ id: row.id, status: "en_curso", startedAt, completedAt: null, reason: null })
-    else if (roll < 0.6) updates.push({ id: row.id, ...done(row.code, startedAt) })
-    else if (roll < 0.65) updates.push({ id: row.id, status: "suspendido", startedAt, completedAt: null, reason: random.pick(PAUSED) })
+    // Ninguna atención lo hizo: nunca figura hecho ni empezado. Lo aceptado hace más de dos
+    // meses se dejó; lo reciente sigue por hacer, salvo alguno que se pausó.
+    const old = new Date(row.decidedAt).getTime() < now - 60 * DAY_MS
+    if (old)
+      updates.push(
+        roll < 0.5
+          ? { id: row.id, status: "suspendido", startedAt: null, completedAt: null, reason: random.pick(PAUSED), plannedSessions: null }
+          : { id: row.id, status: "cancelado", startedAt: null, completedAt: null, reason: random.pick(DROPPED), plannedSessions: null },
+      )
+    else if (roll < 0.05)
+      updates.push({ id: row.id, status: "suspendido", startedAt: null, completedAt: null, reason: random.pick(PAUSED), plannedSessions: null })
+    else if (row.status === "realizado")
+      updates.push({ id: row.id, status: "pendiente", startedAt: null, completedAt: null, reason: null, plannedSessions: null })
   }
   for (const batch of chunks(updates))
     await tx.execute(sql`
       update treatment_plan_item pi set status = v.status, started_at = v.started_at, completed_at = v.completed_at,
-        status_reason = v.reason, updated_at = now()
+        status_reason = v.reason, planned_sessions = coalesce(v.planned_sessions, pi.planned_sessions), updated_at = now()
       from (values ${sql.join(
         batch.map(
           (row) =>
-            sql`(${row.id}::uuid, ${row.status}::text, ${row.startedAt?.toISOString() ?? null}::timestamptz, ${row.completedAt?.toISOString() ?? null}::timestamptz, ${row.reason}::text)`,
+            sql`(${row.id}::uuid, ${row.status}::text, ${row.startedAt?.toISOString() ?? null}::timestamptz, ${row.completedAt?.toISOString() ?? null}::timestamptz, ${row.reason}::text, ${row.plannedSessions}::smallint)`,
         ),
         sql`, `,
-      )}) as v(id, status, started_at, completed_at, reason)
+      )}) as v(id, status, started_at, completed_at, reason, planned_sessions)
       where pi.organization_id = ${orgId} and pi.id = v.id`)
   const progress: Record<string, number> = {}
   for (const row of updates) progress[row.status] = (progress[row.status] ?? 0) + 1

@@ -341,6 +341,7 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   expect(Object.keys(((await coordination.json()) as { data: object }).data).sort()).toEqual([
     "budgetsAwaitingDecision",
     "followUps",
+    "nextControl",
     "treatments",
   ])
   expect((await get("clinician", "/coordination")).status).toBe(200)
