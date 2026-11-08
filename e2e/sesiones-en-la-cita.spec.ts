@@ -106,9 +106,14 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre 
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const signing = page.getByRole("dialog", { name: "Finalizar y firmar" })
   await expect(signing.getByText("Sigue en curso: Endodoncia unirradicular · 36 · sesión 1 de 2")).toBeVisible()
+  // La sesión 2 ya tiene cita: «¿Cuándo vuelve?» la dice y no pide un control (QA del 8 nov, X11).
+  await expect(signing.getByText(/^Vuelve el .+ para Endodoncia unirradicular · 36 · sesión 2 de 2, con su cita\.$/)).toBeVisible()
+  await expect(signing.getByRole("button", { name: "En 1 semana" })).toHaveCount(0)
   await views("cierre-sigue-en-curso")
   await signing.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Atención finalizada" })).toBeVisible()
+  const finalized = page.getByRole("dialog", { name: "Atención finalizada" })
+  await expect(finalized.getByText(/^Vuelve el .+ para Endodoncia unirradicular · 36 · sesión 2 de 2\.$/)).toBeVisible()
+  await expect(finalized.getByRole("button", { name: /^Reservar la sesión/ })).toHaveCount(0)
   const items = await call<Array<{ id: string; status: string; sessionsDone: number }>>(page, "GET", `${apiPath}/plan`, slug)
   expect(items.find((item) => item.id === ids.itemId)).toMatchObject({ status: "en_curso", sessionsDone: 1 })
 
@@ -130,7 +135,7 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre 
   await views("cierre-terminaste")
   // «Falta otra sesión» dice qué pasará; tocar otra vez la elegida no deja ninguna.
   await finished.getByRole("button", { name: "Falta otra sesión" }).click()
-  await expect(signing2.getByText("Sigue en curso y se prevé una sesión más, la 3.")).toBeVisible()
+  await expect(signing2.getByText("Sigue en curso con una sesión más, la 3: al firmar puedes reservarla.")).toBeVisible()
   await expect(signing2.getByText(/El odontograma queda firmado/)).toHaveCount(0)
   await views("cierre-falta-otra")
   await finished.getByRole("button", { name: "Falta otra sesión" }).click()

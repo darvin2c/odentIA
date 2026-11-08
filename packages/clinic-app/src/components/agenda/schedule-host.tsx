@@ -167,7 +167,34 @@ function AppointmentHost({
   )
 }
 
-function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void }) {
+/**
+ * «Nueva cita» dentro de otra ventana, como «Reservar la sesión 2» en el cierre
+ * de la atención: el mismo cajón de la Agenda, encima de quien lo abre (así su
+ * foco y su capa siguen siendo suyos) y con lo reservado de vuelta.
+ */
+export function BookingHere({
+  seed,
+  onClose,
+  onSaved,
+}: {
+  seed: BookingSeed
+  onClose: () => void
+  onSaved: (appointment: AgendaAppointment) => void
+}) {
+  return <BookingHost seed={seed} onClose={onClose} onSaved={onSaved} dock={false} />
+}
+
+function BookingHost({
+  seed,
+  onClose,
+  onSaved,
+  dock,
+}: {
+  seed: BookingSeed
+  onClose: () => void
+  onSaved?: (appointment: AgendaAppointment) => void
+  dock?: boolean
+}) {
   const client = useQueryClient()
   // La sede que se está mirando, la misma de la Agenda.
   const sede = useActiveBranch()
@@ -189,8 +216,10 @@ function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void
       toneOf={toneOf}
       onPreview={noPreview}
       onClose={onClose}
+      dock={dock}
       onSaved={async (created) => {
         onClose()
+        onSaved?.(created)
         await invalidateAppointmentQueries(client)
         announce(created)
       }}

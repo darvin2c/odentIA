@@ -31,7 +31,7 @@ import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@ode
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
-import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
+import { appointmentSessionsOf, markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { type HealthGap, healthGapsOf, listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { assertAttending } from "./encounter-attending.js"
 import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
@@ -59,7 +59,7 @@ import {
   surfaceLimits,
   updatePlanItemPlanning,
 } from "./plan.js"
-import { sessionsDoneSql } from "./to-schedule.js"
+import { canBookAnother, LIVE_APPOINTMENT_STATUSES, sessionCountsOf, sessionsDoneSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
@@ -1681,6 +1681,11 @@ export interface FinalizeEncounterBase {
   encounter: EncounterRow
   /** Lo que se iba a terminar al firmar (ADR 0161) y quedó en curso, con su motivo. */
   keptOpen: SessionKeptOpen[]
+  /**
+   * Lo trabajado hoy que sigue en curso, con su próxima sesión: la cita que ya la
+   * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
+   */
+  nextSessions: NextSession[]
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
@@ -1822,6 +1827,105 @@ export interface ClosingSession {
   title: string
   n: number
   m: number
+  /**
+   * La cita por venir que ya lleva su próxima sesión: «la sesión 2 tiene cita el
+   * lun 9, 10:45» (QA del 8 nov, X11). Sin cita, no viene.
+   */
+  booked?: BookedSession
+}
+
+/** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */
+export interface BookedSession {
+  appointmentId: string
+  startsAt: Date
+  n: number
+  m: number
+}
+
+/**
+ * La próxima sesión de un tratamiento que sigue en curso (propuesta 2 de la QA
+ * del 8 nov): la cita que ya la lleva o, si no tiene, la que falta reservar. Solo
+ * la próxima: con la sesión 2 reservada no se ofrece reservar la 3.
+ */
+export interface NextSession {
+  planItemId: string
+  title: string
+  /** Con qué servicio se abre «Nueva cita». */
+  serviceId: string | null
+  booked: BookedSession | null
+  /** La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no le falta. */
+  toBook: { n: number; m: number } | null
+}
+
+/**
+ * La próxima sesión de cada tratamiento aceptado y por hacer de `itemIds`, en ese
+ * orden; los que no tienen cita ni sesión por reservar no vienen. Cuenta con las
+ * reglas de `to-schedule.ts` (`sessionCountsOf`, `canBookAnother`) y la sesión de
+ * la cita con la de la agenda (`appointmentSessionsOf`). `exceptAppointmentId` es
+ * la cita de la atención que se está cerrando: no es la próxima.
+ */
+export async function nextSessionsOf(
+  tx: Db,
+  orgId: string,
+  itemIds: readonly string[],
+  exceptAppointmentId: string | null,
+): Promise<NextSession[]> {
+  const ids = [...new Set(itemIds)]
+  if (ids.length === 0) return []
+  const items = await tx
+    .select({
+      id: treatmentPlanItem.id,
+      title: treatmentPlanItem.title,
+      serviceId: treatmentPlanItem.serviceId,
+      status: treatmentPlanItem.status,
+      decisionStatus: treatmentPlanItem.decisionStatus,
+      plannedSessions: treatmentPlanItem.plannedSessions,
+    })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        inArray(treatmentPlanItem.id, ids),
+        eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        inArray(treatmentPlanItem.status, [...TO_SCHEDULE_STATUSES]),
+      ),
+    )
+  if (items.length === 0) return []
+  const counts = await sessionCountsOf(tx, orgId, items.map((item) => item.id))
+  // La primera cita por venir que lleva cada uno (la regla de «una cita por venir lo lleva»).
+  const upcoming = await tx
+    .select({ planItemId: appointmentPlanItem.planItemId, appointmentId: appointment.id, startsAt: appointment.startsAt })
+    .from(appointmentPlanItem)
+    .innerJoin(
+      appointment,
+      and(eq(appointment.organizationId, appointmentPlanItem.organizationId), eq(appointment.id, appointmentPlanItem.appointmentId)),
+    )
+    .where(
+      and(
+        eq(appointmentPlanItem.organizationId, orgId),
+        inArray(appointmentPlanItem.planItemId, items.map((item) => item.id)),
+        inArray(appointment.status, [...LIVE_APPOINTMENT_STATUSES]),
+        gt(appointment.startsAt, new Date()),
+        exceptAppointmentId ? ne(appointment.id, exceptAppointmentId) : undefined,
+      ),
+    )
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+  const firstOf = new Map<string, { appointmentId: string; startsAt: Date }>()
+  for (const row of upcoming) if (!firstOf.has(row.planItemId)) firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt })
+  const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
+  const byId = new Map(items.map((item) => [item.id, item]))
+  const out: NextSession[] = []
+  for (const id of ids) {
+    const item = byId.get(id)
+    if (!item) continue
+    const count = counts.get(id) ?? { done: 0, booked: 0 }
+    const first = firstOf.get(id)
+    const session = first ? sessionsOf.get(first.appointmentId)?.find((row) => row.planItemId === id) : undefined
+    const booked = first ? { ...first, n: session?.n ?? count.done + 1, m: session?.m ?? item.plannedSessions } : null
+    const toBook = !booked && canBookAnother(item, count) ? { n: count.done + count.booked + 1, m: item.plannedSessions } : null
+    if (booked || toBook) out.push({ planItemId: id, title: item.title, serviceId: item.serviceId, booked, toBook })
+  }
+  return out
 }
 
 /**
@@ -1846,8 +1950,13 @@ async function closingSessionsOf(
     order by worked.sort_order, worked.created_at, worked.id`)
   const finishing: ClosingSession[] = []
   const continuing: ClosingSession[] = []
+  // Si la próxima sesión ya tiene cita, el cierre la dice (QA del 8 nov, X11).
+  const next = new Map(
+    (await nextSessionsOf(tx, orgId, rows.map((row) => row.id), appointmentId)).map((session) => [session.planItemId, session.booked]),
+  )
   for (const row of rows) {
-    const session = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m) }
+    const booked = next.get(row.id)
+    const session: ClosingSession = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m), ...(booked ? { booked } : {}) }
     ;(session.n >= session.m ? finishing : continuing).push(session)
   }
   // Lo que la cita traía y hoy no se registró: la sesión que le tocaba.
@@ -2612,6 +2721,13 @@ export async function finalizeEncounter(
   }
   // «Falta otra sesión», ya con los cobros de hoy medidos contra lo previsto.
   await addSessions()
+  // Lo que sigue en curso, ya con lo respondido: con la sesión que se sumó y sin lo que se terminó.
+  const nextSessions = await nextSessionsOf(
+    tx,
+    orgId,
+    [...closing.sessions.finishing, ...closing.sessions.continuing].map((session) => session.planItemId),
+    row.appointmentId ?? null,
+  )
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
   // Entre monedas no se suma: cada una con su total.
   const chargedTotals = sumByCurrency(
@@ -2641,7 +2757,10 @@ export async function finalizeEncounter(
         ? "no_hace_falta"
         : closing.controls.next || repeats || stays
           ? "ya_tenia"
-          : "sin_indicar",
+          : // Mientras un tratamiento sigue en curso no se pregunta por un control: vuelve a su próxima sesión.
+            nextSessions.length > 0
+            ? "sesion_en_curso"
+            : "sin_indicar",
     controlsFulfilled: fulfilled.length,
   })
   // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
@@ -2657,6 +2776,7 @@ export async function finalizeEncounter(
     materials,
     controls: { next: nextControl, fulfilled },
     keptOpen,
+    nextSessions,
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
