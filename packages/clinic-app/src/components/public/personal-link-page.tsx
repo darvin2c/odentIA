@@ -49,7 +49,7 @@ import { PersonalDataForm } from "./personal-data-form"
 import { capital, longDay, timeLabel } from "./week-slots"
 
 /**
- * «Su enlace» (ADR 0037 y 0164, «Un enlace por cosa»): la página de cada
+ * «Su enlace» (ADR 0037 y 0165, «Un enlace por cosa»): la página de cada
  * persona sin sesión. `/pendientes` es «Tus pendientes», una tarjeta por cosa
  * que hacer (su cita, sus datos, el presupuesto, el consentimiento, el
  * cuestionario y sus mensajes; nunca un papel), y cada mensaje abre directo lo

@@ -1,4 +1,4 @@
-# 0164 · Un enlace por cosa: el destino va en la dirección
+# 0165 · Un enlace por cosa: el destino va en la dirección
 
 Fecha: 2026-11-08 · Estado: aceptada · Sustituye en [0037](0037-su-enlace-y-portal-en-un-paso.md) la parte de «Su enlace» (una página con todo, «Un enlace por cosa» descartado) · Precisa [0156](0156-cada-envio-manda-el-pdf-y-el-portal-muestra-todo-lo-suyo.md)
 
@@ -29,4 +29,4 @@ Cada mensaje abría la misma página, «Su enlace», con todo lo pendiente: quie
 
 ## Referencias
 
-`packages/services/src/public-links.ts` (`personalLinkAddress`), `booking-links.ts` (`contactHandlesAppointment`, `bookAnotherOf`), `pair-access.ts` (`expireEmailAppointmentTokens`), `clinical-forms.ts` (`remoteSignBlock`, `confirmLinkSignedConsent`, `listLinkSignedToConfirm`), `su-enlace.ts` (`sendConsentToSign`), `automation.ts` (`pendingNoticesFor`), `automation-messages.ts` (`CONSENT_TO_SIGN_MESSAGE`, `REMINDER_PENDING_KEY`), migración `0067_confirmado_en_la_atencion`.
+`packages/services/src/public-links.ts` (`personalLinkAddress`), `booking-links.ts` (`contactHandlesAppointment`, `bookAnotherOf`), `pair-access.ts` (`expireEmailAppointmentTokens`), `clinical-forms.ts` (`remoteSignBlock`, `confirmLinkSignedConsent`, `listLinkSignedToConfirm`), `su-enlace.ts` (`sendConsentToSign`), `automation.ts` (`pendingNoticesFor`), `automation-messages.ts` (`CONSENT_TO_SIGN_MESSAGE`, `REMINDER_PENDING_KEY`), migración `0068_confirmado_en_la_atencion`.

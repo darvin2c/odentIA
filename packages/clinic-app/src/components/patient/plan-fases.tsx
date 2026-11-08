@@ -1,7 +1,20 @@
 import {
   diagnosisCodeLabel,
 } from "@odentia/clinical"
-import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Badge,
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@odentia/ui"
 import { FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, ChevronDown } from "lucide-react"
@@ -123,6 +136,8 @@ function PlanPhasesGroup({
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const [planning, setPlanning] = useState<PlanItem | null>(null)
+  /** «Falta otra sesión» de lo realizado: el tratamiento que se está por reabrir. */
+  const [reopening, setReopening] = useState<PlanItem | null>(null)
   const [error, setError] = useState<string | null>(null)
   const nextOf = new Map(journeys.map((row) => [row.item.id, row]))
   const move = useMutation({
@@ -238,7 +253,13 @@ function PlanPhasesGroup({
                               : null,
                             // Con una revisión enviada, lo que espera es el precio nuevo.
                             item.newTermsPending ? "Precio nuevo por responder" : planDecisionLabel(item.decisionStatus),
-                            `${sessions} de ${plural(planned, "sesión", "sesiones")}`,
+                            // Lo de una sola sesión no dice «0 de 1 sesión»: solo lo de varias.
+                            // Lo que se terminó antes de sus previstas lo dice: por eso no ofrece «Falta otra sesión».
+                            item.status === "realizado" && sessions < planned
+                              ? `Se terminó en la sesión ${sessions} de ${planned}`
+                              : planned > 1 || sessions > planned
+                                ? `${sessions} de ${plural(planned, "sesión", "sesiones")}`
+                                : null,
                             !closed && next ? NEXT_ACTION_LABELS[next] : null,
                           ]
                             .filter(Boolean)
@@ -281,6 +302,18 @@ function PlanPhasesGroup({
                             </Button>
                           </>
                         ) : null}
+                        {/* Lo que se terminó al llegar a sus sesiones previstas puede necesitar otra (ADR 0164). */}
+                        {canWrite && item.canAddSession ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Falta otra sesión en «${item.title}${site(item)}»`}
+                            onClick={() => setReopening(item)}
+                          >
+                            Falta otra sesión…
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           size="sm"
@@ -306,6 +339,14 @@ function PlanPhasesGroup({
           patientId={patientId}
           item={planning}
           onClose={() => setPlanning(null)}
+        />
+      ) : null}
+      {reopening ? (
+        <AnotherSessionDialog
+          key={reopening.id}
+          patientId={patientId}
+          item={reopening}
+          onClose={() => setReopening(null)}
         />
       ) : null}
     </section>
@@ -389,6 +430,59 @@ function NotChosenPath({ items }: { items: PlanItem[] }): React.JSX.Element {
         </ul>
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+/**
+ * «Falta otra sesión» de un tratamiento realizado: vuelve a «En curso» con una
+ * sesión prevista más y sale otra vez en «Por agendar». Lo firmado y lo cobrado
+ * no cambian. Se confirma porque cambia lo que ve recepción.
+ */
+function AnotherSessionDialog({
+  patientId,
+  item,
+  onClose,
+}: {
+  patientId: string
+  item: PlanItem
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const next = (item.sessionsDone ?? 0) + 1
+  const reopen = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/patients/${patientId}/plan/items/${item.id}/another-session`, { method: "POST" }),
+    onSuccess: async () => {
+      await Promise.all(
+        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next", "treatment-coordination"].map((key) =>
+          queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+        ),
+      )
+      onClose()
+    },
+  })
+  return (
+    <AlertDialog open onOpenChange={(open) => (!open && !reopen.isPending ? onClose() : undefined)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Le falta otra sesión?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Lo firmado y lo cobrado hasta hoy no cambian; esa sesión se cobra como las demás de este tratamiento.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {reopen.error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {submitErrorMessage(reopen.error)}
+          </p>
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={reopen.isPending}>Cancelar</AlertDialogCancel>
+          <Button type="button" disabled={reopen.isPending} onClick={() => reopen.mutate()}>
+            {reopen.isPending ? "Guardando…" : "Sí, falta otra sesión"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

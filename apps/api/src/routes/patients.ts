@@ -89,6 +89,7 @@ import {
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
+  reopenPlanItemForSession,
   updatePlanItemPlanning,
   voidEncounter,
   voidEncounterDiagnosis,
@@ -1744,6 +1745,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("itemId"),
           parsed.data,
         ),
+      ),
+    )
+  })
+  // «Falta otra sesión» de lo que se terminó al llegar a sus sesiones previstas (ADR 0164).
+  app.post("/:id/plan/items/:itemId/another-session", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reopenPlanItemForSession(tx, orgId, userId, c.req.param("id"), c.req.param("itemId")),
       ),
     )
   })

@@ -474,8 +474,15 @@
     {
       "idx": 67,
       "version": "7",
-      "when": 1794155428728,
-      "tag": "0067_confirmado_en_la_atencion",
+      "when": 1794156215382,
+      "tag": "0067_sesiones_habituales",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794161187182,
+      "tag": "0068_confirmado_en_la_atencion",
       "breakpoints": true
     }
   ]

@@ -502,7 +502,8 @@ export function ClosingSessions({
       })}
       {sessions.continuing.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
-          Sigue en curso: {line(session)}
+          {/* Si sus sesiones habituales eran más de las que hizo falta, terminarlo es un toque. */}
+          Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Hecho hoy».
         </li>
       ))}
       {/* Avisa, no frena: quizá hoy no se pudo hacer. */}

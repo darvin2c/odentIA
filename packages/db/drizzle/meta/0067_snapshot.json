@@ -1,5 +1,5 @@
 {
-  "id": "d10c1cc3-0948-4338-bceb-c6127a0b1174",
+  "id": "aeaa9ba5-b18b-400c-bd83-5f1d6da5b29d",
   "prevId": "d394cbc0-f4bd-458d-8283-52ae82ba83cf",
   "version": "7",
   "dialect": "postgresql",
@@ -9999,12 +9999,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "informed_encounter_id": {
-          "name": "informed_encounter_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10205,23 +10199,6 @@
           "columnsTo": [
             "system_key",
             "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "consent_document_informed_encounter_fk": {
-          "name": "consent_document_informed_encounter_fk",
-          "tableFrom": "consent_document",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "informed_encounter_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -21277,6 +21254,12 @@
           "notNull": true,
           "default": "'treatment'"
         },
+        "usual_sessions": {
+          "name": "usual_sessions",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "price_disclosure": {
           "name": "price_disclosure",
           "type": "text",
@@ -21536,6 +21519,10 @@
         "service_catalog_billing_mode_check": {
           "name": "service_catalog_billing_mode_check",
           "value": "\"service_catalog\".\"billing_mode\" IN ('treatment','session')"
+        },
+        "service_catalog_usual_sessions_check": {
+          "name": "service_catalog_usual_sessions_check",
+          "value": "\"service_catalog\".\"usual_sessions\" IS NULL OR \"service_catalog\".\"usual_sessions\" BETWEEN 1 AND 60"
         },
         "service_catalog_price_disclosure_check": {
           "name": "service_catalog_price_disclosure_check",
@@ -23382,6 +23369,13 @@
           "notNull": true,
           "default": false
         },
+        "usual_sessions": {
+          "name": "usual_sessions",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -23428,6 +23422,10 @@
         "treatment_template_product_check": {
           "name": "treatment_template_product_check",
           "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical')"
+        },
+        "treatment_template_usual_sessions_check": {
+          "name": "treatment_template_usual_sessions_check",
+          "value": "\"catalog\".\"treatment_template\".\"usual_sessions\" BETWEEN 1 AND 60"
         }
       },
       "isRLSEnabled": false

@@ -5,7 +5,7 @@ import { API_URL } from "./auth-client"
 import type { PortalBudget } from "./portal"
 
 /**
- * «Su enlace» (ADR 0037 y 0164): `/pendientes` con lo que tiene por hacer, cada
+ * «Su enlace» (ADR 0037 y 0165): `/pendientes` con lo que tiene por hacer, cada
  * mensaje abre lo suyo (`?abre=`), y `/reserva` para elegir su cita. Sin sesión:
  * lo único que identifica es el enlace, y nunca trae lo guardado.
  */

@@ -1,0 +1,4 @@
+ALTER TABLE "service_catalog" ADD COLUMN "usual_sessions" smallint;--> statement-breakpoint
+ALTER TABLE "catalog"."treatment_template" ADD COLUMN "usual_sessions" smallint DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "service_catalog" ADD CONSTRAINT "service_catalog_usual_sessions_check" CHECK ("service_catalog"."usual_sessions" IS NULL OR "service_catalog"."usual_sessions" BETWEEN 1 AND 60);--> statement-breakpoint
+ALTER TABLE "catalog"."treatment_template" ADD CONSTRAINT "treatment_template_usual_sessions_check" CHECK ("catalog"."treatment_template"."usual_sessions" BETWEEN 1 AND 60);

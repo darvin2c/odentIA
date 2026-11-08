@@ -5,7 +5,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { saasAction, saasCharge, saasNotice, saasPayment, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { getClinicNotices } from "./clinic-notices.js"
+import { callName, getClinicNotices } from "./clinic-notices.js"
 import { createSaasPlan, tickSaasBilling } from "./saas-billing.js"
 import { setSaasSpendCap } from "./saas-terms.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -250,5 +250,14 @@ describe("correos de cobro (ADR 0065)", () => {
     await tickSaasBilling(ownerDb)
     const [notice] = await ownerDb.select().from(saasNotice).where(and(eq(saasNotice.organizationId, orgId), eq(saasNotice.kind, "credito_aviso")))
     expect(notice?.emailTo ?? null).toBeNull()
+  })
+})
+
+describe("a quién avisar, por su nombre", () => {
+  it("dice el primer nombre, con el tratamiento si lo trae, y sin doble punto", () => {
+    expect(callName("Rosa Díaz")).toBe("Rosa")
+    expect(callName("Dra. Ana Torres")).toBe("Dra. Ana")
+    expect(`Avísale a ${callName("Dra.")}.`).toBe("Avísale a Dra.")
+    expect(callName("  Luis   Prado ")).toBe("Luis")
   })
 })

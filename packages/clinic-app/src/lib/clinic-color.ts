@@ -6,10 +6,10 @@ import { orgSlugFromHostname, requestHostname } from "./host"
  * El color de la marca de la clínica en su app y en sus páginas públicas (ADR 0162).
  *
  * La raíz de cada app lo pide al servidor y lo escribe en el `<head>` del primer
- * pintado, así nada parpadea en el color del producto. Solo redefine el bloque
- * «Marca» de `globals.css` (y el tinte del agente, que sigue a la clínica): estados,
- * gráficos y la identidad de odentIA o latidIA no cambian. Sin color elegido no se
- * escribe nada y queda el del producto.
+ * pintado, así nada parpadea en el color del producto. Redefine el bloque «Marca» de
+ * `globals.css` (y el tinte del agente, que sigue a la clínica) y los grises, en el tono
+ * de la marca y muy suaves: estados, gráficos, el papel y la identidad de odentIA o
+ * latidIA no cambian. Sin color elegido no se escribe nada y queda el del producto.
  */
 
 export interface ClinicAppearance {
@@ -68,15 +68,27 @@ function tokens(t: BrandTokens): string {
   ].join(";")
 }
 
+/** Los grises con sus nombres de `globals.css`. */
+function grays(values: Record<string, string>): string {
+  return Object.entries(values)
+    .map(([name, value]) => `--${name}:${value}`)
+    .join(";")
+}
+
 /**
  * Las reglas del color de la clínica. `:root:root:root` pesa más que `[data-brand]` y
- * que `.dark`, así no depende del orden de las hojas. Lo que se ve como papel
- * (`.theme-light`) queda claro también con la app en oscuro: `.dark` solo va en la raíz.
+ * que `.dark`, así no depende del orden de las hojas. Los grises van solo en la raíz:
+ * lo que se ve como papel (`.theme-light`) declara los suyos y sigue blanco, también con
+ * la app en oscuro (`.dark` solo va en la raíz).
  */
 export function clinicColorCss(brandColor: string | null | undefined): string | null {
   if (!brandColor || !BRAND_COLOR_PATTERN.test(brandColor)) return null
-  const { light, dark } = brandPalette(brandColor)
-  return `:root:root:root,:root:root:root .theme-light{${tokens(light)}}:root:root:root.dark{${tokens(dark)}}`
+  const { light, dark, neutrals } = brandPalette(brandColor)
+  return (
+    `:root:root:root{${tokens(light)};${grays(neutrals.light)}}` +
+    `:root:root:root .theme-light{${tokens(light)}}` +
+    `:root:root:root.dark{${tokens(dark)};${grays(neutrals.dark)}}`
+  )
 }
 
 /** Para el `head` de la raíz: el `<style>` del color, o nada. */

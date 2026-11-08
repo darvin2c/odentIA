@@ -116,6 +116,12 @@ const serviceDurationMin = z
   .min(1, { error: "Duración: minutos enteros entre 1 y 1440" })
   .max(1440, { error: "Duración: minutos enteros entre 1 y 1440" })
 const serviceEvaluationId = z.string().uuid({ error: "Elige la evaluación de la lista" })
+/** Sesiones habituales (ADR 0164); nulas, las de la biblioteca. */
+const serviceUsualSessions = z
+  .number({ error: "Sesiones habituales: un número entero entre 1 y 60" })
+  .int({ error: "Sesiones habituales: un número entero entre 1 y 60" })
+  .min(1, { error: "Sesiones habituales: un número entero entre 1 y 60" })
+  .max(60, { error: "Sesiones habituales: un número entero entre 1 y 60" })
 
 const createInput = z
   .object({
@@ -131,6 +137,7 @@ const createInput = z
       .nullish(),
     durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).nullish(),
+    usualSessions: serviceUsualSessions.nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
     evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
@@ -155,6 +162,7 @@ const patchInput = z
       .optional(),
     durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).optional(),
+    usualSessions: serviceUsualSessions.nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
     evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
@@ -215,6 +223,7 @@ const batchInput = z
                 priceCents: batchPrice,
                 billingMode: batchBillingMode,
                 durationMin: batchDuration,
+                usualSessions: serviceUsualSessions.nullish(),
                 leavesFinding: leavesFindingInput.nullish(),
                 officialCode: officialCodeInput,
               })
@@ -556,6 +565,7 @@ export function createServicesRoute(deps: CrmDeps) {
           currency: parsed.data.currency,
           durationMin: parsed.data.durationMin,
           billingMode: parsed.data.billingMode,
+          usualSessions: parsed.data.usualSessions,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,
@@ -588,6 +598,7 @@ export function createServicesRoute(deps: CrmDeps) {
           currency: parsed.data.currency,
           durationMin: parsed.data.durationMin,
           billingMode: parsed.data.billingMode,
+          usualSessions: parsed.data.usualSessions,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,

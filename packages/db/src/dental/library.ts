@@ -1,7 +1,7 @@
 import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
-import { type CatalogLibrary, type ProcedureLists, seedProcedureCodes, splitHead, strictLines } from "../procedure-codes.js"
+import { type CatalogLibrary, librarySessions, type ProcedureLists, seedProcedureCodes, splitHead, strictLines } from "../procedure-codes.js"
 import { treatmentTemplate } from "../schema/clinical.js"
 
 /**
@@ -9,7 +9,8 @@ import { treatmentTemplate } from "../schema/clinical.js"
  * tratamientos de consultorio con nombre propio, tipo, ámbito, lo que dejan en
  * la pieza, si van en «Más usados» y si son la variante de una norma que solo
  * se ofrece donde tiene código; `seeds/biblioteca_codigos.csv`, el código de
- * cada uno en cada lista. Lo que ya no está queda inactivo (las plantillas
+ * cada uno en cada lista; `seeds/biblioteca_sesiones.csv`, las sesiones
+ * habituales de los que suelen llevar más de una (ADR 0164). Lo que ya no está queda inactivo (las plantillas
  * `cpms:` de antes); las filas se conservan para los servicios que las usan.
  */
 export const dentalLibrary: CatalogLibrary = {
@@ -92,6 +93,7 @@ export const dentalLibrary: CatalogLibrary = {
     }
 
     const scopeKeys = templates.map((t) => t.key)
+    const sessions = librarySessions("biblioteca_sesiones.csv", templateKeys)
     return {
       keys: scopeKeys,
       templates: templates.length,
@@ -105,8 +107,8 @@ export const dentalLibrary: CatalogLibrary = {
             from "dental_template_rule" r where r."template_id" = "treatment_template"."id"), row(null::int, null::int, null::text, null::text)::text)`
           await tx.execute(
             sql`insert into "treatment_template"
-            ("key", "name", "specialty", "scope", "product", "is_common", "coded_only", "is_active", "version")
-            values (${t.key}, ${t.name}, ${t.kind}, ${t.scope}, 'dental', ${t.common}, ${t.codedOnly}, true, 1)
+            ("key", "name", "specialty", "scope", "product", "is_common", "coded_only", "usual_sessions", "is_active", "version")
+            values (${t.key}, ${t.name}, ${t.kind}, ${t.scope}, 'dental', ${t.common}, ${t.codedOnly}, ${sessions.get(t.key) ?? 1}, true, 1)
             on conflict ("key") do update set
               "name" = excluded."name",
               "specialty" = excluded."specialty",
@@ -114,6 +116,8 @@ export const dentalLibrary: CatalogLibrary = {
               "product" = excluded."product",
               "is_common" = excluded."is_common",
               "coded_only" = excluded."coded_only",
+              -- Las sesiones habituales son una sugerencia: no suben la versión.
+              "usual_sessions" = excluded."usual_sessions",
               "is_active" = true,
               "version" = "treatment_template"."version" + (
                 ("treatment_template"."name", "treatment_template"."specialty", "treatment_template"."scope", ${storedRule})
