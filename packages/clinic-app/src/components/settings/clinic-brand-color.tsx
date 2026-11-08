@@ -21,7 +21,17 @@ const FACTORY_WORDS = {
   medical: { color: "morado", brand: "latidIA" },
 } as const
 
-const CODE_HINT = "Escribe 6 cifras o letras después de #, como #1D5FA8."
+/** Qué tiene mal un código escrito a mano, dicho en concreto; null si es un color. */
+function codeProblem(text: string): string | null {
+  if (normalizeBrandColor(text)) return null
+  const body = text.trim().replace(/^#/, "")
+  if (!body) return "Escribe el código de tu color, como #1D5FA8."
+  if (/[^0-9a-f]/i.test(body)) return "El código lleva solo números y letras de la A a la F, como #1D5FA8."
+  const gap = 6 - body.length
+  const count = Math.abs(gap)
+  const digits = count === 1 ? "1 cifra" : `${count} cifras`
+  return `${gap > 0 ? (count === 1 ? "Le falta" : "Le faltan") : count === 1 ? "Le sobra" : "Le sobran"} ${digits}: el código tiene 6, como #1D5FA8.`
+}
 
 /**
  * El color de la marca (ADR 0157, lienzo «Color de la marca»): un solo color para toda
@@ -73,6 +83,12 @@ export function ClinicBrandColorSettings({
   const fromLogo = (logo ? (logoColors.data ?? []) : []).map((hex) => ({ hex, name: brandColorName(hex) }))
   const suggested = suggestedBrandColors(product)
   const palette = brandPalette(chosen)
+  // El nombre del color en uso: el de la lista, el del logo o uno aproximado; nunca solo el código.
+  const savedName =
+    saved === factory
+      ? `${suggested[0]?.name ?? "Turquesa"}, el de ${FACTORY_WORDS[product].brand}`
+      : (suggested.find((color) => color.hex === saved)?.name ??
+        (fromLogo.some((color) => color.hex === saved) ? `${brandColorName(saved)} de tu logo` : brandColorName(saved)))
 
   const save = useMutation({
     mutationFn: (color: string) =>
@@ -107,8 +123,9 @@ export function ClinicBrandColorSettings({
     }
   }
   const submit = () => {
-    if (otherOpen && !normalizeBrandColor(code)) {
-      setCodeError(CODE_HINT)
+    const problem = otherOpen ? codeProblem(code) : null
+    if (problem) {
+      setCodeError(problem)
       document.getElementById(`${id}-code`)?.focus()
       return
     }
@@ -153,12 +170,20 @@ export function ClinicBrandColorSettings({
         </h2>
         <p className="text-sm text-muted-foreground">
           Lo verán tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web. En tus
-          documentos va solo en la línea bajo tu logo.
+          documentos va en la línea bajo el logo o, si no hay logo, en el cuadro de sus iniciales. Se guarda aparte, con
+          «Usar este color».
         </p>
       </div>
 
+      <p className="flex flex-wrap items-center gap-2 text-sm" aria-live="polite">
+        <span className="text-muted-foreground">Tus pacientes ven:</span>
+        <span aria-hidden className="size-5 rounded-md border border-foreground/10" style={{ backgroundColor: saved }} />
+        <span className="font-medium">{savedName}</span>
+        <span className="text-muted-foreground">{saved.toUpperCase()}</span>
+      </p>
+
       <div className="grid gap-5 sm:grid-cols-2">
-        <div className="flex flex-col gap-4">
+        <div className="order-1 flex flex-col gap-4 sm:col-start-1 sm:row-start-1">
           {fromLogo.length > 0 ? (
             <fieldset className="flex flex-col gap-2">
               <legend className="mb-2 text-sm font-semibold">De tu logo</legend>
@@ -172,7 +197,7 @@ export function ClinicBrandColorSettings({
               {suggested.map((color) => swatch(color.hex, color.factory ? `${color.name}, el de ${FACTORY_WORDS[product].brand}` : color.name, false))}
             </div>
             <p className="text-sm text-muted-foreground">
-              {logo ? null : "Sube tu logo arriba y te sugerimos sus colores. "}
+              {logo ? null : "Sube tu logo en «Logo», aquí arriba, y te sugerimos sus colores. "}
               El primero es el {FACTORY_WORDS[product].color} con el que viene {FACTORY_WORDS[product].brand}.
             </p>
           </fieldset>
@@ -202,7 +227,7 @@ export function ClinicBrandColorSettings({
                     value={code}
                     onChange={(event) => onCode(event.target.value)}
                     // Al salir del campo con un código que no es un color, se dice ahí mismo.
-                    onBlur={() => setCodeError(normalizeBrandColor(code) ? null : CODE_HINT)}
+                    onBlur={() => setCodeError(codeProblem(code))}
                     aria-invalid={codeError ? true : undefined}
                     aria-describedby={`${id}-code-help`}
                     autoComplete="off"
@@ -234,14 +259,14 @@ export function ClinicBrandColorSettings({
 
         <ColorPreview palette={palette} clinicName={clinicName} logo={logo} />
 
-        <div className="flex flex-col gap-2 sm:col-start-1">
+        <div className="order-2 flex flex-col gap-2 sm:col-start-1 sm:row-start-2">
           <div className="flex flex-wrap items-center gap-3">
             {dirty ? (
               <Button type="button" className="min-h-11" disabled={save.isPending} onClick={submit}>
                 {save.isPending ? "Guardando…" : "Usar este color"}
               </Button>
             ) : null}
-            {dirty && !save.isPending ? <span className="text-sm text-muted-foreground">Aún no se guarda</span> : null}
+            {dirty && !save.isPending ? <span className="text-sm font-medium text-warning">Aún no se guarda</span> : null}
             {!dirty && brandColor ? (
               <Button type="button" variant="ghost" className="min-h-11" disabled={save.isPending} onClick={() => save.mutate(factory)}>
                 Volver al {FACTORY_WORDS[product].color} de {FACTORY_WORDS[product].brand}
@@ -277,13 +302,13 @@ function ColorNotices({ palette, chosen }: { palette: BrandPalette; chosen: stri
             </span>
             <span className="flex flex-col items-center gap-1 text-xs text-muted-foreground">
               <span className="size-8 rounded-lg" style={{ backgroundColor: palette.light.primary }} />
-              Enlaces
+              Textos
             </span>
           </div>
           <p className="text-sm">
             {palette.light.fill === chosen
-              ? "Tu color es claro. Los botones lo usan tal cual, con letra oscura. Los enlaces y la línea de tus documentos usan este tono más oscuro para que se vean sobre blanco."
-              : "Para que se lea, los botones, los enlaces y la línea de tus documentos usan este tono más oscuro. Tu logo no cambia."}
+              ? "Tu color es claro: los botones lo llevan tal cual y los textos, un tono más oscuro para que se lean."
+              : "Para que se lea, los botones y los textos llevan este tono más oscuro. Tu logo no cambia."}
           </p>
         </div>
       ) : null}
@@ -308,14 +333,14 @@ function ColorPreview({ palette, clinicName, logo }: { palette: BrandPalette; cl
   const id = useId()
   const { light, paper } = palette
   return (
-    <section className="flex flex-col gap-2 sm:col-start-2 sm:row-span-2 sm:row-start-1" aria-labelledby={`${id}-preview`}>
+    <section className="order-3 flex flex-col gap-2 sm:col-start-2 sm:row-span-2 sm:row-start-1" aria-labelledby={`${id}-preview`}>
       <h3 id={`${id}-preview`} className="text-sm font-semibold">
         Así se verá
       </h3>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-1">
+      <div className="grid gap-2">
         <div className="theme-light overflow-hidden rounded-xl border bg-card text-card-foreground">
           <div className="border-b bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">Tu app</div>
-          <div className="flex flex-col gap-1.5 p-2.5 text-xs sm:flex-row sm:items-center sm:gap-2">
+          <div className="flex items-center gap-2 p-2.5 text-xs">
             <span
               className="rounded-md px-1.5 py-1 font-semibold"
               style={{ backgroundColor: light.soft, color: light.softForeground }}
@@ -328,15 +353,14 @@ function ColorPreview({ palette, clinicName, logo }: { palette: BrandPalette; cl
             >
               Atender
             </span>
-            <span className="hidden font-semibold underline sm:inline" style={{ color: light.primary }}>
+            <span className="font-semibold underline" style={{ color: light.primary }}>
               Ver su plan
             </span>
           </div>
         </div>
         <div className="theme-light overflow-hidden rounded-xl border bg-card text-card-foreground">
           <div className="border-b bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
-            <span className="sm:hidden">Tu paciente</span>
-            <span className="hidden sm:inline">Lo que ve tu paciente</span>
+            Lo que ve tu paciente
           </div>
           <div className="p-2.5 text-xs">
             <div className="overflow-hidden rounded-lg border">
@@ -349,8 +373,7 @@ function ColorPreview({ palette, clinicName, logo }: { palette: BrandPalette; cl
         </div>
         <div className="theme-light overflow-hidden rounded-xl border bg-card text-card-foreground">
           <div className="border-b bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
-            <span className="sm:hidden">Documentos</span>
-            <span className="hidden sm:inline">Tus documentos</span>
+            Tus documentos
           </div>
           <div className="flex flex-col gap-1.5 p-2.5">
             <div className="flex min-w-0 items-center gap-1.5">
