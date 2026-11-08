@@ -289,7 +289,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo elijo qué tratamientos trae la cita?",
-        a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita. Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita.",
+        a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita, y lo que tiene sesiones por reservar, con la que sería esta («sesión 2 de 2»). Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita o al que le faltan sesiones por reservar.",
       },
       {
         q: "¿Cómo le reservo una cita desde la conversación?",
@@ -305,7 +305,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedó «Atendida»?",
-        a: "La cita se cierra con su atención: al firmarla pasa a «Atendida» y sus controles quedan hechos. Si una cita ya pasó y nadie la cerró, aparece en «Ya pasaron · sin cerrar» con «Registrar la atención» o «No vino».",
+        a: "La cita se cierra con su atención: al firmarla pasa a «Atendida» y quedan hechos el control reservado en ella y el que ya le tocaba, si quien firma lo deja marcado. Cancelar una cita o marcar «No vino» devuelve su control a estar por reservar. Si una cita ya pasó y nadie la cerró, aparece en «Ya pasaron · sin cerrar» con «Registrar la atención» o «No vino».",
       },
       {
         q: "¿Y si llega tarde después de marcar «No vino»?",
@@ -488,8 +488,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
       },
       {
+        q: "¿Cómo llevo un tratamiento de varias sesiones?",
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones"],
+      },
+      {
         q: "¿La atención queda unida a su cita?",
-        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y sus controles hechos. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: el motivo se escribe dentro, en «Consulta», y lo pide el cierre.",
+        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y su control, hecho. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: el motivo se escribe dentro, en «Consulta», y lo pide el cierre.",
       },
       {
         q: "¿Dónde registro un hallazgo del odontograma?",
@@ -526,6 +531,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
         a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
+      },
+      {
+        q: "¿Cómo dejo dicho cuándo vuelve?",
+        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Plan y controles».",
+      },
+      {
+        q: "¿Cuándo queda hecho un control si vino por otra cosa?",
+        a: "Cualquier atención desde unos días antes de su fecha le sirve, aunque la cita no fuera la del control: al firmar, el cierre muestra su control como casilla, marcada solo si lo indicaste tú. Desmárcala antes de firmar si esta visita no lo cumple y sigue pendiente. Si se cumplió por error, indica otro control.",
       },
       {
         q: "¿Puedo cerrar sin el consentimiento firmado?",
@@ -589,16 +602,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Se guarda lo que escribo en la atención?",
-        a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
+        a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». «Listo» guarda lo último y cierra el bloque; si no se pudo guardar, el bloque sigue abierto y dice por qué. Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
       },
       {
         q: "¿Qué va en cada campo de «Consulta»?",
-        a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos. Si viene de una cita, abajo del motivo se ve para qué se agendó: «Usar como motivo» lo toma si es lo que trae; si escribes o dictas otro, queda ese.",
+        a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos. Si viene de una cita, abajo del motivo se ve para qué se agendó: lo que se escribió al reservarla o, si no se escribió nada, el control o el tratamiento que continúa. Si la cita ya dice a qué viene, aparece «De la cita» con «Usar»: lo toma si es lo que trae; si escribes o dictas otro, queda ese.",
         forms: ["que va en el motivo de consulta", "que pongo en enfermedad actual", "que va en el relato de la enfermedad", "tiempo de enfermedad"],
       },
       {
         q: "¿Cómo atiendo a un paciente?",
-        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Solo lo ve quien escribe en la historia clínica.",
+        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice «Cierre de la atención», cada cosa con «Registrar»; cuando no falta nada, dice «Lista para firmar». Solo lo ve quien escribe en la historia clínica.",
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
       },
       {
@@ -644,7 +657,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué son «Por agendar», «Deben» y los demás atajos?",
-        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control vencido», «Faltan datos», «Por invitar a volver» y «Deben». Cada uno dice su regla al elegirlo. «Por agendar» es quien tiene algo aceptado sin una cita que lo lleve, aunque tenga otra cita, y «Control vencido» quien tiene un control cuyo día ya pasó y ninguna cita por venir: son las mismas cuentas de Inicio y de Argos. En «Por invitar a volver», «Ya la invité» anota que la invitaste por teléfono o en persona.",
+        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control vencido», «Faltan datos», «Por invitar a volver» y «Deben». Cada uno dice su regla al elegirlo. «Por agendar» es quien tiene algo aceptado sin una cita que lo lleve, aunque tenga otra cita, y «Control vencido» quien tiene un control cuyo día ya pasó y ninguna cita por venir: son las mismas cuentas de Inicio y de Argos. «Por invitar a volver» es quien no vino en 6 meses y no tiene cita, presupuesto por responder ni un control de ese tiempo: entra también quien tiene un control vencido hace más de 6 meses. Ahí, «Ya la invité» anota que la invitaste por teléfono o en persona.",
       },
       {
         q: "¿Qué hago si no se le puede enviar su enlace?",
@@ -1296,7 +1309,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo elijo el diagnóstico de una atención?",
-        a: "En tres pasos: lo que propone el odontograma (una caries en la 16 propone su código), los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+        a: "En tres pasos: lo que propone la atención, los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. Propone el odontograma (una caries en la 16 propone su código) y, en una sesión o un control, el diagnóstico del tratamiento que continúa. Nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
       },
       {
         q: "¿Cómo activo la otra moneda?",

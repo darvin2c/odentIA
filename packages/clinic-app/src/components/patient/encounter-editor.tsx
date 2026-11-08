@@ -25,6 +25,7 @@ import {
 } from "@odentia/ui"
 import {
   addDays,
+  common,
   ConfirmDialog,
   clearSubmitErrors,
   DetailDrawer,
@@ -59,8 +60,10 @@ import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
+  type FinalizedControls,
   type FinalizedMaterials,
   fetchEncounterClosing,
+  finalizedControlsWords,
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
@@ -85,14 +88,20 @@ import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-sugg
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
   CLOSING_FIELD_MAP,
+  ClosingNextVisit,
   ClosingSignatureHint,
   type ClosingValues,
+  closingControlsBody,
+  type DictatedControl,
   EncounterClosingDialog,
+  type SessionAnswers,
+  needsNextControlDay,
   SignatureRegistrationFields,
   useClosingForm,
 } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
-import { EncounterDiagnoses } from "./encounter-diagnoses"
+import type { ProposedDiagnosis } from "./diagnosis-picker"
+import { DiagnosisProposals, EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterBudgetSend, EncounterPlanPanel } from "./encounter-plan-panel"
@@ -174,6 +183,9 @@ const CLOSING_SHORT: Record<keyof typeof CLOSING_REQUIREMENT_LABELS, string> = {
 function listWords(items: string[]): string {
   return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items.at(-1)}`
 }
+
+/** Lo que pide el cierre, en el orden de la historia clínica. */
+const CLOSING_ORDER: readonly ClosingRequirement[] = ["reason", "diagnosis", "evolution", "signature"]
 
 /** Lo que exige el cierre: siempre a la vista. */
 const REQUIRED_SECTIONS: readonly SectionKey[] = ["consulta", "hallazgos", "evolucion"]
@@ -388,6 +400,25 @@ function skippedReasonLabel(reason: string | null): string {
   }
 }
 
+/**
+ * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`, solo de lo que el
+ * cierre pregunta hoy: lo que ya no está (se anuló su sesión) no se manda.
+ */
+function sessionAnswerBody(
+  answers: SessionAnswers,
+  sessions: { finishing: Array<{ planItemId: string }> } | undefined,
+): { completePlanItemIds?: string[]; addSessionPlanItemIds?: string[] } {
+  const asked = new Set((sessions?.finishing ?? []).map((session) => session.planItemId))
+  const ids = (answer: "terminar" | "otra") =>
+    Object.entries(answers).flatMap(([id, chosen]) => (chosen === answer && asked.has(id) ? [id] : []))
+  const complete = ids("terminar")
+  const addSession = ids("otra")
+  return {
+    ...(complete.length ? { completePlanItemIds: complete } : {}),
+    ...(addSession.length ? { addSessionPlanItemIds: addSession } : {}),
+  }
+}
+
 export function EncounterEditor({
   patientId,
   detail,
@@ -470,6 +501,8 @@ export function EncounterEditor({
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
   // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
+  // Lo que el cierre hizo con sus controles: «Atención finalizada» dice qué verá recepción.
+  const [finalizedControls, setFinalizedControls] = useState<FinalizedControls | null>(null)
   // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
@@ -488,6 +521,14 @@ export function EncounterEditor({
   const [contextOpen, setContextOpen] = useState(false)
   // Bloque recién agregado: abre su formulario sin un clic de más.
   const [justAdded, setJustAdded] = useState<SectionKey | null>(null)
+  /** Lo que no se pudo guardar al pulsar «Listo»: el bloque sigue abierto y lo dice (solo ese bloque). */
+  const [doneError, setDoneError] = useState<{ section: SectionKey; message: string } | null>(null)
+  /** Una propuesta de diagnóstico sin tipo, usada desde la tarjeta: el bloque abre su formulario con ella. */
+  const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
+  /** «Registrar la sesión» desde «Hecho hoy»: el tratamiento con que se abre «Registrar procedimiento». */
+  const [sessionPrefill, setSessionPrefill] = useState<string | null>(null)
+  /** «¿Terminaste?» del cierre: lo que se eligió de cada tratamiento de hoy (sin elegir, queda en curso). */
+  const [sessionAnswers, setSessionAnswers] = useState<SessionAnswers>({})
   // Sede de la atención: se guarda al elegirla; si no, el error va en su campo.
   const [branchError, setBranchError] = useState<string | null>(null)
   const registrationNumberRef = useRef<HTMLInputElement>(null)
@@ -515,10 +556,20 @@ export function EncounterEditor({
   const missingConsentSignatures = unsignedConsents.filter((need) => !need.personSigned).length
   // Firmar con lo dictado: las sugerencias marcadas se confirman dentro del mismo envío del cierre.
   const signIdsRef = useRef<string[] | null>(null)
+  const closingControls = closingQuery.data?.data.controls ?? null
+  /** El control que dictó Clío y entra con la firma: ya dice cuándo vuelve. */
+  const dictatedControl = (marked: readonly string[] | null): DictatedControl | null => {
+    const item = marked
+      ? dictation.suggestions.find((candidate) => candidate.kind === "control" && marked.includes(candidate.id))
+      : undefined
+    const dueAt = item?.payload["dueAt"]
+    return item && typeof dueAt === "string" ? { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) } : null
+  }
   const closingForm = useClosingForm({
     // Firmar con lo dictado no lo pide: con consentimientos por firmar, sigue al cierre (`finalizeWith`).
     needsReason: () => unsignedConsents.length > 0 && signIdsRef.current === null,
     needsRegistration,
+    needsNextDay: (value) => needsNextControlDay(value, closingControls, dictatedControl(signIdsRef.current)),
     onSubmit: (value) => finalizeWith(value),
   })
   const closingError = useFormSubmitError(closingForm)
@@ -570,6 +621,7 @@ export function EncounterEditor({
   const timerRef = useRef<number | undefined>(undefined)
   const mountedRef = useRef(true)
   const childCountRef = useRef(0)
+  const idleWaitersRef = useRef<Array<() => void>>([])
   const latestWriteAtRef = useRef(new Date(encounter.updatedAt).getTime())
   // Los textos que otra pestaña cambió: no se vuelven a enviar hasta recargar, y lo demás sigue guardándose.
   const conflictRef = useRef<Set<DraftKey>>(new Set())
@@ -904,6 +956,11 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
     }
     if (item.kind === "examen" && exam.withDictated) editExamination(exam.withDictated(valuesRef.current.examination, item.payload))
+    // Un diagnóstico confirmado (o quitado) cambia la lista de problemas y lo que se propone.
+    if (item.kind === "diagnostico") {
+      void queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
+    }
     // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
     if (item.kind === "alergia") {
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
@@ -942,23 +999,6 @@ export function EncounterEditor({
   const dictationRemoved = (key: SectionKey): boolean => {
     const kinds = dictationOf(key)?.kinds ?? []
     return dictation.enabled && dictation.removedByVoice.some((item) => kinds.includes(item.kind))
-  }
-
-  /** Control de página: guarda el borrador (flush + refresh) sin formulario. */
-  const handleSaveDraft = async () => {
-    if (explicitSaving || finalizing || childCountRef.current > 0) return
-    setExplicitSaving(true)
-    try {
-      await flush()
-      await onChanged()
-    } catch (err) {
-      if (mountedRef.current) {
-        setSaveError(placeAutosaveError(err))
-        setSaveState("error")
-      }
-    } finally {
-      if (mountedRef.current) setExplicitSaving(false)
-    }
   }
 
   /**
@@ -1001,6 +1041,7 @@ export function EncounterEditor({
     setFinalizedBilling(null)
     setFinalizedBudget(null)
     setFinalizedMaterials(null)
+    setFinalizedControls(null)
     setCorrectingMaterials(false)
     setMaterialsCorrected(false)
     setBudgetSent(false)
@@ -1047,6 +1088,8 @@ export function EncounterEditor({
         await dictation.refresh()
         // Con consentimientos por firmar, sigue al cierre para firmarlos o decir por qué se sigue sin ellos.
         if (unsignedConsents.length > 0) {
+          // El control dictado ya es suyo: el cierre lo dice en vez de preguntar cuándo vuelve.
+          await refreshClosing()
           setConfirmWithDictation(false)
           return
         }
@@ -1061,6 +1104,7 @@ export function EncounterEditor({
           billing: FinalizeBilling
           budget: FinalizedBudget | null
           materials?: FinalizedMaterials | null
+          controls?: FinalizedControls
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1068,14 +1112,23 @@ export function EncounterEditor({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
+          // «¿Terminaste?»: solo lo que se respondió; lo demás queda en curso.
+          ...sessionAnswerBody(sessionAnswers, closingQuery.data?.data.sessions),
+          // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
+          ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
         }),
       })
       setConfirmOpen(false)
+      setSessionAnswers({})
       closingForm.reset()
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedMaterials(result.data.materials ?? null)
+      setFinalizedControls(result.data.controls ?? null)
       setFinalizedBilling(result.data.billing)
+      // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
+      if (result.data.controls?.next || result.data.controls?.fulfilled.length)
+        void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
       // En Perú, el cierre que cambió el gráfico firmó el odontograma.
       void queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
       // Lo que salió de la sede cambia lo que hay en Inventario.
@@ -1104,7 +1157,10 @@ export function EncounterEditor({
     addSection(
       requirement === "reason" ? "consulta" : requirement === "diagnosis" ? "hallazgos" : requirement === "vitals" ? "examen" : "evolucion",
     )
-    if (requirement !== "diagnosis") void submitForm(draftForm)
+    // Con el motivo de la cita a la vista («De la cita: … · Usar»), el campo no se marca en rojo:
+    // lo primero que se ve es cómo usarlo en un toque.
+    if (requirement === "diagnosis" || (requirement === "reason" && offeredReason)) return
+    void submitForm(draftForm)
   }
 
   /**
@@ -1143,7 +1199,12 @@ export function EncounterEditor({
   const handlePendingChange = (pending: boolean) => {
     childCountRef.current = Math.max(0, childCountRef.current + (pending ? 1 : -1))
     if (mountedRef.current) setChildCount(childCountRef.current)
+    // Terminó la última escritura en curso: sigue quien esperaba (`whenIdle`).
+    if (childCountRef.current === 0) for (const resume of idleWaitersRef.current.splice(0)) resume()
   }
+  /** Espera a que terminen las escrituras en curso (un diagnóstico, la sede, un documento). */
+  const whenIdle = (): Promise<void> =>
+    childCountRef.current === 0 ? Promise.resolve() : new Promise((resolve) => idleWaitersRef.current.push(resolve))
 
   const handleChildChanged = async (): Promise<void> => {
     await onChanged()
@@ -1177,8 +1238,14 @@ export function EncounterEditor({
   const mode = useDetailMode()
 
   const locked = !canWrite || !attending || childCount > 0 || finalizing || voiding
-  // El motivo de la reserva se ofrece solo a quien puede usarlo y mientras no haya otro.
-  const offeredReason = !locked && reason.trim() === "" ? detail.bookedReason : null
+  // El motivo de la reserva se ofrece solo a quien puede usarlo y mientras no haya otro. No
+  // depende de `locked`: durante una escritura en curso sigue a la vista (con «Usar» apagado),
+  // sin parpadear a «Sin motivo».
+  const offeredReason =
+    canWrite && attending && !finalizing && !voiding && reason.trim() === "" ? detail.bookedReason : null
+  const takeOfferedReason = () => {
+    if (offeredReason && !locked) editText("reason", offeredReason)
+  }
   // Los bloques del producto (odentIA: Odontograma y Periodontograma), después del examen.
   const product = productUi().encounter.useBlocks({
     patientId,
@@ -1219,6 +1286,10 @@ export function EncounterEditor({
         .join("; ")
     : ""
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt).length
+  // Los tratamientos con la sesión de hoy: un procedimiento vigente suyo en esta atención.
+  const sessionItemIds = new Set(
+    detail.procedures.flatMap((proc) => (!proc.voidedAt && proc.planItemId ? [proc.planItemId] : [])),
+  )
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1233,13 +1304,9 @@ export function EncounterEditor({
       description: productUi().site
         ? "Motivo de consulta, tiempo y relato de la enfermedad, sede y piezas evaluadas."
         : "Motivo de consulta, tiempo y relato de la enfermedad, y sede.",
-      // Como la evolución: lo que exige el cierre se dice en la tarjeta, no solo al firmar.
-      summary:
-        reason.trim() !== ""
-          ? reason.trim()
-          : offeredReason
-            ? `Se agendó como «${offeredReason}» · falta el motivo`
-            : "Falta el motivo · necesario para cerrar",
+      // La tarjeta dice lo que tiene; lo que falta para firmar se dice en «Cierre de la atención» y en el pie.
+      // Sin motivo propio dice «Sin motivo», aunque la cita traiga uno: ese se ofrece debajo, con «Usar».
+      summary: reason.trim() !== "" ? reason.trim() : "Sin motivo",
       empty: reason.trim() === "",
     },
     {
@@ -1314,10 +1381,12 @@ export function EncounterEditor({
     {
       key: "evolucion",
       title: "Evolución, pronóstico e indicaciones",
-      description: "Pronóstico, evolución (obligatoria para cerrar) e indicaciones.",
+      description: "Evolución (obligatoria para cerrar), indicaciones y pronóstico.",
       summary:
         evolution.trim() === ""
-          ? "Falta · necesaria para cerrar"
+          ? indications.trim() === ""
+            ? "Sin evolución"
+            : "Sin evolución · indicaciones registradas"
           : indications.trim() === ""
             ? "Evolución registrada"
             : "Evolución e indicaciones registradas",
@@ -1333,13 +1402,14 @@ export function EncounterEditor({
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
+  // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   const unrecorded = closingSections
-    .filter((section) => section.empty)
+    .filter((section) => section.empty && !(section.key === "plan" && closingControls))
     .map((section) => section.title.toLowerCase())
+  // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   const finalizeDescription = [
     recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
     unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
-    "Después del cierre solo se agregan adendas. Si vino de una cita, la cita queda atendida.",
   ]
     .filter(Boolean)
     .join(" ")
@@ -1388,9 +1458,45 @@ export function EncounterEditor({
     void flush().catch(() => {})
   }
 
-  const submitSection = (event: React.FormEvent) => {
+  /**
+   * «Listo» en Consulta, Examen y Evolución: guarda lo pendiente (la barrera de
+   * escritura) y cierra. Si hay otra escritura en curso (registrar un
+   * diagnóstico, cambiar la sede), «Listo» queda en «Guardando…» y espera a que
+   * termine, en vez de no hacer nada. Si no se pudo guardar, el bloque sigue
+   * abierto y dice por qué; la «×» cierra igual, y el autoguardado sigue intentándolo.
+   */
+  const finishSection = async (event: React.FormEvent) => {
     event.preventDefault()
-    void handleSaveDraft()
+    if (explicitSaving || finalizing) return
+    const section = openSection
+    setExplicitSaving(true)
+    setDoneError(null)
+    try {
+      await whenIdle()
+      if (!mountedRef.current) return
+      await flush()
+      if (!mountedRef.current) return
+      setOpenSection(null)
+      setJustAdded(null)
+    } catch (err) {
+      if (mountedRef.current && section)
+        setDoneError({
+          section,
+          message: isOffline(err)
+            ? "Sin conexión: no se guardó. Lo escrito sigue aquí y se guarda al volver."
+            : placeAutosaveError(err),
+        })
+    } finally {
+      if (mountedRef.current) setExplicitSaving(false)
+    }
+  }
+
+  /** Enter en un campo de una línea no envía el formulario del bloque (ver `sectionDetail`). */
+  const keepOpenOnEnter = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (event.key !== "Enter" || !(target instanceof HTMLInputElement)) return
+    if (["submit", "button", "reset", "image"].includes(target.type)) return
+    event.preventDefault()
   }
 
   /** Al dictar, la atención queda a la vista: se cierra el bloque abierto y, si cabe, se muestra el respaldo al lado. */
@@ -1430,7 +1536,9 @@ export function EncounterEditor({
         ? "Guardando lo último que escribiste…"
         : saveState === "error"
           ? "No se pudo guardar lo último: revisa el aviso y vuelve a intentarlo."
-          : null
+          : childCount > 0 || explicitSaving
+            ? "Guardando lo último que registraste…"
+            : null
   const openSign = () => {
     signIdsRef.current = null
     // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
@@ -1515,6 +1623,12 @@ export function EncounterEditor({
     if (canSign) void requestSign()
     else document.getElementById(closingId)?.scrollIntoView({ block: "start" })
   }
+  /** Desde el cierre, una sugerencia de Clío que se completa o se corrige: se abre para eso. */
+  const openSuggestion = (id: string) => {
+    setConfirmOpen(false)
+    const item = dictation.suggestions.find((candidate) => candidate.id === id)
+    if (item) dictation.openEdit(item)
+  }
   const pendingDiagnoses = dictationCount("hallazgos")
 
   const consultaBody = (
@@ -1589,15 +1703,17 @@ export function EncounterEditor({
       {offeredReason ? (
         <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <span id={`${uid}-booked-reason`} className="text-muted-foreground">
-            Se agendó como «{offeredReason}».
+            De la cita: «{offeredReason}»
           </span>
           <Button
             type="button"
             size="sm"
-            variant="ghost"
-            onClick={() => editText("reason", offeredReason)}
+            variant="outline"
+            disabled={locked}
+            aria-label={`Usar «${offeredReason}» como motivo`}
+            onClick={takeOfferedReason}
           >
-            Usar como motivo
+            Usar
           </Button>
         </div>
       ) : null}
@@ -1726,28 +1842,14 @@ export function EncounterEditor({
   const evolucionBody = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        <draftForm.AppField name="prognosis">
-          {(field) => (
-            <field.Control label="Pronóstico" id={`${uid}-prognosis`}>
-              {(control) => (
-                <Textarea
-                  {...control.props}
-                  rows={2}
-                  value={field.state.value}
-                  disabled={locked}
-                  maxLength={2000}
-                  onChange={(event) => {
-                    field.handleChange(event.target.value)
-                    rememberText("prognosis", event.target.value)
-                  }}
-                />
-              )}
-            </field.Control>
-          )}
-        </draftForm.AppField>
+        {/* Primero la evolución, que es lo que pide el cierre; después lo que se le indica y, al final, el pronóstico. */}
         <draftForm.AppField name="evolution">
           {(field) => (
-            <field.Control label="Evolución" id={`${uid}-evolution`}>
+            <field.Control
+              label="Evolución"
+              description="Lo que se hizo hoy y cómo respondió; en una primera consulta, el plan y las indicaciones."
+              id={`${uid}-evolution`}
+            >
               {(control) => (
                 <Textarea
                   {...control.props}
@@ -1786,6 +1888,25 @@ export function EncounterEditor({
             </field.Control>
           )}
         </draftForm.AppField>
+        <draftForm.AppField name="prognosis">
+          {(field) => (
+            <field.Control label="Pronóstico" id={`${uid}-prognosis`}>
+              {(control) => (
+                <Textarea
+                  {...control.props}
+                  rows={2}
+                  value={field.state.value}
+                  disabled={locked}
+                  maxLength={2000}
+                  onChange={(event) => {
+                    field.handleChange(event.target.value)
+                    rememberText("prognosis", event.target.value)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </draftForm.AppField>
       </div>
     </div>
   )
@@ -1801,6 +1922,8 @@ export function EncounterEditor({
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
         autoOpen={justAdded === "hallazgos"}
+        prefill={diagnosisPrefill}
+        onPrefillUsed={() => setDiagnosisPrefill(null)}
       />
     ),
     examen: examenBody,
@@ -1813,6 +1936,8 @@ export function EncounterEditor({
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
         autoOpen={justAdded === "procedimientos"}
+        prefillPlanItemId={sessionPrefill}
+        onPrefillUsed={() => setSessionPrefill(null)}
       />
     ),
     plan: (
@@ -1828,6 +1953,11 @@ export function EncounterEditor({
         beforeWrite={flush}
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
+        sessionItemIds={sessionItemIds}
+        onRegisterSession={(itemId) => {
+          setSessionPrefill(itemId)
+          addSection("procedimientos")
+        }}
       />
     ),
     documentos: (
@@ -1868,12 +1998,23 @@ export function EncounterEditor({
       // Solo guardado automático: el bloque no lleva botón de guardar.
       const form = {
         ...surface,
-        children: body,
-        onSubmit: submitSection,
+        children: (
+          // Enter en un campo de una línea (un signo vital, el tiempo de enfermedad) no envía el
+          // bloque: «Listo» lo cierra, y cerrarlo así, a mitad de escribir, sorprende.
+          // biome-ignore lint/a11y/noStaticElementInteractions: solo evita el envío implícito del formulario; cada campo sigue con su teclado.
+          <div onKeyDown={keepOpenOnEnter}>{body}</div>
+        ),
+        onSubmit: finishSection,
         isSubmitting: explicitSaving,
-        // El rechazo del autoguardado, dentro del cajón solo en el teléfono: en el panel ya lo dice el aviso de la página.
-        error: target === "drawer" && saveState === "error" ? saveError : null,
-        hideSubmit: true,
+        // Lo que no guardó «Listo», en los dos modos; el rechazo del autoguardado, dentro del
+        // cajón solo en el teléfono: en el panel ya lo dice el aviso de la página.
+        error:
+          (doneError?.section === openSection && saveState !== "saved" ? doneError.message : null) ??
+          (target === "drawer" && saveState === "error" ? saveError : null),
+        // Se guarda solo: «Listo» guarda lo último y cierra; «Cancelar» no tenía qué cancelar.
+        // Mientras espera otra escritura en curso, lo dice en el mismo botón.
+        submitLabel: explicitSaving ? "Guardando…" : "Listo",
+        cancelLabel: common.actions.close,
       }
       return target === "panel" ? <FormPanel {...form} /> : <FormDrawer open {...form} />
     }
@@ -1923,10 +2064,19 @@ export function EncounterEditor({
         : saveState === "error"
           ? { text: "No se guardó", tone: "border-destructive/40 text-destructive" }
           : { text: `Guardado ${formatClock(savedAt)}`, tone: "border-success/40 bg-success-soft text-success" }
-  // Pie fijo: lo que falta y «Finalizar y firmar», también en la tablet y el teléfono.
+  // Pie fijo: lo que falta y «Finalizar y firmar», también en la tablet y el teléfono. Mientras
+  // se guarda o se comprueba, dice por qué aún no se firma: la lista de faltantes podría estar vieja.
+  const footerWait =
+    signBlockedReason ?? (closingQuery.isSuccess && closingQuery.isFetching ? "Comprobando lo que falta…" : null)
+  const footerMissing =
+    !dictation.busy && !footerWait && closingQuery.isSuccess && !onlyRegistrationMissing && !closingReady
+      ? CLOSING_ORDER.filter((requirement) => missing.includes(requirement))
+      : []
   const footerText = dictation.busy
     ? "Termina el dictado para poder firmar"
-    : !closingQuery.isSuccess
+    : footerWait
+      ? footerWait
+      : !closingQuery.isSuccess
       ? "Comprobando lo que falta…"
       : onlyRegistrationMissing
         ? "Listo para firmar · falta tu colegiatura, se pide al firmar"
@@ -2043,6 +2193,8 @@ export function EncounterEditor({
 
       <MasterDetail
         panelSize="xl"
+        // El pie fijo no tapa el último bloque: abajo queda reservado su alto.
+        className={canWrite && attending ? "pb-28 sm:pb-20" : undefined}
         panel={
           mode === "panel"
             ? (sectionDetail("panel") ??
@@ -2065,8 +2217,24 @@ export function EncounterEditor({
                     ? `${(section.empty && dictationOf(section.key)?.onlySuggested) || section.summary} · ${dictationCount(section.key)} ${dictationCount(section.key) === 1 ? "sugerencia" : "sugerencias"}`
                     : section.summary}
                 </p>
+                {/* Lo que dice la cita no es el motivo hasta que alguien lo usa: se ofrece aparte. */}
+                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
+                  <p className="text-sm">De la cita: «{offeredReason}»</p>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
+                {/* En un control en serie, el motivo de la reserva se usa sin abrir el bloque: es la acción principal. */}
+                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={locked}
+                    aria-label={`Usar «${offeredReason}» como motivo`}
+                    onClick={takeOfferedReason}
+                  >
+                    Usar
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -2076,12 +2244,6 @@ export function EncounterEditor({
                 >
                   {openSection === section.key ? "En edición" : "Abrir"}
                 </Button>
-                {/* En un control en serie, el motivo de la reserva se usa sin abrir el bloque. */}
-                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => editText("reason", offeredReason)}>
-                    Usar como motivo
-                  </Button>
-                ) : null}
                 {!REQUIRED_SECTIONS.includes(section.key) && section.empty && dictationCount(section.key) === 0 ? (
                   <Button
                     type="button"
@@ -2096,6 +2258,22 @@ export function EncounterEditor({
               {(dictationOf(section.key)?.kinds ?? []).map((kind) => (
                 <DictationBlockSuggestions key={kind} session={dictation} kind={kind} patientName={patient.patient.displayName} />
               ))}
+              {/* Lo que propone la atención (el odontograma, el tratamiento que continúa) se usa sin abrir el bloque. */}
+              {section.key === "hallazgos" && openSection !== "hallazgos" && canWrite && attending && !finalizing && !voiding ? (
+                <DiagnosisProposals
+                  patientId={patientId}
+                  encounterId={encounterId}
+                  disabled={locked}
+                  beforeWrite={flush}
+                  onChanged={handleChildChanged}
+                  onPendingChange={handlePendingChange}
+                  onChoose={(item) => {
+                    setDiagnosisPrefill(item)
+                    setContextOpen(false)
+                    setOpenSection("hallazgos")
+                  }}
+                />
+              ) : null}
               {/* El presupuesto en borrador (también el que armó Clío) se muestra, imprime o envía sin abrir el bloque. */}
               {section.key === "plan" && openSection !== "plan" ? (
                 <EncounterBudgetSend patientId={patientId} patientName={patient.patient.displayName} beforeWrite={flush} compact />
@@ -2160,31 +2338,44 @@ export function EncounterEditor({
               agregan adendas.
             </p>
           </div>
-          <ul className="flex flex-col gap-1.5 text-sm" aria-label="Requisitos para cerrar">
-            {(["reason", "diagnosis", "evolution", "signature"] as ClosingRequirement[]).map(
-              (requirement) => {
-                const done = closingQuery.isSuccess && !missing.includes(requirement)
-                return (
-                  <li key={requirement} className="flex flex-wrap items-center gap-2">
+          {/* Solo lo que falta, cada cosa con su «Registrar»; sin nada pendiente, «Lista para firmar». */}
+          {closingQuery.isSuccess ? (
+            missing.length > 0 ? (
+              <ul className="flex flex-col gap-1.5 text-sm" aria-label="Lo que falta para firmar">
+                {CLOSING_ORDER.filter((requirement) => missing.includes(requirement)).map((requirement) => (
+                  // El «!» va con su texto: en un teléfono angosto el texto envuelve a su lado, no debajo.
+                  <li key={requirement} className="flex items-start gap-2">
                     <span
                       aria-hidden="true"
-                      className={
-                        done
-                          ? "inline-flex size-5 items-center justify-center rounded-full bg-success-soft text-xs font-bold text-success"
-                          : "inline-flex size-5 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
-                      }
+                      className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
                     >
-                      {done ? "✓" : "!"}
+                      !
                     </span>
-                    <span>
-                      {requirement === "diagnosis" && !done && pendingDiagnoses > 0
-                        ? pendingDiagnoses === 1
-                          ? "Diagnóstico: hay uno sugerido, sin confirmar"
-                          : `Diagnóstico: hay ${pendingDiagnoses} sugeridos, sin confirmar`
-                        : CLOSING_REQUIREMENT_LABELS[requirement]}
-                      <span className="sr-only">{done ? ": listo" : ": pendiente"}</span>
-                    </span>
-                    {!done && closingQuery.isSuccess ? (
+                    <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="min-w-0">
+                        {requirement === "diagnosis" && pendingDiagnoses > 0
+                          ? pendingDiagnoses === 1
+                            ? "Diagnóstico: hay uno sugerido, sin confirmar"
+                            : `Diagnóstico: hay ${pendingDiagnoses} sugeridos, sin confirmar`
+                          : CLOSING_REQUIREMENT_LABELS[requirement]}
+                        {/* El motivo que trae la cita se usa aquí mismo, en un toque. */}
+                        {requirement === "reason" && offeredReason ? (
+                          <span className="text-muted-foreground"> · de la cita: «{offeredReason}»</span>
+                        ) : null}
+                      </span>
+                      {requirement === "reason" && offeredReason ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="link"
+                          className="h-auto p-0"
+                          disabled={locked}
+                          aria-label={`Usar «${offeredReason}» como motivo`}
+                          onClick={takeOfferedReason}
+                        >
+                          Usar
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         size="sm"
@@ -2193,14 +2384,28 @@ export function EncounterEditor({
                         disabled={!attending}
                         onClick={() => requireBlock(requirement)}
                       >
-                        {requirement === "signature" ? "Completar perfil" : "Registrar"}
+                        {requirement === "signature"
+                          ? "Completar perfil"
+                          : requirement === "reason" && offeredReason
+                            ? "Escribir otro"
+                            : "Registrar"}
                       </Button>
-                    ) : null}
+                    </span>
                   </li>
-                )
-              },
-            )}
-          </ul>
+                ))}
+              </ul>
+            ) : (
+              <p className="flex items-center gap-2 text-sm">
+                <span
+                  aria-hidden="true"
+                  className="inline-flex size-5 items-center justify-center rounded-full bg-success-soft text-xs font-bold text-success"
+                >
+                  ✓
+                </span>
+                Lista para firmar
+              </p>
+            )
+          ) : null}
           {unsignedConsents.length > 0 ? (
             <ul className="flex flex-col gap-1.5 text-sm" aria-label="Consentimientos sin firmar">
               {unsignedConsents.map((need) => (
@@ -2310,7 +2515,28 @@ export function EncounterEditor({
           )}
         >
           <span id={`${uid}-footer`} className="text-sm text-muted-foreground">
-            {footerText}
+            {footerMissing.length > 0 ? (
+              // Cada cosa que falta lleva a su bloque, como «Registrar» en el cierre.
+              <>
+                {footerMissing.length === 1 ? "Falta 1" : `Faltan ${footerMissing.length}`} para cerrar:{" "}
+                {footerMissing.map((requirement, index) => (
+                  <span key={requirement}>
+                    {index === 0 ? "" : index === footerMissing.length - 1 ? " y " : ", "}
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 align-baseline text-sm"
+                      disabled={!attending}
+                      onClick={() => requireBlock(requirement)}
+                    >
+                      {CLOSING_SHORT[requirement]}
+                    </Button>
+                  </span>
+                ))}
+              </>
+            ) : (
+              footerText
+            )}
           </span>
           <Button type="button" disabled={!canSign} aria-describedby={`${uid}-footer`} onClick={requestSign}>
             Finalizar y firmar
@@ -2362,8 +2588,22 @@ export function EncounterEditor({
           if (!finalizing) setConfirmOpen(false)
         }}
         signatureHint={signatureHint}
+        sessionLabel={(session) => {
+          const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
+          return tooth != null ? `${session.title} · ${tooth}` : session.title
+        }}
+        sessionAnswers={sessionAnswers}
+        onSessionAnswer={(planItemId, answer) =>
+          setSessionAnswers((current) => {
+            const next = { ...current }
+            if (answer) next[planItemId] = answer
+            else delete next[planItemId]
+            return next
+          })
+        }
+        nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
       >
-        <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
+        {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
       </EncounterClosingDialog>
       {product.overlay}
       <ConsentSigningScreen
@@ -2382,12 +2622,15 @@ export function EncounterEditor({
         signing={finalizing}
         error={closingError}
         onClose={() => setConfirmOpen(false)}
-        onComplete={(id) => {
-          setConfirmOpen(false)
-          // Lo que no se puede confirmar tal cual se abre para completarlo.
-          const item = dictation.suggestions.find((candidate) => candidate.id === id)
-          if (item) dictation.openEdit(item)
-        }}
+        onComplete={(id) => openSuggestion(id)}
+        nextVisit={(marked) => (
+          <ClosingNextVisit
+            form={closingForm}
+            controls={closingControls}
+            dictated={dictatedControl(marked)}
+            busy={finalizing}
+          />
+        )}
         onSign={(ids) => {
           // Un solo envío: la colegiatura se valida en su campo, luego se confirma lo marcado y se firma.
           signIdsRef.current = ids
@@ -2446,6 +2689,9 @@ export function EncounterEditor({
                 </p>
               ) : null}
             </section>
+          ) : null}
+          {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
+            <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
           ) : null}
           {skippedLines.length > 0 ? (
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">

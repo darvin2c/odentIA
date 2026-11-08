@@ -52,6 +52,11 @@ export interface DatePickerButtonProps
   emptyLabel?: string
   /** Lo que dice el botón sin fecha cuando la fecha no es opcional. */
   placeholder?: string
+  /**
+   * Sin fecha elegida, el mes en que abre el calendario (`yyyy-MM-dd`): el de
+   * la fecha más probable, para no llegar mes a mes desde hoy.
+   */
+  openAt?: string
 }
 
 /**
@@ -72,6 +77,7 @@ export function DatePickerButton({
   align = "start",
   emptyLabel,
   placeholder = "Elegir el día",
+  openAt,
   children,
   className,
   "aria-describedby": describedBy,
@@ -130,7 +136,7 @@ export function DatePickerButton({
           endMonth={endMonth}
           labels={LABELS}
           selected={selected}
-          defaultMonth={selected ?? (last && last < new Date() ? last : undefined)}
+          defaultMonth={selected ?? parseDateOnly(openAt) ?? (last && last < new Date() ? last : undefined)}
           disabled={bounds.length > 0 ? bounds : undefined}
           onSelect={(day) => {
             if (!day) return

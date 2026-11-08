@@ -55,8 +55,13 @@ function EncounterPage() {
       apiFetch<{ data: EncounterDetail }>(`/api/patients/${patientId}/encounters/${encounterId}`),
     enabled: canRead,
   })
+  // Lo que cambia la atención (un diagnóstico confirmado de Clío, el periodontograma, el panel de
+  // la pieza) cambia también lo que se propone como diagnóstico: no quedan propuestas viejas.
   const changed = () =>
-    queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] })
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] }),
+      queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] }),
+    ]).then(() => undefined)
   const finalized = async (_hasCharges: boolean) => {
     // Al finalizar se permanece en la atención, ya de solo lectura: su bloque de
     // cierre y relevo muestra qué recibe cada rol (cobro, control, seguimiento).

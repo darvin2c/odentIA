@@ -39,6 +39,15 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return []
       // latidIA todavía no guarda la tomografía en la ficha.
       if (/tomografía/.test(faq.q)) return []
+      // Las sesiones de un consultorio son de una terapia, sin pieza.
+      if (faq.q === "¿Cómo llevo un tratamiento de varias sesiones?")
+        return [
+          {
+            ...faq,
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+            ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") } : {}),
+          },
+        ]
       // Las preguntas de los caminos hablan de la pieza: en un consultorio, de la opción.
       if (faq.q === "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?")
         return [
@@ -110,6 +119,10 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
           },
         ]
       }
+      // «¿Cuándo vuelve?» y «Por invitar a volver» van con el año del consultorio, no con los 6 meses de odentIA.
+      if (faq.q === "¿Cómo dejo dicho cuándo vuelve?") return [{ ...faq, a: faq.a.replace("«En 6 meses»", "«En 1 año»") }]
+      if (faq.a.includes("«Por invitar a volver» es quien no vino en 6 meses"))
+        return [{ ...faq, a: faq.a.replace("no vino en 6 meses", "no vino en 12 meses").replace("hace más de 6 meses", "hace más de 12 meses") }]
       return [faq]
     }),
   }),
@@ -124,7 +137,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       faq.q === "¿Cómo elijo el diagnóstico de una atención?"
         ? {
             q: faq.q,
-            a: "Con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
           }
         : faq,
     ),

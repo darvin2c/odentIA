@@ -417,15 +417,22 @@ async function withDecisions(
 ): Promise<PlanItemWithProgress[]> {
   const items = await withPlanParts(tx, orgId, rows)
   const ids = items.map((item) => item.id)
+  // Sesiones hechas: atenciones distintas, no anuladas, con un procedimiento vigente
+  // (la misma regla de `sessionsDoneSql` y de las comisiones).
   const done = ids.length
     ? await tx
-        .select({ id: encounterProcedure.planItemId, n: sql<number>`count(*)::int` })
+        .select({ id: encounterProcedure.planItemId, n: sql<number>`count(distinct ${encounterProcedure.encounterId})::int` })
         .from(encounterProcedure)
+        .innerJoin(
+          encounter,
+          and(eq(encounter.organizationId, encounterProcedure.organizationId), eq(encounter.id, encounterProcedure.encounterId)),
+        )
         .where(
           and(
             eq(encounterProcedure.organizationId, orgId),
             inArray(encounterProcedure.planItemId, ids),
             isNull(encounterProcedure.voidedAt),
+            ne(encounter.status, "anulada"),
           ),
         )
         .groupBy(encounterProcedure.planItemId)
@@ -1147,6 +1154,9 @@ export async function setPlanItemStatus(
     suspendido: ["pendiente", "programado", "en_curso", "cancelado"],
   }
   if (!transitions[current.status]?.includes(input.status)) {
+    // Completar lo que aún no empezó: falta registrar la sesión, no es un error de estado.
+    if (current.status === "pendiente" && input.status === "realizado")
+      throw conflict("INVALID_TRANSITION", "Registra primero la sesión de hoy: un tratamiento sin sesiones no se completa")
     throw conflict("INVALID_TRANSITION", "La transición clínica no está permitida")
   }
   let reason: string | null = null
@@ -1171,6 +1181,11 @@ export async function setPlanItemStatus(
   if (input.status === "realizado") {
     if (!input.encounterId)
       throw conflict("ATTENTION_REQUIRED", "Completar requiere una atención borrador")
+    // Basta una sesión vigente de cualquier atención, no de la que lo completa: el
+    // Recorrido ofrece «Completar tratamiento» en la atención abierta aunque hoy no
+    // se haya hecho una sesión (un control que lo da por terminado), y sus pruebas lo
+    // fijan. Lo que no se ofrece es completar sin sesión desde «Hecho hoy»: allí, sin
+    // un procedimiento suyo en esta atención, el botón es «Registrar la sesión».
     const [procedure] = await tx
       .select({ id: encounterProcedure.id })
       .from(encounterProcedure)

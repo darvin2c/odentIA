@@ -1002,6 +1002,40 @@ describe("una historia bloqueada", () => {
   })
 })
 
+describe("«Avisar un control» (ADR 0152)", () => {
+  it("toma solo el control por reservar de quien no tiene una cita que le sirva", async () => {
+    const c = await clinic()
+    await ruleOn(c, "recordatorio_control", new Date(NOW.getTime() - HOUR))
+    // Indicado hace 10 días para mañana: su ventana abrió hace casi dos.
+    const control = (patientId: string, values: { status?: string; appointmentId?: string } = {}) =>
+      ownerDb.insert(clinicalFollowUp).values({
+        organizationId: c.orgId, patientId, kind: "mantenimiento", title: "Control de ortodoncia", dueAt: new Date(NOW.getTime() + DAY),
+        createdAt: new Date(NOW.getTime() - 10 * DAY), ...values,
+      })
+    const free = await person(c, "Sin cita", { consent: ["recordatorio", "seguimiento"] })
+    const booked = await person(c, "Con otra cita", { consent: ["recordatorio", "seguimiento"] })
+    const reserved = await person(c, "Con su cita", { consent: ["recordatorio", "seguimiento"] })
+    const far = await person(c, "Cita lejana", { consent: ["recordatorio", "seguimiento"] })
+    await control(free.patientId)
+    // Una cita dentro de dos meses no le cumple el control a tiempo: se le avisa igual.
+    await control(far.patientId)
+    await appointmentFor(c, far.patientId, new Date(NOW.getTime() + 60 * DAY))
+    // Otra cita por venir le cumple el control: no se le pide agendar.
+    await control(booked.patientId)
+    await appointmentFor(c, booked.patientId, new Date(NOW.getTime() + 3 * DAY))
+    // El reservado ya tiene su cita, que se recuerda sola.
+    const own = await appointmentFor(c, reserved.patientId, new Date(NOW.getTime() + 2 * DAY))
+    await control(reserved.patientId, { status: "programado", appointmentId: own })
+    await run(c, (tx) => syncCheckupReminders(tx, c.orgId, NOW))
+    expect((await jobsOf(c)).map((job) => job.patientId).sort()).toEqual([free.patientId, far.patientId].sort())
+    // Si reserva antes de que salga el aviso, ya no se envía.
+    await appointmentFor(c, free.patientId, new Date(NOW.getTime() + 4 * DAY))
+    const results = await deliver(c)
+    expect(results).toContainEqual(expect.objectContaining({ outcome: "cancelado", detail: "Ya tiene una cita reservada" }))
+    expect(results.filter((result) => result.detail === "Ya tiene una cita reservada")).toHaveLength(1)
+  })
+})
+
 describe("retirar un permiso", () => {
   it("cancela lo que estaba por salir de ese tipo y deja lo demás", async () => {
     const c = await clinic()

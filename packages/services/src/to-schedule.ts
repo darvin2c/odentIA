@@ -12,6 +12,9 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
  * - **Control vencido sin cita**: un control pendiente cuyo día ya pasó, de una
  *   persona sin ninguna cita por venir. A un control le sirve cualquier visita:
  *   la cita no tiene que llevarlo.
+ * - **La ventana de un control** (`controlWindowStart`): desde cuándo una
+ *   visita lo cumple al firmarse, y desde cuándo una cita por venir cuenta en
+ *   «Qué sigue» y en «Usar esa cita».
  *
  * Cada regla existe en código y en SQL; cambian juntas y su prueba las compara.
  */
@@ -87,6 +90,127 @@ export function budgetToScheduleSql(
       )})`
 }
 
+/**
+ * Las sesiones de un tratamiento de varias (una endodoncia en dos, la
+ * ortodoncia mensual, una terapia). Se calculan, no se guardan:
+ *
+ * - **Hechas**: atenciones distintas, no anuladas, con un procedimiento vigente
+ *   del tratamiento. Una atención es una sesión aunque lo registre dos veces,
+ *   como en las comisiones.
+ * - **En pie**: citas programadas o confirmadas que lo llevan y cuya atención
+ *   todavía no lo registró (si ya lo registró, es una sesión hecha y no se
+ *   cuenta dos veces). Una que ya pasó sin llegada ni atención no cuenta: nadie
+ *   marcó «No vino», pero tampoco va a ocurrir.
+ * - **Puede llevar otra cita**: aceptado y por hacer (`TO_SCHEDULE_STATUSES`),
+ *   con más sesiones previstas que hechas y en pie. Es una regla aparte de
+ *   «Aceptó y no tiene cita» (`isToSchedule`), que no cambia: Inicio, Pacientes,
+ *   Reportes y Argos siguen contando lo mismo. La usan la reserva («Para esta
+ *   cita»), la cita que no dice qué trae (Sofi, «Su enlace», Clío) y «Qué sigue».
+ *
+ * Cada regla existe en código y en SQL, y su prueba las compara.
+ */
+export interface SessionCount {
+  /** Atenciones distintas con un procedimiento vigente del tratamiento. */
+  done: number
+  /** Citas en pie que lo llevan y aún no lo registraron. */
+  booked: number
+}
+
+/** Puede llevar otra cita, en código, con lo que cuenta `sessionCountsOf`. */
+export function canBookAnother(
+  item: { status: string; decisionStatus: string; plannedSessions: number },
+  count: SessionCount,
+): boolean {
+  return (
+    item.decisionStatus === "aceptado" &&
+    (TO_SCHEDULE_STATUSES as readonly string[]).includes(item.status) &&
+    item.plannedSessions > count.done + count.booked
+  )
+}
+
+/** Cuántas sesiones quedan por reservar (0 si no puede llevar otra cita). */
+export function sessionsLeft(
+  item: { status: string; decisionStatus: string; plannedSessions: number },
+  count: SessionCount,
+): number {
+  return canBookAnother(item, count) ? item.plannedSessions - count.done - count.booked : 0
+}
+
+/**
+ * Sesiones hechas del tratamiento, en SQL. `exceptAppointment` deja fuera la
+ * atención de esa cita: la sesión que la cita viene a hacer no es «anterior».
+ */
+export function sessionsDoneSql(
+  item: { id: SQLWrapper; organizationId: SQLWrapper },
+  exceptAppointment?: SQLWrapper,
+): SQL {
+  return sql`(select count(distinct done_procedure.encounter_id)::int from encounter_procedure done_procedure
+    join encounter done_encounter on done_encounter.organization_id = done_procedure.organization_id
+      and done_encounter.id = done_procedure.encounter_id
+    where done_procedure.organization_id = ${item.organizationId} and done_procedure.plan_item_id = ${item.id}
+      and done_procedure.voided_at is null and done_encounter.status <> 'anulada'
+      ${exceptAppointment ? sql`and done_encounter.appointment_id is distinct from ${exceptAppointment}` : sql``})`
+}
+
+/** La cita está en pie para el tratamiento (ver arriba), sobre una fila de `appointment` (o un alias). */
+export function standingForSql(
+  appointment: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; startsAt: SQLWrapper; arrivedAt: SQLWrapper },
+  itemId: SQLWrapper,
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`(${appointment.status} in (${list(LIVE_APPOINTMENT_STATUSES)})
+    and (${appointment.startsAt} > ${now} or ${appointment.arrivedAt} is not null
+      or exists (select 1 from encounter standing_encounter
+        where standing_encounter.organization_id = ${appointment.organizationId}
+          and standing_encounter.appointment_id = ${appointment.id} and standing_encounter.status <> 'anulada'))
+    and not exists (select 1 from encounter standing_done
+      join encounter_procedure standing_procedure on standing_procedure.organization_id = standing_done.organization_id
+        and standing_procedure.encounter_id = standing_done.id
+      where standing_done.organization_id = ${appointment.organizationId}
+        and standing_done.appointment_id = ${appointment.id} and standing_done.status <> 'anulada'
+        and standing_procedure.plan_item_id = ${itemId} and standing_procedure.voided_at is null))`
+}
+
+/** Citas en pie que llevan el tratamiento, en SQL. */
+export function bookedSessionsSql(item: { id: SQLWrapper; organizationId: SQLWrapper }, now: SQLWrapper = sql`now()`): SQL {
+  return sql`(select count(*)::int from appointment_plan_item booked
+    join appointment booked_appointment on booked_appointment.organization_id = booked.organization_id
+      and booked_appointment.id = booked.appointment_id
+    where booked.organization_id = ${item.organizationId} and booked.plan_item_id = ${item.id}
+      and ${standingForSql(
+        {
+          id: sql`booked_appointment.id`,
+          organizationId: sql`booked_appointment.organization_id`,
+          status: sql`booked_appointment.status`,
+          startsAt: sql`booked_appointment.starts_at`,
+          arrivedAt: sql`booked_appointment.arrived_at`,
+        },
+        item.id,
+        now,
+      )})`
+}
+
+/** Puede llevar otra cita, en SQL, sobre una fila de `treatment_plan_item` (o un alias). */
+export function canBookAnotherSql(
+  item: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; decisionStatus: SQLWrapper; plannedSessions: SQLWrapper },
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`(${item.decisionStatus} = 'aceptado' and ${item.status} in (${list(TO_SCHEDULE_STATUSES)})
+    and ${item.plannedSessions} > ${sessionsDoneSql(item)} + ${bookedSessionsSql(item, now)})`
+}
+
+/** Hechas y en pie de cada tratamiento, en una sola consulta. Los que no existen no aparecen. */
+export async function sessionCountsOf(tx: Db, orgId: string, itemIds: readonly string[]): Promise<Map<string, SessionCount>> {
+  const ids = [...new Set(itemIds)]
+  if (ids.length === 0) return new Map()
+  const item = { id: sql`counted.id`, organizationId: sql`counted.organization_id` }
+  const rows = await tx.execute<{ id: string; done: number; booked: number }>(sql`
+    select counted.id, ${sessionsDoneSql(item)} as done, ${bookedSessionsSql(item)} as booked
+    from treatment_plan_item counted
+    where counted.organization_id = ${orgId} and counted.id in (${list(ids)})`)
+  return new Map(rows.map((row) => [row.id, { done: Number(row.done), booked: Number(row.booked) }]))
+}
+
 /** La persona no tiene ninguna cita por venir. */
 export function noUpcomingAppointmentSql(
   patient: { id: SQLWrapper; organizationId: SQLWrapper },
@@ -113,6 +237,70 @@ export function isOverdueControl(
   now: Date = new Date(),
 ): boolean {
   return control.status === "pendiente" && dayKeyIn(control.dueAt, timezone) < dayKeyIn(now, timezone) && !nextAppointmentAt
+}
+
+const DAY_MS = 86_400_000
+
+/**
+ * Desde cuándo una visita cumple un control (ADR 0152): su ventana abre
+ * `max(2 días, 25 % del intervalo)` antes de su día, donde el intervalo va de
+ * cuando se indicó a su día, y nunca antes de que se indicara. Un control a 6
+ * meses abre unos 45 días antes; uno a 7 días, 2 días antes. No tiene fin: un
+ * control vencido sigue cumpliéndose con la próxima visita. Cambia junto con
+ * `controlWindowStartSql`.
+ */
+export function controlWindowStart(control: { dueAt: Date; createdAt: Date }): Date {
+  const interval = control.dueAt.getTime() - control.createdAt.getTime()
+  const opens = control.dueAt.getTime() - Math.max(2 * DAY_MS, interval / 4)
+  return new Date(Math.max(control.createdAt.getTime(), opens))
+}
+
+/**
+ * La ventana del control ya abrió hoy, en días de la zona de la clínica. Un
+ * control indicado hoy no se cumple hoy: la visita en que se indicó no es la
+ * que lo cumple.
+ */
+export function isControlWindowOpen(
+  control: { dueAt: Date; createdAt: Date },
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  const today = dayKeyIn(now, timezone)
+  return dayKeyIn(controlWindowStart(control), timezone) <= today && dayKeyIn(control.createdAt, timezone) < today
+}
+
+/** `controlWindowStart` en SQL, sobre una fila de `clinical_follow_up` (o un alias). */
+export function controlWindowStartSql(control: { dueAt: SQLWrapper; createdAt: SQLWrapper }): SQL {
+  return sql`greatest(${control.createdAt}, ${control.dueAt} - greatest(interval '2 days', (${control.dueAt} - ${control.createdAt}) * 0.25))`
+}
+
+/** `isControlWindowOpen` en SQL: el día en que abre su ventana ya llegó y no se indicó hoy. */
+export function controlWindowOpenSql(
+  control: { dueAt: SQLWrapper; createdAt: SQLWrapper },
+  timezone: string,
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`((${controlWindowStartSql(control)} at time zone ${timezone})::date <= (${now} at time zone ${timezone})::date
+    and (${control.createdAt} at time zone ${timezone})::date < (${now} at time zone ${timezone})::date)`
+}
+
+/** Hasta cuántos días después de su fecha una cita por venir todavía le sirve a un control. */
+export const CONTROL_SERVED_DAYS_AFTER = 30
+
+/**
+ * Una cita por venir le sirve al control (ADR 0152): cae desde que abre su
+ * ventana hasta 30 días después de su fecha. «Avisar un control» calla solo
+ * entonces; una cita mucho más lejana no lo cumple a tiempo.
+ */
+export function appointmentServesControlSql(
+  control: { organizationId: SQLWrapper; patientId: SQLWrapper; dueAt: SQLWrapper; createdAt: SQLWrapper },
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`exists (select 1 from appointment serving
+    where serving.organization_id = ${control.organizationId} and serving.patient_id = ${control.patientId}
+      and serving.status in (${list(LIVE_APPOINTMENT_STATUSES)}) and serving.starts_at > ${now}
+      and serving.starts_at >= ${controlWindowStartSql(control)}
+      and serving.starts_at <= ${control.dueAt} + make_interval(days => ${CONTROL_SERVED_DAYS_AFTER}))`
 }
 
 /** Control vencido sin cita, en SQL, sobre una fila de `clinical_follow_up` (o un alias). */

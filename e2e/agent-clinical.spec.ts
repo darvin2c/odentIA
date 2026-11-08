@@ -251,7 +251,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(page.getByLabel("Motivo de consulta", { exact: true })).toHaveValue(joinedReason)
   await page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Cerrar" }).click()
   // La pantalla refleja lo confirmado sin recargar.
-  await expect(closing.getByRole("listitem").filter({ hasText: "diagnóstico" })).toContainText("listo")
+  // La lista de cierre solo dice lo que falta: el diagnóstico ya no aparece.
+  await expect(closing.getByRole("listitem").filter({ hasText: "diagnóstico" })).toHaveCount(0)
 
   // --- Mientras se dicta: las sugerencias llegan con cada pausa, sin terminar el dictado ---
   await idle.getByRole("button", { name: "Dictar", exact: true }).click()

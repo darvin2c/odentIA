@@ -17,6 +17,7 @@ import {
   addEncounterAddendum,
   addEncounterDiagnosis,
   addEncounterProcedure,
+  findEarlierTreatment,
   addPatientAllergy,
   addPlanItem,
   addPlanItemsBatch,
@@ -412,8 +413,27 @@ const finalizeInput = z
     endedAt: z.iso.datetime({ offset: true, error: "Elige la hora de fin de la lista" }).nullish(),
     // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
     consentSkipReason: z.string().trim().max(2000).nullish(),
+    // «¿Terminaste?» de lo trabajado hoy: «Sí, terminar» o «Falta otra sesión».
+    completePlanItemIds: z.array(z.uuid()).max(52).optional(),
+    addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
+    // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
+    nextControl: z
+      .union([
+        z.object({ dueAt: z.iso.date({ error: "Elige un día del calendario" }) }).strict(),
+        z.object({ none: z.literal(true) }).strict(),
+      ])
+      .nullish(),
+    // Los controles que esta visita cumple; sin él, todos los que tocan.
+    followUpIds: z.array(z.uuid()).max(50).nullish(),
   })
   .strict()
+/** Lo que se va a registrar como servicio directo, para avisar si ya se hizo (`findEarlierTreatment`). */
+const earlierTreatmentQuery = z.object({
+  serviceId: z.uuid(),
+  toothNumber: z.coerce.number().int().optional(),
+  quadrant: z.coerce.number().int().min(1).max(8).optional(),
+  arch: z.enum(["upper", "lower"]).optional(),
+})
 /**
  * «Fueron 4, no 2» (ADR 0067): lo que de verdad se usó de un producto en la
  * atención firmada, en su unidad de uso, con la clave del formulario.
@@ -1428,6 +1448,16 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("encounterId"),
           parsed.data,
         ),
+      ),
+    )
+  })
+  app.get("/:id/encounters/:encounterId/procedures/earlier", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = earlierTreatmentQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        findEarlierTreatment(tx, orgId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
       ),
     )
   })

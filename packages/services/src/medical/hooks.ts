@@ -33,6 +33,7 @@ export const medicalHooks: ProductHooks = {
   ...NO_PRODUCT_HOOKS,
   budgetRequired: false,
   recallMonths: 12,
+  recallControlTitle: "Control anual",
   catalog: medicalCatalog,
   planPhases: [MEDICAL_PLAN_PHASE],
   phaseFor: () => MEDICAL_PLAN_PHASE,

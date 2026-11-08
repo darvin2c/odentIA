@@ -2,7 +2,7 @@
 
 Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 3; tablero 3 y decisiones 2, 4, 5, 12 y 13 del lienzo) · Ajusta [0029](0029-una-persona-una-pagina.md): las secciones de la página de la persona.
 
-Precisada por [0151](0151-presupuesto-con-caminos.md): los caminos se marcan en la atención, lo común se responde sin elegir y el odontólogo lee el presupuesto de su colega.
+Precisada por [0153](0153-presupuesto-con-caminos.md): los caminos se marcan en la atención, lo común se responde sin elegir y el odontólogo lee el presupuesto de su colega.
 
 ## Problema
 

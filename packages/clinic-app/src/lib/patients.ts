@@ -464,7 +464,7 @@ export interface PlanItem {
   /** La fase del plan, una de las del producto (`productUi().plan`). */
   phase?: string
   sortOrder?: number
-  /** Sesiones previstas y hechas (procedimientos no anulados). */
+  /** Sesiones previstas y hechas (atenciones distintas con un procedimiento vigente). */
   plannedSessions?: number
   sessionsDone?: number
   decidedAt: string | null

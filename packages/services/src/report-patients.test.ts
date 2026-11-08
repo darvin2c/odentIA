@@ -423,9 +423,14 @@ it("si vuelven: activos en 18 meses, volvieron en el año y sin venir hace más 
   await c.visit(d.patientId, "2025-08-10T15:00:00Z", "atendida")
   // Activa: vino hace un mes.
   await c.visit(a.patientId, "2026-09-10T15:00:00Z", "atendida")
-  // Con control: vino hace un año, pero tiene un control pendiente: alguien ya se encarga.
+  // Con control: vino hace un año, pero tiene un control pendiente de estos 6 meses: alguien ya se encarga.
+  // El de marzo, olvidado hace más de 6 meses, ya no basta (ADR 0152).
   await c.visit(e.patientId, "2025-09-10T15:00:00Z", "atendida")
   await ownerDb.insert(clinicalFollowUp).values({ organizationId: c.orgId, patientId: e.patientId, kind: "mantenimiento", title: "Control", dueAt: new Date("2026-03-10T15:00:00Z") })
+  const [recent] = await ownerDb
+    .insert(clinicalFollowUp)
+    .values({ organizationId: c.orgId, patientId: e.patientId, kind: "mantenimiento", title: "Control", dueAt: new Date("2026-08-10T15:00:00Z") })
+    .returning({ id: clinicalFollowUp.id })
 
   const end = new Date("2026-10-01T05:00:00Z")
   // Los cuatro vinieron en los 18 meses antes del 1 de octubre (desde el 1 de abril de 2025).
@@ -438,6 +443,10 @@ it("si vuelven: activos en 18 meses, volvieron en el año y sin venir hace más 
   expect(lapsed.rows.map((row) => row.personName)).toEqual(["No volvió"])
   // Fuera del embudo no viaja el canal: el cajón no tiene qué decir de él.
   expect(lapsed.rows[0]).not.toHaveProperty("channel")
+  // Sin el control reciente, el de marzo (de hace más de 6 meses) no la saca de «Sin venir».
+  await ownerDb.update(clinicalFollowUp).set({ status: "cancelado" }).where(eq(clinicalFollowUp.id, recent!.id))
+  expect((await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09" }, NOW))).lapsed.count).toBe(2)
+  await ownerDb.update(clinicalFollowUp).set({ status: "pendiente" }).where(eq(clinicalFollowUp.id, recent!.id))
   // Los controles que tocaban y no se hicieron: la lista dice los mismos que la cifra.
   const march = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-03" }, NOW))
   expect(march.controls.current).toMatchObject({ due: 1, came: 0 })

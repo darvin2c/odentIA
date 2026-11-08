@@ -335,7 +335,9 @@ export async function returnedMany(
  * Sin venir hace más de `months` meses (los del producto), a hoy (la misma regla que
  * tendrá «Invitar a volver», #139): personas sin archivar cuya última cita
  * atendida fue antes de eso y que hoy no tienen cita por venir, presupuesto
- * que espere respuesta (`budgetAwaitsAnswerSql`) ni control pendiente. Da
+ * que espere respuesta (`budgetAwaitsAnswerSql`) ni un control pendiente o
+ * reservado de esos mismos meses: un control olvidado más viejo ya no la
+ * saca de la lista (ADR 0152). Da
  * `lapsed(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`
  * con su última cita atendida.
  */
@@ -359,7 +361,7 @@ export function lapsedSql(
         and not exists (select 1 from treatment_budget b where b.organization_id = ${orgId} and b.patient_id = v.patient_id
           and ${budgetAwaitsAnswerSql(budget)})
         and not exists (select 1 from clinical_follow_up c where c.organization_id = ${orgId} and c.patient_id = v.patient_id
-          and c.status in ('pendiente','programado'))
+          and c.status in ('pendiente','programado') and c.due_at > ${monthsBefore(at(now), months, scope.timezone)})
     )`
 }
 
