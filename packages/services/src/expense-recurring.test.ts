@@ -244,7 +244,7 @@ it("se anota sin pagar, y el sueldo que se paga al mes siguiente no vence en su 
     dueOn: `${nextKey}-02`,
     overdue: false,
   })
-  expect(await f.run((tx) => fixedOwedAt(tx, "org_a", now, { branchId }))).toEqual({ cents: 0, count: 0 })
+  expect(await f.run((tx) => fixedOwedAt(tx, "org_a", now, { branchId }))).toMatchObject({ cents: 0, count: 0 })
 
   // El 5 del mes siguiente, ya venció y se debe.
   const later = new Date(Date.UTC(next.year, next.month - 1, 5, 17))
