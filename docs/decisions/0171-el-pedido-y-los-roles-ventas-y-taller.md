@@ -29,4 +29,4 @@ En una óptica se vende y después se espera: se elige la montura, se paga un ad
 
 ## Referencias
 
-`packages/db/src/schema/orders.ts`, `packages/db/drizzle/0072_pedidos.sql`, `packages/services/src/job-orders.ts`, `packages/services/src/optical/demo-orders.ts`, `packages/services/src/inventory.ts` (lo de la etiqueta), `apps/api/src/routes/orders.ts`, `packages/auth/src/permissions.ts` (`PRODUCT_ROLES`, `orders`, `clinical.prescription`), `packages/auth/src/index.ts` (`requireProductRole`).
+`packages/db/src/schema/orders.ts`, `packages/db/drizzle/0077_pedidos.sql`, `packages/services/src/job-orders.ts`, `packages/services/src/optical/demo-orders.ts`, `packages/services/src/inventory.ts` (lo de la etiqueta), `apps/api/src/routes/orders.ts`, `packages/auth/src/permissions.ts` (`PRODUCT_ROLES`, `orders`, `clinical.prescription`), `packages/auth/src/index.ts` (`requireProductRole`).
