@@ -15,6 +15,7 @@ import {
   expenseExchange,
   expenseReceiptType,
   formatMoney,
+  isTaxDocument,
   NO_RECEIPT_TYPE,
   type MoneyFraction,
   roundMoneyValue,
@@ -1334,7 +1335,9 @@ async function expensePaper(
     if (!row) throw invalidField("supplierId", "Ese proveedor no existe")
     supplierId = row.id
     supplierName = row.name
-    supplierTaxId = supplierTaxId ?? row.docNumber ?? null
+    // Solo un documento tributario va como RUC del comprobante; el DNI de una persona no.
+    const [doc] = await tx.select({ docType: supplier.docType }).from(supplier).where(eq(supplier.id, row.id))
+    supplierTaxId = supplierTaxId ?? (isTaxDocument(doc?.docType) ? row.docNumber : null) ?? null
   }
   return { receiptKind, receiptType, supplierId, supplierName, supplierTaxId }
 }
@@ -1944,7 +1947,8 @@ export async function correctExpense(
     replacesExpenseId: original.id,
   })
   if (replay) return replay
-  if (original.voidedAt) throw conflict("EXPENSE_VOIDED", "Ese gasto ya está anulado: no se corrige")
+  if (original.voidedAt)
+    throw conflict("EXPENSE_VOIDED", "Ese gasto ya se anuló o alguien ya lo corrigió: actualiza la lista y abre el que quedó")
   if (original.purchaseOrderId)
     throw conflict("EXPENSE_IS_PURCHASE", "El pago de una compra se corrige en la compra: anúlalo y vuelve a pagarla")
   if ((await commissionPaymentsOf(tx, orgId, [original.id])).size > 0)

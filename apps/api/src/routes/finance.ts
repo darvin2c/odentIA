@@ -504,6 +504,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
         requestId: z.uuid().optional(),
+        // El cambio de este pago, si es en la otra moneda; sin él, el de hoy.
+        exchangeRate: z.string().max(40).optional(),
         ...paperFields,
       })
       .strict()

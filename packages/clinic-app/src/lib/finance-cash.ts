@@ -9,7 +9,7 @@
  * o la sede. Aquí no hay país, moneda ni medio de pago escritos.
  */
 import type { PurchaseBalance, PurchasesToPay } from "./reports"
-import { currencyWord, parseMoney, upperFirst } from "@odentia/clinical"
+import { currencyWord, expenseCategoryWord, parseMoney, upperFirst } from "@odentia/clinical"
 import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
@@ -782,10 +782,8 @@ export const EXPENSE_FILTER_TYPES = [...EXPENSE_CATEGORIES, "Pago de comisiones"
  * «Servicios» como lo que se vende. Solo cambia la palabra: el valor guardado sigue igual, y Gastos,
  * los filtros y Reportes dicen lo mismo.
  */
-const CATEGORY_WORDS: Record<string, string> = { Personal: "Sueldos", Servicios: "Servicios básicos" }
-
 export function expenseCategoryLabel(category: string): string {
-  return CATEGORY_WORDS[category] ?? category
+  return expenseCategoryWord(category)
 }
 
 /** Una línea de ayuda por tipo, para quien duda dónde va lo que pagó. */
@@ -1055,6 +1053,7 @@ export function payRecurringApi(
     requestId?: string
     spentAt?: string
     receiptNumber?: string | null
+    exchangeRate?: string
   } & ExpensePaper,
 ): Promise<{ data: { id: string; amountCents: number; currency: string; fromCash: boolean } }> {
   return apiFetch(`/api/finance/expenses/recurring/${id}/pay`, { method: "POST", body: JSON.stringify(body) })

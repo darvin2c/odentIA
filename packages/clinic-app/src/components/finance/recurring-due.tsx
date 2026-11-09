@@ -36,6 +36,8 @@ import {
   updateRecurringApi,
 } from "../../lib/finance-cash"
 import { fetchPaymentMethods } from "../../lib/finance-collect"
+import { useTodayRate } from "../../lib/org"
+import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceChips } from "./cash-close-drawer"
 import { PaymentMethodButtons } from "./collect-drawer"
@@ -385,6 +387,8 @@ export function RepeatingList({
 interface NoteValues {
   concept: string
   category: string
+  /** Con otra moneda en la clínica, en cuál se paga (el alquiler en dólares). */
+  currency: string
   amount: string
   every: "1" | "6" | "12"
   day: string
@@ -410,9 +414,10 @@ function NoteRecurringDrawer({
   onClose: () => void
   onDone: () => void
 }) {
-  const { branchId, currency, locale, orgTimeZone } = place
+  const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
   const canStaffPay = usePermission("commissions.write")
+  const { second } = useTodayRate(locale)
   const today = todayIn(orgTimeZone)
   const requestId = useRef<string>(crypto.randomUUID())
   const methods = useQuery({ queryKey: ["org-payment-methods"], queryFn: fetchPaymentMethods, enabled: open })
@@ -429,13 +434,24 @@ function NoteRecurringDrawer({
     return dueOn >= today ? current : addMonth(current, 1)
   }
   const form = useAppForm({
-    defaultValues: { concept: "", category: "", amount: "", every: "1", day: "", firstMonth: "", method: "", member: "", dueNext: false } as NoteValues,
+    defaultValues: {
+      concept: "",
+      category: "",
+      currency: place.currency,
+      amount: "",
+      every: "1",
+      day: "",
+      firstMonth: "",
+      method: "",
+      member: "",
+      dueNext: false,
+    } as NoteValues,
     validators: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
         if (!value.concept.trim()) fields.concept = "Escribe en qué se gasta."
         if (!value.category) fields.category = "Elige el tipo."
-        const amount = parseAmount(value.amount, currency, locale)
+        const amount = parseAmount(value.amount, value.currency, locale)
         if (amount === null || amount <= 0) fields.amount = "Escribe lo de siempre, mayor que cero."
         const day = Number(value.day)
         if (!Number.isInteger(day) || day < 1 || day > 31) fields.day = "Escribe un día del 1 al 31."
@@ -443,12 +459,13 @@ function NoteRecurringDrawer({
       },
     },
     onSubmit: async ({ value }) => {
-      const amountCents = parseAmount(value.amount, currency, locale)
+      const amountCents = parseAmount(value.amount, value.currency, locale)
       if (amountCents === null) return
       const day = Number(value.day)
       const created = await noteRecurringApi({
         requestId: requestId.current,
         branchId,
+        ...(value.currency !== place.currency ? { currency: value.currency } : {}),
         category: value.category,
         concept: value.concept.trim(),
         amountCents,
@@ -519,10 +536,30 @@ function NoteRecurringDrawer({
             </field.Group>
           )}
         </form.AppField>
+        {second ? (
+          <form.AppField name="currency">
+            {(field) => (
+              <field.Group legend="Moneda" className="gap-3">
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    tone="primary"
+                    value={field.state.value}
+                    options={currencyChoices([place.currency, second.currency], locale)}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        ) : null}
         <form.AppField name="amount">
           {(field) => (
             <field.TextField
-              label={`Lo de siempre, en ${currencyWord(currency, locale)}`}
+              label={`Lo de siempre, en ${currencyWord(values.currency, locale)}`}
               description="Se propone cada vez que toca pagar; si un mes llega otro, se cambia al pagar."
               inputMode="decimal"
               inputClassName="w-40"

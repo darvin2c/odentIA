@@ -655,6 +655,8 @@ export interface PayRecurringInput {
   supplierId?: string | null
   supplierName?: string | null
   supplierTaxId?: string | null
+  /** El cambio de este pago, si es en la otra moneda; sin él, el de hoy. */
+  exchangeRate?: string
 }
 
 /**
@@ -720,6 +722,7 @@ export async function payRecurringOccurrence(
         amountCents: input.amountCents ?? suggested,
         currency: template.currency,
         fromCash: input.fromCash ?? template.fromCash,
+        ...(input.exchangeRate !== undefined ? { exchangeRate: input.exchangeRate } : {}),
         ...(paymentMethodId ? { paymentMethodId } : {}),
         paymentReference: input.paymentReference,
         receiptType: input.receiptType,

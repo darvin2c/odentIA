@@ -18,6 +18,7 @@ import {
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
+  isTaxDocument,
   NO_RECEIPT_TYPE,
   suggestedReceiptType,
 } from "@odentia/clinical"
@@ -296,8 +297,14 @@ export function ExpenseFormDrawer({
     onSubmit: async ({ value }) => {
       const { chosen, asksSalesTax, cents, currency, paid, method } = derive(value)
       if (cents === null || !method) return
-      // Hoy lleva la hora real; otro día, su mediodía en la zona de la clínica.
-      const spentAt = value.spentDay === today ? {} : { spentAt: noonOf(value.spentDay, orgTimeZone) }
+      // Hoy lleva la hora real; otro día, su mediodía en la zona de la clínica. Al corregir va siempre:
+      // lo que no se manda se queda como estaba (la fecha de antes, aunque se haya elegido hoy).
+      const spentAt =
+        value.spentDay !== today
+          ? { spentAt: noonOf(value.spentDay, orgTimeZone) }
+          : correcting
+            ? { spentAt: new Date().toISOString() }
+            : {}
       const type = value.receiptType ? receiptTypes.find((item) => item.code === value.receiptType) : null
       const supplier = (suppliers.data?.data ?? []).find(
         (item) => item.name.toLocaleLowerCase(locale) === value.supplier.trim().toLocaleLowerCase(locale),
@@ -317,7 +324,8 @@ export function ExpenseFormDrawer({
       if (paying) {
         await payRecurringMutation.mutateAsync({
           due: paying,
-          body: { month: paying.month, amountCents: cents, requestId: requestId.current, ...paper, ...spentAt },
+          // Con otra moneda, el cambio que se escribió (o el de hoy) va con el pago.
+          body: { month: paying.month, amountCents: cents, requestId: requestId.current, ...paid.body, ...paper, ...spentAt },
         })
         return
       }
@@ -346,7 +354,8 @@ export function ExpenseFormDrawer({
         branchId,
         concept: value.concept.trim(),
         amountCents: cents,
-        ...(second && currency !== place.currency ? { currency } : {}),
+        // Al corregir, la moneda va siempre: de dólares a soles es un cambio.
+        ...((second && currency !== place.currency) || correcting ? { currency } : {}),
         ...paid.body,
         category: value.category as ExpenseCategory,
         fromCash: method.typeCode === CASH_TYPE_CODE,
@@ -910,7 +919,9 @@ export function ExpenseFormDrawer({
                   const found = (suppliers.data?.data ?? []).find(
                     (item) => item.name.toLocaleLowerCase(locale) === value.trim().toLocaleLowerCase(locale),
                   )
-                  if (found?.docNumber && !form.getFieldValue("supplierTaxId")) form.setFieldValue("supplierTaxId", found.docNumber)
+                  // Solo un documento tributario (RUC), no el DNI de un proveedor persona.
+                  if (found?.docNumber && isTaxDocument(found.docType) && !form.getFieldValue("supplierTaxId"))
+                    form.setFieldValue("supplierTaxId", found.docNumber)
                 },
               }}
             >

@@ -15,6 +15,23 @@ export interface ExpenseReceiptType {
   asksTaxId: boolean
 }
 
+/**
+ * Cómo se dice cada tipo de gasto (QA de Gastos, G25): «Personal» se leía como el gasto propio y
+ * «Servicios» como lo que se vende. Solo cambia la palabra: el valor guardado sigue igual.
+ */
+const CATEGORY_WORDS: Record<string, string> = { Personal: "Sueldos", Servicios: "Servicios básicos" }
+
+export function expenseCategoryWord(category: string): string {
+  return CATEGORY_WORDS[category] ?? category
+}
+
+/** Los tipos de documento tributario de un proveedor (el RUC en el Perú): los que van al comprobante. */
+const TAX_DOCUMENTS = new Set(["RUC", "RUT", "NIT", "RFC", "CUIT", "NIF", "CIF"])
+
+export function isTaxDocument(docType: string | null | undefined): boolean {
+  return docType ? TAX_DOCUMENTS.has(docType.toUpperCase()) : false
+}
+
 /** «Sin comprobante»: no es un tipo del país, es que no hubo papel. */
 export const NO_RECEIPT_TYPE = "sin"
 
