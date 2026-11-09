@@ -69,7 +69,8 @@ export function NextStepButton({
       })
     } else if (step.kind === "respuesta" && action.budgetId) {
       setOpen("respuesta")
-    } else if (step.kind === "control" && action.appointmentId) {
+    } else if ((step.kind === "control" || step.kind === "cerrar") && action.appointmentId) {
+      // «¿Vino?»: la cita se abre con «Registrar la atención» y «No vino».
       openAppointmentAnywhere(action.appointmentId)
     } else if (step.kind === "control" && action.followUpId) {
       setOpen("control")

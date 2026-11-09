@@ -383,6 +383,7 @@ export function attentionOf(kind: PlanNextKind, lines: ReadonlySet<string>): Per
     case "agendar":
     case "continuar":
       return "persona"
+    case "cerrar":
     case "ninguno":
       return "nadie"
   }

@@ -48,7 +48,12 @@ async function journeyOf(page: Page, title: string): Promise<Locator> {
 
 /** Abre un tratamiento del plan por fases con «Ver»: su recorrido se abre al lado. */
 async function openTreatment(page: Page, title: string): Promise<Locator> {
-  const row = page.getByRole("listitem").filter({ hasText: title }).first()
+  // La fila del tratamiento (la que tiene «Ver»): «Qué sigue» también lo nombra en su lista.
+  const row = page
+    .getByRole("listitem")
+    .filter({ hasText: title })
+    .filter({ has: page.getByRole("button", { name: "Ver", exact: true }) })
+    .first()
   await row.getByRole("button", { name: "Ver", exact: true }).click()
   return journeyOf(page, title)
 }
@@ -283,8 +288,9 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   await expect(page.getByText("Control post-endodoncia").first()).toBeVisible()
   // «Reservar» toma un hueco real del profesional y lo vincula al control.
   await page
-    .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar cita", exact: true })
+    // El control se reserva desde «Qué sigue», el único botón de reservar del Plan (QA de la ficha del 8 nov).
+    .getByRole("region", { name: "Qué sigue" })
+    .getByRole("button", { name: "Reservar el control", exact: true })
     .first()
     .click()
   const schedule = surface(page, { name: "Programar control" })
@@ -420,9 +426,10 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
 
   // Historia: cada evento del recorrido se abre donde corresponde, no como anamnesis.
   await openSection(page, "Clínica", "Historia")
-  await expect(page.getByText("Presupuesto", { exact: true }).first()).toBeVisible()
+  // El presupuesto de lo indicado en la atención va dentro de su tarjeta (QA de la ficha del 8 nov).
+  await expect(page.getByText(/^Presupuesto N\.º \d+/).first()).toBeVisible()
   await expect(page.getByText("Pago", { exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Ver el presupuesto", exact: true }).first().click()
+  await page.getByRole("button", { name: /^Ver el presupuesto/ }).first().click()
   // Se abre encima: la Historia sigue debajo, sin cambiar de pestaña.
   const planOver = surface(page, { name: /^Plan de / })
   await expect(planOver.getByRole("heading", { name: "Presupuesto", exact: true })).toBeVisible()
@@ -628,8 +635,9 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
 
   // Reserva un hueco real: misma operación que la vía clínica.
   await page
-    .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar cita", exact: true })
+    // El control se reserva desde «Qué sigue», el único botón de reservar del Plan (QA de la ficha del 8 nov).
+    .getByRole("region", { name: "Qué sigue" })
+    .getByRole("button", { name: "Reservar el control", exact: true })
     .click()
   const dialog = surface(page, { name: "Programar control" })
   // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.

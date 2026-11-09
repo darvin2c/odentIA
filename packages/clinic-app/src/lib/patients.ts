@@ -517,6 +517,37 @@ export interface PlanItem {
   newTermsPending?: boolean
   /** Realizado al que le puede faltar otra sesión: el Plan ofrece «Falta otra sesión…». */
   canAddSession?: boolean
+  /** El precio acordado (la línea aceptada, lo que se cobra); nulo sin nada aceptado. */
+  agreedPriceCents?: number | null
+  agreedCurrency?: string | null
+  /** Sin nada aceptado, el que le ofrece su presupuesto: no es lo que se cobra. */
+  offeredPriceCents?: number | null
+  offeredCurrency?: string | null
+}
+
+type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
+
+/**
+ * Lo que se cobra al hacerlo: el precio acordado si lo aceptó, si no el de la
+ * indicación (QA de la ficha del 8 nov: la atención decía S/ 120 de lista con
+ * S/ 90 acordado).
+ */
+export function agreedPriceOf(item: PriceFields): { priceCents: number | null; currency: string } {
+  return item.agreedCurrency != null
+    ? { priceCents: item.agreedPriceCents ?? null, currency: item.agreedCurrency }
+    : { priceCents: item.priceCents, currency: item.currency }
+}
+
+/**
+ * El precio que se dice de un tratamiento y de dónde sale: el acordado; si no
+ * aceptó, el que le ofrece su presupuesto («en su presupuesto», no se cobra así
+ * todavía); si no tiene presupuesto, el de la indicación.
+ */
+export function quotedPriceOf(item: PriceFields): { priceCents: number | null; currency: string; offered: boolean } {
+  if (item.agreedCurrency != null) return { ...agreedPriceOf(item), offered: false }
+  if (item.offeredCurrency != null)
+    return { priceCents: item.offeredPriceCents ?? null, currency: item.offeredCurrency, offered: item.offeredPriceCents !== item.priceCents }
+  return { priceCents: item.priceCents, currency: item.currency, offered: false }
 }
 
 export interface PlanItemPath {
@@ -684,8 +715,30 @@ export interface TimelineItem {
   dueAt?: string | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** Quién atendió; en una anulada, quién y cuándo la anuló. */
+  professionalName?: string | null
+  /** Quién firmó la atención y cuándo. */
+  signerName?: string | null
+  signedAt?: string | null
+  /** Hecho de una atención que sigue en curso, sin firmar. */
+  openEncounter?: boolean
+  voidedByName?: string | null
+  voidedAt?: string | null
+  /** Lo que nació en la atención, dentro de su tarjeta (solo en la historia completa). */
+  born?: EncounterBorn
   /** El periodontograma de la atención: un hecho de ella. */
   periodontal?: PeriodontalBrief | null
+}
+
+/** Lo nacido en una atención; lo anulado o cancelado viene con `retired` para plegarlo. */
+export interface EncounterBorn {
+  indicated: Array<{ id: string; title: string; where: string | null; stateText: string; retired: boolean; budgetId: string | null }>
+  budgets: Array<{ id: string; budgetNumber: number; stateText: string; retired: boolean }>
+  consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
+  prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
+  orders: Array<{ id: string; title: string; state: string }>
+  forms: Array<{ id: string; title: string }>
+  followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
 export interface PlanPendingTotal {

@@ -25,6 +25,7 @@ import { usePermission } from "../../lib/crm"
 import { voidProcedureApi } from "../../lib/encounters"
 import {
   type EncounterDetail,
+  agreedPriceOf,
   type PlanItem,
   type ProcedureItem,
   planStatusLabel,
@@ -162,11 +163,13 @@ function earlierWords(earlier: EarlierTreatment): string {
 }
 
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
+  // Lo que se cobra al hacerlo: el acordado si lo aceptó.
+  const agreed = agreedPriceOf(item)
   const price =
-    item.priceCents == null
+    agreed.priceCents == null
       ? "sin precio"
       : locale
-        ? formatMoney(item.priceCents, item.currency, locale)
+        ? formatMoney(agreed.priceCents, agreed.currency, locale)
         : "…"
   const tooth =
     item.toothNumber != null

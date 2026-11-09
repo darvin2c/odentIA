@@ -23,6 +23,7 @@ import { productHooks } from "./products.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
 import { assertAttending } from "./encounter-attending.js"
+import { acceptedBudgetLines } from "./agreed-lines.js"
 import {
   type ProductHooks,
   type ProductParts,
@@ -117,6 +118,21 @@ export type PlanItemWithProgress = PlanItemWithDecision & {
    * ofrece «Falta otra sesión» solo entonces (`reopenPlanItemForSession`).
    */
   canAddSession: boolean
+  /**
+   * El precio acordado: el de la línea aceptada de su presupuesto, el mismo que
+   * se cobra (`acceptedBudgetLines`). Nulo si no hay nada aceptado: vale
+   * `priceCents` (QA de la ficha del 8 nov: la atención decía S/ 120 de lista
+   * con S/ 90 acordado).
+   */
+  agreedPriceCents: number | null
+  agreedCurrency: string | null
+  /**
+   * Sin nada aceptado, el precio que le ofrece su presupuesto vigente (la opción
+   * elegida o, mientras decide, la recomendada). No es lo que se cobra: se dice
+   * «en su presupuesto», nunca como acordado.
+   */
+  offeredPriceCents: number | null
+  offeredCurrency: string | null
 }
 
 /**
@@ -510,6 +526,7 @@ async function withDecisions(
     orgId,
     items.filter((item) => item.status === "realizado").map((item) => item.id),
   )
+  const agreed = await agreedPricesOf(tx, orgId, items)
   return items.map((item) => ({
     ...item,
     decision: item.decisionStatus as PlanItemDecision,
@@ -517,7 +534,71 @@ async function withDecisions(
     path: paths.get(item.id) ?? null,
     newTermsPending: newTerms.has(item.id),
     canAddSession: anotherSessionAllowed(item, another.get(item.id)),
+    agreedPriceCents: agreed.accepted.get(item.id)?.priceCents ?? null,
+    agreedCurrency: agreed.accepted.get(item.id)?.currency ?? null,
+    offeredPriceCents: agreed.offered.get(item.id)?.priceCents ?? null,
+    offeredCurrency: agreed.offered.get(item.id)?.currency ?? null,
   }))
+}
+
+/**
+ * El precio de presupuesto de cada tratamiento: el aceptado (lo que se cobra,
+ * también el de un presupuesto sustituido mientras su revisión espera respuesta)
+ * y, sin nada aceptado, el que le ofrece la línea vigente de su presupuesto no
+ * cancelado (la opción elegida o, mientras decide, la recomendada; como `currentLine`).
+ */
+async function agreedPricesOf(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<{ id: string; patientId: string; budgetId: string | null }>,
+): Promise<{
+  accepted: Map<string, { priceCents: number | null; currency: string }>
+  offered: Map<string, { priceCents: number | null; currency: string }>
+}> {
+  const accepted = new Map<string, { priceCents: number | null; currency: string }>()
+  const offered = new Map<string, { priceCents: number | null; currency: string }>()
+  for (const patientId of new Set(items.map((item) => item.patientId)))
+    for (const [id, line] of await acceptedBudgetLines(
+      tx,
+      orgId,
+      patientId,
+      items.filter((item) => item.patientId === patientId).map((item) => item.id),
+    ))
+      accepted.set(id, { priceCents: line.priceCents, currency: line.currency })
+  const rest = items.filter((item) => item.budgetId && !accepted.has(item.id))
+  if (rest.length === 0) return { accepted, offered }
+  const lines = await tx
+    .select({ planItemId: treatmentBudgetItem.planItemId, priceCents: treatmentBudgetItem.priceCents, currency: treatmentBudgetItem.currency })
+    .from(treatmentBudgetItem)
+    .innerJoin(
+      treatmentBudgetOption,
+      and(
+        eq(treatmentBudgetOption.id, treatmentBudgetItem.optionId),
+        eq(treatmentBudgetOption.organizationId, treatmentBudgetItem.organizationId),
+      ),
+    )
+    .innerJoin(
+      treatmentBudget,
+      and(eq(treatmentBudget.id, treatmentBudgetItem.budgetId), eq(treatmentBudget.organizationId, treatmentBudgetItem.organizationId)),
+    )
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        inArray(
+          treatmentBudgetItem.planItemId,
+          rest.map((item) => item.id),
+        ),
+        sql`${treatmentBudgetItem.budgetId} = (select own.budget_id from treatment_plan_item own where own.id = ${treatmentBudgetItem.planItemId} and own.organization_id = ${treatmentBudgetItem.organizationId})`,
+        ne(treatmentBudget.status, "cancelado"),
+      ),
+    )
+    .orderBy(
+      sql`${treatmentBudgetOption.decision} = 'elegida' desc`,
+      sql`${treatmentBudgetOption.isRecommended} desc`,
+      asc(treatmentBudgetOption.position),
+    )
+  for (const line of lines) if (!offered.has(line.planItemId)) offered.set(line.planItemId, { priceCents: line.priceCents, currency: line.currency })
+  return { accepted, offered }
 }
 
 /** El camino de cada tratamiento según las opciones de su presupuesto vigente. */

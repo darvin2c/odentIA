@@ -744,7 +744,7 @@ export function fetchTreatmentPlanDetail(
 
 /** «Qué sigue» del plan: frase y botón que decide el servidor. */
 export interface PlanNextStep {
-  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
+  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "cerrar" | "ninguno"
   text: string
   detail: string | null
   action: {
@@ -757,6 +757,8 @@ export interface PlanNextStep {
   } | null
   /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
   alsoToSchedule?: string[]
+  /** Un aviso que no frena, en su propio renglón (la cita que se atendió sin registrar lo hecho). */
+  notice?: string | null
 }
 
 export function fetchPlanNextStep(patientId: string): Promise<{ data: PlanNextStep }> {

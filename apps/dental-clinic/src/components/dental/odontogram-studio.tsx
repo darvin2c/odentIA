@@ -50,6 +50,7 @@ import { OdontogramArch } from "./odontogram-arch"
 import { SignedOdontograms } from "./odontogram-assessments"
 import { OdontogramDocument } from "./odontogram-document"
 import { findingWords, OdontogramNotationProvider, useOdontogramNotation } from "./odontogram-notation"
+import { ActiveFindingsList } from "./active-findings-list"
 import { ToothDrawer } from "./tooth-drawer"
 import { ToothSVG } from "./tooth-svg"
 import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
@@ -626,6 +627,21 @@ function StudioBody({
           )}
         </section>
       </div>
+      {/* En la ficha, lo que tiene la boca en una lista; en la atención va la de lo registrado hoy. */}
+      {!compact ? (
+        <ActiveFindingsList
+          history={state.history}
+          asOf={historical ? snapshot : undefined}
+          asOfLabel={historical ? snapshotLabel(snapshot) : undefined}
+          official={official}
+          onSelect={(tooth) => {
+            if (!canChangeSelection()) return
+            setDentition((current) => dentitionFor(tooth, current))
+            setSelection([tooth])
+            setDrawerOpen(true)
+          }}
+        />
+      ) : null}
       {belowChart}
       {!compact && official?.signedOdontogram ? (
         <SignedOdontograms

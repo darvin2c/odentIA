@@ -324,10 +324,6 @@ export function HistoriaSkeleton({ placeLabel, canNote }: { placeLabel?: string;
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FixedTabs label="Filtrar historia clínica" options={HISTORY_FILTERS} />
-          <div className="flex flex-wrap items-center gap-2">
-            <FixedTabs label="Agrupar historia clínica" options={["Día", "Atención"]} />
-            <FixedTabs label="Orden de historia clínica" options={["Recientes", "Antiguos"]} />
-          </div>
         </div>
         {placeLabel ? (
           <div className="flex max-w-64 flex-col gap-2">

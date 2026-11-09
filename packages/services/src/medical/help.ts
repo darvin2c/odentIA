@@ -103,7 +103,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             q: faq.q,
-            a: "Clínica tiene cuatro secciones: Antecedentes, Signos vitales, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, descansos médicos, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
+            a: "Clínica tiene cuatro secciones: Antecedentes, Signos vitales, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, descansos médicos, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
           },
           {
             q: "¿Dónde registro los signos vitales y el examen físico?",

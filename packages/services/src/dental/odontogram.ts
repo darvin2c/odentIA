@@ -26,7 +26,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm"
 import { branchAddressColumns, branchAddressWriter } from "../branches.js"
 import { requireDraftLink } from "../clinical.js"
-import { resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
+import { diagnosisTitlesOf, namedDiagnosis, resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
 import { documentCheckUrl } from "../document-check.js"
 import { invalidField, notFound, ServiceError, validation } from "../errors.js"
 import { requirePatient } from "../patients.js"
@@ -356,7 +356,13 @@ export async function getOdontogram(tx: Db, orgId: string, patientId: string) {
     .from(odontogramEntry)
     .where(and(eq(odontogramEntry.patientId, patientId), eq(odontogramEntry.organizationId, orgId)))
     .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id))
-  const history = rows.map((row) => ({ ...row, status: projectedStatus(row) }))
+  // El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»): la lista de hallazgos de la ficha lo dice así.
+  const titles = await diagnosisTitlesOf(tx, rows.map((row) => ({ system: row.diagnosisSystem, code: row.diagnosisCode })))
+  const history = rows.map((row) => ({
+    ...row,
+    status: projectedStatus(row),
+    diagnosisName: row.diagnosisCode ? namedDiagnosis(titles, row.diagnosisSystem, row.diagnosisCode) : null,
+  }))
   // Activos: append-only, coexisten todas las condiciones registradas;
   // Excluye registros pendientes de revisión y correcciones vigentes.
   const candidates = rows.filter((row) => !row.needsReview && !isVoidedRow(row))
