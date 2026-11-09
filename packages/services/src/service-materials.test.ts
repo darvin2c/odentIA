@@ -379,6 +379,8 @@ it("con anestesia y sin sus antecedentes, el cierre lo dice; «niega» lo deja d
   const health = await f.run((tx) => markHealthDenied(tx, "org_a", f.actor, f.patient.id, ["conditions"]))
   expect(health.reviewStatus).toMatchObject({ conditions: "none", medications: "unknown" })
   expect(health.reviewedAt).toBeNull()
+  // Lo anotó el clínico: no es «declarado por el paciente», así que no queda por revisar (QA del 8 nov).
+  expect(health.reviewPending).toBe(false)
   const [denied] = await ownerDb
     .select({ actor: auditEvent.actorUserId, metadata: auditEvent.metadata })
     .from(auditEvent)
@@ -663,4 +665,19 @@ it("Clío: el material dicho se busca en Inventario y es el total de la atenció
     .where(and(eq(stockMovement.encounterId, f.encounter.id), eq(stockMovement.productId, mask.id)))
   expect(maskMoves.map((move) => move.reason)).toEqual([expect.stringMatching(/^Atención del .+ · lo que se dictó$/)])
   await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { clinicalAssistantEnabled: false }))
+})
+
+it("lo que declaró el paciente sigue por revisar aunque el clínico niegue otro grupo", async () => {
+  const f = await clinicalFixture()
+  // El paciente declaró sus antecedentes al registrarse (la auditoría lo dice así).
+  await ownerDb.insert(auditEvent).values({
+    organizationId: "org_a",
+    actorUserId: null,
+    action: "health.declared",
+    entity: "patient",
+    entityId: f.patient.id,
+  })
+  const health = await f.run((tx) => markHealthDenied(tx, "org_a", f.actor, f.patient.id, ["medications"]))
+  expect(health.reviewPending).toBe(true)
+  expect((await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))).reviewPending).toBe(true)
 })

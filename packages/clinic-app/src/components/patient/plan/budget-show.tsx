@@ -1,5 +1,9 @@
 import {
   Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -9,6 +13,7 @@ import {
 } from "@odentia/ui"
 import { SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
+import { ChevronDown } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { apiFetchBytes } from "../../../lib/api"
 import { budgetPdfUrl, deliverBudgetApi, PLAN_QUERY_KEYS } from "../../../lib/budgets"
@@ -27,11 +32,18 @@ export function BudgetShowActions({
   budgetId,
   patientName,
   beforeWrite,
+  menu = false,
 }: {
   patientId: string
   budgetId: string
   patientName: string
   beforeWrite: () => Promise<void>
+  /**
+   * En la atención, «Anotar su respuesta» es el botón principal y esto va en un
+   * menú «Mostrar · Imprimir · Enviar». Enviar abre lo mismo que se le muestra,
+   * con «Enviar» y a quién le llega, para ver antes qué recibe.
+   */
+  menu?: boolean
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -99,28 +111,53 @@ export function BudgetShowActions({
 
   return (
     <>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          className="min-h-11 sm:min-h-8"
-          onClick={() => setOpen(true)}
-        >
-          Mostrar a {firstName}
-        </Button>
-        {/* Lo que sigue a mostrárselo: anotar lo que respondió, sin imprimir ni enviar. */}
-        <AnswerInPersonButton patientId={patientId} budgetId={budgetId} beforeOpen={beforeWrite} />
-        <SubmitButton
-          type="button"
-          size="sm"
-          variant="outline"
-          className="min-h-11 sm:min-h-8"
-          pending={printing}
-          onClick={() => void print()}
-        >
-          Imprimir y entregar
-        </SubmitButton>
-      </div>
+      {menu ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" />
+            }
+          >
+            Mostrar · Imprimir · Enviar
+            <ChevronDown aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setOpen(true)}>Mostrar a {firstName}</DropdownMenuItem>
+            <DropdownMenuItem disabled={printing} onClick={() => void print()}>
+              Imprimir y entregar
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setOpen(true)}>Enviar…</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+      {menu ? null : (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="min-h-11 sm:min-h-8"
+            onClick={() => setOpen(true)}
+          >
+            Mostrar a {firstName}
+          </Button>
+          {/* Lo que sigue a mostrárselo: anotar lo que respondió, sin imprimir ni enviar. */}
+          <AnswerInPersonButton
+            patientId={patientId}
+            budgetId={budgetId}
+            beforeOpen={beforeWrite}
+          />
+          <SubmitButton
+            type="button"
+            size="sm"
+            variant="outline"
+            className="min-h-11 sm:min-h-8"
+            pending={printing}
+            onClick={() => void print()}
+          >
+            Imprimir y entregar
+          </SubmitButton>
+        </div>
+      )}
       {error && !open ? (
         <p role="alert" className="basis-full text-sm text-destructive">
           {error}

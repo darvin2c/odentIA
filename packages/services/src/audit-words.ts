@@ -263,6 +263,10 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "encounter.finalized": say("Firmó y cerró una atención"),
   "encounter.voided": say("Anuló una atención"),
   "encounter.taken_over": say("Tomó el relevo de una atención"),
+  "encounter.treatment_brought": say("Trajo a la atención un tratamiento por hacer"),
+  "encounter.treatment_left": say("Sacó de la atención un tratamiento que había traído"),
+  "encounter.visit_control": say("Dijo a qué control viene en una atención"),
+  "plan_item.removed_in_encounter": say("Quitó un tratamiento indicado en la misma atención"),
   "encounter.addendum_added": say("Añadió una adenda a una atención"),
   "encounter.diagnosis_added": say("Añadió un diagnóstico"),
   "encounter.diagnosis_status": say("Cambió el estado de un diagnóstico"),
@@ -326,7 +330,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "cash.egreso_recorded": say("Registró una salida de caja"),
   "cash.commission_returned": say("Registró en la caja la devolución de comisiones"),
   "charge.created": say("Registró un cargo"),
-  // El pedido (ADR 0168 y 0169).
+  // El pedido (ADR 0170 y 0171).
   "job_order.created": say("Registró un pedido"),
   "job_order.advanced": say("Marcó cómo va un pedido"),
   "job_order.voided": say("Anuló un pedido"),

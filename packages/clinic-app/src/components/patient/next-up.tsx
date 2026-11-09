@@ -4,8 +4,8 @@
  * sí («Qué sigue», «Próxima cita» y «Próximo control»), con dos «Reservar
  * cita» y un control sin motivo.
  *
- * - Arriba, su próxima cita como contexto (no es una tarea): las filas la nombran.
- * - Debajo, lo que sigue, en el orden y con las palabras del servidor
+ * - Su próxima cita va en la cabecera de la ficha (mesa del 9 nov): aquí no se repite.
+ * - Lo que sigue, en el orden y con las palabras del servidor
  *   (`/next-steps`, la regla de «Qué sigue»; el control vencido va primero).
  *   Cada fila con su botón, que actúa ahí mismo; el primero, destacado.
  *
@@ -15,11 +15,13 @@
 import { Button } from "@odentia/ui"
 import { SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
+import { TriangleAlert } from "lucide-react"
 import { useId } from "react"
+import { useScheduleNow } from "@odentia/ui-patterns"
 import { visitName } from "../../lib/agenda"
 import type { AgendaAppointment } from "../../lib/agenda"
 import { fetchPlanNextSteps } from "../../lib/budgets"
-import { appointmentLine, isInClinic } from "../../lib/patient-appointments"
+import { appointmentLine, isInClinic, nextAppointment, usePatientAppointments } from "../../lib/patient-appointments"
 import { QueryErrorState } from "../../lib/query-error"
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
 import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
@@ -35,7 +37,25 @@ export function usePlanNextSteps(patientId: string, enabled = true) {
   })
 }
 
-/** La próxima cita, como la lee la ficha; `null` si quien mira no ve la agenda. */
+/**
+ * La próxima cita, como la lee la ficha; `null` si quien mira no ve la agenda.
+ * La cabecera la dice y «Qué sigue» la usa para no repetir «Ver la cita»: las
+ * dos leen la misma consulta.
+ */
+export function usePersonUpcoming(patientId: string | null, canAppointments: boolean): UpcomingState | null {
+  const appointments = usePatientAppointments(patientId ?? "none", canAppointments && Boolean(patientId))
+  // El reloj de la Agenda: quien está en la sala sigue en la sala y su espera avanza.
+  const now = useScheduleNow()
+  if (!canAppointments) return null
+  return {
+    appointment: appointments.data ? nextAppointment(appointments.data.data, Date.parse(now)) : null,
+    loading: Boolean(patientId) && appointments.isPending,
+    failed: appointments.isError,
+    onRetry: () => void appointments.refetch(),
+    now,
+  }
+}
+
 export interface UpcomingState {
   appointment: AgendaAppointment | null
   loading: boolean
@@ -48,21 +68,20 @@ export interface UpcomingState {
 export function NextUpCard({
   patientId,
   patientName,
-  upcoming,
+  upcomingId,
 }: {
   patientId: string
   /** Para «Nueva cita»: la persona ya puesta. */
   patientName: string
-  upcoming: UpcomingState | null
+  /** La próxima cita, que ya está en la cabecera con su «Ver la cita». */
+  upcomingId?: string
 }): React.JSX.Element | null {
   const titleId = useId()
   const query = usePlanNextSteps(patientId)
   const steps = query.data?.data ?? []
   // «Ver la cita» de la próxima cita ya está arriba: la fila que diría lo mismo no lo repite.
   const shownAction = (step: (typeof steps)[number]) =>
-    step.action && !(step.action.appointmentId && step.action.appointmentId === upcoming?.appointment?.id) ? step.action : null
-  // Quien no ve la agenda (caja) y no tiene nada en el plan: la tarjeta no dice nada útil.
-  if (!upcoming && query.isSuccess && steps.length === 0) return null
+    step.action && !(step.action.appointmentId && step.action.appointmentId === upcomingId) ? step.action : null
   // Sin color ni botón destacado: el principal es el de la cabecera, y el primero de la
   // lista puede no estar disponible (enviar sin WhatsApp ni correo; segunda mesa del 8 nov).
   return (
@@ -74,7 +93,6 @@ export function NextUpCard({
             Qué sigue
           </h2>
         </div>
-        {upcoming ? <UpcomingLine {...upcoming} /> : null}
       </div>
       {query.isPending ? (
         <SkeletonRegion message="Consultando qué sigue…">
@@ -95,6 +113,7 @@ export function NextUpCard({
               <div className="min-w-0 flex-[1_1_16rem]">
                 <p className="text-sm font-medium">{step.text}</p>
                 {step.detail ? <p className="text-sm text-muted-foreground">{step.detail}</p> : null}
+                <StepNotice notice={step.notice} />
               </div>
               {shownAction(step) ? (
                 <NextStepButton
@@ -112,12 +131,23 @@ export function NextUpCard({
   )
 }
 
+/** Un aviso de la fila en su propio renglón, que se distingue sin frenar (segunda mesa del 9 nov). */
+export function StepNotice({ notice }: { notice?: string | null }): React.JSX.Element | null {
+  if (!notice) return null
+  return (
+    <p className="mt-1 flex items-start gap-1.5 text-sm text-warning">
+      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+      <span>{notice}</span>
+    </p>
+  )
+}
+
 /**
  * «Próxima cita: lun 9 nov 10:00 · Resina · Dra. Ríos · Por confirmar» con
  * «Ver la cita»; si está en la sala, su momento («Llegó 10:02 · espera 6 min»).
  * Sin cita, «Sin cita por venir»: reservar una cualquiera está en la cabecera.
  */
-function UpcomingLine({ appointment, loading, failed, onRetry, now }: UpcomingState): React.JSX.Element {
+export function UpcomingLine({ appointment, loading, failed, onRetry, now }: UpcomingState): React.JSX.Element {
   if (loading) return <p className="text-sm text-muted-foreground">Próxima cita: consultando…</p>
   if (failed)
     return (

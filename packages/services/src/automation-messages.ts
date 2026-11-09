@@ -531,7 +531,7 @@ export const DOCUMENT_READY_MESSAGE: MessageSpec = {
 }
 
 /**
- * «Pedido listo» (entrega 5 del plan de vistIA, ADR 0169): sale al marcar
+ * «Pedido listo» (entrega 5 del plan de vistIA, ADR 0171): sale al marcar
  * «Listo» un pedido, a quien recibe los avisos de la persona. Cada producto que
  * trabaja con pedidos dice lo suyo (vistIA: «Tus lentes ya están listos»). Es un
  * aviso de lo que pasó: solo lo frena «No quiero ningún mensaje». No dice cuánto
@@ -565,7 +565,7 @@ export function orderReadySubjectOf(product: ClinicalProduct): string {
   return ORDER_READY_BY_PRODUCT[product]?.subject ?? ORDER_READY_SUBJECT
 }
 
-/** Los mensajes que solo tiene el producto que trabaja con pedidos (ADR 0168): los demás no los piden ni los listan. */
+/** Los mensajes que solo tiene el producto que trabaja con pedidos (ADR 0170): los demás no los piden ni los listan. */
 export const ORDER_MESSAGE_KEYS: readonly string[] = [ORDER_READY_MESSAGE_KEY]
 
 /**

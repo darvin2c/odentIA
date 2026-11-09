@@ -46,7 +46,8 @@ import {
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
-import { dentalProductSite, siteColumns } from "./site.js"
+import { lesionRowsOf, treatedByItem } from "./lesion.js"
+import { dentalProductSite, dentalSiteOfRow, siteColumns, surfaceWords } from "./site.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
 /**
@@ -105,8 +106,10 @@ async function closingPeriodontalOf(
 
 /**
  * Hallazgos tratados al cerrar: cada indicación realizada en la atención que
- * nació de un hallazgo deja ese hallazgo como tratado (sigue en la historia,
- * pero ya no es un problema por tratar).
+ * nació de un hallazgo deja esa lesión como tratada (sigue en la historia,
+ * pero ya no es un problema por tratar). Una caries de dos caras es una
+ * lesión: se tratan sus caras juntas, o solo las que cubre una resina
+ * (`treatedByItem`).
  */
 async function resolveTreatedFindings(
   tx: Db,
@@ -117,7 +120,13 @@ async function resolveTreatedFindings(
   at: Date,
 ): Promise<void> {
   const items = await tx
-    .select({ id: treatmentPlanItem.id, entryId: planItemFinding.odontogramEntryId })
+    .select({
+      id: treatmentPlanItem.id,
+      entryId: planItemFinding.odontogramEntryId,
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
+      siteQualifiers: treatmentPlanItem.siteQualifiers,
+    })
     .from(encounterPlanItem)
     .innerJoin(treatmentPlanItem, eq(treatmentPlanItem.id, encounterPlanItem.planItemId))
     .innerJoin(planItemFinding, eq(planItemFinding.planItemId, treatmentPlanItem.id))
@@ -130,12 +139,16 @@ async function resolveTreatedFindings(
       ),
     )
   for (const item of items) {
-    const [resolved] = await tx
+    const lesion = await lesionRowsOf(tx, orgId, item.entryId)
+    const rows = treatedByItem(lesion, item.entryId, dentalSiteOfRow(item).surfaces)
+    const open = rows.filter((row) => row.resolvedAt === null).map((row) => row.id)
+    if (open.length === 0) continue
+    const resolved = await tx
       .update(odontogramEntry)
       .set({ resolvedAt: at, resolvedBy: actorUserId, resolvedByPlanItemId: item.id })
       .where(
         and(
-          eq(odontogramEntry.id, item.entryId),
+          inArray(odontogramEntry.id, open),
           eq(odontogramEntry.organizationId, orgId),
           eq(odontogramEntry.patientId, patientId),
           isNull(odontogramEntry.resolvedAt),
@@ -143,13 +156,13 @@ async function resolveTreatedFindings(
         ),
       )
       .returning({ id: odontogramEntry.id })
-    if (resolved)
+    for (const entry of resolved)
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId,
         action: "odontogram.entry_resolved",
         entity: "odontogram_entry",
-        entityId: resolved.id,
+        entityId: entry.id,
         metadata: { patientId, encounterId, planItemId: item.id },
       })
   }
@@ -299,7 +312,7 @@ export const dentalHooks: ProductHooks = {
   async recordSections(tx, { orgId, patientId }) {
     const lines = (await odontogramLines(tx, orgId, patientId)).map(
       (t) =>
-        `Pieza ${t.tooth}: ${t.label}${t.surfaces.length ? ` (${t.surfaces.join(", ")})` : ""}`,
+        `Pieza ${t.tooth}: ${t.label}${t.surfaces.length ? ` (${surfaceWords(t.surfaces)})` : ""}`,
     )
     return [{ title: "Odontograma vigente", lines, empty: "Sin hallazgos registrados." }]
   },

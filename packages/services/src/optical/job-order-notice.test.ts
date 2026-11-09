@@ -19,7 +19,7 @@ import { insertTestPatients } from "../test-patient.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "../test-setup.js"
 
 /**
- * «Tus lentes están listos» (entrega 5 del plan de vistIA, ADR 0169): sale al
+ * «Tus lentes están listos» (entrega 5 del plan de vistIA, ADR 0171): sale al
  * marcar «Listo», por la plantilla aprobada, la respuesta dentro de las 24 horas
  * o el correo; el pedido dice si salió o por qué no, y un aviso dudoso no se
  * reenvía a ciegas. Sin proveedor real: «aprobada» es la que declara la conexión.

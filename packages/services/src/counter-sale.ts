@@ -1,5 +1,5 @@
 /**
- * Venta de mostrador (ADR 0170): productos del inventario que se cobran sin
+ * Venta de mostrador (ADR 0172): productos del inventario que se cobran sin
  * ficha —unos lentes de sol, unas gotas, un cepillo—, a un contacto elegido, a
  * un nombre escrito o a nadie. No abre una historia ni toca la cuenta de nadie.
  *

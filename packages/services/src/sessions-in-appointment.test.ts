@@ -227,6 +227,7 @@ it("D4: el cierre pregunta por lo trabajado hoy; a mitad no cierra nada, «Falta
     finishing: [],
     continuing: [{ planItemId: item.id, title: "Tratamiento propio", n: 1, m: 2 }],
     notRegistered: [],
+    accepted: [],
   })
   // Lo que no se trabajó en esta atención no se responde.
   await expect(
@@ -311,6 +312,7 @@ it("D4: si la cita traía el tratamiento y no se registró su sesión, el cierre
     finishing: [],
     continuing: [],
     notRegistered: [{ planItemId: item.id, title: "Tratamiento propio", n: 1, m: 2 }],
+    accepted: [],
   })
   // Registrada la sesión, ya no es un aviso: sigue en curso.
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, today, { planItemId: item.id }))
@@ -389,4 +391,27 @@ it("X1: si lo que se termina al firmar no se puede terminar, la firma sigue, que
   expect(closed.keptOpen).toEqual([{ planItemId: resin.id, title: "Tratamiento propio", reason: expect.any(String) }])
   const [after] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, resin.id))
   expect(after).toMatchObject({ status: "en_curso" })
+})
+
+it("una cita de un día anterior que nadie cerró ya no cuenta como sesión reservada; la de hoy, sí", async () => {
+  const f = await clinicalFixture()
+  const item = await acceptedTreatment(f, 2)
+  const { book } = await agenda(f)
+  const appointment = await book(1, { planItemIds: [item.id] })
+  const counts = async () => (await f.run((tx) => sessionCountsOf(tx, "org_a", [item.id]))).get(item.id)
+  const coordination = async () =>
+    (await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))).treatments.find((row) => row.id === item.id)
+  expect(await counts()).toEqual({ done: 0, booked: 1 })
+
+  // La persona llegó hace dos días y la atención quedó abierta, sin registrar la sesión ni marcarla atendida.
+  await ownerDb.execute(sql`update appointment set status = 'confirmada', starts_at = now() - interval '2 days',
+    ends_at = now() - interval '2 days' + interval '30 minutes', arrived_at = now() - interval '2 days', arrived_by = ${f.actor} where id = ${appointment.id}`)
+  await ownerDb.update(encounter).set({ appointmentId: appointment.id }).where(eq(encounter.id, f.encounter.id))
+  expect(await counts()).toEqual({ done: 0, booked: 0 })
+  expect(await coordination()).toMatchObject({ sessionsLeft: 2, nextSession: { n: 1, m: 2 } })
+
+  // Hoy, mientras se atiende, sí es la sesión que ocurre.
+  await ownerDb.execute(sql`update appointment set starts_at = now() - interval '5 minutes',
+    ends_at = now() + interval '25 minutes', arrived_at = now() - interval '6 minutes' where id = ${appointment.id}`)
+  expect(await counts()).toEqual({ done: 0, booked: 1 })
 })

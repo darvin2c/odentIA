@@ -323,8 +323,10 @@ function InventoryWorkspace() {
               onClose={() => setPurchase(null)}
               onSaved={(order, pay) => {
                 setPurchase(null)
-                open.order(order.id)
+                // Un solo cajón de pago a la vez: el detalle de la compra se abre al cerrarlo, no debajo
+                // (el detalle tiene su propio cajón de pago; QA de Gastos, G22).
                 if (pay && hasPrices(order)) setPaying(order)
+                else open.order(order.id)
               }}
             />
           </InventoryProvider>
@@ -338,7 +340,18 @@ function InventoryWorkspace() {
         {supplierForm ? (
           <SupplierFormDrawer key={supplierForm.seq} supplier={supplierForm.supplier} onSaved={supplierForm.onSaved} onClose={() => setSupplierForm(null)} />
         ) : null}
-        {paying ? <PurchasePaymentDrawer order={paying} locale={scope.locale} timeZone={scope.timeZone} open onClose={() => setPaying(null)} /> : null}
+        {paying ? (
+          <PurchasePaymentDrawer
+            order={paying}
+            locale={scope.locale}
+            timeZone={scope.timeZone}
+            open
+            onClose={() => {
+              setPaying(null)
+              open.order(paying.id)
+            }}
+          />
+        ) : null}
       </PageShell>
     </InventoryProvider>
   )

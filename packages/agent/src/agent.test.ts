@@ -2367,7 +2367,7 @@ it("la ficha de Recepción declara exactamente las herramientas que el agente ti
   // herramienta que no existe, rompe esta igualdad.
   const ficha = AGENT_ROLES.recepcion
   const declared = [...new Set([...ficha.always, ...ficha.functions.flatMap((fn) => fn.tools)])]
-  // Las de todos los productos: `ver_pedidos` solo existe donde se trabaja con pedidos (ADR 0169).
+  // Las de todos los productos: `ver_pedidos` solo existe donde se trabaja con pedidos (ADR 0171).
   const products: Record<Parameters<typeof agentTextsFor>[0], true> = { dental: true, medical: true, optical: true }
   const tools = new Set((Object.keys(products) as Array<keyof typeof products>).flatMap((product) => makeAgentTools({ ...ctx, texts: agentTextsFor(product) }).map((tool) => tool.name)))
   expect([...tools].sort()).toEqual(declared.sort())

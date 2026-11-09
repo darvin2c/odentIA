@@ -11,7 +11,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { createFinanceRoute } from "./finance.js"
 import type { CrmDeps } from "./helpers.js"
 
-// La venta de mostrador por la API real con PostgreSQL efímero (ADR 0170): la
+// La venta de mostrador por la API real con PostgreSQL efímero (ADR 0172): la
 // vende quien cobra (`finance.write`), con el cuerpo exacto; recepción y quien
 // atiende no la ven; su ticket se abre, se imprime y se anula sin ficha.
 

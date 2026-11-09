@@ -51,7 +51,7 @@ function render(row: CollectTicketRow): string {
   )
 }
 
-// Venta de mostrador (ADR 0170): el ticket no es de una ficha y lo dice.
+// Venta de mostrador (ADR 0172): el ticket no es de una ficha y lo dice.
 describe("el ticket de una venta de mostrador", () => {
   it("sin nombre dice «Venta de mostrador», no «Paciente», y no se envía", () => {
     const page = render(ticket({}))

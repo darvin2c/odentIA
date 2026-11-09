@@ -33,6 +33,11 @@ export interface HelpTopic {
    * («Mis honorarios» del profesional, en el tema de Comisiones que también es de administración).
    */
   menuLabel?: string
+  /**
+   * Cómo se nombra una página de una sola cosa de esta lista (`/people/<id>`): «la ficha de una
+   * persona», no «Pacientes» (QA de la ficha del 9 nov).
+   */
+  itemLabel?: string
   /** Sección del menú o de Configuración donde está. */
   parent: string | null
   /** Para qué sirve, en una o dos frases. */
@@ -51,7 +56,7 @@ const INTEGRATIONS = `${SETTINGS} › Integraciones`
 
 /**
  * Pantallas comunes que solo muestra el producto que las declara (los pedidos:
- * `productUi().orders`, ADR 0168): están en las rutas de todas las apps, pero su
+ * `productUi().orders`, ADR 0170): están en las rutas de todas las apps, pero su
  * tema lo pone la guía de ese producto, y las demás no las nombran.
  */
 export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
@@ -381,9 +386,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/people",
     alsoAt: ["/patients", "/contacts"],
     title: "Pacientes",
+    itemLabel: "la ficha de una persona",
     parent: "Personas",
     purpose:
-      "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, conversaciones, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver.",
+      "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver. Arriba, en todas las pestañas, sus alergias (o si niega o no se le preguntó), su próxima cita si ves la agenda y lo que debe o tiene a favor si ves la caja; si lees la historia, también sus enfermedades y lo que toma. Sus conversaciones y oportunidades están en su Resumen.",
     terms: [
       "historia clínica",
       "ficha",
@@ -440,8 +446,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
       },
       {
-        q: "¿Qué significa «Faltan datos para atenderla»?",
-        a: "Que le falta algo de lo necesario para atenderla (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla por ella) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes. «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
+        q: "¿Puedo registrar a un menor si su madre o su padre no trae su documento?",
+        a: "Sí. Desde la página de quien lo trae, en Datos › Familia y responsables, «Registrar a alguien a su cargo»: queda como su responsable y su documento es opcional. Si no lo trae, regístralo igual; se le pide cuando firme un consentimiento por el menor, en la misma pantalla de la firma. Sus datos y su salud los completa su responsable en su celular o tú en ese momento.",
+        forms: ["menor sin dni de la madre", "registrar a un hijo sin documento", "no trae su dni", "registrar un menor"],
+      },
+      {
+        q: "¿Qué significa «Faltan datos para la atención»?",
+        a: "Que le falta algo de lo necesario para atenderla o atenderlo (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla en su nombre) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes; sin su sexo registrado se dice «para la atención». «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
       },
       {
         q: "¿Por qué el documento, el seguro y la dirección cambian según la clínica?",
@@ -449,7 +460,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedaron los contactos?",
-        a: "En Pacientes: elige «Contactos nuevos» para quienes escribieron y aún no son pacientes, o «Todos». Quien habla por un paciente se ve en su página, en «Personas vinculadas». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes.",
+        a: "En Pacientes: elige «Contactos nuevos» para quienes escribieron y aún no son pacientes, o «Todos». Quien habla por un paciente se ve en su página, en Datos › «Familia y responsables». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes.",
       },
       {
         q: "¿Qué mensajes le podemos enviar sin preguntarle?",
@@ -460,8 +471,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Porque ese número está en sus datos pero nadie lo marcó como su WhatsApp, así que no le llegan los recordatorios por ahí. Si sabes que lo usa, pulsa «Usarlo como su WhatsApp». Si dice «Este número no tiene WhatsApp», WhatsApp rechazó un mensaje: los recordatorios le llegan por correo o «Te espera» te pide llamarla. Si alguien escribe desde el teléfono de una ficha, la conversación pregunta «¿Es la misma persona?»: nunca se une sola.",
       },
       {
+        q: "¿Por qué el Resumen dice «Su WhatsApp es otro» debajo de su teléfono?",
+        a: "Porque su WhatsApp es un número distinto del de «Teléfono», por ejemplo si cambió de número: el Resumen dice «· WhatsApp» solo junto al número que de verdad es su WhatsApp, y si es otro, dice cuál. Al escribir un teléfono de otro país, empieza con «+» y su prefijo (+44…): el país cambia solo. También puedes buscar el país en la lista por su nombre o su prefijo.",
+      },
+      {
         q: "¿Dónde anoto su contacto de emergencia?",
-        a: "En su página › Datos › Personas vinculadas: vincula a la persona (o elígela si ya está) y marca «Contacto de emergencia», con su parentesco. Si la persona aún no existe, se crea en el mismo paso.",
+        a: "En su página › Datos › Familia y responsables: vincula a la persona (o elígela si ya está) y marca «Contacto de emergencia», con su parentesco. Si la persona aún no existe, se crea en el mismo paso.",
       },
       {
         q: "¿Cómo anoto que no quiere recordatorios?",
@@ -489,7 +504,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
-        a: "En el Resumen de su página, en «Qué sigue»: arriba su próxima cita (si ya llegó, dice que está en la sala de espera) y debajo, en una sola lista, todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. El control vencido va primero. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias y alertas y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles.",
+        a: "Su próxima cita está arriba de su página, en todas las pestañas (si ya llegó, dice que está en la sala de espera). En el Resumen, «Qué sigue» dice en una sola lista todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. Si una cita suya de otro día quedó sin cerrar, va primero con «¿Vino?», que abre la cita para registrar la atención o marcar que no vino; y si una cita que llevaba lo aceptado se atendió sin registrar lo que se hizo, la fila de lo aceptado lo dice, para preguntarle a quien atendió antes de reservar. El Plan muestra la misma lista y la lista de Pacientes dice su primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles, y donde falta reservar una cita dice que la reserva recepción.",
       },
       {
         q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",
@@ -497,20 +512,29 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
-        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
+        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
-        a: "Con sus sesiones previstas en el Plan, por ejemplo una corona en dos: al indicarlo nace con las sesiones habituales de su servicio, y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento, su servicio y quien atendió ya elegido, sin salir de la atención; si no tiene horario en la sede o no está en la especialidad del servicio, lo dice ahí y se le reserva igual o eliges a otra persona. Al reservar dice cuándo vuelve y con quién. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo aceptado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
-        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones", "se termino y faltaba otra sesion", "reabrir un tratamiento"],
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una corona en dos: al indicarlo nace con las sesiones habituales de su servicio, y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. Si vuelve sin cita, arriba de la atención «Hoy viene a…» lo dice con su sesión (por ejemplo, la endodoncia de la 46 en su sesión 2 de 2) y «Continuar hoy» lo trae, con el motivo y el diagnóstico que sigue si faltan; nada se da por hecho hasta registrar su procedimiento. En «Realizado hoy» dice en qué sesión va y «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Si lo indicas desde la pieza del odontograma, el panel también pide «Sesiones previstas» con las habituales del servicio. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» diciendo en qué sesión va, con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si su tratamiento resuelve un diagnóstico de esa pieza (la pulpitis de la 46 con su endodoncia), el cierre lo propone marcado como resuelto: desmárcalo si sigue activo. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento, su servicio y quien atendió ya elegido, sin salir de la atención; si no tiene horario en la sede o no está en la especialidad del servicio, lo dice ahí y se le reserva igual o eliges a otra persona. Al reservar dice cuándo vuelve y con quién. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo aceptado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Realizado hoy». Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        forms: [
+          "endodoncia en dos sesiones",
+          "segunda sesion",
+          "sesion 2 de 2",
+          "completar tratamiento",
+          "no me deja completar",
+          "tratamiento por sesiones",
+          "se termino y faltaba otra sesion",
+          "reabrir un tratamiento",
+        ],
       },
       {
         q: "¿La atención queda unida a su cita?",
-        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y su control, hecho. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: el motivo se escribe dentro, en «Consulta», y lo pide el cierre.",
+        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y su control, hecho. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: arriba, «Hoy viene a…» dice lo que tiene por hacer (un tratamiento en curso, un control por cumplir) para elegirlo con un toque, o «Es una urgencia»; el motivo se escribe en «Consulta» y lo pide el cierre.",
       },
       {
         q: "¿Dónde registro un hallazgo del odontograma?",
-        a: "Dentro de la atención, en su bloque Odontograma: eliges la pieza y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
+        a: "Dentro de la atención, en el Odontograma, que siempre está a la vista con lo registrado hoy debajo (una caries de varias caras es un solo hallazgo; en la ficha, bajo el dibujo, está la lista de todo lo que tiene la boca, y tocar un renglón abre esa pieza): eliges la pieza y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
       },
       {
         q: "¿Por qué la pieza quedó dibujada después del tratamiento?",
@@ -542,15 +566,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
-        a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
+        a: "Porque hoy haces un servicio (lo registraste, o lo trajo su cita o «Hacerla hoy») para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo indicado para otro día no lo pide: se firma el día que se hace (si lo quieres firmar hoy, «Nuevo» › Consentimiento). Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
       },
       {
         q: "¿Cómo dejo dicho cuándo vuelve?",
-        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Plan y controles». Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine.",
+        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso y «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte; «Indicar también un control» lo pide igual.",
       },
       {
         q: "¿Cuándo queda hecho un control si vino por otra cosa?",
-        a: "Cualquier atención desde unos días antes de su fecha le sirve, aunque la cita no fuera la del control: al firmar, el cierre muestra su control como casilla, marcada solo si lo indicaste tú. Desmárcala antes de firmar si esta visita no lo cumple y sigue pendiente. Si se cumplió por error, indica otro control.",
+        a: "Cualquier atención desde unos días antes de su fecha le sirve, aunque la cita no fuera la del control: arriba de la atención, «Hoy viene a…» lo muestra con «Viene a su control»: tócalo y el cierre lo trae marcado, aunque lo haya indicado otro doctor. Al firmar, el cierre muestra su control como casilla, marcada si lo indicaste tú o si dijiste que viene a él. Desmárcala antes de firmar si esta visita no lo cumple y sigue pendiente. Si se cumplió por error, indica otro control.",
       },
       {
         q: "¿Puedo cerrar sin el consentimiento firmado?",
@@ -577,7 +601,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde está el plan de tratamiento?",
-        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (lo próximo que hay que hacer, con su botón), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles con «Reservar» (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
+        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (la misma lista del Resumen, cada fila con su botón: lo aceptado y los controles se reservan ahí, en un solo lugar), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles («Reservar» solo en el que no está ya en «Qué sigue») (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
       },
       {
         q: "¿Cómo se arma y se envía el presupuesto?",
@@ -615,7 +639,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después que eligió la opción A, con lo que cuesta esa opción. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
       },
       {
         q: "¿Puedo anular una atención si ya preparé su presupuesto?",
@@ -624,12 +648,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Se guarda lo que escribo en la atención?",
-        a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». «Listo» guarda lo último y cierra el bloque; si no se pudo guardar, el bloque sigue abierto y dice por qué. Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
+        a: "Sí, solo, mientras escribes: todo se escribe en la misma página, sin abrir nada, y arriba dice «Guardado» con la hora o «Guardando…». Si no se pudo guardar, el aviso dice por qué, con «Reintentar». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
       },
       {
         q: "¿Qué va en cada campo de «Consulta»?",
-        a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos. Si viene de una cita, abajo del motivo se ve para qué se agendó: lo que se escribió al reservarla o, si no se escribió nada, el control o el tratamiento que continúa. Si la cita ya dice a qué viene, aparece «De la cita» con «Usar»: lo toma si es lo que trae; si escribes o dictas otro, queda ese.",
-        forms: ["que va en el motivo de consulta", "que pongo en enfermedad actual", "que va en el relato de la enfermedad", "tiempo de enfermedad"],
+        a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos. Arriba de la atención, «Hoy viene a…» dice para qué viene: lo que se escribió al reservar su cita («Su cita: …» con «Usar como motivo»), el tratamiento que continúa o el control que le toca; elegirlo pone el motivo si está vacío. Si escribes o dictas otro, queda ese. «+ Relato de la enfermedad» abre el relato debajo del motivo.",
+        forms: [
+          "que va en el motivo de consulta",
+          "que pongo en enfermedad actual",
+          "que va en el relato de la enfermedad",
+          "tiempo de enfermedad",
+        ],
       },
       {
         q: "¿Cómo atiendo a un paciente?",
@@ -650,8 +679,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dicto una atención?",
-        a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
-        forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],
+        a: "Dentro de la atención, pulsa «Dictar», arriba junto a «Antecedentes y última atención», y habla: Clío ordena lo que dices en sugerencias dentro de cada parte, y tú las confirmas o firmas. Al lado, «¿Qué puedo decir?» muestra ejemplos (la primera vez se abre solo) y «Escribir en vez de dictar». Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
+        forms: [
+          "como uso el dictado",
+          "dictado",
+          "dictar",
+          "como funciona clio",
+          "como funciona el dictado",
+        ],
         general: true,
       },
       {
@@ -661,7 +696,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo borro a un paciente?",
-        a: "Normalmente se archiva. Borrar de verdad es de Administración y responde a un pedido: en su página, Datos › «Pedidos sobre sus datos», «Revisar y borrar…» dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y se confirma escribiendo BORRAR.",
+        a: "Normalmente se archiva. Borrar de verdad es de Administración y responde a un pedido: en su página, Datos › «Privacidad y pedidos», «Revisar y borrar…» dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y se confirma escribiendo BORRAR.",
         forms: ["quiero borrar a un paciente", "como elimino a un paciente", "eliminar paciente", "borrar paciente"],
       },
       {
@@ -983,14 +1018,29 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. Lo que se le devolvió de lo que tenía a favor sale en su cuenta, debajo del cobro de donde salió, con cuánto, cuándo y por qué. «Aplicar lo que tiene a favor» te dice el importe y la sede antes de hacerlo; al confirmar cancela la deuda y deja el movimiento registrado, sin dinero nuevo. Si no alcanza, te dice lo que falta.",
       },
       {
+        q: "¿Cuánto le falta pagar de su tratamiento?",
+        a: "En su página › Cobros, «Tratamiento aceptado» dice por cada presupuesto aceptado lo aceptado, lo que pagó y lo que falta, cada moneda en su renglón (soles y dólares no se suman). Lo que falta incluye lo que todavía no se cobra porque aún no se hace. Si además tiene algo a favor sin tratamiento, se dice debajo: se usa en su próximo cobro. Lo ven caja, la dueña y la administración.",
+        forms: ["cuanto le falta pagar", "cuanto me falta en total", "total del tratamiento", "cuanto debe del tratamiento", "cuanto pago del presupuesto"],
+      },
+      {
+        q: "¿Cómo cobro un adelanto para un tratamiento?",
+        a: "En su página › Cobros, en «Tratamiento aceptado», «Cobrar un adelanto» abre el cobro con «Para» ya elegido; también puedes elegirlo al cobrar un adelanto. Ese dinero queda pagado en ese tratamiento: no queda suelto a favor ni se usa en otro cobro, y al hacerlo se cobra solo lo que falta. Se paga en la moneda del tratamiento. Con «Lo próximo que pague» queda a favor, como siempre. Lo que se cobra por sesión no se adelanta así: queda a favor y cancela la visita al cobrarla.",
+        forms: ["adelanto para la corona", "adelanto para un tratamiento", "deja un adelanto", "pago a cuenta del tratamiento", "adelanto del presupuesto", "dejo plata para su tratamiento"],
+      },
+      {
         q: "¿Cómo dejo el alquiler o los sueldos de cada mes?",
-        a: "Al registrar el gasto, marca «Se repite» y di si ya se pagó: con «Todavía no» se anota sin registrar ningún pago y queda «por pagar». Elige cada cuánto (cada mes, cada 6 meses o cada año), el día, si es el pago de este mes o del anterior, y si se paga en ese mes o al mes siguiente (el sueldo de noviembre que se paga el 2 de diciembre), para que no salga vencido antes de tiempo. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo; «Lo que se repite» lista todo, también lo que no toca este mes. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ve también caja, que lo paga. Para cambiar la persona, deja de repetirlo y anota otro. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
+        a: "Al registrar el gasto, marca «Se repite» y di si ya se pagó: con «Todavía no» se anota sin registrar ningún pago y queda «por pagar». Elige cada cuánto (cada mes, cada 6 meses o cada año), el día, si es el pago de este mes o del anterior, y si se paga en ese mes o al mes siguiente (el sueldo de noviembre que se paga el 2 de diciembre), para que no salga vencido antes de tiempo. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo: deja de repetirse desde el mes que viene, y lo vencido y lo de este mes siguen por pagar (si este mes no hubo, márcalo «No hubo este mes»). «Lo que se repite» lista todo, también lo que no toca este mes. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ven, pagan y cambian solo quienes administran las comisiones; caja y los demás ven «Sueldos» en una sola fila, sin nombres, y el pago sale en Caja como «Pago de sueldo». Para cambiar la persona, deja de repetirlo y anota otro. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
         forms: ["gasto fijo", "gastos fijos", "pago mensual", "alquiler cada mes", "sueldo de la recepcionista", "gasto que se repite", "gasto recurrente"],
       },
       {
         q: "¿Por qué en Gastos sale «Pago de comisiones» sin decir a quién?",
         a: "Porque la comisión de cada profesional solo la ve quien administra las comisiones. Los demás ven en Gastos una sola fila por sede con el total pagado en comisiones ese mes: suma igual que antes, pero no dice a quién se pagó. Quien administra ve cada pago con «Ver el pago», que lo lleva a Comisiones; el pago de una comisión se anula allí, no en Gastos.",
         forms: ["pago de comisiones en gastos", "por que no veo a quien se pago la comision", "anular el gasto de una comision"],
+      },
+      {
+        q: "¿Por qué el pago del impuesto de lo cobrado no suma en «Gastado»?",
+        a: "Porque no es un gasto: ese impuesto (el IGV en el Perú) ya salió de lo cobrado, y la clínica solo lo entrega. Al registrarlo con el tipo «Impuestos» queda en la lista con la marca «No suma», y debajo de «Gastado» se dice cuánto fue. Así Gastos y Reportes dicen lo mismo del mes. Los otros impuestos (renta, municipales) sí son gastos y suman.",
+        forms: ["el igv no suma en gastos", "por que gastos no cuenta el igv", "gastado no coincide con reportes", "pague el igv y no aparece en el total"],
       },
       {
         q: "¿Anulo el ticket o hago una devolución?",
@@ -1642,7 +1692,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Registro de pacientes",
     parent: SETTINGS,
     purpose:
-      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para atenderla».",
+      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
     terms: [
       "formulario de registro",
       "enlace de registro",

@@ -9,6 +9,7 @@
  */
 import {
   formatMoney,
+  ticketCreditSummary,
   ticketFooterLines,
   type TicketTender,
   ticketTenderTitle,
@@ -72,7 +73,7 @@ export interface TicketSnapshot {
   voidReason: string | null
   /**
    * Cómo se dice a quién es: «Paciente», «Cliente» (una venta de mostrador a
-   * alguien) o nulo, una venta de mostrador sin nombre (ADR 0170).
+   * alguien) o nulo, una venta de mostrador sin nombre (ADR 0172).
    */
   partyLabel: "Paciente" | "Cliente" | null
   /** El paciente, quien compró en el mostrador o «Venta de mostrador». */
@@ -113,7 +114,7 @@ export interface TicketSnapshot {
 export async function buildTicketSnapshot(
   tx: Db,
   orgId: string,
-  /** Nulo: el ticket de una venta de mostrador (ADR 0170). */
+  /** Nulo: el ticket de una venta de mostrador (ADR 0172). */
   patientId: string | null,
   documentId: string,
 ): Promise<TicketSnapshot> {
@@ -214,6 +215,19 @@ function thermalRule(kit: DocumentKit) {
 }
 
 function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
+  // Con saldo a favor: la suma de las líneas, lo que se restó y lo pagado hoy, para que
+  // cuadre a la vista (QA del 9 nov). Solo presentación: lo congelado no cambia.
+  const credit = ticketCreditSummary({
+    lineCents: snap.lines.map((line) => line.amountCents),
+    advanceCents: snap.advanceCents,
+    creditAppliedCents: snap.creditAppliedCents,
+    totalCents: snap.totalCents,
+  })
+  if (credit) {
+    // Con una sola línea, la suma es esa línea: no se repite.
+    if (snap.lines.length + (snap.advanceCents ? 1 : 0) > 1) moneyRow(kit, "Suma", money(credit.sumCents))
+    moneyRow(kit, "Saldo a favor usado", `−${money(credit.creditCents)}`)
+  }
   if (snap.taxes) {
     // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa.
     moneyRow(kit, "Subtotal", money(snap.taxes.subtotalCents))
@@ -224,11 +238,11 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
   }
   if (kit.thermal) {
     kit.gap(2)
-    kit.total("TOTAL", money(snap.totalCents))
+    kit.total(credit ? "PAGADO HOY" : "TOTAL", money(snap.totalCents))
   } else {
     kit.gap(4)
     kit.rule({ tone: "ink" })
-    kit.total({ text: "Total", face: "sansSemi" }, money(snap.totalCents), { before: 5 })
+    kit.total({ text: credit ? "Pagado hoy" : "Total", face: "sansSemi" }, money(snap.totalCents), { before: 5 })
   }
 }
 
@@ -245,8 +259,6 @@ function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) 
     )
     if (method.reference) smallNote(kit, `Operación ${method.reference}`)
   }
-  if (snap.creditAppliedCents > 0)
-    moneyRow(kit, "Saldo a favor usado", money(snap.creditAppliedCents))
   if (snap.cashReceivedCents != null) moneyRow(kit, "Recibido", paid(snap.cashReceivedCents))
   if (snap.changeCents != null && snap.changeCents > 0)
     moneyRow(
@@ -289,7 +301,7 @@ function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number
 
 /**
  * A quién es, en el rollo: «Paciente: …», «Cliente: …» o, en una venta de
- * mostrador sin nombre, «Venta de mostrador» solo (ADR 0170).
+ * mostrador sin nombre, «Venta de mostrador» solo (ADR 0172).
  */
 function partyLine(kit: DocumentKit, label: "Paciente" | "Cliente" | null, name: string) {
   kit.text(label ? [{ text: `${label}: `, face: "sansSemi" }, name] : [{ text: name, face: "sansSemi" }], {
@@ -539,7 +551,7 @@ export async function getRefundReceiptPdf(
 export async function renderReturnPdf(
   tx: Db,
   orgId: string,
-  /** Nulo: la devolución de una venta de mostrador (ADR 0170). */
+  /** Nulo: la devolución de una venta de mostrador (ADR 0172). */
   patientId: string | null,
   returnId: string,
   paper?: string | null,

@@ -269,7 +269,7 @@ export function MessagePermissionsSection({
         </div>
       ) : null}
       <p className="text-muted-foreground">
-        Se le escribe por WhatsApp o, si no tiene, por correo. Puede elegirlos ella misma desde su enlace o desde cualquier
+        Se le escribe por WhatsApp o, si no tiene, por correo. Puede elegirlos por su cuenta desde su enlace o desde cualquier
         mensaje.
       </p>
       <ConfirmDialog

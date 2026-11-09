@@ -126,7 +126,7 @@ export type SearchOwnerKind =
   | "respuesta"
   | "gasto"
   | "tarea"
-  /** El ticket de una venta de mostrador (ADR 0170): no es de nadie, es su propia fila. */
+  /** El ticket de una venta de mostrador (ADR 0172): no es de nadie, es su propia fila. */
   | "comprobante"
 
 export interface SearchOwner {
@@ -253,7 +253,10 @@ export async function searchEverything(
         and (${personSearchCondition(q, { displayName: sql`c.display_name`, phone: sql`c.phone`, email: sql`c.email`, docNumber: sql`c.doc_number`, contactId: sql`c.id` })}
           ${record == null ? sql`` : sql`or p.patient_number = ${record}`})
       order by ${record == null ? sql`` : sql`(p.patient_number = ${record}) desc nulls last,`}
-        ${foldedStartsWith(sql`c.display_name`, q)} desc, c.display_name, c.id
+        ${foldedStartsWith(sql`c.display_name`, q)} desc,
+        -- A igual coincidencia, el paciente antes que un homónimo que aún no lo es: Enter abre
+        -- el primero, y anotar en la ficha de otra persona es un error de datos (QA del 9 nov).
+        (p.id is not null) desc, c.display_name, c.id
       limit ${PER_TYPE}`)
     matchedPeople.push(...found)
   }
@@ -492,7 +495,7 @@ export async function searchEverything(
       order by at desc limit ${PER_TYPE}`)
     for (const row of budgets) addToPerson(String(row.person_id), budgetItem(row, true))
   }
-  // Una venta de mostrador (ADR 0170) no es de ninguna ficha: se busca por su número o por quien
+  // Una venta de mostrador (ADR 0172) no es de ninguna ficha: se busca por su número o por quien
   // compró (el contacto elegido o el nombre escrito) y es su propia fila, abierta en Cobros.
   const counterTickets =
     can("finance.read") && on("dinero") && (docNumber != null || !digits)
@@ -554,8 +557,9 @@ export async function searchEverything(
       left join supplier s on s.organization_id = po.organization_id and s.id = po.supplier_id
       where e.organization_id = ${orgId} and e.voided_at is null
         and ${foldedWordsMatch([sql`e.concept`, sql`e.category`, sql`e.notes`, sql`s.name`], q)}
-        -- El pago de una comisión dice a quién y cuánto: solo lo encuentra quien administra comisiones.
-        ${seesAllCommissions ? sql`` : sql`and not exists (select 1 from commission_settlement cs where cs.organization_id = e.organization_id and cs.expense_id = e.id)`}
+        -- Lo que se le paga a una persona (comisiones y todo el tipo «Personal», que también es el
+        -- pago de una comisión) dice a quién y cuánto: solo lo encuentra quien administra comisiones (ADR 0166).
+        ${seesAllCommissions ? sql`` : sql`and e.category <> 'Personal' and not exists (select 1 from commission_settlement cs where cs.organization_id = e.organization_id and cs.expense_id = e.id)`}
       order by e.spent_at desc limit ${PER_TYPE}`)
     for (const row of expenses) {
       const item: SearchItem = {

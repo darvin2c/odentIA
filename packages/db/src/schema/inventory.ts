@@ -112,7 +112,7 @@ export const product = pgTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     /**
-     * Lo que dice la etiqueta, todo opcional (ADR 0168): el código de barras (GTIN/EAN,
+     * Lo que dice la etiqueta, todo opcional (ADR 0170): el código de barras (GTIN/EAN,
      * el que lee el escáner), la marca, el modelo, el color y las medidas (en una
      * montura, calibre, puente y varilla: «52□18 140»).
      */

@@ -38,6 +38,7 @@ import type { AgendaAppointment } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import type { PhoneWhatsApp } from "../../lib/people"
 import { appWords } from "../../lib/product-words"
@@ -79,6 +80,19 @@ export interface BookingSeed {
    * servicio; lo demás aceptado sin cita se ve sin marcar.
    */
   planItemIds?: string[]
+  /**
+   * Controles pendientes que esta cita viene a hacer («Reservar lo aceptado y el
+   * control»): vienen marcados y quedan reservados con la cita, en la misma
+   * operación (QA del 8 nov, entrega 3).
+   */
+  followUpIds?: string[]
+  /**
+   * Por qué se busca hora desde `date` (lo que va después de otro tratamiento de la misma pieza,
+   * o el control que aún no se puede hacer): se dice en el cajón (QA de la ficha del 9 nov).
+   */
+  note?: string
+  /** Antes de este día (`YYYY-MM-DD`) se avisa, sin frenar: la persona decide. */
+  notBefore?: string
 }
 
 /**
@@ -189,7 +203,14 @@ export function BookingDrawer({
   const phase = React.useRef<"registro" | "cita">("cita")
 
   const save = useMutation({
-    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: AgendaException | null; planItemIds?: string[] }) =>
+    mutationFn: (input: {
+      patientId: string
+      value: BookingValues
+      range: ScheduleRangeValue
+      exception: AgendaException | null
+      planItemIds?: string[]
+      followUpIds?: string[]
+    }) =>
       apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
@@ -199,6 +220,7 @@ export function BookingDrawer({
           serviceId: input.value.serviceId || undefined,
           // La lista que se ve, aunque quede vacía: sin decir nada, el servidor une lo aceptado del servicio.
           ...(input.planItemIds ? { planItemIds: input.planItemIds } : {}),
+          ...(input.followUpIds?.length ? { followUpIds: input.followUpIds } : {}),
           startsAt: input.range.start,
           endsAt: input.range.end,
           reason: input.value.reason.trim() || undefined,
@@ -344,6 +366,7 @@ export function BookingDrawer({
           range,
           exception: when.exception,
           planItemIds: chosenItemsFor(patientId),
+          followUpIds: chosenControlsFor(patientId),
         })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
@@ -455,6 +478,34 @@ export function BookingDrawer({
       form.setFieldValue("serviceId", first, { dontUpdateMeta: true })
     }
   }, [coordinationQuery.data, values.patientId])
+  // Los controles que faltan reservar (vencidos o ya en su ventana) también se hacen en esta
+  // cita: una sola visita para lo aceptado y la limpieza. El que pidió «Qué sigue» viene marcado.
+  const seededControls = values.patientId === seed.patient?.id ? (seed.followUpIds ?? []) : []
+  const controls = (coordinationQuery.data?.data.followUps ?? []).filter(
+    (row) =>
+      row.status === "pendiente" &&
+      (seededControls.includes(row.id) || (!row.servedBy && (row.overdue || new Date(row.windowFrom).getTime() <= Date.now()))),
+  )
+  const [markedControls, setMarkedControls] = React.useState<{ patientId: string; ids: string[] } | null>(null)
+  const controlIds =
+    markedControls?.patientId === values.patientId
+      ? markedControls.ids
+      : seededControls.filter((id) => controls.some((row) => row.id === id))
+  const markControl = (id: string, checked: boolean) =>
+    setMarkedControls({
+      patientId: values.patientId,
+      ids: checked ? [...controlIds.filter((other) => other !== id), id] : controlIds.filter((other) => other !== id),
+    })
+  /** Los controles marcados que siguen a la vista (otro pudo reservarlo entre tanto). */
+  // Sin la lista (aún carga o falló), los que pidió «Qué sigue»: el servidor los rechaza si ya no están por reservar.
+  const chosenControlsFor = (patientId: string): string[] | undefined => {
+    if (coordinationQuery.data && patientId === values.patientId)
+      return controlIds.filter((id) => controls.some((row) => row.id === id))
+    return seed.followUpIds?.length && patientId === seed.patient?.id ? seed.followUpIds : undefined
+  }
+  const controlDay = (iso: string) =>
+    new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", timeZone }).replace(".", "")
+
   /** Lo que la cita trae; sin la lista (rol sin acceso o paciente recién registrado), lo que pidió el Plan o la regla del servidor. */
   const chosenItemsFor = (patientId: string): string[] | undefined => {
     // Solo lo que se ve: lo que otra persona reservó entre tanto ya no está en la lista.
@@ -520,6 +571,9 @@ export function BookingDrawer({
     keepProfessional: Boolean(seed.keepProfessional && (seed.serviceId ?? "") === (serviceId ?? "")),
   })
   const { shown } = when
+  // Elegir antes de lo que dice la nota: se avisa, no se frena (la persona decide).
+  const shownDay = shown ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(shown.start)) : null
+  const beforeNote = Boolean(seed.notBefore && shownDay && shownDay < seed.notBefore)
 
   React.useEffect(() => {
     onPreview(
@@ -751,7 +805,7 @@ export function BookingDrawer({
             </div>
           )}
 
-          {toScheduleRows.length > 0 ? (
+          {toScheduleRows.length > 0 || controls.length > 0 ? (
             <FieldSet className="gap-2">
               <FieldLegend variant="label" className="mb-0">
                 Para esta cita
@@ -777,9 +831,25 @@ export function BookingDrawer({
                     </FieldLabel>
                   </Field>
                 ))}
+                {controls.map((row, index) => (
+                  <Field key={row.id} orientation="horizontal">
+                    <Checkbox
+                      id={`cita-control-${index}`}
+                      checked={controlIds.includes(row.id)}
+                      onCheckedChange={(checked) => markControl(row.id, checked === true)}
+                    />
+                    <FieldLabel htmlFor={`cita-control-${index}`} className="font-normal">
+                      {row.title} · {row.overdue ? `vencido, tocaba el ${controlDay(row.dueAt)}` : `toca el ${controlDay(row.dueAt)}`}
+                    </FieldLabel>
+                  </Field>
+                ))}
               </FieldGroup>
               <FieldDescription>
-                Tratamientos aceptados con sesiones por reservar. Los que marques quedan listos en su atención.
+                {toScheduleRows.length > 1
+                  ? "Viene marcado lo del primer servicio; marca más si caben en esta cita. "
+                  : ""}
+                {toScheduleRows.length > 0 ? "Lo marcado queda listo en su atención." : ""}
+                {controls.length > 0 ? `${toScheduleRows.length > 0 ? " " : ""}El control marcado queda reservado con esta cita.` : ""}
               </FieldDescription>
             </FieldSet>
           ) : null}
@@ -817,6 +887,11 @@ export function BookingDrawer({
             </p>
           ) : null}
 
+          {seed.note ? (
+            <p role="status" className={`-mb-2 text-sm ${beforeNote ? "text-warning" : "text-muted-foreground"}`}>
+              {beforeNote ? `Es antes de lo indicado. ${seed.note}` : seed.note}
+            </p>
+          ) : null}
           <WhenFields form={form} fields="when" when={when} />
 
           <form.AppField name="reason">

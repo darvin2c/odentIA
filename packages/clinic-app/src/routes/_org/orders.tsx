@@ -105,7 +105,7 @@ export const Route = createFileRoute("/_org/orders")({
 })
 
 /**
- * Pedidos (ADR 0168): lo que la clínica encargó al taller o al laboratorio, del
+ * Pedidos (ADR 0170): lo que la clínica encargó al taller o al laboratorio, del
  * más próximo a vencer al más lejano, con sus vistas en la dirección
  * (`?vista=abiertos|atrasados|listos|entregados|anulados`) y el buscador sobre lo
  * que llegó (`?q=`). Toda la fila abre el pedido al lado (`?pedido=`); el ticket

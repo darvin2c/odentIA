@@ -1,5 +1,5 @@
 /**
- * Semilla de la venta de mostrador (ADR 0170), común a los tres productos:
+ * Semilla de la venta de mostrador (ADR 0172), común a los tres productos:
  * hoy, en la sede, alguien que no es paciente se lleva lo que se vende. Una
  * sin nombre, pagada en efectivo con vuelto; otra a nombre de quien la pidió,
  * con otro medio. Pasa por `sellAtCounter`, como en Finanzas. Solo para la

@@ -373,7 +373,7 @@ export function createPublicPortalRoute(deps: {
   })
 
   app.get("/account", async (c) => portalCall(c, (tx, ctx) => getPortalAccount(tx, ctx)))
-  // Sus pedidos (ADR 0169): van con «Su cuenta».
+  // Sus pedidos (ADR 0171): van con «Su cuenta».
   app.get("/orders", async (c) => portalCall(c, (tx, ctx) => listPortalOrders(tx, ctx)))
 
   // Cuestionario previo a la cita: lo responde quien tiene la sesión.

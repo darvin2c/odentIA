@@ -1,4 +1,4 @@
-// El logotipo y el ícono de cada web, en un mapa completo por producto (ADR 0165): sobre la noche
+// El logotipo y el ícono de cada web, en un mapa completo por producto (ADR 0167): sobre la noche
 // de las portadas («dark») y sobre claro («light»), como SVG para escribirlo en la página.
 import latidiaFavicon from "../../../../assets/brand/latidia/favicon.svg?url"
 import vistiaFavicon from "../../../../assets/brand/vistia/favicon.svg?url"

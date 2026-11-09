@@ -229,7 +229,7 @@ export interface CollectSnapshotMethod {
  * opcionales faltan en tickets emitidos antes de congelarlos.
  */
 export interface CollectSnapshot {
-  /** Nulo en una venta de mostrador (ADR 0170): entonces dice `buyer`. */
+  /** Nulo en una venta de mostrador (ADR 0172): entonces dice `buyer`. */
   patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null } | null
   /** Quién compró en una venta de mostrador: un contacto o un nombre escrito; nulo si nadie. */
   buyer?: { contactId: string | null; displayName: string } | null
@@ -278,7 +278,7 @@ export interface CollectSnapshotTaxes {
 /** Fila real de `payment_ticket` con su snapshot inmutable. */
 export interface CollectTicketRow {
   id: string
-  /** Nulo en una venta de mostrador (ADR 0170). */
+  /** Nulo en una venta de mostrador (ADR 0172). */
   patientId: string | null
   /** La persona que compró en el mostrador, si se eligió. */
   buyerContactId?: string | null
@@ -327,6 +327,8 @@ export interface CollectInput {
   chargeIds?: string[]
   /** Adelanto puro, sin chargeIds. Excluyente con chargeIds. */
   advanceCents?: number
+  /** El adelanto es para un tratamiento aceptado: la línea de su presupuesto. */
+  advanceForBudgetItemId?: string
   /** Omitido = solo crédito (el servidor consume el saldo a favor). */
   payments?: Array<{ paymentMethodId: string; amountCents: number; reference?: string }>
   cashReceivedCents?: number
@@ -352,6 +354,7 @@ export function collectApi(patientId: string, body: CollectInput): Promise<{ dat
 export function invalidatePatientAccount(queryClient: QueryClient, patientId: string): void {
   void queryClient.invalidateQueries({ queryKey: ["patient-account3", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
+  void queryClient.invalidateQueries({ queryKey: ["patient-accepted-totals", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["ticket-receipt", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
@@ -377,7 +380,7 @@ export interface VoidTicketResult {
 }
 
 /**
- * Lo que se hace con el ticket de una venta de mostrador (ADR 0170) va por
+ * Lo que se hace con el ticket de una venta de mostrador (ADR 0172) va por
  * Finanzas, sin ficha: `/finance/counter-sales/:ticketId/…`.
  */
 function ticketBase(patientId: string | null, ticketId: string): string {
@@ -557,7 +560,7 @@ export function returnPdfPath(patientId: string | null, returnId: string, ticket
   return `/api/patients/${patientId}/financial-document-pdf?${params}`
 }
 
-// --- Venta de mostrador (ADR 0170): POST /finance/counter-sales ---------------------
+// --- Venta de mostrador (ADR 0172): POST /finance/counter-sales ---------------------
 
 /** El nombre con que se dice una venta de mostrador sin nadie que la compre. */
 export const COUNTER_SALE_LABEL = "Venta de mostrador"
@@ -801,6 +804,47 @@ export interface AccountSummary {
 
 export function fetchPatientAccount3(patientId: string): Promise<{ data: AccountSummary }> {
   return apiFetch<{ data: AccountSummary }>(`/api/patients/${patientId}/account`)
+}
+
+/**
+ * Lo aceptado de un presupuesto en una moneda, lo pagado de sus tratamientos y
+ * lo que falta (`acceptedTreatmentTotals`): «¿cuánto me falta en total?».
+ */
+export interface AcceptedTreatmentTotal {
+  budgetId: string
+  budgetNumber: number
+  decidedAt: string | null
+  currency: string
+  agreedCents: number
+  paidCents: number
+  remainingCents: number
+  /** De lo que falta, lo ya cargado y sin pagar: está en Pendiente. */
+  owingCents: number
+  discountCents: number
+  returnedCents: number
+  lines: Array<{
+    budgetItemId: string
+    planItemId: string
+    title: string
+    siteCode: string | null
+    billingMode: string
+    agreedCents: number
+    /** Lo acordado que aún no se carga: lo que se puede adelantar para él. */
+    toChargeCents: number
+  }>
+}
+
+/** Pide caja y presupuesto a la vez (finance.read y budgets.read). */
+export function fetchAcceptedTotals(patientId: string): Promise<{ data: AcceptedTreatmentTotal[] }> {
+  return apiFetch<{ data: AcceptedTreatmentTotal[] }>(`/api/patients/${patientId}/accepted-totals`)
+}
+
+export const acceptedTotalsKey = (patientId: string | null) => ["patient-accepted-totals", patientId] as const
+
+/** Un tratamiento por su nombre y su lugar: «Corona · Pieza 46». */
+export function treatmentLineName(line: { title: string; siteCode: string | null }, placeName?: (code: string) => string | null): string {
+  const place = line.siteCode && placeName ? placeName(line.siteCode) : null
+  return place ? `${line.title} · ${place}` : line.title
 }
 
 

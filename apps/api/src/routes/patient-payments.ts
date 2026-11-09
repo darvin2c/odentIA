@@ -4,7 +4,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, isTicketClosedAfter, paidCommissionsOfTicket, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
+import { acceptedTreatmentTotals, collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, isTicketClosedAfter, paidCommissionsOfTicket, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
 import type { Context } from "hono"
 
 function forbid(c: Context) {
@@ -26,6 +26,8 @@ const collectInput = z.object({
   payerContactId: z.uuid().nullish(),
   chargeIds: z.array(z.uuid()).nullish(),
   advanceCents: cents.nullish(),
+  /** El adelanto es para un tratamiento aceptado: la línea de su presupuesto. */
+  advanceForBudgetItemId: z.uuid().nullish(),
   payments: z.array(z.object({
     paymentMethodId: z.uuid(),
     amountCents: cents,
@@ -139,6 +141,16 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
       getAccountSummary(tx, orgId, params.data.id)))
   })
+  // Lo aceptado de cada presupuesto, lo pagado y lo que falta (QA de la ficha del 8 nov):
+  // es de caja (finance.read) y del presupuesto (budgets.read), los dos a la vez.
+  app.get("/:id/accepted-totals", async c => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.read") || !canAccess(memberRole, "budgets.read")) return forbid(c)
+    const params = z.object({id:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
+      acceptedTreatmentTotals(tx, orgId, params.data.id)))
+  })
   // Cobro atómico en un paso: ticket numerado, pagos por medio, aplicación
   // automática del crédito y reparto FIFO, todo en la caja de la sede.
   app.post("/:id/collect", async c => {
@@ -157,6 +169,7 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
           payerContactId: body.payerContactId ?? undefined,
           chargeIds: body.chargeIds ?? undefined,
           advanceCents: body.advanceCents ?? undefined,
+          advanceForBudgetItemId: body.advanceForBudgetItemId ?? undefined,
           payments: (body.payments ?? []).map((p) => ({
             paymentMethodId: p.paymentMethodId,
             amountCents: p.amountCents,

@@ -114,6 +114,7 @@ export const OPERATIONS = {
       outsideSchedule: { kind: "flag", label: "Fuera de horario", description: "Excepción: reservar aunque el horario del profesional no cubra esa hora. Solo lo decide una persona del equipo.", body: "optional", agent: "person" },
       overrideBusy: { kind: "flag", label: "Hora ocupada", description: "Excepción: reservar sobre un bloqueo, una ausencia u otra cita del profesional. Solo lo decide una persona del equipo.", body: "optional", agent: "person" },
       planItemIds: { kind: "uuidList", maxItems: 52, label: "Tratamientos", description: "Lo aceptado del plan que se atiende en esta cita («Agendar» desde el Plan): la cita sabe qué tratamientos son y su atención los trae.", body: "optional", agent: "person" },
+      followUpIds: { kind: "uuidList", maxItems: 10, label: "Controles", description: "Controles pendientes que se hacen en esta cita («Reservar lo aceptado y el control»): quedan reservados con ella.", body: "optional", agent: "person" },
     },
   },
   "cita.mover": {
@@ -676,7 +677,7 @@ export const READ_TOOLS: readonly string[] = [
   "consultar_conocimiento",
   "ver_contexto_paciente",
   "ver_resumen_paciente",
-  // Los pedidos de la persona (ADR 0169): solo lee.
+  // Los pedidos de la persona (ADR 0171): solo lee.
   "ver_pedidos",
   "ver_presupuesto",
   "buscar_huecos",

@@ -10,7 +10,7 @@ import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
 /**
- * Venta de mostrador (ADR 0170), común a los productos; aquí, en una óptica:
+ * Venta de mostrador (ADR 0172), común a los productos; aquí, en una óptica:
  * unos lentes de sol a quien no es paciente. Se escanea el código, se dice solo
  * su nombre, se paga en efectivo con vuelto y el ticket se abre al lado con
  * «Cliente: …», sin ficha. Recepción no vende: lo dice el servidor.

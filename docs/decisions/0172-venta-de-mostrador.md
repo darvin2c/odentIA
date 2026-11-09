@@ -1,6 +1,6 @@
-# 0170 · Venta de mostrador, sin ficha
+# 0172 · Venta de mostrador, sin ficha
 
-Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0168](0168-el-pedido-y-los-roles-ventas-y-taller.md) y precisa [0067](0067-inventario-por-sede-unidades-materiales-y-venta.md) y [0068](0068-anular-corrige-un-error-devolver-atiende-al-paciente.md). Entrega 6 del plan «vistIA: plan para ópticas», común a los tres productos.
+Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0170](0170-el-pedido-y-los-roles-ventas-y-taller.md) y precisa [0067](0067-inventario-por-sede-unidades-materiales-y-venta.md) y [0068](0068-anular-corrige-un-error-devolver-atiende-al-paciente.md). Entrega 6 del plan «vistIA: plan para ópticas», común a los tres productos.
 
 ## Problema
 

@@ -5,7 +5,7 @@
  * producto (`Record<ClinicalProduct, …>`) o por marca, así el compilador señala
  * cada lugar que tiene que decir algo del nuevo. Lo que es del producto base
  * (odentIA: el dominio de la plataforma, el remitente de siempre) se compara con
- * `BASE_PRODUCT` o `BASE_MAIL_BRAND`, nunca con su nombre escrito (ADR 0165).
+ * `BASE_PRODUCT` o `BASE_MAIL_BRAND`, nunca con su nombre escrito (ADR 0167).
  *
  * Revisa todo paquete y app con `src`, salvo los de cada producto (que sí se
  * nombran a sí mismos) y la web de marketing, que se arma aparte para cada

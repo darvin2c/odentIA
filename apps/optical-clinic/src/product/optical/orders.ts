@@ -51,7 +51,7 @@ function prescriptionLines(snapshot: Record<string, unknown>): string[] {
 }
 
 /**
- * La venta de lentes con pedido (entrega 4 del plan, ADR 0168): la montura y los
+ * La venta de lentes con pedido (entrega 4 del plan, ADR 0170): la montura y los
  * lentes de contacto salen del inventario; las lunas, que el laboratorio hace a
  * medida, se escriben con su precio. Al taller le basta la receta copiada y la
  * altura de montaje de cada ojo.

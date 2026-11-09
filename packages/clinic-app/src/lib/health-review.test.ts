@@ -46,6 +46,13 @@ describe("«Declarado por el paciente · pendiente de revisión»", () => {
     expect(isHealthReviewPending({ ...withConditions, reviewedAt: "2026-11-05T11:00:00Z" })).toBe(false)
   })
 
+  it("lo decide el servidor: lo que solo anotó el clínico («Niega enfermedades») no queda por revisar", () => {
+    const denied: PatientHealth = { ...empty, revision: 1, reviewStatus: { ...empty.reviewStatus, conditions: "none" } }
+    expect(isHealthReviewPending(denied)).toBe(true)
+    expect(isHealthReviewPending({ ...denied, reviewPending: false })).toBe(false)
+    expect(isHealthReviewPending({ ...denied, reviewPending: true })).toBe(true)
+  })
+
   it("sin nada registrado no hay nada que revisar", () => {
     expect(isHealthReviewPending(empty)).toBe(false)
   })

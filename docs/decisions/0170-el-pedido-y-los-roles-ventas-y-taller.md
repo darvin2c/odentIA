@@ -1,6 +1,6 @@
-# 0168 · El pedido, y los roles Ventas y Taller
+# 0170 · El pedido, y los roles Ventas y Taller
 
-Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0167](0167-el-examen-de-la-vista-y-la-receta-de-lentes.md). Entrega 4 del plan «vistIA: plan para ópticas».
+Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0169](0169-el-examen-de-la-vista-y-la-receta-de-lentes.md). Entrega 4 del plan «vistIA: plan para ópticas».
 
 ## Problema
 

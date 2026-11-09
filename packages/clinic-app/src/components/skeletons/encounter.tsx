@@ -53,8 +53,9 @@ export function EncounterEditorSkeleton() {
             <Skeleton className="h-9 w-24 rounded-full" />
             <Skeleton className="h-48 w-full rounded-xl" />
           </section>
-          {["w-24", "w-40", "w-28", "w-32", "w-28", "w-64"].map((width) => (
-            <section key={width} className="flex flex-wrap items-start justify-between gap-3 rounded-sm bg-card p-6">
+          {["w-24", "w-40", "w-28", "w-32", "w-28", "w-64"].map((width, index) => (
+            // Dos anchos se repiten: la clave es su lugar (aviso de React en latidIA).
+            <section key={`${index}-${width}`} className="flex flex-wrap items-start justify-between gap-3 rounded-sm bg-card p-6">
               <div className="flex min-w-0 flex-col gap-1">
                 <Line size="base" className={width} />
                 <Line className="w-56" />

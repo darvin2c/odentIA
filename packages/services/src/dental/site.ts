@@ -39,7 +39,7 @@ export function siteColumns(site: Partial<DentalSite> | null | undefined): SiteC
 
 /** Columnas del sitio común → pieza, caras, cuadrante y arcada. */
 /** Las caras en español, como en la pantalla: «distal, oclusal», no los códigos internos. */
-function surfaceWords(surfaces: readonly string[]): string {
+export function surfaceWords(surfaces: readonly string[]): string {
   return surfaces.map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")
 }
 

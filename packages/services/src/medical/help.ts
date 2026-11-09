@@ -42,8 +42,10 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento, su servicio y quien atendió ya elegido, sin salir de la atención; si no tiene horario en la sede o no está en la especialidad del servicio, lo dice ahí y se le reserva igual o eliges a otra persona. Al reservar dice cuándo vuelve y con quién. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo aceptado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
-            ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") } : {}),
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. Si vuelve sin cita, arriba de la atención «Hoy viene a…» lo dice con su sesión (por ejemplo, la sesión 2 de 10) y «Continuar hoy» lo trae, con el motivo y el diagnóstico que sigue si faltan; nada se da por hecho hasta registrar su procedimiento. En «Realizado hoy» dice en qué sesión va y «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento, su servicio y quien atendió ya elegido, sin salir de la atención; si no tiene horario en la sede o no está en la especialidad del servicio, lo dice ahí y se le reserva igual o eliges a otra persona. Al reservar dice cuándo vuelve y con quién. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo aceptado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Realizado hoy». Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+            ...(faq.forms
+              ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") }
+              : {}),
           },
         ]
       // Las preguntas de los caminos hablan de la pieza: en un consultorio, de la opción.
@@ -101,7 +103,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             q: faq.q,
-            a: "Clínica tiene cuatro secciones: Antecedentes, Signos vitales, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, descansos médicos, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
+            a: "Clínica tiene cuatro secciones: Antecedentes, Signos vitales, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, descansos médicos, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
           },
           {
             q: "¿Dónde registro los signos vitales y el examen físico?",
@@ -132,7 +134,15 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         ]
       }
       // «¿Cuándo vuelve?» y «Por invitar a volver» van con el año del consultorio, no con los 6 meses de odentIA.
-      if (faq.q === "¿Cómo dejo dicho cuándo vuelve?") return [{ ...faq, a: faq.a.replace("«En 6 meses»", "«En 1 año»") }]
+      if (faq.q === "¿Cómo dejo dicho cuándo vuelve?")
+        return [
+          {
+            ...faq,
+            a: faq.a
+              .replace("«En 6 meses»", "«En 1 año»")
+              .replace("(la corona tras la endodoncia)", "(una terapia indicada que aún no empieza)"),
+          },
+        ]
       // En el consultorio la ASA no se pide al anestesiar: solo se ve si alguien la clasificó.
       if (faq.q === "¿Por qué la atención me pide sus enfermedades y su medicación?")
         return [
