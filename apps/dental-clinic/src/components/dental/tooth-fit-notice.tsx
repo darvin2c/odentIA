@@ -18,6 +18,7 @@ import {
 } from "@odentia/dental"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
 
 /** Lo que llega de la API, con los grupos y la dentición que conoce `@odentia/dental`. */
 function anatomyOf(value: { groups: string[]; dentition: string | null }): {
@@ -39,6 +40,7 @@ export function ToothFitNotice({
   const canConfigure = usePermission("settings.write")
   const locale = useOrgProfile().data?.locale
   const anatomy = service.toothAnatomy
+  const [used, setUsed] = useState<string | null>(null)
   const siblings = (anatomy?.siblings ?? []).map((sibling) => ({
     ...sibling,
     ...anatomyOf(sibling),
@@ -48,7 +50,9 @@ export function ToothFitNotice({
     place,
     siblings,
   )
-  if (!notice) return null
+  // Tras «Usar …» el aviso se va: queda una línea que dice el cambio y recibe el foco, para que no
+  // caiga al principio de la página (WCAG 2.4.3, QA antes de entregar).
+  if (!notice) return used ? <UsedLine name={used} /> : null
   const { sibling } = notice
   // Para buscarla en la biblioteca: la primera palabra del servicio («Endodoncia», «Resina»).
   const libraryQuery = service.name.split(/[\s,]+/)[0] ?? ""
@@ -68,18 +72,9 @@ export function ToothFitNotice({
             size="sm"
             variant="outline"
             disabled={pending}
-            onClick={(event) => {
-              // El aviso se va al cambiar: el foco vuelve a lo anterior en la página (el tratamiento
-              // elegido), no al principio (WCAG 2.4.3, QA antes de entregar).
-              const button = event.currentTarget
-              const focusable = [
-                ...document.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])"),
-              ].filter((element) => !element.hasAttribute("disabled"))
-              const before = focusable[focusable.indexOf(button) - 1] ?? null
+            onClick={() => {
+              setUsed(sibling.name)
               onUse(sibling)
-              requestAnimationFrame(() => {
-                if (!button.isConnected && before?.isConnected) before.focus()
-              })
             }}
           >
             Usar {sibling.name}
@@ -103,5 +98,18 @@ export function ToothFitNotice({
         </Link>
       ) : null}
     </div>
+  )
+}
+
+/** «Ahora es Endodoncia posterior vital.»: dice el cambio y toma el foco al aparecer. */
+function UsedLine({ name }: { name: string }): React.JSX.Element {
+  const ref = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
+  return (
+    <p ref={ref} tabIndex={-1} role="status" className="text-sm text-muted-foreground outline-none">
+      Ahora es «{name}».
+    </p>
   )
 }

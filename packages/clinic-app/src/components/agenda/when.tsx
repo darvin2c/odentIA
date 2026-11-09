@@ -724,7 +724,8 @@ function WhenSlot({ when }: { when: WhenState }) {
         </div>
       ) : when.loading ? (
         <DataRefreshMarker message="Buscando horas libres…" />
-      ) : (
+      ) : when.team.length === 0 && when.ready ? null : (
+        // Sin nadie con horario en la sede, eso ya se dijo arriba: un solo mensaje (QA antes de entregar).
         <p className="text-sm text-muted-foreground">
           {emptyDaySaid({ moving, offDuty: when.offDuty })}
         </p>

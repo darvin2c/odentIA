@@ -490,7 +490,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Lo aceptado sin cita",
     describes:
       "De lo aceptado que falta hacer, lo que ninguna cita por venir lleva, aunque el paciente tenga otra cita, hoy.",
-    how: "Lo aceptado que todavía no se hizo (por empezar, programado o en curso) y que ninguna cita por venir lleva, aunque el paciente tenga otra cita; de pacientes activos. Lo que va después de otro tratamiento de la misma pieza que ya tiene su cita (la corona tras la endodoncia) no cuenta mientras esa cita esté por venir. Es la regla de Pacientes › «Por agendar».{al_cambio_de_hoy}",
+    how: "Lo aceptado que todavía no se hizo (por empezar, programado o en curso) y que ninguna cita por venir lleva, aunque el paciente tenga otra cita; de pacientes activos. Lo que va después de otro tratamiento del mismo sitio que ya tiene su cita no cuenta mientras esa cita esté por venir. Es la regla de Pacientes › «Por agendar».{al_cambio_de_hoy}",
     unit: "dinero",
     column: "sin_cita_dinero",
     time: "a_hoy",

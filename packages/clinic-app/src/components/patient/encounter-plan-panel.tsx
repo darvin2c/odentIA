@@ -340,14 +340,15 @@ export function EncounterPlanPanel({
   const fitNotice = (item: PlanItem) => {
     if (!toothFit || !today.has(item.id) || item.toothNumber == null || changing === item.id)
       return null
+    // Sin su servicio a la vista (recién cambiado, aún cargando) el aviso sigue montado sin anatomía:
+    // así dice «Ahora es …» y conserva el foco tras «Usar …».
     const service = fitServices?.find((candidate) => candidate.id === item.serviceId)
-    if (!service) return null
     // Se cambia mientras quien atiende aún puede cambiar el renglón (lo decide el servidor).
     const editable = canWrite && !disabled && removableIds.has(item.id)
     return (
       <div className="basis-full">
         <toothFit.Notice
-          service={{ name: item.title, toothAnatomy: service.toothAnatomy }}
+          service={{ name: item.title, toothAnatomy: service?.toothAnatomy ?? null }}
           place={item.toothNumber}
           pending={switching !== null || removing !== null}
           onUse={editable ? (sibling) => void switchService(item, sibling.id) : undefined}
