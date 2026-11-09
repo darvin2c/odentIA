@@ -1,4 +1,4 @@
-import { budgetStateText, diagnosisCodeLabel, sumByCurrency } from "@odentia/clinical"
+import { budgetStateText, diagnosisCodeLabel, LEFT_OUT_DECISIONS, sumByCurrency } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -294,11 +294,26 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       linkSentAt: consentDocument.linkSentAt,
     })
     .from(consentDocument)
+    .leftJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.id, consentDocument.planItemId),
+        eq(treatmentPlanItem.organizationId, consentDocument.organizationId),
+      ),
+    )
     .where(
       and(
         eq(consentDocument.organizationId, orgId),
         eq(consentDocument.patientId, patientId),
         eq(consentDocument.status, "pendiente"),
+        // El preparado para lo que no aceptó o no eligió ya no se pide (`isLeftOut`), salvo
+        // que ya vaya por su enlace: eso sigue su curso.
+        sql`not (${treatmentPlanItem.decisionStatus} is not null
+          and ${treatmentPlanItem.decisionStatus} in (${sql.join(
+            LEFT_OUT_DECISIONS.map((decision) => sql`${decision}`),
+            sql`, `,
+          )})
+          and ${consentDocument.linkSentAt} is null and ${consentDocument.personSignedAt} is null)`,
       ),
     )
     .orderBy(asc(consentDocument.createdAt))

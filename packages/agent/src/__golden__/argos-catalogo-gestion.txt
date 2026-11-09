@@ -15,11 +15,11 @@ tickets: Los tickets de pago. odentIA no emite facturas ni boletas: solo tickets
 deudas: Lo que debe cada paciente, a hoy (una fila por paciente que debe): lo cargado sin pagar menos lo que tiene a favor. «Te deben» es la suma de «saldo». Su deuda está vencida si su venta más antigua sin pagar tiene más de 30 días.
   paciente_id, paciente, debe, a_favor, saldo, vencida (bool), desde (date: su venta sin pagar más antigua), dias (desde entonces)
 
-gastos: Gastos registrados, como movimientos: el gasto en su fecha y su anulación (negativa) en la suya. Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento. Lo pagado a proveedores (pago_de_compra) está en la categoría Materiales.
+gastos: Gastos registrados, cada uno en su fecha; un gasto anulado no está (anular es decir que no ocurrió). Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento. Lo pagado a proveedores (pago_de_compra) está en la categoría Materiales.
   momento (timestamptz), dia, categoria (Alquiler, Materiales, Personal, Laboratorio, Servicios, Impuestos…), tipo ('gasto'|'pago_de_compra': pago a un proveedor de materiales|'pago_de_comisiones': el pago de comisiones ya contadas en «comisiones»|'pago_del_impuesto_de_lo_cobrado': el pago del IGV o IVA de lo cobrado, que no es un gasto porque ya salió de lo cobrado), monto, sede
 
 comisiones: Comisiones de los profesionales, como Finanzas › Comisiones: cada cobro de lo que atendió un profesional con su porcentaje. Cuenta al cobrar (momento del cobro).
-  momento (timestamptz), dia, profesional, sede (la del cobro), base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea), sin_pagar
+  momento (timestamptz), dia, profesional, sede (la del cobro), base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea; lo que un pago descontó resta en una fila aparte), sin_pagar
 
 citas: Una fila por cita de la agenda. Para contar citas agendadas (cuántas hay, por día, por profesional) deja fuera las canceladas, salvo que pregunten por ellas. Un porcentaje sobre las citas que ya pasaron se divide entre todas las de ya_paso, canceladas incluidas.
   cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi), unidad_dental (la unidad dental de la cita)
