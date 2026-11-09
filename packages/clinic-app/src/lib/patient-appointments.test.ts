@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { type AgendaAppointment, isUnclosed } from "./agenda"
 import { setOrgLocale } from "./locale"
-import { appointmentLine, appointmentVisitWord, isUpcoming, nextAppointment } from "./patient-appointments"
+import {
+  appointmentLine,
+  appointmentVisitWord,
+  appointmentWhat,
+  isUpcoming,
+  nextAppointment,
+} from "./patient-appointments"
 
 const at = (over: Partial<AgendaAppointment>): AgendaAppointment =>
   ({
@@ -85,5 +91,31 @@ describe("una llegada o una atención de otro día", () => {
     const late = Date.parse("2026-11-08T04:30:00.000Z")
     const tonight = at({ status: "confirmada", visit: "llego", startsAt: "2026-11-08T03:00:00.000Z", endsAt: "2026-11-08T03:30:00.000Z" })
     expect(isUpcoming(tonight, late, LIMA)).toBe(true)
+  })
+})
+
+describe("a qué viene la cita (repaso del 9 nov: «Sumar a su cita» no se veía en la cabecera)", () => {
+  it("dice su servicio y lo que se le sumó, sin repetir el servicio", () => {
+    const base = { serviceName: "Endodoncia posterior vital", reason: null }
+    expect(appointmentWhat({ ...base, sessions: [] })).toBe("Endodoncia posterior vital")
+    expect(
+      appointmentWhat({
+        ...base,
+        sessions: [
+          { planItemId: "a", title: "Endodoncia posterior vital", n: 2, m: 2 },
+          { planItemId: "b", title: "Corona metal-cerámica", n: 1, m: 2 },
+        ],
+      }),
+    ).toBe("Endodoncia posterior vital y Corona metal-cerámica")
+    expect(
+      appointmentWhat({
+        ...base,
+        sessions: [
+          { planItemId: "b", title: "Corona", n: 1, m: 1 },
+          { planItemId: "c", title: "Resina", n: 1, m: 1 },
+        ],
+      }),
+    ).toBe("Endodoncia posterior vital y 2 más")
+    expect(appointmentWhat({ serviceName: null, reason: null, sessions: [] })).toBeNull()
   })
 })

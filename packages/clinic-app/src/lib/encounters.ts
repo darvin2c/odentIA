@@ -170,7 +170,8 @@ export interface FinalizedMaterials {
 
 /** Lo que el cierre hizo con los controles: el que indicó «¿Cuándo vuelve?» y los que cumplió. */
 export interface FinalizedControls {
-  next: { id: string; title: string; dueAt: string } | null
+  /** `joinsNext`: va en la misma cita que lo aceptado que «Reservar» ofrece, desde `from` (`YYYY-MM-DD`). */
+  next: { id: string; title: string; dueAt: string; joinsNext?: { from: string } } | null
   fulfilled: Array<{ id: string; title: string }>
 }
 
