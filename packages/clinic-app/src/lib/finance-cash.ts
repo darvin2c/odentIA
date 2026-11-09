@@ -954,11 +954,71 @@ export function createExpenseApi(body: {
   }
   /** La clave del formulario abierto: reintentar después de un corte devuelve el mismo gasto. */
   requestId?: string
+  /** El pago (o una parte) de una factura por pagar (ADR 0174). */
+  payableId?: string
 } & ExpensePaper): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+/** Una factura por pagar (ADR 0174), con lo pagado y lo que falta. */
+export interface Payable {
+  id: string
+  branchId: string
+  category: string
+  concept: string
+  supplierId: string | null
+  supplierName: string
+  supplierTaxId: string | null
+  receiptType: string | null
+  receiptNumber: string | null
+  issuedOn: string
+  dueOn: string | null
+  currency: string
+  amountCents: number
+  paidCents: number
+  dueCents: number
+  overdue: boolean
+  patientId: string | null
+  patientName: string | null
+  planItemId: string | null
+  planItemTitle: string | null
+  planItemSite: string | null
+  notes: string | null
+}
+
+export function fetchPayables(query: { branchId?: string; patientId?: string; open?: boolean }): Promise<{ data: { today: string; payables: Payable[] } }> {
+  const params = new URLSearchParams()
+  if (query.branchId) params.set("branchId", query.branchId)
+  if (query.patientId) params.set("patientId", query.patientId)
+  if (query.open) params.set("open", "1")
+  return apiFetch(`/api/finance/payables?${params}`)
+}
+
+/** Anota una factura por pagar: no paga ni toca la caja. */
+export function notePayableApi(body: {
+  requestId: string
+  branchId: string
+  category: string
+  supplierId?: string
+  supplierName?: string
+  supplierTaxId?: string
+  receiptType?: string
+  receiptNumber?: string
+  issuedOn?: string
+  dueOn?: string
+  currency?: string
+  amountCents: number
+  patientId?: string
+  planItemId?: string
+}): Promise<{ data: { id: string } }> {
+  return apiFetch("/api/finance/payables", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function voidPayableApi(id: string, reason: string): Promise<{ data: { id: string } }> {
+  return apiFetch(`/api/finance/payables/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) })
 }
 
 /** Con qué se pagó, el comprobante del país y a quién (ADR 0167). */
@@ -1278,6 +1338,7 @@ export const financeKeys = {
   expenses: (branchId: string, ref: MonthRef, q = "", category = "") =>
     ["finance-expenses", branchId, ref.year, ref.month, q, category] as const,
   purchases: (branchId: string | null) => ["finance-purchases", branchId] as const,
+  payables: (branchId: string | null, patientId: string | null = null) => ["finance-payables", branchId, patientId] as const,
   tickets: (branchId: string, params: TicketListParams) => ["finance-tickets", branchId, params] as const,
   ticket: (id: string) => ["finance-ticket", id] as const,
 }
@@ -1291,6 +1352,7 @@ export function invalidateFinance(queryClient: QueryClient): void {
     "finance-closures",
     "finance-expenses",
     "finance-purchases",
+    "finance-payables",
     "finance-tickets",
     "finance-ticket",
     // Un gasto o el pago de una compra cambian Inventario y Reportes.

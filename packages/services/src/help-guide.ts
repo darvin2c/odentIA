@@ -1038,6 +1038,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["registrar un gasto", "anotar un gasto", "donde anoto ese gasto", "donde anoto un gasto", "pague la luz", "gasto de la farmacia", "como anoto lo que pague"],
       },
       {
+        q: "¿Cómo anoto una factura que pago después, como la del laboratorio?",
+        a: "En Finanzas › Gastos, en «Por pagar», toca «Anotar una factura»: a quién se le debe, el comprobante con su número y su RUC, el importe, cuándo se emitió y, si quieres, cuándo vence y de qué paciente y tratamiento es. Anotarla no paga ni saca dinero de la caja: queda en «Por pagar» hasta que se pague. Para pagarla, «Pagar» en su fila abre el gasto ya lleno; puedes pagar una parte y lo que falta sigue por pagar. Si la anotaste por error, en su menú está «Anular la factura» (solo sin pagos). Quien administra las comisiones ve en la cuenta de la paciente lo que costó el laboratorio junto a lo que pagó. Lo que se debe de facturas también sale en Reportes › Lo que debes.",
+        forms: ["factura del laboratorio", "pagar a fin de mes", "factura por pagar", "le debo al laboratorio", "cuanto le debo al laboratorio", "anotar una factura", "cuentas por pagar"],
+      },
+      {
         q: "¿Cómo le paso los gastos del mes a mi contador?",
         a: "En Finanzas › Gastos, «Descargar el mes» baja la lista del mes y la sede que ves en un archivo de hoja de cálculo: la fecha del pago, en qué se gastó, el tipo, el comprobante con su código y su número, el proveedor y su RUC, con qué se pagó y el n.º de operación, el importe, la sede y si está vigente o anulado, con su motivo. Si buscas algo o eliges un tipo, baja solo eso. La fecha es la del pago, no la del comprobante. Quien no administra las comisiones ve los sueldos y las comisiones juntos, sin nombres, como en la lista.",
         forms: ["pasar los gastos al contador", "descargar los gastos", "gastos para el contador", "registro de compras", "lista de gastos del mes"],

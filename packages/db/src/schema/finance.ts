@@ -264,7 +264,7 @@ export const expenseRecurringSkip = pgTable(
 )
 
 /**
- * Factura por pagar (ADR 0168): llega hoy y se paga después, en una vez o en partes, como la
+ * Factura por pagar (ADR 0174): llega hoy y se paga después, en una vez o en partes, como la
  * corona que factura el laboratorio a fin de mes. Es el papel, no el dinero: anotarla no saca nada de
  * la caja ni suma en «Gastado». Cada pago es un gasto enlazado (`expense.payable_id`), como el pago de
  * una compra (ADR 0061); lo pagado es la suma de sus gastos vigentes, sin otro registro. Puede decir
@@ -376,7 +376,7 @@ export const expense = pgTable(
      * vigentes; no hay otro registro del pago (ADR 0061).
      */
     purchaseOrderId: uuid("purchase_order_id"),
-    /** El pago (o una parte) de una factura por pagar (ADR 0168). */
+    /** El pago (o una parte) de una factura por pagar (ADR 0174). */
     payableId: uuid("payable_id"),
     /**
      * El pago del impuesto de lo cobrado (el IGV que la clínica entrega a la

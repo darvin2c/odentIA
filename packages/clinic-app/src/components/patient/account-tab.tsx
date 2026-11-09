@@ -46,6 +46,7 @@ import { apiFetch } from "../../lib/api"
 import { useActiveBranch } from "../../lib/active-branch"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
+import { expenseCategoryLabel, fetchPayables } from "../../lib/finance-cash"
 import {
   acceptedTotalsKey,
   CASH_TYPE_CODE,
@@ -184,6 +185,14 @@ export function AccountTab({
   // Lo aceptado, lo pagado y lo que falta de cada presupuesto (QA de la ficha del 8 nov):
   // caja lo veía en Plan, a otro clic. Pide caja y presupuesto a la vez.
   const canBudgets = usePermission("budgets.read")
+  // El costo del laboratorio junto a lo cobrado lo ve quien administra comisiones (ADR 0174).
+  const canCosts = usePermission("commissions.write")
+  const labInvoices = useQuery({
+    queryKey: ["finance-payables", "patient", patientId],
+    queryFn: () => fetchPayables({ patientId }),
+    enabled: canCosts && canRead,
+    staleTime: 30_000,
+  })
   const acceptedTotals = useQuery({
     queryKey: acceptedTotalsKey(patientId),
     queryFn: () => fetchAcceptedTotals(patientId),
@@ -609,6 +618,26 @@ export function AccountTab({
                       </div>
                     ))}
                   </dl>
+                  {(() => {
+                    // Las facturas de este tratamiento (su laboratorio): lo que cuesta junto a lo pagado.
+                    const items = new Set(group.lines.map((line) => line.planItemId))
+                    const invoices = (labInvoices.data?.data.payables ?? []).filter(
+                      (row) => row.planItemId !== null && items.has(row.planItemId) && row.currency === group.currency,
+                    )
+                    if (invoices.length === 0) return null
+                    const cost = invoices.reduce((sum, row) => sum + row.amountCents, 0)
+                    const owed = invoices.reduce((sum, row) => sum + row.dueCents, 0)
+                    // Casi siempre es el laboratorio; si hay de varios tipos, se dice «Facturas».
+                    const kinds = new Set(invoices.map((row) => row.category))
+                    const label = kinds.size === 1 ? expenseCategoryLabel(invoices[0]?.category ?? "") : "Facturas"
+                    return (
+                      <p className="text-sm">
+                        {label}: <span className="font-semibold tabular-nums">{money(cost, group.currency)}</span>
+                        {owed > 0 ? ` (por pagar ${money(owed, group.currency)})` : " (pagado)"}. De lo que pagó, queda{" "}
+                        <span className="font-semibold tabular-nums">{money(group.paidCents - cost, group.currency)}</span>.
+                      </p>
+                    )
+                  })()}
                   {/* «Falta» junta lo ya hecho sin pagar (en Pendiente) y lo que aún no se hace (segunda mesa). */}
                   {group.remainingCents > 0 ? (
                     <p className="text-sm text-muted-foreground">

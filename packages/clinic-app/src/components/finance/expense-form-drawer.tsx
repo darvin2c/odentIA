@@ -55,6 +55,7 @@ import {
   todayIn,
   useCashState,
   voidExpenseApi,
+  type Payable,
 } from "../../lib/finance-cash"
 import { CASH_TYPE_CODE, fetchPaymentMethods } from "../../lib/finance-collect"
 import { orgTaxesOf, useOrgProfile, useTodayRate } from "../../lib/org"
@@ -90,6 +91,8 @@ export type ExpenseDrawerMode =
   | { kind: "nuevo" }
   | { kind: "corregir"; expense: ExpenseRow }
   | { kind: "pagar"; due: RecurringDue }
+  /** Pagar (todo o una parte de) una factura por pagar (ADR 0174): el gasto queda enlazado a ella. */
+  | { kind: "factura"; payable: Payable }
 
 const NEW: ExpenseDrawerMode = { kind: "nuevo" }
 
@@ -195,6 +198,9 @@ export function ExpenseFormDrawer({
   // Lo último que propuso el tipo: elegir otro valor es lo que cuenta como elección de la persona.
   const lastSuggested = useRef("")
   const paying = mode.kind === "pagar" ? mode.due : null
+  const invoice = mode.kind === "factura" ? mode.payable : null
+  /** Lo que ya dice qué es (lo que se repite o una factura): no se pregunta el tipo ni en qué se gastó. */
+  const fixed = paying !== null || invoice !== null
   const correcting = mode.kind === "corregir" ? mode.expense : null
 
   const methods = useQuery({ queryKey: ["org-payment-methods"], queryFn: fetchPaymentMethods, enabled: open })
@@ -225,20 +231,23 @@ export function ExpenseFormDrawer({
       onSubmit: ({ value }) => {
         const { chosen, asksSalesTax, cents, after, paid } = derive(value)
         const fields: Record<string, string> = {}
-        if (!paying && value.category === "") fields.category = "Elige el tipo de gasto."
+        if (!fixed && value.category === "") fields.category = "Elige el tipo de gasto."
         if (asksSalesTax && value.salesTax === null) fields.salesTax = "Elige qué impuesto pagas."
         // Con compras por pagar en esta sede, que sea o no una de ellas lo dice la persona (G4).
         if (
-          !paying &&
+          !fixed &&
           !correcting &&
           value.category === "Materiales" &&
           value.purchase === "" &&
           orders.some((order) => order.branchId === branchId && order.dueCents > 0)
         )
           fields.purchase = "Elige si es el pago de una de estas compras o de otro gasto."
-        if (!paying && !chosen && !value.concept.trim()) fields.concept = "Escribe en qué se gastó."
+        if (!fixed && !chosen && !value.concept.trim()) fields.concept = "Escribe en qué se gastó."
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
+        // Una factura no se paga de más: lo que falta es el tope.
+        else if (invoice && cents > invoice.dueCents)
+          fields.amount = `De esta factura quedan ${formatMoney(invoice.dueCents, invoice.currency, locale)} por pagar.`
         if (!value.method) fields.method = "Elige con qué se pagó."
         else if (!derive(value).method) fields.method = "Ese medio ya no está activo: elige otro."
         else if (after !== null && after < 0)
@@ -310,8 +319,9 @@ export function ExpenseFormDrawer({
         branchId,
         concept: value.concept.trim(),
         amountCents: cents,
-        // Al corregir, la moneda va siempre: de dólares a soles es un cambio.
-        ...((second && currency !== place.currency) || correcting ? { currency } : {}),
+        // Al corregir, la moneda va siempre: de dólares a soles es un cambio. Una factura, en la suya.
+        ...((second && currency !== place.currency) || correcting || invoice ? { currency } : {}),
+        ...(invoice ? { payableId: invoice.id } : {}),
         ...paid.body,
         category: value.category as ExpenseCategory,
         fromCash: method.typeCode === CASH_TYPE_CODE,
@@ -355,20 +365,22 @@ export function ExpenseFormDrawer({
     if (filled.current) return
     filled.current = true
     requestId.current = crypto.randomUUID()
-    receiptTouched.current = Boolean(correcting)
+    receiptTouched.current = Boolean(correcting || invoice)
     const day = todayIn(orgTimeZone)
     const category: ExpenseCategory | "" = paying
       ? (paying.category as ExpenseCategory)
-      : correcting
-        ? (correcting.category as ExpenseCategory)
-        : (initial?.category ?? "")
-    const unit = correcting?.currency ?? paying?.currency ?? place.currency
-    const cents = correcting?.amountCents ?? paying?.amountCents ?? initial?.amountCents ?? null
+      : invoice
+        ? (invoice.category as ExpenseCategory)
+        : correcting
+          ? (correcting.category as ExpenseCategory)
+          : (initial?.category ?? "")
+    const unit = correcting?.currency ?? paying?.currency ?? invoice?.currency ?? place.currency
+    const cents = correcting?.amountCents ?? paying?.amountCents ?? invoice?.dueCents ?? initial?.amountCents ?? null
     form.reset({
       category,
       salesTax: correcting?.salesTax ? "cobros" : null,
       purchase: "",
-      concept: correcting?.concept ?? paying?.concept ?? initial?.concept ?? "",
+      concept: correcting?.concept ?? paying?.concept ?? (invoice ? `Pago de ${invoice.concept}`.slice(0, 500) : null) ?? initial?.concept ?? "",
       currency: unit,
       amount: cents !== null ? formatMoneyInput(cents, unit, locale) : "",
       payIn: unit,
@@ -377,10 +389,15 @@ export function ExpenseFormDrawer({
       // El medio de siempre: el que se dijo, o el efectivo si salía de la caja.
       method: correcting?.paymentMethodId ?? paying?.paymentMethodId ?? "",
       reference: correcting?.paymentReference ?? "",
-      receiptType: correcting ? (correcting.receiptType ?? "") : (lastSuggested.current = category ? suggestedReceiptType(country, category) : ""),
-      receiptNumber: correcting?.receiptNumber ?? "",
-      supplier: correcting?.supplierName ?? "",
-      supplierTaxId: correcting?.supplierTaxId ?? "",
+      // Una factura trae su comprobante y a quién se le debe.
+      receiptType: correcting
+        ? (correcting.receiptType ?? "")
+        : invoice
+          ? (invoice.receiptType ?? "")
+          : (lastSuggested.current = category ? suggestedReceiptType(country, category) : ""),
+      receiptNumber: correcting?.receiptNumber ?? invoice?.receiptNumber ?? "",
+      supplier: correcting?.supplierName ?? invoice?.supplierName ?? "",
+      supplierTaxId: correcting?.supplierTaxId ?? invoice?.supplierTaxId ?? "",
       spentDay: correcting
         ? dayKeyOf(correcting.spentAt, orgTimeZone)
         : initial?.day && initial.day <= day
@@ -388,7 +405,7 @@ export function ExpenseFormDrawer({
           : day,
     })
     setSeen(null)
-  }, [open, orgTimeZone, initial, place.currency, locale, form, todayRate, correcting, paying, country])
+  }, [open, orgTimeZone, initial, place.currency, locale, form, todayRate, correcting, paying, invoice, country])
   // Cuando llega la lista: el medio de siempre se propone solo si sigue activo; lo de antes que
   // salía de la caja, sin medio, propone el efectivo.
   useEffect(() => {
@@ -417,7 +434,7 @@ export function ExpenseFormDrawer({
   const purchases = useQuery({
     queryKey: financeKeys.purchases(null),
     queryFn: () => fetchPurchasesToPay(),
-    enabled: open && !paying && !correcting && values.category === "Materiales",
+    enabled: open && !fixed && !correcting && values.category === "Materiales",
   })
   // Con otra moneda se ven las compras de las dos; sin ella, las de la moneda de la clínica.
   const allOrders = purchases.data?.data.orders ?? []
@@ -430,7 +447,7 @@ export function ExpenseFormDrawer({
   const state = cash.data?.data ?? null
   const unit = second
     ? (picked?.currency ?? (paysSalesTax ? place.currency : values.currency))
-    : (state?.currency ?? correcting?.currency ?? paying?.currency ?? place.currency)
+    : (state?.currency ?? correcting?.currency ?? paying?.currency ?? invoice?.currency ?? place.currency)
   const orders = second ? listed : listed.filter((order) => order.currency === unit)
 
   /** El proveedor se pregunta donde hay a quién pagar con papel: compras, laboratorio o un comprobante con RUC. */
@@ -443,8 +460,8 @@ export function ExpenseFormDrawer({
   /** Lo que se deduce de lo elegido: la compra que se paga, si se pregunta el impuesto, la moneda, el medio y cómo queda la caja. */
   function derive(value: ExpenseValues) {
     // Solo un gasto de Materiales paga una compra: si se cambia el tipo, ya no es ese pago.
-    const chosen = !paying && !correcting && value.category === "Materiales" ? (orders.find((order) => order.orderId === value.purchase) ?? null) : null
-    const asksSalesTax = !paying && value.category === "Impuestos" && salesTaxName !== null
+    const chosen = !fixed && !correcting && value.category === "Materiales" ? (orders.find((order) => order.orderId === value.purchase) ?? null) : null
+    const asksSalesTax = !fixed && value.category === "Impuestos" && salesTaxName !== null
     // El impuesto de lo cobrado solo se paga en moneda del negocio.
     const onlyBusiness = asksSalesTax && value.salesTax === "cobros"
     const currency = second ? (chosen?.currency ?? (onlyBusiness ? place.currency : value.currency)) : unit
@@ -476,7 +493,7 @@ export function ExpenseFormDrawer({
   const { chosen, asksSalesTax, onlyBusiness, cents, after, paid, method, fromCash, back } = derive(values)
   // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
   const advance = chosen !== null && chosen.dueCents === 0
-  const asksPurchase = !paying && !correcting && values.category === "Materiales" && orders.length > 0
+  const asksPurchase = !fixed && !correcting && values.category === "Materiales" && orders.length > 0
   const otherBranch = chosen !== null && chosen.branchId !== branchId
   // Un pago a otra sede no sale de esta caja: el efectivo no se ofrece.
   const methodOptions = otherBranch ? allMethods.filter((item) => item.typeCode !== CASH_TYPE_CODE) : allMethods
@@ -560,9 +577,15 @@ export function ExpenseFormDrawer({
     }
   }
 
-  const title = paying ? `Pagar ${paying.concept} · ${monthWord(paying.month)}` : correcting ? "Corregir gasto" : "Registrar gasto"
+  const title = paying
+    ? `Pagar ${paying.concept} · ${monthWord(paying.month)}`
+    : invoice
+      ? `Pagar ${invoice.concept}`
+      : correcting
+        ? "Corregir gasto"
+        : "Registrar gasto"
   const amountWords = cents !== null && cents > 0 ? ` ${formatMoney(cents, paid.payIn === unit ? unit : unit, locale)}` : ""
-  const submitLabel = paying
+  const submitLabel = fixed
     ? `Registrar pago${amountWords}`
     : correcting
       ? "Guardar corrección"
@@ -582,7 +605,9 @@ export function ExpenseFormDrawer({
           ? paying.memberName
             ? `Sueldo de ${paying.memberName}, de ${place.branchName}.`
             : `${expenseCategoryLabel(paying.category)} de ${place.branchName}.`
-          : chosen
+          : invoice
+            ? `${expenseCategoryLabel(invoice.category)}${invoice.planItemTitle && invoice.patientName ? ` · ${invoice.planItemTitle} de ${invoice.patientName}` : ""} · ${place.branchName}.`
+            : chosen
             ? `Pago de una compra de ${chosen.branchName}.`
             : place.branchName
               ? `Gasto de ${place.branchName}.`
@@ -603,7 +628,7 @@ export function ExpenseFormDrawer({
             con lo que cambió y se registra este. Si salió de la caja, vuelve y sale lo nuevo.
           </p>
         ) : null}
-        {paying ? null : (
+        {fixed ? null : (
           <form.AppField name="concept">
             {(field) =>
               chosen ? (
@@ -617,7 +642,7 @@ export function ExpenseFormDrawer({
             }
           </form.AppField>
         )}
-        {second && !chosen && !onlyBusiness && !paying ? (
+        {second && !chosen && !onlyBusiness && !fixed ? (
           <form.AppField name="currency">
             {(field) => (
               <field.Group legend="Moneda" className="gap-3">
@@ -644,7 +669,9 @@ export function ExpenseFormDrawer({
               description={
                 paying
                   ? `Lo de siempre: ${formatMoney(paying.amountCents, paying.currency, locale)}. Si llegó otro, cámbialo.`
-                  : chosen
+                  : invoice
+                    ? `De esta factura quedan ${formatMoney(invoice.dueCents, invoice.currency, locale)} por pagar. Puedes pagar una parte.`
+                    : chosen
                     ? chosen.dueCents > 0
                       ? `Por pagar: ${money(chosen.dueCents)}. Puedes pagar una parte.`
                       : chosen.receivedCents === 0
@@ -678,7 +705,7 @@ export function ExpenseFormDrawer({
             </field.Control>
           )}
         </form.AppField>
-        {paying ? null : (
+        {fixed ? null : (
           <form.AppField
             name="category"
             listeners={{

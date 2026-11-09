@@ -575,6 +575,20 @@
       "when": 1794248263571,
       "tag": "0081_venta_de_mostrador",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794255747909,
+      "tag": "0082_factura_por_pagar",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794255759431,
+      "tag": "0083_factura_por_pagar_reglas",
+      "breakpoints": true
     }
   ]
 }

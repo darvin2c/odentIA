@@ -16,7 +16,8 @@ import { orgCounter, treatmentBudget, treatmentBudgetItem, treatmentBudgetOption
 import { product, supplier } from "@odentia/db/schema/inventory"
 import { commissionRate } from "@odentia/db/schema/finance"
 import { and, asc, eq, sql } from "drizzle-orm"
-import { payPurchaseOrder, setCommissionRate } from "./finance.js"
+import { createExpense, payPurchaseOrder, setCommissionRate } from "./finance.js"
+import { notePayable } from "./expense-payable.js"
 import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, receivePurchaseOrder } from "./inventory.js"
 import { defaultWarehouse } from "./inventory-stock.js"
 import { getOrgLocale } from "./locale.js"
@@ -569,5 +570,65 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       and i.decision = 'aceptado' and b.status in ('aceptado','parcial') and b.decided_at < now() - interval '60 days'
       and exists (select 1 from encounter_procedure ep where ep.organization_id = pi.organization_id
         and ep.plan_item_id = pi.id and ep.voided_at is null)`)
+  // --- Facturas del laboratorio por pagar (ADR 0174) ---------------------------------------
+  // La corona de una paciente: una factura que vence a fin de mes y otra ya vencida, pagada en parte.
+  // Se anotan con el servicio, como en la pantalla, y el pago es un gasto enlazado.
+  const crowns = await tx
+    .select({ id: treatmentPlanItem.id, patientId: treatmentPlanItem.patientId })
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.decisionStatus, "aceptado"), sql`${treatmentPlanItem.title} ilike '%corona%'`))
+    .orderBy(asc(treatmentPlanItem.createdAt))
+    .limit(2)
+  const lab = { supplierName: "Laboratorio Dental Andino S.A.C.", supplierTaxId: "20512345678" }
+  const dayOf = (date: Date) => localDay(date, timezone)
+  const endOfMonth = (() => {
+    const next = addMonths(current, 1)
+    return dayOf(new Date(monthStart(timezone, next.year, next.month).getTime() - 12 * 3_600_000))
+  })()
+  const [firstCrown, secondCrown] = crowns
+  await notePayable(tx, orgId, ownerUserId, {
+    branchId: main.id,
+    category: "Laboratorio",
+    ...lab,
+    receiptType: "01",
+    receiptNumber: "E001-512",
+    issuedOn: dayOf(ago(2)),
+    dueOn: endOfMonth >= dayOf(ago(2)) ? endOfMonth : null,
+    currency,
+    amountCents: 430_00,
+    ...(firstCrown ? { patientId: firstCrown.patientId, planItemId: firstCrown.id } : {}),
+  })
+  const late = await notePayable(tx, orgId, ownerUserId, {
+    branchId: main.id,
+    category: "Laboratorio",
+    ...lab,
+    receiptType: "01",
+    receiptNumber: "E001-498",
+    issuedOn: dayOf(ago(20)),
+    dueOn: dayOf(ago(5)),
+    currency,
+    amountCents: 380_00,
+    ...(secondCrown ? { patientId: secondCrown.patientId, planItemId: secondCrown.id } : {}),
+  })
+  await createExpense(
+    tx,
+    orgId,
+    ownerUserId,
+    {
+      branchId: main.id,
+      category: "Laboratorio",
+      concept: `Pago de ${late.concept}`,
+      amountCents: 200_00,
+      currency,
+      spentAt: ago(3, 16).toISOString(),
+      paymentMethodId: transfer?.id ?? null,
+      paymentReference: "771390",
+      receiptType: "01",
+      receiptNumber: "E001-498",
+      ...lab,
+    },
+    { payableId: late.id },
+  )
+
   return { settlements, orders, budgets }
 }

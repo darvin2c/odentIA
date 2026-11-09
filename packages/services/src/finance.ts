@@ -50,6 +50,7 @@ import {
   commissionSettlementLine,
   expense,
   expenseGapDismissal,
+  expensePayable,
   expenseRecurring,
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
@@ -175,6 +176,26 @@ async function audit(
   await tx
     .insert(auditEvent)
     .values({ organizationId: orgId, actorUserId, entity, entityId: id, action, metadata: metadata ?? null })
+}
+
+/**
+ * Una factura por pagar con su saldo (ADR 0174), bloqueada mientras se paga: dos pagos a la vez no
+ * pasan de lo que falta. Lo pagado es la suma de sus gastos vigentes.
+ */
+export async function lockPayable(tx: Db, orgId: string, payableId: string) {
+  if (!looksLikeId(payableId)) throw invalidField("payableId", "Esa factura no existe")
+  const [row] = await tx
+    .select()
+    .from(expensePayable)
+    .where(and(eq(expensePayable.organizationId, orgId), eq(expensePayable.id, payableId)))
+    .for("update")
+  if (!row) throw invalidField("payableId", "Esa factura no existe")
+  const [paid] = await tx
+    .select({ cents: sql<string>`coalesce(sum(${expense.amountCents}), 0)::text` })
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.payableId, payableId), isNull(expense.voidedAt)))
+  const paidCents = Number(paid?.cents ?? 0)
+  return { ...row, paidCents, dueCents: Math.max(0, row.amountCents - paidCents) }
 }
 
 export async function requireBranch(tx: Db, orgId: string, branchId: string) {
@@ -1305,7 +1326,7 @@ const CASH_METHOD = "10"
  * Lo que dice la persona del comprobante y del proveedor, con el tipo del país y el proveedor de
  * Inventario si lo eligió (su nombre y su documento se congelan).
  */
-async function expensePaper(
+export async function expensePaper(
   tx: Db,
   orgId: string,
   input: Pick<CreateExpenseInput, "receiptType" | "receiptKind" | "supplierId" | "supplierName" | "supplierTaxId">,
@@ -1420,7 +1441,7 @@ export async function replayedExpense(
     CreateExpenseInput,
     "requestId" | "branchId" | "amountCents" | "concept" | "currency" | "category" | "fromCash" | "salesTax" | "paymentMethodId"
   >,
-  link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string; replacesExpenseId?: string } = {},
+  link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string; replacesExpenseId?: string; payableId?: string } = {},
 ) {
   const requestId = requestKey(input.requestId)
   if (!requestId) return null
@@ -1443,6 +1464,7 @@ export async function replayedExpense(
     row.replacesExpenseId !== (link.replacesExpenseId ?? null) ||
     (input.salesTax !== undefined && row.salesTax !== input.salesTax) ||
     row.purchaseOrderId !== (link.purchaseOrderId ?? null) ||
+    row.payableId !== (link.payableId ?? null) ||
     row.recurringId !== (link.recurringId ?? null) ||
     row.recurringMonth !== (link.recurringMonth ?? null)
   )
@@ -1475,6 +1497,8 @@ export async function createExpense(
     cashConcept?: string
     /** Solo `correctExpense`: el gasto que este reemplaza, anulado en la misma operación. */
     replacesExpenseId?: string
+    /** El pago (o una parte) de una factura por pagar (ADR 0174). */
+    payableId?: string
   } = {},
   /**
    * Quien registra: lo que se le paga al personal (el tipo «Personal») lo anota quien administra
@@ -1509,6 +1533,24 @@ export async function createExpense(
   const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
   const fromCash = method ? method.typeCode === CASH_METHOD : input.fromCash === true
   const amountCents = assertCents(input.amountCents, "El gasto", "amountCents")
+  // El pago de una factura por pagar: de su sede, su tipo y su moneda, y nunca más de lo que falta.
+  if (link.payableId) {
+    if (link.purchaseOrderId) throw validation("Un pago es de una compra o de una factura, no de las dos")
+    const owed = await lockPayable(tx, orgId, link.payableId)
+    if (owed.voidedAt) throw conflict("PAYABLE_VOIDED", "Esa factura se anuló: ya no se paga")
+    if (owed.branchId !== branchRow.id) throw invalidField("branchId", "Esa factura es de otra sede: se paga en la suya")
+    if (owed.category !== category) throw invalidField("category", `Esa factura es de ${owed.category}: su pago va en ese tipo`)
+    if (owed.currency !== unit) throw invalidField("currency", `Esa factura es en ${owed.currency}: se paga en esa moneda`)
+    if (amountCents > owed.dueCents) {
+      const { locale } = await getOrgLocale(tx, orgId)
+      throw invalidField(
+        "amountCents",
+        owed.dueCents === 0
+          ? "Esa factura ya está pagada"
+          : `De esa factura queda ${formatMoney(owed.dueCents, owed.currency, locale)} por pagar`,
+      )
+    }
+  }
   const tender = link.tender
     ? {
         cents: assertCents(link.tender.cents, "Lo que salió", "tenderCents"),
@@ -1559,6 +1601,7 @@ export async function createExpense(
       replacesExpenseId: link.replacesExpenseId ?? null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
       purchaseOrderId: link.purchaseOrderId ?? null,
+      payableId: link.payableId ?? null,
       salesTax,
       recurringId: link.recurringId ?? null,
       recurringMonth: link.recurringMonth ?? null,
@@ -1727,6 +1770,7 @@ function withoutCommissionNames<
         ...("shiftClosed" in row ? { shiftClosed: false } : {}),
         ...("replaced" in row ? { replaced: null } : {}),
         ...("history" in row ? { history: [] } : {}),
+        ...("payableId" in row ? { payableId: null } : {}),
       }
       merged.set(key, first)
       out.push(first)
@@ -1997,6 +2041,7 @@ export async function correctExpense(
     ...(original.recurringId && original.recurringMonth
       ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
       : {}),
+    ...(original.payableId ? { payableId: original.payableId } : {}),
     replacesExpenseId: original.id,
   })
   if (replay) return replay
@@ -2049,6 +2094,8 @@ export async function correctExpense(
         ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
         : {}),
       replacesExpenseId: original.id,
+      // El pago corregido sigue siendo de su factura: si no, quedaría otra vez por pagar (ADR 0174).
+      ...(original.payableId ? { payableId: original.payableId } : {}),
       // El movimiento de caja de un sueldo no dice a quién, como al pagarlo (ADR 0166).
       ...(category === STAFF_PAY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
     },

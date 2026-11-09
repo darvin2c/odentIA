@@ -17,6 +17,7 @@
  *   cada persona cuenta entera en el tramo de su concepto sin pagar más antiguo.
  */
 import { fixedOwedAt } from "./expense-recurring.js"
+import { payablesOwedAt } from "./expense-payable.js"
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
@@ -878,6 +879,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const [owedCommissions, owedNow] = await commissionsOwedMany(tx, orgId, [window.end, now], { currency, branchId })
   // Lo fijo vencido sin pagar al cierre (gastos que se repiten).
   const fixedOwed = await fixedOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId })
+  // Las facturas por pagar (ADR 0174): lo que se debía al cierre.
+  const invoicesOwed = await payablesOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId, currency, timezone: scope.timezone })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingAdjustmentsValued(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
@@ -970,6 +973,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
       salesTax: { cents: Math.max(0, taxOf(0)) },
       /** Gastos que se repiten, vencidos y sin pagar. */
       fixed: fixedOwed,
+      /** Facturas por pagar (la del laboratorio): lo que falta pagar y lo vencido. */
+      invoices: invoicesOwed,
       purchases: purchasesDueOf(unpaid, scope.money),
     },
     missing: await missingExpenses(tx, orgId, scope),

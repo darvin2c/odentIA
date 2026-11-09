@@ -30,6 +30,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { useMemo, useState } from "react"
 import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
 import type { ExpenseDrawerMode } from "./expense-form-drawer"
+import { NotePayableDrawer, useOpenPayables } from "./payables"
 import { FixedOfMonth, RecurringDueSection, RepeatingList, useRecurringMonth } from "./recurring-due"
 import { useActiveBranch } from "../../lib/active-branch"
 import { DownloadButton } from "../reports/report-parts"
@@ -129,6 +130,9 @@ export function ExpensesTab({
   // El detalle de un gasto (el cajón para corregirlo o pagar lo que se repite lo abre Finanzas).
   const [viewing, setViewing] = useState<ExpenseRow | null>(null)
   const place = { branchId, branchName, currency, locale, orgTimeZone }
+  // Las facturas por pagar de la sede (ADR 0174), y el cajón para anotar una.
+  const payables = useOpenPayables(branchId)
+  const [notingInvoice, setNotingInvoice] = useState(false)
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
   const category = (EXPENSE_FILTER_TYPES as readonly string[]).includes(tipo) ? tipo : ""
@@ -472,7 +476,12 @@ export function ExpensesTab({
         locale={locale}
         canWrite={canWrite}
         onPay={(due) => onOpenExpense({ kind: "pagar", due })}
+        payables={payables.data?.data.payables ?? []}
+        payablesToday={payables.data?.data.today ?? ""}
+        onPayInvoice={(payable) => onOpenExpense({ kind: "factura", payable })}
+        onNoteInvoice={() => setNotingInvoice(true)}
       />
+      <NotePayableDrawer place={place} open={notingInvoice} onClose={() => setNotingInvoice(false)} />
 
       {searching ? null : listSection}
 

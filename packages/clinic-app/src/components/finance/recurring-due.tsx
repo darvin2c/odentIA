@@ -28,6 +28,7 @@ import {
   invalidateFinance,
   noteRecurringApi,
   parseAmount,
+  type Payable,
   type RecurringDue,
   type RecurringMonth,
   type RecurringTemplate,
@@ -41,6 +42,7 @@ import { useTodayRate } from "../../lib/org"
 import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceChips } from "./cash-close-drawer"
+import { NotePayableButton, PayableRows, PayableVoidDrawer } from "./payables"
 import { PaymentMethodButtons } from "./collect-drawer"
 
 const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
@@ -196,15 +198,26 @@ export function RecurringDueSection({
   locale,
   canWrite,
   onPay,
+  payables = [],
+  payablesToday = "",
+  onPayInvoice,
+  onNoteInvoice,
 }: {
   data: RecurringMonth | undefined
   locale: string
   canWrite: boolean
   /** «Pagar»: abre el cajón del gasto lleno con lo de siempre. */
   onPay: (row: RecurringDue) => void
+  /** Las facturas por pagar de la sede (ADR 0174): van primero, por lo que vence antes. */
+  payables?: Payable[]
+  payablesToday?: string
+  onPayInvoice?: (payable: Payable) => void
+  /** «Anotar una factura». */
+  onNoteInvoice?: () => void
 }) {
   const queryClient = useQueryClient()
   const [change, setChange] = useState<Editable | null>(null)
+  const [voidingInvoice, setVoidingInvoice] = useState<Payable | null>(null)
   const refresh = () => invalidateFinance(queryClient)
   const money = (cents: number, currency: string) => formatMoney(cents, currency, locale)
   // En el celular se ven los primeros tres; el resto, a pedido (QA de Gastos, UX 5).
@@ -224,14 +237,29 @@ export function RecurringDueSection({
     onError: (error) => toast.error(errorText(error, "No se pudo marcar")),
   })
 
-  if (!data || data.due.length === 0) return null
+  if (!data) return null
+  // Sin nada por pagar, quien puede anotar ve dónde anotar una factura; los demás, nada.
+  if (data.due.length === 0 && payables.length === 0) {
+    return canWrite && onNoteInvoice ? (
+      <section aria-labelledby="gastos-por-pagar" className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border bg-card px-4 py-3">
+        <h2 id="gastos-por-pagar" className="text-sm font-semibold">
+          Por pagar <span className="font-normal text-muted-foreground">· nada pendiente</span>
+        </h2>
+        <NotePayableButton onClick={onNoteInvoice} />
+      </section>
+    ) : null
+  }
   const current = `${data.year}-${String(data.month).padStart(2, "0")}`
   const inMain = data.due.filter((row) => row.currency === data.currency)
+  const invoicesInMain = payables.filter((row) => row.currency === data.currency)
   // Los sueldos juntos (de quien no los paga) van aparte del total: no son lo que le toca pagar.
-  const total = inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0)
+  const total =
+    inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0) +
+    invoicesInMain.reduce((sum, row) => sum + row.dueCents, 0)
   const salaries = inMain.filter((row) => row.group !== null).reduce((sum, row) => sum + row.amountCents, 0)
-  const otherCurrency = inMain.length < data.due.length
-  const earlier = data.due.some((row) => row.month !== current)
+  const otherCurrency = inMain.length < data.due.length || invoicesInMain.length < payables.length
+  // Una factura no es de un mes: con ellas el total es «Por pagar», sin mes.
+  const earlier = data.due.some((row) => row.month !== current) || payables.length > 0
   const FEW = 3
   const shown = all ? data.due : data.due.slice(0, FEW)
 
@@ -250,8 +278,19 @@ export function RecurringDueSection({
             </span>
           ) : null}
         </h2>
+        {canWrite && onNoteInvoice ? <NotePayableButton onClick={onNoteInvoice} /> : null}
       </div>
       <ul className="flex min-w-0 flex-col divide-y">
+        {payables.length > 0 && onPayInvoice ? (
+          <PayableRows
+            payables={payables}
+            today={payablesToday}
+            locale={locale}
+            canWrite={canWrite}
+            onPay={onPayInvoice}
+            onVoid={setVoidingInvoice}
+          />
+        ) : null}
         {shown.map((row) => {
           // Lo que se paga al mes siguiente dice su mes: el sueldo de noviembre, «el 2 de diciembre».
           const dueMonth = row.dueOn.slice(0, 7)
@@ -306,6 +345,7 @@ export function RecurringDueSection({
         </div>
       ) : null}
       <ChangeRecurringDrawer row={change} locale={locale} onClose={() => setChange(null)} onDone={refresh} />
+      <PayableVoidDrawer payable={voidingInvoice} locale={locale} onClose={() => setVoidingInvoice(null)} />
     </section>
   )
 }
