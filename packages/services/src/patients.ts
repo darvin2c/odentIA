@@ -31,7 +31,7 @@ import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm"
 import { screenBeforePatient } from "./contact-screen.js"
 import { requireContact } from "./contacts.js"
 import { endPairAccess } from "./pair-access.js"
-import { createPerson, findPersonByDocument, setPersonArchived } from "./people.js"
+import { createPerson, findPersonByDocument, findRealPersonByDocument, releaseTestDocument, setPersonArchived } from "./people.js"
 import {
   joinPatientPerson,
   PATIENT_IDENTITY_KEYS,
@@ -335,6 +335,31 @@ export class RegistrationHeld extends ServiceError {
 }
 
 /**
+ * Lo que queda para recepción cuando alguien de fuera trae el documento de
+ * una persona que ya está en la clínica (sea o no paciente).
+ */
+export async function heldByDocument(
+  tx: Db,
+  orgId: string,
+  ownerId: string,
+  identity: { displayName: string; phone?: string | null; email?: string | null },
+): Promise<RegistrationHeld> {
+  const [row] = await tx
+    .select({ displayName: contact.displayName, patientId: patient.id })
+    .from(contact)
+    .leftJoin(patient, and(eq(patient.organizationId, contact.organizationId), eq(patient.personId, contact.id)))
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId)))
+    .limit(1)
+  return new RegistrationHeld({
+    ownerId,
+    ownerName: row?.displayName ?? "otra persona",
+    ownerPatientId: row?.patientId ?? null,
+    declared: { displayName: identity.displayName, phone: identity.phone ?? null, email: identity.email ?? null },
+    match: "documento",
+  })
+}
+
+/**
  * Alta de un paciente: la identidad se escribe en su persona (ADR 0044) y la
  * ficha guarda lo clínico y administrativo. La persona es la que se indica
  * como propia; si no, la que ya tiene su documento (identificador fuerte;
@@ -378,27 +403,15 @@ export async function createPatient(
   }
   const selfLink = links.find((link) => link.relationship === "self")
   const others = links.filter((link) => link.relationship !== "self")
+  // El documento de una persona de prueba no es de nadie: lo suelta para quien es real.
+  await releaseTestDocument(tx, orgId, identity, selfLink?.contactId)
   // Desde fuera (sin una persona del equipo: registro en línea, enlace de
   // reserva) nunca se adopta ni se cambia a quien ya tiene ese documento,
   // sea o no paciente: queda para recepción.
   const fromOutside = actorUserId === null
   if (fromOutside) {
-    const owner = await findPersonByDocument(tx, orgId, identity)
-    if (owner && owner !== selfLink?.contactId) {
-      const [row] = await tx
-        .select({ displayName: contact.displayName, patientId: patient.id })
-        .from(contact)
-        .leftJoin(patient, and(eq(patient.organizationId, contact.organizationId), eq(patient.personId, contact.id)))
-        .where(and(eq(contact.organizationId, orgId), eq(contact.id, owner)))
-        .limit(1)
-      throw new RegistrationHeld({
-        ownerId: owner,
-        ownerName: row?.displayName ?? "otra persona",
-        ownerPatientId: row?.patientId ?? null,
-        declared: { displayName: identity.displayName, phone: identity.phone ?? null, email: identity.email ?? null },
-        match: "documento",
-      })
-    }
+    const owner = await findRealPersonByDocument(tx, orgId, identity)
+    if (owner && owner !== selfLink?.contactId) throw await heldByDocument(tx, orgId, owner, identity)
   }
   // El documento con su país: si ya es de otra ficha se dice de quién.
   await assertDocumentFree(tx, orgId, identity, { patientsOnly: true })

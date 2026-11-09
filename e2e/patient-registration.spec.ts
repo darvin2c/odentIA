@@ -233,7 +233,7 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await acceptAndSubmit(anon)
 
     await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
-    await expect(anon.getByText(new RegExp(`${org.name} ya tiene tus datos`))).toBeVisible()
+    await expect(anon.getByText(new RegExp(`${org.name} recibió tus datos`))).toBeVisible()
     // Éxito sin sesión: no expone ficha, número clínico ni edición.
     await expect(anon).toHaveURL(/\/registro/)
     await expect(anon.locator('a[href*="/patients/"]')).toHaveCount(0)
@@ -346,7 +346,7 @@ test("registro público QR en móvil: flujo completo en 390px sin cuenta", async
     await acceptAndSubmit(anon)
 
     await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
-    await expect(anon.getByText(new RegExp(`${org.name} ya tiene tus datos`))).toBeVisible()
+    await expect(anon.getByText(new RegExp(`${org.name} recibió tus datos`))).toBeVisible()
     // En el celular nada se sale de la pantalla.
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await expect(anon).toHaveURL(/\/registro/)
