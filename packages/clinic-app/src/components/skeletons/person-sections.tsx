@@ -116,7 +116,7 @@ export function PersonSummarySkeleton({
         </section>
       ) : clinical ? (
         <>
-          <SummaryCardShape title="Alergias y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
+          <SummaryCardShape title="Antecedentes y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
             <ul className="flex flex-col gap-2">
               <li className="rounded-lg border border-dashed px-3 py-2">
                 <Line className="w-40" />

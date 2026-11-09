@@ -105,7 +105,7 @@ it("M6: una cita meses después de la fecha del control no lo cumple; una dentro
   })
 })
 
-it("la lista: el control vencido primero, lo aceptado con sus nombres, quién indicó el control; caja sin control ni fechas", async () => {
+it("lo aceptado y el control vencido, en una fila y una cita; quién indicó el control; caja sin control ni fechas", async () => {
   const f = await clinicalFixture()
   await ownerDb.update(encounter).set({ reason: "Dolor en la 46" }).where(eq(encounter.id, f.encounter.id))
   const item = await f.run((tx) =>
@@ -116,23 +116,22 @@ it("la lista: el control vencido primero, lo aceptado con sus nombres, quién in
   await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
   const overdue = await control(f, "Control semestral", -3, 180)
 
-  // El «Qué sigue» de siempre no cambia: lo aceptado sin cita.
+  // Lo aceptado primero y el control vencido en la misma fila: un solo botón, una sola cita
+  // (QA del 8 nov, entrega 3). La frase única es esa fila: el Plan y Pacientes dicen lo mismo.
   const { step, steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
-  expect(step).toMatchObject({ kind: "agendar", text: "Aceptó todo: falta su cita" })
+  expect(steps.map((row) => row.kind)).toEqual(["agendar"])
+  expect(step).toEqual(steps[0])
   expect(await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).toEqual(step)
-  // La lista pone el control vencido primero, y cada fila dice qué es.
-  expect(steps.map((row) => row.kind)).toEqual(["control", "agendar"])
-  expect(steps[0]).toMatchObject({
-    text: "Control semestral · vencido",
-    detail: expect.stringMatching(/^Tocaba el .* · lo indicó Clínico el .* en la atención por «Dolor en la 46»$/),
-    action: { label: "Reservar el control", followUpId: overdue.id },
+  expect(step).toMatchObject({
+    text: "Falta su cita: lo aceptado y el control vencido",
+    detail: expect.stringMatching(/^Tratamiento propio · respondió el .* · Control semestral vencido: tocaba el /),
+    action: { label: "Reservar lo aceptado y el control", planItemIds: [item.id], followUpId: overdue.id },
   })
-  expect(steps[1]).toMatchObject({ detail: expect.stringMatching(/^Tratamiento propio · respondió el /), action: { label: "Reservar lo aceptado" } })
 
   // Recepción: lo mismo, sin el motivo de la atención (es de la historia).
   const forReception = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, reception))
-  expect(forReception.steps[0]?.detail).toMatch(/lo indicó Clínico el /)
-  expect(forReception.steps[0]?.detail).not.toContain("Dolor")
+  expect(forReception.steps).toEqual(steps)
+  expect(JSON.stringify(forReception.steps)).not.toContain("Dolor")
 
   // Caja no ve la agenda: ni el control ni la fecha de su cita.
   await book(f, new Date(Date.now() + 7 * DAY))
@@ -180,4 +179,66 @@ it("la lista dice cada tratamiento que sigue en curso sin cita, una vez cada uno
   const { step, steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
   expect(step).toMatchObject({ kind: "continuar", action: { label: "Reservar la sesión 2", planItemIds: [first.id] } })
   expect(steps.map((row) => row.action?.planItemIds)).toEqual([[first.id], [second.id]])
+})
+
+it("el control de un tratamiento va primero; reservar lo aceptado con el control lo deja en esa misma cita", async () => {
+  const f = await clinicalFixture()
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const cleaning = await control(f, "Limpieza y control", -5, 200)
+  // El control de un tratamiento (el de una endodoncia) vencido: decide si funcionó y va primero.
+  const endo = await control(f, "Control de la endodoncia", -2, 90)
+  await ownerDb.update(clinicalFollowUp).set({ planItemId: item.id }).where(eq(clinicalFollowUp.id, endo.id))
+  const { step, steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  expect(steps.map((row) => [row.kind, row.action?.followUpId ?? null])).toEqual([
+    ["control", endo.id],
+    ["agendar", cleaning.id],
+  ])
+  // La frase única es esa primera fila; lo aceptado conserva su «Reservar cita» en el presupuesto del Plan.
+  expect(step).toEqual({ ...steps[0], alsoToSchedule: [item.id] })
+
+  // «Reservar lo aceptado y el control»: una cita con los dos, en una sola operación.
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: "Sede una cita", timezone: "America/Lima" }).returning()
+  const room = await f.run((tx) => createRoom(tx, "org_a", { branchId: site!.id, name: "Unidad" }))
+  const visit = await f.run((tx) =>
+    createAppointment(tx, "org_a", f.actor, {
+      branchId: site!.id,
+      roomId: room.id,
+      professionalUserId: f.actor,
+      patientId: f.patient.id,
+      startsAt: new Date(Date.now() + 3 * DAY).toISOString(),
+      durationMin: 30,
+      outsideSchedule: true,
+      notice: false,
+      planItemIds: [item.id],
+      followUpIds: [cleaning.id],
+    }),
+  )
+  const [linked] = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.id, cleaning.id))
+  expect(linked).toMatchObject({ status: "programado", appointmentId: visit.id })
+  // «Qué sigue» dice que el control va en esa misma cita, no una fila suelta «con cita».
+  await ownerDb.update(clinicalFollowUp).set({ status: "cancelado" }).where(eq(clinicalFollowUp.id, endo.id))
+  const after = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  expect(after.steps.find((row) => row.action?.appointmentId === visit.id && row.kind === "control")?.text).toMatch(/^Limpieza y control · en su cita del /)
+  // Un control que ya no está por reservar no deja la cita a medias: no se reserva nada.
+  await expect(
+    f.run((tx) =>
+      createAppointment(tx, "org_a", f.actor, {
+        branchId: site!.id,
+        roomId: room.id,
+        professionalUserId: f.actor,
+        patientId: f.patient.id,
+        startsAt: new Date(Date.now() + 5 * DAY).toISOString(),
+        durationMin: 30,
+        outsideSchedule: true,
+        notice: false,
+        followUpIds: [cleaning.id],
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 409, fields: { followUpIds: expect.any(String) } })
+  expect(await ownerDb.select().from(appointment).where(eq(appointment.patientId, f.patient.id))).toHaveLength(1)
 })

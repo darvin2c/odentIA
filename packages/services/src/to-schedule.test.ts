@@ -302,18 +302,17 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
 it("Pacientes filtrado por un atajo dice el paso de ese atajo; el paso único no cambia (QA del 8 nov)", async () => {
   const c = await clinic()
   const lia = await person(c, "Lía Paz")
-  // Control vencido y, además, algo aceptado sin cita: la regla de un solo paso pide reservar lo aceptado.
+  // Control vencido y, además, algo aceptado sin cita: una sola fila y una cita para los dos (QA del 8 nov, entrega 3).
   await ownerDb.insert(clinicalFollowUp).values({ organizationId: c.orgId, patientId: lia, kind: "mantenimiento", title: "Limpieza y control", dueAt: new Date(Date.now() - 20 * DAY), status: "pendiente" })
   await accepted(c, lia)
-  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, lia, all))).toMatchObject({ kind: "agendar", action: { label: "Reservar lo aceptado" } })
+  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, lia, all))).toMatchObject({ kind: "agendar", action: { label: "Reservar lo aceptado y el control" } })
   const rowIn = async (atajo?: string) =>
     (await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes", limit: 100, ...(atajo ? { atajo } : {}) }, all))).items.find(
       (item) => item.patient?.id === lia,
     )?.nextStep
-  // Sin filtro, la fila dice el paso único; en «Control vencido», el control; en «Por agendar», lo aceptado.
-  expect(await rowIn()).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado" })
-  expect(await rowIn("control_por_reservar")).toMatchObject({ kind: "control", text: "Limpieza y control · vencido", actionLabel: "Reservar el control" })
-  expect(await rowIn("por_agendar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado" })
+  // La misma fila sin filtro, en «Control vencido» y en «Por agendar».
+  for (const atajo of [undefined, "control_por_reservar", "por_agendar"])
+    expect(await rowIn(atajo)).toMatchObject({ kind: "agendar", text: "Falta su cita: lo aceptado y el control vencido", actionLabel: "Reservar lo aceptado y el control" })
 
   // Con un presupuesto armado y sin enviar, el paso único es enviarlo; «Por agendar» sigue diciendo lo aceptado.
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: lia, title: "Otro plan" }).returning({ id: treatmentPlan.id })
@@ -331,6 +330,6 @@ it("Pacientes filtrado por un atajo dice el paso de ese atajo; el paso único no
     organizationId: c.orgId, patientId: lia, planId: plan!.id, budgetId: draft!.id, optionId, planItemId: item!.id, title: "Resina", currency: "PEN", priceCents: 5_000,
   })
   expect(await rowIn()).toMatchObject({ kind: "enviar" })
-  expect(await rowIn("por_agendar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado" })
-  expect(await rowIn("control_por_reservar")).toMatchObject({ kind: "control" })
+  expect(await rowIn("por_agendar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado y el control" })
+  expect(await rowIn("control_por_reservar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado y el control" })
 })

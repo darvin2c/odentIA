@@ -1,6 +1,8 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
   DIAGNOSIS_VERIFICATION_LABELS,
+  hasHealthInfo as sharedHasHealthInfo,
+  healthReviewPending,
   type MissingPersonDatum,
   type Vitals,
 } from "@odentia/clinical"
@@ -198,6 +200,8 @@ export interface PatientHealth {
   allergiesReviewedAt?: string | null
   allergiesReviewedBy?: string | null
   allergyReviewDue?: boolean
+  /** Lo declarado por el paciente espera la revisión de un profesional (lo decide el servidor). */
+  reviewPending?: boolean
   latestAnamnesis: {
     id: string
     version: number
@@ -276,48 +280,21 @@ export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
 }
 
 /**
- * Hay información clínica registrada: grupo sanguíneo, filas vigentes o una
- * determinación explícita (negación o registro) en algún grupo, o entrevista.
- * La longitud de las listas por sí sola no basta: sangre, un «No» o una
- * respuesta odontológica también son información.
+ * Hay información clínica registrada (no es solo «No se le preguntó»). La
+ * regla es común con el servidor (`@odentia/clinical`).
  */
 export function hasHealthInfo(health: PatientHealth | null | undefined): boolean {
-  if (!health) return false
-  // La declaración explícita «No sé» incrementa revisión aunque no cree filas.
-  if (health.revision > 0) return true
-  if (health.bloodGroup != null) return true
-  if (health.allergies.length > 0 || health.conditions.length > 0 || health.medications.length > 0)
-    return true
-  const status = health.reviewStatus
-  if (
-    status.allergies !== "unknown" ||
-    status.conditions !== "unknown" ||
-    status.medications !== "unknown"
-  )
-    return true
-  const answers = health.latestAnamnesis?.answers
-  return !!answers && Object.keys(answers).length > 0
+  return sharedHasHealthInfo(health)
 }
 
 /**
- * Declaración pendiente de revisión profesional: hay información pero nunca se
- * marcó revisor/fecha. Distinto de «No se le preguntó» (contenido desconocido).
+ * Declaración pendiente de revisión profesional. La decide el servidor
+ * (`reviewPending`), que sabe si lo anotó un clínico o lo declaró el paciente;
+ * una respuesta sin ese dato usa la misma regla sin él.
  */
 export function isHealthReviewPending(health: PatientHealth | null | undefined): boolean {
-  if (!health || health.reviewedAt || !hasHealthInfo(health)) return false
-  // Las alergias tienen su propia revisión: las que agregó o revisó el equipo no son «declaradas
-  // por el paciente», y por sí solas no dejan pendiente lo demás.
-  if (!health.allergiesReviewedAt) return true
-  const status = health.reviewStatus
-  const answers = health.latestAnamnesis?.answers
-  return (
-    health.bloodGroup != null ||
-    health.conditions.length > 0 ||
-    health.medications.length > 0 ||
-    status.conditions !== "unknown" ||
-    status.medications !== "unknown" ||
-    (!!answers && Object.keys(answers).length > 0)
-  )
+  if (!health) return false
+  return health.reviewPending ?? healthReviewPending(health)
 }
 
 export interface ClinicalNote {

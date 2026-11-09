@@ -46,7 +46,7 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre 
   await bookingFor(page, "Lucía Quispe")
   const first = page.getByRole("checkbox", { name: "Endodoncia unirradicular · sesión 1 de 2" })
   await expect(first).toBeChecked()
-  await expect(page.getByText("Tratamientos aceptados con sesiones por reservar.", { exact: false })).toBeVisible()
+  await expect(page.getByText("Lo marcado queda listo en su atención.", { exact: false })).toBeVisible()
   // Una semana después el día entero está libre, sea la hora que sea hoy.
   await page.getByRole("button", { name: "Semana siguiente" }).click()
   await views("reserva-sesion-1")

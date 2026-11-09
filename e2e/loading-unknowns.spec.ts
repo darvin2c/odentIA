@@ -53,7 +53,7 @@ test("la página de quien no se sabe qué es no anuncia lo de un paciente", asyn
   }
   expect(seen).toEqual([])
   await expect(page.getByRole("button", { name: "Reservar cita" })).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Antecedentes y alertas" })).toHaveCount(0)
   gate.resolve()
   await expect(page.getByRole("heading", { level: 1, name: "Rosa Contacto" })).toBeVisible()
   await expect(tabs.getByRole("tab", { name: "Clínica" })).toHaveCount(0)

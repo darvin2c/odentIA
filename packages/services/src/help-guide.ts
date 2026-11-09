@@ -453,6 +453,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Porque ese número está en sus datos pero nadie lo marcó como su WhatsApp, así que no le llegan los recordatorios por ahí. Si sabes que lo usa, pulsa «Usarlo como su WhatsApp». Si dice «Este número no tiene WhatsApp», WhatsApp rechazó un mensaje: los recordatorios le llegan por correo o «Te espera» te pide llamarla. Si alguien escribe desde el teléfono de una ficha, la conversación pregunta «¿Es la misma persona?»: nunca se une sola.",
       },
       {
+        q: "¿Por qué el Resumen dice «Su WhatsApp es otro» debajo de su teléfono?",
+        a: "Porque su WhatsApp es un número distinto del de «Teléfono», por ejemplo si cambió de número: el Resumen dice «· WhatsApp» solo junto al número que de verdad es su WhatsApp, y si es otro, dice cuál. Al escribir un teléfono de otro país, empieza con «+» y su prefijo (+44…): el país cambia solo. También puedes buscar el país en la lista por su nombre o su prefijo.",
+      },
+      {
         q: "¿Dónde anoto su contacto de emergencia?",
         a: "En su página › Datos › Personas vinculadas: vincula a la persona (o elígela si ya está) y marca «Contacto de emergencia», con su parentesco. Si la persona aún no existe, se crea en el mismo paso.",
       },
@@ -482,7 +486,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
-        a: "En el Resumen de su página, en «Qué sigue»: arriba su próxima cita (si ya llegó, dice que está en la sala de espera) y debajo, en una sola lista, todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. El control vencido va primero. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias y alertas y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles.",
+        a: "En el Resumen de su página, en «Qué sigue»: arriba su próxima cita (si ya llegó, dice que está en la sala de espera) y debajo, en una sola lista, todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. El Plan y la lista de Pacientes dicen esa misma primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles.",
       },
       {
         q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",

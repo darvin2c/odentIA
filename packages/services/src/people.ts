@@ -300,7 +300,7 @@ export async function getPersonPage(
     isMinor: await birthDateIsMinor(tx, orgId, row.birthDate),
     sex: row.sex,
     phone: row.phone,
-    phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id),
+    phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id, { withOtherNumber: readsConversations || can("crm.read") }),
     email: row.email,
     archived,
     recordLocked: row.recordLockedAt !== null,
@@ -637,13 +637,14 @@ export async function listPeopleShortcuts(
 /**
  * El paso de «Qué sigue» que dice la fila filtrada por cada atajo: el de su regla
  * («Por agendar»: lo aceptado o la próxima sesión; «Control vencido»: el control).
- * Los de presupuestos ya son el paso único de quien está en ellos.
+ * Los de presupuestos, el suyo: el atajo cuenta a quien lo tiene en cualquier fila.
  */
 const STEP_OF_SHORTCUT: Record<PeopleShortcut, readonly PlanNextKind[]> = {
   por_agendar: ["agendar", "continuar"],
-  presupuesto_sin_enviar: [],
-  presupuesto_sin_respuesta: [],
-  control_por_reservar: ["control"],
+  presupuesto_sin_enviar: ["enviar"],
+  presupuesto_sin_respuesta: ["respuesta"],
+  // El control vencido va en la fila de lo aceptado cuando hay algo aceptado sin cita (una sola cita).
+  control_por_reservar: ["control", "agendar"],
   faltan_datos: [],
   por_invitar_a_volver: [],
   deben: [],
