@@ -597,7 +597,7 @@ export function EncounterProcedures({
             title="Registrar procedimiento"
             description={
               presetId && values.planItemId === presetId
-                ? "Viene puesto lo indicado; si hiciste otra cosa, cámbialo."
+                ? "Viene puesto lo que sigue hoy; si hiciste otra cosa, cámbialo."
                 : productUi().plan.budgetRequired
                   ? "Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
                   : "Elige un tratamiento indicado, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."

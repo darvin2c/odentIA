@@ -968,8 +968,11 @@ export async function listPlanItems(
   // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia), con
   // la regla de «Qué sigue» (`waitingFor`): «Registrar lo de hoy» no lo propone por omisión.
   const phases = (await hooksOf(tx, orgId)).planPhases
-  return withProgress.map((item) => {
-    const before = waitingFor(item, withProgress, phases)
+  // Lo indicado y aún por decidir cuenta como si se aceptara: la endodoncia y la corona indicadas en
+  // la misma consulta ya tienen su orden antes de responder el presupuesto (QA antes de entregar).
+  const asDecided = withProgress.map((item) => (item.decisionStatus === "pendiente" ? { ...item, decisionStatus: "aceptado" } : item))
+  return withProgress.map((item, index) => {
+    const before = waitingFor(asDecided[index]!, asDecided, phases)
     return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null }
   })
 }

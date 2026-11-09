@@ -26,6 +26,7 @@ import {
   nextControlOf,
   sessionCountsOf,
   sessionsLeft,
+  awaitsBooked,
   waitingFor,
 } from "./to-schedule.js"
 
@@ -95,6 +96,11 @@ export interface TreatmentCoordination {
     nextSession: { n: number; m: number }
     /** Lo que va antes en su pieza y sigue sin terminar (`waitingFor`): «va después de Endodoncia». */
     after: string | null
+    /**
+     * Cuenta en «Por agendar» y en Reportes (`toScheduleSql`): `toSchedule` sin lo que va después de
+     * otro tratamiento que ya tiene su cita. «Nueva cita» sigue ofreciendo lo de `toSchedule`.
+     */
+    unbooked: boolean
   }>
 }
 
@@ -171,6 +177,7 @@ export async function getTreatmentCoordination(
         m: item.plannedSessions,
       },
       after: waitingFor(item, open, planPhases)?.title ?? null,
+      unbooked: toSchedule.has(item.id) && !awaitsBooked(item, open, withAppointment, planPhases),
     })),
   }
 }

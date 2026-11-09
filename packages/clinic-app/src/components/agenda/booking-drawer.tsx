@@ -834,13 +834,16 @@ export function BookingDrawer({
                       }
                     />
                     <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
-                      {row.title}
-                      {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
-                      {row.session ? ` · ${row.session}` : ""}
-                      {/* Lo dice como «Qué sigue»: marcarlo igual es decisión de quien reserva (entrega 8). */}
-                      {row.after ? (
-                        <span className="text-muted-foreground">{` · va después de ${row.after}`}</span>
-                      ) : null}
+                      {/* Un solo bloque de texto: la etiqueta es flex y partía «va después» en otra columna. */}
+                      <span>
+                        {row.title}
+                        {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
+                        {row.session ? ` · ${row.session}` : ""}
+                        {/* Lo dice como «Qué sigue»: marcarlo igual es decisión de quien reserva (entrega 8). */}
+                        {row.after ? (
+                          <span className="text-muted-foreground">{` · va después de ${row.after}`}</span>
+                        ) : null}
+                      </span>
                     </FieldLabel>
                   </Field>
                 ))}

@@ -39,7 +39,7 @@ it("la biblioteca guarda para qué piezas es cada tratamiento, sin subir su vers
     )[0]
   expect(await ruleOf("endodoncia-posterior-vital")).toMatchObject({
     toothGroups: ["molar"],
-    dentition: null,
+    dentition: "permanent",
     family: "endodoncia-vital",
   })
   // Sin caras ni lo que deja, la fila se conserva por su anatomía.
@@ -83,7 +83,7 @@ it("el servicio trae la anatomía de su tratamiento y sus hermanos activos; uno 
   const found = await f.run((tx) => getService(tx, "org_a", anterior.id))
   expect(found.toothAnatomy).toMatchObject({
     groups: ["anterior"],
-    dentition: null,
+    dentition: "permanent",
     family: "endodoncia-vital",
   })
   expect(found.toothAnatomy?.siblings.map((sibling) => sibling.id).sort()).toEqual(

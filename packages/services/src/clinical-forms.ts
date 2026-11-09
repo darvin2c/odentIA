@@ -2464,10 +2464,15 @@ async function keepSignerDocument(
   try {
     // En su propio punto de guardado: si no pasa (otro ya lo tiene, no cumple la regla), la firma sigue.
     await tx.transaction((inner) =>
-      updatePersonIdentity(inner as Db, orgId, { userId: actorUserId }, contactId, {
-        docType: parsed.docType,
-        docNumber: parsed.docNumber,
-      }),
+      // Solo si sigue sin documento: otra sesión que lo guardó entre tanto no se pisa (`STALE_DATA`).
+      updatePersonIdentity(
+        inner as Db,
+        orgId,
+        { userId: actorUserId },
+        contactId,
+        { docType: parsed.docType, docNumber: parsed.docNumber },
+        { docNumber: null },
+      ),
     )
     return { saved: true, notice: null }
   } catch (error) {

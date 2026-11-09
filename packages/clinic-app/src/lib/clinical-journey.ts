@@ -293,6 +293,8 @@ export interface TreatmentCoordination {
     nextSession: { n: number; m: number }
     /** Va después de otro tratamiento de su pieza que sigue sin terminar: su título. */
     after?: string | null
+    /** Cuenta en «Por agendar» y en Reportes: sin cita y sin esperar a otro que ya tiene la suya. */
+    unbooked?: boolean
   }>
 }
 

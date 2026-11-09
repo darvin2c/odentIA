@@ -62,6 +62,7 @@ import {
   type FinalizedMaterials,
   type NextSession,
   fetchEncounterClosing,
+  controlDaySaid,
   finalizedControlsWords,
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
@@ -2846,7 +2847,14 @@ export function EncounterEditor({
                   finalizedControls?.next?.joinsNext?.from ?? "",
                 ].sort()[1]!,
                 ...(finalizedControls?.next?.joinsNext
-                  ? { followUpIds: [finalizedControls.next.id] }
+                  ? {
+                      followUpIds: [finalizedControls.next.id],
+                      // Por qué empieza ese día, como en «Qué sigue» (QA antes de entregar).
+                      note: `${finalizedControls.next.title} toca el ${controlDaySaid(
+                        new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(finalizedControls.next.dueAt)),
+                      )}; se puede hacer desde el ${controlDaySaid(finalizedControls.next.joinsNext.from)}.`,
+                      notBefore: finalizedControls.next.joinsNext.from,
+                    }
                   : {}),
               }}
               onClose={() => setBookingNext(null)}

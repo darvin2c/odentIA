@@ -105,6 +105,8 @@ const GROUP_NAME_WORD: Record<string, string> = {
 /** «dientes anteriores», «premolares y molares», «molares temporales». */
 export function anatomyGroupsWords(
   anatomy: Pick<TreatmentAnatomy, "groups" | "dentition">,
+  /** «permanentes» solo se dice si importa (la pieza es temporal); si no, sobra. */
+  sayPermanent = true,
 ): string {
   const ordered = TOOTH_GROUPS.filter((group) => anatomy.groups.includes(group))
   const words = ordered.map((group) => GROUP_PLURAL[group])
@@ -113,7 +115,7 @@ export function anatomyGroupsWords(
       ? `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
       : (words[0] ?? "")
   if (anatomy.dentition === "deciduous") return `${joined} temporales`
-  if (anatomy.dentition === "permanent") return `${joined} permanentes`
+  if (anatomy.dentition === "permanent" && sayPermanent) return `${joined} permanentes`
   return joined
 }
 
@@ -149,7 +151,7 @@ export function toothFitNotice<T extends Pick<TreatmentAnatomy, "groups" | "dent
     anatomyFits(anatomy, tooth)
   )
     return null
-  const message = `La ${tooth} es ${toothSingularWords(tooth)} y «${service.name}» es para ${anatomyGroupsWords(anatomy)}.`
+  const message = `La ${tooth} es ${toothSingularWords(tooth)} y «${service.name}» es para ${anatomyGroupsWords(anatomy, dentitionOf(tooth) === "deciduous")}.`
   const sibling = anatomySibling(tooth, siblings)
   if (sibling) return { tooth, message, sibling, missing: null }
   // El consentimiento dice el nombre del servicio: si trae la palabra del grupo, esa; si no, el nombre.

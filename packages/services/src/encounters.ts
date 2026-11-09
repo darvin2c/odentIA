@@ -2104,7 +2104,7 @@ export async function bookedAfterOf(
         beforeIds.map((id) => sql`${id}`),
         sql`, `,
       )})
-      -- Si su próxima sesión ya tiene cita antes, no hay nada que revisar.
+      -- Si su próxima sesión ya tiene cita antes (o en la misma cita), no hay nada que revisar.
       and not exists (select 1 from appointment_plan_item next_session
         join appointment b on b.organization_id = next_session.organization_id and b.id = next_session.appointment_id
         where next_session.organization_id = before_item.organization_id and next_session.plan_item_id = before_item.id
@@ -2112,7 +2112,7 @@ export async function bookedAfterOf(
             LIVE_APPOINTMENT_STATUSES.map((status) => sql`${status}`),
             sql`, `,
           )})
-          and b.starts_at > now() and b.starts_at < a.starts_at)
+          and b.starts_at > now() and b.starts_at <= a.starts_at)
     order by later.id, a.starts_at`)
   return rows.map((row) => ({
     planItemId: row.id,
@@ -3149,7 +3149,7 @@ export async function finalizeEncounter(
       next:
         nextControl &&
         continuingNext.length === 0 &&
-        nextSessions.length > 0 &&
+        nextSessions.some((session) => session.toBook !== null) &&
         pairsWithAccepted({ dueAt: nextControl.dueAt, createdAt: now })
           ? {
               ...nextControl,

@@ -391,7 +391,7 @@ it("la anatomía de la biblioteca: explícita, de tratamientos por pieza, y la e
   // «Posterior» no es una palabra: en la endodoncia son los molares; en la resina, premolares y molares.
   expect(anatomy.get("endodoncia-posterior-vital")).toEqual({
     groups: ["molar"],
-    dentition: null,
+    dentition: "permanent",
     family: "endodoncia-vital",
   })
   expect(anatomy.get("resina-fotocurable-1-superficie-posterior")?.groups).toEqual([
@@ -404,6 +404,8 @@ it("la anatomía de la biblioteca: explícita, de tratamientos por pieza, y la e
   })
   expect(anatomyFits(anatomy.get("endodoncia-anterior-vital")!, 46)).toBe(false)
   expect(anatomyFits(anatomy.get("endodoncia-posterior-vital")!, 46)).toBe(true)
+  // La endodoncia es de permanentes: en un molar temporal (la 75) avisa (QA antes de entregar).
+  expect(anatomyFits(anatomy.get("endodoncia-posterior-vital")!, 75)).toBe(false)
   // Cada familia tiene más de un miembro (si no, no hay a quién ofrecer) salvo la corona completa anterior.
   const families = new Map<string, number>()
   for (const item of anatomy.values())

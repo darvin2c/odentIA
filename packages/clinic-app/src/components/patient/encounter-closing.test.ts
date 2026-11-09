@@ -90,9 +90,9 @@ describe("el control que se pide junto a la corona ya ofrecida (QA del 9 nov)", 
     )
   })
 
-  it("sin la corona ofrecida, nada cambia: queda el texto de siempre", () => {
+  it("sin nada ofrecido queda el texto de siempre; con la sesión que sigue, tampoco dice «No indicaste cuándo vuelve»", () => {
     expect(controlBesideAccepted([], "")).toBeNull()
     const going = continuingAfterSign({ finishing: [], continuing: [endo] }, {})
-    expect(controlBesideAccepted(going, "")).toBeNull()
+    expect(controlBesideAccepted(going, "")?.line).toMatch(/^Sin plazo, el control no queda anotado: solo «.+».$/)
   })
 })

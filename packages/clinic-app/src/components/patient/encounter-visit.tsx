@@ -205,7 +205,7 @@ export function EncounterVisitStrip({
                   <Button
                     type="button"
                     size="sm"
-                    variant={item.after ? "ghost" : "outline"}
+                    variant="outline"
                     disabled={disabled || busy !== null}
                     aria-label={`${item.started ? "Continuar hoy" : "Hacerla hoy"}: ${words}`}
                     onClick={() =>

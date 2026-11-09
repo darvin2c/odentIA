@@ -114,3 +114,14 @@ describe("la anatomía de un tratamiento y la pieza (ISO 3950)", () => {
     expect(pick?.id).toBe("temporal")
   })
 })
+
+it("la endodoncia de permanente en un molar temporal avisa y no ofrece la de molares permanentes (QA antes de entregar)", () => {
+  const permanentEndo: Anatomy = { groups: ["molar"], dentition: "permanent" }
+  const notice = toothFitNotice({ name: "Endodoncia anterior vital", anatomy: { groups: ["anterior"], dentition: "permanent" } }, 85, [permanentEndo])
+  expect(notice?.message).toBe("La 85 es un molar temporal y «Endodoncia anterior vital» es para dientes anteriores permanentes.")
+  expect(notice?.sibling).toBeNull()
+  // En un molar permanente, no se dice «permanentes»: sobra.
+  expect(toothFitNotice({ name: "Endodoncia anterior vital", anatomy: { groups: ["anterior"], dentition: "permanent" } }, 46, [permanentEndo])?.message).toBe(
+    "La 46 es un molar y «Endodoncia anterior vital» es para dientes anteriores.",
+  )
+})

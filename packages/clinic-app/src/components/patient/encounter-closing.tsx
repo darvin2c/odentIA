@@ -30,6 +30,7 @@ import { useStore } from "@tanstack/react-form"
 import { Check } from "lucide-react"
 import { useId, useRef } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
+import { usePermission } from "../../lib/crm"
 import type { ConsentNeed } from "../../lib/encounter-documents"
 import {
   type BookedSession,
@@ -221,17 +222,17 @@ export function continuingAfterSign(
 }
 
 /**
- * Con lo aceptado ya ofrecido para volver (la corona tras la endodoncia), el
- * control que se pide aparte: su título, como lo nombra el servidor al crearlo
- * («Control de endodoncia»), y lo que queda con o sin plazo. Sin lo aceptado,
- * null: se dice lo de siempre (QA del 9 nov: «No indicaste cuándo vuelve»
- * salía debajo de «Vuelve para Corona…»).
+ * Con algo ya ofrecido para volver (la corona tras la endodoncia, o la sesión 2
+ * que sigue), el control que se pide aparte: su título, como lo nombra el
+ * servidor al crearlo («Control de endodoncia»), y lo que queda con o sin plazo.
+ * Sin nada ofrecido, null: se dice lo de siempre (QA del 9 nov: «No indicaste
+ * cuándo vuelve» salía debajo de «Vuelve para…»).
  */
 export function controlBesideAccepted(
   continuing: ContinuingVisit[],
   day: string,
 ): { title: string; line: string } | null {
-  if (continuing.length === 0 || !continuing.every((visit) => visit.accepted)) return null
+  if (continuing.length === 0) return null
   const after = continuing.find((visit) => visit.after)?.after
   const names = continuing.map((visit) => `«${visit.label}»`)
   const what = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
@@ -953,6 +954,8 @@ export function EncounterClosingDialog({
   onCompleteHealth?: () => void
 }): React.JSX.Element {
   const ids = useId()
+  // Quien no ve la caja no recibe lo que debe en «Atención finalizada»: no se le promete (QA antes de entregar).
+  const seesFinance = usePermission("finance.read")
   const ProductClosing = productUi().encounter.Closing
   const bounds = endTimeBounds(startedAt)
   const needsReason = consents.length > 0
@@ -1095,7 +1098,9 @@ export function EncounterClosingDialog({
                 </p>
               ) : null}
               <p className="text-xs text-muted-foreground">
-                Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja.
+                {seesFinance
+                  ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
+                  : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
               </p>
               {nextVisit}
             </div>

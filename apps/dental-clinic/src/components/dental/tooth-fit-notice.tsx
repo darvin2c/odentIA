@@ -68,7 +68,19 @@ export function ToothFitNotice({
             size="sm"
             variant="outline"
             disabled={pending}
-            onClick={() => onUse(sibling)}
+            onClick={(event) => {
+              // El aviso se va al cambiar: el foco vuelve a lo anterior en la página (el tratamiento
+              // elegido), no al principio (WCAG 2.4.3, QA antes de entregar).
+              const button = event.currentTarget
+              const focusable = [
+                ...document.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])"),
+              ].filter((element) => !element.hasAttribute("disabled"))
+              const before = focusable[focusable.indexOf(button) - 1] ?? null
+              onUse(sibling)
+              requestAnimationFrame(() => {
+                if (!button.isConnected && before?.isConnected) before.focus()
+              })
+            }}
           >
             Usar {sibling.name}
           </Button>
