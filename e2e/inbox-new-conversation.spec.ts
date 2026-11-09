@@ -130,9 +130,10 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   expect(ficha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
   // Su página lo dice con su acción: lo que la clínica pide y falta (los apellidos ya los dio al crearla).
   await gotoHydrated(page, tenant(org.slug, `/people/${detail.contact.id}`))
-  const pendingRow = page.getByText(/Faltan datos para/).first()
+  // En una línea: «Faltan datos: fecha de nacimiento».
+  const pendingRow = page.getByText(/^Faltan datos: /).first()
   await expect(pendingRow).toBeVisible()
-  await expect(page.getByText("Fecha de nacimiento.", { exact: true })).toBeVisible()
+  await expect(pendingRow).toContainText("fecha de nacimiento")
   await info.attach("persona-ficha-minima", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Odontología no lee el CRM: sin «Nueva conversación»; de quien ya es paciente, su «Contexto» sin lo comercial ---
