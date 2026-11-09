@@ -987,7 +987,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     toolCtx.pickLinks = progress.pickLinks
     toolCtx.pickLinkUrls = progress.pickLinkUrls
     // Con una cita que espera su sí, decir que quedó reservada es falso (`send_reply`).
-    toolCtx.awaitingYes = progress.pending !== null
+    toolCtx.awaitingYes = progress.pendingBooking
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
       .filter(Boolean)
       .join("\n\n")

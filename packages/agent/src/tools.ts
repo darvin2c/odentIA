@@ -1862,6 +1862,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
         created = p
       })
+      if (created?.status === "propuesta") ctx.proposedNow = true
       // En el chat web, si cierra la pestaña no le llega nada: la propuesta queda
       // creada y la reserva espera a tener dónde avisarle (se exige al confirmar).
       if (await webchatNeedsContact()) {
@@ -1869,7 +1870,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       // Si ya pidió reservar esa misma hora, su sí está dado: no se le vuelve a pedir (ADR 0097).
       if (created?.status === "propuesta") {
-        ctx.proposedNow = true
         const id = created.id
         const before = await inOrg((tx) => chosenBeforeProposalOf(tx, ctx.orgId, ctx.contactId, id)).catch(() => null)
         if (before && (await choseThisSlot(ctx.decision, { proposed: before.proposed, said: before.said }))) {
@@ -2382,6 +2382,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           }
         }
         return `Confirmado y ejecutado (id ${proposal.id}).`
+      }
+      // Ya no espera nada: lo que diga ahora («esa hora ya está reservada, ¿te reservo otra?») no se frena.
+      if (proposal.status === "fallida" || proposal.status === "expirada") {
+        ctx.awaitingYes = false
+        ctx.proposedNow = false
       }
       if (proposal.status === "fallida") {
         const rawError = proposal.error?.trim() ?? ""

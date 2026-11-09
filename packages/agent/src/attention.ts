@@ -86,6 +86,8 @@ export interface AttentionProgress {
   offered: boolean
   /** La cita propuesta que espera su sí: «Reservar cita — Cita: …». */
   pending: string | null
+  /** Lo que espera su sí es reservar una cita nueva (no moverla ni cancelarla): todavía no está reservada. */
+  pendingBooking: boolean
   /** Lo último que quedó hecho con su cita en esta atención. */
   done: string | null
   /**
@@ -139,6 +141,7 @@ export function attentionProgress(input: {
     replies: said.length,
     offered: input.state.lookups.some((item) => item.tool === "buscar_huecos" && inAttention(item.at)),
     pending: pending ? describe(pending) : null,
+    pendingBooking: pending?.action === "reservar_cita",
     done: done ? describe(done) : null,
     // La pregunta automática de novedades (con el nombre y el trato de la clínica) no le dice lo hecho.
     doneTold:

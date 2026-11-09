@@ -79,7 +79,7 @@ const ASKS_OR_IF = /\?\s*$|^\W*(?:si|if|whether|in case)\b/
  * «Ya quedó reservada», «te reservé la cita», «your appointment is booked». Lo que depende de
  * algo no la da por hecha: «al confirmar tus datos queda reservada», «cuando elijas, queda agendada».
  */
-const BOOKED_PARTICIPLE = String.raw`(?:reservad|agendad|separad|confirmad)[oa]s?`
+const BOOKED_PARTICIPLE = String.raw`(?:reservad|agendad|separad)[oa]s?`
 const BOOKED_ES = new RegExp(
   [
     String.raw`${NOT_AFTER}\b(?:quedo|queda|quedaron|esta|ha quedado|ya esta)(?: ya)? ${BOOKED_PARTICIPLE}\b`,
@@ -88,8 +88,8 @@ const BOOKED_ES = new RegExp(
   ].join("|"),
 )
 const BOOKED_EN = /\b(?:is|are|has been|have been|you're|you are) (?:now |all )?booked\b|\bi(?:'ve| have)? booked\b/
-/** Lo que pasará cuando haga algo: no afirma que ya pasó. */
-const WHEN_IT_DOES = /\b(?:al (?:confirmar|completar|elegir|llenar|terminar)|cuando|una vez que|apenas|en cuanto|para que|once|when|after you)\b/
+/** Lo que pasará cuando haga algo: no afirma que ya pasó. «Con tu sí» llega como «con tu claro» (`YES`). */
+const WHEN_IT_DOES = /\b(?:al (?:confirmar|completar|elegir|llenar|terminar)|cuando|una vez que|apenas|en cuanto|para que|con tu (?:si|claro|confirmacion|respuesta)|respondeme|confirmame|si me (?:dices|confirmas|respondes)|once|when|after you)\b/
 
 export function claimsOf(text: string): { team: boolean; note: boolean; contact: boolean; booked: boolean } {
   const said = plain(text)
