@@ -386,6 +386,7 @@ const planPatchInput = z
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
+    plannedSessions: z.number().int().min(1).max(60).nullish(),
     encounterId: z.uuid(),
     status: z
       .enum([

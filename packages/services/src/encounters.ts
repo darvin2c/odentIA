@@ -2346,6 +2346,8 @@ export interface ClosingAppointmentControl {
   id: string
   title: string
   repeatEveryMonths: number | null
+  /** Quien lo indicó, si no es quien atiende hoy. */
+  byName: string | null
 }
 
 export interface ClosingControls {
@@ -2510,6 +2512,10 @@ async function closingControlsOf(
       repeatEveryMonths: clinicalFollowUp.repeatEveryMonths,
       startsAt: appointment.startsAt,
       appointmentStatus: appointment.status,
+      // Quien lo indicó: el cierre dice qué control se cumple y de quién (QA del 9 nov, repaso 3).
+      originProfessionalName: sql<string | null>`(select u."name" from ${encounter} e join ${user} u on u."id" = e."professional_user_id"
+        where e."id" = ${clinicalFollowUp.originEncounterId} and e."organization_id" = ${clinicalFollowUp.organizationId}
+          and e."professional_user_id" is distinct from ${row.professionalUserId})`,
     })
     .from(clinicalFollowUp)
     .leftJoin(
@@ -2531,7 +2537,12 @@ async function closingControlsOf(
   const first = open.find((control) => !dueIds.has(control.id) && !byAppointment.includes(control))
   return {
     recallMonths,
-    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths }) => ({ id, title, repeatEveryMonths })),
+    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths, originProfessionalName }) => ({
+      id,
+      title,
+      repeatEveryMonths,
+      byName: originProfessionalName ?? null,
+    })),
     shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
     due,
     next: first

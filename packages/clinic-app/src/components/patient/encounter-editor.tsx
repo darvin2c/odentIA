@@ -64,6 +64,7 @@ import {
   fetchEncounterClosing,
   controlDaySaid,
   finalizedControlsWords,
+  keepsDiagnosis,
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
@@ -451,7 +452,7 @@ function resolveDiagnosesBody(
   keep: ReadonlySet<string>,
 ): { resolveDiagnosisIds?: string[] } {
   const ids = resolvingOnSign(resolvable ?? [], sessions, answers)
-    .filter((found) => !found.diagnosisIds.some((id) => keep.has(id)))
+    .filter((found) => !keepsDiagnosis(found, keep))
     .flatMap((found) => found.diagnosisIds)
   return ids.length ? { resolveDiagnosisIds: ids } : {}
 }
@@ -2276,6 +2277,7 @@ export function EncounterEditor({
                 encounterId={encounterId}
                 visit={detail.visit}
                 offeredReason={offeredReason}
+                bookedReason={detail.bookedReason}
                 onUseReason={takeOfferedReason}
                 reasonEmpty={reason.trim() === ""}
                 onUrgency={() => {

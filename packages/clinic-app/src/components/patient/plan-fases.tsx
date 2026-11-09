@@ -24,7 +24,7 @@ import { useId, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
-import { NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
+import { formatDateTime, NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
@@ -227,6 +227,8 @@ function PlanPhasesGroup({
                   position += 1
                   const closed = CLOSED.includes(item.status)
                   const next = nextOf.get(item.id)?.nextAction
+                  // Con la cita de su próxima sesión ya reservada, se dice cuándo es (QA del 9 nov, repaso 3).
+                  const bookedAt = nextOf.get(item.id)?.nextAppointmentAt ?? null
                   const selected = item.id === selectedId
                   const planned = item.plannedSessions ?? 1
                   const sessions = item.sessionsDone ?? 0
@@ -240,7 +242,9 @@ function PlanPhasesGroup({
                       <span className="w-5 text-sm tabular-nums text-muted-foreground">
                         {position}
                       </span>
-                      <div className="flex min-w-0 flex-1 flex-col">
+                      {/* Con poco ancho (390 px), las acciones bajan a otra línea y el nombre no se
+                          aplasta una palabra por línea (QA del 9 nov, repaso 3). */}
+                      <div className="flex min-w-0 flex-[1_1_14rem] flex-col">
                         <span
                           className={`text-sm font-medium ${closed && item.status !== "realizado" ? "line-through" : ""}`}
                         >
@@ -267,7 +271,11 @@ function PlanPhasesGroup({
                               : planned > 1 || sessions > planned
                                 ? `${sessions} de ${plural(planned, "sesión", "sesiones")}`
                                 : null,
-                            !closed && next ? NEXT_ACTION_LABELS[next] : null,
+                            !closed && bookedAt && (next === "iniciar" || next === "continuar")
+                              ? `${planned > 1 ? `Sesión ${sessions + 1}` : "Su cita"}: ${formatDateTime(bookedAt)}`
+                              : !closed && next
+                                ? NEXT_ACTION_LABELS[next]
+                                : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
@@ -278,7 +286,7 @@ function PlanPhasesGroup({
                       {item.status === "pendiente" && item.decisionStatus === "aceptado" ? null : (
                         <Badge variant={statusVariant(item.status)}>{planStatusLabel(item.status)}</Badge>
                       )}
-                      <div className="flex items-center gap-1">
+                      <div className="ml-auto flex flex-wrap items-center gap-1">
                         {canWrite && !closed ? (
                           <>
                             <Button

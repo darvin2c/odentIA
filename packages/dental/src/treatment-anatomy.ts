@@ -35,6 +35,17 @@ export interface TreatmentAnatomy {
   family: string
 }
 
+/**
+ * Familias que hacen lo mismo en la otra dentición: la endodoncia de una pieza
+ * permanente, en una temporal, es la pulpectomía (guía de terapia pulpar de la
+ * AAPD). Solo en ese sentido: una pulpectomía en una permanente no dice si la
+ * pulpa está vital o necrótica, y elegir por la persona sería inventarlo.
+ */
+export const DENTITION_COUNTERPART_FAMILIES: Readonly<Record<string, readonly string[]>> = {
+  "endodoncia-vital": ["pulpectomia-deciduo"],
+  "endodoncia-no-vital": ["pulpectomia-deciduo"],
+}
+
 /** El grupo de una pieza FDI válida. */
 export function toothGroupOf(tooth: number): ToothGroup {
   const type = toothTypeOf(tooth)

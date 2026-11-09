@@ -226,6 +226,11 @@ export interface UpdatePlanItemPatch {
   diagnosisCode?: string | null
   /** Lista del código; sin ella, la de la clínica (el ya guardado viaja con la suya). */
   diagnosisSystem?: string | null
+  /**
+   * Sesiones previstas (1–60) mientras no se hizo ninguna. Al cambiar de servicio sin ellas, las
+   * habituales del nuevo: «Cambiar» pide lo mismo que «Indicar» (QA del 9 nov, repaso 3).
+   */
+  plannedSessions?: number | null
   /** Atención borrador actual como contexto de mutación (obligatorio, nunca reescribe el origen). */
   encounterId: string
 }
@@ -1218,6 +1223,9 @@ export async function updatePlanItem(
       set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
       // Sin sesiones hechas, también las sesiones previstas son las del servicio nuevo (ADR 0164).
       if (current.status === "pendiente" || current.status === "programado") set.plannedSessions = service.usualSessions
+      // Y su fase: la exodoncia cambiada por una endodoncia no se queda en la quirúrgica (QA del 9 nov,
+      // repaso 3). Es la misma regla que al indicar; el orden del plan sale de ella («va después»).
+      set.phase = hooks.phaseFor(await serviceKindOf(tx, orgId, service))
       fields.push("serviceId")
     }
   }
@@ -1242,6 +1250,14 @@ export async function updatePlanItem(
     if (fields.includes("site") && !fields.includes("serviceId")) {
       // El sitio se valida contra el scope vigente del ítem.
     }
+  }
+  const plannedSessions = assertPlannedSessions(patch.plannedSessions)
+  if (plannedSessions !== null && plannedSessions !== (set.plannedSessions ?? current.plannedSessions)) {
+    // Con una sesión hecha, las previstas se cambian desde el Plan («Planificar»), que mira las hechas.
+    if (current.status !== "pendiente" && current.status !== "programado")
+      throw invalidField("plannedSessions", "Ya empezó: cambia sus sesiones desde el Plan")
+    set.plannedSessions = plannedSessions
+    fields.push("plannedSessions")
   }
   if (patch.detail !== undefined) {
     set.detail = assertDetail(patch.detail)
@@ -1276,6 +1292,7 @@ export async function updatePlanItem(
     // acordó por ese tratamiento (QA del 8 nov, entrega 3: «Cambiar» en la atención
     // volvía a la tarifa y perdía el precio pactado).
     const serviceChanged = fields.includes("serviceId")
+    const sessionsChanged = serviceChanged || fields.includes("plannedSessions")
     const modes = serviceChanged && updated.serviceId ? await readBillingModes(tx, orgId, [updated.serviceId]) : {}
     await tx
       .update(treatmentBudgetItem)
@@ -1296,10 +1313,10 @@ export async function updatePlanItem(
               promotionName: null,
               promotionMode: null,
               billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
-              sessionsPlanned: updated.plannedSessions,
               currency: updated.currency,
             }
           : {}),
+        ...(sessionsChanged ? { sessionsPlanned: updated.plannedSessions } : {}),
         updatedAt: new Date(),
       })
       .where(
