@@ -20,7 +20,7 @@ export const PRIVACIDAD: LegalDoc = {
       id: "titular",
       title: "Quién es el responsable",
       blocks: [
-        `${TITULAR.razonSocial}, con RUC ${TITULAR.ruc} y domicilio en ${TITULAR.domicilio}, Perú («odentIA»), que ofrece el servicio con dos marcas: odentIA y latidIA. Esta política se aplica a las dos.`,
+        `${TITULAR.razonSocial}, con RUC ${TITULAR.ruc} y domicilio en ${TITULAR.domicilio}, Perú («odentIA»), que ofrece el servicio con tres marcas: odentIA, latidIA y vistIA. Esta política se aplica a las tres.`,
         `Contacto para asuntos de privacidad: ${TITULAR.correoPrivacidad}. Para consultas generales: [${contactEmail}](mailto:${contactEmail}).`,
       ],
     },
@@ -39,7 +39,7 @@ export const PRIVACIDAD: LegalDoc = {
                 "Responsable del tratamiento y titular del banco de datos.",
               ],
               [
-                "Usuarios de la cuenta de una clínica (recepción, odontólogos o médicos, caja, administración) y datos de facturación de la clínica",
+                "Usuarios de la cuenta de una clínica (recepción, odontólogos, médicos u optómetras, caja, administración) y datos de facturación de la clínica",
                 "odentIA",
                 "Responsable del tratamiento y titular del banco de datos.",
               ],
@@ -59,7 +59,7 @@ export const PRIVACIDAD: LegalDoc = {
       title: "Qué datos tratamos",
       blocks: [
         { h: "Visitantes de la web" },
-        "Las webs de odentIA y latidIA no usan cookies ni cargan herramientas de analítica, publicidad o tipografías de terceros. El servidor registra datos técnicos de cada visita (dirección IP, fecha y hora, página solicitada, navegador) para mantener la web segura y medir el tráfico de forma agregada.",
+        "Las webs de odentIA, latidIA y vistIA no usan cookies ni cargan herramientas de analítica, publicidad o tipografías de terceros. El servidor registra datos técnicos de cada visita (dirección IP, fecha y hora, página solicitada, navegador) para mantener la web segura y medir el tráfico de forma agregada.",
         "Si nos escribe, tratamos los datos que nos envíe: nombre, correo electrónico, teléfono, clínica y el contenido del mensaje.",
         { h: "Usuarios de la cuenta" },
         {

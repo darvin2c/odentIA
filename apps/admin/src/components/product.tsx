@@ -1,13 +1,14 @@
 /**
  * El producto de cada clínica en la administración (lienzo «Administración en
  * negro»): la administración es neutra y el color solo dice de qué app es cada
- * clínica, odentIA en celeste y latidIA en lila. Va como un punto con su nombre,
+ * clínica, odentIA en celeste, latidIA en lila y vistIA en verde. Va como un punto con su nombre,
  * nunca como pastilla, para no confundirse con los estados.
  */
 import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import { cn } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { useQuery } from "@tanstack/react-query"
+import { z } from "zod"
 import { api } from "../lib/api"
 
 /** «Todos» o un producto. */
@@ -16,20 +17,28 @@ export type ProductChoice = ClinicalProduct | "todos"
 const DOT: Record<ClinicalProduct, string> = {
   dental: "bg-[var(--product-dental)]",
   medical: "bg-[var(--product-medical)]",
+  optical: "bg-[var(--product-optical)]",
 }
 const INK: Record<ClinicalProduct, string> = {
   dental: "text-[var(--product-dental-foreground)]",
   medical: "text-[var(--product-medical-foreground)]",
+  optical: "text-[var(--product-optical-foreground)]",
 }
 /** Lo que es la clínica, para la ficha: «latidIA · consultorio médico». */
 const KIND: Record<ClinicalProduct, string> = {
   dental: "clínica dental",
   medical: "consultorio médico",
+  optical: "óptica",
 }
 
 /** El punto de color de un producto. */
 export function ProductDot({ product, className }: { product: ClinicalProduct; className?: string }) {
   return <span aria-hidden className={cn("inline-block size-2 shrink-0 rounded-full", DOT[product], className)} />
+}
+
+/** Un esquema con una entrada por producto, para lo que la API cuenta de cada uno. */
+export function perProduct<T extends z.ZodType>(shape: T) {
+  return z.object(Object.fromEntries(CLINICAL_PRODUCTS.map((product) => [product, shape])) as Record<ClinicalProduct, T>)
 }
 
 /** «● odentIA», o con `kind` «● latidIA · consultorio médico». */
@@ -59,7 +68,10 @@ export function matchesProduct(choice: ProductChoice, product: ClinicalProduct |
 
 /** Cuántas filas hay de cada producto, para el filtro. */
 export function countByProduct<T>(rows: readonly T[], productOf: (row: T) => ClinicalProduct | undefined) {
-  const counts = { todos: rows.length, dental: 0, medical: 0 } satisfies Record<ProductChoice, number>
+  const counts = {
+    todos: rows.length,
+    ...(Object.fromEntries(CLINICAL_PRODUCTS.map((product) => [product, 0])) as Record<ClinicalProduct, number>),
+  } satisfies Record<ProductChoice, number>
   for (const row of rows) {
     const product = productOf(row)
     if (product) counts[product] += 1

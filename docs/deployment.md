@@ -145,13 +145,48 @@ los Workers `latidia-panel` y `latidia-clinicas`, armados con `VITE_BASE_DOMAIN=
 
 La web de `latidia72.com` es la misma `apps/web` con ese build (el Worker `latidia-web`):
 solo inicio, precios, pedir invitación y las páginas legales
-(`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. La lista de espera guarda el
+(`apps/web/src/lib/product-pages.json`); lo demás responde 404. La lista de espera guarda el
 producto del dominio desde el que se pide (decisión 17).
+
+### vistIA en su dominio
+
+vistIA, el producto de las ópticas (ADR 0169), va en `vistia20.com` igual que latidIA en el
+suyo: con `OPTICAL_DOMAIN=vistia20.com` en la API y el worker, la API responde también en
+`api.vistia20.com` con su propia sesión, CORS acepta `vistia20.com`, `app.vistia20.com` y
+`*.vistia20.com`, y los enlaces de una óptica van en `<óptica>.vistia20.com`. Sin
+`OPTICAL_DOMAIN`, sus ópticas van en el dominio de la plataforma. El remitente de sus
+correos, `OPTICAL_SMTP_FROM` cuando el dominio tenga SPF y DKIM; vacío, el de `SMTP_FROM`
+con «vistIA».
+
+Pendiente fuera del código, como con latidIA:
+
+1. Cloudflare: la zona `vistia20.com` y, en el mismo túnel, las rutas `api.`, `app.` y `*.`
+   (más el CNAME `*` a mano). Las rutas de los Workers en el panel de Cloudflare:
+   `vistia20.com/*` a `vistia-web`, `app.vistia20.com/*` a `vistia-panel` y
+   `*.vistia20.com/*` a `vistia-clinicas` (con **Fail open** y las exclusiones de `api.`
+   y `app.`, como en latidIA).
+2. Google OAuth: la dirección de vuelta `https://api.vistia20.com/api/auth/callback/google`.
+3. Meta: el dominio `https://app.vistia20.com/` en la app de «Conectar con Facebook», y la
+   plantilla `vistia_invitar_a_volver_v1` cuando una óptica conecte su WhatsApp.
+4. R2: `https://*.vistia20.com` en el CORS del bucket de adjuntos.
+5. Correo: `hola@` y `privacidad@vistia20.com` (Email Routing) y el remitente.
+6. Administración: «Plan vistIA» y «Fundadores vistIA», empezando con los precios de los de
+   latidIA, y el alta de vistIA («Solo con invitación» hasta decidir otra cosa).
+
+El panel de `app.vistia20.com` y la app de sus ópticas (`apps/optical-clinic`) son los Workers
+`vistia-panel` y `vistia-clinicas`, armados con `VITE_BASE_DOMAIN=vistia20.com`,
+`VITE_API_URL=https://api.vistia20.com` y `VITE_PRODUCT=optical`; la web, `vistia-web`, la misma
+`apps/web` con `VITE_PRODUCT=optical` (job `deploy-web`). Todos los armados conocen
+`VITE_OPTICAL_DOMAIN=vistia20.com`.
+
+La web de `vistia20.com` sirve sus 22 páginas (`apps/web/src/lib/product-pages.json`); lo demás
+responde 404, como la de latidIA, y su lista de espera guarda `optical`. Muestra los planes de
+vistIA marcados «Mostrar en la web».
 
 ## Las webs en Cloudflare Workers
 
-Las dos webs de marketing (ADR 0136) se publican como dos Workers del plan gratuito,
-`odentia-web` y `latidia-web` (`apps/web/wrangler.jsonc`), fuera de OpenShip. El job
+Las webs de marketing (ADR 0136) se publican como Workers del plan gratuito,
+`odentia-web`, `latidia-web` y `vistia-web` (`apps/web/wrangler.jsonc`), fuera de OpenShip. El job
 `deploy-web` del CI las arma con `WEB_TARGET=cloudflare` y su dominio y las publica al
 pasar las pruebas de main; en un PR solo comprueba que se arman. Leen los precios de
 `https://api.<dominio>` y cada página armada se guarda 30 segundos en la caché de

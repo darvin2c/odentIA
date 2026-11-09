@@ -1,0 +1,21 @@
+{
+  "name": "@odentia/optical",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dominio óptico puro de vistIA: el catálogo de la óptica, sus imágenes y sus consentimientos.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@odentia/clinical": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "^3.2.7"
+  }
+}

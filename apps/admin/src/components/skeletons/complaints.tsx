@@ -20,7 +20,7 @@ export function ComplaintsPageSkeleton() {
   return (
     <PageLoading
       title="Libro de Reclamaciones"
-      subtitle="Las hojas que llegan desde las webs de odentIA y latidIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
+      subtitle="Las hojas que llegan desde las webs de odentIA, latidIA y vistIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
       className="space-y-5"
       bodyClassName="space-y-5"
     >

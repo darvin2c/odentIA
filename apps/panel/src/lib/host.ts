@@ -15,6 +15,7 @@ const BASE_PORT = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE
 const PRODUCT_DOMAINS: Record<ClinicalProduct, string | undefined> = {
   dental: import.meta.env.VITE_DENTAL_DOMAIN || undefined,
   medical: import.meta.env.VITE_MEDICAL_DOMAIN || undefined,
+  optical: import.meta.env.VITE_OPTICAL_DOMAIN || undefined,
 }
 
 /** El dominio de las clínicas de un producto; sin decir cuál, el de este panel. */

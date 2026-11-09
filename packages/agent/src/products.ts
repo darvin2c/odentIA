@@ -15,6 +15,8 @@ const DICTATION: Record<ClinicalProduct, DictationProfile | null> = {
   dental: DENTAL_DICTATION_PROFILE,
   // La de latidIA (issue 229, entrega 10): se mide con `eval:dictado-medico` antes de abrir consultorios.
   medical: MEDICAL_DICTATION_PROFILE,
+  // vistIA no dicta: la mesa del plan quitó dictar la refracción (un signo o un eje mal oídos son lentes mal hechos).
+  optical: null,
 }
 
 export function dictationProfileFor(product: ClinicalProduct): DictationProfile | null {

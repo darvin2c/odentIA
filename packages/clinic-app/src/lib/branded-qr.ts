@@ -3,7 +3,7 @@ import { appWords } from "./product-words"
 
 /**
  * Códigos QR de la aplicación con el isotipo de su marca al centro, el [32] de
- * odentIA o el [72] de latidIA (decisión 10 del lienzo «Su enlace y el código
+ * odentIA, el [72] de latidIA o el [20] de vistIA (decisión 10 del lienzo «Su enlace y el código
  * QR» y decisión 2 del issue 229). Se generan con la corrección de
  * errores más alta (H, ISO/IEC 18004: recupera hasta ~30 % del código) y el
  * isotipo tapa cerca del 5 % del área, así que se lee igual. Nunca el logo de
@@ -16,7 +16,7 @@ const QUIET = 2
 const LOGO_SHARE = 0.22
 
 /** El color del isotipo sobre el blanco del código: el de cada marca en claro. */
-const ISOTIPO_COLOR: Record<BrandId, string> = { odentia: "#0e7490", latidia: "#6d3fc0" }
+const ISOTIPO_COLOR: Record<BrandId, string> = { odentia: "#0e7490", latidia: "#6d3fc0", vistia: "#147c3b" }
 
 /** El isotipo de la marca en su caja de 128 × 112: los dos dígitos y los corchetes. */
 function isotipo(brand: BrandId): string {

@@ -49,14 +49,17 @@ const publicLinks = {
   webURL: env.WEB_URL,
   cookieDomain: env.COOKIE_DOMAIN,
   // Uno por producto con dominio propio: el que se agregue tiene que decir el suyo.
-  productDomains: { medical: env.MEDICAL_DOMAIN || undefined } satisfies ProductDomains,
+  productDomains: {
+    medical: env.MEDICAL_DOMAIN || undefined,
+    optical: env.OPTICAL_DOMAIN || undefined,
+  } satisfies ProductDomains,
 }
 configurePublicLinks(publicLinks)
 configureDocumentChecks(secretsKey)
 // La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
-// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
+// El pie de cada correo lleva la web de su marca: la de latidIA y la de vistIA, en su dominio.
 configureMailLinks(env.WEB_URL, mailBrandDomains(publicLinks.productDomains))
 const mailer = createMailer({
   host: env.SMTP_HOST,
@@ -64,7 +67,10 @@ const mailer = createMailer({
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
-  fromByBrand: env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {},
+  fromByBrand: {
+    ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
+    ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+  },
 })
 const storage: Storage = createStorage({
   endpoint: env.S3_ENDPOINT,

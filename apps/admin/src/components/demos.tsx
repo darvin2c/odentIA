@@ -110,7 +110,7 @@ const optionsSchema = z.object({
 })
 
 /** Cómo se llaman las salas de la demo de cada producto, en plural (las arma `buildDemo`). */
-const DEMO_ROOMS: Record<ClinicalProduct, string> = { dental: "unidades", medical: "consultorios" }
+const DEMO_ROOMS: Record<ClinicalProduct, string> = { dental: "unidades", medical: "consultorios", optical: "salas de examen" }
 
 /** Los pasos del armado, como los dice el avance (tablero 4). */
 const STEPS: Array<{ key: string; title: string; detail: (demo: DemoItem) => string }> = [

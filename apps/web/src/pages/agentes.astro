@@ -1,10 +1,14 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.agentes). En latidIA, su propia página de los tres agentes.
-import InnerPage from "../components/pages/InnerPage.astro"
+// Contenido en src/lib/pages-data.ts (PAGES.agentes). latidIA y vistIA tienen su propia página de sus
+// agentes (en vistIA son dos: Clío no dicta en una óptica); odentIA la arma aquí con InnerPage.
 import AgentsPage from "../components/latidia/agents/AgentsPage.astro"
-import { MEDICAL } from "../lib/product"
+import InnerPage from "../components/pages/InnerPage.astro"
+import VistiaPage from "../components/vistia/VistiaPage.astro"
 import { PAGES } from "../lib/pages-data"
+import { ofProduct } from "../lib/product"
+
+const Own = ofProduct({ dental: null, medical: AgentsPage, optical: VistiaPage })
 ---
-{MEDICAL ? <AgentsPage /> : (
+{Own ? <Own /> : (
 <InnerPage page={PAGES.agentes} />
 )}

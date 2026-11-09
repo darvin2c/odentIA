@@ -25,8 +25,11 @@ describe("los dos dominios de una instalación (decisión 9 del issue 229)", () 
   })
 
   it("reconoce el producto de cada host", () => {
-    const domains = { dental: "odentia32.com", medical: "latidia72.com" }
+    const domains = { dental: "odentia32.com", medical: "latidia72.com", optical: "vistia20.com" }
     expect(productOfHost("api.latidia72.com", domains)).toBe("medical")
+    expect(productOfHost("claridad.vistia20.com", domains)).toBe("optical")
+    expect(productOfHost("app.vistia20.com", domains)).toBe("optical")
+    expect(productOfHost("vistia20.com.evil.test", domains)).toBeNull()
     expect(productOfHost("sonrie.odentia32.com:443", domains)).toBe("dental")
     expect(productOfHost("latidia72.com", domains)).toBe("medical")
     expect(productOfHost("latidia72.com.evil.test", domains)).toBeNull()
@@ -53,7 +56,11 @@ describe("los dos dominios de una instalación (decisión 9 del issue 229)", () 
 
 describe("el pie de los correos de cada marca", () => {
   it("lleva la web de la marca de cada producto con dominio propio, y nada sin dominio", () => {
-    expect(mailBrandDomains({ medical: "latidia72.com" })).toEqual({ latidia: "latidia72.com" })
-    expect(mailBrandDomains({ medical: undefined })).toEqual({})
+    expect(mailBrandDomains({ medical: "latidia72.com", optical: "vistia20.com" })).toEqual({
+      latidia: "latidia72.com",
+      vistia: "vistia20.com",
+    })
+    expect(mailBrandDomains({ medical: "latidia72.com", optical: undefined })).toEqual({ latidia: "latidia72.com" })
+    expect(mailBrandDomains({ medical: undefined, optical: undefined })).toEqual({})
   })
 })

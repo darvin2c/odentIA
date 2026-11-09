@@ -159,9 +159,36 @@ const MEDICAL_FOUNDERS_PLAN = {
   product: "medical",
 } as const
 
+/**
+ * La lista de vistIA: empieza con los precios de latidIA, que son los de odentIA
+ * (decisión 3 del plan de vistIA), con su plan por defecto y sus 20 lugares.
+ */
+const OPTICAL_ACTION_PLAN = {
+  ...ACTION_PLAN,
+  code: "vistia-ficticio",
+  name: "Plan vistIA (ficticio)",
+  product: "optical",
+} as const
+const OPTICAL_FOUNDERS_PLAN = {
+  ...FOUNDERS_PLAN,
+  code: "fundadores-vistia-ficticio",
+  name: "Fundadores vistIA (ficticio)",
+  product: "optical",
+} as const
+
+/** Los planes de lista y por invitación de cada producto. */
+const PRODUCT_PLANS = [
+  ACTION_PLAN,
+  FOUNDERS_PLAN,
+  MEDICAL_ACTION_PLAN,
+  MEDICAL_FOUNDERS_PLAN,
+  OPTICAL_ACTION_PLAN,
+  OPTICAL_FOUNDERS_PLAN,
+] as const
+
 /** Catálogo ficticio (no pisa lo editado: solo inserta lo ausente). */
 export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods: number }> {
-  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+  for (const plan of PRODUCT_PLANS) {
     await db.insert(saasPlan).values(plan).onConflictDoNothing({ target: saasPlan.code })
   }
   // Una base de antes de los tipos (ADR 0085): pone sus precios solo si siguen siendo los de la semilla.
@@ -183,35 +210,42 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
   }
   // Informa a USD 0,20 (Fundadores 0,10) y su tope en sombra (ADR 0105): una base sembrada antes
   // los pone solo si el plan sigue con el precio anterior de la semilla, la mitad del de hoy.
-  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+  for (const plan of PRODUCT_PLANS) {
     await db
       .update(saasPlan)
       .set({ conversationInformMicros: plan.conversationInformMicros, informMessageLimit: plan.informMessageLimit, updatedAt: new Date() })
       .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.conversationInformMicros, plan.conversationInformMicros / 2)))
   }
   // 100 preguntas a Argos al mes (ADR 0085): una base sembrada antes baja de 300 solo si nadie las cambió.
-  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+  for (const plan of PRODUCT_PLANS) {
     await db
       .update(saasPlan)
       .set({ argosIncludedQuestions: plan.argosIncludedQuestions, updatedAt: new Date() })
       .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.argosIncludedQuestions, 300)))
   }
   // Estándar a USD 0,30 (Fundadores 0,15): sube solo si seguía en el 0,20 (0,10) anterior de la semilla.
-  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+  for (const plan of PRODUCT_PLANS) {
     await db
       .update(saasPlan)
       .set({ consultationStandardMicros: plan.consultationStandardMicros, updatedAt: new Date() })
       .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.consultationStandardMicros, (plan.consultationStandardMicros * 2) / 3)))
   }
-  // La prueba igual en los cuatro: cambia solo si seguía con la anterior de la semilla
+  // La prueba igual en los seis: cambia solo si seguía con la anterior de la semilla
   // (la lista ampliable hasta 130; Fundadores por 90 días, sin ampliar).
   await db
     .update(saasPlan)
     .set({ ...TRIAL, updatedAt: new Date() })
     .where(
       or(
-        and(inArray(saasPlan.code, [ACTION_PLAN.code, MEDICAL_ACTION_PLAN.code]), eq(saasPlan.trialMaxCreditCents, 13000)),
-        and(inArray(saasPlan.code, [FOUNDERS_PLAN.code, MEDICAL_FOUNDERS_PLAN.code]), eq(saasPlan.trialDays, 90), eq(saasPlan.trialMaxDays, 90)),
+        and(
+          inArray(saasPlan.code, [ACTION_PLAN.code, MEDICAL_ACTION_PLAN.code, OPTICAL_ACTION_PLAN.code]),
+          eq(saasPlan.trialMaxCreditCents, 13000),
+        ),
+        and(
+          inArray(saasPlan.code, [FOUNDERS_PLAN.code, MEDICAL_FOUNDERS_PLAN.code, OPTICAL_FOUNDERS_PLAN.code]),
+          eq(saasPlan.trialDays, 90),
+          eq(saasPlan.trialMaxDays, 90),
+        ),
       ),
     )
   await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))

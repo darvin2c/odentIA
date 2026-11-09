@@ -113,6 +113,10 @@ export function ProductFilterSkeleton() {
         <span className="inline-block size-2 shrink-0 rounded-full bg-[var(--product-medical)]" />
         latidIA
       </span>
+      <span className={item}>
+        <span className="inline-block size-2 shrink-0 rounded-full bg-[var(--product-optical)]" />
+        vistIA
+      </span>
     </div>
   )
 }

@@ -580,15 +580,19 @@ export const CLIO_DETAIL: Record<"simple" | "estandar" | "completa", string> = {
   completa: "Ordenó la consulta dictada y armó el presupuesto",
 }
 
-/** En latidIA, «Completa» es dejar indicado lo que sigue: un consultorio no arma presupuestos (issue 229). */
-const CLIO_DETAIL_MEDICAL: Partial<typeof CLIO_DETAIL> = {
+/**
+ * Donde no se arman presupuestos, «Completa» es dejar indicado lo que sigue: un
+ * consultorio de latidIA (issue 229) o una óptica de vistIA, que cotiza con el pedido.
+ */
+const CLIO_DETAIL_WITHOUT_BUDGET: Partial<typeof CLIO_DETAIL> = {
   completa: "Ordenó la consulta dictada y dejó indicado lo que sigue",
 }
 
 /** Lo que dice cada producto de lo que hizo Clío; lo que no dice, el de `CLIO_DETAIL`. */
 const CLIO_DETAIL_BY_PRODUCT: Record<ClinicalProduct, Partial<typeof CLIO_DETAIL>> = {
   dental: {},
-  medical: CLIO_DETAIL_MEDICAL,
+  medical: CLIO_DETAIL_WITHOUT_BUDGET,
+  optical: CLIO_DETAIL_WITHOUT_BUDGET,
 }
 
 /**

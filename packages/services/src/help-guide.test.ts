@@ -15,7 +15,7 @@ import { describeHelpSearch, helpBanks, measureHelpBank } from "./help-guide-sui
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url))
 const read = (file: string) => readFileSync(resolve(ROOT, file), "utf8").replace(/\r\n/g, "\n")
 
-const APPS = ["dental-clinic", "medical-clinic"] as const
+const APPS = ["dental-clinic", "medical-clinic", "optical-clinic"] as const
 const treeOf = (app: string) =>
   new Set(
     [...read(`apps/${app}/src/routeTree.gen.ts`).matchAll(/fullPath: '([^']+)'/g)].map(

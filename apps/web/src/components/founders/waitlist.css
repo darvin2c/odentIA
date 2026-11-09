@@ -75,3 +75,10 @@
 @media (max-width: 960px) { :root[data-brand="latidia"] .wl-chips li { background: none; } }
 :root[data-brand="latidia"] .wl-field input:focus-visible,
 :root[data-brand="latidia"] .wl-field select:focus-visible { outline-color: rgba(109, 63, 192, .35); }
+
+/* vistIA: el mismo formulario con su verde. */
+:root[data-brand="vistia"] .wl-aside { background: radial-gradient(90% 75% at 50% 0%, #0f3d24 0%, #0a2615 50%, #06170d 100%); }
+:root[data-brand="vistia"] .wl-chips li { border-color: #24563a; background: rgba(74, 222, 128, .1); }
+@media (max-width: 960px) { :root[data-brand="vistia"] .wl-chips li { background: none; } }
+:root[data-brand="vistia"] .wl-field input:focus-visible,
+:root[data-brand="vistia"] .wl-field select:focus-visible { outline-color: rgba(20, 124, 59, .35); }

@@ -28,7 +28,10 @@ const mailer = createMailer({
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
-  fromByBrand: env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {},
+  fromByBrand: {
+    ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
+    ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+  },
 })
 const authOptions = {
   db,

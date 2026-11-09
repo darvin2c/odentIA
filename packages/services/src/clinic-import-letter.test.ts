@@ -119,6 +119,20 @@ describe("welcomeLetterContent", () => {
     expect(text).not.toMatch(/odentIA|unidades dentales|odontólogos|\(COP\)/i)
   })
 
+  it("vistIA: su marca, su dominio y sus palabras", () => {
+    const content = welcomeLetterContent({ ...base, product: "optical", clinic: "Óptica Clara" })
+    const text = words(content)
+    expect(content.brandName).toBe("vistIA")
+    expect(content.inbox).toBe("soporte@vistia20.com")
+    expect(content.title).toBe("Bienvenida a vistIA")
+    expect(content.footer).toBe("vistIA · vistia20.com · SALLCA GROUP E.I.R.L. · RUC 20603338741")
+    expect(text).toContain("la plataforma para ópticas")
+    expect(content.annex[1]?.title).toBe("Sedes y salas de examen")
+    expect(text).toContain("De los optómetras:")
+    expect(text).toContain("colegio profesional y número de colegiatura (CTMP)")
+    expect(text).not.toMatch(/odentIA|latidIA|unidades dentales|consultorios|odontólogos|médicos|\((COP|CMP)\)/i)
+  })
+
   it("sin teléfono de quien acompaña, solo su correo; sin la consulta si ya se sabe qué usan", () => {
     const content = welcomeLetterContent({
       ...base,
@@ -166,7 +180,7 @@ describe("welcomeLetterContent", () => {
 })
 
 describe("welcomeLetterPdf", () => {
-  it.each(["dental", "medical"] as const)(
+  it.each(["dental", "medical", "optical"] as const)(
     "la carta con su firma en la primera hoja y el anexo desde la segunda (%s)",
     async (product) => {
       const { bytes, pages, letterPages, content } = await welcomeLetterPdf({
@@ -203,6 +217,8 @@ describe("welcomeLetterPdf", () => {
     ["dental", false],
     ["medical", true],
     ["medical", false],
+    ["optical", true],
+    ["optical", false],
   ] as const)(
     "con todo en su largo máximo, la firma sigue en la primera hoja y no pasa del tope (%s, consulta su sistema: %s)",
     async (product, askCurrentSystem) => {

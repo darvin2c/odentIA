@@ -74,7 +74,7 @@ export interface EmailContent {
 /* ---------- Marcas ---------- */
 
 /** Las marcas de la plataforma: odentIA, el producto dental, y latidIA, el médico. */
-export type MailBrand = "odentia" | "latidia"
+export type MailBrand = "odentia" | "latidia" | "vistia"
 
 /**
  * La marca base, odentIA: la de los correos internos del equipo y la de lo que
@@ -102,6 +102,12 @@ const MAIL_BRANDS: Record<
     marca: "#6d3fc0",
     marcaTinta: "#4c2a8a",
     oscuro: { boton: "#b79cf0", botonTinta: "#1e0b3d", enlace: "#d6c6f7" },
+  },
+  vistia: {
+    name: "vistIA",
+    marca: "#147c3b",
+    marcaTinta: "#166534",
+    oscuro: { boton: "#4ade80", botonTinta: "#052e16", enlace: "#bbf7d0" },
   },
 }
 
@@ -181,6 +187,10 @@ export const LOGO_CIDS: Record<keyof typeof LOGOS, string> = {
   latidiaLogotipoOscuro: "logotipo-oscuro@latidia",
   latidiaIsotipoClaro: "isotipo-claro@latidia",
   latidiaIsotipoOscuro: "isotipo-oscuro@latidia",
+  vistiaLogotipoClaro: "logotipo-claro@vistia",
+  vistiaLogotipoOscuro: "logotipo-oscuro@vistia",
+  vistiaIsotipoClaro: "isotipo-claro@vistia",
+  vistiaIsotipoOscuro: "isotipo-oscuro@vistia",
 }
 
 /** Las imágenes de cada marca en `LOGOS`, por tipo y tono. */
@@ -192,6 +202,10 @@ const BRAND_LOGOS: Record<MailBrand, Record<"logotipo" | "isotipo", Record<"Clar
   latidia: {
     logotipo: { Claro: "latidiaLogotipoClaro", Oscuro: "latidiaLogotipoOscuro" },
     isotipo: { Claro: "latidiaIsotipoClaro", Oscuro: "latidiaIsotipoOscuro" },
+  },
+  vistia: {
+    logotipo: { Claro: "vistiaLogotipoClaro", Oscuro: "vistiaLogotipoOscuro" },
+    isotipo: { Claro: "vistiaIsotipoClaro", Oscuro: "vistiaIsotipoOscuro" },
   },
 }
 

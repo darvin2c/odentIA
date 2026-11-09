@@ -78,9 +78,13 @@ const MEDICAL_HABITS: PickerItem[] = [
 ]
 /**
  * Lo de cada producto en el registro: lo que suma a «Otros antecedentes» y su
- * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA).
+ * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA). vistIA
+ * todavía no pregunta nada propio: sus antecedentes de la vista llegan con el examen.
  */
-const PRODUCT_FIELDS: Record<ClinicalProduct, { personal: PickerItem[]; own: { title: string; help: string; items: PickerItem[] } }> = {
+const PRODUCT_FIELDS: Record<
+  ClinicalProduct,
+  { personal: PickerItem[]; own: { title: string; help: string; items: PickerItem[] } | null }
+> = {
   dental: {
     personal: [],
     own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
@@ -89,6 +93,7 @@ const PRODUCT_FIELDS: Record<ClinicalProduct, { personal: PickerItem[]; own: { t
     personal: MEDICAL_PERSONAL,
     own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
   },
+  optical: { personal: [], own: null },
 }
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
@@ -212,6 +217,7 @@ export function RegistrationFieldsPicker({
 }) {
   // Lo de cada producto: «Su historia dental» en odentIA; la lactancia y los hábitos en latidIA.
   const product = productUi().product
+  const own = PRODUCT_FIELDS[product].own
   return (
     <div className="flex flex-col gap-7">
       <dl className="grid gap-2 rounded-2xl bg-muted/60 p-4 text-sm sm:grid-cols-3">
@@ -287,16 +293,18 @@ export function RegistrationFieldsPicker({
         disabled={disabled}
         errors={errors}
       />
-      <Group
-        title={PRODUCT_FIELDS[product].own.title}
-        help={PRODUCT_FIELDS[product].own.help}
-        items={PRODUCT_FIELDS[product].own.items}
-        fields={fields}
-        options={TWO}
-        onMode={onMode}
-        disabled={disabled}
-        errors={errors}
-      />
+      {own ? (
+        <Group
+          title={own.title}
+          help={own.help}
+          items={own.items}
+          fields={fields}
+          options={TWO}
+          onMode={onMode}
+          disabled={disabled}
+          errors={errors}
+        />
+      ) : null}
       <Group
         title="Preguntas para conocerlo"
         help="Nunca son obligatorias: no hacen falta para atenderlo."

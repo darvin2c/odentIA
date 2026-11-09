@@ -32,7 +32,7 @@ import { ApiError, api } from "../../lib/api"
 import { rememberOrganizationsSearch } from "../../lib/organizations-search"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { CreateDemoDrawer, DemoBadge, type DemoItem, DemoProgressDrawer, demoLine, PendingDemoCard, useDemos } from "../../components/demos"
-import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
+import { perProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { OrganizationsPageSkeleton, OrganizationsSkeleton } from "../../components/skeletons/organizations"
 
 interface ListSearch {
@@ -94,7 +94,9 @@ function NegotiatedBadge({ deal }: { deal: { discountBps: number; endsAt: string
 const orgListSchema = z.object({
   items: z.array(orgItemSchema),
   total: z.number(),
-  byProduct: z.object({ dental: z.number(), medical: z.number() }).default({ dental: 0, medical: 0 }),
+  byProduct: perProduct(z.number().default(0)).default(
+    Object.fromEntries(CLINICAL_PRODUCTS.map((product) => [product, 0])) as Record<ClinicalProduct, number>,
+  ),
 })
 
 /** El estado de la clínica como pastilla: verde si está activa, ámbar si algo falta, rojo si está restringida. */
@@ -135,6 +137,7 @@ const assistedSchema = z
 const PRODUCT_CHOICES: Record<ClinicalProduct, string> = {
   dental: `${productWords("dental").name} · clínica dental`,
   medical: `${productWords("medical").name} · consultorio médico`,
+  optical: `${productWords("optical").name} · óptica`,
 }
 
 /** Lo que dice el 502 `EMAIL_FAILED`: la clínica ya está creada, solo faltó el correo. */
@@ -367,7 +370,7 @@ function OrganizationsPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Clínicas"
-        subtitle="Las de odentIA y las de latidIA, con suscripción, uso, miembros y actividad."
+        subtitle="Las de odentIA, latidIA y vistIA, con suscripción, uso, miembros y actividad."
         primary={{ label: "Alta asistida", icon: <Plus aria-hidden />, onClick: () => setAssistedOpen(true) }}
         // Crear demos es de la administración (decisión 11): soporte no lo ve.
         {...(isAdmin ? { secondary: { label: "Crear demo", icon: <Presentation aria-hidden />, onClick: () => setDemoOpen(true) } } : {})}

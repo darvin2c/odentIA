@@ -1,0 +1,270 @@
+---
+// Las ilustraciones de las portadas de vistIA (HTML y SVG, sin WebGL), con la Óptica Lucero de
+// ejemplo. Son decorativas: lo mismo está explicado en el texto de cada página, así que el lector de
+// pantalla no las lee. Cada una dice «ejemplo».
+import type { VistiaVisualKind } from "./pages-data"
+
+interface Props {
+  kind: VistiaVisualKind
+}
+const { kind } = Astro.props
+---
+<div class="vv" aria-hidden="true">
+  {(kind === "sofi" || kind === "omnicanal") && (
+    <div class="phone wa">
+      <div class="notch"></div>
+      <div class="wah"><span class="wav">S</span><span><strong>Óptica Lucero</strong><span class="mono">Sofi · asistente virtual</span></span></div>
+      {kind === "omnicanal" ? <span class="chan mono">Instagram → WhatsApp · la misma conversación</span> : null}
+      <div class="bub in">Hola, ¿atienden el sábado? Veo borroso de lejos y quiero medirme la vista.</div>
+      <div class="bub out">Hola, Rosa. El sábado tengo a las 10:00 o a las 11:30 con Andrea Quispe, en Lucero Centro. ¿Cuál te acomoda?</div>
+      <div class="bub in">A las 10, porfa.</div>
+      <div class="bub out ok">Listo: examen de la vista el sábado a las 10:00. Te lo recuerdo un día antes.</div>
+      <span class="ex mono">ejemplo</span>
+    </div>
+  )}
+
+  {kind === "agentes" && (
+    <div class="panel">
+      <div class="ph"><span>Óptica Lucero · hoy</span><span class="ex">ejemplo</span></div>
+      <ul class="log">
+        <li class="sofi"><span class="mono">23:41</span><i></i><span><b>Sofi</b> agendó a Rosa para su examen de la vista</span></li>
+        <li class="sofi"><span class="mono">08:15</span><i></i><span><b>Sofi</b> le dio a Ana la dirección y el horario</span></li>
+        <li class="argos"><span class="mono">09:00</span><i></i><span><b>Argos</b> le recordó a Julia su control de mañana</span></li>
+        <li class="argos"><span class="mono">10:30</span><i></i><span><b>Argos</b> invitó a Miguel a su control anual</span></li>
+        <li><span class="mono">10:40</span><i></i><span><b>Caja</b> cobró el examen y una montura</span></li>
+      </ul>
+      <div class="chip"><i></i>Todo queda en la ficha de cada persona</div>
+    </div>
+  )}
+
+  {kind === "argos" && (
+    <div class="panel">
+      <div class="ph"><span>Reportes · pregúntale a Argos</span><span class="ex">ejemplo</span></div>
+      <div class="ask"><span class="mono">Tú</span>¿Cuántos exámenes de la vista cobramos en octubre?</div>
+      <div class="answer">
+        <span class="mono">Argos</span>
+        <strong>64 exámenes cobrados</strong>
+        <span>8 más que en septiembre, en las dos sedes.</span>
+        <span class="how">Cómo lo calculé: exámenes de la vista con su cobro, del 1 al 31 de octubre.</span>
+      </div>
+      <div class="chip argos"><i></i>Responde con las cifras de Reportes</div>
+    </div>
+  )}
+
+  {kind === "agenda" && (
+    <div class="panel">
+      <div class="ph"><span>Agenda · sábado · Lucero Centro</span><span class="ex">ejemplo</span></div>
+      <div class="cols">
+        {[
+          { who: "Andrea Quispe · Sala 1", slots: [["09:00", "busy", "Examen de la vista"], ["10:00", "new", "Rosa Paredes · Examen de la vista"], ["11:30", "free", "Libre"], ["12:30", "busy", "Control de lentes de contacto"]] },
+          { who: "Jorge Salas · Sala 2", slots: [["09:30", "free", "Libre"], ["10:30", "busy", "Examen de la vista"], ["11:30", "ctrl", "Miguel · control anual"], ["12:30", "free", "Libre"]] },
+        ].map((c) => (
+          <div class="col">
+            <span class="cw">{c.who}</span>
+            {c.slots.map(([t, k, l]) => <div class:list={["slot", k]}><span class="mono">{t}</span><span>{l}</span></div>)}
+          </div>
+        ))}
+      </div>
+      <div class="chip"><i></i>Agendó Sofi · por WhatsApp, a las 23:41</div>
+    </div>
+  )}
+
+  {kind === "ficha" && (
+    <div class="panel">
+      <div class="ph"><span>Ficha · Rosa Paredes Luna</span><span class="ex">ejemplo</span></div>
+      <div class="who"><span class="av">RP</span><span><strong>Rosa Paredes Luna</strong><span class="mono">HC-000001 · 42 años</span></span></div>
+      <ul class="rows">
+        <li><span class="mono">Antecedentes</span><span>Usa lentes desde los 15 años</span></li>
+        <li><span class="mono">Alergias</span><span>Ninguna conocida</span></li>
+        <li><span class="mono">Diagnóstico</span><span>H52.1 · Miopía</span></li>
+        <li><span class="mono">Pruebas del ojo</span><span>Retinografía · con su informe</span></li>
+        <li><span class="mono">Próximo control</span><span>Control anual de la vista · octubre</span></li>
+      </ul>
+      <div class="chip"><i></i>Atención firmada · solo admite adendas</div>
+    </div>
+  )}
+
+  {kind === "caja" && (
+    <div class="panel">
+      <div class="ph"><span>Caja · Lucero Centro · hoy</span><span class="ex">ejemplo</span></div>
+      <ul class="moves">
+        <li><span class="mono">10:40</span><span>Examen de la vista · Rosa</span><span class="pill-s ok">cobrado</span></li>
+        <li><span class="mono">10:41</span><span>Montura de acetato · Rosa</span><span class="pill-s ok">cobrado</span></li>
+        <li><span class="mono">12:15</span><span>Lentes de sol · Ana</span><span class="pill-s ok">cobrado</span></li>
+        <li><span class="mono">15:00</span><span>Gasto · líquido de limpieza</span><span class="pill-s">gasto</span></li>
+      </ul>
+      <div class="stock">
+        <span class="mono ak">Stock · Lucero Centro</span>
+        <div class="st-row"><span>Montura de acetato negra</span><b>3</b></div>
+        <div class="st-row"><span>Estuche rígido</span><b>12</b></div>
+        <div class="st-row low"><span>Solución para lentes de contacto</span><b>2</b></div>
+      </div>
+      <div class="close">Cerrar caja e imprimir la hoja para firmar</div>
+    </div>
+  )}
+
+  {kind === "enlace" && (
+    <div class="phone">
+      <div class="notch"></div>
+      <span class="mono pk">Su enlace · Óptica Lucero</span>
+      <strong class="hi">Hola, Rosa</strong>
+      <div class="next"><span class="mono">Tu próxima cita</span><strong>Sábado · 10:00</strong><span>Examen de la vista · Andrea Quispe</span></div>
+      <div class="acts">
+        <span class="act main">Cambiar mi cita</span>
+        <span class="act">Mis datos</span>
+        <span class="act">Mis documentos</span>
+        <span class="act">Mis mensajes</span>
+      </div>
+      <span class="ex mono">ejemplo</span>
+    </div>
+  )}
+
+  {kind === "reportes" && (
+    <div class="panel">
+      <div class="ph"><span>Reportes · octubre · todas las sedes</span><span class="ex">ejemplo</span></div>
+      <div class="cards">
+        {[
+          ["Cobrado", "S/ 14.380", "↑ 6 % más que en septiembre"],
+          ["Clientes nuevos", "41", "↑ 5 más que en septiembre"],
+          ["Faltaron a su cita", "9", "↓ 3 menos que en septiembre"],
+          ["Citas recuperadas", "6", "Las trajo Argos"],
+        ].map(([label, value, cmp]) => (
+          <div class="kpi"><span class="mono">{label}</span><strong>{value}</strong><span>{cmp}</span></div>
+        ))}
+      </div>
+      <div class="chip argos"><i></i>Pregúntale a Argos lo que no esté aquí</div>
+    </div>
+  )}
+
+  {kind === "seguridad" && (
+    <div class="panel">
+      <div class="ph"><span>Óptica Lucero · separada de las demás</span><span class="ex">ejemplo</span></div>
+      <div class="roles">
+        {[
+          ["Recepción", "Agenda, conversaciones y datos de contacto", "var(--sky)"],
+          ["Optómetras", "La historia clínica de quienes atienden", "var(--mint)"],
+          ["Caja", "Cobros, gastos y cierre", "var(--amber)"],
+        ].map(([r, s, c]) => (
+          <div class="role" style={`--rc:${c}`}>
+            <svg viewBox="0 0 24 24" class="lock"><rect x="5" y="11" width="14" height="10" rx="2.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+            <span><strong>{r}</strong><span>{s}</span></span>
+          </div>
+        ))}
+      </div>
+      <div class="audit">
+        <span class="mono ak">Quién abrió la historia de Rosa</span>
+        <div><span class="mono">10:02</span><span>Andrea Quispe abrió la atención</span></div>
+        <div><span class="mono">10:35</span><span>Andrea Quispe firmó la atención</span></div>
+      </div>
+    </div>
+  )}
+</div>
+
+<style>
+  /* contain: el ancho lo pone la columna, nunca el contenido (como en las portadas de odentIA). */
+  .vv { position: relative; display: flex; justify-content: center; contain: inline-size; animation: float 7s ease-in-out infinite; }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @media (prefers-reduced-motion: reduce) { .vv, .bub.ok, .chip i { animation: none; } }
+  .panel { width: min(520px, 100%); padding: 22px; border-radius: 24px; background: rgba(6, 23, 13, .78); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 40px 80px -40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 14px; color: #e3f1e7; }
+  .ph { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--on-night-3); text-transform: uppercase; }
+  .ex { font-family: var(--mono); font-size: 11px; text-transform: lowercase; color: var(--on-night-3); padding: 2px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+  .mono { font-family: var(--mono); }
+  .chip { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; color: #e3f1e7; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--cc, var(--sky)); animation: pulse 2.4s ease-in-out infinite; }
+  .chip.argos { --cc: var(--amber); }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--cc, var(--sky)); } 50% { box-shadow: 0 0 0 5px transparent; } }
+  .ak { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--on-night-3); }
+
+  /* Registro de los agentes */
+  .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .log li { display: grid; grid-template-columns: 46px 10px 1fr; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13.5px; }
+  .log li .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .log li i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.4); }
+  .log li.sofi i { background: #4fc3d7; }
+  .log li.argos i { background: var(--amber); }
+  .log b { color: #fff; }
+
+  /* Argos */
+  .ask { display: flex; flex-direction: column; gap: 4px; align-self: flex-end; max-width: 88%; padding: 12px 14px; border-radius: 16px 16px 4px 16px; background: rgba(255,255,255,.08); font-size: 14px; }
+  .ask .mono, .answer .mono { font-size: 11px; color: var(--on-night-3); }
+  .answer { display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 16px; background: rgba(245,196,107,.1); box-shadow: inset 3px 0 0 var(--amber); font-size: 14px; }
+  .answer strong { font-size: 22px; letter-spacing: -.02em; color: #fff; }
+  .answer .how { font-size: 12.5px; color: var(--on-night-3); }
+
+  /* Agenda */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .cw { font-weight: 700; font-size: 13.5px; }
+  .slot { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; font-size: 13px; }
+  .slot .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .slot.busy { background: rgba(255,255,255,.06); color: var(--on-night-3); }
+  .slot.free { border: 1px dashed rgba(255,255,255,.2); color: var(--on-night-2); }
+  .slot.new { background: rgba(74,222,128,.16); box-shadow: inset 0 0 0 1.5px var(--sky); color: #fff; font-weight: 700; }
+  .slot.ctrl { background: rgba(245,196,107,.12); box-shadow: inset 3px 0 0 var(--amber); color: #fff; }
+
+  /* Ficha */
+  .who { display: flex; gap: 12px; align-items: center; }
+  .who > span:last-child { display: flex; flex-direction: column; }
+  .who .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .av { width: 44px; height: 44px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--sky); color: #06170d; font-weight: 800; }
+  .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .rows li { display: grid; grid-template-columns: 128px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13.5px; }
+  .rows .mono { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--on-night-3); padding-top: 2px; }
+
+  /* Caja */
+  .moves { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .moves li { display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13.5px; }
+  .moves .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .pill-s { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.08); color: var(--on-night-2); }
+  .pill-s.ok { background: rgba(74,222,128,.16); color: var(--sky-2); }
+  .stock { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: rgba(0,0,0,.2); }
+  .st-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+  .st-row.low b { color: var(--amber); }
+  .close { align-self: flex-start; padding: 10px 14px; border-radius: 999px; background: var(--sky); color: #06170d; font-weight: 700; font-size: 13.5px; }
+
+  /* Reportes */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.06); font-size: 12.5px; color: var(--on-night-2); }
+  .kpi .mono { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--on-night-3); }
+  .kpi strong { font-size: 22px; letter-spacing: -.02em; color: #fff; }
+
+  /* Seguridad */
+  .roles { display: flex; flex-direction: column; gap: 10px; }
+  .role { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.06); box-shadow: inset 3px 0 0 var(--rc); }
+  .role > span { display: flex; flex-direction: column; font-size: 13px; color: var(--on-night-3); }
+  .role strong { color: #fff; font-size: 14.5px; }
+  .lock { width: 24px; height: 24px; flex: none; fill: none; stroke: var(--rc); stroke-width: 1.8; }
+  .audit { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: rgba(0,0,0,.2); }
+  .audit div { display: grid; grid-template-columns: 46px 1fr; gap: 8px; font-size: 13px; }
+  .audit .mono { font-size: 11.5px; color: var(--on-night-3); }
+
+  /* Teléfono (Sofi, Omnicanal y Su enlace) */
+  .phone { position: relative; width: min(320px, calc(100% - 20px)); padding: 40px 18px 22px; border-radius: 40px; background: #f6f8fb; color: var(--ink); box-shadow: 0 0 0 10px #0f3d24, 0 40px 80px -30px rgba(0,0,0,.7); display: flex; flex-direction: column; gap: 12px; }
+  .notch { position: absolute; top: 12px; left: 50%; width: 90px; height: 18px; margin-left: -45px; border-radius: 999px; background: #0f3d24; }
+  .phone .ex { position: absolute; right: 18px; bottom: -36px; color: var(--on-night-3); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+  .pk { font-size: 11px; color: var(--soft); }
+  .hi { font-size: 24px; letter-spacing: -.02em; }
+  .next { display: flex; flex-direction: column; gap: 2px; padding: 14px; border-radius: 16px; background: var(--night); color: #e3f1e7; }
+  .next .mono { font-size: 11px; color: var(--sky-2); }
+  .next span:last-child { font-size: 13px; color: var(--on-night-2); }
+  .acts { display: flex; flex-direction: column; gap: 8px; }
+  .act { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 14px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); font-weight: 700; font-size: 14px; }
+  .act.main { background: var(--teal); color: #fff; box-shadow: none; }
+  .wa { background: #ece5dd; }
+  .wah { display: flex; gap: 10px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid rgba(15,23,42,.08); }
+  .wah > span:last-child { display: flex; flex-direction: column; font-size: 14px; }
+  .wah .mono { font-size: 11px; color: var(--soft); }
+  .wav { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--teal); color: #fff; font-weight: 800; }
+  .chan { align-self: center; font-size: 10.5px; color: var(--soft); background: rgba(255,255,255,.7); padding: 3px 8px; border-radius: 999px; }
+  .bub { max-width: 86%; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+  .bub.in { align-self: flex-start; background: #fff; border-top-left-radius: 3px; }
+  .bub.out { align-self: flex-end; background: #d9fdd3; border-top-right-radius: 3px; }
+  .bub.ok { animation: pop 3.6s ease-in-out infinite; }
+  @keyframes pop { 0%, 20% { opacity: .35; transform: translateY(6px); } 30%, 100% { opacity: 1; transform: none; } }
+
+  @media (max-width: 720px) {
+    .panel { padding: 16px; }
+    .cols, .cards { grid-template-columns: 1fr; }
+    .rows li { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>

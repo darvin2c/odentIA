@@ -244,6 +244,8 @@ export const registrationAnswersSchema = z.strictObject({
       lactancia: z.boolean().optional(), tabaco: z.enum(["nunca", "fuma", "dejo"]).optional(),
       alcohol: z.enum(["no", "ocasional", "frecuente"]).optional(),
     }).optional(),
+    /** vistIA todavía no pregunta nada propio en el registro: sus antecedentes de la vista llegan con el examen. */
+    optical: z.strictObject({}).optional(),
   }).optional(),
   privacyAccepted: z.boolean(),
   // Permisos de mensajes: solo cuentan si el registro los pregunta y se aceptó el aviso.

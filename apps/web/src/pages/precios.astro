@@ -10,7 +10,7 @@ import ValueSection from "../components/pricing/ValueSection.astro"
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
 import { businessDays, days, giftOf, money, shownPlan } from "../lib/pricing"
-import { MEDICAL, WORDS } from "../lib/product"
+import { HAS_CLIO, ofProduct, WORDS } from "../lib/product"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
@@ -19,6 +19,8 @@ const gift = giftOf(pricing)
 const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
 // Las condiciones comerciales: de la administración, como los precios (issue 167).
 const terms = pricing.terms
+// Cómo llama esta página al lugar: odentIA y latidIA dicen «clínica» desde siempre; vistIA, «óptica».
+const place = ofProduct({ dental: "clínica", medical: "clínica", optical: "óptica" })
 
 const title = "Precios: pagas por el trabajo hecho, no por el software"
 // Lo que cobra cada agente, de lo más simple a lo que trae pacientes (ADR 0085).
@@ -28,21 +30,27 @@ const description = !plan
   : founder
     ? `Software para ${WORDS.audience}. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? ` (${founder.discountPercent} % menos que el precio de lista)` : ""}.`
     : `Software para ${WORDS.audience} con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
+// Lo de Clío que se negocia, donde trabaja.
+const clioDeal = ofProduct({
+  dental: "la consulta en la que Clío arma el presupuesto y ",
+  medical: "la consulta en la que Clío deja indicado lo que sigue y ",
+  optical: "y ",
+})
 const faq: FaqItem[] = [
   {
     // ADR 0085: reservar ya es «Gestiona»; la cita que se da suma la diferencia hasta «Agenda».
-    q: "¿Me cobran si Sofi reserva y el paciente no viene?",
-    a: "Sí, como «gestiona»: Sofi hizo el trabajo de agendar. Si el paciente viene, se suma la diferencia hasta «agenda». Si era una cita recuperada por Argos, se cobra solo la cita.",
+    q: `¿Me cobran si Sofi reserva y el ${WORDS.patient} no viene?`,
+    a: `Sí, como «gestiona»: Sofi hizo el trabajo de agendar. Si el ${WORDS.patient} viene, se suma la diferencia hasta «agenda». Si era una cita recuperada por Argos, se cobra solo la cita.`,
   },
   {
     q: "¿Y si un mes mis agentes gastan mucho?",
-    a: "Pones un presupuesto del mes. Te avisamos al acercarte y, al llegar, Sofi pasa las conversaciones nuevas a tu equipo con un mensaje fijo, Clío no escucha en las atenciones nuevas y Argos no escribe para recuperar. Lo que ya empezó se termina y ningún paciente se queda sin respuesta.",
+    a: `Pones un presupuesto del mes. Te avisamos al acercarte y, al llegar, Sofi pasa las conversaciones nuevas a tu equipo con un mensaje fijo${HAS_CLIO ? ", Clío no escucha en las atenciones nuevas y " : " y "}Argos no escribe para recuperar. Lo que ya empezó se termina y ningún ${WORDS.patient} se queda sin respuesta.`,
   },
   {
     q: "¿Cuántas preguntas le puedo hacer a Argos?",
     a: plan?.argos
       ? `${plan.argos.included} al mes vienen incluidas. Al usarlas, Argos te pregunta antes de sumar ${plan.argos.packQuestions} más por ${m(plan.argos.pack)}; si prefieres, se suman solas. Las que no puede responder no cuentan.`
-      : "Las que necesites: Argos responde con las cifras de tu clínica.",
+      : `Las que necesites: Argos responde con las cifras de tu ${place}.`,
   },
   {
     q: "¿Y WhatsApp?",
@@ -50,12 +58,12 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Por qué no hay planes con más funciones?",
-    a: "Porque no vendemos funciones. Todas las clínicas tienen el sistema completo; lo que cambia de una a otra es cuánto trabajo hacen sus agentes, y solo eso se paga.",
+    a: `Porque no vendemos funciones. Todas las ${place}s tienen el sistema completo; lo que cambia de una a otra es cuánto trabajo hacen sus agentes, y solo eso se paga.`,
   },
   {
     // ADR 0047 y 0054: lo decide el modelo de decisión de toda clínica; si duda, se atiende y cuenta.
-    q: "¿Me cobran si alguien escribe algo que no tiene que ver con la clínica?",
-    a: "No. El spam (publicidad, cadenas, estafas, quien le vende algo a la clínica) va a una lista aparte: no se responde ni se cobra. Si alguien pregunta, por ejemplo, si venden zapatillas, el agente le responde con un texto fijo que dice en qué puede ayudar, y eso no cuenta como conversación. Si el agente duda, lo atiende como cualquier mensaje y sí cuenta.",
+    q: `¿Me cobran si alguien escribe algo que no tiene que ver con la ${place}?`,
+    a: `No. El spam (publicidad, cadenas, estafas, quien le vende algo a la ${place}) va a una lista aparte: no se responde ni se cobra. Si alguien pregunta, por ejemplo, si venden zapatillas, el agente le responde con un texto fijo que dice en qué puede ayudar, y eso no cuenta como conversación. Si el agente duda, lo atiende como cualquier mensaje y sí cuenta.`,
   },
   {
     // ADR 0054: «Pedir revisión», no «reclamo», que es el del Libro de Reclamaciones.
@@ -74,7 +82,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Qué no se cobra?",
-    a: "El spam, los mensajes ajenos a tu clínica, lo que responde tu equipo, los recordatorios y avisos de cita, y el borrador que descartas.",
+    a: `El spam, los mensajes ajenos a tu ${place}, lo que responde tu equipo${HAS_CLIO ? ", los recordatorios y avisos de cita, y el borrador que descartas" : " y los recordatorios y avisos de cita"}.`,
   },
   // Sin un plan publicado no hay cuota ni crédito que explicar.
   ...(plan
@@ -90,7 +98,7 @@ const faq: FaqItem[] = [
   {
     q: "¿La prueba pide tarjeta?",
     a: founder
-      ? `No. Pides tu invitación, abres tu clínica y tus agentes empiezan con los ${m(plan?.trialCredit ?? null)} de regalo. La tarjeta no se pide.`
+      ? `No. Pides tu invitación, abres tu ${place} y tus agentes empiezan con los ${m(plan?.trialCredit ?? null)} de regalo. La tarjeta no se pide.`
       : `No. Te registras, conectas tus canales y tus agentes trabajan ${days(plan?.trialDays ?? terms.trialDays)} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
   },
   {
@@ -98,9 +106,9 @@ const faq: FaqItem[] = [
     a: `Tu mes empieza el día que activas el plan. Lo que pasa del crédito se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
   },
   {
-    q: `¿Y si ${MEDICAL ? "mi consultorio" : "mi clínica"} tiene mucho movimiento?`,
+    q: `¿Y si mi ${WORDS.clinic} tiene mucho movimiento?`,
     // ADR 0085: solo se negocian Gestiona, Agenda, Completa y la cita recuperada; lo demás es fijo.
-    a: `Escríbenos. Revisamos tu caso y te proponemos un precio para tu volumen en las citas que Sofi gestiona, la consulta en la que Clío ${MEDICAL ? "deja indicado lo que sigue" : "arma el presupuesto"} y la cita recuperada. Lo demás tiene un precio fijo.`,
+    a: `Escríbenos. Revisamos tu caso y te proponemos un precio para tu volumen en las citas que Sofi gestiona, ${clioDeal}la cita recuperada. Lo demás tiene un precio fijo.`,
   },
 ]
 

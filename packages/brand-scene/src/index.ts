@@ -1,5 +1,6 @@
-// Escenas de la marca: las 32 piezas de odentIA (portada de la web y panel) y el pulso de latidIA.
+// Escenas de la marca: las 32 piezas de odentIA (portada de la web y panel), el pulso de latidIA y la cartilla de vistIA.
 
+export { CalmChartScene, type CalmChartSceneProps } from "./calm-chart-scene.js"
 export { CalmPulseScene, type CalmPulseSceneProps } from "./calm-pulse-scene.js"
 export { CalmToothScene, type CalmToothSceneProps } from "./calm-tooth-scene.js"
 export {

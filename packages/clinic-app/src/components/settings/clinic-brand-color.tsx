@@ -1,5 +1,6 @@
 import {
   type BrandPalette,
+  type ClinicalProduct,
   brandColorName,
   brandPalette,
   normalizeBrandColor,
@@ -20,7 +21,8 @@ import { productUi } from "../../product/product-ui"
 const FACTORY_WORDS = {
   dental: { color: "turquesa", brand: "odentIA" },
   medical: { color: "morado", brand: "latidIA" },
-} as const
+  optical: { color: "verde", brand: "vistIA" },
+} as const satisfies Record<ClinicalProduct, { color: string; brand: string }>
 
 /** Qué tiene mal un código escrito a mano, dicho en concreto; null si es un color. */
 function codeProblem(text: string): string | null {
@@ -87,7 +89,7 @@ export function ClinicBrandColorSettings({
   // El nombre del color en uso: el de la lista, el del logo o uno aproximado; nunca solo el código.
   const savedName =
     saved === factory
-      ? `${suggested[0]?.name ?? "Turquesa"}, el de ${FACTORY_WORDS[product].brand}`
+      ? `${suggested[0]?.name ?? FACTORY_WORDS[product].color}, el de ${FACTORY_WORDS[product].brand}`
       : (suggested.find((color) => color.hex === saved)?.name ??
         (fromLogo.some((color) => color.hex === saved) ? `${brandColorName(saved)} de tu logo` : brandColorName(saved)))
 

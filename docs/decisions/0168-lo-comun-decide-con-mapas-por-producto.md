@@ -12,7 +12,7 @@ Llega un tercer producto (vistIA, para ópticas). Lo común decidía entre odent
 - **El producto base tiene nombre.** `BASE_PRODUCT` (odentIA) es el de lo que no dice su producto y el de la plataforma, cuyo dominio es `COOKIE_DOMAIN`; `BASE_MAIL_BRAND`, el remitente de siempre. Lo que es del producto base se compara con ellos.
 - **Los dominios de los demás, completos.** `ProductDomains` exige el dominio de cada producto con dominio propio (o `undefined`, que lo deja en el de la plataforma). Lo mismo los mapas de los `host.ts`; el pie de los correos sale del mismo mapa (`mailBrandDomains`).
 - **La base nombra a todos.** `packages/db/src/product-sql.test.ts` revisa en una base migrada cada vista, función, restricción, política, disparador, índice, columna calculada y tarea programada: si nombra un producto, nombra a todos o declara por qué no (`UNNAMED_ON_PURPOSE`). Hoy declara cuatro, con su motivo.
-- **La web se detiene.** La web de marketing se arma aparte por producto: uno que no conoce detiene el armado (`astro.config.mjs`) en vez de publicar la de odentIA. Dentro de la web sigue el booleano `MEDICAL`; se ordena al sumar la web del producto nuevo.
+- **La web se detiene.** La web de marketing se arma aparte por producto: uno que no conoce detiene el armado (`astro.config.mjs`) en vez de publicar la de odentIA. Dentro de la web, el booleano `MEDICAL` quedó en mapas por producto al sumar la de vistIA (ADR 0169).
 
 ## Alternativas descartadas
 

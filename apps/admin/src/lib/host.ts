@@ -12,6 +12,7 @@ export const adminUrl = (path = "/") => `https://admin.${BASE_DOMAIN}${BASE_PORT
 const PRODUCT_DOMAINS: Record<ClinicalProduct, string | undefined> = {
   dental: import.meta.env.VITE_DENTAL_DOMAIN || undefined,
   medical: import.meta.env.VITE_MEDICAL_DOMAIN || undefined,
+  optical: import.meta.env.VITE_OPTICAL_DOMAIN || undefined,
 }
 export const domainOf = (product?: string | null): string => (isClinicalProduct(product) && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
 /** La dirección de una clínica, en el dominio de su producto. */

@@ -8,7 +8,7 @@
  * un producto nuevo no cae en silencio en lo de otro y el compilador señala cada
  * lugar que tiene que decidir algo para él. Lo vigila `product-choices.test.ts`.
  */
-export const CLINICAL_PRODUCTS = ["dental", "medical"] as const
+export const CLINICAL_PRODUCTS = ["dental", "medical", "optical"] as const
 export type ClinicalProduct = (typeof CLINICAL_PRODUCTS)[number]
 
 /**

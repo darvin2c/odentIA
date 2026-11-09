@@ -70,10 +70,26 @@ beforeAll(async () => {
       "DA0B.1",
       "DA0E.3",
       "QA00.8",
+      // Los de la óptica de vistIA.
+      "9D00.0",
+      "9D00.1",
+      "9D00.2",
+      "9D00.3",
+      "9D00.4",
+      "9A79",
+      "9D50",
+      "9A60.02",
+      "9B10.0Z",
+      "9C60",
+      "9A77.0",
+      "9C83.2",
+      "9C80.4",
+      "QA00.62",
+      "QA00.6Z",
     ].map((code) => ({ code, title: code })),
     "ICD-11",
   )
-  for (const product of ["dental", "medical"] as const) {
+  for (const product of ["dental", "medical", "optical"] as const) {
     await createSaasPlan(ownerDb, admin.userId, {
       code: `coherencia-${product}`,
       name: `Plan ${product}`,
@@ -97,7 +113,7 @@ type Built = {
   id: string
   organizationId: string
   historyThrough: string
-  product: "dental" | "medical"
+  product: "dental" | "medical" | "optical"
   kind: DemoKindRecipe
   size: "pequeno" | "mediano" | "grande"
 }
@@ -109,7 +125,7 @@ type Built = {
 const seedOf = (fallback: number): number => Number(process.env.DEMO_SEED ?? fallback)
 
 async function build(input: {
-  product: "dental" | "medical"
+  product: "dental" | "medical" | "optical"
   kind: string
   size: "pequeno" | "mediano" | "grande"
   countryCode: string
@@ -720,6 +736,55 @@ describe(`una demo de ginecología pequeña (latidIA, semilla ${GINECOLOGIA})`, 
     expect(
       await count(sql`select count(*)::int as n from clinical_follow_up
         where organization_id = ${orgId} and status = 'cancelado' and cancelled_reason = 'Terminó la gestación'`),
+    ).toBeGreaterThan(0)
+  })
+})
+
+const OPTICA = seedOf(20_261_108)
+describe(`una demo de óptica pequeña (vistIA, semilla ${OPTICA})`, () => {
+  let demo: Built
+  beforeAll(async () => {
+    demo = await build({
+      product: "optical",
+      kind: "optica",
+      size: "pequeno",
+      countryCode: "PE",
+      name: "Óptica Coherente",
+      seed: OPTICA,
+      months: 6,
+    })
+  }, 300_000)
+
+  coherent(() => demo)
+
+  it("Clío no dicta en una óptica: ni encendido ni consultas dictadas en su historia", async () => {
+    const orgId = demo.organizationId
+    expect(
+      await count(
+        sql`select count(*)::int as n from agent_config where organization_id = ${orgId} and clinical_assistant_enabled`,
+      ),
+    ).toBe(0)
+    expect(
+      await count(sql`select count(*)::int as n from saas_action where organization_id = ${orgId} and kind = 'consulta'`),
+    ).toBe(0)
+  })
+
+  it("los optómetras se presentan como licenciados, no como doctores", async () => {
+    const orgId = demo.organizationId
+    const names = (await ownerDb.execute(sql`select u.name from member m join auth."user" u on u.id = m.user_id
+      where m.organization_id = ${orgId} and m.role = 'clinician'`)) as unknown as Array<{ name: string }>
+    expect(names.length).toBeGreaterThan(0)
+    expect(names.every((row) => row.name.startsWith("Lic. "))).toBe(true)
+  })
+
+  it("la óptica atiende con su biblioteca y cuenta su examen anual", async () => {
+    const orgId = demo.organizationId
+    expect(
+      await count(sql`select count(*)::int as n from service_catalog s join catalog.treatment_template t on t.id = s.template_id
+        where s.organization_id = ${orgId} and t.product <> 'optical'`),
+    ).toBe(0)
+    expect(
+      await count(sql`select count(*)::int as n from encounter where organization_id = ${orgId} and status = 'finalizada'`),
     ).toBeGreaterThan(0)
   })
 })
