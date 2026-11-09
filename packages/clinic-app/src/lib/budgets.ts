@@ -754,6 +754,13 @@ export interface PlanNextStep {
     serviceId?: string | null
     followUpId?: string
     appointmentId?: string
+    /** Varios controles en la misma cita. */
+    followUpIds?: string[]
+    /** Desde qué día (`YYYY-MM-DD`) se busca hora, y por qué (lo dice el cajón). */
+    date?: string
+    note?: string
+    /** «Sumar a su cita del 10 nov»: la cita que ya tiene. */
+    join?: { appointmentId: string; label: string }
   } | null
   /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
   alsoToSchedule?: string[]

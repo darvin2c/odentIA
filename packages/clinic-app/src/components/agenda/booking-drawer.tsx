@@ -86,6 +86,13 @@ export interface BookingSeed {
    * operación (QA del 8 nov, entrega 3).
    */
   followUpIds?: string[]
+  /**
+   * Por qué se busca hora desde `date` (lo que va después de otro tratamiento de la misma pieza,
+   * o el control que aún no se puede hacer): se dice en el cajón (QA de la ficha del 9 nov).
+   */
+  note?: string
+  /** Antes de este día (`YYYY-MM-DD`) se avisa, sin frenar: la persona decide. */
+  notBefore?: string
 }
 
 /**
@@ -564,6 +571,9 @@ export function BookingDrawer({
     keepProfessional: Boolean(seed.keepProfessional && (seed.serviceId ?? "") === (serviceId ?? "")),
   })
   const { shown } = when
+  // Elegir antes de lo que dice la nota: se avisa, no se frena (la persona decide).
+  const shownDay = shown ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(shown.start)) : null
+  const beforeNote = Boolean(seed.notBefore && shownDay && shownDay < seed.notBefore)
 
   React.useEffect(() => {
     onPreview(
@@ -877,6 +887,11 @@ export function BookingDrawer({
             </p>
           ) : null}
 
+          {seed.note ? (
+            <p role="status" className={`-mb-2 text-sm ${beforeNote ? "text-warning" : "text-muted-foreground"}`}>
+              {beforeNote ? `Es antes de lo indicado. ${seed.note}` : seed.note}
+            </p>
+          ) : null}
           <WhenFields form={form} fields="when" when={when} />
 
           <form.AppField name="reason">

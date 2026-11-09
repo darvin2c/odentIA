@@ -190,7 +190,7 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   expect(argos.items.find((item) => item.patientId === dani)?.line).toMatch(/^Falta la cita de la próxima sesión · /)
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, gabi, all))).toMatchObject({ kind: "agendar" })
   // «Qué sigue» de Beto dice que su cita no la lleva, no que le falta una.
-  expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: su cita del .+ no lo lleva$/)
+  expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: aún no va en su cita del .+$/)
 
   // Con un presupuesto por enviar, «Qué sigue» pide enviarlo, y sigue en «Por agendar».
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: ana, title: "Otro plan" }).returning({ id: treatmentPlan.id })

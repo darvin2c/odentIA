@@ -512,6 +512,13 @@
       "when": 1794234390530,
       "tag": "0072_gasto_con_clave",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794239372108,
+      "tag": "0073_sumar_a_su_cita",
+      "breakpoints": true
     }
   ]
 }

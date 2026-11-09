@@ -43,6 +43,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { firstName } from "./automation-routing.js"
+import { BUDGET_CALLBACK_KEY } from "./budget-callback.js"
 import { listBudgets, listBudgetsForPatients, valueOptionOf, type BudgetWithTotals } from "./budgets.js"
 import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
@@ -51,6 +52,7 @@ import { productHooks } from "./products.js"
 import {
   appointmentServesControl,
   canBookAnother,
+  controlWindowStart,
   dayKeyIn,
   isControlWindowOpen,
   isOverdueControl,
@@ -81,6 +83,20 @@ export interface PlanNextAction {
   followUpId?: string
   /** «Ver la cita»: el control ya tiene la suya. */
   appointmentId?: string
+  /** Varios controles en la misma cita (lo aceptado y el control de su tratamiento). */
+  followUpIds?: string[]
+  /**
+   * El día (`YYYY-MM-DD`, en la zona de la clínica) desde el que se busca hora: lo que va después
+   * de otro tratamiento de la misma pieza, o el control que todavía no se puede hacer.
+   */
+  date?: string
+  /** Por qué se busca desde ese día, para el cajón de la reserva. */
+  note?: string
+  /**
+   * «Sumar a su cita del 10 nov»: lo aceptado se suma a la cita que ya tiene, sin otra visita
+   * (QA de la ficha del 9 nov). El botón principal pasa a ser «Otra cita».
+   */
+  join?: { appointmentId: string; label: string }
 }
 
 export interface PlanNextStep {
@@ -182,7 +198,7 @@ async function openEncountersOf(tx: Db, orgId: string, patientIds: string[], vie
  * 1,350» (QA de la atención del 8 nov: decía «2 tratamientos · S/ 1,350 · 2
  * opciones» con tres indicados y dos montos).
  */
-export function budgetLine(budget: BudgetWithTotals, locale: string): string {
+export function budgetLine(budget: BudgetWithTotals, locale: string, names?: string): string {
   const say = (totals: BudgetWithTotals["totals"]) =>
     moneyTotalsText(
       totals,
@@ -196,6 +212,8 @@ export function budgetLine(budget: BudgetWithTotals, locale: string): string {
       return `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${say(chosen.totals)}`
     return `${ordered.map((option) => `${option.label} ${say(option.totals)}`).join(" · ")} · falta que elija`
   }
+  // Con sus nombres, si quien llama los tiene: «Resina y Corona · S/ 1,080» (QA de la ficha del 9 nov).
+  if (names) return `${names} · ${say(budget.totals)}`
   const value = valueOptionOf(budget.options)
   const count = value?.lineCount ?? budget.items.length
   return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} · ${say(budget.totals)}`
@@ -328,6 +346,11 @@ async function planFactsOf(
           .where(and(eq(encounter.organizationId, orgId), inArray(encounter.id, originIds)))
       : []
   const originOf = new Map(origins.map((row) => [row.id, row]))
+  // «No contesta · volver a llamar»: la tarea abierta de cada presupuesto (`budget-callback.ts`).
+  const callbacks = await tx.execute<{ key: string; dueAt: Date | null; reason: string | null }>(sql`
+    select idempotency_key as key, due_at as "dueAt", reason from task
+    where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'open'
+      and idempotency_key like ${`${BUDGET_CALLBACK_KEY}%`}`)
   return {
     facts: {
       name: firstName(person),
@@ -337,6 +360,13 @@ async function planFactsOf(
       withAppointment,
       sessions,
       controls,
+      carriedAt: await carriedAtOf(tx, orgId, [patientId]),
+      callbacks: new Map(
+        callbacks.map((row) => [
+          row.key.slice(BUDGET_CALLBACK_KEY.length),
+          { said: row.reason, dueAt: row.dueAt ? new Date(row.dueAt) : null },
+        ]),
+      ),
       nextAppointmentAt: next?.startsAt ?? null,
       nextAppointmentId: next?.id ?? null,
       today,
@@ -481,6 +511,7 @@ async function planFactsMany(
   for (const row of controls) controlsOf.set(row.patientId, [...(controlsOf.get(row.patientId) ?? []), row])
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   const openEncounters = await openEncountersOf(tx, orgId, ids)
+  const carriedAt = await carriedAtOf(tx, orgId, ids)
   for (const person of people) {
     const facts: PlanFacts = {
       name: firstName(person),
@@ -489,6 +520,7 @@ async function planFactsMany(
       openEncounters,
       withAppointment,
       sessions,
+      carriedAt,
       controls: controlsOf.get(person.id) ?? [],
       nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
       nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
@@ -511,16 +543,47 @@ function mayTakeSessions(item: PlanItemRow): boolean {
   )
 }
 
-/** Lo de la clínica que necesita la frase: formato de fechas y si su producto pide presupuesto. */
+/**
+ * Lo de la clínica que necesita la frase: formato de fechas, si su producto pide presupuesto y
+ * las fases de su plan, en el orden en que se hacen (lo que va después en la misma pieza).
+ */
 interface PlanContext {
   locale: string
   timezone: string
   budgetRequired: boolean
+  phases?: readonly string[]
 }
 
 async function planContext(tx: Db, orgId: string): Promise<PlanContext> {
   const { locale, timezone } = await findOrgLocale(tx, orgId)
-  return { locale, timezone, budgetRequired: (await productHooks(tx, orgId)).budgetRequired }
+  const hooks = await productHooks(tx, orgId)
+  return { locale, timezone, budgetRequired: hooks.budgetRequired, phases: hooks.planPhases }
+}
+
+/** La próxima cita por venir que lleva cada tratamiento. */
+async function carriedAtOf(tx: Db, orgId: string, patientIds: string[]): Promise<Map<string, Date>> {
+  if (patientIds.length === 0) return new Map()
+  const rows = await tx
+    .select({ planItemId: appointmentPlanItem.planItemId, startsAt: appointment.startsAt })
+    .from(appointmentPlanItem)
+    .innerJoin(
+      appointment,
+      and(eq(appointment.id, appointmentPlanItem.appointmentId), eq(appointment.organizationId, appointmentPlanItem.organizationId)),
+    )
+    .where(
+      and(
+        eq(appointmentPlanItem.organizationId, orgId),
+        inArray(appointmentPlanItem.patientId, patientIds),
+        inArray(appointment.status, LIVE_APPOINTMENT),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+  const out = new Map<string, Date>()
+  for (const row of rows) {
+    const known = out.get(row.planItemId)
+    if (!known || row.startsAt < known) out.set(row.planItemId, row.startsAt)
+  }
+  return out
 }
 
 /** Lo de una persona que decide su «Qué sigue». `withAppointment` puede traer tratamientos de otras. */
@@ -549,7 +612,18 @@ interface PlanFacts {
   unrecorded?: ReadonlyMap<string, { startsAt: Date; professionalName: string | null; mine: boolean }>
   /** La atención donde se indicó cada control: quién, cuándo y su motivo. Solo de una persona. */
   controlOrigins?: ReadonlyMap<string, { professionalName: string | null; at: Date; reason: string | null }>
+  /** La próxima cita por venir que lleva cada tratamiento: cuándo es la sesión de lo que va antes. */
+  carriedAt?: ReadonlyMap<string, Date>
+  /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
+  callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
 }
+
+/**
+ * Hasta cuántos días por venir puede abrir su ventana el control de un tratamiento para ir en la
+ * misma cita que lo aceptado de esa pieza. Supuesto a confirmar con una clínica: el control de
+ * corto plazo de una endodoncia, no el radiográfico de meses.
+ */
+const PAIRED_CONTROL_DAYS = 30
 
 /** Sin nada que hacer en el plan. */
 const NOTHING: PlanNextStep = { kind: "ninguno", text: "Nada pendiente en el plan", detail: null, action: null }
@@ -594,6 +668,28 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   const notStarted = (item: PlanItemRow) => item.status === "pendiente" || item.status === "programado"
   const accepted = items.filter((item) => item.decisionStatus === "aceptado" && notStarted(item))
   const toStart = toSchedule.filter(notStarted)
+
+  // --- Lo que va después de otro tratamiento de la misma pieza ------------------------------
+  // Lo aceptado sin empezar espera a otro aceptado y sin terminar de la misma pieza que va en
+  // una fase anterior del plan: la corona, a la endodoncia (QA de la ficha del 9 nov: se
+  // proponía reservarla hoy, antes de la sesión 2). Las fases son del producto: latidIA tiene
+  // una sola y nunca espera nada. Es un aviso: la reserva se puede hacer igual.
+  const phases = context.phases ?? []
+  const rankOf = (item: PlanItemRow) => phases.indexOf(item.phase)
+  const sameSite = (a: PlanItemRow, b: PlanItemRow) =>
+    !!a.siteCode && a.siteSystem === b.siteSystem && a.siteCode === b.siteCode
+  // Una endodoncia pausada también va antes: retomarla es lo primero (QA antes de entregar).
+  const unfinished = (item: PlanItemRow) =>
+    item.decisionStatus === "aceptado" && ([...TO_SCHEDULE_STATUSES, "suspendido"] as readonly string[]).includes(item.status)
+  const blockerOf = (item: PlanItemRow): PlanItemRow | null => {
+    if (!notStarted(item) || rankOf(item) <= 0) return null
+    const before = items.filter(
+      (other) => other.id !== item.id && unfinished(other) && sameSite(other, item) && rankOf(other) >= 0 && rankOf(other) < rankOf(item),
+    )
+    // El que ya empezó primero: es el que se está terminando.
+    return before.find((other) => other.status === "en_curso") ?? before[0] ?? null
+  }
+  const ready = toStart.filter((item) => !blockerOf(item))
   const awaiting = budgets.filter((budget) => budget.awaitsAnswer).at(-1) ?? null
   // Un tratamiento en curso sin cita para su próxima sesión, o uno que ya tiene
   // su primera cita (o sesión) y le faltan otras por reservar.
@@ -629,8 +725,23 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   // y la misma cita; sin nada aceptado, en su lugar.
   const joinedControl = open.find((control) => !isTreatmentControl(control) && toBook(control)) ?? null
   // El resto, al final: el próximo de los que quedan (con cita, por venir o se cumple hoy).
+  // El control de un tratamiento y lo aceptado de la misma pieza (la corona sobre la 46 con su
+  // endodoncia por controlar): una fila y una cita, desde que el control se puede hacer (QA de la
+  // ficha del 9 nov). Lo de otras piezas no se atrasa por él: sigue en su fila.
+  const treatedOf = (control: FollowUpRow) => (control.planItemId ? items.find((item) => item.id === control.planItemId) : undefined)
+  const pairedControl =
+    open.find((control) => {
+      if (!isTreatmentControl(control) || control.status !== "pendiente" || servedNow(control) || servedLater(control)) return false
+      // Solo un control cercano: uno a 6 meses atrasaría la corona meses (QA antes de entregar).
+      if (controlWindowStart(control).getTime() > Date.now() + PAIRED_CONTROL_DAYS * 86_400_000) return false
+      const treated = treatedOf(control)
+      return !!treated && ready.some((item) => sameSite(item, treated))
+    }) ?? null
+  const pairedItems = pairedControl ? ready.filter((item) => sameSite(item, treatedOf(pairedControl)!)) : []
   const laterControl =
-    open.find((control) => control.id !== treatmentControl?.id && control.id !== joinedControl?.id) ?? null
+    open.find(
+      (control) => control.id !== treatmentControl?.id && control.id !== joinedControl?.id && control.id !== pairedControl?.id,
+    ) ?? null
 
   // Quien no reserva (caja) ve la fila sin botón: se le dice a quién le toca (QA del 9 nov).
   const bookedBy = can("appointments.write") ? null : "la cita la reserva recepción"
@@ -665,21 +776,82 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     return `${control.title} ${overdue ? "vencido: tocaba" : "por reservar: toca"} el ${day(control.dueAt)}`
   }
 
+  /** «Corona» → «corona»: el título dentro de una frase. */
+  const lower = (title: string) => title.charAt(0).toLowerCase() + title.slice(1)
+  /**
+   * «Resina · Corona · y 1 más»: con « · », porque los nombres de los servicios llevan comas
+   * («Corona metal-cerámica, metal base») y una «y» entre ellos no se leía (segunda mesa del 9 nov).
+   */
+  const namesOf = (list: PlanItemRow[]) => {
+    const titles = list.map((item) => item.title)
+    return titles.length > 3 ? `${titles.slice(0, 3).join(" · ")} · y ${titles.length - 3} más` : titles.join(" · ")
+  }
+  const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+  /** El día siguiente a `date`, en la zona de la clínica (`YYYY-MM-DD`). */
+  const dayAfter = (date: Date) => {
+    const [y, m, d] = dayKey(date).split("-").map(Number)
+    return new Date(Date.UTC(y!, m! - 1, d! + 1)).toISOString().slice(0, 10)
+  }
+  /**
+   * Cuándo es lo que va antes, sin prometer que ahí termina (puede pedir otra sesión):
+   * «su sesión 2 es el 11 nov», «su cita es el 11 nov» o, sin cita, «primero, la endodoncia».
+   */
+  const beforeWords = (blocker: PlanItemRow) => {
+    const at = facts.carriedAt?.get(blocker.id)
+    if (!at) return `primero, ${blocker.status === "en_curso" ? "la próxima sesión de " : ""}${lower(blocker.title)}`
+    const n = countOf(blocker).done + 1
+    if (!seesAgenda) return "ya tiene su cita"
+    return showsSession(n, blocker.plannedSessions)
+      ? `su ${sessionWords(n, blocker.plannedSessions)} es el ${day(at)}`
+      : `su cita es el ${day(at)}`
+  }
+
   /**
    * Lo aceptado sin cita: «Reservar lo aceptado» con los tratamientos ya puestos, y cuáles son.
    * Con un control que también falta reservar, los dos en una fila y una cita (QA del 8 nov,
-   * entrega 3): la limpieza va en la misma visita y no se pierde.
+   * entrega 3): la limpieza va en la misma visita y no se pierde. Lo que va después de otro
+   * tratamiento de la misma pieza se dice así y se busca hora desde el día siguiente a esa
+   * sesión; si todo espera, la fila es esa (QA de la ficha del 9 nov). Con una cita por venir
+   * que no lo lleva, se ofrece sumarlo a ella.
    */
-  const scheduleStep = (control: FollowUpRow | null): PlanNextStep => {
+  const scheduleStep = (list: PlanItemRow[], controls: FollowUpRow[]): PlanNextStep => {
+    const control = controls[0] ?? null
+    const listReady = list.filter((item) => !blockerOf(item))
+    const listWaiting = list.filter((item) => !!blockerOf(item))
     const decided = budgets
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")
-      .find((budget) => budget.items.some((line) => toStart.some((item) => item.id === line.planItemId)))
+      .find((budget) => budget.items.some((line) => list.some((item) => item.id === line.planItemId)))
+    const label = context.budgetRequired ? "Reservar lo aceptado" : "Reservar lo indicado"
+    const answered = decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null
+
+    // Todo lo que falta va después de otro tratamiento: la fila dice de cuál y cuándo es.
+    if (listReady.length === 0 && listWaiting.length > 0 && controls.length === 0) {
+      const blocker = blockerOf(listWaiting[0]!)!
+      const at = facts.carriedAt?.get(blocker.id)
+      const before = beforeWords(blocker)
+      return {
+        kind: "agendar",
+        text: `${namesOf(listWaiting)}: va después de terminar ${blocker.title}`,
+        detail: [capital(before), answered, bookedBy].filter(Boolean).join(" · "),
+        action: can("appointments.write")
+          ? {
+              label,
+              planItemIds: listWaiting.map((item) => item.id),
+              serviceId: listWaiting[0]?.serviceId ?? null,
+              ...(at ? { date: dayAfter(at) } : {}),
+              note: `Va después de terminar ${blocker.title} (${before}).`,
+            }
+          : null,
+      }
+    }
+
     // Ya tiene una cita que no lo lleva: se dice así, no «falta su cita», que suena a que no tiene ninguna.
     // Si una parte ya tiene cita, se dice que falta el resto. A quien no ve la agenda, sin su fecha.
     const partly = toStart.length < accepted.length
     const yourAppointment = (date: Date) => (seesAgenda ? `su cita del ${day(date)}` : "su próxima cita")
     const what = context.budgetRequired ? "lo aceptado" : "lo indicado"
-    const missing = nextAppointmentAt ? `${yourAppointment(nextAppointmentAt)} no lo lleva${partly ? " todo" : ""}` : "falta su cita"
+    // «aún no va en su cita del 10 nov»: el estado; las salidas las dicen los botones (mesa del 9 nov).
+    const missing = nextAppointmentAt ? `aún no va${partly ? " todo" : ""} en ${yourAppointment(nextAppointmentAt)}` : "falta su cita"
     // «el control vencido»: no es el control de lo aceptado, y lo vencido se dice en el título (segunda mesa).
     const controlNoun = control && dayKey(control.dueAt) < dayKey(new Date()) ? "el control vencido" : "el control"
     const text = control
@@ -691,46 +863,82 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
           `${decided.stateText}: ${missing}`
         : context.budgetRequired
           ? nextAppointmentAt
-            ? `Tiene tratamientos aceptados que ${yourAppointment(nextAppointmentAt)} no lleva`
+            ? `Tiene tratamientos aceptados que aún no van en ${yourAppointment(nextAppointmentAt)}`
             : "Tiene tratamientos aceptados sin cita"
           : // En latidIA lo indicado ya queda aceptado: no hubo nada que aceptar.
             nextAppointmentAt
-            ? `${partly ? "Parte de lo indicado" : "Lo indicado"} no va en ${yourAppointment(nextAppointmentAt)}`
+            ? `${partly ? "Parte de lo indicado" : "Lo indicado"} aún no va en ${yourAppointment(nextAppointmentAt)}`
             : "Falta la cita de lo indicado"
-    // Qué falta, con sus nombres (QA del 8 nov: «Aceptó todo: falta su cita» no decía qué).
-    const titles = toStart.map((item) => item.title)
-    const named = titles.length > 3 ? `${titles.slice(0, 3).join(", ")} y ${titles.length - 3} más` : titles.join(", ")
+    // Qué falta, con sus nombres (QA del 8 nov: «Aceptó todo: falta su cita» no decía qué); lo
+    // que va después de otro tratamiento, con cuál.
+    const named = [
+      namesOf(listReady) || null,
+      ...listWaiting.map((item) => `${item.title}: va después de ${blockerOf(item)!.title}`),
+    ]
+      .filter(Boolean)
+      .join(" · ")
     // Su cita ya se atendió y nadie registró que se hiciera: se avisa donde se decide reservar, sin
     // frenarlo (mesa del 9 nov: pudo posponerse a propósito). Quien atendió sabe si se hizo.
-    const notRecorded = toStart.flatMap((item) => {
+    const notRecorded = list.flatMap((item) => {
       const seen = facts.unrecorded?.get(item.id)
       return seen ? [{ item, ...seen }] : []
     })
     // Solo a quien ve la agenda: a caja no le toca reservar ni preguntar por la cita.
-    const recordedWarning = notRecorded.length && seesAgenda
-      ? (() => {
-          const last = notRecorded.reduce((a, b) => (a.startsAt > b.startsAt ? a : b))
-          const what = notRecorded.map((row) => row.item.title.charAt(0).toLowerCase() + row.item.title.slice(1)).join(", ")
-          // A quien atendió no se le pide que se pregunte a sí mismo (segunda mesa del 9 nov).
-          if (last.mine) return `Su cita contigo del ${day(last.startsAt)} se atendió sin registrar ${what}: regístralo en su próxima atención si se hizo`
-          return `Su cita del ${day(last.startsAt)} se atendió sin registrar ${what}${last.professionalName ? `: pregúntale a ${last.professionalName} si se hizo` : ""}`
-        })()
-      : null
-    const label = context.budgetRequired ? "Reservar lo aceptado" : "Reservar lo indicado"
+    const recordedWarning =
+      notRecorded.length && seesAgenda
+        ? (() => {
+            const last = notRecorded.reduce((a, b) => (a.startsAt > b.startsAt ? a : b))
+            const what = notRecorded.map((row) => lower(row.item.title)).join(", ")
+            // A quien atendió no se le pide que se pregunte a sí mismo (segunda mesa del 9 nov).
+            if (last.mine)
+              return `Su cita contigo del ${day(last.startsAt)} se atendió sin registrar ${what}: regístralo en su próxima atención si se hizo`
+            return `Su cita del ${day(last.startsAt)} se atendió sin registrar ${what}${last.professionalName ? `: pregúntale a ${last.professionalName} si se hizo` : ""}`
+          })()
+        : null
+    // El control que todavía no se puede hacer: se busca hora desde que abre su ventana.
+    const opens = controls
+      .map((row) => dayKey(controlWindowStart(row)))
+      .filter((key) => key > dayKey(new Date()))
+      .sort()
+      .at(-1)
+    // Sumarlo a la cita que ya tiene: solo lo que no espera a otro tratamiento y sin control (el
+    // control se reserva con su propia regla).
+    const join =
+      nextAppointmentAt && nextAppointmentId && controls.length === 0 && listReady.length > 0 && seesAgenda
+        ? { appointmentId: nextAppointmentId, label: `Sumar a su cita del ${day(nextAppointmentAt)}` }
+        : null
     return {
       kind: "agendar",
       text,
       detail:
-        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null, bookedBy]
+        [
+          named || null,
+          answered,
+          ...controls.map(controlWords),
+          // Quién pidió el control de su tratamiento (se decía en su fila antes de juntarlas).
+          ...controls.map((row) => {
+            const origin = isTreatmentControl(row) ? controlOrigins?.get(row.id) : undefined
+            return origin?.professionalName ? `lo indicó ${origin.professionalName}` : null
+          }),
+          bookedBy,
+        ]
           .filter(Boolean)
           .join(" · ") || null,
       // Dice qué reserva: «Reservar cita» a secas es el de la cabecera (segunda mesa del 8 nov).
       action: can("appointments.write")
         ? {
-            label: control ? `${label} y el control` : label,
-            planItemIds: toStart.map((item) => item.id),
-            serviceId: toStart[0]?.serviceId ?? null,
-            ...(control ? { followUpId: control.id } : {}),
+            label: join ? "Otra cita" : control ? `${label} y el control` : label,
+            planItemIds: listReady.map((item) => item.id),
+            serviceId: listReady[0]?.serviceId ?? null,
+            ...(control ? { followUpId: control.id, followUpIds: controls.map((row) => row.id) } : {}),
+            // Las dos fechas en una frase: cuándo toca y desde cuándo se puede (segunda mesa del 9 nov).
+            ...(opens && control
+              ? {
+                  date: opens,
+                  note: `${control.title} toca el ${day(control.dueAt)}; se puede hacer desde el ${day(new Date(`${opens}T12:00:00Z`))}.`,
+                }
+              : {}),
+            ...(join ? { join } : {}),
           }
         : null,
       notice: recordedWarning,
@@ -738,12 +946,42 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   }
 
   /** Lo que espera respuesta (una sola regla: `budgetAwaitsAnswer`). */
-  const answerStep = (budget: BudgetWithTotals): PlanNextStep => ({
-    kind: "respuesta",
-    text: budget.status === "presentado" ? "Entregado · espera respuesta" : "Lo está pensando",
-    detail: [budgetLine(budget, locale), budget.presentedAt ? `Entregado el ${day(budget.presentedAt)}` : null].filter(Boolean).join(" · "),
-    action: can("budgets.decide") ? { label: "¿Qué respondió?", budgetId: budget.id } : null,
-  })
+  /**
+   * Lo que espera respuesta, con qué tratamientos son (recepción llama y tiene que saber de qué
+   * hablar) y, si no contestó, cuándo volver a llamar (QA de la ficha del 9 nov).
+   */
+  const answerStep = (budget: BudgetWithTotals): PlanNextStep => {
+    const titleOf = new Map(items.map((item) => [item.id, item.title]))
+    const titles = [...new Set(budget.items.map((line) => titleOf.get(line.planItemId)).filter((title): title is string => !!title))]
+    const names = titles.length > 2 ? `${titles.slice(0, 2).join(" · ")} · y ${titles.length - 2} más` : titles.join(" · ")
+    const callback = facts.callbacks?.get(budget.id)
+    const callbackText = callback
+      ? (() => {
+          const today = dayKey(new Date())
+          const due = callback.dueAt ? dayKey(callback.dueAt) : null
+          const when = !callback.dueAt || !due
+            ? "volver a llamar"
+            : due === today
+              ? "volver a llamar hoy"
+              : due < today
+                ? `volver a llamar: tocaba el ${day(callback.dueAt)}`
+                : `volver a llamar el ${day(callback.dueAt)}`
+          // «No contestó el 9 nov», como quedó anotado (la fecha de la tarea cambia si se edita).
+          return `${callback.said ?? "No contestó"} · ${when}`
+        })()
+      : null
+    return {
+      kind: "respuesta",
+      text: callbackText ?? (budget.status === "presentado" ? "Entregado · espera respuesta" : "Lo está pensando"),
+      detail: [
+        budgetLine(budget, locale, budget.options.length > 1 ? undefined : names || undefined),
+        budget.presentedAt ? `Entregado el ${day(budget.presentedAt)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      action: can("budgets.decide") ? { label: "¿Qué respondió?", budgetId: budget.id } : null,
+    }
+  }
 
   /** Un control, con quién lo indicó y cuándo (QA del 8 nov: no decía para qué era). */
   const controlStep = (control: FollowUpRow): PlanNextStep => {
@@ -819,6 +1057,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     allContinuing,
     treatmentControl,
     joinedControl,
+    pairedControl,
+    pairedItems,
     laterControl,
     continueStep,
     sendStep,
@@ -833,7 +1073,9 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
  * la misma en el Resumen, en la franja del Plan y, en una línea, en la fila de
  * Pacientes, que dicen su primera fila. Sin nada, la lista va vacía.
  *
- * 1. El control de un tratamiento que falta reservar (el de una endodoncia).
+ * 1. El control de un tratamiento que falta reservar (el de una endodoncia). Con lo aceptado
+ *    de la misma pieza (la corona), en una fila y una cita, aunque el control todavía no se
+ *    pueda hacer: se busca hora desde que se puede (QA de la ficha del 9 nov).
  * 2. El presupuesto armado y sin enviar.
  * 3. La próxima sesión de lo empezado, si además hay algo aceptado sin empezar
  *    (QA del 8 nov, X5: la sesión 2 de la endodoncia antes que la corona).
@@ -864,11 +1106,14 @@ function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNe
 
 function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
   const steps: PlanNextStep[] = []
-  if (p.treatmentControl) steps.push(p.controlStep(p.treatmentControl))
+  // El control de un tratamiento con lo aceptado de la misma pieza va primero, en una fila.
+  if (p.pairedControl) steps.push(p.scheduleStep(p.pairedItems, [p.pairedControl]))
+  if (p.treatmentControl && p.treatmentControl.id !== p.pairedControl?.id) steps.push(p.controlStep(p.treatmentControl))
   if (p.unsent) steps.push(p.sendStep(p.unsent))
-  const sessionFirst = p.toStart.length > 0 ? p.startedFirst : undefined
+  const rest = p.toStart.filter((item) => !p.pairedItems.some((other) => other.id === item.id))
+  const sessionFirst = rest.length > 0 ? p.startedFirst : undefined
   if (sessionFirst) steps.push(p.continueStep(sessionFirst))
-  if (p.toStart.length > 0) steps.push(p.scheduleStep(p.joinedControl))
+  if (rest.length > 0) steps.push(p.scheduleStep(rest, p.joinedControl ? [p.joinedControl] : []))
   else if (p.joinedControl) steps.push(p.controlStep(p.joinedControl))
   if (p.awaiting) steps.push(p.answerStep(p.awaiting))
   // Cada tratamiento que sigue en curso, una vez: primero el de la regla, después los demás.

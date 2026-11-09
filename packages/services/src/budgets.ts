@@ -46,6 +46,7 @@ import { livePersonalLinkToken } from "./booking-links.js"
 import { budgetAwaitsAnswer, OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
+import { settleBudgetCallback } from "./budget-callback.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
 import {
@@ -2767,6 +2768,8 @@ export async function decideBudget(
     // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
     title: budgetInterest(own, current.title).title,
   })
+  // Ya respondió: el «volver a llamar» que dejó «No contesta» se cierra solo.
+  if (!awaitsAnswer) await settleBudgetCallback(tx, orgId, budgetId)
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
 }
@@ -3044,6 +3047,8 @@ async function cancelBudgetRow(
   })
   // Su oportunidad ya no se cerrará sola al responderlo (ADR 0144).
   await releaseCancelledBudget(tx, orgId, { budgetId, userId: actorUserId })
+  // Anulado: ya no hay a quién volver a llamar por él.
+  await settleBudgetCallback(tx, orgId, budgetId, "Se anuló su presupuesto")
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
 }
@@ -3589,6 +3594,8 @@ export async function reviseBudget(
     reason,
     supersedesBudgetId: current.id,
   })
+  // Lo reemplaza una revisión: la llamada era por el anterior, y la revisión se entrega de nuevo.
+  await settleBudgetCallback(tx, orgId, current.id, "Su presupuesto se revisó")
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, revision)
 }
