@@ -1652,7 +1652,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "enviar_enlace_cita",
       description:
-        "Envía «Elige tu cita»: su página para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Es solo para reservar. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando pida otra vez un enlace para reservar que ya le diste, también el que dio proponer_cita para confirmar sus datos, o diga que ya no sirve: le das uno nuevo. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
+        "Envía «Elige tu cita»: su página para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Es solo para reservar. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando diga que su enlace para reservar ya no sirve: le das uno nuevo. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
       schema: z.object({
         patientId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
