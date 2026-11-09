@@ -102,6 +102,8 @@ export function CountrySelect({
       isItemEqualToValue={(a, b) => a.value === b.value}
       // El filtro ya lo hizo `shown`: así el prefijo puede ordenar la lista.
       filter={null}
+      // Con el teclado, Enter elige la primera coincidencia («reino» → Reino Unido).
+      autoHighlight
       disabled={disabled}
     >
       <ComboboxTrigger
