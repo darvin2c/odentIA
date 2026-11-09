@@ -563,7 +563,7 @@ export function ExpensesTab({
               // Cada versión anterior, de la más reciente a la primera: qué era y por qué se corrigió.
               ...(viewing.history?.length ? viewing.history : viewing.replaced ? [viewing.replaced] : []).map((was, index, all) => [
                 index === 0 ? "Antes" : index === all.length - 1 ? "Al principio" : "Antes de eso",
-                `${was.concept} · ${formatMoney(was.amountCents, was.currency, locale)} · ${expenseCategoryLabel(was.category)} · ${formatDayMonth(was.spentAt, locale, zone)}${was.methodName ? ` · ${was.methodName}` : ""}${was.reason ? `. Se corrigió: ${was.reason}` : ""}`,
+                `${was.concept} · ${formatMoney(was.amountCents, was.currency, locale)} · ${expenseCategoryLabel(was.category)} · ${formatDayMonth(was.spentAt, locale, zone)}${was.methodName ? ` · ${was.methodName}` : ""}${was.reason ? `. ${was.reason}` : ""}`,
               ]),
               ...(viewing.voidedAt ? [["Anulado", viewing.voidReason ?? "Sin motivo"]] : []),
               ...(viewing.purchaseOrderNumber != null

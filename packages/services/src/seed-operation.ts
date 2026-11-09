@@ -207,6 +207,8 @@ function productsFor(ctx: Context, recipe: DemoKindRecipe["inventory"]): DemoPro
 async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]) {
   const { tx, orgId, ownerUserId, country, random } = ctx
   const [main, second] = ctx.branches as [string, string | undefined]
+  // Las compras se pagan por transferencia (ADR 0167), con su número de operación.
+  const transfer = (await listPaymentMethods(tx, orgId, { activeOnly: true })).find((method) => method.typeCode === "30") ?? null
   const included = productsFor(ctx, recipe)
   const care = included.filter((item) => !item.retired)
 
@@ -407,6 +409,9 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       amountCents: total,
       spentAt: dayAt(ctx, -15, 16).toISOString(),
       fromCash: false,
+      paymentMethodId: transfer?.id ?? null,
+      paymentReference: String(500_000 + (total % 99_991)),
+      receiptType: "01",
       receiptKind: "Factura",
       receiptNumber: `F001-${random.int(1_000, 9_999)}`,
     })
@@ -447,6 +452,9 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       amountCents: Math.round(received / 2 / 100) * 100,
       spentAt: dayAt(ctx, -5, 16).toISOString(),
       fromCash: false,
+      paymentMethodId: transfer?.id ?? null,
+      paymentReference: String(600_000 + (received % 99_991)),
+      receiptType: "01",
       receiptKind: "Factura",
       receiptNumber: `F002-${random.int(100, 999)}`,
     })
