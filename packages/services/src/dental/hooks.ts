@@ -12,7 +12,6 @@ import {
   encounterPlanItem,
   serviceCatalog,
   treatmentPlanItem,
-  treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
   dentalTemplateRule,
@@ -366,6 +365,8 @@ export const dentalHooks: ProductHooks = {
   // col., Int Endod J 1991;24:119-125). La AAE y la ESE no fijan un plazo; es un mínimo que se
   // propone, no que se exige: la reserva deja elegir antes si hace falta (QA del 9 nov, repaso 3).
   sessionGapDays: (kind) => (kind === "endodoncia" ? 7 : null),
+  // Una consulta, una evaluación o una radiografía no piden «Falta otra sesión».
+  oneOffKinds: ["diagnostico"],
   phaseWords: (phase) =>
     TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
 
@@ -572,6 +573,15 @@ export const dentalHooks: ProductHooks = {
   },
 }
 
+/** Las familias de la biblioteca que son un tratamiento de conductos (`seeds/biblioteca_piezas.csv`). */
+const ROOT_CANAL_FAMILIES = new Set([
+  "endodoncia-vital",
+  "endodoncia-no-vital",
+  "endodoncia-bicuspide-raices",
+  "retratamiento",
+  "pulpectomia-deciduo",
+])
+
 /** El título del control de cicatrización de la endodoncia: el mismo al crearlo y al cancelarlo. */
 function radiographicControlTitle(): string {
   return "Control radiográfico de la endodoncia"
@@ -589,13 +599,15 @@ async function yearlyRadiographicControl(
 ): Promise<void> {
   const { orgId, actorUserId, patientId, encounterId, item } = scope
   if (!item.serviceId) return
+  // Solo la endodoncia de verdad (con su familia en la biblioteca: vital, no vital, retratamiento,
+  // pulpectomía): un recubrimiento pulpar o una pulpotomía son del mismo tipo y no llevan este control.
   const [service] = await tx
-    .select({ kind: treatmentTemplate.kind })
+    .select({ family: dentalTemplateRule.family })
     .from(serviceCatalog)
-    .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+    .innerJoin(dentalTemplateRule, eq(dentalTemplateRule.templateId, serviceCatalog.templateId))
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, item.serviceId)))
     .limit(1)
-  if (service?.kind !== "endodoncia") return
+  if (!service?.family || !ROOT_CANAL_FAMILIES.has(service.family)) return
   const title = radiographicControlTitle()
   const [already] = await tx
     .select({ id: clinicalFollowUp.id })

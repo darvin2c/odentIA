@@ -435,6 +435,11 @@ export interface ProductHooks {
    * nada que decir, la siguiente se propone desde mañana.
    */
   sessionGapDays?(kind: string | null): number | null
+  /**
+   * Los tipos de tratamiento de la biblioteca que se hacen de una vez y nunca piden otra sesión
+   * (odentIA: consultas, evaluaciones y radiografías). Sin él, ninguno.
+   */
+  oneOffKinds?: readonly string[]
   /** El nombre de una fase en el papel; sin nombre (una sola fase), el presupuesto no habla de etapas. */
   phaseWords?(phase: string): string | null
   /**

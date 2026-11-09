@@ -218,4 +218,9 @@ it("un pago parcial de varios conceptos dice a cuál va, lo más antiguo primero
   expect(partialSplitWords(items, 50000, "PEN", "es-PE")).toBeNull()
   expect(partialSplitWords(items, 0, "PEN", "es-PE")).toBeNull()
   expect(partialSplitWords(items.slice(0, 1), 2000, "PEN", "es-PE")).toBeNull()
+  // Lo que tiene a favor se usa primero: 100 nuevos y 50 a favor.
+  expect(spaced(partialSplitWords(items, 10000, "PEN", "es-PE", 5000) ?? "")).toBe(
+    "Con lo que tiene a favor, va primero a lo más antiguo: Consulta S/ 50.00 · Endodoncia S/ 100.00.",
+  )
+  expect(partialSplitWords(items, 45000, "PEN", "es-PE", 5000)).toBeNull()
 })

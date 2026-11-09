@@ -1,0 +1,398 @@
+- generic [ref=f16e1]:
+  - generic [ref=f16e2]:
+    - complementary [ref=f16e3]:
+      - generic [ref=f16e5]:
+        - generic [ref=f16e6]:
+          - generic [ref=f16e7]:
+            - img "odentIA" [ref=f16e9]
+            - button "Contraer el panel lateral" [expanded] [ref=f16e25]:
+              - generic [ref=f16e26]: Alternar menú lateral
+          - button "Dental Smile. Menú de la clínica" [ref=f16e28]:
+            - generic [ref=f16e29]: D
+            - generic [ref=f16e32]:
+              - generic [ref=f16e33]: Dental Smile
+              - generic [ref=f16e34]: Propietario
+        - navigation "Principal" [ref=f16e38]:
+          - list [ref=f16e41]:
+            - listitem [ref=f16e42]:
+              - link "Inicio" [ref=f16e43] [cursor=pointer]:
+                - /url: /home
+              - generic:
+                - text: "6"
+                - generic: personas esperan
+            - listitem [ref=f16e48]:
+              - link "Bandeja" [ref=f16e49] [cursor=pointer]:
+                - /url: /inbox
+            - listitem [ref=f16e54]:
+              - link "Agenda" [ref=f16e55] [cursor=pointer]:
+                - /url: /agenda
+            - listitem [ref=f16e59]:
+              - link "Tareas" [ref=f16e60] [cursor=pointer]:
+                - /url: /tasks
+            - listitem [ref=f16e65]:
+              - link "Agente" [ref=f16e66] [cursor=pointer]:
+                - /url: /agent
+              - generic: "4"
+          - generic [ref=f16e71]:
+            - button "Personas" [expanded] [ref=f16e72]
+            - list [ref=f16e77]:
+              - listitem [ref=f16e78]:
+                - link "Pacientes" [ref=f16e79] [cursor=pointer]:
+                  - /url: /people
+              - listitem [ref=f16e84]:
+                - link "Oportunidades" [ref=f16e85] [cursor=pointer]:
+                  - /url: /pipeline
+          - generic [ref=f16e88]:
+            - button "Gestión" [expanded] [ref=f16e89]
+            - list [ref=f16e94]:
+              - listitem [ref=f16e95]:
+                - link "Finanzas" [ref=f16e96] [cursor=pointer]:
+                  - /url: /finance
+              - listitem [ref=f16e101]:
+                - link "Servicios y precios" [ref=f16e102] [cursor=pointer]:
+                  - /url: /services
+              - listitem [ref=f16e108]:
+                - link "Inventario" [ref=f16e109] [cursor=pointer]:
+                  - /url: /inventory
+              - listitem [ref=f16e115]:
+                - link "Reportes" [ref=f16e116] [cursor=pointer]:
+                  - /url: /reports
+        - generic [ref=f16e120]:
+          - list [ref=f16e121]:
+            - listitem [ref=f16e122]:
+              - link "Configuración" [ref=f16e123] [cursor=pointer]:
+                - /url: /settings
+          - separator [ref=f16e128]
+          - button "Menú de Dra. Ana Torres" [ref=f16e129]:
+            - generic [ref=f16e130]: AT
+            - generic [ref=f16e132]:
+              - paragraph [ref=f16e133]: Dra. Ana Torres
+              - paragraph [ref=f16e134]: ana@odentia.dev
+        - button "Alternar menú lateral" [ref=f16e135]
+    - main [ref=f16e136]:
+      - generic [ref=f16e929]:
+        - generic "Alertas clínicas" [ref=f16e930]: Niega alergias
+        - generic [ref=f16e932]:
+          - heading "QA Urgencia Entrega Nueve" [level=1] [ref=f16e933]
+          - generic [ref=f16e934]:
+            - button "Buscar en todo" [ref=f16e935]:
+              - generic [ref=f16e936]: Buscar
+              - generic [ref=f16e937]:
+                - generic: Ctrl
+                - generic: K
+            - button "Ayuda, 2 respuestas nuevas" [ref=f16e938]:
+              - generic [ref=f16e939]: Ayuda
+              - generic [ref=f16e940]: "2"
+            - 'button "Avisos: 3 sin leer" [ref=f16e941]':
+              - generic [ref=f16e942]: Avisos
+              - generic [ref=f16e943]: "3"
+        - generic [ref=f16e944]:
+          - navigation "breadcrumb" [ref=f16e946]:
+            - list [ref=f16e947]:
+              - listitem [ref=f16e948]:
+                - link "Pacientes" [ref=f16e949] [cursor=pointer]:
+                  - /url: /people
+              - listitem [ref=f16e950]
+              - listitem [ref=f16e953]:
+                - link "QA Urgencia Entrega Nueve" [ref=f16e954] [cursor=pointer]:
+                  - /url: /patients/90d314ee-271d-49b6-8539-ce5b3cb1dfba?tab=resumen
+              - listitem [ref=f16e955]
+              - listitem [ref=f16e958]:
+                - link "Atención" [disabled] [ref=f16e959]
+          - generic [ref=f16e960]: 38 años · HC-000977 · en curso desde las 05:37 p. m. · Dra. Ana Torres
+          - status [ref=f16e961]: Guardado 05:37 p. m.
+          - button "Antecedentes y última atención" [ref=f16e962]
+          - generic [ref=f16e963]:
+            - button "Dictar" [ref=f16e964]
+            - button "¿Qué puedo decir?" [ref=f16e965]
+        - generic [ref=f16e991]:
+          - region [ref=f16e993]:
+            - heading "Hoy viene a…" [level=2] [ref=f16e995]
+            - paragraph [ref=f16e997]: Sin cita, tratamiento por hacer ni control por cumplir. Escribe el motivo abajo.
+          - region [ref=f16e998]:
+            - heading "Consulta" [level=2] [ref=f16e1000]
+            - generic [ref=f16e1001]:
+              - generic [ref=f16e1002]:
+                - group [ref=f16e1003]:
+                  - generic [ref=f16e1004]: Motivo de consulta
+                  - textbox "Motivo de consulta" [ref=f16e1005]:
+                    - /placeholder: Motivo de la consulta…
+                    - text: "Urgencia:"
+                - group [ref=f16e1006]:
+                  - generic [ref=f16e1007]: Tiempo de enfermedad (opcional)
+                  - textbox "Tiempo de enfermedad (opcional)" [ref=f16e1008]:
+                    - /placeholder: "Ej.: 3 días"
+              - button "+ Relato de la enfermedad" [ref=f16e1009]
+              - group [ref=f16e1010]:
+                - generic [ref=f16e1011]: Sede de la atención
+                - combobox "Sede de la atención" [ref=f16e1012]:
+                  - generic [ref=f16e1013]: Sede San Isidro
+                - textbox [ref=f16e1014]: 9664fe0d-e520-4db3-9895-505105bf3729
+          - region [ref=f16e1015]:
+            - heading "Odontograma" [level=2] [ref=f16e1017]
+            - generic [ref=f16e1018]:
+              - generic [ref=f16e1020]:
+                - region "Boca dental" [ref=f16e1021]:
+                  - generic [ref=f16e1022]:
+                    - heading "Odontograma" [level=3] [ref=f16e1023]
+                    - generic "Dentición" [ref=f16e1024]:
+                      - button "Permanente (32)" [pressed] [ref=f16e1025]
+                      - button "Mixta" [ref=f16e1026]
+                      - button "Temporal (20)" [ref=f16e1027]
+                  - paragraph [ref=f16e1028]: Dentición sugerida por la edad del paciente.
+                  - generic [ref=f16e1030]:
+                    - button "Seleccionar varias" [ref=f16e1031]
+                    - button "Ver como la norma" [ref=f16e1032]
+                  - group "Odontograma" [ref=f16e1034]:
+                    - generic [ref=f16e1035]: Usa las flechas para moverte entre piezas.
+                    - generic [ref=f16e1039]: Derecha
+                    - generic [ref=f16e1040]: Izquierda
+                    - 'button "Pieza 18: sin hallazgos. Seleccionar pieza." [ref=f16e1042] [cursor=pointer]'
+                    - generic [ref=f16e1048]: "18"
+                    - 'button "Pieza 17: sin hallazgos. Seleccionar pieza." [ref=f16e1050] [cursor=pointer]'
+                    - generic [ref=f16e1056]: "17"
+                    - 'button "Pieza 16: sin hallazgos. Seleccionar pieza." [ref=f16e1058] [cursor=pointer]'
+                    - generic [ref=f16e1064]: "16"
+                    - 'button "Pieza 15: sin hallazgos. Seleccionar pieza." [ref=f16e1066] [cursor=pointer]'
+                    - generic [ref=f16e1072]: "15"
+                    - 'button "Pieza 14: sin hallazgos. Seleccionar pieza." [ref=f16e1074] [cursor=pointer]'
+                    - generic [ref=f16e1080]: "14"
+                    - 'button "Pieza 13: sin hallazgos. Seleccionar pieza." [ref=f16e1082] [cursor=pointer]'
+                    - generic [ref=f16e1088]: "13"
+                    - 'button "Pieza 12: sin hallazgos. Seleccionar pieza." [ref=f16e1090] [cursor=pointer]'
+                    - generic [ref=f16e1096]: "12"
+                    - 'button "Pieza 11: sin hallazgos. Seleccionar pieza." [ref=f16e1098] [cursor=pointer]'
+                    - generic [ref=f16e1104]: "11"
+                    - 'button "Pieza 21: sin hallazgos. Seleccionar pieza." [ref=f16e1106] [cursor=pointer]'
+                    - generic [ref=f16e1112]: "21"
+                    - 'button "Pieza 22: sin hallazgos. Seleccionar pieza." [ref=f16e1114] [cursor=pointer]'
+                    - generic [ref=f16e1120]: "22"
+                    - 'button "Pieza 23: sin hallazgos. Seleccionar pieza." [ref=f16e1122] [cursor=pointer]'
+                    - generic [ref=f16e1128]: "23"
+                    - 'button "Pieza 24: sin hallazgos. Seleccionar pieza." [ref=f16e1130] [cursor=pointer]'
+                    - generic [ref=f16e1136]: "24"
+                    - 'button "Pieza 25: sin hallazgos. Seleccionar pieza." [ref=f16e1138] [cursor=pointer]'
+                    - generic [ref=f16e1144]: "25"
+                    - 'button "Pieza 26: sin hallazgos. Seleccionar pieza." [pressed] [ref=f16e1146] [cursor=pointer]'
+                    - generic [ref=f16e1152]: "26"
+                    - 'button "Pieza 27: sin hallazgos. Seleccionar pieza." [ref=f16e1154] [cursor=pointer]'
+                    - generic [ref=f16e1160]: "27"
+                    - 'button "Pieza 28: sin hallazgos. Seleccionar pieza." [ref=f16e1162] [cursor=pointer]'
+                    - generic [ref=f16e1168]: "28"
+                    - 'button "Pieza 48: sin hallazgos. Seleccionar pieza." [ref=f16e1170] [cursor=pointer]'
+                    - generic [ref=f16e1176]: "48"
+                    - 'button "Pieza 47: sin hallazgos. Seleccionar pieza." [ref=f16e1178] [cursor=pointer]'
+                    - generic [ref=f16e1184]: "47"
+                    - 'button "Pieza 46: sin hallazgos. Seleccionar pieza." [ref=f16e1186] [cursor=pointer]'
+                    - generic [ref=f16e1192]: "46"
+                    - 'button "Pieza 45: sin hallazgos. Seleccionar pieza." [ref=f16e1194] [cursor=pointer]'
+                    - generic [ref=f16e1200]: "45"
+                    - 'button "Pieza 44: sin hallazgos. Seleccionar pieza." [ref=f16e1202] [cursor=pointer]'
+                    - generic [ref=f16e1208]: "44"
+                    - 'button "Pieza 43: sin hallazgos. Seleccionar pieza." [ref=f16e1210] [cursor=pointer]'
+                    - generic [ref=f16e1216]: "43"
+                    - 'button "Pieza 42: sin hallazgos. Seleccionar pieza." [ref=f16e1218] [cursor=pointer]'
+                    - generic [ref=f16e1224]: "42"
+                    - 'button "Pieza 41: sin hallazgos. Seleccionar pieza." [ref=f16e1226] [cursor=pointer]'
+                    - generic [ref=f16e1232]: "41"
+                    - 'button "Pieza 31: sin hallazgos. Seleccionar pieza." [ref=f16e1234] [cursor=pointer]'
+                    - generic [ref=f16e1240]: "31"
+                    - 'button "Pieza 32: sin hallazgos. Seleccionar pieza." [ref=f16e1242] [cursor=pointer]'
+                    - generic [ref=f16e1248]: "32"
+                    - 'button "Pieza 33: sin hallazgos. Seleccionar pieza." [ref=f16e1250] [cursor=pointer]'
+                    - generic [ref=f16e1256]: "33"
+                    - 'button "Pieza 34: sin hallazgos. Seleccionar pieza." [ref=f16e1258] [cursor=pointer]'
+                    - generic [ref=f16e1264]: "34"
+                    - 'button "Pieza 35: sin hallazgos. Seleccionar pieza." [ref=f16e1266] [cursor=pointer]'
+                    - generic [ref=f16e1272]: "35"
+                    - 'button "Pieza 36: sin hallazgos. Seleccionar pieza." [ref=f16e1274] [cursor=pointer]'
+                    - generic [ref=f16e1280]: "36"
+                    - 'button "Pieza 37: sin hallazgos. Seleccionar pieza." [ref=f16e1282] [cursor=pointer]'
+                    - generic [ref=f16e1288]: "37"
+                    - 'button "Pieza 38: sin hallazgos. Seleccionar pieza." [ref=f16e1290] [cursor=pointer]'
+                    - generic [ref=f16e1296]: "38"
+                  - paragraph [ref=f16e1297]: Haz clic en una pieza para abrir su registro clínico.
+                  - generic [ref=f16e1298]:
+                    - generic [ref=f16e1299]: Patología, mal estado o temporal
+                    - generic [ref=f16e1301]: Buen estado o característica no patológica
+                - region "Registro clínico dental" [ref=f16e1406]:
+                  - region [ref=f16e1407]:
+                    - generic [ref=f16e1408]:
+                      - generic [ref=f16e1410]:
+                        - heading "Pieza 26 — Primer molar superior izquierdo" [level=2] [ref=f16e1412]
+                        - button "Cerrar" [ref=f16e1413]:
+                          - generic [ref=f16e1414]: ×
+                      - generic [ref=f16e1418]:
+                        - generic [ref=f16e1529]:
+                          - region [ref=f16e1530]:
+                            - generic [ref=f16e1531]:
+                              - heading "Hallazgo · Lesión de caries dental" [active] [level=3] [ref=f16e1532]
+                              - button "Cambiar hallazgo" [ref=f16e1533]
+                            - generic [ref=f16e1534]:
+                              - generic [ref=f16e1535]: En edición · vista previa no guardada · Lesión de caries dental
+                              - generic "Piezas seleccionadas" [ref=f16e1537]:
+                                - figure [ref=f16e1538]:
+                                  - generic "Pieza 26 — Lesión de caries dental" [ref=f16e1539] [cursor=pointer]:
+                                    - 'group "Edición de la pieza 26: superficies pintables y dibujo libre de la forma observada." [ref=f16e1540]':
+                                      - generic [ref=f16e1544]:
+                                        - 'button "Superficie Mesial de la pieza 26: sin hallazgos" [ref=f16e1545]'
+                                        - 'button "Superficie Distal de la pieza 26: sin hallazgos" [ref=f16e1546]'
+                                        - 'button "Superficie Palatina de la pieza 26: sin hallazgos" [ref=f16e1547]'
+                                        - 'button "Superficie Vestibular de la pieza 26: sin hallazgos" [ref=f16e1548]'
+                                        - 'button "Superficie Oclusal de la pieza 26: sin hallazgos" [ref=f16e1549]'
+                                  - generic [ref=f16e1550]:
+                                    - text: "26"
+                                    - paragraph [ref=f16e1551]: Primer molar superior izquierdo
+                              - button "Trazar forma observada" [ref=f16e1553]
+                              - paragraph [ref=f16e1554]: Toca una cara del diente para agregarla o quitarla del borrador.
+                          - group [ref=f16e1555]:
+                            - generic [ref=f16e1556]: Profundidad · sigla de la NTS 188
+                            - combobox "Profundidad · sigla de la NTS 188" [ref=f16e1557]:
+                              - generic [ref=f16e1558]: Elige…
+                            - textbox [ref=f16e1559]
+                          - group "Superficies comprometidas (o traza la forma observada)" [ref=f16e1561]:
+                            - generic [ref=f16e1563]:
+                              - group [ref=f16e1564]:
+                                - checkbox "Mesial" [ref=f16e1565]
+                                - checkbox [ref=f16e1566]
+                                - generic [ref=f16e1567]: Mesial
+                              - group [ref=f16e1568]:
+                                - checkbox "Distal" [ref=f16e1569]
+                                - checkbox [ref=f16e1570]
+                                - generic [ref=f16e1571]: Distal
+                              - group [ref=f16e1572]:
+                                - checkbox "Vestibular" [ref=f16e1573]
+                                - checkbox [ref=f16e1574]
+                                - generic [ref=f16e1575]: Vestibular
+                              - group [ref=f16e1576]:
+                                - checkbox "Palatina" [ref=f16e1577]
+                                - checkbox [ref=f16e1578]
+                                - generic [ref=f16e1579]: Palatina
+                              - group [ref=f16e1580]:
+                                - checkbox "Oclusal" [ref=f16e1581]
+                                - checkbox [ref=f16e1582]
+                                - generic [ref=f16e1583]: Oclusal
+                          - group "Registro gráfico" [ref=f16e1584]:
+                            - paragraph [ref=f16e1586]: Dibuja el trazo observado sobre la vista previa de la pieza.
+                          - region "Diagnóstico" [ref=f16e1587]:
+                            - generic [ref=f16e1588]:
+                              - group "Diagnóstico" [ref=f16e1589]:
+                                - generic [ref=f16e1591]:
+                                  - generic [ref=f16e1592]: CIE-10 (OMS) · lista de la clínica
+                                  - generic [ref=f16e1594]:
+                                    - generic [ref=f16e1595]: 1 · Lo que propone la atención
+                                    - list [ref=f16e1596]:
+                                      - listitem [ref=f16e1597]:
+                                        - generic [ref=f16e1598]:
+                                          - generic [ref=f16e1599]: K02.9 · Caries dental no especificada
+                                          - generic [ref=f16e1600]: Propuesto por el hallazgo «Lesión de caries dental» en la pieza 26
+                                        - button "Elegir" [ref=f16e1601]
+                                  - generic [ref=f16e1602]:
+                                    - generic [ref=f16e1603]: 2 · Los más usados en tu clínica
+                                    - generic [ref=f16e1604]:
+                                      - button "K02.1 Caries de la dentina" [ref=f16e1605]
+                                      - button "K04.0 Pulpitis" [ref=f16e1606]
+                                      - button "K05.3 Periodontitis crónica" [ref=f16e1607]
+                                      - button "Z01.2 Examen dental" [ref=f16e1608]
+                                  - group [ref=f16e1609]:
+                                    - generic [ref=f16e1610]: 3 · Buscar en toda la lista
+                                    - generic [ref=f16e1611]:
+                                      - group [ref=f16e1612]:
+                                        - combobox "3 · Buscar en toda la lista" [ref=f16e1613]
+                                        - group [ref=f16e1614]
+                                      - textbox [ref=f16e1615]
+                              - group [ref=f16e1616]:
+                                - generic [ref=f16e1617]: Tipo
+                                - combobox "Tipo" [disabled] [ref=f16e1618]:
+                                  - generic [ref=f16e1619]: Elige…
+                                - textbox [disabled] [ref=f16e1620]
+                            - paragraph [ref=f16e1621]: Cuenta como diagnóstico de esta atención
+                          - region "Tratamiento" [ref=f16e1622]:
+                            - group [ref=f16e1623]:
+                              - generic [ref=f16e1624]: Tratamiento
+                              - generic [ref=f16e1626]:
+                                - combobox "Especialidad" [ref=f16e1627]:
+                                  - generic [ref=f16e1628]: Todas las especialidades
+                                - textbox [ref=f16e1629]: todas
+                                - group [ref=f16e1630]:
+                                  - combobox "Tratamiento" [ref=f16e1631]
+                                  - group [ref=f16e1632]
+                                - textbox [ref=f16e1633]
+                            - paragraph [ref=f16e1634]: "Opcional: lo que propones hacer va al plan, aparte de lo observado"
+                          - group [ref=f16e1635]:
+                            - generic [ref=f16e1636]: Nota (opcional)
+                            - textbox "Nota (opcional)" [ref=f16e1637]:
+                              - /placeholder: Detalle clínico del hallazgo…
+                        - group [ref=f16e1638]:
+                          - generic "Estado y contexto de las piezas" [ref=f16e1639] [cursor=pointer]
+                      - button "Registrar hallazgo" [ref=f16e1641]
+              - paragraph [ref=f16e1303]: Toca una pieza para registrar lo que encuentras.
+          - region [ref=f16e1305]:
+            - generic [ref=f16e1306]:
+              - heading "Diagnóstico (0)" [level=2] [ref=f16e1307]
+              - paragraph [ref=f16e1308]: Al menos uno para cerrar la atención; «Presuntivo» basta.
+            - paragraph [ref=f16e1309]: Sin diagnósticos registrados.
+            - button "Registrar diagnóstico" [ref=f16e1311]
+          - region [ref=f16e1312]:
+            - heading "Realizado hoy" [level=2] [ref=f16e1314]
+            - generic [ref=f16e1316]:
+              - region "Procedimientos registrados" [ref=f16e1317]:
+                - paragraph [ref=f16e1318]: Sin procedimientos registrados hoy.
+              - button "Registrar lo de hoy" [ref=f16e1320]
+          - region [ref=f16e1321]:
+            - heading "Plan" [level=2] [ref=f16e1323]
+            - region "Lo que sigue por hacer" [ref=f16e1325]:
+              - heading "Lo que sigue por hacer" [level=3] [ref=f16e1327]
+              - paragraph [ref=f16e1328]: Todavía no hay tratamientos por hacer. El primero que indiques abre el plan.
+              - button "Indicar un tratamiento" [ref=f16e1330]
+          - region [ref=f16e1331]:
+            - heading "Documentos" [level=2] [ref=f16e1333]
+            - generic [ref=f16e1334]:
+              - generic [ref=f16e1335]:
+                - paragraph [ref=f16e1336]: Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención.
+                - button "Nuevo" [ref=f16e1337]
+              - list [ref=f16e1338]:
+                - listitem [ref=f16e1339]: Aún no hay documentos en esta atención. Usa «Nuevo» para crear uno.
+          - region [ref=f16e1340]:
+            - heading "Evolución e indicaciones" [level=2] [ref=f16e1342]
+            - generic [ref=f16e1344]:
+              - group [ref=f16e1345]:
+                - generic [ref=f16e1346]: Evolución
+                - textbox "Evolución" [ref=f16e1347]:
+                  - /placeholder: Evolución clínica…
+                - paragraph [ref=f16e1348]: Lo que se hizo hoy y cómo respondió; en una primera consulta, el plan y lo que se le explicó.
+              - group [ref=f16e1349]:
+                - generic [ref=f16e1350]: Indicaciones
+                - textbox "Indicaciones" [ref=f16e1351]:
+                  - /placeholder: Indicaciones para el paciente…
+          - region "También" [ref=f16e1352]:
+            - generic [ref=f16e1353]: "También:"
+            - button "Agregar Examen clínico" [ref=f16e1354]: + Examen clínico
+            - button "Agregar Pronóstico" [ref=f16e1355]: + Pronóstico
+            - button "Agregar Periodontograma" [ref=f16e1356]: + Periodontograma
+          - region "Cierre de la atención" [ref=f16e1357]:
+            - generic [ref=f16e1358]:
+              - heading "Cierre de la atención" [level=2] [ref=f16e1359]
+              - paragraph [ref=f16e1360]: "Al cerrar se firma con tu colegiatura y la atención queda inmutable: después solo se agregan adendas."
+            - list "Lo que falta para firmar" [ref=f16e1361]:
+              - listitem [ref=f16e1367]:
+                - generic [ref=f16e1368]: "!"
+                - generic [ref=f16e1369]:
+                  - generic [ref=f16e1370]: Al menos un diagnóstico con su tipo (presuntivo basta)
+                  - button "Registrar" [ref=f16e1371]
+              - listitem [ref=f16e1372]:
+                - generic [ref=f16e1373]: "!"
+                - generic [ref=f16e1374]:
+                  - generic [ref=f16e1375]: Evolución
+                  - button "Registrar" [ref=f16e1376]
+            - paragraph [ref=f16e1378]: "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."
+            - button "Anular esta atención…" [ref=f16e1380]
+        - generic [ref=f16e1381]:
+          - generic [ref=f16e1382]:
+            - text: "Faltan 2 para cerrar:"
+            - button "diagnóstico" [ref=f16e1391]
+            - generic [ref=f16e1392]:
+              - text: "y"
+              - button "evolución" [ref=f16e1393]
+          - button "Finalizar y firmar" [ref=f16e1389]
+  - region "Notifications alt+T"

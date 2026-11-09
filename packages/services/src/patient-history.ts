@@ -1156,8 +1156,14 @@ export async function getTimeline(
       const related = docs.get(row.id) ?? []
       // Con su nombre: «Pulpitis (CIE-11 DA09.0)», no solo el código (QA de la ficha del 8 nov).
       // Resuelto, lo dice sin abrir la tarjeta, con la palabra del detalle (tercer repaso del 9 nov, E8).
+      // Solo si todas las piezas con ese diagnóstico quedaron resueltas: la caries de la 26 sigue
+      // activa aunque la resina resolviera la de la 16 (revisión antes de entregar).
+      const noteName = (n: (typeof rowNotes)[number]) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)
       const resolved = new Set(
-        rowNotes.filter((n) => n.status === "resuelto").map((n) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)),
+        rowNotes
+          .filter((n) => n.status === "resuelto")
+          .map(noteName)
+          .filter((name) => rowNotes.every((other) => noteName(other) !== name || other.status === "resuelto")),
       )
       const diagnoses = [
         ...new Set(

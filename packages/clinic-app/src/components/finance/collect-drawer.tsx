@@ -1317,6 +1317,7 @@ export function CollectDrawer({
           figures.cancels,
           debt,
           locale,
+          favor,
         )
   const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
   const rateHelp = !second
@@ -1567,12 +1568,12 @@ export function CollectDrawer({
                               }}
                             />
                           ) : null}
-                          {!chosenTarget && owedInDebt ? (
+                          {!chosenTarget && owedInDebt && owedInDebt.cents > favor ? (
                             // Con deuda, un adelanto suelto la dejaba igual y la ficha mostraba tres cifras
                             // (QA del 9 nov, repaso 3): se avisa y se ofrece pagar lo que debe, sin frenar.
                             <div role="status" className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
                               <p>
-                                Debe {formatMoney(owedInDebt.cents, owedInDebt.code, locale)}. Este adelanto no
+                                Debe {formatMoney(owedInDebt.cents - favor, owedInDebt.code, locale)}. Este adelanto no
                                 paga esa deuda: queda a favor, aparte, hasta su próximo cobro.
                               </p>
                               <Button
@@ -1581,17 +1582,31 @@ export function CollectDrawer({
                                 className="self-start"
                                 disabled={busy}
                                 onClick={() => {
-                                  // Lo escrito va a lo que debe, empezando por lo más antiguo; lo que sobre queda a favor.
+                                  // Lo escrito va a lo que debe, empezando por lo más antiguo. Lo que pase de lo que
+                                  // debe no cabe en ese cobro: queda escrito como adelanto, para después.
                                   const written = form.state.values.amount.trim()
+                                  const writtenCents = written ? parseMoneyOrNull(written, debt, locale) : null
+                                  const owedCents = Math.max(0, owedInDebt.cents - favor)
                                   form.setFieldValue("advance", false)
                                   form.setFieldValue("advanceFor", "")
                                   form.setFieldValue("chargeIds", owedInDebt.ids)
                                   setPendingDraft(null)
-                                  setAdvanceDraft(null)
-                                  if (written) {
-                                    form.setFieldValue("amount", written)
+                                  if (writtenCents !== null && writtenCents > owedCents && owedCents > 0) {
+                                    setAdvanceDraft({
+                                      amount: formatMoneyInput(writtenCents - owedCents, debt, locale),
+                                      advanceFor: "",
+                                      debtCurrency: form.state.values.debtCurrency,
+                                      payCurrency: form.state.values.payCurrency,
+                                    })
+                                    form.setFieldValue("amount", formatMoneyInput(owedCents, debt, locale))
                                     setAmountTouched(true)
-                                  } else setAmountTouched(false)
+                                  } else {
+                                    setAdvanceDraft(null)
+                                    if (written) {
+                                      form.setFieldValue("amount", written)
+                                      setAmountTouched(true)
+                                    } else setAmountTouched(false)
+                                  }
                                 }}
                               >
                                 Mejor, a lo que debe

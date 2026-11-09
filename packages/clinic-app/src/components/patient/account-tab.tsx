@@ -487,7 +487,9 @@ export function AccountTab({
                     ["Debe", balance.porCobrar],
                     ["A favor", balance.aFavor],
                     // «Saldo» no decía de quién (QA del 9 nov, repaso 3): lo que falta, o lo que le queda.
-                    balance.saldo < 0 ? ["Le queda a favor", -balance.saldo] : ["Falta pagar", balance.saldo],
+                    balance.aFavor > balance.porCobrar
+                      ? ["Le queda a favor", balance.aFavor - balance.porCobrar]
+                      : ["Falta pagar", balance.saldo],
                   ] satisfies Array<readonly [string, number]>
                 ).map(([label, cents]) => (
                   <div key={label} className="min-w-0">

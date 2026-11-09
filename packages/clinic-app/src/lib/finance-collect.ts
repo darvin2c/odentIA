@@ -149,10 +149,14 @@ export function partialSplitWords(
   cents: number | null,
   currency: string,
   locale: string,
+  /** Lo que tiene a favor en esa moneda: el servidor lo usa primero, también en lo más antiguo. */
+  creditCents = 0,
 ): string | null {
   const total = items.reduce((sum, item) => sum + item.saldoCents, 0)
-  if (items.length < 2 || cents === null || cents <= 0 || cents >= total) return null
-  let rest = cents
+  if (items.length < 2 || cents === null || cents <= 0) return null
+  const covered = cents + Math.max(0, creditCents)
+  if (covered >= total) return null
+  let rest = covered
   const parts: string[] = []
   for (const item of items) {
     if (rest <= 0) break
@@ -160,7 +164,7 @@ export function partialSplitWords(
     parts.push(`${item.description} ${formatMoney(take, currency, locale)}`)
     rest -= take
   }
-  return `Va primero a lo más antiguo: ${parts.join(" · ")}.`
+  return `${creditCents > 0 ? "Con lo que tiene a favor, va" : "Va"} primero a lo más antiguo: ${parts.join(" · ")}.`
 }
 
 /** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */

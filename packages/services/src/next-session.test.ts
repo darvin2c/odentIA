@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { clinicalFollowUp, encounter, serviceCatalog, treatmentPlanItem, treatmentTemplate } from "@odentia/db/schema/clinical"
+import { dentalTemplateRule } from "@odentia/db/schema/dental"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -233,6 +234,7 @@ it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya n
     .insert(treatmentTemplate)
     .values({ key: `endo-espera-${randomUUID()}`, name: "Endodoncia de prueba", kind: "endodoncia", scope: "tooth" })
     .returning()
+  await ownerDb.insert(dentalTemplateRule).values({ templateId: template!.id, toothGroups: ["molar"], family: "endodoncia-vital" })
   await ownerDb.update(serviceCatalog).set({ templateId: template!.id, source: "template" }).where(eq(serviceCatalog.id, f.service.id))
   const endo = await acceptedTreatment(f, 2)
   await f.ready(f.encounter.id)
@@ -259,4 +261,8 @@ it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya n
   const yearly = controls.find((row) => row.title === "Control radiográfico de la endodoncia")
   expect(yearly).toMatchObject({ status: "pendiente", kind: "tratamiento" })
   expect(yearly!.dueAt.getTime() - Date.now()).toBeGreaterThan(360 * DAY)
+  // Ese control lejano no responde «¿Cuándo vuelve?» en la próxima atención: se sigue preguntando.
+  const third = await attention(f)
+  const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, third))
+  expect(closing.controls.next).toBeNull()
 })

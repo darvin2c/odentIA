@@ -2525,6 +2525,7 @@ async function closingControlsOf(
       originEncounterId: clinicalFollowUp.originEncounterId,
       appointmentId: clinicalFollowUp.appointmentId,
       repeatEveryMonths: clinicalFollowUp.repeatEveryMonths,
+      kind: clinicalFollowUp.kind,
       startsAt: appointment.startsAt,
       appointmentStatus: appointment.status,
       // Quien lo indicó: el cierre dice qué control se cumple y de quién (QA del 9 nov, repaso 3).
@@ -2549,7 +2550,15 @@ async function closingControlsOf(
   const byAppointment = open.filter(
     (control) => row.appointmentId !== null && control.status === "programado" && control.appointmentId === row.appointmentId,
   )
-  const first = open.find((control) => !dueIds.has(control.id) && !byAppointment.includes(control))
+  // Un control de tratamiento lejano (el radiográfico de la endodoncia, al año) no dice cuándo
+  // vuelve: más allá del recordatorio de la clínica, «¿Cuándo vuelve?» se sigue preguntando
+  // (revisión antes de entregar: si no, nadie podía indicar la limpieza de los 6 meses en un año).
+  const recallDay = addMonthsToDay(today, recallMonths)
+  const farTreatmentControl = (control: (typeof open)[number]) =>
+    control.kind === "tratamiento" && control.status === "pendiente" && dayKeyIn(control.dueAt, timezone) > recallDay
+  const first = open.find(
+    (control) => !dueIds.has(control.id) && !byAppointment.includes(control) && !farTreatmentControl(control),
+  )
   return {
     recallMonths,
     byAppointment: byAppointment.map(({ id, title, repeatEveryMonths, originProfessionalName }) => ({

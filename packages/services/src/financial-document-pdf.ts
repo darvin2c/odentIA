@@ -303,7 +303,7 @@ function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number
   if (owed > 0)
     moneyRow(
       kit,
-      kit.thermal ? "Le falta pagar" : snap.accountDueCents != null ? "En total" : "Por este tratamiento",
+      kit.thermal ? "Le falta pagar" : snap.accountDueCents != null ? "En esta moneda" : "Por este tratamiento",
       money(owed),
       { strong: true },
     )

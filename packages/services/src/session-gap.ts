@@ -4,7 +4,7 @@
  * proponía para mañana. Es el día de la última sesión hecha más los días que su
  * tipo de tratamiento deja entre sesiones (`ProductHooks.sessionGapDays`); sin
  * sesión hecha o sin espera propia, nada (la reserva busca desde mañana, como
- * siempre). Lo usan la reserva desde el cierre, «Qué sigue» y lo que va después
+ * siempre). Cuenta desde el día en que se registró la sesión, no desde la firma. Lo usan la reserva desde el cierre, «Qué sigue» y lo que va después
  * de una endodoncia que todavía no tiene su próxima cita: una sola regla.
  *
  * Propone, no exige: la reserva deja elegir antes.
@@ -49,7 +49,7 @@ export async function nextSessionFromOf(
     last_done: Date | string | null
   }>(sql`
     select item.id, template.specialty as kind,
-      (select max(coalesce(done_encounter.finalized_at, done_procedure.created_at)) from encounter_procedure done_procedure
+      (select max(done_procedure.created_at) from encounter_procedure done_procedure
         join encounter done_encounter on done_encounter.organization_id = done_procedure.organization_id
           and done_encounter.id = done_procedure.encounter_id
         where done_procedure.organization_id = item.organization_id and done_procedure.plan_item_id = item.id

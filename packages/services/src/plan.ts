@@ -154,11 +154,18 @@ async function sessionsForAnother(
 ): Promise<Map<string, { signed: number; frozen: number; oneOff?: boolean }>> {
   const out = new Map<string, { signed: number; frozen: number; oneOff?: boolean }>()
   if (ids.length === 0) return out
+  const oneOffKinds = (await hooksOf(tx, orgId)).oneOffKinds ?? []
+  const oneOffSql = oneOffKinds.length
+    ? sql`tpl.specialty in (${sql.join(
+        oneOffKinds.map((kind) => sql`${kind}`),
+        sql`, `,
+      )})`
+    : sql`false`
   const rows = await tx.execute<{ id: string; signed: number; frozen: number; one_off: boolean | null }>(sql`
     select item.id,
       -- Una consulta, una evaluación o una radiografía se hacen de una vez: no piden otra sesión
       -- (QA del 9 nov, repaso 3: la consulta de una urgencia ofrecía «Falta otra sesión»).
-      (select tpl.specialty = 'diagnostico' from service_catalog svc join treatment_template tpl on tpl.id = svc.template_id
+      (select ${oneOffSql} from service_catalog svc join treatment_template tpl on tpl.id = svc.template_id
         where svc.organization_id = item.organization_id and svc.id = item.service_id) as one_off,
       (select count(distinct e.id)::int from encounter_procedure ep
         join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
