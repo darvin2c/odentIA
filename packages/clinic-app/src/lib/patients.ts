@@ -942,6 +942,12 @@ export interface PatientFull {
    * fase 3); null para quien no edita los datos (odontólogo, caja).
    */
   missingData: MissingPersonDatum[] | null
+  /**
+   * Si se le preguntó por alergias («recorded», «none» = niega, «unknown» = no se
+   * le preguntó): sin alergias registradas no es lo mismo. Solo a quien ve las
+   * alergias; nulo para el resto.
+   */
+  allergyReview?: HealthReviewState | null
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }

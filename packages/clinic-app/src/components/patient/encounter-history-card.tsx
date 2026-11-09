@@ -223,7 +223,10 @@ export function EncounterHistoryCard({
           >
             {item.title}
           </Link>
-          {item.status && item.status !== "finalizada" ? (
+          {item.status === "borrador" ? (
+            // Lo de dentro aún puede cambiar: no se lee como una atención firmada (QA del 9 nov).
+            <Badge variant="warning">En curso · sin firmar</Badge>
+          ) : item.status && item.status !== "finalizada" ? (
             <Badge variant="outline">{encounterStatusLabel(item.status)}</Badge>
           ) : null}
         </div>

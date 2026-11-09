@@ -96,6 +96,20 @@ it("la Historia: lo nacido en una atención va dentro de su tarjeta, una vez; la
   expect(loose?.detail ?? "").not.toMatch(/pendiente|en_curso|_/)
 })
 
+it("la atención en curso es su tarjeta, marcada sin firmar, con lo nacido en ella dentro (QA del 9 nov)", async () => {
+  const f = await clinicalFixture()
+  // El fixture deja su atención en borrador, como la app mientras se atiende.
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  const card = data.find((row) => row.type === "encounter")
+  expect(card).toMatchObject({ id: f.encounter.id, status: "borrador", signerName: null })
+  expect(card?.born?.indicated.map((row) => row.id)).toEqual([item.id])
+  // Lo indicado en ella no sale suelto además.
+  expect(data.some((row) => row.id === item.id)).toBe(false)
+})
+
 it("el diagnóstico con su nombre y su código; sin nombre en el catálogo, solo el código", () => {
   const titles = new Map([["ICD-11|DA09.0", "Pulpitis"]])
   expect(namedDiagnosis(titles, "ICD-11", "DA09.0")).toBe("Pulpitis (CIE-11 DA09.0)")

@@ -475,6 +475,12 @@ it("cuenta y cobro: reception/professional 403, cashier cobra con ticket, tenanc
   expect((await buildApp("cashier", CASH).request(accountPath)).status).toBe(200)
   // Tenant: la cuenta de org_fin_a no existe en org_fin_b.
   expect((await buildApp("admin", ADMIN_B, ORG_B).request(accountPath)).status).toBe(404)
+  // Lo aceptado, pagado y por pagar de cada presupuesto: caja y presupuesto a la vez.
+  const totalsPath = `/patients/${PAT_A}/accepted-totals`
+  expect((await buildApp("reception", RECEP).request(totalsPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT1).request(totalsPath)).status).toBe(403)
+  expect((await buildApp("cashier", CASH).request(totalsPath)).status).toBe(200)
+  expect((await buildApp("admin", ADMIN_B, ORG_B).request(totalsPath)).status).toBe(404)
 
   // Adelanto con medios válidos: el 403 de rol no lo mascara la validación.
   const collectBody = (methodId: string) => ({
