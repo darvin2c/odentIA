@@ -1,6 +1,6 @@
-# 0166 · vistIA, el producto de las ópticas
+# 0168 · vistIA, el producto de las ópticas
 
-Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0079](0079-un-nucleo-para-varios-productos.md), [0087](0087-dos-dominios-y-el-producto-de-la-clinica.md), [0093](0093-una-lista-de-precios-por-producto.md) y [0165](0165-lo-comun-decide-con-mapas-por-producto.md). Entrega 2 del plan «vistIA: plan para ópticas».
+Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0079](0079-un-nucleo-para-varios-productos.md), [0087](0087-dos-dominios-y-el-producto-de-la-clinica.md), [0093](0093-una-lista-de-precios-por-producto.md) y [0167](0167-lo-comun-decide-con-mapas-por-producto.md). Entrega 2 del plan «vistIA: plan para ópticas».
 
 ## Problema
 

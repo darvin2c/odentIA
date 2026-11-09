@@ -54,7 +54,7 @@ async function newClinic(product: "dental" | "medical" | "optical" = "dental") {
 }
 
 describe("una clínica nueva nace con todo encendido (ADR 0141)", () => {
-  it("una óptica de vistIA nace con Sofi y Argos, y Clío apagado: en una óptica no dicta (ADR 0166)", async () => {
+  it("una óptica de vistIA nace con Sofi y Argos, y Clío apagado: en una óptica no dicta (ADR 0168)", async () => {
     const c = await newClinic("optical")
     await c.run((tx) => setUpNewClinic(tx, c.orgId, c.ownerId))
     const [agent] = await ownerDb.select().from(agentConfig).where(eq(agentConfig.organizationId, c.orgId))
