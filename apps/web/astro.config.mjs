@@ -16,7 +16,7 @@ const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
 // La web de latidIA la publica el mismo servidor con VITE_PRODUCT=medical: su dominio y solo sus
 // páginas en el mapa del sitio (`src/lib/latidia-pages.json`); las propias de latidIA no van en el de odentIA.
 // Los productos que tienen web y su dominio en local. Otro detiene el armado en vez de publicar en
-// silencio la web de odentIA en su dominio (ADR 0165).
+// silencio la web de odentIA en su dominio (ADR 0167).
 const LOCAL_DOMAINS = { dental: "odentia.localhost", medical: "latidia.localhost" }
 const product = process.env.VITE_PRODUCT || "dental"
 if (!Object.hasOwn(LOCAL_DOMAINS, product))
