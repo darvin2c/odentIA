@@ -1087,14 +1087,16 @@ function AntecedentesSummary({
   // La que toma: sin fin o con fin desde hoy, como en la receta y en la atención.
   const today = clinicToday()
   const activeMed = medications.filter((r) => r.endDate === "" || r.endDate >= today)
-  // La ASA va con sus enfermedades, de donde sale (QA del 8 nov: estaba bajo el grupo sanguíneo).
+  // La ASA va con sus enfermedades, de donde sale (QA del 8 nov: estaba bajo el grupo sanguíneo),
+  // primero y con el nombre de su tarjeta en el formulario: quien va a anestesiar la busca así
+  // (QA del 8 nov, noche: al final de «Condiciones» se leía como una cola de «Sin registros»).
   const asa = asaLabel(asaClass)
-  const rows: Array<{ title: string; state: HealthReviewState; detail: string; extra?: string }> = [
+  const rows: Array<{ title: string; state: HealthReviewState; detail: string; lead?: string }> = [
     {
       title: "Condiciones",
       state: review.conditions,
-      extra:
-        asa || productUi().health.showsAsa ? `Riesgo anestésico: ${asa ?? "ASA sin clasificar"}` : undefined,
+      lead:
+        asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
       detail:
         activeCon.length > 0
           ? activeCon.map((row) => row.name).join(", ")
@@ -1133,8 +1135,8 @@ function AntecedentesSummary({
       {rows.map((row) => (
         <div key={row.title} className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
           <span className="font-heading text-sm font-medium">{row.title}</span>
+          {row.lead ? <span className="text-sm">{row.lead}</span> : null}
           <span className="text-sm text-muted-foreground">{row.detail}</span>
-          {row.extra ? <span className="text-sm text-muted-foreground">{row.extra}</span> : null}
           <Badge
             variant={
               row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"

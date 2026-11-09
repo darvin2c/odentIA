@@ -1,4 +1,5 @@
 import {
+  budgetOptionLabel,
   diagnosisCodeLabel,
   isLeftOut,
 } from "@odentia/clinical"
@@ -364,8 +365,8 @@ function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
   const thinking = group.items.some((item) => item.decisionStatus === "pospuesto")
   const count = pathCountWord(group.pathCount)
   const heading = group.site
-    ? `${group.site} · por decidir entre ${count} caminos`
-    : `Por decidir entre ${count} caminos`
+    ? `${group.site} · por decidir entre ${count} opciones`
+    : `Por decidir entre ${count} opciones`
   return (
     <section
       aria-labelledby={headingId}
@@ -384,7 +385,7 @@ function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
           const titles = joinTitles(path.items.map((item) => item.title))
           const words = path.name
             ? `${path.name}: ${lowerFirst(titles)}`
-            : titles || `Camino ${path.position}`
+            : titles || budgetOptionLabel(path.position)
           const total = pathTotal(path.items)
           return (
             <li key={path.position}>
@@ -411,7 +412,7 @@ function NotChosenPath({ items }: { items: PlanItem[] }): React.JSX.Element {
       <CollapsibleTrigger
         render={
           <Button type="button" variant="ghost" size="sm" className="group self-start">
-            El camino que no eligió · {open ? "Ocultar" : "Ver"}
+            La opción que no eligió · {open ? "Ocultar" : "Ver"}
             <ChevronDown
               aria-hidden
               className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
@@ -436,7 +437,11 @@ function NotChosenPath({ items }: { items: PlanItem[] }): React.JSX.Element {
 /**
  * «Falta otra sesión» de un tratamiento realizado: vuelve a «En curso» con una
  * sesión prevista más y sale otra vez en «Por agendar». Lo firmado y lo cobrado
- * no cambian. Se confirma porque cambia lo que ve recepción.
+ * no cambian y reabrir no crea ningún cargo (`reopenPlanItemForSession`). Si esa
+ * sesión se cobra lo decide la firma con su regla (`finalizeEncounter`): lo que se
+ * cobra una vez ya está cubierto y lo aceptado por sesión tiene su tope; solo lo
+ * que va por sesión sin un tope aceptado se cobra. Por eso el diálogo no lo
+ * promete y lo deja al cierre. Se confirma porque cambia lo que ve recepción.
  */
 function AnotherSessionDialog({
   patientId,
@@ -454,7 +459,8 @@ function AnotherSessionDialog({
       apiFetch(`/api/patients/${patientId}/plan/items/${item.id}/another-session`, { method: "POST" }),
     onSuccess: async () => {
       await Promise.all(
-        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next", "treatment-coordination"].map((key) =>
+        // También los presupuestos: su línea decía «Realizado» hasta recargar (QA del 8 nov).
+        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next", "treatment-coordination", "budgets", "budget"].map((key) =>
           queryClient.invalidateQueries({ queryKey: [key, patientId] }),
         ),
       )
@@ -467,7 +473,7 @@ function AnotherSessionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>¿Le falta otra sesión?</AlertDialogTitle>
           <AlertDialogDescription>
-            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Lo firmado y lo cobrado hasta hoy no cambian; esa sesión se cobra como las demás de este tratamiento.`}
+            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Reabrirlo no cobra nada: lo firmado y lo cobrado hasta hoy no cambian. Al firmar esa sesión se dice si se cobra.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {reopen.error ? (

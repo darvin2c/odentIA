@@ -64,8 +64,10 @@ export function PlanSiteChoices({
 
 /**
  * Lo que la norma del país pide de un hallazgo dictado y no se dijo (la
- * profundidad de una caries, el estado de una corona): se elige con un toque,
- * con los nombres del odontograma. También se puede completar diciéndolo.
+ * profundidad de una caries, el estado de una corona, la cara de una caries):
+ * se elige con un toque, con los nombres del odontograma. La variante y el
+ * estado también se completan diciéndolos; la cara no (dicha después llega
+ * como otro hallazgo): se toca aquí, y varias caras se marcan en «Completar».
  */
 export function FindingChoices({
   session,
@@ -82,8 +84,9 @@ export function FindingChoices({
     ? (item.payload["missing"] as string[])
     : []
   if (!finding || missing.length === 0) return null
-  const choose = (patch: Record<string, string>) =>
+  const choose = (patch: Record<string, unknown>) =>
     session.save.mutate({ item, patch, confirm: false })
+  const tooth = typeof item.payload["toothNumber"] === "number" ? item.payload["toothNumber"] : null
   const choice = "h-auto min-h-11 whitespace-normal sm:min-h-8"
   return (
     <div className="flex flex-col gap-2 sm:pl-8">
@@ -129,6 +132,23 @@ export function FindingChoices({
           >
             Mal estado
           </Button>
+        </fieldset>
+      ) : null}
+      {missing.includes("surfaces") && tooth !== null ? (
+        <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={`Cara de la ${tooth}`}>
+          {surfacesForTooth(tooth).map((surface) => (
+            <Button
+              key={surface}
+              type="button"
+              variant="outline"
+              size="sm"
+              className={choice}
+              disabled={busy || session.save.isPending}
+              onClick={() => choose({ surfaces: [surface] })}
+            >
+              {surfaceLabel(surface)}
+            </Button>
+          ))}
         </fieldset>
       ) : null}
     </div>

@@ -134,6 +134,8 @@ const availabilityQuery = z.object({
   ignoreAppointmentId: z.uuid().optional(),
   // «Nueva cita» con servicio: solo quien lo atiende (ADR 0039).
   serviceId: z.uuid().optional(),
+  // Quien se pidió al abrir: con servicio, viene aunque la regla no lo ofrezca (ADR 0039).
+  professionalUserId: z.string().trim().min(1).max(200).optional(),
 })
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
