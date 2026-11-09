@@ -21,6 +21,7 @@ import {
 } from "@odentia/optical"
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm"
 import type { DocumentCheckFacts } from "../document-check.js"
+import type { SaleReference } from "../product-hooks.js"
 import { assertAttending } from "../encounter-attending.js"
 import { fieldsError, invalidField, notFound, ServiceError } from "../errors.js"
 import { clinicToday } from "../inventory-stock.js"
@@ -368,6 +369,63 @@ export async function prescriptionRecordLines(tx: Db, orgId: string, patientId: 
     const head = `${formatDay(row.issuedOn)} · ${kind} · ${row.source === "externa" ? `externa, de ${row.prescriberName}${row.verifiedAt ? "" : ", sin verificar"}` : row.prescriberName}${row.voidedAt ? ` · anulada: ${row.voidReason}` : ""}`
     return [head, ...EYES.filter((eye) => lenses[eye.key]).map((eye) => `  ${eye.short} ${lensText(lenses[eye.key])}`)]
   })
+}
+
+/**
+ * Las recetas vigentes para vender (ADR 0168): la de anteojos y la de lentes de
+ * contacto, con su graduación por ojo y su aviso si venció o no se verificó.
+ */
+export async function saleLensPrescriptions(tx: Db, orgId: string, patientId: string): Promise<SaleReference[]> {
+  const current = await currentLensPrescriptions(tx, orgId, patientId)
+  return PRESCRIPTION_KINDS.flatMap(({ key, label }) => {
+    const item = current[key]
+    if (!item) return []
+    return [
+      {
+        id: item.id,
+        label: `Receta de ${label.toLowerCase()} · ${formatDay(item.issuedOn)}`,
+        lines: EYES.filter((eye) => item.lenses[eye.key]).map((eye) => `${eye.short} ${lensText(item.lenses[eye.key])}`),
+        notices: item.notices,
+      },
+    ]
+  })
+}
+
+/**
+ * La copia de la receta que va en el pedido: lo que el taller necesita para hacer
+ * los lentes (la graduación, la distancia pupilar, quién la firmó y hasta cuándo
+ * vale), sin el resto de la historia. Anulada o de otra persona, null.
+ */
+export async function lensPrescriptionSnapshot(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  id: string,
+): Promise<Record<string, unknown> | null> {
+  const [row] = await tx
+    .select()
+    .from(lensPrescription)
+    .where(
+      and(
+        eq(lensPrescription.organizationId, orgId),
+        eq(lensPrescription.patientId, patientId),
+        eq(lensPrescription.id, id),
+        isNull(lensPrescription.voidedAt),
+      ),
+    )
+  if (!row) return null
+  return {
+    id: row.id,
+    kind: row.kind,
+    source: row.source,
+    lenses: row.lenses,
+    pupillaryDistance: row.pupillaryDistance,
+    issuedOn: row.issuedOn,
+    validUntil: row.validUntil,
+    prescriberName: row.prescriberName,
+    prescriberRegistration: row.prescriberRegistration,
+    verified: row.verifiedAt !== null,
+  }
 }
 
 /** Lo que dice el QR de una receta de lentes: vigente, vencida o anulada, y quién la firmó. */

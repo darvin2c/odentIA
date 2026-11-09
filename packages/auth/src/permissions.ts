@@ -183,6 +183,8 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     // registra lo que se usa fuera de una atención. Pedir, contar y ajustar no.
     "inventory.stock",
     "inventory.receive",
+    // Ve cómo va el pedido de una persona («¿ya están mis lentes?»), sin cobrarlo.
+    "orders.read",
   ],
   clinician: [
     "patients.read",
@@ -201,6 +203,8 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "conversations.topics",
     "tasks.read",
     "tasks.write",
+    // Ve el pedido que se hizo con su receta y cómo va.
+    "orders.read",
   ],
   cashier: [
     "patients.read",

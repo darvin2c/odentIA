@@ -26,6 +26,8 @@ export const jobOrder = pgTable(
     patientId: uuid("patient_id").notNull(),
     /** El número del pedido en la clínica, sin huecos (`org_counter` «job_order»). */
     orderNumber: integer("order_number").notNull(),
+    /** La clave de la venta que lo creó: un reintento devuelve el mismo pedido. Nula en uno rehecho. */
+    requestKey: text("request_key"),
     status: text("status").notNull().default("por_enviar"),
     /** Lo que se le prometió a la persona: el día que puede recogerlo. */
     promisedOn: date("promised_on").notNull(),
@@ -54,6 +56,7 @@ export const jobOrder = pgTable(
       name: "job_order_patient_fk",
     }),
     uniqueIndex("job_order_number_uidx").on(table.organizationId, table.orderNumber),
+    uniqueIndex("job_order_request_uidx").on(table.organizationId, table.requestKey),
     index("job_order_status_idx").on(table.organizationId, table.status, table.promisedOn),
     index("job_order_patient_idx").on(table.organizationId, table.patientId),
     check(

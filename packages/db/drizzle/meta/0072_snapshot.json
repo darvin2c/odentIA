@@ -1,5 +1,5 @@
 {
-  "id": "f2f36618-f0cb-4571-91a0-0ff40fbd7330",
+  "id": "4b2fe66c-db73-4db4-abb4-0d8cd246b23d",
   "prevId": "302f9178-a50c-47e9-9c16-257c66defdb8",
   "version": "7",
   "dialect": "postgresql",
@@ -42087,6 +42087,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "request_key": {
+          "name": "request_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -42193,6 +42199,27 @@
             },
             {
               "expression": "order_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "job_order_request_uidx": {
+          "name": "job_order_request_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

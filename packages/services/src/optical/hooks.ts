@@ -12,8 +12,10 @@ import { opticalExamination } from "./examination.js"
 import { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
 import {
   lensPrescriptionCheck,
+  lensPrescriptionSnapshot,
   portalLensPrescriptions,
   prescriptionRecordLines,
+  saleLensPrescriptions,
   seedDemoLensPrescriptions,
 } from "./lens-prescriptions.js"
 
@@ -49,6 +51,8 @@ export const opticalHooks: ProductHooks = {
   demoBuilt: seedDemoLensPrescriptions,
   // El cliente ve sus recetas de lentes en su portal y las descarga (entrega 3).
   portalPapers: { list: portalLensPrescriptions, pdf: renderLensPrescriptionPdf },
+  // La venta de lentes copia en el pedido la receta vigente (entrega 4, ADR 0168).
+  saleReference: { current: saleLensPrescriptions, snapshot: lensPrescriptionSnapshot },
   // El QR de la receta de lentes dice si está vigente, vencida o anulada.
   documentCheck: (tx, orgId, type, id) => (type === "lens_prescription" ? lensPrescriptionCheck(tx, orgId, id) : Promise.resolve(null)),
   async recordSections(tx, { orgId, patientId }) {

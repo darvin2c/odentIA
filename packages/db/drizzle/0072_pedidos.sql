@@ -4,6 +4,7 @@ CREATE TABLE "job_order" (
 	"branch_id" uuid,
 	"patient_id" uuid NOT NULL,
 	"order_number" integer NOT NULL,
+	"request_key" text,
 	"status" text DEFAULT 'por_enviar' NOT NULL,
 	"promised_on" date NOT NULL,
 	"maker" text NOT NULL,
@@ -64,6 +65,7 @@ ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_job_order_id_job_ord
 ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_product_id_product_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."product"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_charge_id_patient_charge_id_fk" FOREIGN KEY ("charge_id") REFERENCES "public"."patient_charge"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "job_order_number_uidx" ON "job_order" USING btree ("organization_id","order_number");--> statement-breakpoint
+CREATE UNIQUE INDEX "job_order_request_uidx" ON "job_order" USING btree ("organization_id","request_key");--> statement-breakpoint
 CREATE INDEX "job_order_status_idx" ON "job_order" USING btree ("organization_id","status","promised_on");--> statement-breakpoint
 CREATE INDEX "job_order_patient_idx" ON "job_order" USING btree ("organization_id","patient_id");--> statement-breakpoint
 CREATE INDEX "job_order_event_order_idx" ON "job_order_event" USING btree ("organization_id","job_order_id","at");--> statement-breakpoint

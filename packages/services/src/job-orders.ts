@@ -1,6 +1,6 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { orgCounter, patient, patientCharge, patientPaymentApplication } from "@odentia/db/schema/clinical"
+import { orgCounter, patient, patientCharge, patientPaymentApplication, paymentTicket } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { jobOrder, jobOrderEvent, jobOrderLine } from "@odentia/db/schema/orders"
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm"
@@ -55,7 +55,7 @@ export interface JobOrderSaleInput {
   /** La referencia del producto que se copia en el pedido (vistIA: la receta de lentes). */
   referenceId?: string | null
   /** Las medidas para montar (vistIA: alturas de montaje por ojo). */
-  fitting?: Record<string, unknown> | null
+  fitting?: Record<string, number | string> | null
   notes?: string | null
   /** El adelanto: los medios con que paga ahora; vacío, sin adelanto. */
   payments?: CollectMethodInput[]
@@ -65,6 +65,7 @@ export interface JobOrderSaleInput {
 }
 
 const TEXT_MAX = 200
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const NOTES_MAX = 2000
 
 function text(value: unknown, field: string, label: string, max = TEXT_MAX): string {
@@ -84,6 +85,36 @@ function isoDate(value: unknown, field: string): string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)))
     throw invalidField(field, "Elige la fecha en el calendario")
   return value
+}
+
+/**
+ * Las medidas para montar (vistIA: la altura de montaje de cada ojo): pocas, con
+ * su nombre y un número o un texto corto. Lo que cada producto mide lo dice su
+ * pantalla; aquí solo se cuida que no sea otra cosa.
+ */
+function fittingOf(value: unknown): Record<string, number | string> | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== "object" || Array.isArray(value)) throw invalidField("fitting", "Las medidas van con su nombre")
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 12) throw invalidField("fitting", "Como mucho 12 medidas")
+  const out: Record<string, number | string> = {}
+  for (const [key, item] of entries) {
+    if (!/^[a-zA-Z]{1,30}$/.test(key)) throw invalidField("fitting", "Las medidas van con su nombre")
+    if (item === null || item === "") continue
+    if (typeof item === "number" && Number.isFinite(item) && item >= 0 && item <= 100) out[key] = item
+    else if (typeof item === "string" && item.trim().length <= 60) out[key] = item.trim()
+    else throw invalidField(`fitting.${key}`, "Escribe la medida en milímetros")
+  }
+  return Object.keys(out).length ? out : null
+}
+
+/** La persona de un pedido, para guardar su historia si está bloqueada; null si no existe. */
+export async function jobOrderPatientId(tx: Db, orgId: string, id: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ patientId: jobOrder.patientId })
+    .from(jobOrder)
+    .where(and(eq(jobOrder.organizationId, orgId), eq(jobOrder.id, id)))
+  return row?.patientId ?? null
 }
 
 async function nextOrderNumber(tx: Db, orgId: string): Promise<number> {
@@ -123,8 +154,22 @@ export async function createJobOrderSale(
     throw invalidField("promisedOn", "La fecha prometida no puede ser anterior a hoy")
   if (!Array.isArray(input.lines) || input.lines.length === 0 || input.lines.length > 20)
     throw invalidField("lines", "Agrega lo que lleva el pedido (hasta 20 cosas)")
-  if (typeof input.requestId !== "string" || input.requestId.length < 8 || input.requestId.length > 100)
+  if (typeof input.requestId !== "string" || !UUID.test(input.requestId))
     throw invalidField("requestId", "Falta la clave de la venta")
+  // Un reintento tras un corte devuelve la misma venta: ni otro pedido ni otro cobro.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('job_order:' || ${orgId} || ':' || ${input.requestId}))`)
+  const [replay] = await tx
+    .select({ id: jobOrder.id, patientId: jobOrder.patientId })
+    .from(jobOrder)
+    .where(and(eq(jobOrder.organizationId, orgId), eq(jobOrder.requestKey, input.requestId)))
+  if (replay) {
+    if (replay.patientId !== patientId) throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave ya es de otra venta")
+    const [ticket] = await tx
+      .select({ id: paymentTicket.id })
+      .from(paymentTicket)
+      .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.requestId, input.requestId)))
+    return { order: await getJobOrder(tx, orgId, replay.id), ticketId: ticket?.id ?? null }
+  }
 
   // La referencia (vistIA: la receta vigente) se copia: el taller no abre la historia.
   const hooks = await productHooks(tx, orgId)
@@ -162,11 +207,12 @@ export async function createJobOrderSale(
       branchId: input.branchId,
       patientId,
       orderNumber: await nextOrderNumber(tx, orgId),
+      requestKey: input.requestId,
       promisedOn,
       maker,
       title,
       prescription,
-      fitting: input.fitting ?? null,
+      fitting: fittingOf(input.fitting),
       notes: optional(input.notes, "notes"),
       createdBy: actorUserId,
     })
@@ -192,7 +238,8 @@ export async function createJobOrderSale(
         branchId: input.branchId,
         chargeIds: charges.map((item) => item.id),
         payments,
-        requestId: `${input.requestId}:adelanto`,
+        // La misma clave: el ticket del adelanto es de esta venta.
+        requestId: input.requestId,
         ...(input.cashReceivedCents !== undefined ? { cashReceivedCents: input.cashReceivedCents } : {}),
         ...(input.payerContactId ? { payerContactId: input.payerContactId } : {}),
       })
@@ -317,19 +364,33 @@ export async function remakeJobOrder(
   return getJobOrder(tx, orgId, order!.id)
 }
 
-/** Lo que falta pagar de los cargos de cada pedido, en centavos (sin los anulados). */
+/**
+ * Lo que falta pagar de los cargos de cada pedido, en centavos: el importe de cada
+ * cargo vigente menos lo aplicado vigente, como lo cuenta la caja.
+ */
 async function dueByOrder(tx: Db, orgId: string, orderIds: readonly string[]): Promise<Map<string, number>> {
   if (orderIds.length === 0) return new Map()
-  const rows = (await tx.execute(sql`
-    select l.job_order_id as id,
-      coalesce(sum(c.amount_cents - coalesce((
-        select sum(a.amount_cents) from patient_payment_application a
-        where a.organization_id = c.organization_id and a.charge_id = c.id and a.voided_at is null), 0)), 0)::int as due
-    from job_order_line l
-    join patient_charge c on c.organization_id = l.organization_id and c.id = l.charge_id and c.voided_at is null
-    where l.organization_id = ${orgId} and l.job_order_id in ${sql.raw(`(${orderIds.map((id) => `'${id.replace(/[^0-9a-f-]/gi, "")}'`).join(",")})`)}
-    group by l.job_order_id`)) as unknown as Array<{ id: string; due: number }>
-  return new Map(rows.map((row) => [row.id, Math.max(0, Number(row.due))]))
+  const applied = sql`coalesce((select sum(${patientPaymentApplication.amountCents}) from ${patientPaymentApplication}
+    where ${patientPaymentApplication.organizationId} = ${patientCharge.organizationId}
+      and ${patientPaymentApplication.chargeId} = ${patientCharge.id}
+      and ${patientPaymentApplication.voidedAt} is null), 0)`
+  const rows = await tx
+    .select({
+      id: jobOrderLine.jobOrderId,
+      due: sql<number>`coalesce(sum(greatest(${patientCharge.amountCents} - ${applied}, 0)), 0)::int`,
+    })
+    .from(jobOrderLine)
+    .innerJoin(
+      patientCharge,
+      and(
+        eq(patientCharge.organizationId, jobOrderLine.organizationId),
+        eq(patientCharge.id, jobOrderLine.chargeId),
+        isNull(patientCharge.voidedAt),
+      ),
+    )
+    .where(and(eq(jobOrderLine.organizationId, orgId), inArray(jobOrderLine.jobOrderId, [...orderIds])))
+    .groupBy(jobOrderLine.jobOrderId)
+  return new Map(rows.map((row) => [row.id, Number(row.due)]))
 }
 
 export interface JobOrderRow {
@@ -361,7 +422,8 @@ export async function listJobOrders(
 ): Promise<JobOrderRow[]> {
   const today = await clinicToday(tx, orgId)
   const open = ["por_enviar", "en_laboratorio", "por_revisar"]
-  const conditions = [eq(jobOrder.organizationId, orgId)]
+  // La historia bloqueada (ADR 0080) no existe para los demás: tampoco sus pedidos.
+  const conditions = [eq(jobOrder.organizationId, orgId), isNull(patientPerson.recordLockedAt)]
   if (filter.patientId) conditions.push(eq(jobOrder.patientId, filter.patientId))
   if (filter.status === "abiertos") conditions.push(inArray(jobOrder.status, [...open, "listo"]))
   else if (filter.status === "atrasados") conditions.push(inArray(jobOrder.status, open), sql`${jobOrder.promisedOn} < ${today}`)
@@ -463,5 +525,3 @@ export async function saleReferencesOf(tx: Db, orgId: string, patientId: string)
   return hooks.saleReference ? hooks.saleReference.current(tx, orgId, patientId) : []
 }
 
-// Para quien solo necesita saber si un pedido aplica pagos: la tabla se lee en `dueByOrder`.
-void patientPaymentApplication
