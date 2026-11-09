@@ -151,6 +151,7 @@ export function DictationHeaderButton({
         <Button
           type="button"
           size="sm"
+          className="min-h-11 sm:min-h-8"
           onClick={() => {
             setOpen(false)
             onStart()
@@ -161,7 +162,7 @@ export function DictationHeaderButton({
         </Button>
       ) : null}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger render={<Button type="button" size="sm" variant="ghost" />}>
+        <PopoverTrigger render={<Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" />}>
           ¿Qué puedo decir?
         </PopoverTrigger>
         <PopoverContent align="end" className="flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-3">

@@ -322,20 +322,11 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   // Iniciar sesión crea la atención y navega a su página: el registro del
   // procedimiento y el cierre ocurren allí, no en una pestaña del paciente.
   await expect(page).toHaveURL(/\/encounters\//)
-  const agregarServicios = page.getByRole("button", { name: "Agregar Procedimientos" })
-  await expect(
-    agregarServicios.or(
-      page.getByRole("button", { name: "Registrar procedimiento", exact: true }),
-    ),
-  ).toBeVisible()
-  if ((await agregarServicios.count()) > 0) {
-    // Un bloque nuevo abre su formulario al agregarlo, sin un clic de más (fase 3, paso 2B).
-    await agregarServicios.click()
-  } else {
-    const registrar = page.getByRole("button", { name: "Registrar procedimiento", exact: true }).first()
-    await expect(registrar).toBeEnabled()
-    await registrar.click()
-  }
+  // Una sola página: «Realizado hoy» está a la vista, sin agregarlo ni abrirlo.
+  const realizado = page.getByRole("region", { name: "Realizado hoy", exact: true })
+  const registrar = realizado.getByRole("button", { name: "Registrar lo de hoy", exact: true })
+  await expect(registrar).toBeEnabled()
+  await registrar.click()
   const procedureDrawer = surface(page, { name: "Registrar procedimiento" })
   await expect(procedureDrawer).toBeVisible()
   await procedureDrawer.getByLabel("Tratamiento del presupuesto").click()
@@ -344,17 +335,13 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   await procedureDrawer
     .getByRole("button", { name: "Registrar procedimiento", exact: true })
     .click()
-  // Lo hecho hoy y «Completar» viven en «Plan y controles» (ADR 0034).
-  await page
-    .getByRole("region", { name: "Plan y controles" })
-    .getByRole("button", { name: "Abrir", exact: true })
-    .click()
-  await expect(page.getByText("En curso desde", { exact: false }).first()).toBeVisible()
+  // Lo hecho hoy y «Completar» se ven en «Realizado hoy», sin abrir nada.
+  await expect(realizado.getByText("En curso desde", { exact: false }).first()).toBeVisible()
 
   // Completar el tratamiento ocurre aquí, con la atención abierta.
-  await page.getByRole("button", { name: "Completar", exact: true }).click()
+  await realizado.getByRole("button", { name: "Completar", exact: true }).click()
   await expect(page.getByText(/Completado el/).first()).toBeVisible()
-  // Sin evolución, «Finalizar y firmar» lleva a su bloque y la marca en su campo.
+  // Sin evolución, «Finalizar y firmar» lleva a su campo, en la misma página, y lo marca.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
   await expect(page.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()

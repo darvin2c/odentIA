@@ -9,7 +9,7 @@ import { account, organization, user as users } from "@odentia/db/schema/auth"
 import { encounter, patientPayment, serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
@@ -469,8 +469,8 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${encounterId}`))
   await expect(page.getByText("Piezas vinculadas")).toHaveCount(0)
 
-  // El examen físico: diez signos vitales, el IMC sale solo y se compara con la vez anterior.
-  await page.getByRole("button", { name: "Agregar Examen físico" }).click()
+  // El examen físico, siempre a la vista en un consultorio: diez signos vitales, el IMC sale solo y se compara con la vez anterior.
+  await expect(page.getByRole("region", { name: "Examen físico", exact: true })).toBeVisible()
   await page.getByLabel("PA sistólica (mmHg)").fill("118")
   await page.getByLabel("PA diastólica (mmHg)").fill("76")
   await page.getByLabel("Temperatura (°C)").fill("38,4")
@@ -677,8 +677,8 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
 
   // La Dra. Vela indica 3 nebulizaciones: sin «ámbito» dental ni presupuesto que esperar (decisión 15).
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
-  await page.getByRole("button", { name: "Agregar Plan y controles" }).click()
-  const block = page.getByRole("region", { name: "Plan y controles" })
+  const block = page.getByRole("region", { name: "Plan", exact: true })
+  await block.getByRole("button", { name: "Indicar un tratamiento" }).click()
   await expect(block.getByText("Lo indicado queda aceptado: se puede agendar enseguida, sin presupuesto.")).toBeVisible()
   await expect(block.getByLabel("Ámbito", { exact: true })).toHaveCount(0)
   await block.getByLabel("Tratamiento", { exact: true }).fill("Nebuli")
@@ -937,9 +937,11 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${walkIn.body.data.id}`))
   await page.getByRole("button", { name: "Atender", exact: true }).first().click()
   await expect(page).toHaveURL(/\/encounters\//)
-  await expect(page.getByRole("region", { name: "Dictado de la atención" }).getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })).toHaveAttribute("aria-expanded", "false")
-  await expect(page.getByLabel("Motivo de consulta", { exact: true })).toHaveCount(0)
+  // Dictar es un botón de la cabecera; el motivo se escribe en la página, sin tomar el cursor.
+  await expect(page.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Dictado de la atención" })).toHaveCount(0)
+  await expect(page.getByLabel("Motivo de consulta", { exact: true })).toBeVisible()
+  await expect(page.getByLabel("Motivo de consulta", { exact: true })).not.toBeFocused()
   await shot("clio-atender-sin-motivo")
 
   // En la atención: lo dictado va a cada bloque, también al examen físico y a los documentos.
@@ -947,10 +949,16 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const review = page.getByRole("region", { name: "Sugerencias por revisar" })
   const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
-  const write = async (text: string, from = idle) => {
-    await from.getByRole("button", { name: "Escribir en vez de dictar" }).click()
-    await from.getByLabel("Escribe lo dictado").fill(text)
-    await from.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  // Sin nada dictado, la barra no ocupa la atención: se escribe desde «¿Qué puedo decir?» de la cabecera.
+  const write = async (text: string, from?: Locator) => {
+    const bar = from ?? idle
+    if (from || (await idle.count()) > 0) await bar.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+    else {
+      await page.getByRole("button", { name: "¿Qué puedo decir?", exact: true }).click()
+      await page.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+    }
+    await bar.getByLabel("Escribe lo dictado").fill(text)
+    await bar.getByRole("button", { name: "Ordenar lo dictado" }).click()
   }
   await write(DICTATION)
   await expect(review).toContainText("Clío dejó 6 sugerencias por revisar")
@@ -1339,7 +1347,9 @@ test("latidIA: Clío anota el material dicho, al firmar se ve lo que salió del 
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
   // Clío anota el material dicho: el total, no se suma a lo que trae la consulta (ADR 0106).
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
-  await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+  // Sin nada dictado, «Escribir en vez de dictar» está en «¿Qué puedo decir?» de la cabecera.
+  await page.getByRole("button", { name: "¿Qué puedo decir?", exact: true }).click()
+  await page.getByRole("button", { name: "Escribir en vez de dictar" }).click()
   await idle.getByLabel("Escribe lo dictado").fill("Usé dos pares de guantes.")
   await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
   const dictated = page.getByRole("list", { name: "Sugerencias de Clío: Materiales" }).getByRole("listitem").first()
