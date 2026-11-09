@@ -10,12 +10,12 @@ import { encounterDiagnosis, serviceCatalog, treatmentPlanItem } from "@odentia/
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, eq, inArray } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
-import { addOdontogramEntries } from "./dental/odontogram.js"
-import { orgDiagnosisSystem } from "./diagnosis-codes.js"
-import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
-import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "./encounters.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
+import { addOdontogramEntries } from "./odontogram.js"
+import { orgDiagnosisSystem } from "../diagnosis-codes.js"
+import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
+import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "../encounters.js"
+import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 
 setupTestDb()
 
