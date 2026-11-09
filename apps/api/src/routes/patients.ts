@@ -97,6 +97,10 @@ import {
   voidEncounterDiagnosis,
   voidEncounterProcedure,
   recordLockState,
+  bringTreatmentToEncounter,
+  chooseVisitControl,
+  leaveTreatmentFromEncounter,
+  removeIndicatedFromEncounter,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -1602,6 +1606,81 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         ),
       ),
     )
+  })
+  // «Hoy viene a…»: traer a la atención un tratamiento por hacer, o dejarlo, y decir a qué control viene.
+  app.post("/:id/encounters/:encounterId/visit/treatments", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ planItemId: z.uuid() })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        bringTreatmentToEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data.planItemId,
+        ),
+      ),
+    )
+  })
+  app.delete("/:id/encounters/:encounterId/visit/treatments/:planItemId", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        leaveTreatmentFromEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("planItemId"),
+        ),
+      )
+      return { ok: true }
+    })
+  })
+  app.put("/:id/encounters/:encounterId/visit/control", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ followUpId: z.uuid().nullable() })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        chooseVisitControl(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data.followUpId,
+        ),
+      ),
+    )
+  })
+  // «Quitar» un renglón indicado en esta misma atención, antes de que responda.
+  app.delete("/:id/encounters/:encounterId/indicated/:planItemId", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        removeIndicatedFromEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("planItemId"),
+          {
+            memberRole,
+          },
+        ),
+      )
+      return { ok: true }
+    })
   })
   app.post("/:id/encounters/:encounterId/take-over", async (c) => {
     const { orgId, userId } = orgContextOf(c)

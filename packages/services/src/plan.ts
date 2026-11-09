@@ -829,6 +829,13 @@ export async function getTreatmentPlanDetail(
 }
 
 /**
+ * El motivo con que queda lo que se quitó en la misma atención donde se indicó,
+ * antes de que la persona respondiera (`removeIndicatedFromEncounter`). El Plan
+ * no lo lista: fue corregir el borrador, como lo de una atención anulada.
+ */
+export const REMOVED_IN_ENCOUNTER = "Se quitó en la atención donde se indicó"
+
+/**
  * Los tratamientos del plan. `withoutVoided` (el Plan de la persona): lo que
  * se canceló porque se anuló la atención donde se indicó no se lista; queda en
  * la atención anulada y en la auditoría. La copia de la historia y los demás
@@ -848,9 +855,11 @@ export async function listPlanItems(
   ]
   if (planId) conditions.push(eq(treatmentPlanItem.planId, planId))
   if (opts.withoutVoided) {
-    conditions.push(sql`not (${treatmentPlanItem.status} = 'cancelado' and exists (
+    // Tampoco lo que quien atendía quitó en la misma atención donde lo indicó: fue corregir el borrador.
+    conditions.push(sql`not (${treatmentPlanItem.status} = 'cancelado' and (exists (
       select 1 from encounter voided where voided.organization_id = ${treatmentPlanItem.organizationId}
-        and voided.id = ${treatmentPlanItem.sourceEncounterId} and voided.status = 'anulada'))`)
+        and voided.id = ${treatmentPlanItem.sourceEncounterId} and voided.status = 'anulada')
+      or ${treatmentPlanItem.statusReason} = ${REMOVED_IN_ENCOUNTER}))`)
   }
   const items = await tx
     .select()

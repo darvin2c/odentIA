@@ -85,6 +85,8 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
+import { removableFromEncounter } from "./encounter-plan-remove.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
@@ -93,6 +95,13 @@ export type EncounterNoteRow = typeof clinicalNote.$inferSelect & SiteFields
 /** Documento con vínculos, piezas y etiquetas de su revisión vigente. */
 export type EncounterDocumentRow = PatientDocumentWithContext
 export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & SiteFields
+/**
+ * Un tratamiento de la atención con sus sesiones hechas (las atenciones no
+ * anuladas con un procedimiento suyo, esta incluida: la regla de
+ * `sessionsDoneSql`) y si quien lleva el borrador puede quitarlo
+ * (`removableFromEncounter`: indicado aquí, sin respuesta y sin entregar).
+ */
+export type EncounterItem = EncounterPlannedItemRow & { sessionsDone: number; removable: boolean }
 
 export interface CreateEncounterInput {
   /**
@@ -208,9 +217,14 @@ export interface EncounterDetailBase {
   /** clinical_note con kind='adenda', orden ascendente determinista, con quién la escribió. */
   addenda: Array<EncounterNoteRow & { authorName: string | null }>
   /** Ítems del plan vinculados a la atención (aceptados al vincular; su estado clínico no cambia al abrir). */
-  plannedItems: EncounterPlannedItemRow[]
+  plannedItems: EncounterItem[]
   /** Ítems indicados en esta atención (origen), con su decisión derivada. */
-  indicatedItems: EncounterPlannedItemRow[]
+  indicatedItems: EncounterItem[]
+  /**
+   * «Hoy viene a…» del borrador (`encounterVisitOf`): lo que trae, con o sin
+   * cita. Nulo en una atención firmada o anulada.
+   */
+  visit: EncounterVisit | null
   /**
    * Tratamientos que esta atención deja por ejecutar: los vinculados y los
    * indicados aquí, sin repetir, que siguen abiertos y la persona no dejó fuera
@@ -700,8 +714,10 @@ async function appointmentItemsToLink(
   // Donde lo indicado queda aceptado al indicarlo (latidIA), no se pide presupuesto.
   const { budgetRequired } = await productHooks(tx, orgId)
   const budgeted = budgetRequired
-    ? sql`and exists (select 1 from treatment_budget b where b.id = i.budget_id and b.organization_id = i.organization_id
-        and b.status in ('aceptado','parcial'))`
+    ? sql`and (exists (select 1 from treatment_budget b where b.id = i.budget_id and b.organization_id = i.organization_id
+        and b.status in ('aceptado','parcial'))
+        or (i.budget_id is null and exists (select 1 from encounter_procedure done where done.organization_id = i.organization_id
+          and done.plan_item_id = i.id and done.voided_at is null)))`
     : sql``
   const rows = await tx.execute<{ id: string }>(sql`
     select i.id from appointment_plan_item ap
@@ -729,7 +745,27 @@ async function linkAppointmentItems(
     .onConflictDoNothing({ target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId] })
 }
 
-async function assertLinkablePlans(
+/**
+ * Un tratamiento sin presupuesto que quedó aceptado en una atención (al hacerlo,
+ * o el directo de varias sesiones): tiene un procedimiento vigente. La misma
+ * regla que `acceptedInAttention` del plan.
+ */
+async function acceptedWhenDone(tx: Db, orgId: string, itemId: string): Promise<boolean> {
+  const [done] = await tx
+    .select({ id: encounterProcedure.id })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.planItemId, itemId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .limit(1)
+  return Boolean(done)
+}
+
+export async function assertLinkablePlans(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -792,6 +828,18 @@ async function assertLinkablePlans(
       if (plan.decisionStatus !== "aceptado")
         throw conflict("ITEM_NOT_ACCEPTED", "Solo se pueden vincular tratamientos aceptados")
       accepted.push({ id: plan.id, toothNumber: plan.siteSystem === site.system ? site.value(plan.siteCode) : null })
+      continue
+    }
+    if (
+      plan.decisionStatus === "aceptado" &&
+      !plan.budgetId &&
+      (await acceptedWhenDone(tx, orgId, plan.id))
+    ) {
+      // Aceptado al hacerlo (o directo de varias sesiones): su sesión siguiente se trae igual.
+      accepted.push({
+        id: plan.id,
+        toothNumber: plan.siteSystem === site.system ? site.value(plan.siteCode) : null,
+      })
       continue
     }
     if (!plan.budgetId) {
@@ -922,6 +970,16 @@ export async function getEncounterDetail(
   const attention = new Map(
     [...plannedItems.map((link) => link.item), ...indicatedItems].map((item) => [item.id, item] as const),
   )
+  const counts = await sessionCountsOf(tx, orgId, [...attention.keys()])
+  const removable =
+    row.status === "borrador"
+      ? await removableFromEncounter(tx, orgId, encounterId)
+      : new Set<string>()
+  const withProgress = <T extends { id: string }>(item: T) => ({
+    ...item,
+    sessionsDone: counts.get(item.id)?.done ?? 0,
+    removable: removable.has(item.id),
+  })
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),
   ).length
@@ -935,10 +993,11 @@ export async function getEncounterDetail(
     ...(await (await productHooks(tx, orgId)).encounterDetailParts(tx, { orgId, patientId, encounterId })),
     documents,
     addenda: addenda.map((row) => withSite(site, row)),
-    plannedItems: plannedItems.map((link) => withSite(site, link.item)),
-    indicatedItems: indicatedItems.map((row) => withSite(site, row)),
+    plannedItems: plannedItems.map((link) => withProgress(withSite(site, link.item))),
+    indicatedItems: indicatedItems.map((item) => withProgress(withSite(site, item))),
     pendingTreatments,
     bookedReason,
+    visit: await encounterVisitOf(tx, orgId, row),
   }
 }
 
@@ -1993,22 +2052,36 @@ async function closingSessionsOf(
     const session: ClosingSession = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m), ...(booked ? { booked } : {}) }
     ;(session.n >= session.m ? finishing : continuing).push(session)
   }
-  // Lo que la cita traía y hoy no se registró: la sesión que le tocaba.
+  // Lo que la cita traía, o se trajo al empezar («Hacerla hoy»), y hoy no se
+  // registró: la sesión que le tocaba. Con o sin cita: el cierre lo avisa sin frenar.
   const notRegistered: ClosingSession[] = []
-  if (appointmentId) {
-    const carried = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
-      select carried.id, carried.title, carried.planned_sessions as m,
-        ${sessionsDoneSql({ id: sql`carried.id`, organizationId: sql`carried.organization_id` })} as done
-      from appointment_plan_item brought
-      join treatment_plan_item carried on carried.organization_id = brought.organization_id and carried.id = brought.plan_item_id
-      where brought.organization_id = ${orgId} and brought.appointment_id = ${appointmentId}
-        and carried.decision_status = 'aceptado' and carried.status in ('pendiente', 'programado', 'en_curso')
-        and not exists (select 1 from encounter_procedure today
-          where today.organization_id = carried.organization_id and today.plan_item_id = carried.id
-            and today.encounter_id = ${encounterId} and today.voided_at is null)
-      order by carried.sort_order, carried.created_at, carried.id`)
-    for (const row of carried) notRegistered.push({ planItemId: row.id, title: row.title, n: Number(row.done) + 1, m: Number(row.m) })
-  }
+  const carried = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
+    select carried.id, carried.title, carried.planned_sessions as m,
+      ${sessionsDoneSql({ id: sql`carried.id`, organizationId: sql`carried.organization_id` })} as done
+    from treatment_plan_item carried
+    where carried.organization_id = ${orgId}
+      and carried.decision_status = 'aceptado' and carried.status in ('pendiente', 'programado', 'en_curso')
+      and (exists (select 1 from encounter_plan_item linked
+            where linked.organization_id = carried.organization_id and linked.plan_item_id = carried.id
+              and linked.encounter_id = ${encounterId})
+        ${
+          appointmentId
+            ? sql`or exists (select 1 from appointment_plan_item brought
+            where brought.organization_id = carried.organization_id and brought.plan_item_id = carried.id
+              and brought.appointment_id = ${appointmentId})`
+            : sql``
+        })
+      and not exists (select 1 from encounter_procedure today
+        where today.organization_id = carried.organization_id and today.plan_item_id = carried.id
+          and today.encounter_id = ${encounterId} and today.voided_at is null)
+    order by carried.sort_order, carried.created_at, carried.id`)
+  for (const row of carried)
+    notRegistered.push({
+      planItemId: row.id,
+      title: row.title,
+      n: Number(row.done) + 1,
+      m: Number(row.m),
+    })
   return { finishing, continuing, notRegistered }
 }
 
@@ -2020,6 +2093,10 @@ export interface ClosingDueControl {
   dueAt: Date
   /** Quien firma es quien atendió la atención donde se indicó: viene marcado. */
   mine: boolean
+  /** Quien atiende dijo al empezar que viene a este control («Viene a su control»): también viene marcado. */
+  chosen: boolean
+  /** Quien lo indicó (la atención de origen), para decir «de la Dra. Ana». */
+  originProfessionalUserId: string | null
   /** Si se repite, cumplirlo deja indicado el siguiente. */
   repeatEveryMonths: number | null
 }
@@ -2137,7 +2214,7 @@ function addDaysToDay(day: string, days: number): string {
 }
 
 /** Los controles por cumplir de la persona: pendientes, con su ventana abierta y no indicados en esta atención. */
-async function dueControlsOf(
+export async function dueControlsOf(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -2168,7 +2245,12 @@ async function dueControlsOf(
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
-  return rows.map(({ originProfessional, ...control }) => ({ ...control, mine: originProfessional === actorUserId }))
+  return rows.map(({ originProfessional, ...control }) => ({
+    ...control,
+    mine: originProfessional === actorUserId,
+    chosen: row.visitFollowUpId === control.id,
+    originProfessionalUserId: originProfessional ?? null,
+  }))
 }
 
 /**
@@ -2359,8 +2441,8 @@ export interface FinalizeEncounterInput {
   nextControl?: { dueAt: string } | { none: true } | null
   /**
    * Los controles por cumplir que esta visita cumple (`ClosingControls.due`).
-   * Sin él (API sin pantalla), solo los de quien firma (`mine`), los que la
-   * pantalla trae marcados.
+   * Sin él (API sin pantalla), los de quien firma (`mine`) y el que se eligió
+   * al empezar («Viene a su control», `chosen`): los que la pantalla trae marcados.
    */
   followUpIds?: string[] | null
   /**
@@ -2490,7 +2572,9 @@ export async function finalizeEncounter(
   // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
   const { timezone } = await findOrgLocale(tx, orgId)
   const wanted = input.followUpIds ? new Set(input.followUpIds) : null
-  const fulfilling = closing.controls.due.filter((control) => (wanted ? wanted.has(control.id) : control.mine))
+  const fulfilling = closing.controls.due.filter((control) =>
+    wanted ? wanted.has(control.id) : control.mine || control.chosen,
+  )
   const nextDay = input.nextControl && "dueAt" in input.nextControl ? input.nextControl.dueAt : null
   if (nextDay !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(nextDay) || nextDay <= dayKeyIn(now, timezone)))
     throw invalidField("nextControl.dueAt", "Elige un día desde mañana.")

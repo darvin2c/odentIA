@@ -166,13 +166,30 @@ async function openEncountersOf(tx: Db, orgId: string, patientIds: string[], vie
   return new Set(rows.filter((row) => !viewerUserId || row.professionalUserId !== viewerUserId).map((row) => row.id))
 }
 
-/** «3 tratamientos · S/ 540», con el total de la opción que vale. */
+/**
+ * El presupuesto en una línea honesta. Con una opción: «3 tratamientos · S/ 540».
+ * Con varias, cada una con su total, que nunca se suman: «Opción A S/ 1,350 ·
+ * Opción B S/ 150 · falta que elija»; con una elegida, «Eligió la opción A · S/
+ * 1,350» (QA de la atención del 8 nov: decía «2 tratamientos · S/ 1,350 · 2
+ * opciones» con tres indicados y dos montos).
+ */
 export function budgetLine(budget: BudgetWithTotals, locale: string): string {
+  const say = (totals: BudgetWithTotals["totals"]) =>
+    moneyTotalsText(
+      totals,
+      (cents, currency) => formatMoney(cents, currency, locale),
+      "falta algún precio",
+    )
+  if (budget.options.length > 1) {
+    const ordered = [...budget.options].sort((a, b) => a.position - b.position)
+    const chosen = ordered.find((option) => option.decision === "elegida")
+    if (chosen)
+      return `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${say(chosen.totals)}`
+    return `${ordered.map((option) => `${option.label} ${say(option.totals)}`).join(" · ")} · falta que elija`
+  }
   const value = valueOptionOf(budget.options)
   const count = value?.lineCount ?? budget.items.length
-  const money = moneyTotalsText(budget.totals, (cents, currency) => formatMoney(cents, currency, locale), "falta algún precio")
-  const options = budget.options.length > 1 ? ` · ${budget.options.length} opciones` : ""
-  return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} · ${money}${options}`
+  return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} · ${say(budget.totals)}`
 }
 
 /**
