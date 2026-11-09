@@ -2014,6 +2014,8 @@ const SAME_WORD: Readonly<Record<string, string>> = Object.fromEntries(
       ["inasistencia", "inasistencias faltaron falto"],
       ["correo", "email mail"],
       ["comision", "comisiones porcentaje"],
+      // vistIA: «lentes» sería «lent», como «lento»; con «anteojos» no se confunde.
+      ["anteojos", "lente lentes gafas"],
     ] as const
   ).flatMap(([word, others]) => others.split(" ").map((other) => [other, word] as const)),
 )
