@@ -682,7 +682,8 @@ export function ExpenseFormDrawer({
             listeners={{
               // El comprobante que suele traer ese tipo, hasta que la persona elige otro.
               onChange: ({ value }) => {
-                if (!receiptTouched.current && value) form.setFieldValue("receiptType", suggestedReceiptType(country, value))
+                // Solo mientras la persona no eligió uno: lo que cambia el código no cuenta como elegido.
+                if (!receiptTouched.current && value) form.setFieldValue("receiptType", suggestedReceiptType(country, value), { dontUpdateMeta: true })
               },
             }}
           >
@@ -850,8 +851,9 @@ export function ExpenseFormDrawer({
           <form.AppField
             name="receiptType"
             listeners={{
-              onChange: () => {
-                receiptTouched.current = true
+              // Solo lo que elige la persona: `setFieldValue` del tipo no pasa por aquí con `dontUpdateMeta`.
+              onChange: ({ fieldApi }) => {
+                if (fieldApi.state.meta.isTouched) receiptTouched.current = true
               },
             }}
           >

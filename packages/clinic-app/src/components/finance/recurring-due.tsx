@@ -211,7 +211,7 @@ export function RecurringDueSection({
     onSuccess: (_result, input) => {
       refresh()
       if (!input.undo)
-        toast.success(`${input.row.concept}: este mes no hubo`, {
+        toast.success(`${input.row.concept}: en ${monthWord(input.row.month)} no hubo`, {
           duration: 10_000,
           action: { label: "Deshacer", onClick: () => skip.mutate({ row: input.row, undo: true }) },
         })
@@ -277,7 +277,12 @@ export function RecurringDueSection({
                   <RowActions
                     label={`Más acciones de ${named}`}
                     items={[
-                      { key: "no", label: "No hubo este mes", onSelect: () => skip.mutate({ row }) },
+                      {
+                        key: "no",
+                        // Una fila de otro mes dice su mes, no «este mes».
+                        label: row.month === current ? "No hubo este mes" : `No hubo en ${monthWord(row.month)}`,
+                        onSelect: () => skip.mutate({ row }),
+                      },
                       { key: "cambiar", label: "Cambiar lo que se repite", onSelect: () => setChange(editableOfDue(row)) },
                       { key: "fin", label: "Dejar de repetir", onSelect: () => end.mutate(editableOfDue(row)) },
                     ]}

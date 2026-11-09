@@ -55,6 +55,7 @@ import {
   fetchPurchasesToPay,
   financeKeys,
   formatDayMonth,
+  formatDayShort,
   formatMonthName,
   invalidateFinance,
   isForbidden,
@@ -74,6 +75,8 @@ function plural(count: number, one: string, many: string): string {
 }
 
 function receiptText(row: ExpenseRow): string | null {
+  // La fila junta de sueldos suma pagos con papeles distintos: no dice uno.
+  if (row.salary) return "Varios"
   const kind = row.receiptKind && row.receiptKind !== NO_RECEIPT ? row.receiptKind : ""
   const number = row.receiptNumber ?? ""
   if (kind) return number ? `${kind} ${number}` : kind
@@ -180,7 +183,8 @@ export function ExpensesTab({
         id: "fecha",
         header: "Fecha",
         meta: { view: { primary: true } },
-        cell: ({ row }) => <span className="whitespace-nowrap">{formatDayMonth(row.original.spentAt, locale, zone)}</span>,
+        // La fecha corta («9 nov»): con el detalle abierto, la tabla cabe sin cortar el monto.
+        cell: ({ row }) => <span className="whitespace-nowrap">{formatDayShort(row.original.spentAt, locale, zone)}</span>,
       },
       {
         id: "concepto",
@@ -191,7 +195,7 @@ export function ExpensesTab({
           const voided = expense.voidedAt !== null
           return (
             // Un ancho mínimo: partir solo una palabra larga no debe angostar la columna a una letra.
-            <div className="flex min-w-0 flex-col gap-1 sm:min-w-44">
+            <div className="flex min-w-0 flex-col gap-1 sm:min-w-36">
               {/* Solo el texto libre parte una palabra larga; el monto y «Anular» no se salen de la tabla (QA del 8 nov, G28). */}
               {/* Un botón: con el teclado también se abre el detalle, con «Anular» y «Corregir». */}
               <button
@@ -257,7 +261,7 @@ export function ExpensesTab({
       },
       {
         id: "salio",
-        header: "Con qué se pagó",
+        header: "Pagado con",
         meta: { view: { primary: true } },
         cell: ({ row }) => (
           <span className="[overflow-wrap:anywhere]">
