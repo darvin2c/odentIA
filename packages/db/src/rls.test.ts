@@ -1091,7 +1091,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   const repetidas = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname in ('public', 'admin', 'catalog', 'auth', 'dental') and c.relkind in ('r', 'p', 'v')
+    where n.nspname in ('public', 'admin', 'catalog', 'auth', 'dental', 'optical') and c.relkind in ('r', 'p', 'v')
     group by c.relname having count(*) > 1
   `)) as unknown as { tabla: string }[]
   expect(repetidas).toEqual([])
@@ -1112,6 +1112,14 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     "plan_item_finding",
     "service_finding",
   ])
+  // Lo de vistIA también vive en su esquema (ADR 0167): solo la receta de lentes.
+  const optica = (await ownerDb.execute(sql`
+    select c.relname as "tabla"
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'optical' and c.relkind in ('r', 'p')
+    order by 1
+  `)) as unknown as { tabla: string }[]
+  expect(optica.map((r) => r.tabla)).toEqual(["lens_prescription"])
   const columnasDentales = (await ownerDb.execute(sql`
     select c.relname || '.' || a.attname as "columna"
     from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
@@ -1129,7 +1137,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   const abiertas = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname in ('public', 'dental') and c.relkind in ('r', 'p') and not c.relrowsecurity
+    where n.nspname in ('public', 'dental', 'optical') and c.relkind in ('r', 'p') and not c.relrowsecurity
       and has_table_privilege(${APP_ROLE}, c.oid, 'select, insert, update, delete')
       and exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'organization_id' and not a.attisdropped)
     order by 1

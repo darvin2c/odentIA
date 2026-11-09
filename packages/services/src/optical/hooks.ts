@@ -7,6 +7,8 @@ import {
 } from "@odentia/optical"
 import { NO_PRODUCT_HOOKS, type ProductHooks } from "../product-hooks.js"
 import { opticalCatalog } from "./catalog.js"
+import { opticalExamination } from "./examination.js"
+import { prescriptionRecordLines } from "./lens-prescriptions.js"
 
 /**
  * Lo que vistIA hace en los momentos de lo común (ADR 0079). Sin «dónde» (el ojo
@@ -16,7 +18,9 @@ import { opticalCatalog } from "./catalog.js"
  * el pedido, no con el presupuesto clínico. Se invita a volver al año, al
  * control anual de la vista. Su biblioteca y sus especialidades son las de una
  * óptica, su plan tiene una sola fase y el buscador de diagnósticos pone primero
- * los del ojo. No anestesia: no pregunta la ASA.
+ * los del ojo. No anestesia: no pregunta la ASA. Su examen es el de la vista
+ * (entrega 3), sin signos vitales, y la copia de la historia lleva sus recetas de
+ * lentes.
  */
 export const opticalHooks: ProductHooks = {
   ...NO_PRODUCT_HOOKS,
@@ -32,4 +36,15 @@ export const opticalHooks: ProductHooks = {
   // La tomografía de una óptica es la OCT: una imagen con su informe, no un estudio en cortes.
   imagingStudy: null,
   consentSuggestions: OPTICAL_CONSENT_TEMPLATES,
+  examination: opticalExamination,
+  vitals: [],
+  async recordSections(tx, { orgId, patientId }) {
+    return [
+      {
+        title: "Recetas de lentes",
+        lines: await prescriptionRecordLines(tx, orgId, patientId),
+        empty: "Sin recetas de lentes.",
+      },
+    ]
+  },
 }

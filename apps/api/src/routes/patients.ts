@@ -513,6 +513,8 @@ const CLINICAL_SUBPATHS = [
   "/prescriptions",
   // El descanso médico (issue 229).
   "/medical-leaves",
+  // La receta de lentes de vistIA (ADR 0167).
+  "/lens-prescriptions",
   "/follow-ups",
   "/documents",
   "/imaging/studies",
@@ -574,6 +576,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/follow-ups", "controles"],
   ["/prescriptions", "recetas"],
   ["/medical-leaves", "descansos"],
+  ["/lens-prescriptions", "recetas"],
   ["/documents", "documentos"],
   ["/imaging/studies", "documentos"],
   ["/record", "descarga"],

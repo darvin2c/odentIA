@@ -19,3 +19,9 @@ export const authSchema = pgSchema("auth")
  * enlaces. Es de la clínica igual que `public`, con su RLS.
  */
 export const dentalSchema = pgSchema("dental")
+
+/**
+ * Lo que solo usa vistIA (ADR 0167): la receta de lentes. Es de la clínica igual
+ * que `public`, con su RLS.
+ */
+export const opticalSchema = pgSchema("optical")
