@@ -328,7 +328,8 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   await expect(waiting.getByText(/Se registró en línea: ¿es la misma persona\? · \d+ datos? distintos?/)).toBeVisible()
   await expect(waiting.getByText(/Mismo celular/)).toBeVisible()
   await waiting.getByRole("button", { name: "Revisar" }).first().click()
-  const review = page.getByRole("dialog", { name: "¿Es la misma persona?" })
+  // En pantalla ancha se abre en la columna lateral; si no cabe, en cajón.
+  const review = page.getByRole("complementary", { name: "Panel lateral" }).or(page.getByRole("dialog", { name: "¿Es la misma persona?" }))
   await expect(review.getByText(/márcalos solo si comprobaste que es la misma persona/)).toBeVisible()
   const names = review.getByRole("checkbox", { name: /^Nombres y apellidos/ })
   await expect(names).not.toBeChecked()
