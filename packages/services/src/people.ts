@@ -634,6 +634,21 @@ export async function listPeopleShortcuts(
   return countPeopleShortcuts(tx, orgId, can, timezone, new Date())
 }
 
+/**
+ * El paso de «Qué sigue» que dice la fila filtrada por cada atajo: el de su regla
+ * («Por agendar»: lo aceptado o la próxima sesión; «Control vencido»: el control).
+ * Los de presupuestos ya son el paso único de quien está en ellos.
+ */
+const STEP_OF_SHORTCUT: Record<PeopleShortcut, readonly PlanNextKind[]> = {
+  por_agendar: ["agendar", "continuar"],
+  presupuesto_sin_enviar: [],
+  presupuesto_sin_respuesta: [],
+  control_por_reservar: ["control"],
+  faltan_datos: [],
+  por_invitar_a_volver: [],
+  deben: [],
+}
+
 export async function listPeople(
   tx: Db,
   orgId: string,
@@ -755,7 +770,8 @@ export async function listPeople(
     plan && agenda
       ? await inviteStatusOf(tx, orgId, page.flatMap((r) => (r.patient_id && !toInvite.has(r.patient_id) ? [r.patient_id] : [])))
       : new Map()
-  // «Qué sigue» de los pacientes de la página, de una vez.
+  // «Qué sigue» de los pacientes de la página, de una vez. Filtrada por un atajo, cada fila dice
+  // el paso de ese atajo (QA del 8 nov: en «Control vencido» decía «Reservar lo aceptado»).
   const steps =
     plan
       ? await planNextStepsOf(
@@ -763,6 +779,7 @@ export async function listPeople(
           orgId,
           page.flatMap((r) => (r.patient_id ? [r.patient_id] : [])),
           can,
+          atajo ? STEP_OF_SHORTCUT[atajo] : [],
         )
       : new Map()
   const items: PersonListItem[] = []

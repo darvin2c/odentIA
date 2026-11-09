@@ -47,16 +47,27 @@ export function foldedWordsMatch(
   return and(...words.map((word) => or(...columns.map((column) => foldedContains(column, word)))!))!
 }
 
+/** Desde cuántas letras una palabra a medio escribir ya cuenta como palabra de todos los días: con tres, «con» (de consulta) ya traía la endodoncia por «conducto». */
+const EVERYDAY_PREFIX_MIN = 4
+
 /**
  * Las otras formas de una búsqueda de servicios: cada palabra de todos los días
  * («limpieza») por las del catálogo de su producto (`catalog.everydayWords`).
- * Solo amplía lo que se encuentra; nunca cambia un nombre.
+ * Vale también a medio escribir, como el resto de la búsqueda: «extrac» ya es
+ * «extracción» (QA del 8 nov). Solo amplía lo que se encuentra; nunca cambia un nombre.
  */
 export function everydayServiceVariants(q: string, everydayWords: Readonly<Record<string, readonly string[]>>): string[] {
   const words = searchWords(q)
+  const keys = Object.keys(everydayWords)
   return words.flatMap((word, index) => {
     const folded = foldText(word)
-    const others = Object.hasOwn(everydayWords, folded) ? (everydayWords[folded] ?? []) : []
+    // La palabra entera, a medio escribir («extrac») o en plural («extracciones»).
+    const said = Object.hasOwn(everydayWords, folded)
+      ? [folded]
+      : folded.length >= EVERYDAY_PREFIX_MIN
+        ? keys.filter((key) => key.startsWith(folded) || folded.startsWith(key))
+        : []
+    const others = [...new Set(said.flatMap((key) => everydayWords[key] ?? []))]
     return others.map((other) => [...words.slice(0, index), other, ...words.slice(index + 1)].join(" "))
   })
 }
