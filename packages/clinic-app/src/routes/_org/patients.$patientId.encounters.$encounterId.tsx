@@ -2,6 +2,7 @@ import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "../../components/patient/clinical-panels"
 import { EncounterBreadcrumb } from "../../components/patient/encounter-breadcrumb"
@@ -58,6 +59,16 @@ function EncounterPage() {
   })
   // Lo que cambia la atención (un diagnóstico confirmado de Clío, el periodontograma, el panel de
   // la pieza) cambia también lo que se propone como diagnóstico: no quedan propuestas viejas.
+  // Tras firmar aquí, «Atención finalizada» vive en el editor: una relectura de la atención (el foco
+  // de la ventana pasados 10 s, otra pestaña) ya la trae firmada y desmontaba el editor con su aviso
+  // y la cita que se estaba reservando (QA del 8 nov). Sigue montado, con lo que tenía, hasta cerrarlo.
+  const [signedHere, setSignedHere] = useState<string | null>(null)
+  const lastDraft = useRef<EncounterDetail | null>(null)
+  // La página se reutiliza al ir a otra atención: lo firmado aquí no se arrastra a la vuelta.
+  useEffect(() => {
+    setSignedHere(null)
+    lastDraft.current = null
+  }, [encounterId])
   const changed = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] }),
@@ -84,6 +95,7 @@ function EncounterPage() {
         "treatment-plans",
       ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
     )
+    setSignedHere(null)
   }
 
   if (patientQuery.isLoading || encounterQuery.isLoading) return <EncounterLoading />
@@ -108,7 +120,10 @@ function EncounterPage() {
   }
 
   const patient = patientQuery.data.data
-  const detail = encounterQuery.data.data
+  const fetched = encounterQuery.data.data
+  if (fetched.encounter.status === "borrador") lastDraft.current = fetched
+  const kept = signedHere === encounterId && lastDraft.current?.encounter.id === encounterId ? lastDraft.current : null
+  const detail = kept ?? fetched
   if (detail.encounter.status === "borrador" && canWrite) {
     return (
       <PageShell className="flex flex-col gap-4">
@@ -120,6 +135,7 @@ function EncounterPage() {
             patient={patient}
             detail={detail}
             onChanged={changed}
+            onSigned={() => setSignedHere(encounterId)}
             onFinalized={finalized}
           />
         </WideSectionProvider>

@@ -27,6 +27,7 @@ Había dos listas de especialidades: la fija de la biblioteca (14 claves, copiad
 
 - Beneficio: recepción, el enlace y el agente ofrecen las mismas horas, de quien de verdad atiende; el agente nombra las especialidades como la clínica.
 - Sacrificio: si la clínica marca a un especialista y olvida a los generales que también hacen ese servicio, la agenda deja de ofrecérselo a ellos. El aviso de Especialidades y el contador de servicios ayudan a verlo. Reservar a mano con otro profesional sigue permitido: la regla decide qué se ofrece, no qué se puede guardar.
+- Actualización del 2026-11-08: «Reservar la sesión 2» al firmar ponía «Cualquiera» callado si quien atendió no tenía horario en la sede o no estaba en la especialidad, y la sesión quedaba con otro. Ahora quien se pide al abrir (`professionalUserId` de la disponibilidad) viene igual, con sus horas y marcado `outsideService`, y «Nueva cita» dice por qué y quién atiende la especialidad; se le reserva igual o se elige a otro. Lo que se ofrece a Sofi, al enlace y al portal no cambia.
 - Revisar si las clínicas piden servicios compartidos por dos especialidades.
 
 ## Referencias

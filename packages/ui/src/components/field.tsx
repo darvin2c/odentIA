@@ -49,16 +49,19 @@ function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+// Una etiqueta solo para lector de pantalla (`sr-only`) queda de 1 px, como manda esa clase:
+// con `w-auto` medía su texto entero sin cortarlo y, cerca del borde derecho, corría la
+// página a lo ancho (QA del 8 nov: «Precio acordado de …» en el presupuesto del Plan).
 const fieldVariants = cva(
   "group/field flex w-full gap-3 data-[invalid=true]:text-destructive",
   {
     variants: {
       orientation: {
-        vertical: "flex-col *:w-full [&>.sr-only]:w-auto",
+        vertical: "flex-col *:w-full [&>.sr-only]:w-px",
         horizontal:
           "flex-row items-center has-[>[data-slot=field-content]]:items-start *:data-[slot=field-label]:flex-auto has-[>[data-slot=field-content]]:[&>[role=checkbox],[role=radio]]:mt-px",
         responsive:
-          "flex-col *:w-full @md/field-group:flex-row @md/field-group:items-center @md/field-group:*:w-auto @md/field-group:has-[>[data-slot=field-content]]:items-start @md/field-group:*:data-[slot=field-label]:flex-auto [&>.sr-only]:w-auto @md/field-group:has-[>[data-slot=field-content]]:[&>[role=checkbox],[role=radio]]:mt-px",
+          "flex-col *:w-full @md/field-group:flex-row @md/field-group:items-center @md/field-group:*:w-auto @md/field-group:has-[>[data-slot=field-content]]:items-start @md/field-group:*:data-[slot=field-label]:flex-auto [&>.sr-only]:w-px @md/field-group:has-[>[data-slot=field-content]]:[&>[role=checkbox],[role=radio]]:mt-px",
       },
     },
     defaultVariants: {

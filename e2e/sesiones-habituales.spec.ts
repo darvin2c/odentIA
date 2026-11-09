@@ -90,7 +90,7 @@ test("sesiones habituales: la biblioteca las dice, el servicio las guarda, el pl
   await doneRow.getByRole("button", { name: "Falta otra sesión en «Endodoncia unirradicular · Pieza 36»", exact: true }).click()
   const confirm = page.getByRole("alertdialog", { name: "¿Le falta otra sesión?" })
   await expect(confirm).toContainText("queda la sesión 2 por agendar")
-  await expect(confirm).toContainText("Lo firmado y lo cobrado hasta hoy no cambian; esa sesión se cobra como las demás de este tratamiento.")
+  await expect(confirm).toContainText("Reabrirlo no cobra nada: lo firmado y lo cobrado hasta hoy no cambian.")
   await views("falta-otra-sesion")
   await confirm.getByRole("button", { name: "Sí, falta otra sesión", exact: true }).click()
   await expect(confirm).toBeHidden()
