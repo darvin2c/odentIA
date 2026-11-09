@@ -170,7 +170,7 @@ function RefreshBar({ isFetching, refreshMessage }: { isFetching: boolean; refre
 
 function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, className }: LayoutProps<TData>) {
   return (
-    <div className={cn("overflow-hidden rounded-md bg-card", className)}>
+    <div className={cn("overflow-hidden rounded-md border bg-card", className)}>
       <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       {/* La tabla que no entra se recorre con la barra del sistema de diseño:
           el contenedor del registry deja de scrollear (`overflow-visible`) para
@@ -236,7 +236,7 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refresh
             <Item
               key={row.id}
               className={cn(
-                "rounded-md bg-card",
+                "rounded-md border bg-card",
                 onRowClick && "cursor-pointer",
                 active && activeRowClass,
               )}
@@ -302,11 +302,11 @@ function CardLayout<TData>({ table, onRowClick, isRowActive, isFetching, refresh
               key={row.id}
               data-slot="data-table-card"
               className={cn(
-                // La ficha se define por su superficie (`bg-card` sobre el fondo
-                // de página) y el hover por elevación: el fondo de página y
-                // `--muted` son el mismo gris, así que un hover de fondo se
+                // La ficha se define por su borde, como las tarjetas (el blanco sobre el
+                // gris de página se separa poco), y el hover por elevación: el fondo de
+                // página y `--muted` son casi el mismo gris, así que un hover de fondo se
                 // funde con la página en vez de destacar.
-                "@container flex flex-col rounded-md bg-card p-5 transition-[background-color,box-shadow] hover:shadow-sm",
+                "@container flex flex-col rounded-md border bg-card p-5 transition-[background-color,box-shadow] hover:shadow-sm",
                 onRowClick && "cursor-pointer",
                 active && activeRowClass,
               )}
@@ -388,7 +388,7 @@ function SelectionBar<TData>({
   if (!header) return null
 
   return (
-    <div className="flex items-center gap-2 rounded-md bg-card px-3 py-2">
+    <div className="flex items-center gap-2 rounded-md border bg-card px-3 py-2">
       {flexRender(select.columnDef.header, header.getContext())}
       <span className="text-sm text-muted-foreground">{common.views.selectAll}</span>
     </div>
@@ -478,7 +478,7 @@ function TableSkeleton({ columnCount, rowCount, showPagination, label }: Skeleto
   const rows = slotKeys(rowCount, "row")
 
   return (
-    <div {...statusProps(label)} className="overflow-hidden rounded-md bg-card">
+    <div {...statusProps(label)} className="overflow-hidden rounded-md border bg-card">
       <Table aria-hidden="true">
         <TableHeader>
           <TableRow>
@@ -516,7 +516,7 @@ function ListSkeleton({ rowCount, showPagination, label }: SkeletonShape) {
     <div {...statusProps(label)} className="flex flex-col gap-2">
       <div aria-hidden="true" className="flex flex-col gap-2">
         {rows.map((rowKey, rowIndex) => (
-          <Item key={rowKey} className="rounded-md bg-card">
+          <Item key={rowKey} className="rounded-md border bg-card">
             <ItemMedia variant="image">
               <Skeleton className="size-full rounded-sm" />
             </ItemMedia>
@@ -530,7 +530,7 @@ function ListSkeleton({ rowCount, showPagination, label }: SkeletonShape) {
           </Item>
         ))}
       </div>
-      {showPagination ? <SkeletonPagination className="rounded-md bg-card" /> : null}
+      {showPagination ? <SkeletonPagination className="rounded-md border bg-card" /> : null}
     </div>
   )
 }
@@ -547,7 +547,7 @@ function CardSkeleton({ columnCount, rowCount, showPagination, label }: Skeleton
           <div
             key={cardKey}
             data-slot="data-table-skeleton-card"
-            className="@container flex flex-col rounded-md bg-card p-5"
+            className="@container flex flex-col rounded-md border bg-card p-5"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
@@ -576,7 +576,7 @@ function CardSkeleton({ columnCount, rowCount, showPagination, label }: Skeleton
           </div>
         ))}
       </div>
-      {showPagination ? <SkeletonPagination className="rounded-md bg-card" /> : null}
+      {showPagination ? <SkeletonPagination className="rounded-md border bg-card" /> : null}
     </div>
   )
 }

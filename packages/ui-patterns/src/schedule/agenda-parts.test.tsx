@@ -10,7 +10,7 @@ import { ScheduleStatusSummary } from "./status-summary.js"
 import { ScheduleTeamWeek } from "./team-week.js"
 import { setupScheduleDom } from "./test-utils.js"
 import { addDays, minutesToInstant, zonedDateOf } from "./time.js"
-import { initialsOf, scheduleToneAt } from "./tone.js"
+import { initialsOf, scheduleToneAt, scheduleToneClass } from "./tone.js"
 import type { ScheduleColumn, ScheduleEntry, ScheduleStatus } from "./types.js"
 import { ScheduleWeekOverview } from "./week-overview.js"
 
@@ -218,6 +218,10 @@ describe("recursos y días", () => {
     expect(scheduleToneAt(0)).toBe(0)
     expect(scheduleToneAt(5)).toBe(0)
     expect(scheduleToneAt(7)).toBe(2)
+  })
+
+  it("ningún profesional lleva el color de la marca: ese queda para lo que se toca y lo elegido", () => {
+    for (const tone of [0, 1, 2, 3, 4] as const) expect(scheduleToneClass(tone)).not.toMatch(/primary|agent/)
   })
 
   it("la franja marca el día elegido y pasa de semana", () => {

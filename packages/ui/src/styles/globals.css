@@ -33,6 +33,7 @@
     --color-scale-4: var(--scale-4);
     --color-ring: var(--ring);
     --color-input: var(--input);
+    --color-input-border: var(--input-border);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
     --color-destructive-foreground: var(--destructive-foreground);
@@ -111,6 +112,9 @@
     --accent-foreground: #181818;
     --border: #e7e7e7;
     --input: #d4d4d4;
+    /* El borde de campos, casillas y opciones: 3:1 sobre cada fondo claro (WCAG 1.4.11),
+       porque el relleno `--input` solo no deja ver dónde está el campo. */
+    --input-border: #868686;
     --radius: 0.875rem;
     /* Blanco, como las tarjetas: el ítem activo se lee más limpio (lienzo «menos saturado»). */
     --sidebar: #ffffff;
@@ -209,6 +213,7 @@
     --accent-foreground: #f4f4f4;
     --border: #303030;
     --input: #464646;
+    --input-border: #7a7a7a;
     --sidebar: #171717;
     --sidebar-foreground: #e7e7e7;
     --sidebar-accent: #303030;

@@ -5,7 +5,9 @@
  * sin leer.
  *
  * Paleta categórica (excepción prevista en `packages/ui/AGENTS.md`): tonos que
- * no se confunden con los de estado; por eso no hay verde, ámbar ni rojo.
+ * no se confunden con los de estado; por eso no hay verde, ámbar ni rojo. Ninguno
+ * es el color de la marca: ese queda para actuar y lo seleccionado (ADR 0162), y
+ * con un profesional en ese tono sus citas parecían botones o elegidas.
  */
 
 import { cn } from "@odentia/ui"
@@ -13,11 +15,11 @@ import { cn } from "@odentia/ui"
 import type { ScheduleTone } from "./types.js"
 
 const TONE_CLASSES: Record<ScheduleTone, string> = {
-  0: "bg-primary-soft text-primary-soft-foreground",
+  0: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200",
   1: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200",
   2: "bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-200",
   3: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
-  4: "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100",
+  4: "bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100",
 }
 
 const TONE_COUNT = Object.keys(TONE_CLASSES).length
