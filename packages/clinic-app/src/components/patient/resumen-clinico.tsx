@@ -4,9 +4,17 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import { clinicToday } from "../../lib/inventory"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import type { OpenEncounterBrief, PatientHealth, PatientSummary } from "../../lib/patients"
+import {
+  asaLabel,
+  isCurrentMedication,
+  type OpenEncounterBrief,
+  type PatientHealth,
+  type PatientSummary,
+} from "../../lib/patients"
 import { usePersonArchived } from "../../lib/person-archived"
+import { productUi } from "../../product/product-ui"
 import { AllergyQuickActions } from "./allergies-card"
 import { EncounterReadDrawer } from "./encounter-read-drawer"
 import { SummaryCard } from "./resumen-tab"
@@ -120,7 +128,7 @@ function Alert({
 }
 
 /**
- * Alergias y alertas antes de tocar al paciente (Resumen de quien atiende):
+ * Antecedentes y alertas antes de tocar al paciente (Resumen de quien atiende):
  * alergias de la más grave a la menos (tablero 7: no hay «por confirmar»), condiciones
  * activas y medicación vigente, en columnas para que muchas no alarguen la página;
  * nunca se oculta ninguna. Sin alergias registradas dice lo que consta
@@ -143,12 +151,22 @@ export function ClinicalAlertsCard({
     .filter((allergy) => allergy.isActive && allergy.verification !== "descartada")
     .sort(bySeverity)
   const conditions = (health?.conditions ?? []).filter((condition) => condition.status === "activa")
-  // Vigente = sin fecha de fin, igual que la cabecera de la ficha.
-  const medications = (health?.medications ?? []).filter((medication) => !medication.endDate)
+  // La que toma: sin fin o con fin desde hoy, la misma regla del cierre y del aviso «Pregúntale a…».
+  const today = clinicToday()
+  const medications = (health?.medications ?? []).filter((medication) => isCurrentMedication(medication, today))
   const allergyState = health?.reviewStatus.allergies ?? "unknown"
+  const asa = asaLabel(health?.asaClass)
+  // Lo que no es una alerta, en una línea: «niega» solo si se le preguntó, si no, «no preguntado»
+  // (ADR 0035). Antes de atender se veían solo las alergias (QA del 8 nov, entrega 3).
+  const quiet = [
+    conditions.length === 0 ? `Enfermedades: ${groupWord(health?.reviewStatus.conditions, "niega", "sin enfermedades activas")}` : null,
+    medications.length === 0 ? `Medicación: ${groupWord(health?.reviewStatus.medications, "ninguna", "sin medicación vigente")}` : null,
+    // ASA en odentIA siempre; en latidIA solo si alguien la clasificó.
+    asa || productUi().health.showsAsa ? (asa ?? "ASA: sin clasificar") : null,
+  ].filter((part): part is string => part !== null)
   return (
     <SummaryCard
-      title="Alergias y alertas"
+      title="Antecedentes y alertas"
       action={
         <Button type="button" size="sm" variant="outline" onClick={onAntecedentes}>
           Antecedentes
@@ -197,9 +215,17 @@ export function ClinicalAlertsCard({
             detail="Medicamento vigente"
           />
         ))}
+        {quiet.length > 0 ? (
+          <li className="col-span-full text-sm text-muted-foreground">{quiet.join(" · ")}</li>
+        ) : null}
       </ul>
     </SummaryCard>
   )
+}
+
+/** Un grupo de antecedentes sin filas: niega, no se le preguntó o se registró sin nada vigente. */
+function groupWord(state: string | undefined, denied: string, recorded: string): string {
+  return state === "none" ? denied : state === "recorded" ? recorded : "no preguntado"
 }
 
 /** «8 oct», en la zona de la clínica. */

@@ -68,7 +68,7 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
 
   // Para quien atiende el Resumen es el clínico (ADR 0035): alergias y alertas,
   // «Qué sigue» (con su próxima cita) y última atención, más lo pendiente.
-  await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Antecedentes y alertas" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Qué sigue" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Última atención" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
@@ -528,7 +528,7 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
       // Su Resumen es el clínico: abrir la página ya es una lectura de la historia (ADR 0035).
       expect(summaryReads.length).toBeGreaterThan(0)
       await openSection(page, "Resumen")
-      await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Antecedentes y alertas" })).toBeVisible()
       // El odontograma, en la dentición de su edad.
       await openSection(page, "Clínica", "Odontograma")
       await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
