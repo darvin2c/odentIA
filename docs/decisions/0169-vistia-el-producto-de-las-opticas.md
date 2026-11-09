@@ -30,4 +30,4 @@ Una óptica vende lentes y, casi siempre, examina la vista antes de venderlos. S
 
 ## Referencias
 
-`packages/clinical/src/products.ts`, `packages/optical/`, `packages/services/src/optical/`, `packages/db/src/optical/library.ts`, `packages/db/drizzle/0070_vistia_opticas.sql`, `apps/optical-clinic/`, `docs/deployment.md` («vistIA en su dominio»).
+`packages/clinical/src/products.ts`, `packages/optical/`, `packages/services/src/optical/`, `packages/db/src/optical/library.ts`, `packages/db/drizzle/0075_vistia_opticas.sql`, `apps/optical-clinic/`, `docs/deployment.md` («vistIA en su dominio»).
