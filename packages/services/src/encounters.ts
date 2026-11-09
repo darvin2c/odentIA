@@ -1855,6 +1855,8 @@ export interface ClosingSession {
 export interface BookedSession {
   appointmentId: string
   startsAt: Date
+  /** Con quién es: «Atención finalizada» lo dice junto a la hora (QA del 8 nov). */
+  professionalUserId: string
   n: number
   m: number
 }
@@ -1913,7 +1915,12 @@ export async function nextSessionsOf(
   const counts = await sessionCountsOf(tx, orgId, items.map((item) => item.id))
   // La primera cita por venir que lleva cada uno (la regla de «una cita por venir lo lleva»).
   const upcoming = await tx
-    .select({ planItemId: appointmentPlanItem.planItemId, appointmentId: appointment.id, startsAt: appointment.startsAt })
+    .select({
+      planItemId: appointmentPlanItem.planItemId,
+      appointmentId: appointment.id,
+      startsAt: appointment.startsAt,
+      professionalUserId: appointment.professionalUserId,
+    })
     .from(appointmentPlanItem)
     .innerJoin(
       appointment,
@@ -1930,8 +1937,11 @@ export async function nextSessionsOf(
       ),
     )
     .orderBy(asc(appointment.startsAt), asc(appointment.id))
-  const firstOf = new Map<string, { appointmentId: string; startsAt: Date }>()
-  for (const row of upcoming) if (!firstOf.has(row.planItemId)) firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt })
+  const firstOf = new Map<string, { appointmentId: string; startsAt: Date; professionalUserId: string }>()
+  for (const row of upcoming) {
+    if (!firstOf.has(row.planItemId))
+      firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt, professionalUserId: row.professionalUserId })
+  }
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
   const out: NextSession[] = []
   for (const item of items) {

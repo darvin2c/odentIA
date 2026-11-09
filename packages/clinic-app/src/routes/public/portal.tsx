@@ -1161,7 +1161,7 @@ function OrdersBlock({ sessionToken }: { sessionToken: string }) {
           <li key={item.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{item.title}</span>
-              <Badge variant={item.ready ? "default" : "secondary"}>{item.ready ? "Listo para recoger" : item.statusLabel}</Badge>
+              <Badge variant={item.ready ? "success" : "secondary"}>{item.ready ? "Listo para recoger" : item.statusLabel}</Badge>
             </div>
             <span className="text-sm text-muted-foreground">
               Pedido N.º {item.orderNumber}

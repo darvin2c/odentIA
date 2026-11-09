@@ -1749,10 +1749,6 @@ export interface PortalAccountView {
   }>
 }
 
-/**
- * Cuenta real del paciente (historial + saldo). Solo lectura: la pasarela no
- * está elegida y el portal jamás crea cargos ni pagos.
- */
 /** Un pedido como lo ve la persona en su portal (ADR 0169): qué es, cómo va, para cuándo y lo que falta. */
 export interface PortalOrder {
   id: string
@@ -1791,6 +1787,10 @@ export async function listPortalOrders(tx: Db, ctx: PortalContext): Promise<{ lo
   }
 }
 
+/**
+ * Cuenta real del paciente (historial + saldo). Solo lectura: la pasarela no
+ * está elegida y el portal jamás crea cargos ni pagos.
+ */
 export async function getPortalAccount(tx: Db, ctx: PortalContext): Promise<PortalAccountView> {
   requireScope(ctx.session, "account")
   const account = await getPatientAccount(tx, ctx.orgId, ctx.session.patientId)

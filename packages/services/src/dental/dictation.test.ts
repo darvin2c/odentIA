@@ -106,6 +106,16 @@ describe("odontograma por voz (issue 109)", () => {
       payload: { variant: "metal_ceramic", quality: "good" },
     })
 
+    // Una caries dicha sin cara (QA del 8 nov): se pide la cara, se elige con un toque y lo pedido ya no queda.
+    const [faceless] = (await segment({
+      drafts: [{ kind: "odontograma", payload: { toothNumber: 37, condition: "caries", variant: "dentina" }, sourceText: "La 37 con caries en dentina." }],
+    })).suggestions
+    expect(faceless).toMatchObject({ status: "por_revisar", payload: { missing: ["surfaces"] }, note: "¿Qué cara de la 37? Elígela aquí." })
+    await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, faceless!.id, { surfaces: ["occlusal", "distal"] }))
+    const faced = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === faceless!.id)
+    expect(faced).toMatchObject({ status: "lista", payload: { surfaces: ["occlusal", "distal"] } })
+    expect(faced?.payload).not.toHaveProperty("missing")
+
     // El asistente a veces corrige y además vuelve a registrar: el mismo hallazgo pendiente no se repite.
     expect((await segment({ drafts: [{ kind: "odontograma", payload: { toothNumber: 36, condition: "caries", surfaces: ["oclusal"] } }] })).suggestions).toEqual([])
 

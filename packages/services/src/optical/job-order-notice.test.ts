@@ -143,6 +143,13 @@ describe("«Tus lentes están listos» (entrega 5)", () => {
     await run(c, (tx) => setMessageChoice(tx, c.orgId, c.ownerId, p.contactId, { choice: "ninguno", receive: false, source: "telefono" }))
     const ready = await readyOrder(c, p.patientId)
     expect(ready.readyNotice?.status).toBe("no_salio")
+    // Aunque haya escrito hace poco: el aviso de «Listo» es del sistema, no una respuesta.
+    const writing = await client(c, "Iván Soto", { openWindow: true })
+    await run(c, (tx) => setMessageChoice(tx, c.orgId, c.ownerId, writing.contactId, { choice: "ninguno", receive: false, source: "telefono" }))
+    const quiet = await readyOrder(c, writing.patientId)
+    expect(quiet.readyNotice?.status).toBe("no_salio")
+    const sent = await ownerDb.select({ id: message.id }).from(message).where(and(eq(message.organizationId, c.orgId), eq(message.direction, "out")))
+    expect(sent).toHaveLength(0)
   })
 
   it("«Pedido listo» está entre los mensajes de una óptica y no entre los de odentIA", async () => {

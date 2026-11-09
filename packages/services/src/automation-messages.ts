@@ -550,13 +550,19 @@ export const ORDER_READY_MESSAGE: MessageSpec = {
 export const ORDER_READY_SUBJECT = "Tu pedido está listo"
 
 /** «Pedido listo» en cada producto que trabaja con pedidos: su texto y su plantilla, que Meta aprueba aparte. */
-const ORDER_READY_BY_PRODUCT: Record<ClinicalProduct, Pick<MessageSpec, "template" | "body"> | null> = {
+const ORDER_READY_BY_PRODUCT: Record<ClinicalProduct, (Pick<MessageSpec, "template" | "body"> & { subject: string }) | null> = {
   dental: null,
   medical: null,
   optical: {
+    subject: "Tus lentes están listos",
     template: "vistia_lentes_listos_v1",
     body: "Hola, {{1}}. Tus lentes ya están listos para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
   },
+}
+
+/** El asunto de «Pedido listo» por correo en un producto (vistIA: «Tus lentes están listos»). */
+export function orderReadySubjectOf(product: ClinicalProduct): string {
+  return ORDER_READY_BY_PRODUCT[product]?.subject ?? ORDER_READY_SUBJECT
 }
 
 /** Los mensajes que solo tiene el producto que trabaja con pedidos (ADR 0168): los demás no los piden ni los listan. */

@@ -374,13 +374,6 @@ export const AGENT_APPOINTMENTS_SHOWN = 12
 /** Presupuestos (estado y número) en el resumen; los anteriores se cuentan. */
 export const AGENT_SUMMARY_BUDGETS_SHOWN = 5
 
-/**
- * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
- * historia clínica: próximas citas para self/representante/autorizado; estado
- * de presupuestos presentados o decididos (nunca borradores) solo para quien
- * decide (`decides`); saldo solo para self, representante legal o responsable
- * económico vigente. Siempre del paciente verificado, nunca de otro.
- */
 /** Si quien escribe puede oír lo que se debe: la persona, su representante legal o quien paga por ella. */
 async function maySeeMoneyOf(
   tx: Db,
@@ -438,6 +431,13 @@ export async function listAgentPatientOrders(
   return { context, orders, withMoney }
 }
 
+/**
+ * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
+ * historia clínica: próximas citas para self/representante/autorizado; estado
+ * de presupuestos presentados o decididos (nunca borradores) solo para quien
+ * decide (`decides`); saldo solo para self, representante legal o responsable
+ * económico vigente. Siempre del paciente verificado, nunca de otro.
+ */
 export async function getAgentPatientSummary(
   tx: Db,
   orgId: string,
