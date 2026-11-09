@@ -95,7 +95,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     expect(coverage).toMatchObject({ medical: 12002 - 505, medical_library: 38, medical_uncoded: 1 })
     // vistIA: lo del ojo de la CPMS y su biblioteca de 19 servicios, con código CPMS
     // salvo la evaluación de baja visión y la tonometría simple, que la CPMS no tiene.
-    expect(coverage).toMatchObject({ optical: 95, optical_library: 19, optical_uncoded: 2 })
+    expect(coverage).toMatchObject({ optical: 97, optical_library: 19, optical_uncoded: 2 })
     const [section] = await db.execute<{ section: string }>(
       sql`select section from procedure_code where system_key = 'CPMS' and code = 'D2392'`,
     )

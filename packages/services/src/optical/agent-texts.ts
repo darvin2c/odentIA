@@ -59,6 +59,8 @@ export const OPTICAL_AGENT_TEXTS: ProductAgentTexts = {
       String.raw`\b(de repente|de golpe|derepente)\b[^.!?]{0,30}${ALARM_NOT}\bveo doble\b|${ALARM_NOT}\bveo doble\b[^.!?]{0,30}\b(de repente|de golpe|derepente)\b`,
     ),
   ],
+  // Lo urgente sin señal de alarma (un ojo rojo que duele) se orienta primero por teléfono, como en latidIA.
+  urgentFirst: "telefono",
   clinic: { es: "óptica", en: "optical store" },
   room: "sala de examen",
   site: "",

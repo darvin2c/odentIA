@@ -36,15 +36,13 @@ const OUTSIDE = [
 ]
 /**
  * Lo óptico de los servicios y de la base, y los `products.ts`: los únicos
- * lugares que conectan cada producto con lo común. La semilla de desarrollo de
- * odentIA también crea la demo de la óptica (`seed:dev`), solo a mano.
+ * lugares que conectan cada producto con lo común.
  */
 const OPTICAL_INSIDE = [
   "packages/services/src/optical/",
   "packages/services/src/products.ts",
   "packages/db/src/optical/",
   "packages/db/src/products.ts",
-  "packages/services/src/dental/seed-demo.ts",
 ]
 
 function filesUnder(dir: string): string[] {

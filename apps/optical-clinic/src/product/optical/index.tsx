@@ -2,6 +2,7 @@ import { bareProduct, type ProductUi } from "@odentia/clinic-app/product/product
 import {
   OPTICAL_CATEGORY_LABELS,
   OPTICAL_IMAGING_TYPES,
+  OPTICAL_MEDICATION_CATALOG,
   OPTICAL_SERVICE_KINDS,
   opticalProfessionalFor,
 } from "@odentia/optical"
@@ -31,6 +32,8 @@ export const opticalUi: ProductUi = {
   services: { kinds: OPTICAL_SERVICE_KINDS.map((kind) => ({ key: kind.key, name: kind.name })), leaves: null },
   plan: { ...bare.plan, budgetRequired: false, repeatingControls: true },
   health: { ...bare.health, showsAsa: false },
+  // Su lista propia, la misma del servidor: nada de la lista dental.
+  prescribing: { ...bare.prescribing, catalog: OPTICAL_MEDICATION_CATALOG },
   documents: {
     ...bare.documents,
     imaging: {

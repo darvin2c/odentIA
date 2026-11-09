@@ -87,7 +87,7 @@ it("cada código de la biblioteca de vistIA existe en la edición vigente de su 
 
 it("el buscador de vistIA ofrece lo del ojo de cada lista, con toda su biblioteca", () => {
   const products = rows("procedure_code_products.csv", "system_key,product,code", 3)
-  for (const system of ["CPMS", "CUPS", "CIE9MC-MX"]) {
+  for (const system of ["CPMS", "CUPS", "CIE9MC-MX", "FONASA"]) {
     const optical = new Set(
       products.filter((row) => row[0] === system && row[1] === "optical").map((row) => row[2]!),
     )

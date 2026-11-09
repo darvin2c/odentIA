@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm"
 import { RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
 import { AGENT_ROLES, switchableFunctions } from "./agent-roles.js"
 import { invalidField, ServiceError, validation } from "./errors.js"
+import { productDictation } from "./products.js"
 
 export interface AgentConfig {
   organizationId: string
@@ -158,6 +159,9 @@ export async function upsertAgentConfig(
   input: UpsertAgentConfigInput,
   opts: UpsertAgentConfigOpts = {},
 ): Promise<AgentConfig> {
+  // Clío se enciende solo donde su producto dicta (en vistIA no dicta, ADR 0166).
+  if (input.clinicalAssistantEnabled === true && (await productDictation(tx, orgId)) === null)
+    throw invalidField("clinicalAssistantEnabled", "Clío todavía no dicta en este producto")
   if (
     input.maxTurns !== undefined &&
     (!Number.isInteger(input.maxTurns) || input.maxTurns < 1 || input.maxTurns > 50)
