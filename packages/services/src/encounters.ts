@@ -1,4 +1,4 @@
-import { isLeftOut, isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
+import { budgetStateText, isLeftOut, isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
 import {
   type AssembledBudget,
   assembleEncounterBudget,
@@ -28,6 +28,7 @@ import {
   prescription,
   treatmentBudget,
   treatmentBudgetItem,
+  treatmentBudgetOption,
   treatmentPlan,
   serviceCatalog,
   treatmentPlanItem,
@@ -88,6 +89,7 @@ import {
 import { productHooks } from "./products.js"
 import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
 import { removableFromEncounter } from "./encounter-plan-remove.js"
+import { type ClosingResolvable, resolvableDiagnosesOf, resolveDiagnosesOnSign } from "./closing-diagnoses.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
@@ -221,6 +223,19 @@ export interface EncounterDetailBase {
   plannedItems: EncounterItem[]
   /** Ítems indicados en esta atención (origen), con su decisión derivada. */
   indicatedItems: EncounterItem[]
+  /**
+   * Los presupuestos de lo indicado aquí, con su estado en palabras («Eligió la
+   * opción A», «Anulado»): la atención firmada lo nombra y la anulada dice el que
+   * anuló con ella (QA del 9 nov).
+   */
+  budgets: Array<{
+    id: string
+    budgetNumber: number
+    status: string
+    stateText: string
+    /** Se anuló junto con esta atención (no antes, por su cuenta). */
+    voidedWith: boolean
+  }>
   /**
    * «Hoy viene a…» del borrador (`encounterVisitOf`): lo que trae, con o sin
    * cita. Nulo en una atención firmada o anulada.
@@ -996,10 +1011,71 @@ export async function getEncounterDetail(
     addenda: addenda.map((row) => withSite(site, row)),
     plannedItems: plannedItems.map((link) => withProgress(withSite(site, link.item))),
     indicatedItems: indicatedItems.map((item) => withProgress(withSite(site, item))),
+    budgets: await encounterBudgetsOf(tx, orgId, encounterId, row.voidedAt),
     pendingTreatments,
     bookedReason,
     visit: await encounterVisitOf(tx, orgId, row),
   }
+}
+
+/** Los presupuestos con líneas de lo indicado en la atención, en orden y con su estado dicho. */
+async function encounterBudgetsOf(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+  voidedAt: Date | null,
+): Promise<EncounterDetailBase["budgets"]> {
+  const budgets = await tx
+    .selectDistinct({
+      id: treatmentBudget.id,
+      budgetNumber: treatmentBudget.budgetNumber,
+      status: treatmentBudget.status,
+      updatedAt: treatmentBudget.updatedAt,
+    })
+    .from(treatmentBudget)
+    .innerJoin(
+      treatmentBudgetItem,
+      and(eq(treatmentBudgetItem.organizationId, treatmentBudget.organizationId), eq(treatmentBudgetItem.budgetId, treatmentBudget.id)),
+    )
+    .innerJoin(
+      treatmentPlanItem,
+      and(eq(treatmentPlanItem.organizationId, treatmentBudgetItem.organizationId), eq(treatmentPlanItem.id, treatmentBudgetItem.planItemId)),
+    )
+    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentPlanItem.sourceEncounterId, encounterId)))
+    .orderBy(asc(treatmentBudget.budgetNumber))
+  if (budgets.length === 0) return []
+  const ids = budgets.map((budget) => budget.id)
+  const [lines, options] = await Promise.all([
+    tx
+      .select({
+        budgetId: treatmentBudgetItem.budgetId,
+        decision: treatmentBudgetItem.decision,
+        optionId: treatmentBudgetItem.optionId,
+        planItemId: treatmentBudgetItem.planItemId,
+      })
+      .from(treatmentBudgetItem)
+      .where(and(eq(treatmentBudgetItem.organizationId, orgId), inArray(treatmentBudgetItem.budgetId, ids))),
+    tx
+      .select({
+        id: treatmentBudgetOption.id,
+        budgetId: treatmentBudgetOption.budgetId,
+        decision: treatmentBudgetOption.decision,
+        position: treatmentBudgetOption.position,
+      })
+      .from(treatmentBudgetOption)
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.budgetId, ids))),
+  ])
+  return budgets.map(({ updatedAt, ...budget }) => ({
+    ...budget,
+    // Anulado en el mismo paso que la atención (`settleEncounterVoidBudgets`, en su transacción).
+    voidedWith:
+      budget.status === "cancelado" && voidedAt !== null && Math.abs(updatedAt.getTime() - voidedAt.getTime()) < 60_000,
+    stateText: budgetStateText({
+      status: budget.status,
+      items: lines.filter((line) => line.budgetId === budget.id),
+      options: options.filter((option) => option.budgetId === budget.id),
+    }),
+  }))
 }
 
 /**
@@ -1862,7 +1938,19 @@ export interface ClosingCheckBase {
    * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada; el
    * cierre lo avisa sin frenar la firma (`n` es la sesión que le tocaba).
    */
-  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered: ClosingSession[] }
+  sessions: {
+    finishing: ClosingSession[]
+    continuing: ClosingSession[]
+    notRegistered: ClosingSession[]
+    /** Lo aceptado sin empezar, a lo que vuelve (`n` = 0: aún no tiene ninguna sesión). */
+    accepted: ClosingSession[]
+  }
+  /**
+   * Los diagnósticos activos que resuelve un tratamiento trabajado hoy si queda
+   * realizado (la pulpitis de la 46 con su endodoncia): el cierre los propone
+   * marcados y se resuelven los que vuelven en `resolveDiagnosisIds` (QA del 9 nov).
+   */
+  resolvable: ClosingResolvable[]
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión: «Endodoncia · sesión 2 de 2». */
@@ -1871,6 +1959,8 @@ export interface ClosingSession {
   title: string
   n: number
   m: number
+  /** Dónde, si no se hizo hoy («pieza 46»): lo aceptado sin empezar no está en la atención. */
+  place?: string
   /**
    * La cita por venir que ya lleva su próxima sesión: «la sesión 2 tiene cita el
    * lun 9, 10:45» (QA del 8 nov, X11). Sin cita, no viene.
@@ -2044,7 +2134,53 @@ async function closingSessionsOf(
       n: Number(row.done) + 1,
       m: Number(row.m),
     })
-  return { finishing, continuing, notRegistered }
+  // Lo aceptado que aún no empieza en la misma pieza que lo que hoy se trabajó (la corona tras
+  // la endodoncia de la 46): es a lo que vuelve. «¿Cuándo vuelve?» lo dice y «Atención finalizada»
+  // lo reserva, en vez de un control genérico que pedía otra cita (QA del 9 nov). No si otro
+  // tratamiento sigue en curso sin su sesión de hoy (la sesión 2 de otra endodoncia va primero), ni
+  // lo de otra pieza o sin pieza (un blanqueamiento aceptado hace un año no cambia cada cierre).
+  // Los de hoy y los que trae la cita ya están arriba.
+  const taken = new Set([...finishing, ...continuing, ...notRegistered].map((session) => session.planItemId))
+  const pendingRows = await tx.execute<{
+    id: string
+    title: string
+    m: number
+    site_system: string | null
+    site_code: string | null
+    site_qualifiers: string[] | null
+  }>(sql`
+    select waiting.id, waiting.title, waiting.planned_sessions as m,
+      waiting.site_system, waiting.site_code, waiting.site_qualifiers
+    from treatment_plan_item waiting
+    join encounter here on here.organization_id = waiting.organization_id and here.id = ${encounterId}
+    where waiting.organization_id = ${orgId} and waiting.patient_id = here.patient_id
+      and waiting.decision_status = 'aceptado' and waiting.status in ('pendiente', 'programado')
+      and waiting.site_code is not null
+      and not exists (select 1 from encounter_procedure done
+        where done.organization_id = waiting.organization_id and done.plan_item_id = waiting.id and done.voided_at is null)
+      and exists (select 1 from encounter_procedure today
+        join treatment_plan_item worked on worked.organization_id = today.organization_id and worked.id = today.plan_item_id
+        where today.organization_id = waiting.organization_id and today.encounter_id = here.id and today.voided_at is null
+          and worked.site_system is not distinct from waiting.site_system and worked.site_code = waiting.site_code)
+      and not exists (select 1 from treatment_plan_item other
+        where other.organization_id = waiting.organization_id and other.patient_id = waiting.patient_id
+          and other.status = 'en_curso'
+          and not exists (select 1 from encounter_procedure other_today
+            where other_today.organization_id = other.organization_id and other_today.plan_item_id = other.id
+              and other_today.encounter_id = here.id and other_today.voided_at is null))
+    order by waiting.sort_order, waiting.created_at, waiting.id
+    limit 6`)
+  const site = await siteOf(tx, orgId)
+  const pendingIds = pendingRows.filter((row) => !taken.has(row.id)).slice(0, 3)
+  const bookedPending = new Map(
+    (await nextSessionsOf(tx, orgId, pendingIds.map((row) => row.id), appointmentId)).map((session) => [session.planItemId, session.booked]),
+  )
+  const accepted: ClosingSession[] = pendingIds.map((row) => {
+    const booked = bookedPending.get(row.id)
+    const place = site.words({ siteSystem: row.site_system, siteCode: row.site_code, siteQualifiers: row.site_qualifiers ?? [] }, "short")
+    return { planItemId: row.id, title: row.title, n: 0, m: Number(row.m), ...(place ? { place } : {}), ...(booked ? { booked } : {}) }
+  })
+  return { finishing, continuing, notRegistered, accepted }
 }
 
 /** Un control pendiente cuya ventana ya abrió: esta visita lo cumple al firmar (ADR 0152). */
@@ -2148,6 +2284,7 @@ export async function checkEncounterClosing(
     anesthetics: (materials?.items ?? []).filter((item) => isLocalAnestheticName(item.name)).map((item) => item.name),
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
+  const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
   const controls = await closingControlsOf(tx, orgId, actorUserId, row)
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,
@@ -2157,7 +2294,7 @@ export async function checkEncounterClosing(
       .map((session) => session.planItemId)
       .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
-  return { ready: missing.length === 0, missing, consents, materials, health, sessions, controls, ...product }
+  return { ready: missing.length === 0, missing, consents, materials, health, sessions, resolvable, controls, ...product }
 }
 
 /** Un día civil («2026-11-07») más N meses; el 31 cae en el último día del mes que no lo tiene. */
@@ -2417,6 +2554,11 @@ export interface FinalizeEncounterInput {
   completePlanItemIds?: string[]
   /** «Falta otra sesión»: a cada uno se le prevé una sesión más (`updatePlanItemPlanning`) y sigue en curso. */
   addSessionPlanItemIds?: string[]
+  /**
+   * Los diagnósticos que el cierre proponía resolver (`closing.resolvable`) y la
+   * pantalla mostró marcados: quedan resueltos con su tratamiento. Sin él, ninguno.
+   */
+  resolveDiagnosisIds?: string[]
 }
 
 /**
@@ -2553,6 +2695,8 @@ export async function finalizeEncounter(
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
   const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
+  await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], now)
   const procedures = await tx
     .select()
     .from(encounterProcedure)
@@ -2802,12 +2946,18 @@ export async function finalizeEncounter(
   // «Falta otra sesión», ya con los cobros de hoy medidos contra lo previsto.
   await addSessions()
   // Lo que sigue en curso, ya con lo respondido: con la sesión que se sumó y sin lo que se terminó.
-  const nextSessions = await nextSessionsOf(
+  const continuingNext = await nextSessionsOf(
     tx,
     orgId,
     [...closing.sessions.finishing, ...closing.sessions.continuing].map((session) => session.planItemId),
     row.appointmentId ?? null,
   )
+  // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras terminar la
+  // endodoncia): «Reservar» lo deja con su cita ahí mismo. Mientras algo sigue, no: la corona
+  // no va en la cita de la sesión 2 (QA del 9 nov).
+  const nextSessions = continuingNext.length
+    ? continuingNext
+    : await nextSessionsOf(tx, orgId, closing.sessions.accepted.map((session) => session.planItemId), row.appointmentId ?? null)
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
   // Entre monedas no se suma: cada una con su total.
   const chargedTotals = sumByCurrency(
@@ -2842,7 +2992,10 @@ export async function finalizeEncounter(
             closing.sessions.continuing.some((session) => !(input.completePlanItemIds ?? []).includes(session.planItemId)) ||
               (input.addSessionPlanItemIds ?? []).length > 0
             ? "sesion_en_curso"
-            : "sin_indicar",
+            : // Lo mismo con lo aceptado sin empezar a lo que vuelve (la corona tras la endodoncia).
+              closing.sessions.accepted.length > 0
+              ? "aceptado_por_empezar"
+              : "sin_indicar",
     controlsFulfilled: fulfilled.length,
   })
   // Al firmar queda armado el presupuesto con lo indicado aquí: crece el

@@ -50,7 +50,27 @@ export interface ClosingCheck {
    * en curso. `n` cuenta esta.
    * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada.
    */
-  sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
+  sessions?: {
+    finishing: ClosingSession[]
+    continuing: ClosingSession[]
+    notRegistered?: ClosingSession[]
+    /** Lo aceptado sin empezar, a lo que vuelve si nada sigue en curso (la corona tras la endodoncia). */
+    accepted?: ClosingSession[]
+  }
+  /**
+   * Los diagnósticos activos que resuelve un tratamiento de hoy si queda
+   * realizado: el cierre los propone marcados y manda en `resolveDiagnosisIds` los que siguen marcados.
+   */
+  resolvable?: ClosingResolvable[]
+}
+
+/** Un diagnóstico que un tratamiento de hoy resuelve: «Pulpitis (CIE-11 DA09.0) · pieza 46». */
+export interface ClosingResolvable {
+  diagnosisIds: string[]
+  /** Los tratamientos de hoy que lo resuelven si terminan (basta uno). */
+  planItemIds: string[]
+  label: string
+  site: string | null
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión. */
@@ -59,6 +79,8 @@ export interface ClosingSession {
   title: string
   n: number
   m: number
+  /** Dónde, si no se hizo hoy («pieza 46»): lo aceptado sin empezar no está en la atención. */
+  place?: string
   /** La cita por venir que ya lleva su próxima sesión; sin cita, no viene. */
   booked?: BookedSession
 }

@@ -134,7 +134,15 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         ]
       }
       // «¿Cuándo vuelve?» y «Por invitar a volver» van con el año del consultorio, no con los 6 meses de odentIA.
-      if (faq.q === "¿Cómo dejo dicho cuándo vuelve?") return [{ ...faq, a: faq.a.replace("«En 6 meses»", "«En 1 año»") }]
+      if (faq.q === "¿Cómo dejo dicho cuándo vuelve?")
+        return [
+          {
+            ...faq,
+            a: faq.a
+              .replace("«En 6 meses»", "«En 1 año»")
+              .replace("(la corona tras la endodoncia)", "(una terapia indicada que aún no empieza)"),
+          },
+        ]
       // En el consultorio la ASA no se pide al anestesiar: solo se ve si alguien la clasificó.
       if (faq.q === "¿Por qué la atención me pide sus enfermedades y su medicación?")
         return [

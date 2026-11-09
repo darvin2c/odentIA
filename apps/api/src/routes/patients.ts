@@ -436,6 +436,8 @@ const finalizeInput = z
     // «¿Terminaste?» de lo trabajado hoy: «Sí, terminar» o «Falta otra sesión».
     completePlanItemIds: z.array(z.uuid()).max(52).optional(),
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
+    // Los diagnósticos que el cierre proponía resolver y quien firma dejó marcados.
+    resolveDiagnosisIds: z.array(z.uuid()).max(100).optional(),
     // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
     nextControl: z
       .union([

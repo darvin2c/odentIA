@@ -33,6 +33,7 @@ import {
   type ClosingMaterials,
   type ClosingNextControl,
   type ClosingRequirement,
+  type ClosingResolvable,
   type ClosingSession,
   controlDaySaid,
   type HealthGap,
@@ -179,7 +180,7 @@ export interface ContinuingVisit {
  * sesión y no pregunta por un control (QA del 8 nov, X11).
  */
 export function continuingAfterSign(
-  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] } | null | undefined,
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; accepted?: ClosingSession[] } | null | undefined,
   answers: SessionAnswers,
   labelOf: (session: ClosingSession) => string = (session) => session.title,
 ): ContinuingVisit[] {
@@ -191,12 +192,15 @@ export function continuingAfterSign(
     m,
     ...(session.booked ? { booked: session.booked } : {}),
   })
-  return [
+  const going = [
     ...sessions.continuing.map((session) => visit(session, session.m)),
     ...sessions.finishing
       .filter((session) => answers[session.planItemId] === "otra")
       .map((session) => visit(session, Math.max(session.m, session.n) + 1)),
   ]
+  // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras la endodoncia):
+  // no un control genérico que pedía otra cita (QA del 9 nov). La regla del servidor (`finalizeEncounter`).
+  return going.length > 0 ? going : (sessions.accepted ?? []).map((session) => visit(session, session.m))
 }
 
 /** «el lun 9 a las 10:45», «mañana a las 17:00», en la zona de la clínica. */
@@ -551,19 +555,34 @@ export function ClosingSessions({
   answers,
   onAnswer,
   disabled,
+  resolvable = [],
+  keepDiagnoses,
+  onKeepDiagnosis,
 }: {
   sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
   labelOf: (session: ClosingSession) => string
   answers: SessionAnswers
   onAnswer: (planItemId: string, answer: "terminar" | "otra") => void
   disabled: boolean
+  /** Los diagnósticos que resuelve lo que hoy termina (`closing.resolvable`). */
+  resolvable?: ClosingResolvable[]
+  /** Los que quien firma desmarcó: siguen activos. */
+  keepDiagnoses?: ReadonlySet<string>
+  /** Sin él, solo se informa. */
+  onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
 }): React.JSX.Element | null {
   const ids = useId()
   const notRegistered = sessions.notRegistered ?? []
-  if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0) return null
+  const resolving = resolvingOnSign(resolvable, sessions, answers)
+  if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0 && resolving.length === 0)
+    return null
   // Una resina de una sesión no dice «sesión 1 de 1»: solo su nombre.
   const line = (session: ClosingSession) =>
     showsSession(session.n, session.m) ? `${labelOf(session)} · ${sessionWords(session.n, session.m)}` : labelOf(session)
+  // Al preguntar «¿Terminaste?» sí: «sesión 1 de 1» deja ver que se previó una sola y,
+  // si eran dos, «Falta otra sesión» está al lado (QA del 9 nov: la endodoncia de dos
+  // sesiones indicada con una venía en «Sí, terminar» sin decirlo).
+  const asked = (session: ClosingSession) => `${labelOf(session)} · ${sessionWords(session.n, session.m)}`
   const choices = [
     { value: "terminar", label: "Sí, terminar" },
     { value: "otra", label: "Falta otra sesión" },
@@ -576,7 +595,7 @@ export function ClosingSessions({
         return (
           <li key={session.planItemId} className="flex flex-col gap-2">
             <span id={labelId}>
-              <span className="font-medium">{line(session)}</span> · ¿Terminaste?
+              <span className="font-medium">{asked(session)}</span> · ¿Terminaste?
             </span>
             {/* Siempre hay una elegida: tocar la elegida no la desmarca. */}
             <ToggleGroup
@@ -618,8 +637,58 @@ export function ClosingSessions({
           «Realizado hoy».
         </li>
       ))}
+      {/* Lo que el tratamiento terminado resuelve: marcado, se desmarca si no (QA del 9 nov). */}
+      {resolving.map((found) => {
+        const kept = found.diagnosisIds.some((id) => keepDiagnoses?.has(id))
+        const checkboxId = `${ids}-resuelve-${found.diagnosisIds[0]}`
+        return (
+          <li key={found.diagnosisIds.join(",")} className="flex items-start gap-2">
+            <Checkbox
+              id={checkboxId}
+              checked={!kept}
+              disabled={disabled || !onKeepDiagnosis}
+              onCheckedChange={(checked) => onKeepDiagnosis?.(found.diagnosisIds, checked !== true)}
+            />
+            <label htmlFor={checkboxId} className="leading-snug">
+              {found.label}
+              {found.site ? ` · ${found.site}` : ""} pasa a resuelto
+              <span className="block text-xs text-muted-foreground">
+                Lo resuelve {labelOfPlanItem(found.planItemIds, sessions, labelOf)}. Desmárcalo si sigue activo.
+              </span>
+            </label>
+          </li>
+        )
+      })}
     </ul>
   )
+}
+
+/**
+ * Los diagnósticos que quedan resueltos al firmar con lo respondido: los de lo
+ * que termina (o ya terminó hoy), no los de lo que sigue en curso.
+ */
+export function resolvingOnSign(
+  resolvable: readonly ClosingResolvable[],
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] } | null | undefined,
+  answers: SessionAnswers,
+): ClosingResolvable[] {
+  // Basta un tratamiento que termine (o que ya terminó hoy): lo mismo que mira el servidor al firmar.
+  const ends = (planItemId: string) => {
+    if (sessions?.continuing.some((session) => session.planItemId === planItemId)) return false
+    const finishing = sessions?.finishing.some((session) => session.planItemId === planItemId)
+    return !finishing || (answers[planItemId] ?? "terminar") === "terminar"
+  }
+  return resolvable.filter((found) => found.planItemIds.some(ends))
+}
+
+/** «la endodoncia · 46»: el nombre del tratamiento, como en «¿Terminaste?». */
+function labelOfPlanItem(
+  planItemIds: readonly string[],
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] },
+  labelOf: (session: ClosingSession) => string,
+): string {
+  const session = sessions.finishing.find((row) => planItemIds.includes(row.planItemId))
+  return session ? inSentence(labelOf(session)) : "el tratamiento de hoy"
 }
 
 /**
@@ -771,6 +840,8 @@ export function EncounterClosingDialog({
   sessionLabel = (session) => session.title,
   sessionAnswers = {},
   onSessionAnswer,
+  keepDiagnoses,
+  onKeepDiagnosis,
   children,
   nextVisit = null,
   healthGaps = [],
@@ -816,6 +887,9 @@ export function EncounterClosingDialog({
   /** Lo respondido a «¿Terminaste?»; sin `onSessionAnswer` solo se informa. */
   sessionAnswers?: SessionAnswers
   onSessionAnswer?: (planItemId: string, answer: "terminar" | "otra") => void
+  /** Los diagnósticos que resuelve lo de hoy y quien firma desmarcó. */
+  keepDiagnoses?: ReadonlySet<string>
+  onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
   /** «¿Cuándo vuelve?», justo encima de firmar. */
@@ -888,6 +962,9 @@ export function EncounterClosingDialog({
                   answers={sessionAnswers}
                   onAnswer={onSessionAnswer}
                   disabled={busy}
+                  resolvable={closing.resolvable}
+                  keepDiagnoses={keepDiagnoses}
+                  onKeepDiagnosis={onKeepDiagnosis}
                 />
               ) : null}
               {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
