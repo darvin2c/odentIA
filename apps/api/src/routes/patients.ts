@@ -101,6 +101,7 @@ import {
   chooseVisitControl,
   leaveTreatmentFromEncounter,
   removeIndicatedFromEncounter,
+  assembleEncounterBudget,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -685,7 +686,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // deciden sin clínica); entregarlo o enviarlo, `budgets.send`; el resto
     // de mutaciones, `budgets.write`.
     const permission =
-      domain === "budgets" && write && remainder.includes("/decision")
+      // «No contesta» es seguir la respuesta: la anota quien anota la respuesta.
+      domain === "budgets" && write && (remainder.includes("/decision") || remainder.endsWith("/no-answer"))
         ? "budgets.decide"
         : domain === "budgets" && write && BUDGET_SEND_SUFFIXES.some((suffix) => remainder.endsWith(suffix))
           ? "budgets.send"
@@ -1492,6 +1494,19 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         ),
       ),
     )
+  })
+  // «Armarlo ahora»: lo indicado en la atención entra al presupuesto en borrador, como al firmar,
+  // para mostrarlo o enviarlo en plena consulta (QA del 9 nov: una indicación sola tras otro
+  // presupuesto no tenía línea). No envía nada.
+  app.post("/:id/encounters/:encounterId/budget", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write") || !canAccess(memberRole, "budgets.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para armar el presupuesto"), 403)
+    return runService(c, 200, async () => ({
+      data: await withOrgContext(deps.db, orgId, (tx) =>
+        assembleEncounterBudget(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), { onRequest: true }),
+      ),
+    }))
   })
   app.post("/:id/encounters/:encounterId/procedures", async (c) => {
     const { orgId, userId } = orgContextOf(c)

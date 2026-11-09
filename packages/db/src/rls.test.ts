@@ -521,10 +521,18 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
   expect(await withOrgContext(appDb, "org_b", tx => tx.execute(linkedQuery))).toHaveLength(0)
   expect(await appDb.execute(linkedQuery)).toHaveLength(0)
-  await expect(
-    withOrgContext(appDb, "org_a", tx =>
-      tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`)),
-  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  // Lo que llevó una cita cancelada es constancia: la app no lo borra (solo de una cita en pie
+  // y por venir, «Sumar a su cita» y su «Deshacer»).
+  await withOrgContext(appDb, "org_a", tx =>
+    tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`))
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
+  await ownerDb.execute(sql`update appointment set status = 'programada' where id = ${cita!.id}`)
+  await withOrgContext(appDb, "org_b", tx =>
+    tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`))
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
+  await withOrgContext(appDb, "org_a", tx =>
+    tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`))
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(0)
   // La cita y el tratamiento son del mismo paciente: otro paciente no se cuela.
   await expect(
     ownerDb.execute(sql`insert into appointment_plan_item (organization_id,patient_id,appointment_id,plan_item_id)

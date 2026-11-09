@@ -780,7 +780,8 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await gotoHydrated(page, tenant(slug, `/contacts/${own?.contactId}`))
   await expect(page).toHaveURL(tenantPattern(slug, `/people/${own?.contactId}`))
   await expect(page.getByRole("heading", { level: 1, name: "Lucía Quispe" })).toBeVisible()
-  await expect(page.getByText("Habla por ella:")).toBeVisible()
+  // Sin sexo registrado no se supone ninguno.
+  await expect(page.getByText("Habla en su nombre:")).toBeVisible()
 
   // La identidad se edita con el formulario de la ficha y llega a las dos.
   await page.getByRole("button", { name: "Más acciones" }).click()
@@ -845,7 +846,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   const areas = page.getByRole("tablist", { name: "Pestañas de la página" }).getByRole("tab")
   await expect(areas).toHaveText(["Resumen", "Citas", "Datos"])
   await expect(page.getByText("Contacto nuevo", { exact: true }).first()).toBeVisible()
-  await expect(page.getByText("Falta registrarla como paciente")).toBeVisible()
+  await expect(page.getByText("Falta su registro como paciente")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("por-registrar.png"), fullPage: true })
 
   // El cajón trae lo que ya se sabe de ella.
@@ -871,7 +872,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   await expect(page).toHaveURL(tenantPattern(slug, `/people/${rosa.id}`))
   await expect(areas).toHaveText(["Resumen", "Citas", "Clínica", "Plan", "Cobros", "Datos"])
   await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible()
-  await expect(page.getByText("Falta registrarla como paciente")).toHaveCount(0)
+  await expect(page.getByText("Falta su registro como paciente")).toHaveCount(0)
 })
 
 test("quien solo dijo sus nombres: editar otro dato no pide apellidos, y registrarla los pide con lo guardado ya escrito", async ({ owner }) => {

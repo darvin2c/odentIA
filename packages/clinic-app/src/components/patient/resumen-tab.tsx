@@ -18,7 +18,6 @@ import { usePersonArchived } from "../../lib/person-archived"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { dueWords, isOverdue } from "../crm/crm-helpers"
 import { TaskDrawer } from "../crm/task-drawer"
-import { attendWord } from "../../lib/patient-overview"
 import { useCollectFlow } from "./collect-flow"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
@@ -93,7 +92,7 @@ export function PendingList({ pending, loading = false }: { pending: Pending[]; 
           {/* El texto tiene un ancho mínimo: una acción ancha baja de línea en vez de dejarlo en una columna de una palabra. */}
           <div className="min-w-0 flex-[1_1_16rem]">
             <p className="text-sm font-medium">{item.title}</p>
-            <p className="text-sm text-muted-foreground">{item.detail}</p>
+            {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
           </div>
           {item.stacked ? <div className="basis-full">{item.action}</div> : item.action}
         </li>
@@ -282,9 +281,9 @@ export function PatientPendingCard({
     if (gaps.length > 0 || review)
       pending.push({
         id: "filiacion",
-        title: gaps.length > 0 ? `Faltan datos para ${attendWord(detail.patient.sex)}` : "Apellidos por confirmar",
-        stacked: gaps.length > 0,
-        detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
+        // En una línea, qué falta (QA de la ficha del 9 nov: eran 4 líneas en casi todos).
+        title: gaps.length > 0 ? `Faltan datos: ${filiationGapsText(gaps).toLowerCase()}` : "Apellidos por confirmar",
+        detail: review,
         action: (() => {
           const complete = (
             <Button
