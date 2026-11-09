@@ -18,6 +18,7 @@ import {
   roundMoneyValue,
   sumMoneyValues,
 } from "@odentia/clinical"
+import { canAttend } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { conversation } from "@odentia/db/schema/crm"
@@ -2234,7 +2235,9 @@ export interface CommissionExceptionInput {
 /**
  * Una excepción para un servicio: otro porcentaje, un monto fijo por cada uno o,
  * sin ninguno de los dos, quitarla (vuelve al general). Vale para lo que se atienda
- * desde ahora, como el porcentaje general. El monto va en la moneda del precio del
+ * desde ahora, como el porcentaje general; la primera de un servicio, sin porcentaje
+ * general, vale también para lo ya cobrado de él que aún no se paga (un profesional
+ * puede comisionar solo por servicio). El monto va en la moneda del precio del
  * servicio, porque la comisión va en la moneda de lo cobrado (ADR 0155).
  */
 export async function setCommissionException(
@@ -2265,6 +2268,22 @@ export async function setCommissionException(
     sql`select pg_advisory_xact_lock(hashtextextended(${`commission-rate:${orgId}:${input.professionalUserId}`}, 0))`,
   )
   const current = await latestRate(tx, orgId, input.professionalUserId, service.id)
+  // Sin porcentaje general ni nada antes para este servicio, lo ya cobrado de él no tenía ninguna regla
+  // (daba 0 y un pago no lo congelaba): la primera comisión del servicio vale también para eso, como el
+  // primer porcentaje general. Con un general, lo de antes ya se calculó con él y el cambio vale desde ahora.
+  const [anyBefore] = current
+    ? [current]
+    : await tx
+        .select({ id: commissionRate.id })
+        .from(commissionRate)
+        .where(
+          and(
+            eq(commissionRate.organizationId, orgId),
+            eq(commissionRate.professionalUserId, input.professionalUserId),
+            or(isNull(commissionRate.serviceId), eq(commissionRate.serviceId, service.id)),
+          ),
+        )
+        .limit(1)
   const zone = await getOrgLocale(tx, orgId)
   // Lo guardado sin moneda es del negocio: el mismo monto en otra moneda es otra regla.
   const currentCurrency = current?.fixedCents == null ? null : (current.fixedCurrency ?? zone.currency)
@@ -2280,7 +2299,7 @@ export async function setCommissionException(
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
       serviceId: service.id,
-      effectiveFrom: sql`clock_timestamp()`,
+      effectiveFrom: anyBefore ? sql`clock_timestamp()` : sql`'-infinity'::timestamptz`,
       rateBps,
       fixedCents,
       fixedCurrency,
@@ -2314,6 +2333,40 @@ export async function listCommissionRates(
     rows.map((r) => r.professionalUserId),
   )
   return rows.map((r) => ({ ...r, professionalName: names.get(r.professionalUserId) ?? null }))
+}
+
+/**
+ * La comisión de hoy de cada persona del equipo que puede atender, la tenga o no: su porcentaje
+ * general (con desde cuándo y el anterior) y cada servicio con una comisión distinta. Es lo que se
+ * fija en Configuración › Comisiones por profesional; el mes se calcula aparte, con lo que valía cada día.
+ *
+ * - Sin ningún porcentaje ni servicio: aún no se decidió (lo cobrado de lo que atiende da 0 hasta fijarla).
+ * - Porcentaje 0 sin servicios: no cobra comisión (por ejemplo, solo tiene sueldo).
+ * - Porcentaje 0 o ninguno, con servicios: comisiona solo por esos servicios.
+ */
+export async function listCommissionAgreements(tx: Db, orgId: string) {
+  const team = await tx
+    .select({ userId: member.userId, role: member.role, name: user.name })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(eq(member.organizationId, orgId))
+  const attending = team
+    .filter((row) => canAttend(row.role))
+    .sort((a, b) => a.name.localeCompare(b.name, "es"))
+  const out = []
+  for (const person of attending) {
+    const rules = await commissionRulesOf(tx, orgId, person.userId)
+    out.push({
+      professionalUserId: person.userId,
+      professionalName: person.name,
+      rateBps: rules.rateBps,
+      hasRate: rules.hasRate,
+      rateSince: rules.since,
+      previousRateBps: rules.previousRateBps,
+      exceptions: rules.exceptions,
+    })
+  }
+  return out
 }
 
 async function commissionRateOf(tx: Db, orgId: string, professionalUserId: string): Promise<number> {
@@ -3230,6 +3283,8 @@ function commissionSummary(view: MonthCommissionsView) {
     month: view.month,
     currency: view.currency,
     rateBps: view.rateBps,
+    /** Ya tiene un porcentaje general, aunque sea 0 (no cobra comisión o solo por servicio). */
+    hasRate: view.hasRate,
     /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
     exceptionCount: view.exceptions.length,
     /**
@@ -3323,7 +3378,10 @@ export async function listMonthCommissions(
     // Quien salió sin comisión en el mes (por ejemplo, sin porcentaje) ni nada que deber no se lista.
     const shows = (v: MonthCommissionsView) =>
       v.commissionCents > 0 || v.paidCents > 0 || v.pendingCents !== 0 || v.owedCents > 0
-    if (view.inTeam || shows(view) || view.others.some(shows)) rows.push(summaryWithOthers(view))
+    // Quien no cobra comisión (porcentaje 0 y ningún servicio aparte) no tiene nada que pagar en el mes:
+    // solo aparece si queda algo de antes, pagado o por descontar.
+    const noCommission = view.hasRate && view.rateBps === 0 && view.exceptions.length === 0
+    if ((view.inTeam && !noCommission) || shows(view) || view.others.some(shows)) rows.push(summaryWithOthers(view))
   }
   return rows.sort(
     (a, b) => b.commissionCents - a.commissionCents || (a.professionalName ?? "").localeCompare(b.professionalName ?? ""),
