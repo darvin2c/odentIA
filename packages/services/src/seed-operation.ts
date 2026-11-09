@@ -310,6 +310,7 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       usedInCare: !item.onlySale,
       forSale: item.sale !== undefined,
       salePriceCents: item.sale !== undefined ? demoPriceCents(item.sale, country) : null,
+      ...(item.label ?? {}),
       // Las compras llegan a la sede principal: la otra solo recibe guantes y no lleva mínimos
       // (con ellos, todo saldría como que hace falta).
       minimums: min > 0 ? [{ branchId: main, minQuantity: min }] : [],

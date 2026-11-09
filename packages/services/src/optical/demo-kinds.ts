@@ -117,6 +117,8 @@ const OPTICAL_INVENTORY: DemoKindRecipe["inventory"] = {
       sku: "VEN-MONTURA-ACETATO",
       name: "Montura de acetato",
       unit: "montura",
+      // Con su etiqueta, para mostrar el escáner al vender (el código es de ficción).
+      label: { barcode: "7750000150013", brand: "Marca propia", model: "AC-210", color: "Carey", size: "52□18 140" },
       cost: 45,
       min: 10,
       sale: 150,
