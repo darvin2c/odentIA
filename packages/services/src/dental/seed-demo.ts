@@ -1091,19 +1091,16 @@ const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
       causeAt: new Date(Date.now() + 2 * 24 * 3600_000),
     })
   },
-  // Pasó sola: presupuesto presentado.
+  // Interesado, con quien la lleva. No se mueve a «Presupuesto enviado» a mano: ahí llegan
+  // solas las de los presupuestos que la demo sí entrega (QA del 8 nov: una oportunidad en
+  // «Presupuesto enviado» cuyo cajón decía «Sin presupuesto»).
   "Carlos Paredes": async (contactId) => {
-    const opp = await createOpportunity(
+    await createOpportunity(
       db,
       ORG_A,
       { contactId, title: "Endodoncia", assignedUserId: ANA_ID },
       { userId: ANA_ID },
     )
-    await moveOpportunity(db, ORG_A, opp.id, stageOf("presupuesto_enviado").id, {
-      userId: null,
-      origin: "automatico",
-      cause: "presupuesto_presentado",
-    })
   },
   // Ganada: aceptó el presupuesto.
   "Lucía Fernández": async (contactId) => {
