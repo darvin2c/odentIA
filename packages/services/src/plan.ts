@@ -828,11 +828,18 @@ export async function getTreatmentPlanDetail(
   }
 }
 
+/**
+ * Los tratamientos del plan. `withoutVoided` (el Plan de la persona): lo que
+ * se canceló porque se anuló la atención donde se indicó no se lista; queda en
+ * la atención anulada y en la auditoría. La copia de la historia y los demás
+ * lectores lo siguen recibiendo.
+ */
 export async function listPlanItems(
   tx: Db,
   orgId: string,
   patientId: string,
   planId?: string,
+  opts: { withoutVoided?: boolean } = {},
 ): Promise<PlanItemWithProgress[]> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
@@ -840,6 +847,11 @@ export async function listPlanItems(
     eq(treatmentPlanItem.organizationId, orgId),
   ]
   if (planId) conditions.push(eq(treatmentPlanItem.planId, planId))
+  if (opts.withoutVoided) {
+    conditions.push(sql`not (${treatmentPlanItem.status} = 'cancelado' and exists (
+      select 1 from encounter voided where voided.organization_id = ${treatmentPlanItem.organizationId}
+        and voided.id = ${treatmentPlanItem.sourceEncounterId} and voided.status = 'anulada'))`)
+  }
   const items = await tx
     .select()
     .from(treatmentPlanItem)

@@ -92,6 +92,7 @@ import {
   updatePlanItem,
   reopenPlanItemForSession,
   updatePlanItemPlanning,
+  getEncounterVoidPreview,
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
@@ -412,6 +413,12 @@ const planBatchInput = z
 const reasonInput = z
   .object({
     reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
+  })
+  .strict()
+/** Anular la atención: el motivo y lo entregado que el diálogo mostró que se anula con ella. */
+const voidEncounterInput = reasonInput
+  .extend({
+    budgets: z.array(z.object({ id: z.uuid(), status: z.string().max(20) }).strict()).max(20).optional(),
   })
   .strict()
 /** `/closing?addSession=a,b`: lo marcado «Falta otra sesión» en el cierre. */
@@ -914,26 +921,30 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   // La leen quien atiende, recepción y caja: sin diagnósticos ni piezas, y el
   // botón solo para quien puede hacerlo.
   app.get("/:id/next-step", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+        getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission), {
+          viewerUserId: userId,
+        }),
       ),
     )
   })
   // Todo lo que sigue, en una lista (el Resumen): la misma regla y el mismo permiso.
   app.get("/:id/next-steps", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
     }
     return runService(c, 200, async () =>
       (
         await withOrgContext(deps.db, orgId, (tx) =>
-          getPlanNextSteps(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+          getPlanNextSteps(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission), {
+            viewerUserId: userId,
+          }),
         )
       ).steps,
     )
@@ -1565,9 +1576,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
+  // Qué se lleva anular la atención: el diálogo lo muestra antes de confirmar.
+  app.get("/:id/encounters/:encounterId/void-preview", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getEncounterVoidPreview(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), {
+          memberRole,
+          seesCharges: canAccess(memberRole, "finance.read"),
+        }),
+      ),
+    )
+  })
   app.post("/:id/encounters/:encounterId/void", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = voidEncounterInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
@@ -1578,6 +1601,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("id"),
           c.req.param("encounterId"),
           parsed.data,
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
       ),
     )
@@ -1726,7 +1750,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId } = orgContextOf(c)
     const planId = c.req.query("planId") || undefined
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId)),
+      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId, { withoutVoided: true })),
     )
   })
   app.post("/:id/plan/items", async (c) => {
