@@ -92,6 +92,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] El representante legal declarado por el chat («es mi hijo», ADR 0101) no se vuelve representante pleno sin comprobarlo: una tía o una abuela no debería firmar consentimientos ni recibir los papeles de salud. Hoy el documento de prueba existe pero no se exige.
 - [ ] Lo que el paciente declara en el enlace queda pendiente de revisión, no como confirmado.
 - [ ] Tabaco y alcohol se preguntan. Importan en periodoncia, cirugía e implantes, y hoy solo los pregunta latidIA.
+- [ ] El documento del representante escrito al firmar se guarda en su ficha (sin pisar otro distinto) y, mientras falte, entra en «Faltan datos» del menor.
 
 **Ya falló:** el +44 se abría como Perú; «Es esta persona» se movía bajo el cursor y cambiaba el formulario (8 nov, PR 550); al menor le faltaba el DNI del responsable.
 **Fuentes:** NTS 139-MINSA; Ley 29414; ADR 0001, 0029, 0044, 0058 y 0109.
@@ -120,11 +121,12 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Con o sin cita, la atención sabe a qué viene la persona: la cita de hoy, la sesión que sigue de un tratamiento en curso («sesión 2 de 2»), el control vencido o una urgencia.
 - [ ] Un toque en «Continuar hoy» o «Viene a su control» llena el motivo, propone el diagnóstico activo y vincula el tratamiento. **Por la cita y por la ficha hace lo mismo.**
 - [ ] Si ya tiene cita para esa sesión otro día, lo dice.
+- [ ] Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia en curso) dice «va después de terminar…» y su «Hacerla hoy» queda como segunda opción; es la misma regla de «Qué sigue», Inicio, el enlace y Argos.
 - [ ] Motivo, tiempo y relato son campos de la página, sin cajón. Se guardan mientras se escribe.
 - [ ] Hay un solo borrador por paciente. Si otro profesional lo toma, queda registrado (`takeOverEncounter`).
 - [ ] Se atiende sin cita (ADR 0098) y en domingo o fuera de horario, si la clínica lo permite.
 
-**Ya falló:** la atención sin cita salía en blanco (8 nov, PR 549); por la cita no proponía el diagnóstico, y por la ficha sí (9 nov).
+**Ya falló:** la atención sin cita salía en blanco (8 nov, PR 549); por la cita no proponía el diagnóstico, y por la ficha sí (9 nov); «Hoy viene a…» ofrecía «Corona · Hacerla hoy» con la endodoncia en curso (9 nov, tarde).
 **Fuentes:** NTS 139-MINSA (motivo, tiempo de enfermedad y relato); ADR 0002, 0003, 0098, 0128, 0139 y 0165.
 
 ## P-ODO-04 Examen clínico
@@ -157,7 +159,9 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] En el Perú, el odontograma se firma en sus momentos (inicio del plan, nuevos hallazgos y culminación; NTS 188), y lo firmado coincide con lo que se ve.
 - [ ] Las palabras van en español (no «occlusal»).
 
-**Ya falló:** una caries de dos caras contaba como dos hallazgos y quedaba una vigente tras la endodoncia (PR 553); la 38 no se podía elegir (PR 481); las piezas a 390 px medían 20 px; «Evolución» salía vacío sobre la lista.
+- [ ] Cada hallazgo guarda su propio código y no el del diagnóstico elegido junto. Una caries profunda (CDP) no se convierte en pulpitis: el diagnóstico pulpar se sugiere sin marcar y pide evaluar la vitalidad (AAE).
+
+**Ya falló:** la caries quedaba rotulada con el código de la pulpitis elegida en el mismo panel (9 nov); una caries de dos caras contaba como dos hallazgos y quedaba una vigente tras la endodoncia (PR 553); la 38 no se podía elegir (PR 481); las piezas a 390 px medían 20 px; «Evolución» salía vacío sobre la lista.
 **Huecos conocidos:** no hay cara cervical (la clase V va como vestibular, palatina o lingual).
 **Fuentes:** ISO 3950 (notación FDI); NTS 188-MINSA (odontograma); ADR 0036 y 0079.
 
@@ -183,6 +187,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 - [ ] Al indicar, la pieza y el diagnóstico vienen del último hallazgo, sin escribirlos de nuevo.
 - [ ] El servicio corresponde a la pieza: una endodoncia de molar no se ofrece como «anterior», y el tarifario tiene la de anterior, premolar y molar.
+- [ ] El servicio coincide con el grupo de la pieza (anterior, premolar o molar) y la dentición (permanente o temporal); si no, avisa sin frenar y ofrece el mismo servicio del grupo correcto. Sin él en el tarifario, no ofrece otro grupo (la bicúspide no sirve en un molar). Fuentes: CPMS (RM 550-2023-MINSA) y CDT D3310–D3348.
 - [ ] Caminos alternativos para la misma pieza (endodoncia más corona, o exodoncia) se ven como opciones que no se suman.
 - [ ] Las fases (urgencia, básica, quirúrgica, rehabilitadora y mantenimiento) siguen el orden clínico: **la corona no se propone ni se hace antes de terminar la endodoncia de esa pieza**, y lo urgente va primero.
 - [ ] Cada tratamiento dice sus sesiones previstas (las habituales del servicio, ADR 0164) y pregunta las sesiones por cualquier camino, también si se indica desde el odontograma.
@@ -191,7 +196,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Avisa si ya se hizo antes en esa pieza.
 - [ ] Lo anulado no ensucia el plan con renglones tachados.
 
-**Ya falló:** «Endodoncia anterior vital» se ofrecía para un molar (demo); la endodoncia indicada desde el odontograma no preguntaba sesiones y venía «Sí, terminar» marcado (9 nov); la corona antes de terminar la endodoncia del mismo diente (9 nov); «sesión 2» que contaba una cita pasada (PR 550).
+**Ya falló:** «Endodoncia anterior vital» se ofrecía para un molar (demo) y el consentimiento firmado decía «anterior · pieza 46» (9 nov); la endodoncia indicada desde el odontograma no preguntaba sesiones y venía «Sí, terminar» marcado (9 nov); la corona antes de terminar la endodoncia del mismo diente (9 nov); «sesión 2» que contaba una cita pasada (PR 550).
 **Fuentes:** ADR 0034, 0099, 0153, 0161 y 0164.
 
 ## P-ODO-08 Presupuesto del plan
@@ -318,7 +323,10 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] La firma guarda nombre, título y colegiatura (COP) de quien firma. Después solo se agregan adendas.
 - [ ] «Qué sigue» es una sola lista, igual en la ficha, Inicio y la atención.
 
-**Ya falló:** «Sí, terminar» venía marcado aunque faltaba una sesión; la sesión 2 se proponía el mismo día; el control de otro odontólogo venía desmarcado (8 y 9 nov; PR 524, 533, 535 y 537).
+- [ ] Si una sesión termina en «Falta otra sesión» y lo que va después ya tiene cita, el cierre lo avisa para revisar esa cita.
+- [ ] El cierre dice lo que se cargó hoy y una sola cifra de lo que debe, que sigue siendo cierta después de cobrar ahí mismo.
+
+**Ya falló:** tras un pago parcial, el cierre decía a la vez «Quedó por cobrar S/ 450» y «Debe S/ 200», y en la sesión 2 «ya estaba incluido en lo cobrado» debiendo 200 (9 nov); «Sí, terminar» venía marcado aunque faltaba una sesión; la sesión 2 se proponía el mismo día; el control de otro odontólogo venía desmarcado (8 y 9 nov; PR 524, 533, 535 y 537).
 **Fuentes:** NTS 139-MINSA; ADR 0003, 0152 y 0161.
 
 ## P-ODO-16 Anular y corregir
@@ -354,6 +362,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] El control se pide al firmar y se cumple al volver (ADR 0152). Un control y una cita no son dos cosas para el odontólogo.
 - [ ] Los controles que se repiten (mantenimiento periodontal, ortodoncia mensual) se generan con su frecuencia.
 - [ ] La lista de vencidos de Inicio tiene un número real y lleva a atenderlos.
+- [ ] La endodoncia deja un control corto (a 30 días o menos, que puede ir en la cita de la corona) y uno radiográfico de cicatrización (ESE 2006: al menos al año), que no se da por cumplido con el corto.
 - [ ] El recordatorio que sale al paciente coincide con el control.
 
 **Ya falló:** «Indica el próximo control» sin botón; el control y la cita separados (6 nov).
@@ -469,6 +478,7 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | C13 | Hipertenso que llega con 185/115 para una exodoncia programada. | 02, 04, 10 | La presión se nota antes de anestesiar y el aviso no bloquea (hoy no hay aviso). |
 | C14 | Tomografía para planear un implante en la 36, guardada en la atención de hoy. | 14, 21 | Ir a la 36; medir con escala; guardar la vista en la atención correcta; la orden se completa. |
 | C15 | Toda la consulta C1 dictada a Clío. | 19 y los de C1 | Cada propuesta se confirma; el odontograma, el diagnóstico y la receta dictados son correctos. |
+| C16 | Adulto con necrosis en la 14, a quien se le indica «Endodoncia posterior no vital». | 05, 06, 07, 09 | Avisa y ofrece la de bicúspide no vital; el consentimiento dice premolar. |
 
 ### El recorrido largo
 
