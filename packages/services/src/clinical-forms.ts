@@ -3149,9 +3149,11 @@ const NEED_RANK: Record<ConsentNeedStatus, number> = {
 }
 
 /**
- * Consentimientos que pide una atención: por los servicios registrados como
- * hechos y por los indicados en ella, más los pendientes que se prepararon a
- * mano en la misma atención. Uno firmado para el mismo tratamiento en otra
+ * Consentimientos que pide una atención: por lo que se hace hoy, es decir, los
+ * servicios registrados como hechos y los tratamientos que se trajeron a ella
+ * (su cita o «Hacerla hoy»), más los pendientes que se prepararon a mano en la
+ * misma atención. Lo indicado para otro día no lo pide: se consiente el día que
+ * se hace (QA de la atención del 8 nov; ADR 0165). Uno firmado para el mismo tratamiento en otra
  * visita también lo cubre. Una sola definición para el bloque Documentos, el
  * cierre y la API.
  */
@@ -3205,7 +3207,8 @@ export async function getEncounterConsentNeeds(
       and(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        sql`exists (select 1 from encounter_plan_item today where today.organization_id = ${treatmentPlanItem.organizationId}
+          and today.plan_item_id = ${treatmentPlanItem.id} and today.encounter_id = ${encounterId})`,
         sql`${treatmentPlanItem.status} <> 'cancelado'`,
       ),
     )
