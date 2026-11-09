@@ -1117,7 +1117,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   const orgMethods = await tx
     .select({ id: organizationPaymentMethod.id, name: organizationPaymentMethod.name, typeCode: organizationPaymentMethod.typeCode })
     .from(organizationPaymentMethod)
-    .where(eq(organizationPaymentMethod.organizationId, input.orgId))
+    .where(and(eq(organizationPaymentMethod.organizationId, input.orgId), eq(organizationPaymentMethod.isActive, true)))
   const methodOf = (typeCode: string) => orgMethods.find((method) => method.typeCode === typeCode) ?? null
   const { countryCode } = await getOrgLocale(tx, input.orgId)
   const paperOf = (category: string) => {

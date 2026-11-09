@@ -192,3 +192,80 @@ it("anotar lo que se repite no paga; empieza en lo que aún no vence y «Pagar»
   )
   expect(paid).toMatchObject({ amountCents: 28_000, shiftId: null, paymentReference: "777", recurringMonth: current.key })
 })
+
+it("la fila de sueldos que ve caja no dice a quién, con qué ni lo de antes, aunque el pago lo diga (ADR 0166)", async () => {
+  const { f, branchId, yape } = await setup()
+  const admin = { seesPeople: true }
+  const paid = await f.run((tx) =>
+    createExpense(
+      tx,
+      "org_a",
+      f.actor,
+      {
+        branchId,
+        category: "Personal",
+        concept: "Honorarios de Ana Pérez",
+        amountCents: 150_000,
+        currency: "PEN",
+        paymentMethodId: yape.id,
+        paymentReference: "777111",
+        receiptType: "02",
+        supplierName: "Ana Pérez",
+        supplierTaxId: "10456789012",
+      },
+      {},
+      admin,
+    ),
+  )
+  await f.run((tx) =>
+    correctExpense(tx, "org_a", f.actor, paid.id, {
+      branchId,
+      category: "Personal",
+      concept: "Honorarios de Ana Pérez",
+      amountCents: 160_000,
+      currency: "PEN",
+      paymentMethodId: yape.id,
+    }, { seesPeople: true }),
+  )
+  const cashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...thisMonth(), branchId }))
+  const row = cashier.expenses.find((item) => item.category === "Personal")
+  expect(row).toMatchObject({
+    concept: "Pago de sueldos",
+    supplierName: null,
+    supplierTaxId: null,
+    paymentReference: null,
+    methodName: null,
+    replaced: null,
+    replacesExpenseId: null,
+  })
+  expect(JSON.stringify(cashier)).not.toContain("Ana")
+  // Buscar el nombre no la encuentra: la fila junta ya no lo lleva.
+  const found = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...thisMonth(), branchId, q: "Ana" }))
+  expect(found.expenses).toEqual([])
+})
+
+it("corregir un pago del IGV a otro tipo deja de ser el impuesto de lo cobrado", async () => {
+  const { f, branchId, yape } = await setup()
+  const igv = await f.run((tx) =>
+    createExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Impuestos",
+      concept: "IGV",
+      amountCents: 10_000,
+      currency: "PEN",
+      salesTax: true,
+      paymentMethodId: yape.id,
+    }),
+  )
+  const fixed = await f.run((tx) =>
+    correctExpense(tx, "org_a", f.actor, igv.id, {
+      branchId,
+      category: "Otros",
+      concept: "Arbitrios",
+      amountCents: 10_000,
+      currency: "PEN",
+      paymentMethodId: yape.id,
+    }),
+  )
+  expect(fixed).toMatchObject({ category: "Otros", salesTax: false })
+})

@@ -272,7 +272,11 @@ export async function registerRecurringExpense(
       day,
       firstMonth,
       memberUserId,
-      fromCash: expenseInput.fromCash === true,
+      // El medio con que se pagó, si se dijo: es el que se propone la próxima vez.
+      fromCash: expenseInput.paymentMethodId
+        ? (await recurringMethod(tx, orgId, expenseInput.paymentMethodId)).typeCode === "10"
+        : expenseInput.fromCash === true,
+      paymentMethodId: expenseInput.paymentMethodId ?? null,
       dueNextMonth: repeat.dueNextMonth === true,
       requestId,
       createdBy: actorUserId,
@@ -366,11 +370,14 @@ export async function noteRecurringExpense(
       .where(and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.requestId, requestId)))
     if (replay) {
       if (
+        replay.branchId !== input.branchId ||
         replay.concept !== input.concept.trim() ||
         replay.amountCents !== input.amountCents ||
         replay.day !== input.day ||
         replay.everyMonths !== input.everyMonths ||
-        replay.category !== category
+        replay.category !== category ||
+        (input.firstMonth != null && replay.firstMonth !== input.firstMonth) ||
+        replay.paymentMethodId !== (input.paymentMethodId ?? null)
       )
         throw requestReused()
       return replay
@@ -667,9 +674,23 @@ export async function payRecurringOccurrence(
   const template = await lockTemplate(tx, orgId, id, viewer)
   await requireOccurrence(tx, orgId, template, input.month)
   const suggested = (await suggestedAmounts(tx, orgId, [template])).get(template.id) ?? template.amountCents
-  // Con qué se paga: lo que se dijo; si no, el medio de la plantilla, y si no tiene, la casilla de antes.
-  const paymentMethodId =
-    input.paymentMethodId ?? (input.fromCash === undefined ? (template.paymentMethodId ?? undefined) : undefined)
+  // Con qué se paga: lo que se dijo; si no, el medio de la plantilla mientras siga activo, y si no, la
+  // casilla de antes.
+  const templateMethod =
+    !input.paymentMethodId && input.fromCash === undefined && template.paymentMethodId
+      ? await tx
+          .select({ id: organizationPaymentMethod.id })
+          .from(organizationPaymentMethod)
+          .where(
+            and(
+              eq(organizationPaymentMethod.organizationId, orgId),
+              eq(organizationPaymentMethod.id, template.paymentMethodId),
+              eq(organizationPaymentMethod.isActive, true),
+            ),
+          )
+          .then((rows) => rows[0]?.id)
+      : undefined
+  const paymentMethodId = input.paymentMethodId ?? templateMethod
   const replay = await replayedExpense(
     tx,
     orgId,

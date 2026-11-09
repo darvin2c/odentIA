@@ -1663,6 +1663,15 @@ function withoutCommissionNames<
     receiptKind: string
     shiftId: string | null
     requestId: string | null
+    receiptType: string | null
+    paymentMethodId: string | null
+    methodName: string | null
+    methodTypeCode: string | null
+    paymentReference: string | null
+    supplierId: string | null
+    supplierName: string | null
+    supplierTaxId: string | null
+    replacesExpenseId: string | null
     commission: boolean
     /** El pago del sueldo de una persona: se junta igual, como «Pago de sueldos» (S1). */
     salary: boolean
@@ -1694,12 +1703,24 @@ function withoutCommissionNames<
         createdBy: null,
         recurringId: null,
         recurringMonth: null,
-        // Junta pagos hechos de varias formas: no dice de qué caja ni con qué papel salió cada uno.
+        // Junta pagos hechos de varias formas: no dice de qué caja, con qué medio ni con qué papel
+        // salió cada uno, ni a quién (un recibo por honorarios dice el nombre y el RUC), ni lo que
+        // era antes de corregirlo (ADR 0166).
         receiptKind: "ninguno",
         shiftId: null,
         requestId: null,
+        receiptType: null,
+        paymentMethodId: null,
+        methodName: null,
+        methodTypeCode: null,
+        paymentReference: null,
+        supplierId: null,
+        supplierName: null,
+        supplierTaxId: null,
+        replacesExpenseId: null,
         ...("fromCash" in row ? { fromCash: false } : {}),
         ...("shiftClosed" in row ? { shiftClosed: false } : {}),
+        ...("replaced" in row ? { replaced: null } : {}),
       }
       merged.set(key, first)
       out.push(first)
@@ -1791,7 +1812,15 @@ export async function getMonthExpenses(
           await tx
             .select({ id: expense.replacesExpenseId })
             .from(expense)
-            .where(and(eq(expense.organizationId, orgId), inArray(expense.replacesExpenseId, rows.map((row) => row.id))))
+            .where(
+              and(
+                eq(expense.organizationId, orgId),
+                inArray(expense.replacesExpenseId, rows.map((row) => row.id)),
+                // Solo si lo nuevo quedó en este mes: corregido a otro mes, sigue aquí anulado y lo dice.
+                gte(expense.spentAt, start),
+                lt(expense.spentAt, end),
+              ),
+            )
         ).map((row) => row.id)
       : [],
   )
@@ -1925,8 +1954,9 @@ export async function correctExpense(
   const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
   const was = original.methodName ?? (original.shiftId ? "Efectivo de la caja" : "Otro medio")
   const now = method?.name ?? (input.fromCash ? "Efectivo de la caja" : "Otro medio")
+  // Lo que no se manda se queda como estaba (la API o el agente pueden mandar solo lo que cambia).
   const unit = input.currency ?? original.currency
-  const category = input.category?.trim() || "Otros"
+  const category = input.category?.trim() || original.category
   const changes = [
     original.amountCents !== input.amountCents || original.currency !== unit
       ? `${money(original.amountCents, original.currency)} → ${money(input.amountCents, unit)}`
@@ -1941,12 +1971,23 @@ export async function correctExpense(
     tx,
     orgId,
     actorUserId,
-    { ...input, branchId: original.branchId, salesTax: input.salesTax ?? original.salesTax },
+    {
+      ...input,
+      branchId: original.branchId,
+      category,
+      currency: unit,
+      spentAt: input.spentAt === undefined ? original.spentAt.toISOString() : input.spentAt,
+      notes: input.notes === undefined ? original.notes : input.notes,
+      // El pago del impuesto de lo cobrado lo sigue siendo solo si sigue en «Impuestos».
+      salesTax: input.salesTax ?? (category === SALES_TAX_EXPENSE_CATEGORY ? original.salesTax : false),
+    },
     {
       ...(original.recurringId && original.recurringMonth
         ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
         : {}),
       replacesExpenseId: original.id,
+      // El movimiento de caja de un sueldo no dice a quién, como al pagarlo (ADR 0166).
+      ...(category === STAFF_PAY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
     },
     viewer,
   )

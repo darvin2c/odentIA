@@ -407,17 +407,25 @@ export function PurchasePaymentDrawer({
                   : "Solo el efectivo sale de la caja."
               }
             >
-              {(control) => (
-                <PaymentMethodButtons
-                  id={control.id}
-                  methods={methods.data?.data ?? []}
-                  value={field.state.value}
-                  invalid={control.invalid}
-                  aria-describedby={control.describedBy}
-                  onBlur={control.onBlur}
-                  onChange={(next) => field.handleChange(next)}
-                />
-              )}
+              {(control) =>
+                methods.isPending ? (
+                  <p className="text-sm text-muted-foreground">Consultando los medios de la clínica…</p>
+                ) : methods.isError ? (
+                  <p className="text-sm">No se pudieron consultar los medios de pago: cierra y vuelve a abrir el pago.</p>
+                ) : (methods.data?.data ?? []).length === 0 ? (
+                  <p className="text-sm">La clínica aún no tiene medios de pago: se agregan en Configuración › Medios de pago.</p>
+                ) : (
+                  <PaymentMethodButtons
+                    id={control.id}
+                    methods={methods.data?.data ?? []}
+                    value={field.state.value}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )
+              }
             </field.Group>
           )}
         </form.AppField>

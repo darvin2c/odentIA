@@ -12,7 +12,15 @@
  * Inventario; ADR 0061) y así no se cuenta dos veces. Con otra moneda en la clínica, un gasto suelto
  * lleva su moneda y su cambio, y pagar una compra deja elegir con qué se paga.
  */
-import { currencyWord, expenseReceiptTypes, formatMoney, formatMoneyInput, NO_RECEIPT_TYPE, suggestedReceiptType } from "@odentia/clinical"
+import {
+  currencyWord,
+  expenseReceiptTypes,
+  formatExchangeRateInput,
+  formatMoney,
+  formatMoneyInput,
+  NO_RECEIPT_TYPE,
+  suggestedReceiptType,
+} from "@odentia/clinical"
 import { Button, cn, FieldDescription, FieldError, FieldLabel, Input, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, useAppForm, useFieldContext, useFieldControl, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -143,6 +151,8 @@ function PurchaseChoice({
       <legend id={legendId} className="px-1 font-semibold">
         ¿Es el pago de una compra de Inventario?
       </legend>
+      {/* El error arriba, junto a la pregunta: debajo de una lista larga quedaba fuera de la vista. */}
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
       <RadioGroup
         id={control.id}
         aria-labelledby={legendId}
@@ -187,7 +197,6 @@ function PurchaseChoice({
       <p id={descriptionId} className="text-sm text-muted-foreground">
         Si es una compra, el monto se llena solo y la compra queda al día en Inventario: así no se cuenta dos veces.
       </p>
-      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
     </fieldset>
   )
 }
@@ -274,6 +283,7 @@ export function ExpenseFormDrawer({
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
         if (!value.method) fields.method = "Elige con qué se pagó."
+        else if (!derive(value).method) fields.method = "Ese medio ya no está activo: elige otro."
         else if (after !== null && after < 0)
           // Una sola salida por cada camino: ingresar lo que falta o decir que se pagó de otra forma.
           fields.method = "No alcanza el efectivo de la caja: ingresa lo que falta o elige con qué se pagó."
@@ -341,8 +351,9 @@ export function ExpenseFormDrawer({
         category: value.category as ExpenseCategory,
         fromCash: method.typeCode === CASH_TYPE_CODE,
         ...(asksSalesTax ? { salesTax: value.salesTax === "cobros" } : {}),
-        // Lo de antes, con su comprobante escrito a mano, lo conserva si no se elige un tipo.
+        // Lo de antes, con su comprobante escrito a mano y su número, lo conserva si no se elige un tipo.
         ...(correcting && !value.receiptType && correcting.receiptKind !== NO_RECEIPT ? { receiptKind: correcting.receiptKind } : {}),
+        ...(correcting && !value.receiptType && correcting.receiptNumber ? { receiptNumber: correcting.receiptNumber } : {}),
         ...paper,
         ...spentAt,
       }
@@ -397,7 +408,7 @@ export function ExpenseFormDrawer({
       amount: cents !== null ? formatMoneyInput(cents, unit, locale) : "",
       payIn: unit,
       tender: "",
-      rate: correcting?.exchangeRate ?? todayRate,
+      rate: correcting?.exchangeRate ? formatExchangeRateInput(correcting.exchangeRate, locale) : todayRate,
       // El medio de siempre: el que se dijo, o el efectivo si salía de la caja.
       method: correcting?.paymentMethodId ?? paying?.paymentMethodId ?? "",
       reference: correcting?.paymentReference ?? "",
@@ -413,12 +424,16 @@ export function ExpenseFormDrawer({
     })
     setSeen(null)
   }, [open, orgTimeZone, initial, place.currency, locale, form, todayRate, correcting, paying, country])
-  // Lo de antes que salía de la caja, sin medio: se propone el efectivo cuando llega la lista.
+  // Cuando llega la lista: el medio de siempre se propone solo si sigue activo; lo de antes que
+  // salía de la caja, sin medio, propone el efectivo.
   useEffect(() => {
-    if (!open || !cashMethod || form.getFieldValue("method") !== "") return
+    if (!open || !methods.data) return
+    const current = form.getFieldValue("method")
+    if (current && !allMethods.some((method) => method.id === current)) form.setFieldValue("method", "", { dontUpdateMeta: true })
+    if (form.getFieldValue("method") !== "" || !cashMethod) return
     if (correcting?.fromCash || (paying && paying.fromCash && !paying.paymentMethodId))
       form.setFieldValue("method", cashMethod.id, { dontUpdateMeta: true })
-  }, [open, cashMethod, form, correcting, paying])
+  }, [open, methods.data, allMethods, cashMethod, form, correcting, paying])
   // El cambio de hoy puede llegar después de abrir: llega puesto, sin pisar lo escrito.
   useEffect(() => {
     if (open && todayRate && form.getFieldValue("rate") === "")
@@ -473,14 +488,19 @@ export function ExpenseFormDrawer({
     })
     const method = allMethods.find((item) => item.id === value.method) ?? null
     const fromCash = method?.typeCode === CASH_TYPE_CODE
+    // Al corregir un gasto que salió de la caja, lo que salió vuelve antes de sacar lo nuevo.
+    const back =
+      correcting?.fromCash && state && (correcting.tenderCurrency ?? correcting.currency) === paid.payIn
+        ? (correcting.tenderCents ?? correcting.amountCents)
+        : 0
     // Con la caja a la vista se dice cómo queda; si no alcanza, se dice antes de guardar.
     const after =
       fromCash && state && state.currency === paid.payIn && paid.outCents !== null && (!chosen || chosen.branchId === branchId)
-        ? state.cashOnHandCents - paid.outCents
+        ? state.cashOnHandCents + back - paid.outCents
         : null
-    return { chosen, asksSalesTax, onlyBusiness, currency, cents, after, paid, method, fromCash }
+    return { chosen, asksSalesTax, onlyBusiness, currency, cents, after, paid, method, fromCash, back }
   }
-  const { chosen, asksSalesTax, onlyBusiness, cents, after, paid, method, fromCash } = derive(values)
+  const { chosen, asksSalesTax, onlyBusiness, cents, after, paid, method, fromCash, back } = derive(values)
   // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
   const advance = chosen !== null && chosen.dueCents === 0
   const asksPurchase = !paying && !correcting && values.category === "Materiales" && orders.length > 0
@@ -803,6 +823,13 @@ export function ExpenseFormDrawer({
                 <div className="flex flex-col gap-2.5">
                   {methods.isPending ? (
                     <p className="text-sm text-muted-foreground">Consultando los medios de la clínica…</p>
+                  ) : methods.isError ? (
+                    <p className="flex flex-wrap items-center gap-2 text-sm">
+                      No se pudieron consultar los medios de pago.
+                      <Button type="button" variant="outline" size="sm" onClick={() => void methods.refetch()}>
+                        Reintentar
+                      </Button>
+                    </p>
                   ) : methodOptions.length === 0 ? (
                     <p className="text-sm">La clínica aún no tiene medios de pago: se agregan en Configuración › Medios de pago.</p>
                   ) : (
@@ -821,8 +848,8 @@ export function ExpenseFormDrawer({
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm">
                       <span>
                         {after >= 0
-                          ? `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0), paid.payIn, locale)}: queda ${formatMoney(after, paid.payIn, locale)}.`
-                          : `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0), paid.payIn, locale)}: faltan ${formatMoney(-after, paid.payIn, locale)}.`}
+                          ? `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0) - back, paid.payIn, locale)}${back > 0 ? ` y vuelven ${formatMoney(back, paid.payIn, locale)} de lo anotado antes` : ""}: queda ${formatMoney(after, paid.payIn, locale)}.`
+                          : `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0) - back, paid.payIn, locale)}: faltan ${formatMoney(-after, paid.payIn, locale)}.`}
                       </span>
                       {after < 0 && canWrite ? (
                         <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
@@ -867,7 +894,7 @@ export function ExpenseFormDrawer({
               />
             )}
           </form.AppField>
-          {values.receiptType && values.receiptType !== NO_RECEIPT_TYPE ? (
+          {(values.receiptType && values.receiptType !== NO_RECEIPT_TYPE) ? (
             <form.AppField name="receiptNumber">
               {(field) => <field.TextField label="Número" maxLength={60} autoComplete="off" placeholder="B001-2345" />}
             </form.AppField>

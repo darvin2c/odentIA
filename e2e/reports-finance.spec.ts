@@ -64,11 +64,11 @@ test("una compra recibida llega a Finanzas: se avisa, se paga como gasto de Mate
   await page.getByRole("button", { name: "Registrar gasto", exact: true }).first().click()
   const form = surface(page, { name: "Registrar gasto" })
   await form.getByRole("radio", { name: "Materiales" }).check()
-  await form.getByRole("radio", { name: new RegExp(`^${label} · Insumos de prueba`) }).check()
+  await form.getByRole("radio", { name: new RegExp(`^Compra a Insumos de prueba · ${label}`) }).check()
   await expect(form.getByLabel("Importe", { exact: true })).toHaveValue("500.00")
   await expect(form.getByText("Por pagar: S/ 500.00. Puedes pagar una parte.")).toBeVisible()
-  // Se pagó por transferencia: no sale del efectivo de la caja.
-  await form.getByRole("checkbox", { name: "Se pagó con el efectivo de la caja" }).uncheck()
+  // Se pagó por transferencia: no sale del efectivo de la caja (ADR 0167).
+  await form.getByRole("button", { name: "Transferencia", exact: true }).click()
   await observe(page, info, "pagar-compra")
   await form.getByRole("button", { name: "Registrar pago" }).click()
   await expect(page.getByText(`Pago registrado: ${label} queda al día en Inventario`)).toBeVisible()

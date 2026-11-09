@@ -559,7 +559,7 @@ function NoteRecurringDrawer({
                   ? `Si no eliges, ${monthWord(proposed)}: el primero cuyo día aún no pasó. Lo de antes que ya se pagó, regístralo como gasto.`
                   : "Si no eliges, el primero cuyo día aún no pasó."
               }
-              placeholder={validDay ? `${monthWord(proposed)} (el primero que no vence)` : "El primero que no vence"}
+              placeholder={validDay ? monthWord(proposed) : "Escribe antes el día"}
               options={months}
             />
           )}

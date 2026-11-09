@@ -150,7 +150,7 @@ export function ExpensesTab({
   const askAdmin = useMutation({
     mutationFn: (input: { expense: ExpenseRow; reason: string }) =>
       requestExpenseVoidApi({
-        title: `Anular el gasto «${input.expense.concept}» del ${formatDayMonth(input.expense.spentAt, locale, orgTimeZone)} (${formatMoney(input.expense.amountCents, input.expense.currency, locale)}): ${input.reason}`,
+        title: `Anular o corregir el gasto «${input.expense.concept}» del ${formatDayMonth(input.expense.spentAt, locale, orgTimeZone)} (${formatMoney(input.expense.amountCents, input.expense.currency, locale)}): ${input.reason}`,
       }),
     onSuccess: () => {
       toast.success("Se lo pediste a administración: le llegó como tarea. El gasto sigue hasta que lo anule.")
@@ -191,9 +191,20 @@ export function ExpensesTab({
             // Un ancho mínimo: partir solo una palabra larga no debe angostar la columna a una letra.
             <div className="flex min-w-0 flex-col gap-1 sm:min-w-44">
               {/* Solo el texto libre parte una palabra larga; el monto y «Anular» no se salen de la tabla (QA del 8 nov, G28). */}
-              <span className={cn("font-medium [overflow-wrap:anywhere]", voided && "text-muted-foreground line-through")}>
+              {/* Un botón: con el teclado también se abre el detalle, con «Anular» y «Corregir». */}
+              <button
+                type="button"
+                className={cn(
+                  "text-left font-medium [overflow-wrap:anywhere] hover:underline focus-visible:underline focus-visible:outline-none",
+                  voided && "text-muted-foreground line-through",
+                )}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setViewing(expense)
+                }}
+              >
                 {expense.concept}
-              </span>
+              </button>
               <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 {expense.supplierName ? <span className="[overflow-wrap:anywhere]">{expense.supplierName}</span> : null}
                 {expense.purchaseOrderId && expense.purchaseOrderNumber !== null ? (
@@ -354,7 +365,7 @@ export function ExpensesTab({
     <>
       {filtered && data && data.expenses.length > 0 ? (
         <p className="px-1 text-sm text-muted-foreground" role="status">
-          Se ven {plural(data.shown.count, "gasto", "gastos")} ·{" "}
+          {data.shown.count === 1 ? "Se ve" : "Se ven"} {plural(data.shown.count, "gasto", "gastos")} ·{" "}
           <span className="font-semibold text-foreground">{formatMoney(data.shown.totalCents, data.currency, locale)}</span>
           {data.shown.notCounted ? ` · y ${plural(data.shown.notCounted, "pago", "pagos")} del impuesto de lo cobrado, que no suma` : ""}
         </p>
@@ -539,7 +550,7 @@ export function ExpensesTab({
                 ? [
                     [
                       "Antes",
-                      `${formatMoney(viewing.replaced.amountCents, viewing.replaced.currency, locale)} · ${expenseCategoryLabel(viewing.replaced.category)}${viewing.replaced.methodName ? ` · ${viewing.replaced.methodName}` : ""}${viewing.replaced.reason ? `. ${viewing.replaced.reason}` : ""}`,
+                      `${formatMoney(viewing.replaced.amountCents, viewing.replaced.currency, locale)} · ${expenseCategoryLabel(viewing.replaced.category)} · ${formatDayMonth(viewing.replaced.spentAt, locale, zone)}${viewing.replaced.methodName ? ` · ${viewing.replaced.methodName}` : ""}${viewing.replaced.reason ? `. ${viewing.replaced.reason}` : ""}`,
                     ],
                   ]
                 : []),
