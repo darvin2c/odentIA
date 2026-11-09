@@ -630,6 +630,8 @@ export interface VisitTreatment {
   linked: boolean
   /** Su sesión de hoy ya está registrada. */
   registered: boolean
+  /** Lo trae la cita de esta atención: no se saca desde aquí. */
+  broughtByAppointment: boolean
 }
 
 /** Un control con su ventana abierta: esta visita lo cumple si se marca. */

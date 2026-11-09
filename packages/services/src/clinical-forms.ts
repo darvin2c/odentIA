@@ -3376,6 +3376,9 @@ export async function getEncounterConsentNeeds(
     if (covered.has(doc.id) || doc.encounterId !== encounterId || doc.status !== "pendiente") continue
     // El preparado para lo que dejó fuera ya no falta: queda en Documentos, sin pedirse al cerrar.
     if (doc.planItemId && leftOut.has(doc.planItemId)) continue
+    // El de un tratamiento que hoy no se hace (se quitó, «Hoy no», o es para otro día) tampoco:
+    // queda en Documentos y se firma el día que se haga (ADR 0165).
+    if (doc.planItemId && !sources.some((source) => source.planItemId === doc.planItemId)) continue
     if (needs.some((need) => need.templateKey === doc.key && need.documentId === doc.id)) continue
     needs.push({
       templateKey: doc.key,

@@ -903,19 +903,27 @@ function IndicationForm({
     onSubmit: async ({ value }) => {
       if (editing) {
         // «Cambiar»: lo mismo que el Plan (`updatePlanItem`), en la atención donde se indicó.
+        // Solo lo que cambió: el sitio, si se cambió la pieza o sus caras; el detalle y el
+        // diagnóstico, si se escribieron otros. El hallazgo y el ámbito no se cambian aquí.
+        const detail = value.detail.trim() === "" ? null : value.detail.trim()
+        const diagnosisCode = value.diagnosisCode.trim() === "" ? null : value.diagnosisCode.trim()
         const patch: Record<string, unknown> = {
           encounterId,
-          detail: value.detail.trim() === "" ? null : value.detail.trim(),
-          diagnosisCode: value.diagnosisCode.trim() === "" ? null : value.diagnosisCode.trim(),
-          ...(value.service && value.service.id !== editing.serviceId
-            ? { serviceId: value.service.id }
+          ...(detail !== (editing.detail ?? null) ? { detail } : {}),
+          ...(diagnosisCode !== (editing.diagnosisCode ?? null)
+            ? { diagnosisCode }
             : {}),
+          ...(value.service && value.service.id !== editing.serviceId ? { serviceId: value.service.id } : {}),
         }
-        if (value.scope === "tooth" || value.scope === "surfaces")
-          patch.toothNumber = value.teeth[0] ?? null
-        if (value.scope === "surfaces") patch.surfaces = value.surfaces
-        if (value.scope === "quadrant" && value.quadrant) patch.quadrant = Number(value.quadrant)
-        if (value.scope === "arch" && value.arch) patch.arch = value.arch
+        const tooth = value.teeth[0] ?? null
+        if ((value.scope === "tooth" || value.scope === "surfaces") && tooth !== editing.toothNumber)
+          patch.toothNumber = tooth
+        if (value.scope === "surfaces" && value.surfaces.slice().sort().join() !== (editing.surfaces ?? []).slice().sort().join())
+          patch.surfaces = value.surfaces
+        if (Object.keys(patch).length === 1) {
+          onDone?.()
+          return
+        }
         onPendingChange(true)
         try {
           await beforeWrite()
@@ -1008,7 +1016,7 @@ function IndicationForm({
       {/* Lo que falta se dice en su campo; lo que no es de ninguno, junto al botón. */}
       <div className="grid gap-3 sm:grid-cols-2">
         {/* Sin «dónde» (latidIA, decisión 4 del issue 229) todo es general: no hay ámbito que elegir. */}
-        {site ? (
+        {site && !editing ? (
           <form.AppField name="scope">
             {(field) => (
               <field.SelectField
@@ -1066,7 +1074,7 @@ function IndicationForm({
             )}
           </form.AppField>
         )}
-        {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && (
+        {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && !editing && (
           <form.AppField name="odontogramEntryId">
             {(field) => (
               <field.SelectField

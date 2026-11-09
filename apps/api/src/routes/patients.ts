@@ -1629,6 +1629,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
   app.delete("/:id/encounters/:encounterId/visit/treatments/:planItemId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    const planItemId = z.uuid().safeParse(c.req.param("planItemId"))
+    if (!planItemId.success) return validationError(c, planItemId.error.issues)
     return runService(c, 200, async () => {
       await withOrgContext(deps.db, orgId, (tx) =>
         leaveTreatmentFromEncounter(
@@ -1665,6 +1667,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   // «Quitar» un renglón indicado en esta misma atención, antes de que responda.
   app.delete("/:id/encounters/:encounterId/indicated/:planItemId", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
+    const planItemId = z.uuid().safeParse(c.req.param("planItemId"))
+    if (!planItemId.success) return validationError(c, planItemId.error.issues)
     return runService(c, 200, async () => {
       await withOrgContext(deps.db, orgId, (tx) =>
         removeIndicatedFromEncounter(

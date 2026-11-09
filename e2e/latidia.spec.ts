@@ -516,7 +516,8 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
     slug,
   )
   expect(saved.body.data.encounter.examination.sistemas).not.toHaveProperty("abdomen")
-  await expect(page.getByText("1 sistema con hallazgos").first()).toBeVisible()
+  // En la misma página, sin tarjeta que resuma: el examen se lee donde se escribió.
+  await expect(page.getByRole("region", { name: "Examen físico", exact: true })).toContainText("9 examinados · 1 con hallazgos")
   await shot("examen")
   await page.setViewportSize({ width: 390, height: 844 })
   await shot("examen-telefono")

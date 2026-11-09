@@ -54,6 +54,8 @@ export interface VisitTreatment {
   linked: boolean
   /** Ya tiene un procedimiento vigente en esta atención: la sesión de hoy está registrada. */
   registered: boolean
+  /** Lo trae la cita de esta atención: «Hoy no» no lo saca (el cierre avisa si no se hizo). */
+  broughtByAppointment: boolean
 }
 
 /** Un control con su ventana abierta: esta visita puede cumplirlo. */
@@ -114,6 +116,7 @@ export async function encounterVisitOf(
     done_before: number
     linked: boolean
     registered: boolean
+    by_appointment: boolean
   }>(sql`
     select i.id, i.title, i.site_system, i.site_code, i.status, i.planned_sessions as m,
       (select count(distinct done_procedure.encounter_id)::int from encounter_procedure done_procedure
@@ -125,9 +128,22 @@ export async function encounterVisitOf(
       exists (select 1 from encounter_plan_item linked where linked.organization_id = i.organization_id
         and linked.plan_item_id = i.id and linked.encounter_id = ${row.id}) as linked,
       exists (select 1 from encounter_procedure today where today.organization_id = i.organization_id
-        and today.plan_item_id = i.id and today.encounter_id = ${row.id} and today.voided_at is null) as registered
+        and today.plan_item_id = i.id and today.encounter_id = ${row.id} and today.voided_at is null) as registered,
+      ${
+        row.appointmentId
+          ? sql`exists (select 1 from appointment_plan_item brought where brought.organization_id = i.organization_id
+        and brought.plan_item_id = i.id and brought.appointment_id = ${row.appointmentId})`
+          : sql`false`
+      } as by_appointment
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
+      ${
+        // Donde lo indicado nace aceptado (latidIA), lo indicado hoy es para otro día: no es «a qué viene».
+        budgetRequired
+          ? sql``
+          : sql`and (i.source_encounter_id is distinct from ${row.id} or exists (select 1 from encounter_plan_item kept
+        where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))`
+      }
     order by linked desc, (i.status = 'en_curso') desc, i.sort_order, i.created_at, i.id`)
   const treatments = rows.slice(0, VISIT_TREATMENTS).map((item) => {
     const done = Number(item.done_before)
@@ -140,6 +156,7 @@ export async function encounterVisitOf(
       started: done > 0 || item.status === "en_curso",
       linked: Boolean(item.linked),
       registered: Boolean(item.registered),
+      broughtByAppointment: Boolean(item.by_appointment),
     }
   })
   const { timezone } = await findOrgLocale(tx, orgId)

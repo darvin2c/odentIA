@@ -973,7 +973,7 @@ export async function getEncounterDetail(
   const counts = await sessionCountsOf(tx, orgId, [...attention.keys()])
   const removable =
     row.status === "borrador"
-      ? await removableFromEncounter(tx, orgId, encounterId)
+      ? await removableFromEncounter(tx, orgId, encounterId, row.professionalUserId)
       : new Set<string>()
   const withProgress = <T extends { id: string }>(item: T) => ({
     ...item,

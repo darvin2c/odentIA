@@ -737,6 +737,19 @@ export function EncounterEditor({
     }
   }, [detail.teeth, encounter.updatedAt])
 
+  // El motivo que puso el servidor al elegir en «Hoy viene a…» (o que quitó «Hoy no») se ve en su
+  // campo y pasa a ser lo guardado: si no, escribir después daría un falso «otra pestaña lo cambió».
+  // Lo que se está escribiendo manda: no se pisa.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambia el motivo guardado en el servidor
+  useEffect(() => {
+    const stored = encounter.reason ?? null
+    if (stored === savedTextRef.current.reason) return
+    if (dirtyRef.current.has("reason") || inflightRef.current.has("reason")) return
+    savedTextRef.current.reason = stored
+    valuesRef.current.reason = stored ?? ""
+    draftForm.setFieldValue("reason", stored ?? "")
+  }, [encounter.reason])
+
   const clearTimer = () => {
     window.clearTimeout(timerRef.current)
     timerRef.current = undefined
@@ -1037,6 +1050,11 @@ export function EncounterEditor({
   /** Lo que se dicta en un bloque: en los comunes, lo de arriba; en los del producto, lo que declara el bloque. */
   const dictationOf = (key: SectionKey) =>
     SECTION_DICTATION[key as CommonSectionKey] ?? product.blocks.find((block) => block.key === key)?.dictation
+  /** ¿Tiene la parte algo quitado por voz que aún se puede deshacer? Entonces se muestra. */
+  const dictationRemoved = (key: SectionKey): boolean => {
+    const kinds = dictationOf(key)?.kinds ?? []
+    return dictation.enabled && dictation.removedByVoice.some((item) => kinds.includes(item.kind))
+  }
   const dictationCount = (key: SectionKey): number => {
     const kinds = dictationOf(key)?.kinds ?? []
     return dictation.enabled ? dictation.suggestions.filter((item) => kinds.includes(item.kind)).length : 0
@@ -1944,13 +1962,15 @@ export function EncounterEditor({
   const examAlways = !productUi().site
   const examHasData =
     examination !== null || Object.values(vitals).some((value) => value.trim() !== "")
-  const showExam = examAlways || examHasData || extras.has("examen") || dictationCount("examen") > 0
+  const showExam =
+    examAlways || examHasData || extras.has("examen") || dictationCount("examen") > 0 || dictationRemoved("examen")
   const showPrognosis = draftValues.prognosis.trim() !== "" || extras.has("pronostico")
   // Los bloques del producto: el odontograma, siempre; lo demás (el periodontograma), en «También» hasta que tenga algo.
   const everyday = product.blocks.filter((item) => item.key === "odontograma")
   const optional = product.blocks.filter((item) => item.key !== "odontograma")
   const shownOptional = optional.filter(
-    (item) => !item.empty || extras.has(item.key) || dictationCount(item.key) > 0,
+    (item) =>
+      !item.empty || extras.has(item.key) || dictationCount(item.key) > 0 || dictationRemoved(item.key),
   )
   const also = [
     ...(showExam ? [] : [{ key: "examen", title: exam.title }]),
@@ -2149,7 +2169,6 @@ export function EncounterEditor({
                 patientId={patientId}
                 encounterId={encounterId}
                 visit={detail.visit}
-                fromAppointment={Boolean(encounter.appointmentId)}
                 offeredReason={offeredReason}
                 onUseReason={takeOfferedReason}
                 reasonEmpty={reason.trim() === ""}
@@ -2166,6 +2185,7 @@ export function EncounterEditor({
                 disabled={locked}
                 beforeWrite={flush}
                 onChanged={handleChildChanged}
+                onPendingChange={handlePendingChange}
               />
             </div>
           ) : null}
@@ -2203,14 +2223,13 @@ export function EncounterEditor({
 
           <div id={`${uid}-diagnostico`} className="flex scroll-mt-4 flex-col gap-3">
             <EncounterDiagnoses
-              key={`diagnosticos-${diagnosisAsk}`}
               patientId={patientId}
               detail={detail}
               disabled={locked}
               beforeWrite={flush}
               onChanged={handleChildChanged}
               onPendingChange={handlePendingChange}
-              autoOpen={diagnosisAsk > 0}
+              openSignal={diagnosisAsk}
               prefill={diagnosisPrefill}
               onPrefillUsed={() => setDiagnosisPrefill(null)}
             />

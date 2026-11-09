@@ -14,6 +14,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   createConsentTemplate,
   getEncounterConsentNeeds,
+  prepareEncounterConsents,
   publishConsentTemplate,
   setConsentTemplateServices,
 } from "./clinical-forms.js"
@@ -213,6 +214,10 @@ it("el consentimiento es de lo que se hace hoy: lo indicado para otro día no lo
   // Se hace hoy: lo pide.
   await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, f.encounter.id, item.id))
   expect((await needs()).map((need) => need.title)).toEqual(["Tratamiento propio"])
+  // Preparado y después «Hoy no»: queda en Documentos, pero ya no falta al cerrar.
+  await f.run((tx) => prepareEncounterConsents(tx, ...f.args, f.encounter.id))
+  await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, f.encounter.id, item.id))
+  expect(await needs()).toEqual([])
 })
 
 it("«Quitar» lo indicado hoy sin respuesta: sale del plan y del presupuesto en borrador; lo ya respondido no", async () => {

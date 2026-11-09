@@ -53,7 +53,6 @@ export function EncounterVisitStrip({
   patientId,
   encounterId,
   visit,
-  fromAppointment,
   offeredReason,
   onUseReason,
   reasonEmpty,
@@ -61,12 +60,11 @@ export function EncounterVisitStrip({
   disabled,
   beforeWrite,
   onChanged,
+  onPendingChange,
 }: {
   patientId: string
   encounterId: string
   visit: EncounterVisit | null | undefined
-  /** La atención viene de una cita: lo que la cita trae no se saca desde aquí. */
-  fromAppointment: boolean
   /** El motivo que trae la cita, mientras no haya otro. */
   offeredReason: string | null
   onUseReason: () => void
@@ -76,6 +74,8 @@ export function EncounterVisitStrip({
   disabled: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
+  /** Escribe en la atención: firmar espera a que termine. */
+  onPendingChange: (pending: boolean) => void
 }): React.JSX.Element | null {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -87,6 +87,7 @@ export function EncounterVisitStrip({
     if (busy) return
     setBusy(key)
     setError(null)
+    onPendingChange(true)
     try {
       await beforeWrite()
       await write()
@@ -95,6 +96,7 @@ export function EncounterVisitStrip({
       setError(submitErrorMessage(err))
     } finally {
       setBusy(null)
+      onPendingChange(false)
     }
   }
 
@@ -153,7 +155,7 @@ export function EncounterVisitStrip({
                 </span>
                 {item.registered ? null : item.linked ? (
                   <span className="flex flex-wrap gap-2">
-                    {fromAppointment ? null : (
+                    {item.broughtByAppointment ? null : (
                       <Button
                         type="button"
                         size="sm"
