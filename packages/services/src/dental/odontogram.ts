@@ -1,3 +1,4 @@
+import { brandPalette } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import {
@@ -757,11 +758,13 @@ async function establishmentOf(tx: Db, orgId: string) {
       fiscalDocNumber: orgProfile.fiscalDocNumber,
       address: orgProfile.fiscalAddress,
       logo: organization.logo,
+      brandColor: orgProfile.brandColor,
     })
     .from(orgProfile)
     .leftJoin(organization, eq(organization.id, orgProfile.organizationId))
     .where(eq(orgProfile.organizationId, orgId))
   if (!org) return null
+  const { brandColor, ...establishment } = org
   // Como los demás papeles: con una sola sede, su nombre, dirección y teléfono.
   const branches = await tx
     .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
@@ -770,10 +773,13 @@ async function establishmentOf(tx: Db, orgId: string) {
     .limit(2)
   const only = branches.length === 1 ? branches[0]! : null
   return {
-    ...org,
+    ...establishment,
     address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? org.address,
     branchName: only?.name ?? null,
     phone: only?.phone ?? null,
+    // La línea del membrete y las iniciales en el color de la marca, como los demás papeles
+    // (ADR 0162). Va en el encabezado que se congela al firmar: la hoja firmada no cambia.
+    brandInk: brandColor ? brandPalette(brandColor).paper : null,
   }
 }
 

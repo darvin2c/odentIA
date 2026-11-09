@@ -122,6 +122,8 @@ export interface PrintEstablishment {
   /** Con una sola sede, su nombre y su teléfono. */
   branchName?: string | null
   phone?: string | null
+  /** La línea del membrete y las iniciales; sin color (o firmada antes de tenerlo), gris. */
+  brandInk?: string | null
 }
 
 function base(patientId: string): string {
