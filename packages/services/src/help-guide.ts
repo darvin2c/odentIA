@@ -1820,6 +1820,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Sí. Agrégale sus servicios con «Comisión por un servicio», sin ponerle porcentaje; si ya tenía uno, agrégalos y en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga.",
         forms: ["comisión solo por servicio", "solo por procedimiento", "sin porcentaje general"],
       },
+      {
+        q: "¿Dónde veo el historial de la comisión de un profesional?",
+        a: "Junto a su nombre, en «Ver historial»: cada cambio con lo que quedó, la fecha, quién lo hizo y el porcentaje que tenía antes. Aparece cuando su comisión cambió al menos una vez. Cada cambio vale para lo que se atienda desde ese día; lo ya atendido conserva lo que tenía.",
+        forms: ["historial de comisiones", "quién modificó la comisión"],
+      },
     ],
   },
   {

@@ -38,6 +38,7 @@ import {
   paymentReturn,
   paymentTicket,
   serviceCatalog,
+  treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { requireCanAttend } from "./attending.js"
 import {
@@ -2931,6 +2932,7 @@ export async function listCommissionAgreements(tx: Db, orgId: string) {
   const people = team
     .filter((row) => canAttend(row.role) || withRules.has(row.userId))
     .sort((a, b) => a.name.localeCompare(b.name, "es"))
+  const history = await commissionHistory(tx, orgId)
   const out = []
   for (const person of people) {
     const rules = await commissionRulesOf(tx, orgId, person.userId)
@@ -2947,9 +2949,85 @@ export async function listCommissionAgreements(tx: Db, orgId: string) {
       rateSince: rules.since,
       previousRateBps: rules.previousRateBps,
       exceptions: rules.exceptions,
+      history: history.get(person.userId) ?? [],
     })
   }
   return out
+}
+
+/** Una versión guardada de la comisión: la general (`serviceId` nulo) o la de un servicio. */
+export interface CommissionChange {
+  serviceId: string | null
+  /** El nombre de hoy del servicio en el catálogo. */
+  serviceName: string | null
+  rateBps: number | null
+  fixedCents: number | null
+  fixedCurrency: string | null
+}
+
+/** Un cambio de la comisión de alguien: lo que se guardó a la vez, quién y cuándo. */
+export interface CommissionHistoryEvent {
+  at: Date
+  /** Quien lo guardó; nulo si ya no se sabe. */
+  byName: string | null
+  /** Fue la primera: vale desde siempre (también para lo ya cobrado sin pagar), no desde ese día. */
+  fromStart: boolean
+  changes: CommissionChange[]
+}
+
+/**
+ * Todos los cambios de comisión de cada persona, lo más nuevo primero. Las versiones no se editan ni
+ * se borran (`commission_rate`), así que es la historia entera. Lo guardado en una misma operación (la
+ * primera comisión de un servicio guarda también el general 0) es un solo cambio: comparte quién y
+ * el momento de su transacción (`created_at`), y si vale desde siempre o desde ese día.
+ *
+ * Lo copiado de la regla anterior (migración 0057, solo de antes de las clínicas reales) guardó quién
+ * y cuándo creó esa regla, no quién la cambió después: ahí el historial puede atribuirlo mal.
+ */
+async function commissionHistory(tx: Db, orgId: string): Promise<Map<string, CommissionHistoryEvent[]>> {
+  const rows = await tx
+    .select({
+      professionalUserId: commissionRate.professionalUserId,
+      serviceId: commissionRate.serviceId,
+      serviceName: serviceCatalog.name,
+      rateBps: commissionRate.rateBps,
+      fixedCents: commissionRate.fixedCents,
+      // Lo guardado sin moneda es del negocio.
+      fixedCurrency: sql<string | null>`case when ${commissionRate.fixedCents} is not null then coalesce(${commissionRate.fixedCurrency}, ${orgProfile.currency}) end`,
+      fromStart: sql<boolean>`${commissionRate.effectiveFrom} = '-infinity'::timestamptz`,
+      createdAt: commissionRate.createdAt,
+      createdBy: commissionRate.createdBy,
+      byName: user.name,
+    })
+    .from(commissionRate)
+    .leftJoin(
+      serviceCatalog,
+      and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, commissionRate.serviceId)),
+    )
+    .leftJoin(user, eq(user.id, commissionRate.createdBy))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, orgId))
+    .where(eq(commissionRate.organizationId, orgId))
+    .orderBy(desc(commissionRate.createdAt), sql`${commissionRate.serviceId} nulls first`, serviceCatalog.name)
+  const byPerson = new Map<string, CommissionHistoryEvent[]>()
+  let lastKey = ""
+  let event: CommissionHistoryEvent | undefined
+  for (const row of rows) {
+    const key = `${row.professionalUserId}|${row.createdAt.toISOString()}|${row.createdBy ?? ""}|${row.fromStart}`
+    if (!event || key !== lastKey) {
+      event = { at: row.createdAt, byName: row.byName, fromStart: false, changes: [] }
+      byPerson.set(row.professionalUserId, [...(byPerson.get(row.professionalUserId) ?? []), event])
+      lastKey = key
+    }
+    event.fromStart ||= row.fromStart
+    event.changes.push({
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+      rateBps: row.rateBps,
+      fixedCents: row.fixedCents,
+      fixedCurrency: row.fixedCurrency,
+    })
+  }
+  return byPerson
 }
 
 async function commissionRateOf(tx: Db, orgId: string, professionalUserId: string): Promise<number> {
@@ -3067,6 +3145,8 @@ interface LiveCommissionLine {
   rateBps: number | null
   fixedCents: number | null
   forService: boolean
+  /** El servicio con que la vista eligió la regla (el del procedimiento o el del tratamiento). */
+  serviceId: string | null
   /** Tuvo alguna regla (general o del servicio): sin ninguna da 0 y no se congela al pagar. */
   hasRule: boolean
   commissionCents: number
@@ -3092,13 +3172,14 @@ async function liveCommissionLines(
     rateBps: number | null
     fixedCents: number | null
     forService: boolean
+    serviceId: string | null
     hasRule: boolean
     commission: string
   }>(sql`
     select l.application_id as "applicationId", l.slice, l.sessions, l.charge_id as "chargeId", l.payment_id as "paymentId",
       l.patient_id as "patientId", l.description, l.promotion_name as "promotionName", l.at, l.currency,
       l.own_value::text as value, l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService",
-      l.has_rule as "hasRule", l.own_commission::text as commission
+      l.service_id as "serviceId", l.has_rule as "hasRule", l.own_commission::text as commission
     from ${commissionLiveIn(orgId, query.start, query.end, sql`and professional_user_id = ${query.professionalUserId}`)} l`)
   return [...rows].map((row) => ({
     ...row,
@@ -3360,6 +3441,12 @@ export interface CommissionLine {
   fixedCents: number | null
   /** El porcentaje o el monto fue una excepción para el servicio. */
   forService: boolean
+  /**
+   * El servicio del cobro y su nombre de hoy en el catálogo, para juntar en «Cómo se calcula» el mismo
+   * servicio cobrado con textos distintos. Nulo en lo que no tiene uno (lo pagado sin su cargo).
+   */
+  serviceId: string | null
+  serviceName: string | null
   /** Sin ninguna regla aún: da 0 y un pago no lo congela (cuando se fije, se calcula). */
   unruled?: boolean
   /** Ya entró en un pago registrado: su porcentaje e importe quedaron congelados. */
@@ -3459,6 +3546,46 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
 /** La clave de una línea: el cobro y, si se reparte por sesiones, su parte. */
 function lineKey(applicationId: string, slice: number | null | undefined): string {
   return slice ? `${applicationId}:${slice}` : applicationId
+}
+
+/**
+ * El servicio de cada cargo, como lo decide `commission_live`: el del procedimiento o, en lo adelantado
+ * de un tratamiento, el del tratamiento. Para lo ya pagado, que guarda el cargo y no el servicio.
+ */
+async function serviceOfCharges(tx: Db, orgId: string, chargeIds: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(chargeIds)]
+  if (unique.length === 0) return new Map()
+  const rows = await tx
+    .select({
+      chargeId: patientCharge.id,
+      serviceId: sql<string | null>`coalesce(${encounterProcedure.serviceId}, ${treatmentPlanItem.serviceId})`,
+    })
+    .from(patientCharge)
+    .leftJoin(
+      encounterProcedure,
+      and(eq(encounterProcedure.organizationId, orgId), eq(encounterProcedure.id, patientCharge.encounterProcedureId)),
+    )
+    .leftJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.id, patientCharge.planItemId),
+        isNull(patientCharge.encounterProcedureId),
+      ),
+    )
+    .where(and(eq(patientCharge.organizationId, orgId), inArray(patientCharge.id, unique)))
+  return new Map(rows.flatMap((row) => (row.serviceId ? [[row.chargeId, row.serviceId] as const] : [])))
+}
+
+/** El nombre de hoy de cada servicio del catálogo. */
+async function serviceNames(tx: Db, orgId: string, ids: Array<string | null>): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((id): id is string => !!id))]
+  if (unique.length === 0) return new Map()
+  const rows = await tx
+    .select({ id: serviceCatalog.id, name: serviceCatalog.name })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, unique)))
+  return new Map(rows.map((row) => [row.id, row.name]))
 }
 
 async function patientNames(tx: Db, orgId: string, ids: string[]): Promise<Map<string, string>> {
@@ -3585,6 +3712,16 @@ async function monthView(
     ...frozenCobros.map((f) => f.line.patientId).filter((id): id is string => !!id),
   ])
   const inMonth = (at: Date) => at >= start && at < end
+  const frozenService = await serviceOfCharges(
+    tx,
+    orgId,
+    frozenCobros.filter((f) => inMonth(f.line.occurredAt)).map((f) => f.line.chargeId).filter((id): id is string => !!id),
+  )
+  const serviceName = await serviceNames(tx, orgId, [
+    ...live.map((app) => app.serviceId),
+    ...frozenService.values(),
+  ])
+  const withService = (id: string | null) => ({ serviceId: id, serviceName: id ? (serviceName.get(id) ?? null) : null })
   const lines: CommissionLine[] = []
   // La base del mes se redondea una vez, sobre la suma; lo ya pagado quedó con su base.
   const baseValues: MoneyFraction[] = []
@@ -3613,6 +3750,7 @@ async function monthView(
       sessions: f.line.sessions,
       fixedCents: f.line.fixedCents,
       forService: f.line.forService,
+      ...withService(f.line.chargeId ? (frozenService.get(f.line.chargeId) ?? null) : null),
       settled: true,
       paidAt: f.settledAt,
       voidedAfterPaid,
@@ -3640,6 +3778,7 @@ async function monthView(
       sessions: app.slice ? app.sessions : null,
       fixedCents: app.fixedCents,
       forService: app.forService,
+      ...withService(app.serviceId),
       ...(app.hasRule ? {} : { unruled: true }),
       settled: false,
       paidAt: null,

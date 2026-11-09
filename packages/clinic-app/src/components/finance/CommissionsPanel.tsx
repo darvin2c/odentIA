@@ -163,9 +163,25 @@ function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: s
 
 /** La regla que usó la línea: «35 %», «45 % · para este servicio» o «monto fijo de 150.00 por cada uno». */
 function ruleWords(line: CommissionLine, locale: string, currency: string): string {
-  if (line.fixedCents !== null) return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno`
+  if (line.fixedCents !== null)
+    return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno${otherServiceName(line, " · ")}`
   if (line.rateBps === null || (line.rateBps === 0 && !line.forService)) return "sin porcentaje"
-  return line.forService ? `${percentLabel(line.rateBps, locale)} · para este servicio` : percentLabel(line.rateBps, locale)
+  return line.forService
+    ? `${percentLabel(line.rateBps, locale)} · ${serviceWords(line)}`
+    : percentLabel(line.rateBps, locale)
+}
+
+/**
+ * El servicio de la regla, cuando el texto del cobro no lo dice («Endodoncia molar 46» es la
+ * endodoncia): así la línea se encuentra en su fila de «Cómo se calcula».
+ */
+function otherServiceName(line: CommissionLine, prefix: string): string {
+  return line.serviceName && line.serviceName !== line.description ? `${prefix}${line.serviceName}` : ""
+}
+
+/** «para este servicio» o, si el cobro se llamó de otra forma, «para Endodoncia». */
+function serviceWords(line: CommissionLine): string {
+  return otherServiceName(line, "para ") || "para este servicio"
 }
 
 /** «sesión 2 de 3» en un tratamiento compartido: lo cobrado se reparte igual entre sus sesiones. */
@@ -881,9 +897,10 @@ function specialRule(
   decided: boolean,
 ): string | null {
   if (line.unruled) return decided ? "sin comisión: el monto fijo quedó en otra moneda" : "sin comisión decidida"
-  if (line.fixedCents !== null) return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno`
+  if (line.fixedCents !== null)
+    return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno${otherServiceName(line, " · ")}`
   const rate = line.rateBps ?? 0
-  if (line.forService) return `${percentLabel(rate, locale)} para este servicio`
+  if (line.forService) return `${percentLabel(rate, locale)} ${serviceWords(line)}`
   if (rate === generalBps) return null
   return rate > 0 ? percentLabel(rate, locale) : "sin comisión"
 }

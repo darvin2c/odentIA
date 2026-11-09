@@ -166,8 +166,9 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   if (owner) {
     const since = monthStart(timezone, current.year, current.month)
     await tx.insert(commissionRate).values([
-      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.CORONA.id, effectiveFrom: since, fixedCents: 15000, createdBy: ownerUserId },
-      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.BLANQUEAMIENTO.id, effectiveFrom: since, rateBps: 4500, createdBy: ownerUserId },
+      // Puestas ese día: el historial de Configuración las cuenta como un cambio del 1, no de hoy.
+      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.CORONA.id, effectiveFrom: since, fixedCents: 15000, createdBy: ownerUserId, createdAt: since },
+      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.BLANQUEAMIENTO.id, effectiveFrom: since, rateBps: 4500, createdBy: ownerUserId, createdAt: since },
     ])
   }
   // Cada mes se paga el día 10 del siguiente, como lo haría «Pagar comisiones»: congela

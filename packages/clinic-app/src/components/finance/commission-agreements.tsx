@@ -21,6 +21,7 @@ import {
   type CommissionAgreement,
   type CommissionException,
   dayLabel,
+  historyLines,
   percentInput,
   percentLabel,
   rateBpsFromPercent,
@@ -187,18 +188,15 @@ function AgreementCard({
     locale,
   )
   const noCommission = agreement.hasRate && agreement.rateBps === 0 && agreement.exceptions.length === 0
-  // Desde cuándo vale lo de hoy y lo que tenía antes: lo que dice si el cambio ya rige.
+  // Desde cuándo vale lo de hoy; lo que tenía antes, con quién lo cambió, va en su historial.
   const since = [
     !agreement.attends ? "Ya no atiende pacientes" : null,
     agreement.rateSince ? `desde el ${day(agreement.rateSince)}` : null,
-    agreement.previousRateBps !== null && agreement.previousRateBps !== agreement.rateBps
-      ? agreement.previousRateBps > 0
-        ? `antes tenía ${percentLabel(agreement.previousRateBps, locale)}`
-        : "antes no tenía porcentaje"
-      : null,
   ]
     .filter(Boolean)
     .join(" · ")
+  // Con un solo cambio, el historial repetiría la tarjeta: aparece cuando hubo cambios.
+  const history = (agreement.history ?? []).length > 1 ? historyLines(agreement.history ?? [], locale, timeZone) : []
 
   const remove = async (exception: CommissionException) => {
     setRemoving(exception.serviceId)
@@ -348,6 +346,27 @@ function AgreementCard({
                   : "Comisión por un servicio"}
           </Button>
         </div>
+      ) : null}
+
+      {history.length > 0 ? (
+        // Plegado, como lo demás que se consulta poco: quién cambió su comisión, cuándo y qué había antes.
+        <details className="border-t pt-1 text-sm">
+          <summary className="min-h-11 cursor-pointer content-center font-medium text-primary-soft-foreground sm:min-h-8">
+            Ver historial<span className="sr-only"> de {name}</span> ({history.length})
+          </summary>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Cada cambio vale para lo que se atienda desde ese día; lo atendido antes conserva lo que tenía. La primera
+            valió también para lo atendido antes que aún no se pagaba.
+          </p>
+          <ol className="mt-1 flex min-w-0 flex-col">
+            {history.map((line) => (
+              <li key={line.key} className="py-1.5">
+                <span className="block break-words font-medium">{line.what}</span>
+                <span className="block text-xs text-muted-foreground">{line.detail}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
       ) : null}
     </section>
   )
