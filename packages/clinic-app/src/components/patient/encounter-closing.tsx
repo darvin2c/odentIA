@@ -172,6 +172,8 @@ export interface ContinuingVisit {
   n: number
   m: number
   booked?: BookedSession
+  /** Lo aceptado sin empezar a lo que vuelve (la corona): lo de hoy ya terminó. */
+  accepted?: boolean
 }
 
 /**
@@ -200,7 +202,7 @@ export function continuingAfterSign(
   ]
   // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras la endodoncia):
   // no un control genérico que pedía otra cita (QA del 9 nov). La regla del servidor (`finalizeEncounter`).
-  return going.length > 0 ? going : (sessions.accepted ?? []).map((session) => visit(session, session.m))
+  return going.length > 0 ? going : (sessions.accepted ?? []).map((session) => ({ ...visit(session, session.m), accepted: true }))
 }
 
 /** «el lun 9 a las 10:45», «mañana a las 17:00», en la zona de la clínica. */
@@ -346,7 +348,10 @@ export function ClosingNextVisit({
         ))}
         {sessionsLines.length > 0 && !known && !values.askControl ? (
           <p className="text-xs text-muted-foreground">
-            El control se indica en la sesión en que termine.{" "}
+            {/* Lo de hoy terminó (la endodoncia): su control se indica ahora, si hace falta (segunda mesa del 9 nov). */}
+            {continuing.every((visit) => visit.accepted)
+              ? "Lo de hoy queda terminado: si necesita su control, indícalo también."
+              : "El control se indica en la sesión en que termine."}{" "}
             <Button
               type="button"
               size="sm"
@@ -752,7 +757,8 @@ export function FinalizedNextSessions({
           className="self-start"
           onClick={() => onBook(toBook.map((session) => session.planItemId))}
         >
-          {only && showsSession(only.n, only.m) ? `Reservar la sesión ${only.n}` : "Reservar su próxima cita"}
+          {/* La primera de algo que aún no empieza (la corona) no es «la sesión 1»: es su cita. */}
+          {only && showsSession(only.n, only.m) && only.n > 1 ? `Reservar la sesión ${only.n}` : "Reservar su próxima cita"}
         </Button>
       ) : toBook.length > 0 ? (
         <p className="text-xs text-muted-foreground">Recepción la verá en «Qué sigue» para reservarla.</p>

@@ -1128,6 +1128,12 @@ export function EncounterEditor({
     }
   }
 
+  // Si debe lo mismo que acaba de quedar por cobrar, no se dice dos veces: el mismo importe
+  // repetido se leía como que debía el doble (segunda mesa del 9 nov).
+  const owedSameAsToday =
+    finalizedOwed.length === 1 &&
+    finalizedBilling?.currency === finalizedOwed[0]?.currency &&
+    finalizedBilling?.chargedCents === finalizedOwed[0]?.saldo
   const chargedLines = finalizedBilling?.lines.filter((line) => line.status === "charged") ?? []
   const skippedLines = finalizedBilling?.lines.filter((line) => line.status !== "charged") ?? []
   const closeFinalized = () => {
@@ -2863,12 +2869,19 @@ export function EncounterEditor({
           {canReadFinance && !accountQuery.isFetching && finalizedOwed.length > 0 && orgLocale ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
               <span>
-                Debe en total{" "}
-                <span className="font-semibold tabular-nums">
-                  {finalizedOwed.map((row) => formatMoney(row.saldo, row.currency, orgLocale)).join(" y ")}
-                </span>
+                {owedSameAsToday ? (
+                  "Caja puede cobrarlo ahora."
+                ) : (
+                  <>
+                    Debe en total{" "}
+                    <span className="font-semibold tabular-nums">
+                      {finalizedOwed.map((row) => formatMoney(row.saldo, row.currency, orgLocale)).join(" y ")}
+                    </span>
+                  </>
+                )}
               </span>
-              <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" />
+              {/* Secundario: la acción de quien atiende es reservar lo que sigue. */}
+              <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" variant="outline" />
             </div>
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (

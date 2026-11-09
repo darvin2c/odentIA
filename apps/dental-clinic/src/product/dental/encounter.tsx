@@ -167,15 +167,23 @@ function DentalClosing({
         <div className="flex items-start gap-3 rounded-lg border p-3">
           <Badge variant="outline">{odontogram.shortName}</Badge>
           <div className="flex min-w-0 flex-col">
-            <span className="font-medium">
-              El odontograma queda firmado como «
-              {SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
-            </span>
             {findingsLine(odontogram) ? (
-              <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
+              <>
+                <span className="font-medium">
+                  El odontograma queda firmado como «
+                  {SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
+                </span>
+                <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
+              </>
             ) : (
-              // Sin hallazgos nuevos se firma por lo que hoy queda tratado: dicho, no «sin registrar».
-              <span className="text-xs text-muted-foreground">Con lo que hoy queda tratado; sin hallazgos nuevos.</span>
+              // Sin hallazgos nuevos se firma por lo que hoy queda tratado: «Nuevos hallazgos» al lado de
+              // «sin hallazgos nuevos» se contradecía (segunda mesa del 9 nov). El momento de la norma, aparte.
+              <>
+                <span className="font-medium">El odontograma queda firmado con lo tratado hoy</span>
+                <span className="text-xs text-muted-foreground">
+                  Momento de la norma: «{SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
+                </span>
+              </>
             )}
           </div>
         </div>
