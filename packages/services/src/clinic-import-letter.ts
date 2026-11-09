@@ -32,14 +32,18 @@ const PRODUCT = {
   dental: {
     brand: "odentia",
     domain: "odentia32.com",
-    rooms: "sus sillones",
+    rooms: "Sus sillones: cuántos hay en cada sede y cómo los llaman («Sillón 1»).",
+    roles: "recepción, odontología, caja o administración",
     clinicians: "los odontólogos",
+    college: "COP",
   },
   medical: {
     brand: "latidia",
     domain: "latidia72.com",
-    rooms: "sus consultorios",
+    rooms: "Sus consultorios: cuántos hay en cada sede y cómo los llaman («Consultorio 1»).",
+    roles: "recepción, consulta, caja o administración",
     clinicians: "los médicos",
+    college: "CMP",
   },
 } as const
 
@@ -47,8 +51,9 @@ const PRODUCT = {
 const isoDate = z.iso.date({ error: "Fecha AAAA-MM-DD que exista en el calendario" })
 
 /*
- * Los largos máximos son los que caben en una hoja con todo lo demás en su
- * largo máximo (la prueba lo comprueba): la carta no pasa de una página.
+ * Los largos máximos son los que caben con todo lo demás en su largo máximo
+ * (la prueba lo comprueba): la carta en la primera hoja y en la segunda lo
+ * que hay que enviar.
  */
 
 export const welcomeLetterSchema = z
@@ -99,9 +104,12 @@ export interface WelcomeLetterContent {
   intro: string[]
   steps: LetterStep[]
   help: { title: string; body: string }
+  /** Los datos de la clínica que se piden junto con la lista: lo que el equipo registra en el alta. */
+  clinicData: string[]
   /** Si la clínica todavía no dijo qué usa: la pregunta, al final de «La lista de pacientes». */
   currentSystem: string | null
-  list: string[]
+  /** «La lista de pacientes»: qué sirve, lo que conviene que traiga y lo que no se puede cargar. */
+  list: { lead: string; items: string[]; tail: string }
   after: string[]
 }
 
@@ -148,36 +156,50 @@ export function welcomeLetterContent(raw: WelcomeLetterInput): WelcomeLetterCont
     title: `Bienvenidos a ${brandName}`,
     intro: [
       `Gracias por confiar en ${brandName}, una marca de ${CONSUMER_COMPLAINT_PROVIDER.legalName} Desde ahora, sus pacientes, sus citas, su historia clínica y sus conversaciones estarán en un solo lugar.`,
-      "Para empezar a trabajar con sus propios pacientes necesitamos su lista de pacientes, tal como la tienen: no hace falta ordenarla ni llenar una plantilla.",
+      "Para empezar a trabajar con su propia información necesitamos los datos de su clínica y su lista de pacientes, tal como los tienen: no hace falta ordenarlos ni llenar una plantilla.",
     ],
     steps: [
       {
         lead: `Entren a ${brandName}.`,
-        rest: `Acepten la invitación que les llegó al correo. Al entrar, ${brandName} les pide aceptar el contrato de encargo de datos: con él nos autorizan a cargar a sus pacientes.`,
+        rest: `Acepten la invitación que les llegó al correo. Al entrar, ${brandName} les pide aceptar el contrato de encargo de datos: con él nos autorizan a cargar su información.`,
       },
       {
-        lead: `Envíen su lista de pacientes a ${inbox} hasta ${deadlineWords(letter.deadline, date)},`,
-        rest: "con el nombre de la clínica en el asunto. No la envíen por WhatsApp: son datos de salud.",
+        lead: `Envíen los datos de su clínica y su lista de pacientes a ${inbox} hasta ${deadlineWords(letter.deadline, date)},`,
+        rest: "en un correo con el nombre de la clínica en el asunto. Lo que nos sirve está en la página siguiente. No los envíen por WhatsApp: son datos de salud.",
       },
       {
-        lead: "Para la reunión de alta, tengan a mano",
-        rest: `su RUC, sus sedes con su horario, ${product.rooms}, su equipo (nombre, correo y qué hace cada persona y, de ${product.clinicians}, su colegiatura) y su lista de precios. De los precios sirve una foto o el papel que tienen.`,
+        lead: "En la reunión de alta",
+        rest: "revisamos juntos lo que enviaron y completamos lo que falte. Si no saben cómo descargar la lista de su sistema, ahí lo hacemos juntos.",
       },
     ],
     help: {
       title: "¿Dudas?",
-      body: `Escríbanle a ${companion.name}, quien los acompaña en el alta: ${contact}. Si no saben cómo descargar la lista, en la reunión lo hacemos juntos.`,
+      body: `Escríbanle a ${companion.name}, quien los acompaña en el alta: ${contact}.`,
     },
+    clinicData: [
+      "La empresa: razón social, RUC, nombre comercial y su logo en imagen.",
+      "Cada sede: nombre, dirección, teléfono y horario de atención.",
+      product.rooms,
+      `Su equipo: de cada persona, nombre completo, correo, celular y qué hace (${product.roles}) y, de ${product.clinicians}, su especialidad y su número de colegiatura (${product.college}). Cada persona recibirá una invitación para entrar.`,
+      "Sus servicios y precios: su lista como la tengan; sirve una foto o el papel.",
+    ],
     currentSystem: letter.askCurrentSystem
       ? `Cuéntenle también a quien los acompaña qué usan hoy para sus pacientes (un programa, Excel o un cuaderno) y si de ahí pueden descargar las citas y los saldos, sin enviarlos todavía.`
       : null,
-    list: [
-      "Sirve su Excel o lo que descarga su sistema; si tiene varias descargas, la de pacientes. Basta el nombre, y si la lista los trae también sirven el número de historia, el documento, la fecha de nacimiento con el año completo, el sexo, el celular, el correo y la dirección y, de los menores, el papá, la mamá o quien los trae, con su documento, parentesco y celular. Lo que falte se completa después. Un PDF o fotos de fichas todavía no se pueden cargar.",
-    ],
+    list: {
+      lead: "Sirve su Excel o lo que descarga su sistema; si tiene varias descargas, la de pacientes. Basta el nombre de cada paciente y, si la lista los trae, también sirven:",
+      items: [
+        "su número de historia y su documento;",
+        "su fecha de nacimiento, con el año completo, y su sexo;",
+        "su celular, su correo y su dirección;",
+        "de los menores, el papá, la mamá o quien los trae: su nombre, documento, parentesco y celular.",
+      ],
+      tail: "Lo que falte se completa después. Un PDF o fotos de fichas todavía no se pueden cargar.",
+    },
     after: [
       "Lo dudoso, como dos pacientes con el mismo nombre, lo confirmamos con ustedes: nunca juntamos a dos personas solo porque se parecen.",
       "Cargar a sus pacientes no les envía ningún mensaje. Al terminar les decimos cuántos entraron, cuántos ya estaban y cuáles no y por qué.",
-      `Eliminamos su correo y el archivo de nuestro buzón al terminar la carga y, como máximo, a los ${WELCOME_LETTER_RETENTION_DAYS} días de recibirlo.`,
+      `Eliminamos su correo y sus archivos de nuestro buzón al terminar la carga y, como máximo, a los ${WELCOME_LETTER_RETENTION_DAYS} días de recibirlos.`,
       `Las citas, los saldos y la historia anterior todavía no se cargan: las citas de la primera semana se registran en ${brandName} y lo demás consérvenlo como lo tienen.`,
     ],
   }
@@ -208,19 +230,19 @@ export async function welcomeLetterPdf(
     receiptWidth: "80",
   }
   const kit = await DocumentKit.open(sender, sheetFormat("A4"), {
-    title: `${content.title} · ${content.clinic}`,
+    title: content.title,
     docLabel: `Bienvenida · ${content.clinic}`,
   })
-  // Una página: la clínica la lee en el celular, sin pasar de hoja.
-  const body = { size: SIZE.dense, leading: 1.4 }
+  // Dos hojas: la carta (qué hacer y qué pasa) y lo que hay que enviar, para reunirlo.
+  const body = { size: SIZE.table, leading: 1.45 }
 
   kit.gap(8)
   kit.spread(
     { text: content.to, face: "sansSemi" },
     { text: content.placeAndDate, tone: "gray" },
-    { size: SIZE.dense, leading: 1.4 },
+    { size: SIZE.table, leading: 1.4 },
   )
-  kit.text(content.clinic, { size: SIZE.dense, tone: "gray", leading: 1.4 })
+  kit.text(content.clinic, { size: SIZE.table, tone: "gray", leading: 1.4 })
   kit.heading(content.title, { size: SIZE.h2, before: 12, after: 4 })
   content.intro.forEach((paragraph, index) => {
     if (index) kit.gap(4)
@@ -235,28 +257,35 @@ export async function welcomeLetterPdf(
       [
         {
           inlines: [{ text: step.lead, face: "sansSemi" }, ` ${step.rest}`] satisfies Inline[],
-          leading: 1.4,
+          leading: 1.45,
         },
       ],
     ]),
-    size: SIZE.dense,
+    size: SIZE.table,
     rowPad: 2,
     plain: true,
   })
   kit.gap(6)
-  kit.panel({ title: content.help.title, body: content.help.body, size: SIZE.dense })
+  kit.panel({ title: content.help.title, body: content.help.body })
 
-  kit.subheading("La lista de pacientes", { before: 8, after: 2 })
-  for (const [index, paragraph] of [
-    ...content.list,
-    ...(content.currentSystem ? [content.currentSystem] : []),
-  ].entries()) {
-    if (index) kit.gap(4)
-    kit.text(paragraph, body)
-  }
-
-  kit.subheading("Qué pasa después", { before: 8, after: 2 })
+  kit.subheading("Qué pasa después", { before: 10, after: 2 })
   kit.bullets(content.after, body)
+
+  // Lo que hay que enviar empieza en su propia hoja, salvo que la carta ya haya pasado a ella.
+  if (kit.pageCount === 1) kit.newPage()
+  kit.heading("Qué enviarnos", { size: SIZE.h2small, before: 4, after: 4 })
+  kit.subheading("Los datos de la clínica", { before: 6, after: 2 })
+  kit.bullets(content.clinicData, body)
+
+  kit.subheading("La lista de pacientes", { before: 10, after: 2 })
+  kit.text(content.list.lead, body)
+  kit.bullets(content.list.items, body)
+  kit.gap(4)
+  kit.text(content.list.tail, body)
+  if (content.currentSystem) {
+    kit.gap(4)
+    kit.text(content.currentSystem, body)
+  }
 
   const bytes = await kit.finish()
   return { bytes, pages: kit.pageCount, content }

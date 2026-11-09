@@ -25,8 +25,8 @@ Primero va lo que otra cosa necesita: una cita necesita al profesional y la sede
 
 | Etapa | Qué se pide | Cuándo | Cómo se carga |
 |---|---|---|---|
-| 1 · La clínica | Razón social, RUC, nombre comercial y logo; sedes con dirección y horario; unidades dentales; equipo (nombre, correo, rol, especialidad y, de los odontólogos, su colegiatura); servicios y precios | Semana del alta | A mano en el alta, con la dueña: Equipo invita a cada persona y Servicios parte de la biblioteca del país |
-| 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta | Con esta skill |
+| 1 · La clínica | Razón social, RUC, nombre comercial y logo; sedes con dirección, teléfono y horario; sillones o consultorios; equipo (nombre, correo, celular, rol, especialidad y colegiatura); servicios y precios | Semana del alta, en la carta | A mano en el alta con lo que enviaron, y se revisa con la dueña en la reunión: Equipo invita a cada persona y Servicios parte de la biblioteca del país |
+| 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta, en la carta | Con esta skill |
 | 3 · Día de corte | Citas de las próximas 2 a 4 semanas (fecha, hora, paciente, profesional, sede y motivo); saldos y deudas a esa fecha | La víspera de empezar a agendar en odentIA | Todavía no: las citas se registran a mano la primera semana |
 | 4 · Después | Historia anterior en PDF o fotos, con el número de historia o el DNI en el nombre o en una lista; alergias y antecedentes; radiografías y documentos; tratamientos en curso y presupuestos | Sin apuro | Todavía no |
 
@@ -34,7 +34,7 @@ Mientras las etapas 3 y 4 no tengan carga, solo se pregunta si se pueden exporta
 
 ## La carta de bienvenida
 
-Los datos se piden con una carta en PDF, de una página, con la marca del producto de la clínica (odentIA o latidIA) y su titular, SALLCA GROUP E.I.R.L. Le da la bienvenida y le dice qué hacer y para cuándo: entrar y aceptar el contrato de encargo, enviar su lista de pacientes por correo a soporte y tener a mano los datos de la clínica para la reunión de alta. También dice qué pasa con la lista y que el correo se borra, como máximo, a los 30 días. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
+Los datos de las etapas 1 y 2 se piden con una carta en PDF con la marca del producto de la clínica (odentIA o latidIA) y su titular, SALLCA GROUP E.I.R.L. La idea es cargar todo lo que se pueda. La primera hoja da la bienvenida y dice qué hacer y para cuándo: entrar y aceptar el contrato de encargo, enviar a soporte en un solo correo los datos de la clínica y la lista de pacientes, y revisarlos juntos en la reunión de alta. También dice qué pasa después, y que el correo se borra, como máximo, a los 30 días. La segunda hoja es lo que hay que enviar, para que lo reúnan. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
 
 La carta es para clínicas de Perú: pide el RUC y la colegiatura. Le pide aceptar la invitación que le llegó al correo: se entrega cuando la clínica ya está creada en la administración (alta asistida) y su invitación salió. Si todavía no, dilo al entregarla.
 
@@ -66,7 +66,7 @@ pnpm --filter @odentia/services import:carta -- <carpeta>/carta.json
 
 El buzón es `soporte@odentia32.com` o, en latidIA, `soporte@latidia72.com`; otro, solo con `inbox`. Antes de la primera carta de latidIA, comprueba que `soporte@latidia72.com` recibe correo.
 
-El comando dice cuántas páginas salió: tiene que ser una. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda la lista a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
+El comando dice cuántas páginas salió: son dos, y si pasan, falla. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda sus datos a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
 
 ## Antes de empezar
 
