@@ -48,7 +48,12 @@ async function journeyOf(page: Page, title: string): Promise<Locator> {
 
 /** Abre un tratamiento del plan por fases con «Ver»: su recorrido se abre al lado. */
 async function openTreatment(page: Page, title: string): Promise<Locator> {
-  const row = page.getByRole("listitem").filter({ hasText: title }).first()
+  // La fila del tratamiento (la que tiene «Ver»): «Qué sigue» también lo nombra en su lista.
+  const row = page
+    .getByRole("listitem")
+    .filter({ hasText: title })
+    .filter({ has: page.getByRole("button", { name: "Ver", exact: true }) })
+    .first()
   await row.getByRole("button", { name: "Ver", exact: true }).click()
   return journeyOf(page, title)
 }
