@@ -780,3 +780,9 @@ export const PLAN_QUERY_KEYS = [
   "treatment-coordination",
   "treatment-journey",
 ] as const
+
+/**
+ * Lo que cambia en la atención abierta cuando la persona responde: lo que no
+ * aceptó o no eligió deja de pedir consentimiento y de contar por ejecutar.
+ */
+export const ANSWER_ENCOUNTER_KEYS = ["encounter", "consent-needs", "encounter-closing"] as const

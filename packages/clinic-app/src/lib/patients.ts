@@ -597,6 +597,8 @@ export interface EncounterDetail {
   teeth: number[]
   plannedItems: PlanItem[]
   indicatedItems: PlanItem[]
+  /** Lo que la atención deja por ejecutar, sin lo que la persona dejó fuera: lo cuenta el servidor. */
+  pendingTreatments: number
   procedures: ProcedureItem[]
   /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
   diagnoses: EncounterDiagnosis[]
