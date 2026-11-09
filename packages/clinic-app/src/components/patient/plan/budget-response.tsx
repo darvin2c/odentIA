@@ -15,6 +15,7 @@
  */
 import {
   budgetAnswerText,
+  budgetOptionLabel,
   budgetStateText,
   documentText,
   moneyTotalsText,
@@ -143,10 +144,9 @@ function pathSite(lines: readonly BudgetLine[]): { label: string; short: string 
   return labels.size === 1 && label && label !== "General" ? { label, short: null } : null
 }
 
-/** Cómo se llama un camino: su nombre en la clínica o «Opción A». */
-/** El nombre del camino: el que le puso el odontólogo o «Camino 1», como en el plan y la atención. */
+/** El nombre del camino: el que le puso el odontólogo o «Opción A», como en el papel, el plan y la atención. */
 function pathName(option: BudgetOption): string {
-  return option.name?.trim() || `Camino ${option.position}`
+  return option.name?.trim() || budgetOptionLabel(option.position)
 }
 
 interface Decider {
@@ -181,7 +181,7 @@ interface ResponseValues {
 function responseSchema(needsPath: () => boolean) {
   return z.object({
     // En el campo y no en el objeto: así se dice a la vez que lo que falte marcar.
-    optionId: z.string().refine((value) => !needsPath() || value !== "", "Elige un camino, «Lo piensa» o «No acepta»."),
+    optionId: z.string().refine((value) => !needsPath() || value !== "", "Elige una opción, «Lo piensa» o «No acepta»."),
     decidedByContactId: z.string(),
     decisions: z.array(
       z.object({
@@ -381,14 +381,14 @@ function PathChoice({
         <RadioGroupItem value={PATH_THINK} className="mt-0.5" aria-label="Lo piensa" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="font-medium">Lo piensa</span>
-          <span className="text-xs text-muted-foreground">Lo de los caminos queda para después.</span>
+          <span className="text-xs text-muted-foreground">Lo de las opciones queda para después.</span>
         </span>
       </FieldLabel>
       <FieldLabel className={item}>
         <RadioGroupItem value={PATH_NONE} className="mt-0.5" aria-label="No acepta" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="font-medium">No acepta</span>
-          <span className="text-xs text-muted-foreground">No acepta lo de ningún camino.</span>
+          <span className="text-xs text-muted-foreground">No acepta ninguna de las opciones.</span>
         </span>
       </FieldLabel>
     </RadioGroup>
@@ -400,7 +400,7 @@ function PathChoice({
  * firma, quién decide y quién lo anotó (su palabra, no la de la persona); por su
  * enlace, el portal o el chat, la persona.
  */
-function AnsweredBy({
+export function AnsweredBy({
   budget,
   formatDay,
 }: {
@@ -847,8 +847,9 @@ export function BudgetResponse({
   // Con caminos, si no se elige uno, la pieza queda por decidir.
   const pathPending = choosing && pathOpen && (!pickedPath || pickedPath === PATH_THINK)
   const patientShortName = patient?.patient.givenNames?.trim().split(/\s+/)[0] ?? patient?.patient.displayName ?? null
-  const pathQuestion = site ? `${site.label} · ¿qué camino?` : "¿Qué camino?"
-  const commonTitle = budget.options.length === 2 ? "Va en los dos caminos" : "Va en todos los caminos"
+  // Una sola palabra en pantalla, la del papel: «opción» (QA del 8 nov).
+  const pathQuestion = site ? `${site.label} · ¿qué opción?` : "¿Qué opción?"
+  const commonTitle = budget.options.length === 2 ? "Va en las dos opciones" : "Va en todas las opciones"
 
   /**
    * Sin caminos y con más de un tratamiento: «Acepta todo», «Lo piensa» o «No
@@ -952,8 +953,8 @@ export function BudgetResponse({
         paths
           ? `${budgetNumberLabel(budget.budgetNumber)}. ${
               acceptAllIntent && pathOpen
-                ? "Para aceptarlo todo, elige el camino."
-                : `Marca la respuesta de cada tratamiento${pathOpen ? " y el camino" : ""}.`
+                ? "Para aceptarlo todo, elige la opción."
+                : `Marca la respuesta de cada tratamiento${pathOpen ? " y la opción" : ""}.`
             }`
           : `${budgetNumberLabel(budget.budgetNumber)}${
               several && fixedOption ? ` · ${fixedOption.label}` : ""
@@ -1091,7 +1092,7 @@ export function BudgetResponse({
             <span className="text-lg font-semibold tabular-nums">{acceptingWords()}</span>
             {pathPending ? (
               <span className="text-sm text-muted-foreground">
-                {site?.short ? ` · ${site.short} sigue por decidir` : " · falta elegir el camino"}
+                {site?.short ? ` · ${site.short} sigue por decidir` : " · falta elegir la opción"}
               </span>
             ) : null}
           </dd>
@@ -1112,7 +1113,7 @@ export function BudgetResponse({
                 : unanswered > 1
                   ? `Falta marcar la respuesta de ${unanswered} tratamientos.`
                   : null,
-              pathMissing ? "Falta elegir el camino." : null,
+              pathMissing ? "Falta elegir la opción." : null,
             ]
               .filter(Boolean)
               .join(" ")

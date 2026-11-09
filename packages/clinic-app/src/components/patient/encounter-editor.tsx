@@ -372,7 +372,7 @@ function FinalizedBudgetSummary({
       )
     return (
       <p className="text-sm">
-        Presupuesto listo con {count} caminos: {words.join(" o ")}. Nunca se suman.
+        Presupuesto listo con {count} opciones: {words.join(" o ")}. Nunca se suman.
       </p>
     )
   }
