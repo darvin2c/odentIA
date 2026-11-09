@@ -17,6 +17,7 @@ import { ApiError, apiFetch } from "./api"
 import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
 import { useOrgSecondCurrency } from "./org"
+import { appWords } from "./product-words"
 
 /** Efectivo según UN/CEFACT 4461: lo único que se cuenta al cerrar. */
 export const CASH_TYPE_CODE = "10"
@@ -790,15 +791,22 @@ export function expenseCategoryLabel(category: string): string {
   return expenseCategoryWord(category)
 }
 
-/** Una línea de ayuda por tipo, para quien duda dónde va lo que pagó. */
-export const EXPENSE_CATEGORY_HINTS: Record<string, string> = {
-  Personal: "Sueldos y lo que se le paga al equipo (sin las comisiones).",
-  Alquiler: "El alquiler de la sede.",
-  Laboratorio: "Coronas, prótesis y trabajos de laboratorio.",
-  Materiales: "Insumos y materiales: algodón, guantes, resinas.",
-  Servicios: "Luz, agua, internet y teléfono.",
-  Impuestos: "El IGV de lo cobrado, la renta, los arbitrios.",
-  Otros: "Lo que no va en los demás: taxi, útiles, limpieza.",
+/**
+ * Una línea de ayuda por tipo, para quien duda dónde va lo que pagó. Lo del laboratorio y los
+ * insumos lo dice cada producto (una óptica no paga coronas ni resinas).
+ */
+export function expenseCategoryHint(category: string): string | undefined {
+  const own = appWords().expenseHints
+  const hints: Record<string, string> = {
+    Personal: "Sueldos y lo que se le paga al equipo (sin las comisiones).",
+    Alquiler: "El alquiler de la sede.",
+    Laboratorio: own.lab,
+    Materiales: own.supplies,
+    Servicios: "Luz, agua, internet y teléfono.",
+    Impuestos: "El IGV de lo cobrado, la renta, los arbitrios.",
+    Otros: "Lo que no va en los demás: taxi, útiles, limpieza.",
+  }
+  return hints[category]
 }
 
 /** Valor con que el servidor guarda «sin comprobante». */
