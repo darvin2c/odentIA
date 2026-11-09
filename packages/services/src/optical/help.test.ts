@@ -58,7 +58,6 @@ const OWN_QUOTED = [
   "Sin verificar",
   "La revisé: verificar",
   "Anteriores",
-  "Anular",
   "Emitir otra desde su examen",
 ]
 
