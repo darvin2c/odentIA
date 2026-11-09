@@ -219,6 +219,7 @@ describe("el historial de una comisión, lo más nuevo primero", () => {
       ],
       "es-PE",
       "America/Lima",
+      "PEN",
     )
     expect(lines.map((line) => [line.what.replace(/\s/g, " "), line.detail])).toEqual([
       ["Endodoncia: vuelve a su 40 %", "8 de noviembre de 2026 · Ana Torres"],
@@ -233,10 +234,28 @@ describe("el historial de una comisión, lo más nuevo primero", () => {
       [event("2026-11-02T15:00:00Z", [general(0)]), event("2026-11-01T15:00:00Z", [general(4000), service(5000)], { fromStart: true })],
       "es-PE",
       "America/Lima",
+      "PEN",
     )
     expect(lines.map((line) => [line.what.replace(/\s/g, " "), line.detail])).toEqual([
       ["Solo por 1 servicio", "2 de noviembre de 2026 · Ana Torres · antes 40 %"],
       ["40 % de lo cobrado · Endodoncia: 50 %", "1 de noviembre de 2026 · Ana Torres · la primera"],
+    ])
+  })
+
+  it("a quien solo comisionaba por un servicio, el porcentaje nuevo dice lo que tenía; la primera queda al final", () => {
+    const lines = historyLines(
+      [
+        // La primera, guardada después (una semilla) que lo de un día: sigue siendo lo primero que tuvo.
+        event("2026-11-09T15:00:00Z", [general(0), service(5000)], { fromStart: true }),
+        event("2026-11-10T15:00:00Z", [general(4000)]),
+      ],
+      "es-PE",
+      "America/Lima",
+      "PEN",
+    )
+    expect(lines.map((line) => [line.what.replace(/\s/g, " "), line.detail])).toEqual([
+      ["40 % de lo cobrado", "10 de noviembre de 2026 · Ana Torres · antes solo por 1 servicio"],
+      ["Endodoncia: 50 % · lo demás no comisiona", "9 de noviembre de 2026 · Ana Torres · la primera"],
     ])
   })
 
@@ -249,6 +268,7 @@ describe("el historial de una comisión, lo más nuevo primero", () => {
       ],
       "es-PE",
       "America/Lima",
+      "PEN",
     )
     expect(lines.map((line) => line.what.replace(/\s/g, " "))).toEqual([
       "No cobra comisión",

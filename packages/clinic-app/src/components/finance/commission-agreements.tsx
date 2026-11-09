@@ -196,7 +196,7 @@ function AgreementCard({
     .filter(Boolean)
     .join(" · ")
   // Con un solo cambio, el historial repetiría la tarjeta: aparece cuando hubo cambios.
-  const history = (agreement.history ?? []).length > 1 ? historyLines(agreement.history ?? [], locale, timeZone) : []
+  const history = (agreement.history ?? []).length > 1 ? historyLines(agreement.history ?? [], locale, timeZone, currency) : []
 
   const remove = async (exception: CommissionException) => {
     setRemoving(exception.serviceId)

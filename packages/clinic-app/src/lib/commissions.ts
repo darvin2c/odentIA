@@ -644,6 +644,8 @@ export function historyLines(
   events: ReadonlyArray<CommissionHistoryEvent>,
   locale: string,
   timeZone: string | undefined,
+  /** La moneda de la clínica, para un monto fijo que llegue sin la suya. */
+  currency: string,
 ): CommissionHistoryLine[] {
   const date = (iso: string) => {
     const at = new Date(iso)
@@ -651,15 +653,16 @@ export function historyLines(
       ? ""
       : new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: timeZone || undefined }).format(at)
   }
-  // Del más antiguo al más nuevo, para saber qué general y qué servicios regían en cada cambio (lo que
-  // vale desde siempre va antes que lo de ese mismo momento).
-  const oldestFirst = [...events].sort((a, b) => a.at.localeCompare(b.at) || Number(b.fromStart) - Number(a.fromStart))
+  // Del más antiguo al más nuevo, para saber qué general y qué servicios regían en cada cambio. Lo que
+  // vale desde siempre es lo primero que tuvo (la primera comisión de alguien sin ninguna antes).
+  const oldestFirst = [...events].sort((a, b) => Number(b.fromStart) - Number(a.fromStart) || a.at.localeCompare(b.at))
   let general: number | null = null
   const withCommission = new Set<string>()
   const out: CommissionHistoryLine[] = []
   for (const [index, event] of oldestFirst.entries()) {
     const generalChange = event.changes.find((change) => change.serviceId === null)
     const services = event.changes.filter((change) => change.serviceId !== null)
+    const servicesBefore = withCommission.size
     for (const change of services)
       if (change.rateBps !== null || change.fixedCents !== null) withCommission.add(change.serviceId as string)
       else withCommission.delete(change.serviceId as string)
@@ -668,7 +671,7 @@ export function historyLines(
     const parts = services.map((change) => {
       const name = change.serviceName ?? "Un servicio"
       if (change.fixedCents !== null)
-        return `${name}: ${formatMoney(change.fixedCents, change.fixedCurrency ?? "PEN", locale)} por cada uno`
+        return `${name}: ${formatMoney(change.fixedCents, change.fixedCurrency ?? currency, locale)} por cada uno`
       if (change.rateBps !== null) return `${name}: ${percentLabel(change.rateBps, locale)}`
       return now && now > 0 ? `${name}: vuelve a su ${percentLabel(now, locale)}` : `${name}: ya no comisiona`
     })
@@ -688,7 +691,9 @@ export function historyLines(
       generalChange && before !== null && before !== now
         ? before > 0
           ? `antes ${percentLabel(before, locale)}`
-          : "antes no cobraba comisión"
+          : servicesBefore > 0
+            ? `antes solo por ${servicesBefore === 1 ? "1 servicio" : `${servicesBefore} servicios`}`
+            : "antes no cobraba comisión"
         : null
     out.push({
       key: `${event.at}:${index}`,

@@ -1822,7 +1822,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo el historial de la comisión de un profesional?",
-        a: "Junto a su nombre, en «Ver historial»: cada cambio con lo que quedó, la fecha, quién lo hizo y el porcentaje que tenía antes. Aparece cuando su comisión cambió al menos una vez. Cada cambio vale para lo que se atienda desde ese día; lo ya atendido conserva lo que tenía.",
+        a: "Debajo de su comisión, en «Ver historial»: cada cambio con lo que quedó, la fecha, quién lo hizo y el porcentaje que tenía antes. Aparece cuando su comisión cambió al menos una vez. Cada cambio vale para lo que se atienda desde ese día; lo ya atendido conserva lo que tenía.",
         forms: ["historial de comisiones", "quién modificó la comisión"],
       },
     ],

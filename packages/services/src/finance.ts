@@ -3009,16 +3009,16 @@ async function commissionHistory(tx: Db, orgId: string): Promise<Map<string, Com
     .where(eq(commissionRate.organizationId, orgId))
     .orderBy(desc(commissionRate.createdAt), sql`${commissionRate.serviceId} nulls first`, serviceCatalog.name)
   const byPerson = new Map<string, CommissionHistoryEvent[]>()
-  let lastKey = ""
-  let event: CommissionHistoryEvent | undefined
+  // Por la clave y no por filas seguidas: lo de dos personas guardado a la vez puede intercalarse.
+  const events = new Map<string, CommissionHistoryEvent>()
   for (const row of rows) {
     const key = `${row.professionalUserId}|${row.createdAt.toISOString()}|${row.createdBy ?? ""}|${row.fromStart}`
-    if (!event || key !== lastKey) {
-      event = { at: row.createdAt, byName: row.byName, fromStart: false, changes: [] }
+    let event = events.get(key)
+    if (!event) {
+      event = { at: row.createdAt, byName: row.byName, fromStart: row.fromStart, changes: [] }
+      events.set(key, event)
       byPerson.set(row.professionalUserId, [...(byPerson.get(row.professionalUserId) ?? []), event])
-      lastKey = key
     }
-    event.fromStart ||= row.fromStart
     event.changes.push({
       serviceId: row.serviceId,
       serviceName: row.serviceName,
@@ -3145,8 +3145,9 @@ interface LiveCommissionLine {
   rateBps: number | null
   fixedCents: number | null
   forService: boolean
-  /** El servicio con que la vista eligió la regla (el del procedimiento o el del tratamiento). */
+  /** El servicio con que la vista eligió la regla (el del procedimiento o el del tratamiento), y su nombre de hoy. */
   serviceId: string | null
+  serviceName: string | null
   /** Tuvo alguna regla (general o del servicio): sin ninguna da 0 y no se congela al pagar. */
   hasRule: boolean
   commissionCents: number
@@ -3173,14 +3174,16 @@ async function liveCommissionLines(
     fixedCents: number | null
     forService: boolean
     serviceId: string | null
+    serviceName: string | null
     hasRule: boolean
     commission: string
   }>(sql`
     select l.application_id as "applicationId", l.slice, l.sessions, l.charge_id as "chargeId", l.payment_id as "paymentId",
       l.patient_id as "patientId", l.description, l.promotion_name as "promotionName", l.at, l.currency,
       l.own_value::text as value, l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService",
-      l.service_id as "serviceId", l.has_rule as "hasRule", l.own_commission::text as commission
-    from ${commissionLiveIn(orgId, query.start, query.end, sql`and professional_user_id = ${query.professionalUserId}`)} l`)
+      l.service_id as "serviceId", sc.name as "serviceName", l.has_rule as "hasRule", l.own_commission::text as commission
+    from ${commissionLiveIn(orgId, query.start, query.end, sql`and professional_user_id = ${query.professionalUserId}`)} l
+    left join service_catalog sc on sc.organization_id = ${orgId} and sc.id = l.service_id`)
   return [...rows].map((row) => ({
     ...row,
     at: new Date(row.at),
@@ -3507,6 +3510,9 @@ interface FrozenLine {
   /** La nota del registro: de lo saldado, su motivo. */
   notes: string | null
   promotionName: string | null
+  /** El servicio de su cargo, como lo decide `commission_live` (lo pagado guarda el cargo, no el servicio). */
+  serviceId: string | null
+  serviceName: string | null
 }
 
 /** Líneas ya pagadas del profesional (pagos vigentes), con la fecha del pago. */
@@ -3519,6 +3525,9 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
       kind: commissionSettlement.kind,
       notes: commissionSettlement.notes,
       promotionName: patientCharge.promotionName,
+      // El del procedimiento o, en lo adelantado de un tratamiento, el del tratamiento: como la vista.
+      serviceId: sql<string | null>`coalesce(${encounterProcedure.serviceId}, ${treatmentPlanItem.serviceId})`,
+      serviceName: serviceCatalog.name,
     })
     .from(commissionSettlementLine)
     .innerJoin(
@@ -3533,6 +3542,22 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
       patientCharge,
       and(eq(patientCharge.organizationId, orgId), eq(patientCharge.id, commissionSettlementLine.chargeId)),
     )
+    .leftJoin(
+      encounterProcedure,
+      and(eq(encounterProcedure.organizationId, orgId), eq(encounterProcedure.id, patientCharge.encounterProcedureId)),
+    )
+    .leftJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.id, patientCharge.planItemId),
+        isNull(patientCharge.encounterProcedureId),
+      ),
+    )
+    .leftJoin(
+      serviceCatalog,
+      sql`${serviceCatalog.organizationId} = ${orgId} and ${serviceCatalog.id} = coalesce(${encounterProcedure.serviceId}, ${treatmentPlanItem.serviceId})`,
+    )
     .where(
       and(
         eq(commissionSettlementLine.organizationId, orgId),
@@ -3546,46 +3571,6 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
 /** La clave de una línea: el cobro y, si se reparte por sesiones, su parte. */
 function lineKey(applicationId: string, slice: number | null | undefined): string {
   return slice ? `${applicationId}:${slice}` : applicationId
-}
-
-/**
- * El servicio de cada cargo, como lo decide `commission_live`: el del procedimiento o, en lo adelantado
- * de un tratamiento, el del tratamiento. Para lo ya pagado, que guarda el cargo y no el servicio.
- */
-async function serviceOfCharges(tx: Db, orgId: string, chargeIds: string[]): Promise<Map<string, string>> {
-  const unique = [...new Set(chargeIds)]
-  if (unique.length === 0) return new Map()
-  const rows = await tx
-    .select({
-      chargeId: patientCharge.id,
-      serviceId: sql<string | null>`coalesce(${encounterProcedure.serviceId}, ${treatmentPlanItem.serviceId})`,
-    })
-    .from(patientCharge)
-    .leftJoin(
-      encounterProcedure,
-      and(eq(encounterProcedure.organizationId, orgId), eq(encounterProcedure.id, patientCharge.encounterProcedureId)),
-    )
-    .leftJoin(
-      treatmentPlanItem,
-      and(
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.id, patientCharge.planItemId),
-        isNull(patientCharge.encounterProcedureId),
-      ),
-    )
-    .where(and(eq(patientCharge.organizationId, orgId), inArray(patientCharge.id, unique)))
-  return new Map(rows.flatMap((row) => (row.serviceId ? [[row.chargeId, row.serviceId] as const] : [])))
-}
-
-/** El nombre de hoy de cada servicio del catálogo. */
-async function serviceNames(tx: Db, orgId: string, ids: Array<string | null>): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((id): id is string => !!id))]
-  if (unique.length === 0) return new Map()
-  const rows = await tx
-    .select({ id: serviceCatalog.id, name: serviceCatalog.name })
-    .from(serviceCatalog)
-    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, unique)))
-  return new Map(rows.map((row) => [row.id, row.name]))
 }
 
 async function patientNames(tx: Db, orgId: string, ids: string[]): Promise<Map<string, string>> {
@@ -3712,16 +3697,6 @@ async function monthView(
     ...frozenCobros.map((f) => f.line.patientId).filter((id): id is string => !!id),
   ])
   const inMonth = (at: Date) => at >= start && at < end
-  const frozenService = await serviceOfCharges(
-    tx,
-    orgId,
-    frozenCobros.filter((f) => inMonth(f.line.occurredAt)).map((f) => f.line.chargeId).filter((id): id is string => !!id),
-  )
-  const serviceName = await serviceNames(tx, orgId, [
-    ...live.map((app) => app.serviceId),
-    ...frozenService.values(),
-  ])
-  const withService = (id: string | null) => ({ serviceId: id, serviceName: id ? (serviceName.get(id) ?? null) : null })
   const lines: CommissionLine[] = []
   // La base del mes se redondea una vez, sobre la suma; lo ya pagado quedó con su base.
   const baseValues: MoneyFraction[] = []
@@ -3750,7 +3725,8 @@ async function monthView(
       sessions: f.line.sessions,
       fixedCents: f.line.fixedCents,
       forService: f.line.forService,
-      ...withService(f.line.chargeId ? (frozenService.get(f.line.chargeId) ?? null) : null),
+      serviceId: f.serviceId,
+      serviceName: f.serviceName,
       settled: true,
       paidAt: f.settledAt,
       voidedAfterPaid,
@@ -3778,7 +3754,8 @@ async function monthView(
       sessions: app.slice ? app.sessions : null,
       fixedCents: app.fixedCents,
       forService: app.forService,
-      ...withService(app.serviceId),
+      serviceId: app.serviceId,
+      serviceName: app.serviceName,
       ...(app.hasRule ? {} : { unruled: true }),
       settled: false,
       paidAt: null,
