@@ -827,7 +827,9 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           ...base,
           missingData: canEdit ? await getPatientMissingData(tx, orgId, c.req.param("id")) : null,
         }
-        if (clinical) return full
+        // Con lo clínico va también si se le preguntó por alergias: la atención lo dice (revisión del 9 nov).
+        if (clinical)
+          return { ...full, allergyReview: (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown" }
         // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
         // lo declaró y sus datos de contacto), sin la salud declarada: así la
         // ficha no dice «origen no disponible» por algo que solo está oculto.

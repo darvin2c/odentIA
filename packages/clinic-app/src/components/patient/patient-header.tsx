@@ -107,9 +107,12 @@ export function clinicalAlerts(
 export function PatientClinicalStrip({
   detail,
   onAntecedentes,
+  medicationReview,
 }: {
   detail: Pick<PatientFull, "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview">
   onAntecedentes?: () => void
+  /** Para quien lee la historia: si se le preguntó qué toma (sin medicación registrada). */
+  medicationReview?: string | null
 }) {
   const alerts = clinicalAlerts(detail)
   const shown = alerts.slice(0, 6)
@@ -121,7 +124,10 @@ export function PatientClinicalStrip({
       : noAllergies && detail.allergyReview === "unknown"
         ? "Alergias: no preguntado"
         : null
-  if (alerts.length === 0 && !allergyWord) return null
+  // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
+  const medicationWord =
+    detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
+  if (alerts.length === 0 && !allergyWord && !medicationWord) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   return (
     <div className="flex flex-wrap items-center gap-2" aria-label="Alertas clínicas">
@@ -135,6 +141,11 @@ export function PatientClinicalStrip({
           )}
         >
           {allergyWord}
+        </Badge>
+      ) : null}
+      {medicationWord ? (
+        <Badge variant="outline" className="h-auto min-h-5 max-w-full border-warning/30 bg-warning-soft py-px text-left whitespace-normal text-warning">
+          {medicationWord}
         </Badge>
       ) : null}
       {shown.map((alert) => (
@@ -591,6 +602,7 @@ export function PersonHeader({
         {detail ? (
           <PatientClinicalStrip
             detail={clinicalHealth ? withHealth(detail, clinicalHealth) : detail}
+            medicationReview={clinicalHealth?.reviewStatus.medications ?? null}
             onAntecedentes={canClinical && openWide ? () => openWide({ id: "antecedentes" }) : undefined}
           />
         ) : null}

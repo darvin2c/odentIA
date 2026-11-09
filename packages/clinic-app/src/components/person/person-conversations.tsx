@@ -164,12 +164,12 @@ export function PersonConversations({ person }: { person: PersonPage }) {
               ) : (
                 <ul className="flex flex-col divide-y">
                   {shownOpportunities.map((row) => (
-                    <li key={row.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+                    <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-2 py-2 text-sm">
                       <Button
                         type="button"
                         variant="link"
-                        // Un título largo baja de línea: no se sale de la tarjeta.
-                        className="h-auto whitespace-normal p-0 text-left font-medium"
+                        // Un título largo baja de línea: no se sale de la tarjeta (segunda mesa, 390 px).
+                        className="h-auto min-w-0 max-w-full shrink whitespace-normal break-words p-0 text-left font-medium"
                         onClick={() => setViewingOpportunity(row.id)}
                       >
                         {row.title}

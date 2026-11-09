@@ -87,6 +87,9 @@ export function useAttendAppointment() {
         toast.error(
           "Ya tiene otra atención en curso. Termínala o anúlala y vuelve a «Registrar la atención» de esta cita: lo de cada día va en su propia atención.",
           {
+            // Se queda hasta que la persona lo cierre: es una decisión, no un aviso al paso (segunda mesa).
+            duration: Number.POSITIVE_INFINITY,
+            closeButton: true,
             action: {
               label: "Ir a la atención en curso",
               onClick: () =>
