@@ -52,7 +52,7 @@ export const opticalUi: ProductUi = {
     professional: opticalProfessionalFor,
   },
   // Los tipos de su biblioteca, para filtrarla; nada queda dibujado al completar un servicio.
-  services: { kinds: OPTICAL_SERVICE_KINDS.map((kind) => ({ key: kind.key, name: kind.name })), leaves: null },
+  services: { kinds: OPTICAL_SERVICE_KINDS.map((kind) => ({ key: kind.key, name: kind.name })), leaves: null, toothFit: null },
   plan: { ...bare.plan, budgetRequired: false, repeatingControls: true },
   health: { ...bare.health, showsAsa: false },
   encounter: {

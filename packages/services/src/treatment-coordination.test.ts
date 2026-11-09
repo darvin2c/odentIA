@@ -79,6 +79,9 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
       // Sin aceptar, no tiene sesiones por reservar.
       sessionsLeft: 0,
       nextSession: { n: 1, m: 1 },
+      // Solo el título de lo que va antes en su pieza, sin pieza ni diagnóstico (entrega 8).
+      after: null,
+      unbooked: false,
     },
   ])
   expect(view.followUps).toHaveLength(1)
