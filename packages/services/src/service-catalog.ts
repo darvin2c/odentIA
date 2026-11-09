@@ -33,8 +33,10 @@ import {
   libraryServiceFinding,
   productHooks,
   type ServiceLeaves,
+  type ServiceToothAnatomy,
   saveServiceFinding,
   serviceLeavesFinding,
+  serviceToothAnatomy,
   type TemplateProduct,
   templateProductColumns,
 } from "./products.js"
@@ -66,8 +68,15 @@ export type ServiceRow = typeof serviceCatalog.$inferSelect & {
   /** Sus sesiones habituales: las que puso la clínica o las de la biblioteca (`usualSessionsSql`). */
   usualSessions: number
 }
-/** El servicio como lo lee una pantalla: con el nombre de su especialidad de la clínica. */
-export type ServiceListItem = ServiceRow & { specialtyName: string | null }
+/**
+ * El servicio como lo lee una pantalla: con el nombre de su especialidad de la
+ * clínica y, si su tratamiento de la biblioteca lo dice, para qué piezas es con
+ * sus hermanos (odentIA; null en un servicio propio o de otro producto).
+ */
+export type ServiceListItem = ServiceRow & {
+  specialtyName: string | null
+  toothAnatomy: ServiceToothAnatomy | null
+}
 /** El tratamiento de la biblioteca con su parte dental (caras y lo que deja en la pieza). */
 export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & TemplateProduct
 
@@ -699,6 +708,7 @@ const serviceListColumns = () => ({
   patientGuideReviewedAt: serviceCatalog.patientGuideReviewedAt,
   patientGuideReviewedBy: serviceCatalog.patientGuideReviewedBy,
   leavesFinding: serviceLeavesFinding,
+  toothAnatomy: serviceToothAnatomy,
   procedureSystem: serviceCatalog.procedureSystem,
   procedureCode: serviceCatalog.procedureCode,
   procedureVersion: serviceCatalog.procedureVersion,

@@ -92,9 +92,11 @@ export async function productHelpTopics(tx: Db, orgId: string): Promise<readonly
 export {
   checkServiceFinding,
   libraryServiceFinding,
-  saveServiceFinding,
   type ServiceLeaves,
+  type ServiceToothAnatomy,
+  saveServiceFinding,
   serviceLeavesFinding,
+  serviceToothAnatomy,
   type TemplateDental as TemplateProduct,
   templateDentalColumns as templateProductColumns,
 } from "./dental/service-finding.js"

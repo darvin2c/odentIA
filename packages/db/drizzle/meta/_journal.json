@@ -519,6 +519,13 @@
       "when": 1794239372108,
       "tag": "0073_sumar_a_su_cita",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794245978132,
+      "tag": "0074_anatomia_de_la_biblioteca",
+      "breakpoints": true
     }
   ]
 }

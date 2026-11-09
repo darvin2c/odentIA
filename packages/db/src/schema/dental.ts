@@ -395,11 +395,28 @@ export const dentalTemplateRule = catalogSchema.table(
     surfaceCountMax: integer("surface_count_max"),
     leavesCondition: text("leaves_condition"),
     leavesVariant: text("leaves_variant"),
+    /**
+     * Para qué piezas es (entrega 8 de la atención): sus grupos (ISO 3950:
+     * `anterior`, `premolar`, `molar`), su dentición (`permanent`,
+     * `deciduous`; nula, las dos) y su familia de hermanos (la endodoncia
+     * vital anterior, bicúspide y posterior). Un dato explícito, no deducido
+     * del nombre; sin grupos, el tratamiento no tiene anatomía.
+     */
+    toothGroups: text("tooth_groups").array(),
+    dentition: text("dentition"),
+    family: text("family"),
   },
   (table) => [
     check(
       "dental_template_rule_leaves_check",
       sql`${table.leavesVariant} IS NULL OR ${table.leavesCondition} IS NOT NULL`,
+    ),
+    check(
+      "dental_template_rule_anatomy_check",
+      sql`(${table.toothGroups} IS NULL AND ${table.family} IS NULL AND ${table.dentition} IS NULL)
+        OR (${table.family} IS NOT NULL AND cardinality(${table.toothGroups}) > 0
+          AND ${table.toothGroups} <@ ARRAY['anterior', 'premolar', 'molar']::text[]
+          AND (${table.dentition} IS NULL OR ${table.dentition} IN ('permanent', 'deciduous')))`,
     ),
   ],
 )

@@ -32,8 +32,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { removeIndicatedApi } from "../../lib/encounters"
-import { groupFindings } from "../../lib/site-findings"
 import {
   budgetNumberLabel,
   commonPlanItemIds,
@@ -44,9 +42,16 @@ import {
   totalsOf,
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
+import { removeIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel, quotedPriceOf } from "../../lib/patients"
-import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import {
+  fetchService,
+  fetchServices,
+  type ServiceCatalogItem,
+  TREATMENT_SCOPE_LABELS,
+} from "../../lib/services"
+import { groupFindings } from "../../lib/site-findings"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -265,7 +270,7 @@ export function EncounterPlanPanel({
           variant="ghost"
           aria-expanded={changing === item.id}
           aria-label={`Cambiar ${item.title}`}
-          disabled={removing !== null}
+          disabled={removing !== null || switching !== null}
           onClick={() => setChanging((current) => (current === item.id ? null : item.id))}
         >
           Cambiar
@@ -275,13 +280,81 @@ export function EncounterPlanPanel({
           size="sm"
           variant="ghost"
           aria-label={`Quitar ${item.title}`}
-          disabled={removing !== null}
+          disabled={removing !== null || switching !== null}
           onClick={() => void remove(item.id)}
         >
           {removing === item.id ? "Quitando…" : "Quitar"}
         </Button>
       </span>
     ) : null
+  // La endodoncia anterior indicada hoy en la 46 (entrega 8, punto 1): el aviso queda en su fila
+  // hasta que se cambie. Lo dice el producto con la anatomía de cada servicio; aquí solo se pinta.
+  const toothFit = productUi().services.toothFit
+  const fitIds = [
+    ...new Set(
+      indicatedItems.flatMap((item) =>
+        item.serviceId && item.toothNumber != null ? [item.serviceId] : [],
+      ),
+    ),
+  ]
+    .sort()
+    .slice(0, 100)
+  const fitServices = useQuery({
+    queryKey: ["services", "ids", fitIds],
+    queryFn: () => fetchServices({ ids: fitIds, limit: fitIds.length }),
+    enabled: toothFit !== null && fitIds.length > 0,
+    staleTime: 30_000,
+  }).data?.data
+  const [switching, setSwitching] = useState<string | null>(null)
+  /** «Usar Endodoncia posterior vital»: la misma operación que «Cambiar» el tratamiento del renglón. */
+  const switchService = async (item: PlanItem, serviceId: string) => {
+    if (switching || removing) return
+    setSwitching(item.id)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await apiFetch(`/api/patients/${patientId}/plan/items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ encounterId, serviceId }),
+      })
+      await Promise.all(
+        [
+          "treatment-plans",
+          "treatment-plan",
+          "plan-items",
+          "patient-summary",
+          "plan-next",
+          "budget",
+          "budgets",
+        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
+      await onChanged()
+    } catch (err) {
+      setRowError({ itemId: item.id, message: submitErrorMessage(err) })
+    } finally {
+      setSwitching(null)
+      onPendingChange(false)
+    }
+  }
+  const fitNotice = (item: PlanItem) => {
+    if (!toothFit || !today.has(item.id) || item.toothNumber == null || changing === item.id)
+      return null
+    const service = fitServices?.find((candidate) => candidate.id === item.serviceId)
+    if (!service) return null
+    // Se cambia mientras quien atiende aún puede cambiar el renglón (lo decide el servidor).
+    const editable = canWrite && !disabled && removableIds.has(item.id)
+    return (
+      <div className="basis-full">
+        <toothFit.Notice
+          service={{ name: item.title, toothAnatomy: service.toothAnatomy }}
+          place={item.toothNumber}
+          pending={switching !== null || removing !== null}
+          onUse={editable ? (sibling) => void switchService(item, sibling.id) : undefined}
+        />
+      </div>
+    )
+  }
   const changeForm = (item: PlanItem) =>
     changing === item.id ? (
       <div className="basis-full">
@@ -379,6 +452,7 @@ export function EncounterPlanPanel({
                         )}
                         {rowActions(item)}
                       </span>
+                      {fitNotice(item)}
                       {changeForm(item)}
                       {rowError?.itemId === item.id ? (
                         <p role="alert" className="basis-full text-sm text-destructive">
@@ -424,6 +498,7 @@ export function EncounterPlanPanel({
                 onPlace={placeIn}
                 rowActions={rowActions}
                 changeForm={changeForm}
+                fitNotice={fitNotice}
               />
             ))}
           </>
@@ -607,6 +682,7 @@ function PathsBox({
   onPlace,
   rowActions,
   changeForm,
+  fitNotice,
 }: {
   patientId: string
   group: PlanPathGroup
@@ -621,6 +697,8 @@ function PathsBox({
   /** «Cambiar» y «Quitar» del renglón indicado hoy, y su formulario abierto. */
   rowActions: (item: PlanItem) => React.ReactNode
   changeForm: (item: PlanItem) => React.ReactNode
+  /** El aviso de la pieza equivocada de lo indicado hoy. */
+  fitNotice: (item: PlanItem) => React.ReactNode
 }): React.JSX.Element {
   const count = pathCountWord(group.pathCount)
   // El total de cada opción es el del presupuesto (con lo que va en todas, descuentos y su
@@ -709,6 +787,7 @@ function PathsBox({
                           </span>
                         ) : null}
                         {first ? rowActions(item) : null}
+                        {first ? fitNotice(item) : null}
                         {first ? changeForm(item) : null}
                         {movable ? (
                           <ChoiceSelect
@@ -1068,6 +1147,24 @@ function IndicationForm({
   const tooth = useStore(form.store, (state) => state.values.teeth[0] ?? null)
   const entryId = useStore(form.store, (state) => state.values.odontogramEntryId)
   const service = useStore(form.store, (state) => state.values.service)
+  const toothFit = productUi().services.toothFit
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  /** «Usar Endodoncia posterior vital»: cambia el servicio elegido, con sus sesiones habituales. */
+  const switchToSibling = async (serviceId: string) => {
+    setSwitching(true)
+    setSwitchError(null)
+    try {
+      const { data } = await fetchService(serviceId)
+      form.setFieldValue("service", data)
+      if (data.scope) form.setFieldValue("scope", data.scope)
+      form.setFieldValue("sessions", String(data.usualSessions ?? 1))
+    } catch (err) {
+      setSwitchError(submitErrorMessage(err))
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   const vigentes = productUi().useFindings(patientId, canRead)
   // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
@@ -1267,6 +1364,20 @@ function IndicationForm({
           {site && service.scope
             ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}`
             : ""}
+        </p>
+      ) : null}
+      {/* Justo debajo de lo elegido: la endodoncia anterior en la 46 avisa y ofrece la que encaja. */}
+      {service && toothFit && tooth != null && (scope === "tooth" || scope === "surfaces") ? (
+        <toothFit.Notice
+          service={service}
+          place={tooth}
+          pending={blocked || switching}
+          onUse={(sibling) => void switchToSibling(sibling.id)}
+        />
+      ) : null}
+      {switchError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {switchError}
         </p>
       ) : null}
       {service && !editing ? (
