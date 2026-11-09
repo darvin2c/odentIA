@@ -92,10 +92,16 @@ import {
   updatePlanItem,
   reopenPlanItemForSession,
   updatePlanItemPlanning,
+  getEncounterVoidPreview,
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
   recordLockState,
+  bringTreatmentToEncounter,
+  chooseVisitControl,
+  leaveTreatmentFromEncounter,
+  removeIndicatedFromEncounter,
+  assembleEncounterBudget,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -414,6 +420,12 @@ const reasonInput = z
     reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
   })
   .strict()
+/** Anular la atención: el motivo y lo entregado que el diálogo mostró que se anula con ella. */
+const voidEncounterInput = reasonInput
+  .extend({
+    budgets: z.array(z.object({ id: z.uuid(), status: z.string().max(20) }).strict()).max(20).optional(),
+  })
+  .strict()
 /** `/closing?addSession=a,b`: lo marcado «Falta otra sesión» en el cierre. */
 const closingQuery = z.array(z.uuid()).max(52)
 
@@ -425,6 +437,8 @@ const finalizeInput = z
     // «¿Terminaste?» de lo trabajado hoy: «Sí, terminar» o «Falta otra sesión».
     completePlanItemIds: z.array(z.uuid()).max(52).optional(),
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
+    // Los diagnósticos que el cierre proponía resolver y quien firma dejó marcados.
+    resolveDiagnosisIds: z.array(z.uuid()).max(100).optional(),
     // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
     nextControl: z
       .union([
@@ -672,7 +686,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // deciden sin clínica); entregarlo o enviarlo, `budgets.send`; el resto
     // de mutaciones, `budgets.write`.
     const permission =
-      domain === "budgets" && write && remainder.includes("/decision")
+      // «No contesta» es seguir la respuesta: la anota quien anota la respuesta.
+      domain === "budgets" && write && (remainder.includes("/decision") || remainder.endsWith("/no-answer"))
         ? "budgets.decide"
         : domain === "budgets" && write && BUDGET_SEND_SUFFIXES.some((suffix) => remainder.endsWith(suffix))
           ? "budgets.send"
@@ -816,7 +831,9 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           ...base,
           missingData: canEdit ? await getPatientMissingData(tx, orgId, c.req.param("id")) : null,
         }
-        if (clinical) return full
+        // Con lo clínico va también si se le preguntó por alergias: la atención lo dice (revisión del 9 nov).
+        if (clinical)
+          return { ...full, allergyReview: (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown" }
         // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
         // lo declaró y sus datos de contacto), sin la salud declarada: así la
         // ficha no dice «origen no disponible» por algo que solo está oculto.
@@ -829,6 +846,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           registration: full.registration ? { ...full.registration, answers: declared } : null,
           activeAllergies:
             clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
+          // Sin alergias registradas no es lo mismo «niega» que «no se le preguntó»: la
+          // cabecera lo dice a quien ve las alergias (mesa del 9 nov). Nada más de su salud.
+          allergyReview:
+            clinicalRead || canAccess(memberRole, "clinical.alerts")
+              ? (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown"
+              : null,
           activeConditions: [],
           currentMedications: [],
         }
@@ -911,26 +934,30 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   // La leen quien atiende, recepción y caja: sin diagnósticos ni piezas, y el
   // botón solo para quien puede hacerlo.
   app.get("/:id/next-step", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+        getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission), {
+          viewerUserId: userId,
+        }),
       ),
     )
   })
   // Todo lo que sigue, en una lista (el Resumen): la misma regla y el mismo permiso.
   app.get("/:id/next-steps", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
     }
     return runService(c, 200, async () =>
       (
         await withOrgContext(deps.db, orgId, (tx) =>
-          getPlanNextSteps(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+          getPlanNextSteps(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission), {
+            viewerUserId: userId,
+          }),
         )
       ).steps,
     )
@@ -1468,6 +1495,19 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
+  // «Armarlo ahora»: lo indicado en la atención entra al presupuesto en borrador, como al firmar,
+  // para mostrarlo o enviarlo en plena consulta (QA del 9 nov: una indicación sola tras otro
+  // presupuesto no tenía línea). No envía nada.
+  app.post("/:id/encounters/:encounterId/budget", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write") || !canAccess(memberRole, "budgets.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para armar el presupuesto"), 403)
+    return runService(c, 200, async () => ({
+      data: await withOrgContext(deps.db, orgId, (tx) =>
+        assembleEncounterBudget(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), { onRequest: true }),
+      ),
+    }))
+  })
   app.post("/:id/encounters/:encounterId/procedures", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = procedureInput.safeParse(await c.req.json().catch(() => null))
@@ -1562,9 +1602,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
+  // Qué se lleva anular la atención: el diálogo lo muestra antes de confirmar.
+  app.get("/:id/encounters/:encounterId/void-preview", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getEncounterVoidPreview(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), {
+          memberRole,
+          seesCharges: canAccess(memberRole, "finance.read"),
+        }),
+      ),
+    )
+  })
   app.post("/:id/encounters/:encounterId/void", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = voidEncounterInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
@@ -1575,9 +1627,89 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("id"),
           c.req.param("encounterId"),
           parsed.data,
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
       ),
     )
+  })
+  // «Hoy viene a…»: traer a la atención un tratamiento por hacer, o dejarlo, y decir a qué control viene.
+  app.post("/:id/encounters/:encounterId/visit/treatments", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ planItemId: z.uuid() })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        bringTreatmentToEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data.planItemId,
+        ),
+      ),
+    )
+  })
+  app.delete("/:id/encounters/:encounterId/visit/treatments/:planItemId", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const planItemId = z.uuid().safeParse(c.req.param("planItemId"))
+    if (!planItemId.success) return validationError(c, planItemId.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        leaveTreatmentFromEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("planItemId"),
+        ),
+      )
+      return { ok: true }
+    })
+  })
+  app.put("/:id/encounters/:encounterId/visit/control", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ followUpId: z.uuid().nullable() })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        chooseVisitControl(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data.followUpId,
+        ),
+      ),
+    )
+  })
+  // «Quitar» un renglón indicado en esta misma atención, antes de que responda.
+  app.delete("/:id/encounters/:encounterId/indicated/:planItemId", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const planItemId = z.uuid().safeParse(c.req.param("planItemId"))
+    if (!planItemId.success) return validationError(c, planItemId.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        removeIndicatedFromEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("planItemId"),
+          {
+            memberRole,
+          },
+        ),
+      )
+      return { ok: true }
+    })
   })
   app.post("/:id/encounters/:encounterId/take-over", async (c) => {
     const { orgId, userId } = orgContextOf(c)
@@ -1723,7 +1855,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId } = orgContextOf(c)
     const planId = c.req.query("planId") || undefined
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId)),
+      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId, { withoutVoided: true })),
     )
   })
   app.post("/:id/plan/items", async (c) => {

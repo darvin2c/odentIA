@@ -77,8 +77,14 @@ const RESTOCK_DAYS = 100
 
 type Progress = { status: string; startedAt: Date | null; completedAt: Date | null; reason: string | null }
 
-export async function seedReportsProgress(tx: Db, input: ReportsProgressSeedInput) {
-  const { orgId, ownerUserId } = input
+/**
+ * El avance de lo aceptado de la historia: lo que una visita hizo queda hecho (o
+ * en curso) con sus fechas, y lo que ninguna hizo nunca figura empezado. Lo usa
+ * también la demo de ventas (`demo-build.ts`): sin esto, lo que una visita de
+ * abril ya hizo seguía «pendiente», el Plan decía «Iniciar la primera sesión» y
+ * el cajón de reservar «sesión 2 (1 prevista)» (QA del 8 nov, Claudia).
+ */
+export async function seedAcceptedProgress(tx: Db, orgId: string): Promise<Record<string, number>> {
   const random = generator(192)
   const now = Date.now()
   const historyEnd = now - HISTORY_GAP_DAYS * DAY_MS
@@ -159,6 +165,13 @@ export async function seedReportsProgress(tx: Db, input: ReportsProgressSeedInpu
       where pi.organization_id = ${orgId} and pi.id = v.id`)
   const progress: Record<string, number> = {}
   for (const row of updates) progress[row.status] = (progress[row.status] ?? 0) + 1
+  return progress
+}
+
+export async function seedReportsProgress(tx: Db, input: ReportsProgressSeedInput) {
+  const { orgId, ownerUserId } = input
+  const now = Date.now()
+  const progress = await seedAcceptedProgress(tx, orgId)
 
   // --- Materiales de cada servicio ---------------------------------------------------------
   const products = await tx

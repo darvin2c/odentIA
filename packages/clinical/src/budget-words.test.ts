@@ -15,6 +15,23 @@ describe("un solo nombre para cada estado del presupuesto", () => {
     expect(said("en_espera")).toBe("En espera")
   })
 
+  // QA del 9 nov: la Historia y el Plan decían «Aceptó todo» junto a «Exodoncia · No elegida».
+  it("con varias opciones, aceptar es elegir una: «Eligió la opción A»", () => {
+    const items = [
+      { decision: "aceptado", optionId: "a" },
+      { decision: "no_elegida", optionId: "b" },
+    ]
+    const options = [
+      { id: "a", decision: "elegida", position: 1 },
+      { id: "b", decision: "no_elegida", position: 2 },
+    ]
+    expect(budgetStateText({ status: "aceptado", items, options })).toBe("Eligió la opción A")
+    // Una sola opción sigue siendo «Aceptó todo».
+    expect(budgetStateText({ status: "aceptado", items, options: [{ id: "a", decision: "elegida", position: 1 }] })).toBe(
+      "Aceptó todo",
+    )
+  })
+
   it("«Aceptó N de M» cuenta solo las líneas de la opción elegida", () => {
     const items = [
       { decision: "aceptado", optionId: "a" },

@@ -13,7 +13,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm"
-import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { diagnosisTitlesOf, namedDiagnosis, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
@@ -23,6 +23,7 @@ import { productHooks } from "./products.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
 import { assertAttending } from "./encounter-attending.js"
+import { acceptedBudgetLines } from "./agreed-lines.js"
 import {
   type ProductHooks,
   type ProductParts,
@@ -104,6 +105,8 @@ export interface PlanItemPath {
 
 /** Ítem listado con su progreso: sesiones hechas = procedimientos no anulados. */
 export type PlanItemWithProgress = PlanItemWithDecision & {
+  /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»); null sin diagnóstico. */
+  diagnosisName: string | null
   sessionsDone: number
   path: PlanItemPath | null
   /**
@@ -117,6 +120,21 @@ export type PlanItemWithProgress = PlanItemWithDecision & {
    * ofrece «Falta otra sesión» solo entonces (`reopenPlanItemForSession`).
    */
   canAddSession: boolean
+  /**
+   * El precio acordado: el de la línea aceptada de su presupuesto, el mismo que
+   * se cobra (`acceptedBudgetLines`). Nulo si no hay nada aceptado: vale
+   * `priceCents` (QA de la ficha del 8 nov: la atención decía S/ 120 de lista
+   * con S/ 90 acordado).
+   */
+  agreedPriceCents: number | null
+  agreedCurrency: string | null
+  /**
+   * Sin nada aceptado, el precio que le ofrece su presupuesto vigente (la opción
+   * elegida o, mientras decide, la recomendada). No es lo que se cobra: se dice
+   * «en su presupuesto», nunca como acordado.
+   */
+  offeredPriceCents: number | null
+  offeredCurrency: string | null
 }
 
 /**
@@ -510,14 +528,85 @@ async function withDecisions(
     orgId,
     items.filter((item) => item.status === "realizado").map((item) => item.id),
   )
+  const agreed = await agreedPricesOf(tx, orgId, items)
+  // El diagnóstico con su nombre, como en la Historia: «Pulpitis (CIE-11 DA09.0)», no solo el código.
+  const titles = await diagnosisTitlesOf(
+    tx,
+    items.map((item) => ({ system: item.diagnosisSystem, code: item.diagnosisCode })),
+  )
   return items.map((item) => ({
     ...item,
+    diagnosisName: item.diagnosisCode ? namedDiagnosis(titles, item.diagnosisSystem, item.diagnosisCode) : null,
     decision: item.decisionStatus as PlanItemDecision,
     sessionsDone: sessions.get(item.id) ?? 0,
     path: paths.get(item.id) ?? null,
     newTermsPending: newTerms.has(item.id),
     canAddSession: anotherSessionAllowed(item, another.get(item.id)),
+    agreedPriceCents: agreed.accepted.get(item.id)?.priceCents ?? null,
+    agreedCurrency: agreed.accepted.get(item.id)?.currency ?? null,
+    offeredPriceCents: agreed.offered.get(item.id)?.priceCents ?? null,
+    offeredCurrency: agreed.offered.get(item.id)?.currency ?? null,
   }))
+}
+
+/**
+ * El precio de presupuesto de cada tratamiento: el aceptado (lo que se cobra,
+ * también el de un presupuesto sustituido mientras su revisión espera respuesta)
+ * y, sin nada aceptado, el que le ofrece la línea vigente de su presupuesto no
+ * cancelado (la opción elegida o, mientras decide, la recomendada; como `currentLine`).
+ */
+async function agreedPricesOf(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<{ id: string; patientId: string; budgetId: string | null }>,
+): Promise<{
+  accepted: Map<string, { priceCents: number | null; currency: string }>
+  offered: Map<string, { priceCents: number | null; currency: string }>
+}> {
+  const accepted = new Map<string, { priceCents: number | null; currency: string }>()
+  const offered = new Map<string, { priceCents: number | null; currency: string }>()
+  for (const patientId of new Set(items.map((item) => item.patientId)))
+    for (const [id, line] of await acceptedBudgetLines(
+      tx,
+      orgId,
+      patientId,
+      items.filter((item) => item.patientId === patientId).map((item) => item.id),
+    ))
+      accepted.set(id, { priceCents: line.priceCents, currency: line.currency })
+  const rest = items.filter((item) => item.budgetId && !accepted.has(item.id))
+  if (rest.length === 0) return { accepted, offered }
+  const lines = await tx
+    .select({ planItemId: treatmentBudgetItem.planItemId, priceCents: treatmentBudgetItem.priceCents, currency: treatmentBudgetItem.currency })
+    .from(treatmentBudgetItem)
+    .innerJoin(
+      treatmentBudgetOption,
+      and(
+        eq(treatmentBudgetOption.id, treatmentBudgetItem.optionId),
+        eq(treatmentBudgetOption.organizationId, treatmentBudgetItem.organizationId),
+      ),
+    )
+    .innerJoin(
+      treatmentBudget,
+      and(eq(treatmentBudget.id, treatmentBudgetItem.budgetId), eq(treatmentBudget.organizationId, treatmentBudgetItem.organizationId)),
+    )
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        inArray(
+          treatmentBudgetItem.planItemId,
+          rest.map((item) => item.id),
+        ),
+        sql`${treatmentBudgetItem.budgetId} = (select own.budget_id from treatment_plan_item own where own.id = ${treatmentBudgetItem.planItemId} and own.organization_id = ${treatmentBudgetItem.organizationId})`,
+        ne(treatmentBudget.status, "cancelado"),
+      ),
+    )
+    .orderBy(
+      sql`${treatmentBudgetOption.decision} = 'elegida' desc`,
+      sql`${treatmentBudgetOption.isRecommended} desc`,
+      asc(treatmentBudgetOption.position),
+    )
+  for (const line of lines) if (!offered.has(line.planItemId)) offered.set(line.planItemId, { priceCents: line.priceCents, currency: line.currency })
+  return { accepted, offered }
 }
 
 /** El camino de cada tratamiento según las opciones de su presupuesto vigente. */
@@ -828,11 +917,25 @@ export async function getTreatmentPlanDetail(
   }
 }
 
+/**
+ * El motivo con que queda lo que se quitó en la misma atención donde se indicó,
+ * antes de que la persona respondiera (`removeIndicatedFromEncounter`). El Plan
+ * no lo lista: fue corregir el borrador, como lo de una atención anulada.
+ */
+export const REMOVED_IN_ENCOUNTER = "Se quitó en la atención donde se indicó"
+
+/**
+ * Los tratamientos del plan. `withoutVoided` (el Plan de la persona): lo que
+ * se canceló porque se anuló la atención donde se indicó no se lista; queda en
+ * la atención anulada y en la auditoría. La copia de la historia y los demás
+ * lectores lo siguen recibiendo.
+ */
 export async function listPlanItems(
   tx: Db,
   orgId: string,
   patientId: string,
   planId?: string,
+  opts: { withoutVoided?: boolean } = {},
 ): Promise<PlanItemWithProgress[]> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
@@ -840,6 +943,13 @@ export async function listPlanItems(
     eq(treatmentPlanItem.organizationId, orgId),
   ]
   if (planId) conditions.push(eq(treatmentPlanItem.planId, planId))
+  if (opts.withoutVoided) {
+    // Tampoco lo que quien atendía quitó en la misma atención donde lo indicó: fue corregir el borrador.
+    conditions.push(sql`not (${treatmentPlanItem.status} = 'cancelado' and (exists (
+      select 1 from encounter voided where voided.organization_id = ${treatmentPlanItem.organizationId}
+        and voided.id = ${treatmentPlanItem.sourceEncounterId} and voided.status = 'anulada')
+      or ${treatmentPlanItem.statusReason} = ${REMOVED_IN_ENCOUNTER}))`)
+  }
   const items = await tx
     .select()
     .from(treatmentPlanItem)
@@ -1145,30 +1255,36 @@ export async function updatePlanItem(
     // La línea del borrador es snapshot: se actualiza en la misma transacción.
     // Solo el borrador sigue a la nueva indicación; presentados/decididos son
     // históricos inmutables (updatePlanItem ya rechazó budget no-borrador).
-    // Cambiar de indicación re-congela la tarifa y el modo de cobro, y limpia
-    // precio acordado y promoción (eran del servicio anterior).
-    const modes = updated.serviceId
-      ? await readBillingModes(tx, orgId, [updated.serviceId])
-      : {}
+    // Solo cambiar de servicio es otra indicación: re-congela la tarifa y el modo
+    // de cobro, y limpia precio acordado y promoción (eran del servicio anterior).
+    // Corregir la pieza, sus caras, el detalle o el diagnóstico conserva lo que se
+    // acordó por ese tratamiento (QA del 8 nov, entrega 3: «Cambiar» en la atención
+    // volvía a la tarifa y perdía el precio pactado).
+    const serviceChanged = fields.includes("serviceId")
+    const modes = serviceChanged && updated.serviceId ? await readBillingModes(tx, orgId, [updated.serviceId]) : {}
     await tx
       .update(treatmentBudgetItem)
       .set({
-        serviceId: updated.serviceId,
-        title: updated.title,
         scope: updated.scope,
         siteSystem: updated.siteSystem,
         siteCode: updated.siteCode,
         siteQualifiers: updated.siteQualifiers,
-        codings: updated.codings,
-        priceCents: updated.priceCents,
-        tariffPriceCents: updated.priceCents,
-        priceReason: null,
-        promotionId: null,
-        promotionName: null,
-        promotionMode: null,
-        billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
-        sessionsPlanned: updated.plannedSessions,
-        currency: updated.currency,
+        ...(serviceChanged
+          ? {
+              serviceId: updated.serviceId,
+              title: updated.title,
+              codings: updated.codings,
+              priceCents: updated.priceCents,
+              tariffPriceCents: updated.priceCents,
+              priceReason: null,
+              promotionId: null,
+              promotionName: null,
+              promotionMode: null,
+              billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
+              sessionsPlanned: updated.plannedSessions,
+              currency: updated.currency,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(

@@ -508,7 +508,12 @@ function FinanceWorkspace() {
                 {canReports ? (
                   <Link
                     to="/reports"
-                    search={{ tab: "finanzas", ...(view !== "comisiones" ? { branch: ws.branchId } : {}) }}
+                    search={{
+                      tab: "finanzas",
+                      ...(view !== "comisiones" ? { branch: ws.branchId } : {}),
+                      // Desde Gastos, el reporte del mismo mes que se mira (QA de Gastos, G13).
+                      ...(view === "gastos" && period ? { period: `${period.year}-${String(period.month).padStart(2, "0")}` } : {}),
+                    }}
                     className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
                   >
                     Ver el reporte

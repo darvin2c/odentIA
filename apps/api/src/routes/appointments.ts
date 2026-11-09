@@ -28,6 +28,7 @@ import {
   setAppointmentStatus,
   setBranchDefaultDuration,
   setProfessionalSchedule,
+  setAppointmentPlanItems,
   updateAppointment,
   updateRoom,
 } from "@odentia/services"
@@ -67,6 +68,14 @@ const settingsInput = z.object({
 
 // Los detalles de la cita; el estado tiene sus propias vías (`/status`, `/arrival`
 // y el cierre de la atención), cada una con sus efectos.
+const planItemsInput = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    add: z.array(z.uuid()).max(52).optional(),
+    remove: z.array(z.uuid()).max(52).optional(),
+  })
+  .strict()
+
 const patchInput = z
   .object({
     expectedVersion: z.number().int().positive(),
@@ -466,6 +475,21 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updateAppointment(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // Lo que lleva una cita que ya existe: «Sumar a su cita» y su «Deshacer» (la lista entera).
+  app.post("/:id/plan-items", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar citas"), 403)
+    }
+    const parsed = planItemsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setAppointmentPlanItems(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
     )
   })

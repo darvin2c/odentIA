@@ -227,10 +227,10 @@ function DeciderPicker({
     <Link
       to="/patients/$patientId"
       params={{ patientId }}
-      search={{ tab: "responsables" }}
+      search={{ tab: "contactos" }}
       className={cn(buttonVariants({ variant: "link", size: "sm" }), "h-auto self-start p-0")}
     >
-      Registrar un representante en Responsables
+      Registrar un representante en Familia y responsables
     </Link>
   )
   return (
@@ -1117,7 +1117,19 @@ export function BudgetResponse({
             ]
               .filter(Boolean)
               .join(" ")
-          : `Quedará como «${expectedState(panelAnswered, paths && !picked ? budget.options : undefined)}», anotado por ti.${
+          : `Quedará como «${expectedState(
+              panelAnswered,
+              // Con la opción elegida y todo aceptado, «Eligió la opción A», no «Aceptó todo» (QA del 9
+              // nov). Con algo sin aceptar sigue «Aceptó N de M»: sus líneas no dicen su opción.
+              panelAnswered.every((answer) => answer === "aceptado") && (picked || chosenOption)
+                ? budget.options.map((option) => ({
+                    ...option,
+                    decision: option.id === (picked?.option.id ?? chosenOption?.id) ? "elegida" : "no_elegida",
+                  }))
+                : paths && !picked
+                  ? budget.options
+                  : undefined,
+            )}», anotado por ti.${
               panelAnswered.includes("pospuesto") ? " Lo que deja para después se puede responder luego." : ""
             }`}
       </p>

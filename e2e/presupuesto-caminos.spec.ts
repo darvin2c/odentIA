@@ -6,7 +6,7 @@
  * dice qué cambió y pregunta solo por eso.
  */
 import { tenant } from "./env"
-import { call, expect, test } from "./fixtures"
+import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { buildClinicalBase, patientApiPath } from "./patients-fixture"
 import { surface } from "./surface"
@@ -80,13 +80,8 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
 
   // En la atención, la exodoncia pregunta si es otro camino para la 46.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit.id}`))
-  await page
-    .getByText("Plan y controles", { exact: true })
-    .first()
-    .locator("xpath=ancestor::*[.//button][1]")
-    .getByRole("button", { name: "Abrir", exact: true })
-    .click()
-  const panel = page
+  // El Plan está a la vista en la misma página, sin abrir nada.
+  const panel = page.getByRole("region", { name: "Plan", exact: true })
   const question = panel.getByRole("group", { name: /es otro camino o va también/ })
   await expect(question).toBeVisible()
   await shot("atencion-pregunta")
@@ -149,15 +144,10 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
     "pospuesto",
   ])
 
-  // Mientras lo piensa, la atención pide los dos consentimientos; el de la exodoncia ya se preparó.
-  expect((await consentAsked()).sort()).toEqual(["Consentimiento de endodoncia", "Consentimiento de exodoncia"])
-  await call(page, "POST", "/api/clinical-forms/consent-needs/prepare", slug, {
-    patientId: ids.patientId,
-    encounterId: visit.id,
-    templateKeys: ["e2e-exodoncia"],
-  }, 201)
+  // Mientras lo piensa, nada se hace hoy: la atención no pide consentimiento de lo indicado (ADR 0165).
+  expect(await consentAsked()).toEqual([])
 
-  // Elige conservar: la exodoncia que no eligió deja de pedir su consentimiento.
+  // Elige conservar y empieza hoy la endodoncia: pide la suya; la exodoncia que no eligió no se puede traer a hoy.
   const conservar = draft.options.find((option) => option.position === 1)!
   await call(page, "POST", `${apiPath}/budgets/${draft.id}/decision`, slug, {
     optionId: conservar.id,
@@ -166,18 +156,16 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
       { planItemId: coronaItem.id, decision: "aceptado" },
     ],
   })
+  expect(await consentAsked()).toEqual([])
+  await call(page, "POST", `${apiPath}/encounters/${visit.id}/visit/treatments`, slug, { planItemId: endoItem.id })
+  expect((await api(page, "POST", `${apiPath}/encounters/${visit.id}/visit/treatments`, slug, { planItemId: exoItem.id })).status).toBe(409)
   expect(await consentAsked()).toEqual(["Consentimiento de endodoncia"])
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit.id}`))
-  const asks = page.getByText(/^Necesita consentimiento · /).first()
+  const documents = page.getByRole("region", { name: "Documentos", exact: true })
+  const asks = documents.getByText(/^Necesita consentimiento · /).first()
   await expect(asks).toHaveText("Necesita consentimiento · Consentimiento de endodoncia")
-  // El de la exodoncia, ya preparado, sigue a la vista pero no se ofrece para firmar.
-  await page
-    .getByText("Documentos", { exact: true })
-    .first()
-    .locator("xpath=ancestor::*[.//button][1]")
-    .getByRole("button", { name: "Abrir", exact: true })
-    .click()
-  await expect(page.getByText("Ya no se pide: no lo aceptó o eligió otra opción")).toBeVisible()
+  // La exodoncia que no eligió no pide nada.
+  await expect(documents.getByText(/Consentimiento de exodoncia/)).toHaveCount(0)
   await expect(page.getByText(/^Faltan? las? firmas? de /)).toHaveCount(0)
   await views("atencion-camino-elegido")
 

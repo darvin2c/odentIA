@@ -13,12 +13,25 @@ import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import { FieldLegend, FieldSet, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { readExpenseMoney } from "../../lib/expense-exchange"
 import { currencyChoices } from "../../lib/product-words"
-import { cashFormMessage, errorCode, formatDayKey, invalidateFinance, noonOf, parseAmount, payPurchaseApi, todayIn, useCashState } from "../../lib/finance-cash"
+import {
+  cashFormMessage,
+  errorCode,
+  fetchPurchaseLookalikes,
+  formatDayKey,
+  formatDayMonth,
+  invalidateFinance,
+  noonOf,
+  parseAmount,
+  payPurchaseApi,
+  todayIn,
+  useCashState,
+} from "../../lib/finance-cash"
 import type { PurchaseOrderDetail } from "../../lib/inventory"
 import { useOrgProfile, useTodayRate } from "../../lib/org"
 import { purchaseOrderLabel } from "../../lib/reports"
@@ -36,6 +49,14 @@ interface PaymentValues {
   day: string
   receiptKind: string
   receiptNumber: string
+}
+
+/** El mes de un momento en la zona de la clínica, para abrir Gastos en ese mes. */
+function monthOfDay(at: string, timeZone: string): { year: number; month: number } {
+  const [year, month] = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit" })
+    .format(new Date(at))
+    .split("-")
+  return { year: Number(year), month: Number(month) }
 }
 
 /** El servidor nombra los datos como el cuerpo; el formulario, como la pantalla. */
@@ -87,11 +108,21 @@ export function PurchasePaymentDrawer({
   const credit = Math.min(order.supplierCreditCents, rest)
   const money = (cents: number) => formatMoney(cents, order.currency, locale)
   const state = cash.data?.data ?? null
+  // Lo que ya se anotó como gasto suelto y puede ser este mismo pago: se avisa, no se frena (G4).
+  const lookalikes = useQuery({
+    queryKey: ["finance-purchases", "lookalikes", order.id],
+    queryFn: () => fetchPurchaseLookalikes(order.id),
+    enabled: open,
+    staleTime: 30_000,
+  })
+  const twin = lookalikes.data?.data[0] ?? null
 
   // Lo que se vio al abrir: si la compra cambia mientras tanto (otro pago, o este mismo
   // enviado dos veces), el servidor lo dice en vez de pagar sobre otra cifra.
   const paid = balance?.paidCents ?? 0
   const seen = useRef({ due, paid })
+  // Una clave por cajón abierto (ADR 0018): reintentar tras un corte devuelve el mismo pago.
+  const requestId = useRef<string>(crypto.randomUUID())
   // Tras «la compra cambió», lo nuevo que llega es lo que se ve: el reintento paga sobre eso.
   const stale = useRef(false)
   useEffect(() => {
@@ -163,6 +194,7 @@ export function PurchasePaymentDrawer({
         ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
         expectedDueCents: seen.current.due,
         expectedPaidCents: seen.current.paid,
+        requestId: requestId.current,
       })
     },
   })
@@ -244,6 +276,21 @@ export function PurchasePaymentDrawer({
       }}
     >
       <div className="flex flex-col gap-5">
+        {twin ? (
+          <p role="status" className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm">
+            Ya hay un gasto de Materiales de {formatMoney(twin.amountCents, twin.currency, locale)} del{" "}
+            {formatDayMonth(twin.spentAt, locale, timeZone)} en esta sede, sin compra: «{twin.concept}». Si es este mismo
+            pago, anúlalo en{" "}
+            <Link
+              to="/finance"
+              search={{ tab: "gastos", tipo: "Materiales", ...monthOfDay(twin.spentAt, timeZone) }}
+              className="font-semibold underline underline-offset-2"
+            >
+              Gastos
+            </Link>{" "}
+            para que no cuente dos veces.
+          </p>
+        ) : null}
         <form.AppField name="amount">
           {(field) => {
             const description =
@@ -253,7 +300,7 @@ export function PurchasePaymentDrawer({
                   ? `Aún no llega nada: queda como adelanto${rest > 0 ? `. Falta adelantar ${money(rest)} del total` : ""}.`
                   : "Lo recibido ya está pagado: esto queda como adelanto de lo que falta recibir."
             return second ? (
-              <field.Control id="pago-monto" label="Lo que cancelas" description={description}>
+              <field.Control id={`${uid}-monto`} label="Lo que cancelas" description={description}>
                 {(control) => (
                   <MoneyInput
                     id={control.id}
@@ -268,7 +315,7 @@ export function PurchasePaymentDrawer({
               </field.Control>
             ) : (
               <field.TextField
-                id="pago-monto"
+                id={`${uid}-monto`}
                 label="Monto"
                 inputMode="decimal"
                 autoComplete="off"
@@ -316,7 +363,7 @@ export function PurchasePaymentDrawer({
           >
             {(field) => (
               <field.CheckboxField
-                id="pago-favor"
+                id={`${uid}-favor`}
                 label={`Usar lo que tienes a favor con ${order.supplierName ?? "el proveedor"} (${money(order.supplierCreditCents)})`}
                 description={`Se descuenta ${money(Math.min(credit, suggested))} de lo que hay que pagar. No es un gasto nuevo: ese dinero ya salió.`}
               />
@@ -325,7 +372,7 @@ export function PurchasePaymentDrawer({
         ) : null}
         <form.AppField name="day">
           {(field) => (
-            <field.Control id="pago-fecha" label="Fecha del pago">
+            <field.Control id={`${uid}-fecha`} label="Fecha del pago">
               {(control) => (
                 <DatePickerButton
                   {...control.props}
@@ -343,7 +390,7 @@ export function PurchasePaymentDrawer({
         <form.AppField name="fromCash">
           {(field) => (
             <field.CheckboxField
-              id="pago-caja"
+              id={`${uid}-caja`}
               label="Sale del efectivo de la caja"
               description={
                 second && field.state.value
@@ -355,10 +402,10 @@ export function PurchasePaymentDrawer({
         </form.AppField>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
           <form.AppField name="receiptKind">
-            {(field) => <field.TextField id="pago-comprobante" label="Comprobante" maxLength={60} placeholder="Factura, recibo…" />}
+            {(field) => <field.TextField id={`${uid}-comprobante`} label="Comprobante" maxLength={60} placeholder="Factura, recibo…" />}
           </form.AppField>
           <form.AppField name="receiptNumber">
-            {(field) => <field.TextField id="pago-numero" label="Número" maxLength={60} autoComplete="off" />}
+            {(field) => <field.TextField id={`${uid}-numero`} label="Número" maxLength={60} autoComplete="off" />}
           </form.AppField>
         </div>
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-foreground/80">

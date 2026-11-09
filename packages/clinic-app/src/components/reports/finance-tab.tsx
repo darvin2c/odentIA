@@ -392,7 +392,14 @@ function Cascade({ data }: { data: ReportFinance }) {
   const { cascade } = data
   const taxName = data.taxName ?? "Impuesto"
   const current = data.totals.current
-  const gastosSearch = { tab: "gastos" as const, ...(data.branch ? { branch: data.branch.id } : {}) }
+  // Un periodo de un solo mes abre Gastos en ese mes; uno más largo, en el mes en curso (G13).
+  const oneMonth =
+    data.period.from.year === data.period.to.year && data.period.from.month === data.period.to.month && !data.period.days
+  const gastosSearch = {
+    tab: "gastos" as const,
+    ...(data.branch ? { branch: data.branch.id } : {}),
+    ...(oneMonth ? { year: data.period.from.year, month: data.period.from.month } : {}),
+  }
   const steps: Array<WaterfallStep & { note: string; link?: ReactNode }> = [
     {
       key: "cobrado",
@@ -437,7 +444,11 @@ function Cascade({ data }: { data: ReportFinance }) {
           ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
           : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
       link: canFinance ? (
-        <Link to="/finance" search={gastosSearch} className="font-bold text-primary-soft-foreground underline-offset-2 hover:underline">
+        <Link
+          to="/finance"
+          search={{ ...gastosSearch, tipo: item.category }}
+          className="font-bold text-primary-soft-foreground underline-offset-2 hover:underline"
+        >
           Ver los gastos
         </Link>
       ) : null,

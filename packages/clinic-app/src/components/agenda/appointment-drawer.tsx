@@ -191,7 +191,12 @@ function RealAppointmentDrawer({
   const startAttention = () =>
     attend.mutate({
       patientId: appointment.patientId,
-      appointment: { id: appointment.id, professionalUserId: appointment.professionalUserId, professionalName: appointment.professionalName },
+      appointment: {
+        id: appointment.id,
+        professionalUserId: appointment.professionalUserId,
+        professionalName: appointment.professionalName,
+        pastVisit: unclosed && !isToday,
+      },
     })
 
   // ----- Cancelar -----
@@ -512,7 +517,10 @@ function RealAppointmentDrawer({
                   ? `En atención con ${professionalSaid(appointment.encounter.professionalName)} desde ${hourLabel(dayMinutesIn(appointment.encounter.startedAt, timeZone))}`
                   : appointment.visit === "llego" && appointment.arrivedAt
                     ? visitLabel(appointment, { now, timeZone }).replace(/^Llegó /, "Llegó a las ")
-                    : visitLabel(appointment, { now, timeZone })}
+                    : unclosed
+                      ? // Ya pasó: «Por confirmar» no decía nada (QA del 9 nov, «¿Vino?»).
+                        "Ya pasó y nadie la cerró: falta decir si vino"
+                      : visitLabel(appointment, { now, timeZone })}
               </span>
               {/* Lo que queda por reservar, no una frase fija: un control indicado hoy sigue pendiente. */}
               {appointment.visit === "atendida" ? (

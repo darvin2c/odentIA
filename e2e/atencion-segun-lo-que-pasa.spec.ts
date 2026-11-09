@@ -1,14 +1,16 @@
 /**
  * La atención según lo que pasa: una sesión abierta desde su cita propone el
  * motivo («Continúa: …») y el diagnóstico del tratamiento («Usar»), dice lo que
- * falta para firmar en un solo lugar y sus cajones se cierran con «Listo».
+ * falta para firmar en un solo lugar y todo se escribe en la misma página.
  */
 import { tenant } from "./env"
 import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { buildClinicalBase, createAcceptedBudget, patientApiPath } from "./patients-fixture"
 
-test("sesión desde su cita: motivo y diagnóstico propuestos, lo que falta una vez y «Listo»", async ({ owner }, testInfo) => {
+test("sesión desde su cita: motivo y diagnóstico propuestos, lo que falta una vez y todo en una página", async ({
+  owner,
+}, testInfo) => {
   const { page } = owner
   const slug = owner.org.slug
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
@@ -50,20 +52,10 @@ test("sesión desde su cita: motivo y diagnóstico propuestos, lo que falta una 
   // Lo que falta para firmar ya no incluye el diagnóstico.
   await expect(page.getByText(/diagnóstico/i).filter({ hasText: /Falta/ })).toHaveCount(0)
   await shot("sesion-diagnostico-usado")
-  // El cajón de Evolución: la evolución primero y «Listo».
-  await page
-    .getByText("Evolución, pronóstico e indicaciones", { exact: true })
-    .first()
-    .locator("xpath=ancestor::*[.//button][1]")
-    .getByRole("button")
-    .first()
-    .click()
-  const listo = page.getByRole("button", { name: "Listo", exact: true })
-  await expect(listo).toBeVisible()
+  // La evolución se escribe en su sitio, en la misma página: sin cajón ni «Listo».
+  await expect(page.getByRole("button", { name: "Listo", exact: true })).toHaveCount(0)
   await page.getByLabel("Evolución", { exact: true }).fill("Se trabajó la 36; sin molestias.")
-  await views("evolucion-cajon")
-  await listo.click()
-  await expect(listo).toBeHidden()
+  await views("evolucion-en-linea")
   // Guardado: lo que falta ya no incluye la evolución.
   await expect(page.getByText(/Falta 1 para cerrar/)).toBeVisible()
   await shot("sesion-casi-lista")

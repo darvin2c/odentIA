@@ -15,7 +15,7 @@ import {
   readInternational,
   regionCountry,
 } from "./phone.js"
-import { maskNationalDigits, phoneMaskOptions, phonePlaceholder } from "./phone-mask.js"
+import { internationalMaskOptions, maskNationalDigits, phoneMaskOptions, phonePlaceholder } from "./phone-mask.js"
 
 export interface PhoneInputProps {
   /**
@@ -60,6 +60,11 @@ export interface PhoneInputProps {
  * prefijo y conserva el número. Sin selector de país, el prefijo se pinta dentro
  * del campo para no dejarlo invisible.
  *
+ * Escribir «+» al empezar pasa a escribir el número entero con su prefijo
+ * (`+44 7700 900878`): el selector toma el país del prefijo y, al salir del
+ * campo, queda el número nacional con su país (QA del 8 nov, M10: el «+» se
+ * perdía y el número quedaba con el prefijo repetido).
+ *
  * El error lo dibuja la pantalla (`Field`/`FieldError`) y el campo se marca
  * inválido por sí solo al salir si lo escrito no es un teléfono válido: un
  * número a medias no puede parecer correcto. Tampoco valida como verdad final —
@@ -99,7 +104,12 @@ export function PhoneInput({
   // devuelve ese mismo valor (o `null` mientras el número está incompleto).
   const emitted = React.useRef<string | null>(value)
 
-  const maskOptions = React.useMemo(() => phoneMaskOptions(country), [country])
+  // Escribiendo con «+»: el número entero con su prefijo, sin la máscara nacional.
+  const [international, setInternational] = React.useState(false)
+  const maskOptions = React.useMemo(
+    () => (international ? internationalMaskOptions(country) : phoneMaskOptions(country)),
+    [country, international],
+  )
   const maskRef = useMaskito({ options: maskOptions })
   const maskPlaceholder = React.useMemo(() => phonePlaceholder(country), [country])
 
@@ -108,13 +118,14 @@ export function PhoneInput({
    * marca inválido por sí solo. El mensaje lo pone la pantalla (`FieldError`);
    * aquí solo se enciende `aria-invalid`, que es lo que pinta el error. Un
    * número posible pero raro para su país (un celular al que le falta un
-   * dígito) también se pinta, pero es un aviso y no un error (`data-advisory`):
-   * se guarda igual y el foco del envío va a lo que de verdad falta.
+   * dígito) es un aviso y no un error (`data-advisory`): no se pinta en rojo
+   * (QA del 9 nov: el borde rojo hacía creer que no se guardaba), lo dice el
+   * texto de ayuda, se guarda igual y el foco del envío va a lo que de verdad falta.
    */
   const current = React.useMemo(() => phoneMeta(display, country), [country, display])
   const doubtful = touched && current.digits.length > 0 && !current.isValid
-  const invalid = invalidProp || doubtful
   const advisory = !invalidProp && doubtful && current.e164 !== null
+  const invalid = invalidProp || (doubtful && !advisory)
 
   React.useEffect(() => {
     if (value === emitted.current) return
@@ -144,16 +155,84 @@ export function PhoneInput({
 
   function handleInputChange(event: React.ChangeEvent<HTMLInputElement>) {
     const next = event.target.value
+    if (international && !next.includes("+")) setInternational(false)
     setDisplay(next)
+    if (international && next.includes("+")) {
+      // El prefijo dice el país: el selector lo sigue mientras se escribe.
+      const typed = readInternational(next)
+      if (typed && typed.country !== country) {
+        countryChosen.current = true
+        setCountry(typed.country)
+      }
+    }
     emit(next, country)
+  }
+
+  /**
+   * «+» al empezar a escribir: el campo pasa a recibir el número con su prefijo.
+   * Se escucha en la envoltura, antes que la máscara nacional del campo (que lo
+   * borraría); si ya hay dígitos, el «+» no cambia nada. Devuelve si lo tomó.
+   */
+  function takePlus(data: string, input: HTMLInputElement): boolean {
+    if (international || !data.startsWith("+")) return false
+    const whole = (input.selectionStart ?? 0) === 0 && (input.selectionEnd ?? 0) >= input.value.length
+    if (phoneDigits(display) && !whole) return false
+    const nextDisplay = `+${phoneDigits(data)}`
+    setInternational(true)
+    setDisplay(nextDisplay)
+    emit(nextDisplay, country)
+    return true
+  }
+  const takePlusRef = React.useRef(takePlus)
+  takePlusRef.current = takePlus
+  const wrapperRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+    const listener = (event: Event) => {
+      const input = event.target
+      const data = (event as InputEvent).data ?? ""
+      // Solo lo tecleado: lo pegado lo resuelve `handlePaste`.
+      if (!(input instanceof HTMLInputElement) || (event as InputEvent).inputType !== "insertText") return
+      if (!takePlusRef.current(data, input)) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    // En captura: llega antes que el «beforeinput» de la máscara, que está en el campo.
+    wrapper.addEventListener("beforeinput", listener, true)
+    return () => wrapper.removeEventListener("beforeinput", listener, true)
+  }, [])
+
+  /** Al salir, el número con prefijo queda como siempre: el nacional, con su país en el selector. */
+  function settleInternational() {
+    if (!international) return
+    const typed = readInternational(display)
+    if (!typed) return
+    setInternational(false)
+    countryChosen.current = true
+    setCountry(typed.country)
+    setDisplay(maskNationalDigits(phoneDigits(nationalText(typed.e164)), typed.country))
   }
 
   function handleCountryChange(next: CountryCode) {
     if (next === country) return
     countryChosen.current = true
     setCountry(next)
-    const digits = phoneDigits(display)
+    setInternational(false)
+    let digits = phoneDigits(display)
     if (!digits) return
+    // «44 7700 900878» escrito con otro país y luego Reino Unido: el prefijo no se repite.
+    const withCode = readInternational(`+${digits}`)
+    const stripped = withCode ? phoneDigits(nationalText(withCode.e164)) : null
+    // Solo si sin el prefijo es un número posible del país elegido: si no, los dígitos son suyos.
+    if (
+      stripped &&
+      withCode &&
+      getCountryCallingCode(withCode.country) === getCountryCallingCode(next) &&
+      (international || !phoneMeta(display, country).isValid) &&
+      phoneMeta(stripped, next).isPossible
+    )
+      digits = stripped
     const nextDisplay = maskNationalDigits(digits, next)
     setDisplay(nextDisplay)
     emit(nextDisplay, next)
@@ -187,12 +266,13 @@ export function PhoneInput({
     onPaste: handlePaste,
     onBlur: (event: React.FocusEvent<HTMLInputElement>) => {
       setTouched(true)
+      settleInternational()
       onBlur?.(event)
     },
   }
 
   return (
-    <div className={cn("flex w-full min-w-0 items-center gap-2", className)}>
+    <div ref={wrapperRef} className={cn("flex w-full min-w-0 items-center gap-2", className)}>
       {showCountrySelect ? (
         <CountrySelect
           value={country}

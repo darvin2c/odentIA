@@ -1,6 +1,6 @@
 ---
 name: odentia-entrega
-description: Llevar un cambio de odentIA o latidIA de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo con cinco voces (desarrollo, clínica, experto en UX, novato y auditor), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
+description: Llevar un cambio de odentIA o latidIA de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo en la mesa con las cinco voces de odentia-qa (novato, clínica, desarrollo, auditor y diseño UX), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, pasar la QA de odentia-qa antes de entregar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
 ---
 
 # Entregar un cambio
@@ -28,15 +28,15 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 
 ## Por dónde entra cada cambio
 
-| Qué llega | Mesa | Lienzo |
-|---|---|---|
-| Lienzo aprobado | Las cinco voces, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está |
-| Función nueva que cambia una pantalla o un recorrido | Las cinco voces | Si hay más de una forma razonable |
-| Función pequeña dentro de un patrón que ya existe | Experto en UX, novato y auditor | No |
-| Error | Solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No |
-| Cambio interno, sin efecto visible | Ninguna | No |
+| Qué llega | Mesa | Lienzo | QA antes de entregar |
+|---|---|---|---|
+| Lienzo aprobado | Las cinco voces, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está | Las cinco voces |
+| Función nueva que cambia una pantalla o un recorrido | Las cinco voces | Si hay más de una forma razonable | Las cinco voces |
+| Función pequeña dentro de un patrón que ya existe | Diseño UX, novato y auditor | No | Novato, desarrollo y diseño UX |
+| Error | Solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No | Desarrollo y las voces a las que afecte |
+| Cambio interno, sin efecto visible | Ninguna | No | Desarrollo |
 
-Clínica entra siempre que el cambio toque datos o decisiones clínicas.
+Las voces son las de `.claude/skills/odentia-qa/references/voces.md`. Clínica entra siempre que el cambio toque datos o decisiones clínicas, en la mesa y en la QA, con el catálogo de procesos de su producto.
 
 Un error se explica antes de arreglarlo: qué le pasó a la persona, si es un error y de qué (falló el modelo o falló una regla nuestra), en palabras simples. Si la causa todavía no está comprobada, se dice así. Si afecta a una persona real, se dice primero quién debe avisarle; el agente no le escribe sin permiso. Después se arregla sin esperar respuesta, salvo que el arreglo sea una decisión de producto. Lo que ya está comprobado que es falso se corrige aunque la causa del caso siga en duda.
 
@@ -46,7 +46,22 @@ Cada etapa aplica solo si el cambio la necesita; la que se salta se dice en el P
 
 ### 1. La mesa
 
-Cinco voces critican el cambio por separado, antes de dibujar o programar. Cómo se hace, en `references/mesa.md`. Sale un acta corta que se le muestra al usuario y alimenta las etapas siguientes.
+Las voces de `odentia-qa` critican el cambio por separado, antes de dibujar o programar, cada una con su método «en la mesa» de `.claude/skills/odentia-qa/references/voces.md`. Sirve para encontrar a tiempo lo que sería caro corregir después, no para aprobar: una voz simulada no es una clínica real, y lo que diga la mesa nunca se presenta como evidencia. Para buscar errores en código ya escrito, la mesa no rinde más que un solo revisor: eso es la etapa 6.
+
+1. **Ficha.** Cada voz recibe la suya (actor, tarea y resultado observable; de dónde viene; a qué producto afecta; lo ya decidido, que no se reabre) y su apartado del archivo de voces entero, con «Para todas», no un resumen. Clínica recibe además el catálogo de su producto, `comunes.md` y la lista de procesos que el cambio toca, y barre el cambio buscando flujos que el catálogo no tiene. El novato recibe solo lo que vería la persona.
+2. **Cada voz es un subagente aparte**, sin ver a las otras. Hay un tope de subagentes a la vez: si la mesa corre junto a otros trabajos largos, se lanzan las voces cuando haya lugar, sin reemplazarlas escribiéndolas seguidas.
+3. **Reunir.** Lo que las voces afirman del código y los permisos se comprueba en el código, porque pueden equivocarse con mucha seguridad. Si dos voces chocan (clínica pide un campo que el novato quitaría), hay una sola ronda de respuesta entre esas dos. Se decide en este orden: seguridad clínica y permisos primero, después lo más simple que cumpla. Un problema real pesa más que uno hipotético. Lo que siga dependiendo del producto va al usuario, con una recomendación.
+4. **El acta.** Se le muestra al usuario, en lo posible en menos de 8 líneas, y va como tablero si hay lienzo y en «Decisiones y límites que quedan» del PR:
+
+```markdown
+**La mesa**
+- **Se queda:** …
+- **Se quita:** … (por qué)
+- **Cambia:** …
+- **Procesos clínicos que toca:** … (con lo que mejora o se rompe en cada uno)
+- **Por confirmar con una clínica real:** …
+- **Para tu decisión:** … (solo si hay; con recomendación)
+```
 
 ### 2. El lienzo
 
@@ -107,17 +122,24 @@ Quien escribió el código no ve lo que dio por hecho.
 
 Corregir lo real y repetir las pruebas de lo que cambió. Lo que se decide no corregir va al PR con su motivo.
 
-### 7. La pantalla real y la segunda mesa
+### 7. La QA antes de entregar
 
-Aplica si cambió algo que una persona ve. Con `pnpm dev`, seguir «Implementar y comprobar» de `odentia-ux`: entrada, acción, respuesta y recuperación; escritorio y 390 px; teclado; rechazo del servidor si toca permisos; los dos productos. Guardar capturas.
+Siempre, también en un cambio chico o interno: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 7 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado.
 
-Con esas capturas vuelve la mesa: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Corregir lo que traba y repetir las pruebas de lo que cambió.
+Quien implementa también sigue «Implementar y comprobar» de `odentia-ux` (entrada, acción, respuesta y recuperación; escritorio y 390 px; teclado; rechazo del servidor si toca permisos), pero eso no reemplaza a las voces: quien escribió el cambio no ve lo que dio por hecho.
 
-Si no se pudo abrir la pantalla, se dice como límite en el PR. Una prueba automática no la reemplaza.
+Con lo que devuelve la QA:
+
+- **Lo que rompió o dejó a medias este cambio** se corrige ahora, se repiten las pruebas de lo que cambió y un verificador nuevo repite en pantalla esos pasos hasta que pasan. No se pide el sí con un error propio abierto.
+- **Lo que ya estaba antes** queda como pendiente en el PR, salvo un fallo de permisos, aislamiento o datos, que va solo al informe privado y se le avisa al usuario.
+- **Las decisiones de producto** van a la parada del sí.
+- **Lo que sale «Para el catálogo»** se suma a `.claude/skills/odentia-qa/references/clinica/` en este PR.
+
+Si no se pudo abrir la pantalla, la QA lo dice y el PR lo lleva como límite. Una prueba automática no la reemplaza.
 
 ### 8. Medir a los agentes
 
-Aplica si cambia lo que un agente lee o puede hacer: prompt, herramientas, camino o modelo. Se mide al final, sobre el código ya revisado, porque cuesta y cualquier cambio posterior lo invalida. Si solo cambia cuándo corre o algo a su alrededor, se juzga por sus pruebas y el PR explica por qué.
+Aplica si cambia lo que un agente lee o puede hacer: prompt, herramientas, camino o modelo. Se mide al final, sobre el código ya revisado y pasado por la QA, porque cuesta y cualquier cambio posterior lo invalida. Si solo cambia cuándo corre o algo a su alrededor, se juzga por sus pruebas y el PR explica por qué.
 
 - Sofi: auditoría al azar con `packages/agent/src/auditoria-masiva.ts`, con los mismos casos contra `main` y en los dos productos, y las dos versiones calificadas por un solo juez.
 - Argos, Clío, el modelo de decisión y Ariadna: el `eval:*` o banco que nombra la regla en `packages/agent/AGENTS.md` o `packages/services/AGENTS.md`.
@@ -139,7 +161,7 @@ Título: `tipo(scope): lo que cambia para la persona`. Cuerpo en palabras simple
 ## Al desplegar
 ```
 
-«Cómo se probó» dice lo ejecutado y lo que no. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa como prueba de que es fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
+«Cómo se probó» dice lo ejecutado y lo que no, con el resumen de la QA antes de entregar. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa o la QA como prueba de que una clínica real lo encuentre fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
 
 Esperar el CI con `gh pr checks --watch`. Si falla, leer el registro y corregir la causa.
 
@@ -154,7 +176,8 @@ Con todo verde, enviar este resumen y esperar:
 
 - **Para quien lo usa:** <qué notará recepción, el clínico, caja o el paciente>
 - **Se quitó:** <lo que la mesa o la simplificación sacaron>
-- **Se comprobó:** <pruebas, recorrido en pantalla, CI>
+- **Se comprobó:** <pruebas, CI>
+- **La QA:** <voces que entraron, qué encontró, qué se corrigió y qué verificó en pantalla; estado de los procesos clínicos que toca>
 - **No se comprobó:** <lo que falta, sin suavizar>
 - **Agentes:** <resultado frente a la versión anterior, o por qué no aplica>
 - **Al desplegar:** <migración y pasos a mano, o nada>
