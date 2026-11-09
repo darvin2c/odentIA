@@ -26,7 +26,6 @@ import {
 import {
   addDays,
   common,
-  ConfirmDialog,
   clearSubmitErrors,
   DetailDrawer,
   DetailPanel,
@@ -69,7 +68,6 @@ import {
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
-  voidEncounterApi,
 } from "../../lib/encounters"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -121,6 +119,7 @@ import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-docu
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterBudgetSend, EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
+import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { PatientClinicalStrip } from "./patient-header"
 import { BudgetSendButton } from "./plan/budget-send"
 
@@ -617,25 +616,15 @@ export function EncounterEditor({
     onSubmit: (value) => finalizeWith(value),
   })
   const closingError = useFormSubmitError(closingForm)
-  const voidBodyRef = useRef<HTMLDivElement>(null)
-  const voidForm = useAppForm({
-    defaultValues: { reason: "" },
-    validators: {
-      onSubmit: ({ value }) =>
-        value.reason.trim() ? undefined : { fields: { reason: "Escribe por qué se anula" } },
-    },
-    onSubmit: async ({ value }) => {
-      clearTimer()
-      await voidEncounterApi(patientId, encounterId, value.reason.trim())
-      setVoidOpen(false)
-      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
-      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
-      await queryClient.invalidateQueries({ queryKey: ["encounters", patientId] })
-      await onChanged()
-    },
-  })
-  const voiding = useStore(voidForm.store, (state) => state.isSubmitting)
-  const voidError = useFormSubmitError(voidForm)
+  const afterVoid = async () => {
+    setVoidOpen(false)
+    await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+    await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
+    await queryClient.invalidateQueries({ queryKey: ["encounters", patientId] })
+    // Pudo anularse su presupuesto: el Plan y la atención lo vuelven a leer.
+    for (const key of PLAN_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
+    await onChanged()
+  }
 
   // Tratamientos a los que se puede ligar una receta o un control desde esta
   // atención: los vinculados y los indicados aquí, sin repetir.
@@ -1317,12 +1306,12 @@ export function EncounterEditor({
 
   const mode = useDetailMode()
 
-  const locked = !canWrite || !attending || childCount > 0 || finalizing || voiding
+  const locked = !canWrite || !attending || childCount > 0 || finalizing
   // El motivo de la reserva se ofrece solo a quien puede usarlo y mientras no haya otro. No
   // depende de `locked`: durante una escritura en curso sigue a la vista (con «Usar» apagado),
   // sin parpadear a «Sin motivo».
   const offeredReason =
-    canWrite && attending && !finalizing && !voiding && reason.trim() === "" ? detail.bookedReason : null
+    canWrite && attending && !finalizing && reason.trim() === "" ? detail.bookedReason : null
   const takeOfferedReason = () => {
     if (offeredReason && !locked) editText("reason", offeredReason)
   }
@@ -1335,7 +1324,7 @@ export function EncounterEditor({
     canRead,
     canWrite,
     locked,
-    writable: canWrite && attending && !finalizing && !voiding,
+    writable: canWrite && attending && !finalizing,
     flush,
     onChanged: handleChildChanged,
     onPendingChange: handlePendingChange,
@@ -2341,7 +2330,7 @@ export function EncounterEditor({
                 <DictationBlockSuggestions key={kind} session={dictation} kind={kind} patientName={patient.patient.displayName} />
               ))}
               {/* Lo que propone la atención (el odontograma, el tratamiento que continúa) se usa sin abrir el bloque. */}
-              {section.key === "hallazgos" && openSection !== "hallazgos" && canWrite && attending && !finalizing && !voiding ? (
+              {section.key === "hallazgos" && openSection !== "hallazgos" && canWrite && attending && !finalizing ? (
                 <DiagnosisProposals
                   patientId={patientId}
                   encounterId={encounterId}
@@ -2567,10 +2556,7 @@ export function EncounterEditor({
               variant="ghost"
               className="text-destructive"
               disabled={locked || explicitSaving}
-              onClick={() => {
-                voidForm.reset()
-                setVoidOpen(true)
-              }}
+              onClick={() => setVoidOpen(true)}
             >
               Anular esta atención…
             </Button>
@@ -2938,32 +2924,14 @@ export function EncounterEditor({
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog
+      <EncounterVoidDialog
         open={voidOpen}
-        title="Anular este borrador"
-        description="Queda en la historia como «anulada» con tu nombre, la hora y el motivo. Se anulan sus diagnósticos, procedimientos, hallazgos, recetas, controles, descansos, órdenes sin resultado y consentimientos sin firmar; lo que se dio por hecho aquí vuelve a quedar pendiente y no genera cargos. Un papel que ya entregaste dirá «Anulado» al comprobarlo. Lo que la persona ya firmó no cambia. La cita, si la hay, puede volver a atenderse."
-        confirmLabel="Anular borrador"
-        pending={voiding}
-        error={voidError}
-        onConfirm={() => void submitForm(voidForm, { root: voidBodyRef.current })}
-        onClose={() => {
-          if (!voiding) setVoidOpen(false)
-        }}
-      >
-        <div ref={voidBodyRef}>
-          <voidForm.AppField name="reason">
-            {(field) => (
-              <field.TextareaField
-                label="Motivo"
-                id={`${uid}-void`}
-                rows={2}
-                maxLength={2000}
-                placeholder="Ej.: se abrió para el paciente equivocado"
-              />
-            )}
-          </voidForm.AppField>
-        </div>
-      </ConfirmDialog>
+        patientId={patientId}
+        encounterId={encounterId}
+        onClose={() => setVoidOpen(false)}
+        onBeforeVoid={clearTimer}
+        onVoided={afterVoid}
+      />
 
       {profileOpen ? (
         <ProfessionalProfileDrawer
