@@ -40,4 +40,4 @@ Con el pedido en marcha (ADR 0171), la persona espera sus lentes y pregunta: Â«Â
 
 ## Referencias
 
-`packages/services/src/job-order-notice.ts`, `packages/services/src/automation-messages.ts` (`ORDER_READY_MESSAGE`), `packages/services/src/clinic-messages.ts`, `packages/services/src/agent-operations.ts` (`listAgentPatientOrders`), `packages/agent/src/tools.ts` (`ver_pedidos`), `packages/agent/src/decision/route.ts`, `packages/services/src/portal.ts` (`listPortalOrders`), `packages/db/drizzle/0073_pedido_listo.sql`.
+`packages/services/src/job-order-notice.ts`, `packages/services/src/automation-messages.ts` (`ORDER_READY_MESSAGE`), `packages/services/src/clinic-messages.ts`, `packages/services/src/agent-operations.ts` (`listAgentPatientOrders`), `packages/agent/src/tools.ts` (`ver_pedidos`), `packages/agent/src/decision/route.ts`, `packages/services/src/portal.ts` (`listPortalOrders`), `packages/db/drizzle/0078_pedido_listo.sql`.
