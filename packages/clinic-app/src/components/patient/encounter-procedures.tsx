@@ -163,7 +163,7 @@ function earlierWords(earlier: EarlierTreatment): string {
 }
 
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
-  // El precio de su presupuesto, el que se cobra al hacerlo.
+  // Lo que se cobra al hacerlo: el acordado si lo aceptó.
   const agreed = agreedPriceOf(item)
   const price =
     agreed.priceCents == null

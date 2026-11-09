@@ -517,23 +517,37 @@ export interface PlanItem {
   newTermsPending?: boolean
   /** Realizado al que le puede faltar otra sesión: el Plan ofrece «Falta otra sesión…». */
   canAddSession?: boolean
-  /** El precio de su presupuesto (el acordado, o el que le ofrece mientras decide); nulo sin presupuesto. */
+  /** El precio acordado (la línea aceptada, lo que se cobra); nulo sin nada aceptado. */
   agreedPriceCents?: number | null
   agreedCurrency?: string | null
+  /** Sin nada aceptado, el que le ofrece su presupuesto: no es lo que se cobra. */
+  offeredPriceCents?: number | null
+  offeredCurrency?: string | null
 }
 
+type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
+
 /**
- * El precio que se dice de un tratamiento: el de su presupuesto si lo tiene (lo
- * que se cobra), si no el de la indicación (QA de la ficha del 8 nov: la atención
- * decía S/ 120 de lista con S/ 90 acordado).
+ * Lo que se cobra al hacerlo: el precio acordado si lo aceptó, si no el de la
+ * indicación (QA de la ficha del 8 nov: la atención decía S/ 120 de lista con
+ * S/ 90 acordado).
  */
-export function agreedPriceOf(item: Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency">): {
-  priceCents: number | null
-  currency: string
-} {
+export function agreedPriceOf(item: PriceFields): { priceCents: number | null; currency: string } {
   return item.agreedCurrency != null
     ? { priceCents: item.agreedPriceCents ?? null, currency: item.agreedCurrency }
     : { priceCents: item.priceCents, currency: item.currency }
+}
+
+/**
+ * El precio que se dice de un tratamiento y de dónde sale: el acordado; si no
+ * aceptó, el que le ofrece su presupuesto («en su presupuesto», no se cobra así
+ * todavía); si no tiene presupuesto, el de la indicación.
+ */
+export function quotedPriceOf(item: PriceFields): { priceCents: number | null; currency: string; offered: boolean } {
+  if (item.agreedCurrency != null) return { ...agreedPriceOf(item), offered: false }
+  if (item.offeredCurrency != null)
+    return { priceCents: item.offeredPriceCents ?? null, currency: item.offeredCurrency, offered: item.offeredPriceCents !== item.priceCents }
+  return { priceCents: item.priceCents, currency: item.currency, offered: false }
 }
 
 export interface PlanItemPath {

@@ -119,13 +119,20 @@ export type PlanItemWithProgress = PlanItemWithDecision & {
    */
   canAddSession: boolean
   /**
-   * El precio de su presupuesto: el acordado si lo aceptó (la misma línea que se
-   * cobra, `acceptedBudgetLines`) o, mientras decide, el de la línea que le
-   * ofrece su presupuesto vigente. Nulo sin presupuesto: vale `priceCents` (QA
-   * de la ficha del 8 nov: la atención decía S/ 120 de lista con S/ 90 acordado).
+   * El precio acordado: el de la línea aceptada de su presupuesto, el mismo que
+   * se cobra (`acceptedBudgetLines`). Nulo si no hay nada aceptado: vale
+   * `priceCents` (QA de la ficha del 8 nov: la atención decía S/ 120 de lista
+   * con S/ 90 acordado).
    */
   agreedPriceCents: number | null
   agreedCurrency: string | null
+  /**
+   * Sin nada aceptado, el precio que le ofrece su presupuesto vigente (la opción
+   * elegida o, mientras decide, la recomendada). No es lo que se cobra: se dice
+   * «en su presupuesto», nunca como acordado.
+   */
+  offeredPriceCents: number | null
+  offeredCurrency: string | null
 }
 
 /**
@@ -527,34 +534,39 @@ async function withDecisions(
     path: paths.get(item.id) ?? null,
     newTermsPending: newTerms.has(item.id),
     canAddSession: anotherSessionAllowed(item, another.get(item.id)),
-    agreedPriceCents: agreed.get(item.id)?.priceCents ?? null,
-    agreedCurrency: agreed.get(item.id)?.currency ?? null,
+    agreedPriceCents: agreed.accepted.get(item.id)?.priceCents ?? null,
+    agreedCurrency: agreed.accepted.get(item.id)?.currency ?? null,
+    offeredPriceCents: agreed.offered.get(item.id)?.priceCents ?? null,
+    offeredCurrency: agreed.offered.get(item.id)?.currency ?? null,
   }))
 }
 
 /**
- * El precio de presupuesto de cada tratamiento: el aceptado (lo que se cobra)
- * o, sin aceptar, el de la línea vigente de su presupuesto no cancelado (la
- * opción elegida o, mientras decide, la recomendada; como `currentLine`).
+ * El precio de presupuesto de cada tratamiento: el aceptado (lo que se cobra,
+ * también el de un presupuesto sustituido mientras su revisión espera respuesta)
+ * y, sin nada aceptado, el que le ofrece la línea vigente de su presupuesto no
+ * cancelado (la opción elegida o, mientras decide, la recomendada; como `currentLine`).
  */
 async function agreedPricesOf(
   tx: Db,
   orgId: string,
   items: ReadonlyArray<{ id: string; patientId: string; budgetId: string | null }>,
-): Promise<Map<string, { priceCents: number | null; currency: string }>> {
-  const out = new Map<string, { priceCents: number | null; currency: string }>()
-  const withBudget = items.filter((item) => item.budgetId)
-  if (withBudget.length === 0) return out
-  for (const patientId of new Set(withBudget.map((item) => item.patientId)))
+): Promise<{
+  accepted: Map<string, { priceCents: number | null; currency: string }>
+  offered: Map<string, { priceCents: number | null; currency: string }>
+}> {
+  const accepted = new Map<string, { priceCents: number | null; currency: string }>()
+  const offered = new Map<string, { priceCents: number | null; currency: string }>()
+  for (const patientId of new Set(items.map((item) => item.patientId)))
     for (const [id, line] of await acceptedBudgetLines(
       tx,
       orgId,
       patientId,
-      withBudget.filter((item) => item.patientId === patientId).map((item) => item.id),
+      items.filter((item) => item.patientId === patientId).map((item) => item.id),
     ))
-      out.set(id, { priceCents: line.priceCents, currency: line.currency })
-  const rest = withBudget.filter((item) => !out.has(item.id))
-  if (rest.length === 0) return out
+      accepted.set(id, { priceCents: line.priceCents, currency: line.currency })
+  const rest = items.filter((item) => item.budgetId && !accepted.has(item.id))
+  if (rest.length === 0) return { accepted, offered }
   const lines = await tx
     .select({ planItemId: treatmentBudgetItem.planItemId, priceCents: treatmentBudgetItem.priceCents, currency: treatmentBudgetItem.currency })
     .from(treatmentBudgetItem)
@@ -585,8 +597,8 @@ async function agreedPricesOf(
       sql`${treatmentBudgetOption.isRecommended} desc`,
       asc(treatmentBudgetOption.position),
     )
-  for (const line of lines) if (!out.has(line.planItemId)) out.set(line.planItemId, { priceCents: line.priceCents, currency: line.currency })
-  return out
+  for (const line of lines) if (!offered.has(line.planItemId)) offered.set(line.planItemId, { priceCents: line.priceCents, currency: line.currency })
+  return { accepted, offered }
 }
 
 /** El camino de cada tratamiento según las opciones de su presupuesto vigente. */

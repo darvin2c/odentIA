@@ -43,7 +43,7 @@ import {
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
-import { agreedPriceOf, type PlanItem, planStatusLabel } from "../../lib/patients"
+import { type PlanItem, planStatusLabel, quotedPriceOf } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
@@ -355,9 +355,9 @@ export function EncounterPlanPanel({
                         <span className="text-xs text-muted-foreground">
                           {[
                             treatmentSiteLabel(item),
-                            // El de su presupuesto, el que se cobra: no el de lista (QA de la ficha del 8 nov).
-                            agreedPriceOf(item).priceCents != null && orgLocale
-                              ? formatMoney(agreedPriceOf(item).priceCents ?? 0, agreedPriceOf(item).currency, orgLocale)
+                            // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
+                            quotedPriceOf(item).priceCents != null && orgLocale
+                              ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
                               : "",
                           ]
                             .filter(Boolean)
@@ -688,9 +688,9 @@ function PathsBox({
                             ) : null}
                           </span>
                           <span className="tabular-nums">
-                            {agreedPriceOf(item).priceCents != null && locale
-                              ? formatMoney(agreedPriceOf(item).priceCents ?? 0, agreedPriceOf(item).currency, locale)
-                              : agreedPriceOf(item).priceCents == null
+                            {quotedPriceOf(item).priceCents != null && locale
+                              ? formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, locale)
+                              : quotedPriceOf(item).priceCents == null
                                 ? "Sin precio"
                                 : "…"}
                           </span>
