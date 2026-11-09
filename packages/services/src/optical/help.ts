@@ -43,12 +43,19 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   "¿Para qué es «Guardar en tu atención de hoy» en la tomografía?": () => [],
   // Lo indicado ya queda aceptado: lo que falta es su cita.
   "¿Dónde veo sus alergias, qué le toca y su última atención?": (faq) => [
-    { ...faq, a: faq.a.replace("la cita de lo aceptado (con sus nombres)", "la cita de lo indicado (con sus nombres)") },
+    {
+      ...faq,
+      a: faq.a
+        .replace("la cita de lo aceptado (con sus nombres)", "la cita de lo indicado (con sus nombres)")
+        .replace("la limpieza o el control que también falta reservar", "el control que también falta reservar")
+        // Una óptica no anestesia: arriba no va la ASA (`showsAsa`).
+        .replace("alergias, enfermedades, medicación y ASA", "alergias, enfermedades y medicación"),
+    },
   ],
   "¿Dónde quedaron Atenciones, Recetas u Órdenes?": (faq) => [
     {
       ...faq,
-      a: "Clínica tiene tres secciones: Antecedentes, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
+      a: "Clínica tiene tres secciones: Antecedentes, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, controles, recetas y pedidos) y lo que se firmó; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
     },
   ],
   // Las sesiones de una óptica son las de la terapia visual (diez en la biblioteca), sin pieza.
@@ -58,6 +65,13 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: faq.a
           .replace("por ejemplo una corona en dos", "por ejemplo una terapia visual de diez")
+          .replace("(por ejemplo, la endodoncia de la 46 en su sesión 2 de 2)", "(por ejemplo, la terapia visual en su sesión 2 de 10)")
+          .replace(" Si lo indicas desde la pieza del odontograma, el panel también pide «Sesiones previstas» con las habituales del servicio.", "")
+          // Resolver el diagnóstico de la pieza al firmar es de odentIA.
+          .replace(
+            " Si su tratamiento resuelve un diagnóstico de esa pieza (la pulpitis de la 46 con su endodoncia), el cierre lo propone marcado como resuelto: desmárcalo si sigue activo.",
+            "",
+          )
           .replace("en curso en esa pieza,", "en curso,"),
       },
       "endodoncia en dos sesiones",
@@ -76,6 +90,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
       ...faq,
       a: faq.a
         .replace("«En 6 meses»", "«En 1 año»")
+        .replace("(la corona tras la endodoncia)", "(una terapia visual indicada que aún no empieza)")
         .replace(
           "con el nombre de lo que hiciste hoy o de mantenimiento,",
           "con el nombre de lo que hiciste hoy (con «En 1 año», «Control anual de la vista»),",
@@ -256,6 +271,15 @@ const EYE_FAQS: Faq[] = [
 
 /** Lo que en una óptica es otra cosa, por tema: sus palabras de búsqueda y sus preguntas. */
 const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
+  // El adelanto de una óptica es para su terapia visual, no para una corona.
+  finanzas: (topic) => ({
+    ...topic,
+    faqs: (topic.faqs ?? []).map((faq) =>
+      faq.q === "¿Cómo cobro un adelanto para un tratamiento?" && faq.forms
+        ? { ...faq, forms: faq.forms.map((form) => (form === "adelanto para la corona" ? "adelanto para la terapia visual" : form)) }
+        : faq,
+    ),
+  }),
   pacientes: (topic) => ({
     ...topic,
     terms: [
