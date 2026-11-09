@@ -1,5 +1,5 @@
 {
-  "id": "b940ce13-8718-412d-9ae5-6e1779d8dbde",
+  "id": "302f9178-a50c-47e9-9c16-257c66defdb8",
   "prevId": "44cde6b2-a933-4324-9f0e-39cb1017ce2a",
   "version": "7",
   "dialect": "postgresql",
@@ -42269,19 +42269,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "lens_prescription_encounter_id_encounter_id_fk": {
-          "name": "lens_prescription_encounter_id_encounter_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "encounter_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "lens_prescription_prescriber_user_id_user_id_fk": {
           "name": "lens_prescription_prescriber_user_id_user_id_fk",
           "tableFrom": "lens_prescription",
@@ -42345,6 +42332,38 @@
           "columnsFrom": [
             "organization_id",
             "patient_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "lens_prescription_encounter_fk": {
+          "name": "lens_prescription_encounter_fk",
+          "tableFrom": "lens_prescription",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "lens_prescription_photo_fk": {
+          "name": "lens_prescription_photo_fk",
+          "tableFrom": "lens_prescription",
+          "tableTo": "patient_document",
+          "columnsFrom": [
+            "organization_id",
+            "photo_document_id"
           ],
           "columnsTo": [
             "organization_id",

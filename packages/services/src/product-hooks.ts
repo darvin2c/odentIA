@@ -418,7 +418,8 @@ export interface ProductHooks {
   phaseWords?(phase: string): string | null
   /**
    * Lo que el producto agrega a una demo para presentar ya armada (vistIA: la
-   * receta de anteojos de cada examen de la vista firmado). Sin él, nada.
+   * receta de anteojos de cada examen de la vista firmado). Corre al armarla y cada
+   * noche, después de cerrar las visitas del día: debe poder repetirse. Sin él, nada.
    */
   demoBuilt?(tx: Db, orgId: string): Promise<void>
   /**

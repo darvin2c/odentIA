@@ -10,7 +10,12 @@ import { NO_PRODUCT_HOOKS, type ProductHooks } from "../product-hooks.js"
 import { opticalCatalog } from "./catalog.js"
 import { opticalExamination } from "./examination.js"
 import { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
-import { portalLensPrescriptions, prescriptionRecordLines, seedDemoLensPrescriptions } from "./lens-prescriptions.js"
+import {
+  lensPrescriptionCheck,
+  portalLensPrescriptions,
+  prescriptionRecordLines,
+  seedDemoLensPrescriptions,
+} from "./lens-prescriptions.js"
 
 /**
  * Lo que vistIA hace en los momentos de lo común (ADR 0079). Sin «dónde» (el ojo
@@ -44,6 +49,8 @@ export const opticalHooks: ProductHooks = {
   demoBuilt: seedDemoLensPrescriptions,
   // El cliente ve sus recetas de lentes en su portal y las descarga (entrega 3).
   portalPapers: { list: portalLensPrescriptions, pdf: renderLensPrescriptionPdf },
+  // El QR de la receta de lentes dice si está vigente, vencida o anulada.
+  documentCheck: (tx, orgId, type, id) => (type === "lens_prescription" ? lensPrescriptionCheck(tx, orgId, id) : Promise.resolve(null)),
   async recordSections(tx, { orgId, patientId }) {
     return [
       {

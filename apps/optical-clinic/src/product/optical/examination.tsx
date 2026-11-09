@@ -15,14 +15,14 @@ import {
   HEALTH_PARTS,
   HEALTH_STATE_LABELS,
   type HealthState,
-  normalizeAcuity,
-  PRISM_BASES,
+  PD_FIELDS,
   readEyeExam,
   referralSigns,
   USES_LENSES,
   type UsesLenses,
 } from "@odentia/optical"
 import { Alert, AlertDescription, AlertTitle, Field, FieldError, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { PrismBases } from "./lens-fields"
 
 /**
  * El borrador del examen: lo mismo que se guarda, con los números como se
@@ -37,13 +37,16 @@ interface RefractionDraft {
   adicion?: Text
   prisma?: Text
   base?: Text
+  prisma2?: Text
+  base2?: Text
 }
+type PdKey = (typeof PD_FIELDS)[number]["key"]
 interface EyeExamDraft {
   acompanante?: { nombre?: string; parentesco?: string }
   antecedentes?: { usaLentes?: UsesLenses; nota?: string }
   agudeza?: Partial<Record<Eye, Partial<Record<(typeof ACUITY_FIELDS)[number]["key"], string>>>>
   refraccion?: Partial<Record<Eye, RefractionDraft>>
-  dp?: Partial<Record<Eye, Text>>
+  dp?: Partial<Record<PdKey, Text>>
   salud?: Partial<Record<(typeof HEALTH_PARTS)[number]["key"], { estado: HealthState; nota?: string }>> & {
     presion?: Partial<Record<Eye, Text>>
   }
@@ -93,12 +96,14 @@ function draftOf(saved: unknown): EyeExamDraft | null {
       adicion: textOf(r.adicion, true),
       prisma: textOf(r.prisma),
       base: r.base,
+      prisma2: textOf(r.prisma2),
+      base2: r.base2,
     }
   }
   const dp: EyeExamDraft["dp"] = {}
+  for (const { key } of PD_FIELDS) if (exam.dp?.[key] !== undefined) dp[key] = textOf(exam.dp[key])
   const presion: Partial<Record<Eye, Text>> = {}
   for (const { key: eye } of EYES) {
-    if (exam.dp?.[eye] !== undefined) dp[eye] = textOf(exam.dp[eye])
     if (exam.salud?.presion?.[eye] !== undefined) presion[eye] = textOf(exam.salud.presion[eye])
   }
   const { presion: _saved, ...health } = exam.salud ?? {}
@@ -119,21 +124,26 @@ function bodyOf(draft: unknown): Record<string, unknown> | null {
   for (const { key: eye } of EYES) {
     const r = d.refraccion?.[eye]
     if (!r) continue
+    const prisma = numberOf(r.prisma)
+    const prisma2 = numberOf(r.prisma2)
     const lens = {
       esfera: numberOf(r.esfera),
       cilindro: numberOf(r.cilindro),
       eje: numberOf(r.eje),
       adicion: numberOf(r.adicion),
-      prisma: numberOf(r.prisma),
-      base: r.base || undefined,
+      prisma,
+      // Sin prisma, su base no se guarda: se borró el prisma y la base quedó escondida.
+      base: prisma === undefined ? undefined : r.base || undefined,
+      prisma2: prisma === undefined ? undefined : prisma2,
+      base2: prisma === undefined || prisma2 === undefined ? undefined : r.base2 || undefined,
     }
     if (Object.values(lens).some((value) => value !== undefined)) refraccion[eye] = lens
   }
-  const pairs = (values: Partial<Record<Eye, Text>> | undefined) => {
+  const pairs = (values: Partial<Record<string, Text>> | undefined, keys: readonly string[] = EYES.map((eye) => eye.key)) => {
     const out: Record<string, unknown> = {}
-    for (const { key: eye } of EYES) {
-      const value = numberOf(values?.[eye])
-      if (value !== undefined) out[eye] = value
+    for (const key of keys) {
+      const value = numberOf(values?.[key])
+      if (value !== undefined) out[key] = value
     }
     return Object.keys(out).length ? out : undefined
   }
@@ -143,7 +153,7 @@ function bodyOf(draft: unknown): Record<string, unknown> | null {
     antecedentes: d.antecedentes,
     agudeza: d.agudeza,
     refraccion: Object.keys(refraccion).length ? refraccion : undefined,
-    dp: pairs(d.dp),
+    dp: pairs(d.dp, PD_FIELDS.map((field) => field.key)),
     salud: { ...health, presion: pairs(presion) },
   }
   // Lo vacío no se guarda: el servidor limpia el resto y, sin nada, deja el examen en null.
@@ -291,13 +301,11 @@ function EyeExamFields({ idPrefix, draft, onChange, disabled, errors }: Examinat
       <EyeGrid
         idPrefix={idPrefix}
         title="Agudeza visual"
-        columns={ACUITY_FIELDS}
+        columns={ACUITY_FIELDS.map((field) => ({ ...field, placeholder: field.near ? "J1" : "20/20" }))}
         path="agudeza"
-        placeholder="20/20"
         value={(eye, key) => d.agudeza?.[eye]?.[key as keyof NonNullable<EyeExamDraft["agudeza"]>[Eye]] ?? ""}
-        onChange={(eye, key, text) =>
-          set({ ...d, agudeza: { ...d.agudeza, [eye]: { ...d.agudeza?.[eye], [key]: normalizeAcuity(text) ?? text } } })
-        }
+        // Como se escribe («CD 1 m», «20/25+1»): el servidor lo deja en su notación al guardar.
+        onChange={(eye, key, text) => set({ ...d, agudeza: { ...d.agudeza, [eye]: { ...d.agudeza?.[eye], [key]: text } } })}
         disabled={disabled}
         errors={errors}
       />
@@ -308,34 +316,37 @@ function EyeExamFields({ idPrefix, draft, onChange, disabled, errors }: Examinat
         columns={REFRACTION_FIELDS}
         path="refraccion"
         value={(eye, key) => d.refraccion?.[eye]?.[key as keyof RefractionDraft] ?? ""}
-        onChange={(eye, key, text) => set({ ...d, refraccion: { ...d.refraccion, [eye]: { ...d.refraccion?.[eye], [key]: text } } })}
+        onChange={(eye, key, text) =>
+          set({
+            ...d,
+            refraccion: {
+              ...d.refraccion,
+              [eye]: {
+                ...d.refraccion?.[eye],
+                [key]: text,
+                // Sin prisma no queda una base escondida que impida guardar.
+                ...(key === "prisma" && !text.trim() ? { base: undefined, prisma2: undefined, base2: undefined } : {}),
+              },
+            },
+          })
+        }
         disabled={disabled}
         errors={errors}
       />
-      {EYES.some((eye) => d.refraccion?.[eye.key]?.prisma) ? (
-        <div className="flex flex-col gap-3 sm:col-span-2">
-          {EYES.filter((eye) => d.refraccion?.[eye.key]?.prisma).map((eye) => {
-            const id = `${idPrefix}-base-${eye.key}`
-            const error = subFieldError(errors, `refraccion.${eye.key}.base`, id)
-            return (
-              <div key={eye.key} className="flex flex-col gap-1">
-                <span id={id} className="text-xs text-muted-foreground">
-                  Base del prisma {eye.short}
-                </span>
-                <ChoiceButtons
-                  aria-labelledby={id}
-                  value={(d.refraccion?.[eye.key]?.base as (typeof PRISM_BASES)[number]["key"] | undefined) ?? null}
-                  options={PRISM_BASES.map((base) => ({ value: base.key, label: base.label }))}
-                  columns={2}
-                  disabled={disabled}
-                  invalid={error.invalid}
-                  aria-describedby={error.describedBy}
-                  onChange={(base) => set({ ...d, refraccion: { ...d.refraccion, [eye.key]: { ...d.refraccion?.[eye.key], base } } })}
-                />
-                {error.message ? <FieldError id={error.errorId}>{error.message}</FieldError> : null}
-              </div>
-            )
-          })}
+      {EYES.some((eye) => d.refraccion?.[eye.key]?.prisma?.trim()) ? (
+        <div className="flex flex-col gap-4 sm:col-span-2">
+          {EYES.filter((eye) => d.refraccion?.[eye.key]?.prisma?.trim()).map((eye) => (
+            <PrismBases
+              key={eye.key}
+              idPrefix={idPrefix}
+              eye={eye}
+              path={`refraccion.${eye.key}`}
+              draft={d.refraccion?.[eye.key] ?? {}}
+              disabled={disabled}
+              errors={errors}
+              onChange={(next) => set({ ...d, refraccion: { ...d.refraccion, [eye.key]: { ...d.refraccion?.[eye.key], ...next } } })}
+            />
+          ))}
         </div>
       ) : null}
       <p className="-mt-3 text-xs text-muted-foreground">
@@ -345,13 +356,38 @@ function EyeExamFields({ idPrefix, draft, onChange, disabled, errors }: Examinat
       <EyeGrid
         idPrefix={idPrefix}
         title="Distancia pupilar (mm)"
-        columns={[{ key: "mm", label: "Del centro de la nariz", placeholder: "31,5" }]}
+        columns={[{ key: "mm", label: "Monocular, del centro de la nariz", placeholder: "31,5" }]}
         path="dp"
         value={(eye) => d.dp?.[eye] ?? ""}
         onChange={(eye, _key, text) => set({ ...d, dp: { ...d.dp, [eye]: text } })}
         disabled={disabled}
         errors={errorsWithoutColumn(errors, "dp", "mm")}
       />
+      <div className="-mt-2 grid grid-cols-2 gap-2 sm:col-span-2 sm:max-w-md">
+        {PD_FIELDS.filter((field) => field.key === "binocular" || field.key === "cerca").map((field) => {
+          const id = `${idPrefix}-dp-${field.key}`
+          const error = subFieldError(errors, `dp.${field.key}`, id)
+          return (
+            <Field key={field.key} data-invalid={error.invalid} className="gap-1">
+              <FieldLabel htmlFor={id} className="text-xs text-muted-foreground">
+                {field.label} <span className="font-normal">(opcional)</span>
+              </FieldLabel>
+              <Input
+                id={id}
+                inputMode="decimal"
+                autoComplete="off"
+                value={d.dp?.[field.key] ?? ""}
+                placeholder={field.key === "binocular" ? "63" : "60"}
+                disabled={disabled}
+                aria-invalid={error.invalid}
+                aria-describedby={error.describedBy}
+                onChange={(event) => set({ ...d, dp: { ...d.dp, [field.key]: event.target.value } })}
+              />
+              {error.message ? <FieldError id={error.errorId}>{error.message}</FieldError> : null}
+            </Field>
+          )
+        })}
+      </div>
 
       <section aria-labelledby={`${idPrefix}-salud`} className="flex flex-col">
         <h3 id={`${idPrefix}-salud`} className="pb-2 text-sm font-medium">

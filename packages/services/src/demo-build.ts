@@ -1616,6 +1616,8 @@ export async function advanceDemo(
   const at = now.toISOString()
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
+  // Lo que el producto agrega a lo cerrado anoche (vistIA: la receta de cada examen firmado).
+  await (await productHooks(tx, demo.organizationId)).demoBuilt?.(tx, demo.organizationId)
   // Lo cobrado de ayer ya está en su caja: recepción la cierra.
   await closeDemoCash(tx, ctx, today)
   const through = addDays(today, HORIZON_DAYS)

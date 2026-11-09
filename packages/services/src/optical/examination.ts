@@ -8,19 +8,20 @@ import {
   readEyeExam,
   refractionText,
 } from "@odentia/optical"
-import { invalidField } from "../errors.js"
+import { fieldsError } from "../errors.js"
 import type { ExamObservation, ProductExamination } from "../product-hooks.js"
 
 /**
  * El examen de la vista de vistIA (entrega 3 del plan): lo valida
- * `parseEyeExam` y cada error va junto a su dato («examination.refraccion.od.eje»).
+ * `parseEyeExam` y cada error va junto a su dato («examination.refraccion.od.eje»), todos a la vez.
  * En la copia de la historia, una línea por parte; en FHIR, una observación por
  * dato medido de cada ojo, sin inventar lo que no se midió.
  */
 export const opticalExamination: ProductExamination = {
   parse(input) {
     const parsed = parseEyeExam(input)
-    if (!parsed.ok) throw invalidField(parsed.path ? `examination.${parsed.path}` : "examination", parsed.error)
+    // Todos los errores a la vez, cada uno junto a su dato (ADR 0113).
+    if (!parsed.ok) throw fieldsError(parsed.errors, (path) => (path ? `examination.${path}` : "examination"))!
     return parsed.value ? { ...parsed.value } : null
   },
   recordLines: (value) => eyeExamLines(readEyeExam(value)),

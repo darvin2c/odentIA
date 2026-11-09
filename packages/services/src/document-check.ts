@@ -32,6 +32,8 @@ export const CHECKABLE_DOCUMENTS = [
   "signed_odontogram",
   // Al final: el token guarda la posición, y lo ya impreso debe seguir valiendo.
   "attention_sheet",
+  // La receta de lentes de vistIA: la responde su producto (`documentCheck`).
+  "lens_prescription",
 ] as const
 export type CheckableDocument = (typeof CHECKABLE_DOCUMENTS)[number]
 
