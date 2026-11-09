@@ -4191,6 +4191,9 @@ export interface PayMonthCommissionInput {
    * gasto, para que el cierre cuadre. Sin esto queda «fuera de la caja».
    */
   fromCash?: boolean
+  /** Con qué se pagó (ADR 0167), como un gasto: manda sobre `fromCash`; solo el efectivo sale de la caja. */
+  paymentMethodId?: string | null
+  paymentReference?: string | null
 }
 
 /**
@@ -4320,8 +4323,11 @@ export async function payMonthCommission(
       })
     return { settlement, expense: null }
   }
+  // Con qué se pagó, como en un gasto: el medio manda, y solo el efectivo sale de la caja.
+  const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
+  const fromCash = method ? method.typeCode === CASH_METHOD : input.fromCash === true
   // Como un gasto de la caja (`createExpense`): la abre si hace falta y no la deja en negativo.
-  const shift = input.fromCash
+  const shift = fromCash
     ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
     : null
   // En otra moneda, el gasto guarda su valor en la del negocio con el cambio de hoy, como cualquier gasto.
@@ -4343,6 +4349,10 @@ export async function payMonthCommission(
       category: COMMISSION_EXPENSE_CATEGORY,
       spentAt: paidAt,
       receiptKind: "ninguno",
+      paymentMethodId: method?.id ?? null,
+      methodName: method?.name ?? null,
+      methodTypeCode: method?.typeCode ?? null,
+      paymentReference: method && method.typeCode !== CASH_METHOD ? input.paymentReference?.trim().slice(0, 60) || null : null,
       createdBy: actorUserId,
     })
     .returning()
