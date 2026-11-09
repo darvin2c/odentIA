@@ -70,7 +70,8 @@ export function ReturnDrawer({
 }: {
   open: boolean
   onClose: () => void
-  patientId: string
+  /** Nulo: una venta de mostrador (ADR 0170), sin cuenta donde dejarlo a favor. */
+  patientId: string | null
   patientName: string
   ticketId: string
   ticketNumber: string
@@ -354,7 +355,7 @@ export function ReturnDrawer({
             onClick={() => {
               setPrinting(true)
               setPrintError(null)
-              void openServerPdf(returnPdfPath(patientId, done.id))
+              void openServerPdf(returnPdfPath(patientId, done.id, ticketId))
                 .catch((err: unknown) => setPrintError(financeErrorMessage(err)))
                 .finally(() => setPrinting(false))
             }}
@@ -367,16 +368,18 @@ export function ReturnDrawer({
               {printError}
             </p>
           ) : null}
-          <SendFinancialDocument
-            patientId={patientId}
-            documentType="return"
-            documentId={done.id}
-            trigger={
-              <Button type="button" variant="outline" className="min-h-10 w-full">
-                Enviar al paciente
-              </Button>
-            }
-          />
+          {patientId !== null ? (
+            <SendFinancialDocument
+              patientId={patientId}
+              documentType="return"
+              documentId={done.id}
+              trigger={
+                <Button type="button" variant="outline" className="min-h-10 w-full">
+                  Enviar al paciente
+                </Button>
+              }
+            />
+          ) : null}
         </div>
       ) : returnable.isError ? (
         <ErrorState
@@ -503,7 +506,12 @@ export function ReturnDrawer({
                       tone="primary"
                       columns={2}
                       value={chosenPayout}
-                      options={[...methodOptions, { value: LEAVE_AS_CREDIT, label: "Dejarlo a favor" }]}
+                      options={
+                        // Sin ficha no hay cuenta: lo devuelto siempre se le paga.
+                        patientId === null
+                          ? methodOptions
+                          : [...methodOptions, { value: LEAVE_AS_CREDIT, label: "Dejarlo a favor" }]
+                      }
                       onChange={(value) => field.handleChange(value)}
                     />
                   )

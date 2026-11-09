@@ -280,7 +280,10 @@ export const TICKET_STATE_OPTIONS = [
 export interface TicketListRow {
   id: string
   number: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0170): `displayName` es quien compró o «Venta de mostrador». */
+  patientId: string | null
+  /** La persona que compró en el mostrador, si se eligió: su página se abre desde la fila. */
+  buyerContactId: string | null
   displayName: string
   docType: string | null
   docNumber: string | null
@@ -392,7 +395,8 @@ export interface DayMovement {
 export interface VoidedTicket {
   ticketId: string
   ticketNumber: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0170). */
+  patientId: string | null
   patientName: string
   currency: string
   totalCents: number

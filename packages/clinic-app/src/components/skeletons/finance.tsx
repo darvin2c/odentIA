@@ -413,7 +413,7 @@ export function FinancePageSkeleton({ section }: { section?: FinanceStrip } = {}
   const isMobile = useIsMobile()
   const header = isMobile ? undefined : financeHeader(view, access)
   return (
-    <PageLoading title="Finanzas" primary={header?.primary} menu={header?.menu} footer={isMobile ? <PhoneActions view={view} /> : null}>
+    <PageLoading title="Finanzas" primary={header?.primary} secondary={header?.secondary} menu={header?.menu} footer={isMobile ? <PhoneActions view={view} /> : null}>
       <div className="flex flex-col gap-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
           {view === "comisiones" ? (
