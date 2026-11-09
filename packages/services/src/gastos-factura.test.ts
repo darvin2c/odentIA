@@ -28,7 +28,7 @@ async function setup() {
     .insert(treatmentPlanItem)
     .values({ organizationId: "org_a", patientId: f.patient.id, planId: f.plan.id, title: "Corona", currency: "PEN", status: "pendiente", decisionStatus: "aceptado" })
     .returning()
-  const lab = { supplierName: "Laboratorio Dental Andino S.A.C.", supplierTaxId: "20512345678", receiptType: "01", receiptNumber: `E001-${Math.floor(Math.random() * 9000) + 1000}` }
+  const lab = { supplierName: "Laboratorio Dental Andino S.A.C.", supplierTaxId: "20512345671", receiptType: "01", receiptNumber: `E001-${Math.floor(Math.random() * 9000) + 1000}` }
   return { f, branchId, transfer, cash, crown: crown!, lab }
 }
 

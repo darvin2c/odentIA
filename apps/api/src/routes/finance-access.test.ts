@@ -437,6 +437,8 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
     `/finance/tickets/${id}`,
     `/finance/movements?branchId=${BRANCH_A}&day=2026-01-15`,
     `/finance/expenses?branchId=${BRANCH_A}`,
+    `/finance/expenses/month/download?branchId=${BRANCH_A}&year=2026&month=11`,
+    `/finance/payables?branchId=${BRANCH_A}&open=1`,
   ]
   const writes: Array<[string, unknown]> = [
     [
@@ -446,6 +448,8 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
     [`/finance/movements/${id}/void`, { reason: "x" }],
     ["/finance/expenses", { branchId: BRANCH_A, concept: "Útiles", amountCents: 1000 }],
     [`/finance/expenses/${id}/void`, { reason: "x" }],
+    ["/finance/payables", { branchId: BRANCH_A, supplierName: "Laboratorio", amountCents: 1000 }],
+    [`/finance/payables/${id}/void`, { reason: "x" }],
     [
       "/finance/closures",
       { branchId: BRANCH_A, shiftId: null, countedCents: 0, retainedCents: 0, deliveredCents: 0 },
@@ -464,7 +468,7 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
         `${role} POST ${path}`,
       ).toBe(403)
   }  // Un id que no es uuid no existe: 404, no un error interno.
-  for (const path of ["/finance/expenses/no-es-un-id/void", "/finance/movements/no-es-un-id/void"])
+  for (const path of ["/finance/expenses/no-es-un-id/void", "/finance/movements/no-es-un-id/void", "/finance/payables/no-es-un-id/void"])
     expect((await postJson(buildApp("cashier", CASH), path, { reason: "x" })).status, path).toBe(404)
 })
 

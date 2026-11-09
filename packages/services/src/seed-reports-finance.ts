@@ -279,7 +279,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     const [found] = await tx.select({ id: supplier.id }).from(supplier).where(and(eq(supplier.organizationId, orgId), eq(supplier.name, name))).limit(1)
     return found?.id ?? (await createSupplier(tx, orgId, ownerUserId, { name, docType: "RUC", docNumber })).id
   }
-  const dentalPeru = await supplierOf("Dental Perú SAC", "20456789123")
+  const dentalPeru = await supplierOf("Dental Perú SAC", "20456789120")
   const insumosLima = await supplierOf("Insumos Lima EIRL", "20567891234")
   const odontoSur = await supplierOf("Odonto Sur SAC", "20678912345")
   const dentalAndina = await supplierOf("Dental Andina SAC", "20123456789")
@@ -579,7 +579,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.decisionStatus, "aceptado"), sql`${treatmentPlanItem.title} ilike '%corona%'`))
     .orderBy(asc(treatmentPlanItem.createdAt))
     .limit(2)
-  const lab = { supplierName: "Laboratorio Dental Andino S.A.C.", supplierTaxId: "20512345678" }
+  const lab = { supplierName: "Laboratorio Dental Andino S.A.C.", supplierTaxId: "20512345671" }
   const dayOf = (date: Date) => localDay(date, timezone)
   const endOfMonth = (() => {
     const next = addMonths(current, 1)

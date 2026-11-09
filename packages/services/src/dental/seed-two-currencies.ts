@@ -152,14 +152,15 @@ export async function seedTwoCurrencies(
     receiptType: "01",
     receiptNumber: "E001-318",
     supplierName: "Laboratorio Dental Andino S.A.C.",
-    supplierTaxId: "20512345678",
+    supplierTaxId: "20512345671",
   })
 
   // Una compra en dólares, recibida y pagada en parte con soles: el cambio sale de lo pagado.
   const seller = await createSupplier(tx, orgId, ownerUserId, {
     name: "Implantes del Pacífico S.A.C.",
     docType: "RUC",
-    docNumber: "20601234567",
+    // Un RUC que pasa el dígito de control y no es el de la clínica.
+    docNumber: "20555666773",
   })
   const implant = await createProduct(tx, orgId, ownerUserId, {
     sku: "IMP-TITANIO",
