@@ -177,7 +177,7 @@ export function NextStepButton({
         <DetailDrawer
           open
           title="No contesta"
-          description={`Su presupuesto sigue esperando respuesta. Queda una tarea para volver a llamar a ${patient.name.split(" ")[0]}.`}
+          description={`Su presupuesto sigue esperando respuesta. Queda una tarea para volver a llamar por el presupuesto de ${patient.name}.`}
           onClose={() => setOpen(null)}
         >
           <BudgetNoAnswer

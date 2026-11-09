@@ -4,7 +4,7 @@
  * aceptado a la cita que ya tiene, la corona y el control de su endodoncia en
  * una fila, y seguir un presupuesto que no contesta.
  */
-import { appointmentPlanItem } from "@odentia/db/schema/clinical"
+import { appointmentPlanItem, clinicalFollowUp } from "@odentia/db/schema/clinical"
 import { treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { crmTask } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
@@ -246,4 +246,41 @@ it("anular el presupuesto cierra su «volver a llamar»", async () => {
   await f.run((tx) => cancelBudget(tx, ...f.args, budget.id))
   const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.idempotencyKey, `${BUDGET_CALLBACK_KEY}${budget.id}`))
   expect(task).toMatchObject({ status: "done", settledReason: "Se anuló su presupuesto", title: "Volver a llamar por el presupuesto de Paciente de prueba" })
+})
+
+it("si todo lo aceptado espera a otro tratamiento, el control vencido va en su propia fila con su botón", async () => {
+  const f = await clinicalFixture()
+  await item(f, "Endodoncia", { tooth: "36", phase: "basica", status: "en_curso", plannedSessions: 2 })
+  await item(f, "Corona", { tooth: "36", phase: "rehabilitadora" })
+  const limpieza = await f.run((tx) =>
+    createFollowUp(tx, ...f.args, {
+      kind: "mantenimiento",
+      title: "Limpieza y control",
+      dueAt: new Date(Date.now() + 30 * DAY).toISOString(),
+      originEncounterId: f.encounter.id,
+    }),
+  )
+  await ownerDb
+    .update(clinicalFollowUp)
+    .set({ dueAt: new Date(Date.now() - 5 * DAY), createdAt: new Date(Date.now() - 180 * DAY) })
+    .where(eq(clinicalFollowUp.id, limpieza.id))
+  const list = await steps(f)
+  const waiting = list.find((step) => step.kind === "agendar")
+  expect(waiting?.text).toBe("Corona: va después de terminar Endodoncia")
+  expect(waiting?.action?.followUpIds).toBeUndefined()
+  expect(list.find((step) => step.kind === "control")).toMatchObject({ action: { label: "Reservar el control", followUpId: limpieza.id } })
+})
+
+it("«Lo piensa» también cierra el «volver a llamar»: la fila dice lo que respondió", async () => {
+  const f = await clinicalFixture()
+  const resina = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [resina.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => noteBudgetNoAnswer(tx, ...f.args, budget.id, { callAgainAt: new Date(Date.now() + DAY).toISOString() }))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: resina.id, decision: "pospuesto" }] }))
+  const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.idempotencyKey, `${BUDGET_CALLBACK_KEY}${budget.id}`))
+  expect(task?.status).toBe("done")
+  expect((await steps(f)).find((step) => step.kind === "respuesta")?.text).toBe("Lo está pensando")
 })

@@ -512,6 +512,20 @@ async function planFactsMany(
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   const openEncounters = await openEncountersOf(tx, orgId, ids)
   const carriedAt = await carriedAtOf(tx, orgId, ids)
+  // «No contesta · volver a llamar» de cada uno: la fila de Pacientes dice lo mismo que la ficha.
+  const callbackRows = await tx.execute<{ patientId: string; key: string; dueAt: Date | null; reason: string | null }>(sql`
+    select patient_id as "patientId", idempotency_key as key, due_at as "dueAt", reason from task
+    where organization_id = ${orgId} and status = 'open' and idempotency_key like ${`${BUDGET_CALLBACK_KEY}%`}
+      and patient_id in (${sql.join(
+        ids.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})`)
+  const callbacksOf = new Map<string, Map<string, { said: string | null; dueAt: Date | null }>>()
+  for (const row of callbackRows) {
+    const map = callbacksOf.get(row.patientId) ?? new Map()
+    map.set(row.key.slice(BUDGET_CALLBACK_KEY.length), { said: row.reason, dueAt: row.dueAt ? new Date(row.dueAt) : null })
+    callbacksOf.set(row.patientId, map)
+  }
   for (const person of people) {
     const facts: PlanFacts = {
       name: firstName(person),
@@ -521,6 +535,7 @@ async function planFactsMany(
       withAppointment,
       sessions,
       carriedAt,
+      callbacks: callbacksOf.get(person.id),
       controls: controlsOf.get(person.id) ?? [],
       nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
       nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
@@ -1059,6 +1074,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     joinedControl,
     pairedControl,
     pairedItems,
+    blockerOf,
     laterControl,
     continueStep,
     sendStep,
@@ -1113,8 +1129,11 @@ function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
   const rest = p.toStart.filter((item) => !p.pairedItems.some((other) => other.id === item.id))
   const sessionFirst = rest.length > 0 ? p.startedFirst : undefined
   if (sessionFirst) steps.push(p.continueStep(sessionFirst))
-  if (rest.length > 0) steps.push(p.scheduleStep(rest, p.joinedControl ? [p.joinedControl] : []))
-  else if (p.joinedControl) steps.push(p.controlStep(p.joinedControl))
+  // El control va con lo aceptado solo si algo de eso se puede reservar ya; si todo espera a otro
+  // tratamiento, cada uno en su fila (QA antes de entregar: el botón quedaba sin nada que reservar).
+  const restReady = rest.some((item) => !p.blockerOf(item))
+  if (rest.length > 0) steps.push(p.scheduleStep(rest, p.joinedControl && restReady ? [p.joinedControl] : []))
+  if (p.joinedControl && !(rest.length > 0 && restReady)) steps.push(p.controlStep(p.joinedControl))
   if (p.awaiting) steps.push(p.answerStep(p.awaiting))
   // Cada tratamiento que sigue en curso, una vez: primero el de la regla, después los demás.
   const ordered = p.continuing ? [p.continuing, ...p.allContinuing.filter((item) => item.id !== p.continuing?.id)] : p.allContinuing

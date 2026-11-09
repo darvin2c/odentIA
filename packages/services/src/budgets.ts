@@ -1418,6 +1418,14 @@ export async function assembleEncounterBudget(
 ): Promise<AssembledBudget | null> {
   const required = (await productHooks(tx, orgId)).budgetRequired
   if (!required && !opts.onRequest) return null
+  // Lo pide quien atiende antes de firmar: solo de una atención en curso de esa persona.
+  if (opts.onRequest) {
+    const [open] = await tx.execute<{ status: string }>(sql`
+      select status from encounter where organization_id = ${orgId} and id = ${encounterId}::uuid and patient_id = ${patientId}::uuid`)
+    if (!open) throw notFound("Atención")
+    if (open.status !== "borrador")
+      throw new ServiceError("ENCOUNTER_CLOSED", 409, "Esta atención ya se cerró: su presupuesto se armó al firmarla")
+  }
   const candidates = await tx
     .select()
     .from(treatmentPlanItem)
@@ -2768,8 +2776,9 @@ export async function decideBudget(
     // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
     title: budgetInterest(own, current.title).title,
   })
-  // Ya respondió: el «volver a llamar» que dejó «No contesta» se cierra solo.
-  if (!awaitsAnswer) await settleBudgetCallback(tx, orgId, budgetId)
+  // Ya respondió (aunque sea «lo pienso» o una parte): el «volver a llamar» de «No contesta» se
+  // cierra solo; la fila dice entonces lo que respondió.
+  await settleBudgetCallback(tx, orgId, budgetId)
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
 }
