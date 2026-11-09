@@ -10,7 +10,7 @@ import { branch } from "@odentia/db/schema/org"
 import { and, eq, isNull } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { listPayables, notePayable, payablesOwedAt, voidPayable } from "./expense-payable.js"
+import { correctPayable, listPayables, notePayable, payablesOwedAt, voidPayable } from "./expense-payable.js"
 import { addCashMovement, correctExpense, createExpense, voidExpense } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -157,4 +157,19 @@ it("se anula solo sin pagos vigentes, y lo que se debía sale en Lo que debes", 
     f.run((tx) => createExpense(tx, "org_a", f.actor, payment(branchId, transfer.id, 1_000), { payableId: owed.id })),
   ).rejects.toMatchObject({ code: "PAYABLE_VOIDED" })
   expect((await f.run((tx) => payablesOwedAt(tx, "org_a", new Date(), { branchId, money: { currency: "PEN", secondCurrency: null, exchangeRate: null, exchangeFactor: null }, timezone: "America/Lima" }))).cents).toBe(0)
+})
+
+it("corregir una factura sin pagos la anula con lo que cambió y anota la nueva; con pagos, no", async () => {
+  const { f, branchId, transfer, lab } = await setup()
+  const wrong = await f.run((tx) => notePayable(tx, "org_a", f.actor, { branchId, ...lab, amountCents: 250_000 }))
+  const right = await f.run((tx) =>
+    correctPayable(tx, "org_a", f.actor, wrong.id, { requestId: randomUUID(), branchId, ...lab, amountCents: 25_000 }),
+  )
+  expect(right.id).not.toBe(wrong.id)
+  const open = await f.run((tx) => listPayables(tx, "org_a", { branchId, open: true }))
+  expect(open.payables.map((row) => [row.id, row.dueCents])).toEqual([[right.id, 25_000]])
+  await f.run((tx) => createExpense(tx, "org_a", f.actor, payment(branchId, transfer.id, 5_000), { payableId: right.id }))
+  await expect(
+    f.run((tx) => correctPayable(tx, "org_a", f.actor, right.id, { requestId: randomUUID(), branchId, ...lab, amountCents: 30_000 })),
+  ).rejects.toMatchObject({ code: "PAYABLE_HAS_PAYMENTS" })
 })

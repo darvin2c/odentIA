@@ -53,7 +53,8 @@ export async function expensesMonthCsv(
     "N.º de operación",
     "Moneda",
     "Importe",
-    `Valor en ${unit}`,
+    // Solo lo que suma en «Gastado»: sumada, esta columna da lo mismo que la pantalla.
+    `Suma en el mes (${unit})`,
     "Sede",
     "Estado",
     "Motivo",
@@ -64,7 +65,8 @@ export async function expensesMonthCsv(
     const merged = row.salary || (row.commission && row.id.includes(":"))
     const type = merged ? null : expenseReceiptType(zone.countryCode, row.receiptType)
     const receiptWord = merged ? "Varios" : (type?.label ?? (row.receiptKind && row.receiptKind !== "ninguno" ? row.receiptKind : ""))
-    const value = row.currency === unit ? row.amountCents : row.businessCents
+    const counts = !row.voidedAt && !row.salesTax
+    const value = counts ? (row.currency === unit ? row.amountCents : row.businessCents) : null
     const state = row.voidedAt ? "Anulado" : row.salesTax ? "No suma: impuesto de lo cobrado" : "Vigente"
     const was = row.replaced
     return [
@@ -90,5 +92,8 @@ export async function expensesMonthCsv(
   })
   const place = query.branchId ? branchName.get(query.branchId) : null
   const period = `${query.year}-${String(query.month).padStart(2, "0")}`
-  return { filename: csvFileName(place ? `Gastos ${place}` : "Gastos", period), body: toCsv(header, rows) }
+  // Con un filtro, el archivo lo dice: no se confunde con el mes completo.
+  const filtered = [query.category ? expenseCategoryWord(query.category) : null, query.q?.trim() ? "busqueda" : null].filter(Boolean)
+  const title = ["Gastos", place, ...filtered].filter(Boolean).join(" ")
+  return { filename: csvFileName(title, period), body: toCsv(header, rows) }
 }

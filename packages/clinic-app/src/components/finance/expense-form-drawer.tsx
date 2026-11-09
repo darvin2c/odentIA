@@ -167,6 +167,7 @@ export function ExpenseFormDrawer({
   initial,
   mode = NEW,
   onPayInvoice,
+  onNoteInvoice,
 }: {
   place: ExpensePlace
   open: boolean
@@ -175,6 +176,8 @@ export function ExpenseFormDrawer({
   mode?: ExpenseDrawerMode
   /** Pagar una factura por pagar en vez de registrar un gasto suelto (ADR 0174). */
   onPayInvoice?: (payable: Payable) => void
+  /** «¿Todavía no lo pagas?»: anotar la factura en vez de un gasto. */
+  onNoteInvoice?: () => void
 }) {
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
@@ -251,7 +254,7 @@ export function ExpenseFormDrawer({
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
         // Una factura no se paga de más: lo que falta es el tope.
         else if (invoice && cents > invoice.dueCents)
-          fields.amount = `De esta factura quedan ${formatMoney(invoice.dueCents, invoice.currency, locale)} por pagar.`
+          fields.amount = `Es más de lo que falta: de esta factura quedan ${formatMoney(invoice.dueCents, invoice.currency, locale)} por pagar.`
         if (!value.method) fields.method = "Elige con qué se pagó."
         else if (!derive(value).method) fields.method = "Ese medio ya no está activo: elige otro."
         else if (after !== null && after < 0)
@@ -286,8 +289,8 @@ export function ExpenseFormDrawer({
         ...(value.receiptType && value.receiptType !== NO_RECEIPT_TYPE && value.receiptNumber.trim()
           ? { receiptNumber: value.receiptNumber.trim() }
           : {}),
-        ...(asksSupplier && supplier ? { supplierId: supplier.id } : {}),
-        ...(asksSupplier && !supplier && value.supplier.trim() ? { supplierName: value.supplier.trim() } : {}),
+        ...(asksSupplier && supplier?.id ? { supplierId: supplier.id } : {}),
+        ...(asksSupplier && !supplier?.id && value.supplier.trim() ? { supplierName: value.supplier.trim() } : {}),
         ...(asksSupplier && type?.asksTaxId && value.supplierTaxId.trim() ? { supplierTaxId: value.supplierTaxId.trim() } : {}),
       }
       if (paying) {
@@ -525,7 +528,19 @@ export function ExpenseFormDrawer({
   const inMonth = (day: string) => (day.slice(0, 7) !== today.slice(0, 7) ? `: quedó en ${monthWord(day)}` : "")
   const createMutation = useMutation({
     mutationFn: createExpenseApi,
-    onSuccess: () => done(`Gasto registrado${inMonth(form.getFieldValue("spentDay"))}`),
+    onSuccess: (_result, body) => {
+      // El pago de una factura dice cuánto queda de ella.
+      if (invoice) {
+        const left = invoice.dueCents - body.amountCents
+        done(
+          left > 0
+            ? `Pagado ${formatMoney(body.amountCents, invoice.currency, locale)} de ${invoice.concept}: quedan ${formatMoney(left, invoice.currency, locale)} por pagar`
+            : `${invoice.concept}: pagada`,
+        )
+        return
+      }
+      done(`Gasto registrado${inMonth(form.getFieldValue("spentDay"))}`)
+    },
   })
   const correctMutation = useMutation({
     mutationFn: (input: { id: string; body: Parameters<typeof createExpenseApi>[0] }) => correctExpenseApi(input.id, input.body),
@@ -628,6 +643,15 @@ export function ExpenseFormDrawer({
       }}
     >
       <div className="flex flex-col gap-5">
+        {/* Lo que llega para pagar después no es un gasto todavía: se anota la factura (ADR 0174). */}
+        {!fixed && !correcting && onNoteInvoice ? (
+          <p className="text-sm text-muted-foreground">
+            ¿Todavía no lo pagas?{" "}
+            <Button type="button" variant="link" className="h-auto p-0" onClick={onNoteInvoice}>
+              Anotar la factura por pagar
+            </Button>
+          </p>
+        ) : null}
         {correcting ? (
           <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-sm">
             Antes: <strong>{formatMoney(correcting.amountCents, correcting.currency, locale)}</strong> ·{" "}

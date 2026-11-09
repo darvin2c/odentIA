@@ -1547,7 +1547,7 @@ export async function createExpense(
         "amountCents",
         owed.dueCents === 0
           ? "Esa factura ya está pagada"
-          : `De esa factura queda ${formatMoney(owed.dueCents, owed.currency, locale)} por pagar`,
+          : `Es más de lo que falta: de esa factura queda ${formatMoney(owed.dueCents, owed.currency, locale)} por pagar`,
       )
     }
   }
@@ -2131,11 +2131,28 @@ export async function correctExpense(
  * aunque no vea Inventario.
  */
 export async function listExpenseSuppliers(tx: Db, orgId: string) {
-  return tx
+  const listed = await tx
     .select({ id: supplier.id, name: supplier.name, docType: supplier.docType, docNumber: supplier.docNumber })
     .from(supplier)
     .where(and(eq(supplier.organizationId, orgId), eq(supplier.isActive, true)))
     .orderBy(asc(supplier.name))
+  // Los que se escribieron a mano en un gasto o una factura (el laboratorio), con el último RUC dicho:
+  // así se sugieren igual y el contador no ve dos nombres para el mismo proveedor.
+  const written = await tx.execute<{ name: string; taxId: string | null }>(sql`
+    select distinct on (lower(name)) name, tax_id as "taxId" from (
+      select supplier_name as name, supplier_tax_id as tax_id, created_at from expense
+        where organization_id = ${orgId} and supplier_id is null and supplier_name is not null and voided_at is null
+      union all
+      select supplier_name, supplier_tax_id, created_at from expense_payable
+        where organization_id = ${orgId} and supplier_id is null and voided_at is null
+    ) s
+    order by lower(name), (tax_id is null), created_at desc
+    limit 200`)
+  const known = new Set(listed.map((row) => row.name.toLocaleLowerCase("es")))
+  const extra = [...written]
+    .filter((row) => !known.has(row.name.toLocaleLowerCase("es")))
+    .map((row) => ({ id: null as string | null, name: row.name, docType: row.taxId ? "RUC" : null, docNumber: row.taxId }))
+  return [...listed.map((row) => ({ ...row, id: row.id as string | null })), ...extra].sort((a, b) => a.name.localeCompare(b.name, "es"))
 }
 
 /**

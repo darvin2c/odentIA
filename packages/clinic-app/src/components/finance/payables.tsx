@@ -5,7 +5,7 @@
  * tratamiento son; su costo junto a lo cobrado lo ve quien administra comisiones, en la cuenta de la
  * paciente.
  */
-import { currencyWord, expenseReceiptTypes, formatMoney, isTaxDocument, NO_RECEIPT_TYPE, rucLooksValid } from "@odentia/clinical"
+import { currencyWord, expenseReceiptTypes, formatMoney, formatMoneyInput, isTaxDocument, NO_RECEIPT_TYPE, rucLooksValid } from "@odentia/clinical"
 import { Button, FieldDescription, Input, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, RowActions, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -22,6 +22,7 @@ import {
   invalidateFinance,
   notePayableApi,
   type Payable,
+  correctPayableApi,
   parseAmount,
   todayIn,
   voidPayableApi,
@@ -67,6 +68,7 @@ export function PayableRows({
   canWrite,
   onPay,
   onVoid,
+  onCorrect,
 }: {
   payables: Payable[]
   today: string
@@ -74,6 +76,8 @@ export function PayableRows({
   canWrite: boolean
   onPay: (payable: Payable) => void
   onVoid: (payable: Payable) => void
+  /** «Corregir la factura»: solo sin pagos. */
+  onCorrect: (payable: Payable) => void
 }) {
   return (
     <>
@@ -100,7 +104,10 @@ export function PayableRows({
                 ) : null}
               </span>
             </span>
-            <span className="shrink-0 font-semibold tabular-nums">{formatMoney(row.dueCents, row.currency, locale)}</span>
+            <span className="shrink-0 font-semibold tabular-nums">
+              {row.paidCents > 0 ? <span className="font-normal text-muted-foreground">queda </span> : null}
+              {formatMoney(row.dueCents, row.currency, locale)}
+            </span>
             {canWrite ? (
               <span className="flex shrink-0 items-center gap-1">
                 <Button
@@ -113,7 +120,10 @@ export function PayableRows({
                 </Button>
                 <RowActions
                   label={`Más acciones de ${row.concept}`}
-                  items={[{ key: "anular", label: "Anular la factura", onSelect: () => onVoid(row) }]}
+                  items={[
+                    ...(row.paidCents === 0 ? [{ key: "corregir", label: "Corregir la factura", onSelect: () => onCorrect(row) }] : []),
+                    { key: "anular", label: "Anular la factura", onSelect: () => onVoid(row) },
+                  ]}
                 />
               </span>
             ) : null}
@@ -143,6 +153,7 @@ export function PayableVoidDrawer({ payable, locale, onClose }: { payable: Payab
           await voidPayableApi(voiding.id, reason)
           invalidateFinance(queryClient)
           toast.success(`${voiding.concept}: anulada`)
+          onClose()
         }}
       />
   )
@@ -172,10 +183,13 @@ export function NotePayableDrawer({
   place,
   open,
   onClose,
+  correcting = null,
 }: {
   place: { branchId: string; branchName: string; currency: string; locale: string; orgTimeZone: string }
   open: boolean
   onClose: () => void
+  /** «Corregir la factura»: el cajón viene lleno y, al guardar, la anotada queda anulada con lo que cambió. */
+  correcting?: Payable | null
 }) {
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
@@ -186,7 +200,9 @@ export function NotePayableDrawer({
   const today = todayIn(orgTimeZone)
   const supplierListId = useId()
   const suppliers = useQuery({ queryKey: ["finance", "suppliers"], queryFn: fetchExpenseSuppliers, enabled: open, staleTime: 60_000 })
-  const note = useMutation({ mutationFn: notePayableApi })
+  const note = useMutation({
+    mutationFn: (body: Parameters<typeof notePayableApi>[0]) => (correcting ? correctPayableApi(correcting.id, body) : notePayableApi(body)),
+  })
   const form = useAppForm({
     defaultValues: {
       category: "Laboratorio",
@@ -224,7 +240,7 @@ export function NotePayableDrawer({
         requestId: requestId.current,
         branchId,
         category: value.category,
-        ...(supplier ? { supplierId: supplier.id } : { supplierName: value.supplier.trim() }),
+        ...(supplier?.id ? { supplierId: supplier.id } : { supplierName: value.supplier.trim() }),
         ...(type?.asksTaxId && value.supplierTaxId.trim() ? { supplierTaxId: value.supplierTaxId.trim() } : {}),
         ...(value.receiptType ? { receiptType: value.receiptType } : {}),
         ...(value.receiptType && value.receiptType !== NO_RECEIPT_TYPE && value.receiptNumber.trim()
@@ -238,7 +254,11 @@ export function NotePayableDrawer({
         ...(value.patient?.patientId && value.planItem ? { planItemId: value.planItem } : {}),
       })
       invalidateFinance(queryClient)
-      toast.success(`Anotada: queda por pagar ${formatMoney(cents, value.currency, locale)} a ${value.supplier.trim()}`)
+      toast.success(
+        correcting
+          ? `Factura corregida: queda por pagar ${formatMoney(cents, value.currency, locale)}; la de antes, anulada con lo que cambió`
+          : `Anotada: queda por pagar ${formatMoney(cents, value.currency, locale)} a ${value.supplier.trim()}`,
+      )
       onClose()
     },
   })
@@ -250,7 +270,21 @@ export function NotePayableDrawer({
     if (!open) return
     requestId.current = crypto.randomUUID()
     form.reset()
-  }, [open, form])
+    if (!correcting) return
+    // Corregir: lo anotado, para cambiar solo lo que estaba mal.
+    form.setFieldValue("category", correcting.category)
+    form.setFieldValue("supplier", correcting.supplierName)
+    form.setFieldValue("supplierTaxId", correcting.supplierTaxId ?? "")
+    form.setFieldValue("receiptType", correcting.receiptType ?? "")
+    form.setFieldValue("receiptNumber", correcting.receiptNumber ?? "")
+    form.setFieldValue("currency", correcting.currency)
+    form.setFieldValue("amount", formatMoneyInput(correcting.amountCents, correcting.currency, locale))
+    form.setFieldValue("issuedOn", correcting.issuedOn)
+    form.setFieldValue("dueOn", correcting.dueOn ?? "")
+    if (correcting.patientId && correcting.patientName)
+      form.setFieldValue("patient", { id: correcting.patientId, name: correcting.patientName, patientId: correcting.patientId })
+    form.setFieldValue("planItem", correcting.planItemId ?? "")
+  }, [open, form, correcting, locale])
   const patientId = values.patient?.patientId ?? null
   const accepted = useQuery({
     queryKey: ["finance-payables", "accepted", patientId],
@@ -267,9 +301,13 @@ export function NotePayableDrawer({
       onClose={() => {
         if (!surface.isSubmitting) onClose()
       }}
-      title="Anotar una factura"
-      description={`No paga: queda en «Por pagar» de ${place.branchName} hasta que se pague.`}
-      submitLabel="Anotar"
+      title={correcting ? "Corregir la factura" : "Anotar una factura"}
+      description={
+        correcting
+          ? "Al guardar, la anotada queda anulada con lo que cambió y queda esta."
+          : `No paga: queda en «Por pagar» de ${place.branchName} hasta que se pague.`
+      }
+      submitLabel={correcting ? "Guardar corrección" : "Anotar"}
     >
       <div className="flex flex-col gap-5">
         <form.AppField name="category">
@@ -345,7 +383,7 @@ export function NotePayableDrawer({
           </form.AppField>
           {values.receiptType && values.receiptType !== NO_RECEIPT_TYPE ? (
             <form.AppField name="receiptNumber">
-              {(field) => <field.TextField label="Número" maxLength={60} placeholder="E001-512" />}
+              {(field) => <field.TextField label="Número" maxLength={60} placeholder="F001-000123" />}
             </form.AppField>
           ) : null}
         </div>
@@ -353,10 +391,12 @@ export function NotePayableDrawer({
           <form.AppField name="supplierTaxId">
             {(field) => (
               <div className="flex flex-col gap-1">
-                <field.TextField label="RUC" maxLength={20} inputMode="numeric" inputClassName="sm:w-48" />
+                <field.TextField label="RUC (opcional)" maxLength={20} inputMode="numeric" inputClassName="sm:w-48" />
                 {/* Avisa, no frena: el contador lo revisa con el comprobante. */}
                 {country === "PE" && field.state.value.trim() && !rucLooksValid(field.state.value) ? (
                   <FieldDescription>Ese RUC no parece válido: revísalo con la factura.</FieldDescription>
+                ) : !field.state.value.trim() ? (
+                  <FieldDescription>Sin RUC, tu contador no podrá usar la factura. Puedes anotarla igual.</FieldDescription>
                 ) : null}
               </div>
             )}
@@ -411,6 +451,7 @@ export function NotePayableDrawer({
                     {...control.props}
                     className="justify-start font-normal"
                     value={field.state.value || values.issuedOn}
+                    min={values.issuedOn}
                     onChange={(day) => field.handleChange(day)}
                   >
                     {field.state.value ? formatDayKey(field.state.value, locale, today) : "Sin fecha"}

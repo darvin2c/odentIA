@@ -202,6 +202,7 @@ export function RecurringDueSection({
   payablesToday = "",
   onPayInvoice,
   onNoteInvoice,
+  onCorrectInvoice,
 }: {
   data: RecurringMonth | undefined
   locale: string
@@ -214,6 +215,8 @@ export function RecurringDueSection({
   onPayInvoice?: (payable: Payable) => void
   /** «Anotar una factura». */
   onNoteInvoice?: () => void
+  /** «Corregir la factura» (sin pagos). */
+  onCorrectInvoice?: (payable: Payable) => void
 }) {
   const queryClient = useQueryClient()
   const [change, setChange] = useState<Editable | null>(null)
@@ -289,6 +292,7 @@ export function RecurringDueSection({
             canWrite={canWrite}
             onPay={onPayInvoice}
             onVoid={setVoidingInvoice}
+            onCorrect={(payable) => onCorrectInvoice?.(payable)}
           />
         ) : null}
         {shown.map((row) => {

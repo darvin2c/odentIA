@@ -30,7 +30,8 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { useMemo, useState } from "react"
 import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
 import type { ExpenseDrawerMode } from "./expense-form-drawer"
-import { NotePayableDrawer, useOpenPayables } from "./payables"
+import { useOpenPayables } from "./payables"
+import type { Payable } from "../../lib/finance-cash"
 import { FixedOfMonth, RecurringDueSection, RepeatingList, useRecurringMonth } from "./recurring-due"
 import { useActiveBranch } from "../../lib/active-branch"
 import { DownloadButton } from "../reports/report-parts"
@@ -104,6 +105,7 @@ export function ExpensesTab({
   canWrite,
   onExpense,
   onOpenExpense,
+  onNoteInvoice,
 }: {
   branchId: string
   branchName: string
@@ -119,6 +121,8 @@ export function ExpensesTab({
    * pestañas, como «Registrar gasto», para no perder lo escrito al mirar la Caja.
    */
   onOpenExpense: (mode: ExpenseDrawerMode) => void
+  /** «Anotar una factura» (o corregir la que se pasa): el cajón vive en Finanzas, como los demás. */
+  onNoteInvoice: (correcting: Payable | null) => void
 }) {
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
@@ -130,9 +134,8 @@ export function ExpensesTab({
   // El detalle de un gasto (el cajón para corregirlo o pagar lo que se repite lo abre Finanzas).
   const [viewing, setViewing] = useState<ExpenseRow | null>(null)
   const place = { branchId, branchName, currency, locale, orgTimeZone }
-  // Las facturas por pagar de la sede (ADR 0174), y el cajón para anotar una.
+  // Las facturas por pagar de la sede (ADR 0174); el cajón para anotarlas vive en Finanzas.
   const payables = useOpenPayables(branchId)
-  const [notingInvoice, setNotingInvoice] = useState(false)
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
   const category = (EXPENSE_FILTER_TYPES as readonly string[]).includes(tipo) ? tipo : ""
@@ -441,7 +444,10 @@ export function ExpensesTab({
             </h2>
             {/* Para el contador: la lista que se ve, con el comprobante, el RUC y con qué se pagó. */}
             {data.expenses.length > 0 ? (
-              <DownloadButton label="Descargar el mes" onDownload={() => downloadMonthExpenses({ branchId, ...month, q, category })} />
+              <DownloadButton
+                label={filtered ? "Descargar lo que se ve" : "Descargar el mes"}
+                onDownload={() => downloadMonthExpenses({ branchId, ...month, q, category })}
+              />
             ) : null}
           </div>
           <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
@@ -479,9 +485,9 @@ export function ExpensesTab({
         payables={payables.data?.data.payables ?? []}
         payablesToday={payables.data?.data.today ?? ""}
         onPayInvoice={(payable) => onOpenExpense({ kind: "factura", payable })}
-        onNoteInvoice={() => setNotingInvoice(true)}
+        onNoteInvoice={() => onNoteInvoice(null)}
+        onCorrectInvoice={(payable) => onNoteInvoice(payable)}
       />
-      <NotePayableDrawer place={place} open={notingInvoice} onClose={() => setNotingInvoice(false)} />
 
       {searching ? null : listSection}
 

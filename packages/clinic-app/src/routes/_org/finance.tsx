@@ -57,6 +57,8 @@ import { CounterSaleDrawer } from "../../components/finance/counter-sale-drawer"
 import { DebtsTab } from "../../components/finance/debts-tab"
 import { ExchangeRateLine } from "../../components/finance/exchange-rate-line"
 import { type ExpenseDrawerMode, ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
+import { NotePayableDrawer } from "../../components/finance/payables"
+import type { Payable } from "../../lib/finance-cash"
 import { ExpensesTab } from "../../components/finance/expenses-tab"
 import {
   CommissionsAdminPanel,
@@ -305,6 +307,8 @@ function FinanceWorkspace() {
   // «Pagar» y «Corregir» de Gastos: aquí, fuera de las pestañas, como «Registrar gasto» (QA de
   // Gastos, UX4: al mirar la Caja se perdía lo escrito).
   const [expenseMode, setExpenseMode] = useState<{ mode: ExpenseDrawerMode; branchId: string } | null>(null)
+  // «Anotar una factura» (o corregirla), aquí por lo mismo: no pierde lo escrito al mirar la Caja.
+  const [invoiceDrawer, setInvoiceDrawer] = useState<{ correcting: Payable | null; branchId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
   const [justClosed, setJustClosed] = useState<{
     id: string
@@ -319,6 +323,7 @@ function FinanceWorkspace() {
   // Al cambiar de sede, «Pagar» o «Corregir» de la otra se cierra: no vuelve al regresar.
   useEffect(() => {
     setExpenseMode((current) => (current && current.branchId !== branchId ? null : current))
+    setInvoiceDrawer((current) => (current && current.branchId !== branchId ? null : current))
   }, [branchId])
   const prof = profile.data?.data ?? null
   const branchZone = useBranchesStatus()
@@ -618,6 +623,7 @@ function FinanceWorkspace() {
                 canWrite={canWrite}
                 onExpense={() => openPanel("gasto")}
                 onOpenExpense={(mode) => setExpenseMode({ mode, branchId: ws.branchId })}
+                onNoteInvoice={(correcting) => setInvoiceDrawer({ correcting, branchId: ws.branchId })}
               />
             ) : null}
           </TabsContent>
@@ -657,7 +663,14 @@ function FinanceWorkspace() {
               closePanel("gasto")
               setExpenseMode({ mode: { kind: "factura", payable }, branchId: ws.branchId })
             }}
+            onNoteInvoice={() => {
+              closePanel("gasto")
+              setInvoiceDrawer({ correcting: null, branchId: ws.branchId })
+            }}
           />
+          {invoiceDrawer && invoiceDrawer.branchId === ws.branchId ? (
+            <NotePayableDrawer place={ws} open correcting={invoiceDrawer.correcting} onClose={() => setInvoiceDrawer(null)} />
+          ) : null}
           {/* Lo de otra sede no se paga ni se corrige en esta: al cambiar de sede se cierra. */}
           {expenseMode && expenseMode.branchId === ws.branchId ? (
             <ExpenseFormDrawer place={ws} open mode={expenseMode.mode} onClose={() => setExpenseMode(null)} />

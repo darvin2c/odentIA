@@ -1017,6 +1017,11 @@ export function notePayableApi(body: {
   return apiFetch("/api/finance/payables", { method: "POST", body: JSON.stringify(body) })
 }
 
+/** «Corregir la factura» (sin pagos): anula la anotada con lo que cambió y anota esta. */
+export function correctPayableApi(id: string, body: Parameters<typeof notePayableApi>[0]): Promise<{ data: { id: string } }> {
+  return apiFetch(`/api/finance/payables/${id}/correct`, { method: "POST", body: JSON.stringify(body) })
+}
+
 export function voidPayableApi(id: string, reason: string): Promise<{ data: { id: string } }> {
   return apiFetch(`/api/finance/payables/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) })
 }
@@ -1038,8 +1043,9 @@ export function correctExpenseApi(id: string, body: Parameters<typeof createExpe
 }
 
 /** A quién se pagó: los proveedores de la clínica, con su documento. */
+/** Los proveedores para decir a quién se pagó: los de Inventario (con `id`) y los ya escritos (sin él). */
 export function fetchExpenseSuppliers(): Promise<{
-  data: Array<{ id: string; name: string; docType: string | null; docNumber: string | null }>
+  data: Array<{ id: string | null; name: string; docType: string | null; docNumber: string | null }>
 }> {
   return apiFetch("/api/finance/suppliers")
 }

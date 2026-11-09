@@ -112,7 +112,7 @@ it("la lista del mes se descarga para el contador: comprobante con su código, R
   expect(file.filename).toMatch(new RegExp(`^gastos-sede-centro-.*-${period}\\.csv$`))
   const lines = file.body.replace(/^﻿/, "").trimEnd().split("\r\n")
   expect(lines[0]).toBe(
-    "Fecha del pago,Concepto,Tipo,Comprobante,Código del comprobante,Número del comprobante,Proveedor,RUC del proveedor,Con qué se pagó,N.º de operación,Moneda,Importe,Valor en PEN,Sede,Estado,Motivo,Corrige a",
+    "Fecha del pago,Concepto,Tipo,Comprobante,Código del comprobante,Número del comprobante,Proveedor,RUC del proveedor,Con qué se pagó,N.º de operación,Moneda,Importe,Suma en el mes (PEN),Sede,Estado,Motivo,Corrige a",
   )
   const lab = lines.find((line) => line.includes("Corona de la 46"))
   expect(lab).toContain(`Laboratorio,Factura,01,F001-123,"Dental Lab, S.A.C.",20100047218,${yape.name},889900,PEN,430.00,430.00,${branchName},Vigente`)
@@ -120,6 +120,8 @@ it("la lista del mes se descarga para el contador: comprobante con su código, R
   const voided = lines.find((line) => line.includes("HYPERLINK"))
   expect(voided).toContain("'=HYPERLINK(1)")
   expect(voided).toContain("Anulado,Era de otra sede")
+  // Lo anulado no suma: la columna «Suma en el mes» va vacía y sumada da lo mismo que «Gastado».
+  expect(voided).toContain("PEN,15.00,,")
 })
 
 it("caja descarga los sueldos juntos y sin nombres; quien administra comisiones, con de quién es", async () => {

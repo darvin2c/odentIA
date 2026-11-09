@@ -271,6 +271,44 @@ export async function listPayables(
   return { today, payables }
 }
 
+/**
+ * «Corregir la factura» mientras no tiene pagos: en una operación anula la anotada con lo que cambió
+ * y anota la nueva, como al corregir un gasto (ADR 0167). Con pagos, no: se anulan primero sus pagos.
+ */
+export async function correctPayable(tx: Db, orgId: string, actorUserId: string, payableId: string, input: NotePayableInput) {
+  const owed = await lockPayable(tx, orgId, payableId)
+  // El mismo pedido dos veces devuelve la factura que ya quedó.
+  const requestId = requestKey(input.requestId)
+  if (requestId && owed.voidedAt) {
+    const [seen] = await tx
+      .select()
+      .from(expensePayable)
+      .where(and(eq(expensePayable.organizationId, orgId), eq(expensePayable.requestId, requestId)))
+    if (seen) return seen
+  }
+  if (owed.voidedAt) throw conflict("PAYABLE_VOIDED", "Esa factura ya se anuló o alguien ya la corrigió: actualiza la lista")
+  if (owed.paidCents > 0) {
+    const { locale } = await getOrgLocale(tx, orgId)
+    throw conflict(
+      "PAYABLE_HAS_PAYMENTS",
+      `Tiene ${formatMoney(owed.paidCents, owed.currency, locale)} pagados: anula primero esos pagos en la lista de gastos`,
+    )
+  }
+  const { locale } = await getOrgLocale(tx, orgId)
+  const changes = [
+    owed.amountCents !== input.amountCents || (input.currency && input.currency !== owed.currency)
+      ? `${formatMoney(owed.amountCents, owed.currency, locale)} → ${formatMoney(input.amountCents, input.currency ?? owed.currency, locale)}`
+      : null,
+    (input.receiptNumber ?? null) !== owed.receiptNumber ? `número ${owed.receiptNumber ?? "sin"} → ${input.receiptNumber ?? "sin"}` : null,
+    (input.dueOn ?? null) !== owed.dueOn ? `vence ${owed.dueOn ?? "sin fecha"} → ${input.dueOn ?? "sin fecha"}` : null,
+  ].filter((text): text is string => text !== null)
+  await tx
+    .update(expensePayable)
+    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: `Corregida${changes.length ? `: ${changes.join("; ")}` : ""}`.slice(0, 2000), updatedAt: new Date() })
+    .where(and(eq(expensePayable.organizationId, orgId), eq(expensePayable.id, payableId)))
+  return notePayable(tx, orgId, actorUserId, { ...input, branchId: input.branchId ?? owed.branchId })
+}
+
 /** Anula una factura anotada por error. Con pagos vigentes no: primero se anulan sus pagos. */
 export async function voidPayable(tx: Db, orgId: string, actorUserId: string, payableId: string, input: { reason: string }) {
   const reason = input.reason?.trim()
