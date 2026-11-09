@@ -173,6 +173,21 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
   // El mes de toda la clínica es de administración, también lo cobrado de sesiones que nadie hizo.
   expect((await app.request("/commissions/month?year=2026&month=9")).status).toBe(403)
   expect((await app.request("/commissions/unassigned")).status).toBe(403)
+  // La comisión de cada uno (Configuración › Comisiones) tampoco: ni siquiera la propia por esta vía.
+  expect((await app.request("/commissions/agreements")).status).toBe(403)
+})
+
+it("administración ve la comisión de cada persona que puede atender, la tenga o no", async () => {
+  const admin = buildApp("admin", OWNER)
+  const response = await admin.request("/commissions/agreements")
+  expect(response.status).toBe(200)
+  const rows = ((await response.json()) as { data: Array<{ professionalUserId: string; hasRate: boolean; exceptions: unknown[] }> }).data
+  // Quien atiende aparece aunque no tenga nada decidido; caja y un miembro sin atención, no.
+  expect(rows.map((row) => row.professionalUserId)).toEqual(expect.arrayContaining([OWNER, PROFESSIONAL, OTHER]))
+  expect(rows.map((row) => row.professionalUserId)).not.toContain(CASHIER)
+  expect(rows.map((row) => row.professionalUserId)).not.toContain(MEMBER)
+  // Caja no la ve.
+  expect((await buildApp("cashier", CASHIER).request("/commissions/agreements")).status).toBe(403)
 })
 
 it("lo atendido sin cobrar de «Mis honorarios» es siempre de quien pregunta", async () => {

@@ -166,7 +166,7 @@ import {
   updateEncounterDraft,
   voidEncounter,
 } from "../encounters.js"
-import { setCommissionRate } from "../finance.js"
+import { setCommissionException, setCommissionRate } from "../finance.js"
 import {
   cancelFollowUp,
   completeFollowUp,
@@ -4549,6 +4549,15 @@ for (const seed of [
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
+// Configuración › Comisiones con cada caso: el odontólogo de la demo comisiona solo por la
+// endodoncia (sin porcentaje general), junto a quien tiene porcentaje y servicios aparte.
+await db.transaction((tx) =>
+  setCommissionException(tx, ORG_A, ANA_ID, {
+    professionalUserId: "seed-user-dentista",
+    serviceId: serviceIdA("ENDODONCIA"),
+    rateBps: 5000,
+  }),
+)
 // «Tus mensajes» (ADR 0040): Carmen pidió por teléfono no recibir recordatorios
 // (en su página se ve apagado y, con «Recordar la cita» prendida, «Te espera»
 // pide llamarla el día antes de su cita); Diego no quiere ningún mensaje.

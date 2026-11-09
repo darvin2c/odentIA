@@ -17,6 +17,7 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 import {
   getMonthlyCommissions,
   getMyCommissions,
+  listCommissionAgreements,
   listCommissionRates,
   listCommissionSettlements,
   listMonthCommissions,
@@ -89,6 +90,15 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
       withOrgContext(deps.db, orgId, (tx) =>
         listCommissionRates(tx, orgId, { professionalUserId: scoped.target }),
       ),
+    )
+  })
+
+  // La comisión de hoy de cada persona que puede atender, la tenga o no (Configuración › Comisiones).
+  app.get("/agreements", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write")) return forbid(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listCommissionAgreements(tx, orgId)),
     )
   })
 
