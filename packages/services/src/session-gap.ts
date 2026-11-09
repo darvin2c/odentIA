@@ -16,7 +16,12 @@ import { productHooks } from "./products.js"
 
 /** `YYYY-MM-DD` en la zona de la clínica. */
 function dayIn(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).format(date)
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(date)
 }
 
 function addDays(day: string, days: number): string {
@@ -29,12 +34,20 @@ function addDays(day: string, days: number): string {
  * tratamiento de `itemIds` que espera algo después de su última sesión. Solo vienen los que
  * caen después de hoy.
  */
-export async function nextSessionFromOf(tx: Db, orgId: string, itemIds: readonly string[]): Promise<Map<string, string>> {
+export async function nextSessionFromOf(
+  tx: Db,
+  orgId: string,
+  itemIds: readonly string[],
+): Promise<Map<string, string>> {
   const ids = [...new Set(itemIds)]
   if (ids.length === 0) return new Map()
   const hooks = await productHooks(tx, orgId)
   if (!hooks.sessionGapDays) return new Map()
-  const rows = await tx.execute<{ id: string; kind: string | null; last_done: Date | string | null }>(sql`
+  const rows = await tx.execute<{
+    id: string
+    kind: string | null
+    last_done: Date | string | null
+  }>(sql`
     select item.id, template.specialty as kind,
       (select max(coalesce(done_encounter.finalized_at, done_procedure.created_at)) from encounter_procedure done_procedure
         join encounter done_encounter on done_encounter.organization_id = done_procedure.organization_id
@@ -61,4 +74,5 @@ export async function nextSessionFromOf(tx: Db, orgId: string, itemIds: readonly
 }
 
 /** Por qué se busca desde ese día, para el cajón de la reserva. */
-export const SESSION_GAP_NOTE = "Entre sesiones se deja actuar la medicación: se busca hora desde una semana después de la anterior."
+export const SESSION_GAP_NOTE =
+  "Entre sesiones se deja actuar la medicación: se busca hora desde una semana después de la anterior."

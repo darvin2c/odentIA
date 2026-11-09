@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { clinicalProfileFor } from "./country-profiles.js"
-import { healsAtFollowUp,
+import {
+  healsAtFollowUp,
   diagnosisCodeLabel,
   findingDiagnosisCode,
   findingDiagnosisCodes,

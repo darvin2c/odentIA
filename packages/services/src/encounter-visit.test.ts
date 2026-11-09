@@ -350,8 +350,14 @@ it("«Hacerla hoy» de lo que aún no empezó no arrastra el diagnóstico de otr
 
 it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cuál se cumple (QA del 9 nov, repaso 3)", async () => {
   const f = await clinicalFixture()
-  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
-  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" }).returning()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}` })
+    .returning()
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" })
+    .returning()
   const startsAt = new Date()
   const [visitAt] = await ownerDb
     .insert(appointment)
@@ -388,7 +394,9 @@ it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cu�
   expect(visit?.controls).toEqual([
     expect.objectContaining({ id: control!.id, chosen: true, byAppointment: true }),
   ])
-  const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, today))
+  const closing = await f.run((tx) =>
+    getEncounterClosing(tx, "org_a", f.actor, f.patient.id, today),
+  )
   expect(closing.controls.byAppointment).toEqual([
     expect.objectContaining({ id: control!.id, title: "Limpieza y control" }),
   ])
