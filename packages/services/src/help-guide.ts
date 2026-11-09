@@ -1196,7 +1196,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     menuLabel: "Mis honorarios",
     parent: "Gestión",
     purpose:
-      "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró, y el registro de su pago. Quien administra lo ve como pestaña de Finanzas; cada profesional ve lo suyo en «Mis honorarios».",
+      "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró, y el registro de su pago. Quien administra lo ve como pestaña de Finanzas: cada profesional con su liquidación del mes, que dice cuánto falta pagar, cómo se calcula y cada cobro por fecha. Lo que se lleva cada uno se fija en Configuración › Comisiones por profesional. Cada profesional ve lo suyo en «Mis honorarios».",
     terms: [
       "comisión",
       "porcentaje",
@@ -1211,12 +1211,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo se calcula la comisión?",
-        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis honorarios» dice cuánto de lo atendido del mes falta cobrar, cada moneda aparte, y qué servicios son, con su fecha. Una venta suelta, sin atención, no es de ningún profesional. Va en la moneda de lo cobrado: lo que se cobra en dólares le da su comisión en dólares, y se le paga en dólares, aparte de lo de soles. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
+        a: "Es el porcentaje de cada profesional (o la comisión distinta de un servicio) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis honorarios» dice cuánto de lo atendido del mes falta cobrar, cada moneda aparte, y qué servicios son, con su fecha. Una venta suelta, sin atención, no es de ningún profesional. Va en la moneda de lo cobrado: lo que se cobra en dólares le da su comisión en dólares, y se le paga en dólares, aparte de lo de soles. La liquidación lo muestra en «Cómo se calcula», una fila por cada regla que sumadas dan lo que le corresponde, y cada cobro dice su fecha, si tuvo promoción y, cuando no es la general, la regla que usó.",
         forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención", "comisión en dólares"],
       },
       {
         q: "¿Cómo registro el pago de una comisión?",
-        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel como liquidación de honorarios, para que el profesional haga su recibo. Si otros meses tienen cobros sin pagar, arriba de la lista se dice cuánto falta en total y cada mes lleva a su lista.",
+        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel como liquidación de honorarios, con todos los cobros por fecha, para que el profesional haga su recibo; si el mes aún no termina, dice hasta qué día. Si otros meses tienen cobros sin pagar, un aviso arriba de la lista lleva a cada uno.",
         forms: ["pagar comisión", "pagar al doctor", "liquidar comisiones", "anular pago de comisión", "imprimir liquidación"],
       },
       {
@@ -1238,13 +1238,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Si cambio el porcentaje, cambia lo que ya se cobró?",
-        a: "No. El porcentaje nuevo vale para lo que se atienda desde ese día; lo atendido antes conserva el que tenía, aunque se cobre después o en cuotas. En el detalle se ve desde cuándo vale y el anterior, cada línea dice el porcentaje que usó y al profesional se le avisa del cambio.",
+        a: "No. El porcentaje nuevo vale para lo que se atienda desde ese día; lo atendido antes conserva el que tenía, aunque se cobre después o en cuotas. Se cambia en Configuración › Comisiones por profesional, que siempre parte del porcentaje de hoy y dice desde cuándo vale y el anterior; en la liquidación, cada cobro con otro porcentaje lo dice, y al profesional se le avisa del cambio.",
         forms: ["cambiar porcentaje de comisión", "subir la comisión", "desde cuándo vale la comisión"],
       },
       {
         q: "¿Puedo pagar distinto por un servicio?",
-        a: "Sí. En el detalle del profesional, «Otro porcentaje o monto para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno, en la moneda del precio del servicio. El monto fijo se gana entero aunque se cobre con descuento, y en proporción a lo pagado si se paga en partes: si el paciente pagó la mitad, la mitad. Nunca paga más de lo cobrado. Si el servicio se cobra por sesión, se gana en cada sesión que se cobre. Vale para lo que se atienda desde hoy, y «Quitar» lo devuelve a su porcentaje general. Si el servicio pasa a otra moneda, el monto deja de valer hasta que lo escribas de nuevo.",
+        a: "Sí. En Configuración › Comisiones por profesional, en la tarjeta del profesional, «Comisión distinta para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno, en la moneda del precio del servicio. El monto fijo se gana entero aunque se cobre con descuento, y en proporción a lo pagado si se paga en partes: si el paciente pagó la mitad, la mitad. Nunca paga más de lo cobrado. Si el servicio se cobra por sesión, se gana en cada sesión que se cobre. Vale para lo que se atienda desde hoy (la primera de un servicio, sin porcentaje general, también para lo ya cobrado de él que aún no se paga), y «Quitar» lo devuelve a su porcentaje general. Si el servicio pasa a otra moneda, el monto deja de valer hasta que lo escribas de nuevo.",
         forms: ["comisión por servicio", "monto fijo por procedimiento", "comisión distinta por tratamiento", "porcentaje por procedimiento"],
+      },
+      {
+        q: "¿Cómo le pongo la comisión a un doctor nuevo?",
+        a: "En Configuración › Comisiones por profesional aparece apenas puede atender, con «Sin comisión decidida». Elige «Poner su porcentaje» y escribe el porcentaje de lo cobrado. Si por algún servicio se lleva otra cosa, usa «Comisión distinta para un servicio»: otro porcentaje o un monto fijo por cada uno. La primera comisión vale también para lo que ya se cobró de lo que atendió y aún no se paga; los cambios después valen desde ese día.",
+        forms: ["comisión doctor nuevo", "dónde fijo la comisión", "dónde pongo el porcentaje"],
+      },
+      {
+        q: "¿Y si un profesional no cobra comisión?",
+        a: "Elige «No cobra comisión»: deja de aparecer en la lista para pagar de cada mes y no se te pide nada sobre él. Si tiene un sueldo fijo, se registra en Finanzas › Gastos como gasto que se repite. Si más adelante empieza a comisionar, le pones su porcentaje y vale desde ese día.",
+        forms: ["doctor sin comisión", "solo tiene sueldo", "no comisiona"],
       },
       {
         q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
@@ -1794,6 +1804,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "frase del ticket",
     ],
     writePermission: "settings.write",
+  },
+  {
+    id: "comisiones-de-cada-profesional",
+    path: "/settings/commissions",
+    title: "Comisiones por profesional",
+    parent: SETTINGS,
+    purpose:
+      "Lo que se lleva cada profesional de lo cobrado por lo que atiende: su porcentaje, los servicios con una comisión distinta (otro porcentaje o un monto fijo por cada uno) o que no cobra comisión. Aparece cada persona del equipo que puede atender, aunque aún no haya atendido. Es un acuerdo con la persona: se fija al contratarla. La primera comisión vale también para lo ya cobrado que aún no se paga; un cambio después vale para lo que se atienda desde ese día. Lo de cada mes se liquida y se paga en Finanzas › Comisiones. Solo lo ve y lo cambia quien administra las comisiones.",
+    terms: ["fijar comisión", "poner porcentaje", "no cobra comisión", "configurar comisiones"],
+    writePermission: "commissions.write",
+    faqs: [
+      {
+        q: "¿Puede comisionar solo por algunos servicios?",
+        a: "Sí. Agrégale sus servicios con «Comisión por un servicio», sin ponerle porcentaje; si ya tenía uno, agrégalos y en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga.",
+        forms: ["comisión solo por servicio", "solo por procedimiento", "sin porcentaje general"],
+      },
+    ],
   },
   {
     id: "plan-y-pagos",

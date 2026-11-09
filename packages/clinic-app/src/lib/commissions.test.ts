@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { debtClosureWords, discountFromWords, previousMonthsDiscounts, returnMethodWords, showAllLabel, summaryAmountWords, summaryDiscountWords } from "./commissions"
+import {
+  agreementWords,
+  calculationGroups,
+  type CommissionLine,
+  debtClosureWords,
+  discountFromWords, previousMonthsDiscounts,
+  returnMethodWords,
+  showAllLabel,
+  summaryAmountWords,
+  summaryDiscountWords,
+} from "./commissions"
 
 const lines = (counted: number, voided: number) => [
   ...Array.from({ length: counted }, () => ({ voidedAfterPaid: false })),
@@ -99,5 +109,62 @@ describe("«Meses anteriores» reparte lo que debe una sola vez", () => {
 
   it("sin deuda, nada que descontar", () => {
     expect(previousMonthsDiscounts([month(10, 555100, 0)], new Map()).get("2026-10-PEN")).toEqual({ discountCents: 0, pendingCents: 555100 })
+  })
+})
+
+describe("«Cómo se calcula»: una fila por regla que suman lo que le corresponde", () => {
+  let next = 0
+  const line = (patch: Partial<CommissionLine>): CommissionLine => ({
+    applicationId: `app-${next++}`,
+    patientId: "p",
+    patientName: "Paciente",
+    description: "Resina",
+    baseCents: 10000,
+    rateBps: 4000,
+    commissionCents: 4000,
+    occurredAt: "2026-11-02T15:00:00Z",
+    promotionName: null,
+    slice: null,
+    sessions: null,
+    fixedCents: null,
+    forService: false,
+    settled: false,
+    paidAt: null,
+    voidedAfterPaid: false,
+    ...patch,
+  })
+
+  it("el porcentaje general, cada servicio aparte y al final lo que no comisiona", () => {
+    const lines = [
+      line({}),
+      line({ baseCents: 20000, commissionCents: 8000 }),
+      line({ description: "Blanqueamiento dental", forService: true, rateBps: 4500, baseCents: 60000, commissionCents: 27000 }),
+      line({ description: "Corona cerámica", forService: true, rateBps: null, fixedCents: 15000, baseCents: 90000, commissionCents: 15000 }),
+      // Lo de antes de un cambio de porcentaje va en su propia fila.
+      line({ rateBps: 3500, baseCents: 10000, commissionCents: 3500 }),
+      line({ rateBps: null, unruled: true, commissionCents: 0, description: "Control" }),
+      // Un cobro anulado después de pagado no cuenta, como en el total del servidor.
+      line({ voidedAfterPaid: true, commissionCents: 9999 }),
+    ]
+    const groups = calculationGroups(lines, "es-PE", "PEN")
+    expect(groups.map((group) => [group.label.replace(/\s/g, " "), group.count, group.baseCents, group.commissionCents])).toEqual([
+      ["40 % de lo cobrado", 2, 30000, 12000],
+      ["35 % de lo cobrado", 1, 10000, 3500],
+      ["Blanqueamiento dental · 45 %", 1, 60000, 27000],
+      ["Corona cerámica · S/ 150.00 por cada uno", 1, 90000, 15000],
+      ["Sin comisión decidida", 1, 10000, 0],
+    ])
+    const counted = lines.filter((item) => !item.voidedAfterPaid).reduce((sum, item) => sum + item.commissionCents, 0)
+    expect(groups.reduce((sum, group) => sum + group.commissionCents, 0)).toBe(counted)
+  })
+
+  it("la comisión de cada profesional, en una frase", () => {
+    expect(agreementWords({ hasRate: true, rateBps: 4000, exceptionCount: 0 }, "es-PE")).toBe("40 % de lo cobrado")
+    expect(agreementWords({ hasRate: true, rateBps: 4000, exceptionCount: 2 }, "es-PE")).toBe(
+      "40 % de lo cobrado y 2 servicios con comisión distinta",
+    )
+    expect(agreementWords({ hasRate: false, rateBps: 0, exceptionCount: 1 }, "es-PE")).toBe("Solo por 1 servicio")
+    expect(agreementWords({ hasRate: true, rateBps: 0, exceptionCount: 0 }, "es-PE")).toBe("No cobra comisión")
+    expect(agreementWords({ hasRate: false, rateBps: 0, exceptionCount: 0 }, "es-PE")).toBe("Sin comisión decidida")
   })
 })

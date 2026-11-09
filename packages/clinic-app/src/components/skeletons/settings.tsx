@@ -1082,6 +1082,45 @@ export function PlanActionsPageSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// Comisiones
+// ---------------------------------------------------------------------------
+
+/** Tarjetas con la forma de las reales: la persona, su porcentaje y el botón; en el teléfono, el botón debajo. */
+export function CommissionAgreementsSkeleton() {
+  return (
+    <ul aria-hidden className="flex flex-col gap-3">
+      {slots(4).map((row) => (
+        <li key={row} className="elevated flex flex-col gap-3 rounded-xl border bg-card px-4 py-4 sm:px-5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Skeleton className="size-8 rounded-full" />
+            <div className="flex min-w-40 flex-1 flex-col gap-1">
+              <BaseLine className="w-40" />
+              <Line className="w-28" />
+            </div>
+            <Skeleton className="h-6 w-32 rounded-md" />
+            <Skeleton className="h-9 w-24 rounded-full" />
+          </div>
+          <Line className="w-56" />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function CommissionsSettingsPageSkeleton() {
+  return (
+    <SettingsPage
+      title="Comisiones por profesional"
+      subtitle="Lo que se lleva cada profesional de lo cobrado por lo que atiende."
+      message="Cargando las comisiones…"
+      className="flex flex-col gap-4"
+    >
+      <CommissionAgreementsSkeleton />
+    </SettingsPage>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // El contenido del layout mientras llega su código
 // ---------------------------------------------------------------------------
 
@@ -1096,6 +1135,7 @@ const PAGE_BY_PATH: Record<string, () => ReactNode> = {
   "/settings/patient-registration": PatientRegistrationPageSkeleton,
   "/settings/patient-access": PatientPortalPageSkeleton,
   "/settings/payment-methods": PaymentMethodsPageSkeleton,
+  "/settings/commissions": CommissionsSettingsPageSkeleton,
   "/settings/pipelines": PipelinesPageSkeleton,
   "/settings/integrations": IntegrationsPageSkeleton,
   "/settings/integrations/whatsapp": WhatsAppPageSkeleton,
