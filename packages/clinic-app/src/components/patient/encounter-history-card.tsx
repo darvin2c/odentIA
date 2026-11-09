@@ -84,7 +84,7 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
   return (
     <>
       {indicatedSomething ? (
-        <Part label={retired ? "Se anuló" : "Se indicó"}>
+        <Part label={retired ? "Ya no vigente" : "Se indicó"}>
           <ul className="flex flex-col gap-1 text-sm">
             {indicated.map((row) => (
               <li key={row.id}>
@@ -195,7 +195,10 @@ export function EncounterHistoryCard({
   })
   const regionId = `encounter-detail-${item.refId}`
   const retiredId = `encounter-retired-${item.refId}`
-  const procedures = item.procedures ?? []
+  // Una sola cosa hecha que ya es su título no se repite debajo.
+  const procedures = (item.procedures ?? []).filter(
+    (procedure, _index, all) => !(all.length === 1 && procedure.toLowerCase() === item.title.toLowerCase()),
+  )
   const teeth = item.toothNumbers ?? []
   const diagnoses = item.diagnoses ?? (item.diagnosisCode ? [item.diagnosisCode] : [])
   const documents = item.documents ?? []
@@ -227,6 +230,12 @@ export function EncounterHistoryCard({
         <p className="text-xs text-muted-foreground">
           <time dateTime={item.createdAt}>{whenWords(item.createdAt)}</time>
           {item.professionalName ? ` · ${item.professionalName}` : ""}
+          {/* Firmada: lo que se lee es definitivo; si firmó otra persona, se nombra (segunda mesa del 9 nov). */}
+          {item.signerName
+            ? item.professionalName && item.signerName.includes(item.professionalName.replace(/^(Dra?\.|Dr\.)\s+/, ""))
+              ? " · firmada"
+              : ` · firmó ${item.signerName}`
+            : ""}
         </p>
       </div>
       <div className="flex flex-col gap-3">
@@ -338,7 +347,7 @@ export function EncounterHistoryCard({
               aria-controls={retiredId}
               onClick={() => setShowRetired((value) => !value)}
             >
-              {showRetired ? "Ocultar lo anulado" : `Anulado en esta atención: ${retired} · Ver`}
+              {showRetired ? "Ocultar lo que ya no vale" : `Ya no vigente: ${retired} · Ver`}
             </Button>
             {showRetired ? (
               <div id={retiredId} className="flex flex-col gap-3 text-muted-foreground">
@@ -403,6 +412,13 @@ export function VoidedEncounterLine({ item }: { item: TimelineItem }) {
         {item.voidedByName ? ` por ${item.voidedByName}` : ""} · Motivo: {item.voidReason ?? "sin registrar"}
       </p>
       {withIt ? <p className="text-muted-foreground">Se anuló con ella: {withIt}</p> : null}
+      {/* Lo firmado, recetado o pedido en ella no desaparece: un consentimiento firmado o una
+          receta que salió siguen siendo hechos (revisión de código del 9 nov). */}
+      {born ? (
+        <div className="mt-1 flex flex-col gap-2 text-muted-foreground">
+          <BornParts born={{ ...born, indicated: [], budgets: [], followUps: [] }} />
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -89,9 +89,12 @@ export interface PlanNextStep {
   detail: string | null
   /** Nulo si el rol no puede hacerlo (la frase igual se dice). */
   action: PlanNextAction | null
+  /** Un aviso que no frena, en su propio renglón (la cita que se atendió sin registrar lo hecho). */
+  notice?: string | null
   /**
    * Lo aceptado sin empezar que también falta agendar cuando gana la sesión de
-   * un tratamiento empezado: el presupuesto del Plan conserva su «Reservar cita».
+   * un tratamiento empezado, para quien solo lee esta frase (el agente, Pacientes): la lista
+   * de la ficha y del Plan lo ofrece en su propia fila.
    * Solo para quien puede reservar.
    */
   alsoToSchedule?: string[]
@@ -210,7 +213,7 @@ export async function getPlanNextStep(
   can: Can,
   opts: { viewerUserId?: string } = {},
 ): Promise<PlanNextStep> {
-  const { facts, context } = await planFactsOf(tx, orgId, patientId, opts.viewerUserId)
+  const { facts, context } = await planFactsOf(tx, orgId, patientId, opts.viewerUserId, { list: false })
   return planNextStepFrom(facts, context, can)
 }
 
@@ -235,7 +238,10 @@ async function planFactsOf(
   orgId: string,
   patientId: string,
   viewerUserId?: string,
+  opts: { list?: boolean } = {},
 ): Promise<{ facts: PlanFacts; context: PlanContext }> {
+  // Lo que solo dice la lista de la ficha (la cita sin cerrar y lo atendido sin registrar).
+  const forList = opts.list ?? true
   const [person] = await tx
     .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
@@ -280,7 +286,7 @@ async function planFactsOf(
   const today = (await todayLiveAppointments(tx, orgId, [patientId], context.timezone)).get(patientId) ?? null
   // Sus citas de días que ya pasaron sin que nadie dijera si vino (la regla de «Te espera» y de la
   // Agenda, «Ya pasaron · sin cerrar»), y lo aceptado cuya cita se atendió sin registrar lo hecho.
-  const unclosed = await tx.execute<{ id: string; startsAt: Date; serviceName: string | null; professionalName: string | null }>(sql`
+  const unclosed = !forList ? [] : await tx.execute<{ id: string; startsAt: Date; serviceName: string | null; professionalName: string | null }>(sql`
     select a.id, a.starts_at as "startsAt", a.service_name as "serviceName", u.name as "professionalName"
     from appointment a
     left join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
@@ -290,16 +296,21 @@ async function planFactsOf(
       and (a.starts_at at time zone coalesce(b.timezone, ${context.timezone}))::date < (now() at time zone coalesce(b.timezone, ${context.timezone}))::date
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
     order by a.starts_at desc, a.id limit 3`)
-  const attended = await tx.execute<{ planItemId: string; startsAt: Date; professionalName: string | null }>(sql`
-    select distinct on (link.plan_item_id) link.plan_item_id as "planItemId", a.starts_at as "startsAt", u.name as "professionalName"
+  // La última cita que llevaba cada tratamiento aceptado sin empezar: si se atendió, lo hecho no
+  // se registró (registrarlo lo deja en curso). Solo una cita reservada para él antes de ocurrir.
+  const attended = !forList ? [] : (
+    await tx.execute<{ planItemId: string; startsAt: Date; status: string; professionalUserId: string; professionalName: string | null }>(sql`
+    select distinct on (link.plan_item_id) link.plan_item_id as "planItemId", a.starts_at as "startsAt", a.status,
+      a.professional_user_id as "professionalUserId", u.name as "professionalName"
     from appointment_plan_item link
     join appointment a on a.organization_id = link.organization_id and a.id = link.appointment_id
     join treatment_plan_item item on item.organization_id = link.organization_id and item.id = link.plan_item_id
     left join "user" u on u.id = a.professional_user_id
-    where link.organization_id = ${orgId} and link.patient_id = ${patientId}::uuid
-      and a.status = 'atendida' and a.starts_at < now()
+    where link.organization_id = ${orgId} and link.patient_id = ${patientId}::uuid and not a.is_test
+      and link.created_at <= a.starts_at
       and item.status in ('pendiente', 'programado') and item.decision_status = 'aceptado'
     order by link.plan_item_id, a.starts_at desc`)
+  ).filter((row) => row.status === "atendida" && new Date(row.startsAt).getTime() < Date.now())
   // Quién indicó cada control y cuándo: el profesional y el día de la atención donde nació
   // (no quien lo creó: el que se repite lo crea quien cerró el anterior).
   const originIds = [...new Set(controls.map((row) => row.originEncounterId).filter((id): id is string => !!id))]
@@ -330,7 +341,12 @@ async function planFactsOf(
       nextAppointmentId: next?.id ?? null,
       today,
       unclosed: unclosed.map((row) => ({ ...row, startsAt: new Date(row.startsAt) })),
-      unrecorded: new Map(attended.map((row) => [row.planItemId, { startsAt: new Date(row.startsAt), professionalName: row.professionalName }])),
+      unrecorded: new Map(
+        attended.map((row) => [
+          row.planItemId,
+          { startsAt: new Date(row.startsAt), professionalName: row.professionalName, mine: !!viewerUserId && row.professionalUserId === viewerUserId },
+        ]),
+      ),
       controlOrigins: new Map(
         controls.flatMap((row) => {
           const origin = row.originEncounterId ? originOf.get(row.originEncounterId) : undefined
@@ -530,7 +546,7 @@ interface PlanFacts {
    * Lo aceptado sin empezar cuya cita ya se atendió sin registrar lo que se hizo: sigue
    * por agendar (la regla es una, `to-schedule.ts`), pero la fila lo avisa. Solo de una persona.
    */
-  unrecorded?: ReadonlyMap<string, { startsAt: Date; professionalName: string | null }>
+  unrecorded?: ReadonlyMap<string, { startsAt: Date; professionalName: string | null; mine: boolean }>
   /** La atención donde se indicó cada control: quién, cuándo y su motivo. Solo de una persona. */
   controlOrigins?: ReadonlyMap<string, { professionalName: string | null; at: Date; reason: string | null }>
 }
@@ -693,8 +709,9 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       ? (() => {
           const last = notRecorded.reduce((a, b) => (a.startsAt > b.startsAt ? a : b))
           const what = notRecorded.map((row) => row.item.title.charAt(0).toLowerCase() + row.item.title.slice(1)).join(", ")
-          const who = last.professionalName ? `; pregúntale a ${last.professionalName} antes de reservar` : ""
-          return `Su cita del ${day(last.startsAt)} se atendió sin registrar ${what}${who}`
+          // A quien atendió no se le pide que se pregunte a sí mismo (segunda mesa del 9 nov).
+          if (last.mine) return `Su cita contigo del ${day(last.startsAt)} se atendió sin registrar ${what}: regístralo en su próxima atención si se hizo`
+          return `Su cita del ${day(last.startsAt)} se atendió sin registrar ${what}${last.professionalName ? `: pregúntale a ${last.professionalName} si se hizo` : ""}`
         })()
       : null
     const label = context.budgetRequired ? "Reservar lo aceptado" : "Reservar lo indicado"
@@ -702,7 +719,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       kind: "agendar",
       text,
       detail:
-        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null, recordedWarning]
+        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null]
           .filter(Boolean)
           .join(" · ") || null,
       // Dice qué reserva: «Reservar cita» a secas es el de la cabecera (segunda mesa del 8 nov).
@@ -714,6 +731,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
             ...(control ? { followUpId: control.id } : {}),
           }
         : null,
+      notice: recordedWarning,
     }
   }
 
@@ -870,8 +888,8 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   const p = planPieces(facts, context, can)
   const [first] = stepsOf(p)
   if (!first) return NOTHING
-  // La sesión de lo empezado gana a lo aceptado sin empezar: lo aceptado sigue «por agendar» y el
-  // presupuesto del Plan conserva su «Reservar cita».
+  // La sesión de lo empezado gana a lo aceptado sin empezar: lo aceptado sigue «por agendar» (la
+  // lista lo ofrece en su fila).
   if (first.kind === "continuar" && p.toStart.length > 0)
     return {
       ...first,
@@ -879,7 +897,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       ...(can("appointments.write") ? { alsoToSchedule: p.toStart.map((item) => item.id) } : {}),
     }
   // Sin esa fila a la vista, el presupuesto no esconde la sesión que falta reservar.
-  // Lo aceptado sin empezar que no es la primera fila conserva su «Reservar cita» en el presupuesto del Plan.
+  // Lo aceptado sin empezar que no es la primera fila se dice también a quien lee solo esta frase.
   const alsoToSchedule =
     first.kind !== "agendar" && p.toStart.length > 0 && can("appointments.write") ? { alsoToSchedule: p.toStart.map((item) => item.id) } : {}
   if ((first.kind === "enviar" || first.kind === "respuesta") && p.startedFirst)

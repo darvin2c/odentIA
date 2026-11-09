@@ -583,7 +583,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde está el plan de tratamiento?",
-        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (la misma lista del Resumen, cada fila con su botón: lo aceptado y los controles se reservan ahí, en un solo lugar), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles («Reservar» solo en el que no está ya en «Qué sigue» (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
+        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (la misma lista del Resumen, cada fila con su botón: lo aceptado y los controles se reservan ahí, en un solo lugar), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles («Reservar» solo en el que no está ya en «Qué sigue») (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
       },
       {
         q: "¿Cómo se arma y se envía el presupuesto?",

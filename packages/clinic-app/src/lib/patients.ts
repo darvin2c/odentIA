@@ -717,6 +717,11 @@ export interface TimelineItem {
   voidReason?: string | null
   /** Quién atendió; en una anulada, quién y cuándo la anuló. */
   professionalName?: string | null
+  /** Quién firmó la atención y cuándo. */
+  signerName?: string | null
+  signedAt?: string | null
+  /** Hecho de una atención que sigue en curso, sin firmar. */
+  openEncounter?: boolean
   voidedByName?: string | null
   voidedAt?: string | null
   /** Lo que nació en la atención, dentro de su tarjeta (solo en la historia completa). */

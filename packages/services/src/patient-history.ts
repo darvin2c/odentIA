@@ -690,6 +690,11 @@ export interface TimelineItemBase {
   voidReason?: string | null
   /** Quién atendió, y en una anulada quién la anuló y cuándo. */
   professionalName?: string | null
+  /** Quién firmó la atención y cuándo. */
+  signerName?: string | null
+  signedAt?: Date | null
+  /** Hecho de una atención que sigue en curso (sin firmar): la historia lo dice. */
+  openEncounter?: boolean
   voidedByName?: string | null
   voidedAt?: Date | null
   /**
@@ -836,8 +841,30 @@ async function loadBornForEncounters(
       budgetId: item.budgetId,
     })
   }
-  // Sus presupuestos: los de lo indicado en ella, con el mismo estado que el Plan.
-  const budgetIds = [...new Set(items.flatMap((item) => (item.budgetId ? [item.budgetId] : [])))]
+  // Sus presupuestos, por sus líneas (no por el presupuesto al que hoy apunta cada
+  // tratamiento: al cancelarse o revisarse, ese vínculo cambia). Es la misma regla
+  // que lo saca del listado suelto (`getTimeline`): va dentro solo si todo lo que
+  // lleva nació en atenciones que se muestran, y en la más reciente de ellas.
+  const touched = await tx.execute<{ budgetId: string; encounterId: string | null; status: string | null; startedAt: string | null }>(sql`
+    select distinct line.budget_id as "budgetId", item.source_encounter_id as "encounterId", born.status, born.started_at::text as "startedAt"
+    from treatment_budget_item line
+    join treatment_plan_item item on item.organization_id = line.organization_id and item.id = line.plan_item_id
+    left join encounter born on born.organization_id = item.organization_id and born.id = item.source_encounter_id
+    where line.organization_id = ${orgId} and item.patient_id = ${patientId}::uuid
+      and line.budget_id in (select own_line.budget_id from treatment_budget_item own_line
+        join treatment_plan_item own_item on own_item.organization_id = own_line.organization_id and own_item.id = own_line.plan_item_id
+        where own_line.organization_id = ${orgId} and own_item.source_encounter_id in (${sql.join(
+          encounterIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )}))`)
+  const ownerOf = new Map<string, string>()
+  for (const budgetId of new Set(touched.map((row) => row.budgetId))) {
+    const sources = touched.filter((row) => row.budgetId === budgetId)
+    if (sources.some((row) => !row.encounterId || (row.status !== "finalizada" && row.status !== "anulada"))) continue
+    const owner = sources.reduce((a, b) => ((a.startedAt ?? "") >= (b.startedAt ?? "") ? a : b))
+    if (owner.encounterId && encounterIds.includes(owner.encounterId)) ownerOf.set(budgetId, owner.encounterId)
+  }
+  const budgetIds = [...ownerOf.keys()]
   if (budgetIds.length) {
     const [budgets, lines, options] = await Promise.all([
       tx.select().from(treatmentBudget).where(and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds))),
@@ -856,20 +883,19 @@ async function loadBornForEncounters(
         .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.budgetId, budgetIds))),
     ])
     for (const budget of budgets.sort((a, b) => a.budgetNumber - b.budgetNumber)) {
-      const stateText = budgetStateText({
-        status: budget.status,
-        items: lines.filter((line) => line.budgetId === budget.id),
-        options: options.filter((option) => option.budgetId === budget.id),
+      const owner = ownerOf.get(budget.id)
+      if (!owner) continue
+      of(owner).budgets.push({
+        id: budget.id,
+        budgetNumber: budget.budgetNumber,
+        stateText: budgetStateText({
+          status: budget.status,
+          items: lines.filter((line) => line.budgetId === budget.id),
+          options: options.filter((option) => option.budgetId === budget.id),
+        }),
+        // Cancelado o reemplazado por su revisión: ya no vale, se pliega.
+        retired: budget.status === "cancelado" || budget.status === "sustituido",
       })
-      const owners = new Set(items.filter((item) => item.budgetId === budget.id).map((item) => item.sourceEncounterId))
-      for (const encounterId of owners)
-        if (encounterId)
-          of(encounterId).budgets.push({
-            id: budget.id,
-            budgetNumber: budget.budgetNumber,
-            stateText,
-            retired: (RETIRED_BUDGETS as readonly string[]).includes(budget.status),
-          })
     }
   }
   for (const row of consents) {
@@ -1155,7 +1181,20 @@ export async function getTimeline(
         voidedAt: row.voidedAt,
         voidedByName: row.voidedBy ? (nameOf.get(row.voidedBy) ?? null) : null,
         professionalName: nameOf.get(row.professionalUserId) ?? null,
-        ...(born.has(row.id) ? { born: born.get(row.id) } : {}),
+        // Quién la firmó y cuándo: lo que se lee es definitivo (segunda mesa del 9 nov).
+        signerName: row.status === "finalizada" ? row.signerName : null,
+        signedAt: row.status === "finalizada" ? row.finalizedAt : null,
+        // Lo que se hizo en ella no se repite en «Se indicó».
+        ...(born.has(row.id)
+          ? {
+              born: {
+                ...born.get(row.id)!,
+                indicated: born
+                  .get(row.id)!
+                  .indicated.filter((item) => !rowProcedures.some((p) => p.planItemId === item.id)),
+              },
+            }
+          : {}),
         title: row.reason || "Atención",
         detail: row.evolution,
         toothNumbers: teeth
@@ -1165,7 +1204,8 @@ export async function getTimeline(
           .sort((a, b) => a - b),
         authorId: row.professionalUserId,
         status: row.status,
-        procedures: rowProcedures.map((p) => p.description),
+        // Con su pieza: un procedimiento sin el diente tratado no se lee (segunda mesa del 9 nov).
+        procedures: rowProcedures.map((p) => [p.description, site.words(p, "full")].filter(Boolean).join(" · ")),
         documentsCount: related.length,
         documents: related,
         diagnoses,
@@ -1288,6 +1328,7 @@ export async function getTimeline(
         authorId: row.createdBy,
         planId: row.planId,
         planItemId: row.id,
+        encounterId: row.sourceEncounterId,
       })
     }
   const budgetIds = ids("budget")
@@ -1356,6 +1397,7 @@ export async function getTimeline(
         authorId: row.createdBy,
         planItemId: row.planItemId,
         followUpId: row.id,
+        encounterId: row.originEncounterId,
       })
     }
   const prescriptionIds = ids("prescription")
@@ -1392,6 +1434,7 @@ export async function getTimeline(
         authorId: row.issuedBy,
         planItemId: row.planItemId,
         prescriptionId: row.id,
+        encounterId: row.encounterId,
       })
     }
   const consentIds = ids("consent")
@@ -1472,6 +1515,19 @@ export async function getTimeline(
         encounterId: row.encounterId,
       })
     }
+  // Lo de una atención que sigue en curso sale suelto (el borrador no es todavía un
+  // hecho de la historia) y lo dice, para no leerlo como cerrado (segunda mesa del 9 nov).
+  const drafts = new Set(
+    (
+      await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(and(eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId), eq(encounter.status, "borrador")))
+    ).map((row) => row.id),
+  )
+  if (drafts.size)
+    for (const item of hydrated.values())
+      if (item.type !== "encounter" && item.encounterId && drafts.has(item.encounterId)) item.openEncounter = true
   // Los pagos no son historia clínica: sus movimientos viven en la cuenta.
   const last = page[page.length - 1]!
   return {

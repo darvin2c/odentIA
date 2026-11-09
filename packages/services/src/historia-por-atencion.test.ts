@@ -10,7 +10,7 @@ import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment, createRoom } from "./appointments.js"
-import { adjustBudgetLines, createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import { adjustBudgetLines, cancelBudget, createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { createClinicalOrder } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { namedDiagnosis } from "./diagnosis-codes.js"
@@ -37,7 +37,7 @@ async function sign(f: Fixture) {
 async function consent(f: Fixture, title: string, status: "firmado" | "revocado", encounterId: string | null) {
   const [template] = await ownerDb
     .insert(consentTemplate)
-    .values({ organizationId: "org_a", key: `k-${title}`, title, body: "Texto", status: "publicado" })
+    .values({ organizationId: "org_a", key: `k-${title}-${Math.random().toString(36).slice(2)}`, title, body: "Texto", status: "publicado" })
     .returning()
   const [row] = await ownerDb
     .insert(consentDocument)
@@ -102,24 +102,24 @@ it("el diagnóstico con su nombre y su código; sin nombre en el catálogo, solo
   expect(namedDiagnosis(titles, "ICD-11", "DA08.0")).toBe("CIE-11 · DA08.0")
 })
 
-it("lo indicado dice el precio de su presupuesto: el ajustado mientras decide y el acordado al aceptar", async () => {
+it("lo indicado dice el precio acordado al aceptar; mientras decide, el ofrecido aparte, que no es lo que se cobra", async () => {
   const f = await clinicalFixture()
   const item = await f.run((tx) =>
     addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
   )
   const before = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((row) => row.id === item.id)
   // Sin presupuesto, nada que decir: vale el de la indicación.
-  expect(before).toMatchObject({ priceCents: 120000, agreedPriceCents: null, agreedCurrency: null })
+  expect(before).toMatchObject({ priceCents: 120000, agreedPriceCents: null, agreedCurrency: null, offeredPriceCents: null })
   const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
   await f.run((tx) =>
     adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, priceCents: 90000, reason: "Paciente frecuente" }] }),
   )
   const offered = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((row) => row.id === item.id)
-  expect(offered).toMatchObject({ priceCents: 120000, agreedPriceCents: 90000, agreedCurrency: "PEN" })
+  expect(offered).toMatchObject({ priceCents: 120000, agreedPriceCents: null, offeredPriceCents: 90000, offeredCurrency: "PEN" })
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
   const agreed = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((row) => row.id === item.id)
-  expect(agreed).toMatchObject({ agreedPriceCents: 90000 })
+  expect(agreed).toMatchObject({ agreedPriceCents: 90000, agreedCurrency: "PEN", offeredPriceCents: null })
 })
 
 /** Una cita de la persona hace `daysAgo` días, fuera de horario. */
@@ -147,7 +147,10 @@ async function pastAppointment(f: Fixture, daysAgo: number, status: "programada"
     .set({ startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), status })
     .where(eq(appointment.id, made.id))
   if (planItemId)
-    await ownerDb.insert(appointmentPlanItem).values({ organizationId: "org_a", patientId: f.patient.id, appointmentId: made.id, planItemId })
+    // Reservada para él antes de ocurrir, como en la vida real.
+    await ownerDb
+      .insert(appointmentPlanItem)
+      .values({ organizationId: "org_a", patientId: f.patient.id, appointmentId: made.id, planItemId, createdAt: new Date(startsAt.getTime() - DAY) })
   return made
 }
 
@@ -165,7 +168,10 @@ it("«Qué sigue»: la cita de otro día que nadie cerró va primero con «¿Vin
   const schedule = steps.find((step) => step.kind === "agendar")
   // Sigue por reservar (la regla de «Por agendar» es una): la fila lo avisa.
   expect(schedule?.action?.planItemIds).toEqual([item.id])
-  expect(schedule?.detail).toMatch(/Su cita del .* se atendió sin registrar .*; pregúntale a Clínico antes de reservar/)
+  expect(schedule?.notice).toMatch(/^Su cita del .* se atendió sin registrar .*: pregúntale a Clínico si se hizo$/)
+  // A quien la atendió no se le pide que se pregunte a sí mismo.
+  const mine = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all, { viewerUserId: f.actor }))
+  expect(mine.steps.find((step) => step.kind === "agendar")?.notice).toMatch(/^Su cita contigo del .* regístralo en su próxima atención si se hizo$/)
 
   // Una cita de hace 2 días que nadie cerró: primero en la lista, con «¿Vino?».
   const unclosed = await pastAppointment(f, 2, "programada")
@@ -181,4 +187,35 @@ it("«Qué sigue»: la cita de otro día que nadie cerró va primero con «¿Vin
   const cashier = (permission: string) => ["patients.read", "finance.read", "budgets.read"].includes(permission)
   const forCashier = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, cashier))
   expect(forCashier.steps.some((step) => step.kind === "cerrar")).toBe(false)
+  // Ni el aviso de lo atendido sin registrar: a caja no le toca reservar.
+  expect(forCashier.steps.find((step) => step.kind === "agendar")?.notice ?? null).toBeNull()
+})
+
+it("lo firmado en una atención que después se anuló no desaparece de la Historia", async () => {
+  const f = await clinicalFixture()
+  const signed = await consent(f, "Endodoncia", "firmado", f.encounter.id)
+  await ownerDb
+    .update(encounter)
+    .set({ status: "anulada", voidedAt: new Date(), voidedBy: f.actor, voidReason: "Abierta por error" })
+    .where(eq(encounter.id, f.encounter.id))
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  const voided = data.find((row) => row.type === "encounter")
+  expect(voided).toMatchObject({ status: "anulada", voidReason: "Abierta por error" })
+  expect(voided?.born?.consents).toEqual([expect.objectContaining({ id: signed.id, status: "firmado" })])
+})
+
+it("un presupuesto cancelado de lo indicado en una atención queda dentro de ella, plegado, y no se pierde ni sale dos veces", async () => {
+  const f = await clinicalFixture()
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  // Cancelarlo suelta el tratamiento de su presupuesto: el vínculo se busca por sus líneas.
+  await f.run((tx) => cancelBudget(tx, ...f.args, budget.id))
+  await sign(f)
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  expect(data.filter((row) => row.type === "budget")).toEqual([])
+  expect(data.find((row) => row.type === "encounter")?.born?.budgets).toEqual([
+    expect.objectContaining({ id: budget.id, retired: true }),
+  ])
 })

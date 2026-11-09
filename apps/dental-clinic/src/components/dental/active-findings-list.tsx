@@ -1,10 +1,16 @@
-import type { OdontogramStandardProfile } from "@odentia/dental"
-import { activeFindingsAsOf, surfaceLabel } from "@odentia/dental"
+import { activeFindingsAsOf, conditionLabel, type OdontogramStandardProfile, surfaceLabel, variantLabel } from "@odentia/dental"
 import { Button } from "@odentia/ui"
 import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
-import { findingWords } from "./odontogram-notation"
+import { officialAbbreviation } from "./odontogram-notation"
+
+/** «CD · Lesión de caries a nivel de la dentina»: la variante dice el hallazgo; sin ella, su nombre. */
+function compactFinding(official: OdontogramStandardProfile | null, entry: OdontogramEntry): string {
+  const what = variantLabel(entry.condition, entry.details?.variant) ?? conditionLabel(entry.condition)
+  const abbr = officialAbbreviation(official, entry)
+  return abbr ? `${abbr} · ${what}` : what
+}
 
 /** «distal y oclusal». */
 function surfacesWords(surfaces: string[]): string {
@@ -57,7 +63,8 @@ export function ActiveFindingsList({
           {groups.map((group) => {
             const entry = group.first as OdontogramEntry
             const words = [
-              findingWords(official, entry),
+              // Corto: la sigla de la norma (si la clínica la usa) y la variante, sin repetir el hallazgo.
+              compactFinding(official, entry),
               group.surfaces.length ? surfacesWords(group.surfaces) : null,
               entry.diagnosisName ?? (entry.diagnosisCode ? diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode) : null),
             ]

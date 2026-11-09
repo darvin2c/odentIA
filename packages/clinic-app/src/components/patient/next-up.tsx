@@ -15,6 +15,7 @@
 import { Button } from "@odentia/ui"
 import { SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
+import { TriangleAlert } from "lucide-react"
 import { useId } from "react"
 import { visitName } from "../../lib/agenda"
 import type { AgendaAppointment } from "../../lib/agenda"
@@ -95,6 +96,7 @@ export function NextUpCard({
               <div className="min-w-0 flex-[1_1_16rem]">
                 <p className="text-sm font-medium">{step.text}</p>
                 {step.detail ? <p className="text-sm text-muted-foreground">{step.detail}</p> : null}
+                <StepNotice notice={step.notice} />
               </div>
               {shownAction(step) ? (
                 <NextStepButton
@@ -109,6 +111,17 @@ export function NextUpCard({
         </ul>
       )}
     </section>
+  )
+}
+
+/** Un aviso de la fila en su propio renglón, que se distingue sin frenar (segunda mesa del 9 nov). */
+export function StepNotice({ notice }: { notice?: string | null }): React.JSX.Element | null {
+  if (!notice) return null
+  return (
+    <p className="mt-1 flex items-start gap-1.5 text-sm text-warning">
+      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+      <span>{notice}</span>
+    </p>
   )
 }
 

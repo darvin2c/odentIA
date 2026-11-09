@@ -4419,6 +4419,15 @@ for (const item of agendaSeed) {
     })
   }
 }
+// Marco: su control de ortodoncia se aceptó y se reservó antes de esa cita de hace 9 días (la
+// semilla lo crea hoy; aquí queda en sus fechas, así la cita de verdad lo llevaba).
+await db.update(treatmentPlanItem).set({ createdAt: daysAgo(14) }).where(eq(treatmentPlanItem.id, marcoCtrl.id))
+await db
+  .update(treatmentBudget)
+  .set({ createdAt: daysAgo(14), presentedAt: daysAgo(13), decidedAt: daysAgo(12) })
+  .where(eq(treatmentBudget.id, marcoBudget.id))
+await db.update(appointmentPlanItem).set({ createdAt: daysAgo(12) }).where(eq(appointmentPlanItem.planItemId, marcoCtrl.id))
+
 // La sala de espera de la Dra. Ana hoy (tablero 7): Lucía llegó y espera, y
 // Rosa ya está en atención (su evaluación en borrador de hoy se une a su cita
 // y la llegada queda marcada a esa hora). Ana es propietaria y atiende: su

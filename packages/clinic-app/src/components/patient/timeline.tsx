@@ -139,12 +139,14 @@ function itemDateTime(iso: string, timezone: string, locale: string | undefined)
 
 function CardHeaderRow({
   badge,
+  badgeVariant,
   context,
   createdAt,
   timezone,
   locale,
 }: {
   badge: string
+  badgeVariant?: "destructive"
   context?: string | null
   createdAt: string
   timezone: string
@@ -152,7 +154,7 @@ function CardHeaderRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Badge>{badge}</Badge>
+      <Badge variant={badgeVariant}>{badge}</Badge>
       {context ? <span className="text-xs text-muted-foreground">{context}</span> : null}
       <time
         dateTime={createdAt}
@@ -356,6 +358,7 @@ function JourneyCard({
     <div className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
       <CardHeaderRow
         badge={timelineTypeLabel(item.type)}
+        context={item.openEncounter ? "De la atención en curso, sin firmar" : null}
         createdAt={item.createdAt}
         timezone={timezone}
         locale={locale}
@@ -426,6 +429,9 @@ function FactCard({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <CardHeaderRow
           badge={voided ? `${timelineTypeLabel(item.type)} ${FEMININE_TYPES.has(item.type) ? "anulada" : "anulado"}` : timelineTypeLabel(item.type)}
+          // Una receta anulada no se confunde con una vigente (segunda mesa del 9 nov).
+          badgeVariant={voided ? "destructive" : undefined}
+          context={item.openEncounter ? "De la atención en curso, sin firmar" : null}
           createdAt={item.createdAt}
           timezone={timezone}
           locale={locale}

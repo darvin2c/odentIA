@@ -11,7 +11,7 @@ import { useId } from "react"
 import { fetchPlanNextStep } from "../../../lib/budgets"
 import { QueryErrorState } from "../../../lib/query-error"
 import { PlanNextSkeleton } from "../../skeletons/person-sections"
-import { usePlanNextSteps } from "../next-up"
+import { StepNotice, usePlanNextSteps } from "../next-up"
 import { NextStepButton } from "./next-step-action"
 
 export function usePlanNextStep(patientId: string, enabled = true) {
@@ -68,6 +68,7 @@ export function PlanNextCard({
               <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-0.5">
                 <span className="font-medium">{step.text}</span>
                 {step.detail ? <span className="text-sm text-muted-foreground">{step.detail}</span> : null}
+                <StepNotice notice={step.notice} />
               </div>
               <NextStepButton
                 patient={{ id: patientId, name: patientName }}
