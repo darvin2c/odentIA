@@ -1166,30 +1166,36 @@ export async function updatePlanItem(
     // La línea del borrador es snapshot: se actualiza en la misma transacción.
     // Solo el borrador sigue a la nueva indicación; presentados/decididos son
     // históricos inmutables (updatePlanItem ya rechazó budget no-borrador).
-    // Cambiar de indicación re-congela la tarifa y el modo de cobro, y limpia
-    // precio acordado y promoción (eran del servicio anterior).
-    const modes = updated.serviceId
-      ? await readBillingModes(tx, orgId, [updated.serviceId])
-      : {}
+    // Solo cambiar de servicio es otra indicación: re-congela la tarifa y el modo
+    // de cobro, y limpia precio acordado y promoción (eran del servicio anterior).
+    // Corregir la pieza, sus caras, el detalle o el diagnóstico conserva lo que se
+    // acordó por ese tratamiento (QA del 8 nov, entrega 3: «Cambiar» en la atención
+    // volvía a la tarifa y perdía el precio pactado).
+    const serviceChanged = fields.includes("serviceId")
+    const modes = serviceChanged && updated.serviceId ? await readBillingModes(tx, orgId, [updated.serviceId]) : {}
     await tx
       .update(treatmentBudgetItem)
       .set({
-        serviceId: updated.serviceId,
-        title: updated.title,
         scope: updated.scope,
         siteSystem: updated.siteSystem,
         siteCode: updated.siteCode,
         siteQualifiers: updated.siteQualifiers,
-        codings: updated.codings,
-        priceCents: updated.priceCents,
-        tariffPriceCents: updated.priceCents,
-        priceReason: null,
-        promotionId: null,
-        promotionName: null,
-        promotionMode: null,
-        billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
-        sessionsPlanned: updated.plannedSessions,
-        currency: updated.currency,
+        ...(serviceChanged
+          ? {
+              serviceId: updated.serviceId,
+              title: updated.title,
+              codings: updated.codings,
+              priceCents: updated.priceCents,
+              tariffPriceCents: updated.priceCents,
+              priceReason: null,
+              promotionId: null,
+              promotionName: null,
+              promotionMode: null,
+              billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
+              sessionsPlanned: updated.plannedSessions,
+              currency: updated.currency,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(
