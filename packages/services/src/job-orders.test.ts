@@ -3,12 +3,13 @@ import { encounter, patientCharge, patientPaymentApplication } from "@odentia/db
 import { product, stockMovement } from "@odentia/db/schema/inventory"
 import { jobOrder, jobOrderEvent } from "@odentia/db/schema/orders"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { advanceJobOrder, createJobOrderSale, getJobOrder, listJobOrders, remakeJobOrder, saleReferencesOf, voidJobOrder } from "./job-orders.js"
 import { issueLensPrescription } from "./optical/lens-prescriptions.js"
 import { createPaymentMethod } from "./payment-methods.js"
+import { getTicketReturnable, returnFromTicket } from "./payments.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -148,24 +149,115 @@ describe("el pedido de lentes (entrega 4)", () => {
     })
   })
 
-  it("rehacer crea otro pedido unido al original, con lo mismo y sin cobrar otra vez", async () => {
+  it("rehacer crea otro pedido unido al original, con sus mismos cargos: no se cobra otra vez y lo que falta sigue a la vista", async () => {
     const s = await store()
     const { order } = await sell(s)
-    const remade = await s.f.run((tx) =>
-      remakeJobOrder(tx, OPTICA, s.f.actor, order.id, { reason: "No ve bien de lejos con el OD", promisedOn: inDays(5) }),
-    )
+    const requestId = randomUUID()
+    const remake = () =>
+      s.f.run((tx) =>
+        remakeJobOrder(tx, OPTICA, s.f.actor, order.id, { reason: "No ve bien de lejos con el OD", promisedOn: inDays(5), requestId }),
+      )
+    const remade = await remake()
     expect(remade).toMatchObject({
       remakeOf: order.id,
+      remakeOfOrder: { id: order.id, orderNumber: order.orderNumber },
       remakeReason: "No ve bien de lejos con el OD",
       status: "por_enviar",
-      dueCents: 0,
+      // Lo que faltaba pagar de la venta sigue en el nuevo: quien lo entrega lo ve.
+      dueCents: 30_000,
       prescription: { id: s.prescription!.id },
     })
     expect(remade.orderNumber).toBeGreaterThan(order.orderNumber)
-    expect(remade.lines.map((line) => [line.kind, line.chargeId])).toEqual([
-      ["montura", null],
-      ["lunas", null],
-    ])
+    expect(remade.lines.map((line) => line.chargeId)).toEqual(order.lines.map((line) => line.chargeId))
+    // Un reintento devuelve el mismo.
+    expect((await remake()).id).toBe(remade.id)
+    // El original queda reemplazado: sale de lo que se trabaja y ya no avanza ni se anula.
+    const open = await s.f.run((tx) => listJobOrders(tx, OPTICA, { status: "abiertos", patientId: s.f.patient.id, withMoney: true }))
+    expect(open.map((row) => row.id)).toEqual([remade.id])
+    const original = await s.f.run((tx) => getJobOrder(tx, OPTICA, order.id))
+    expect(original.remadeAs).toEqual({ id: remade.id, orderNumber: remade.orderNumber })
+    await expect(s.f.run((tx) => advanceJobOrder(tx, OPTICA, s.f.actor, order.id, { status: "listo" }))).rejects.toMatchObject({
+      code: "JOB_ORDER_REMADE",
+    })
+    await expect(s.f.run((tx) => voidJobOrder(tx, OPTICA, s.f.actor, order.id, { reason: "Se rehízo" }))).rejects.toMatchObject({
+      code: "JOB_ORDER_REMADE",
+    })
+    // Anular el rehecho no anula los cargos que comparte con el original, que vuelve a la lista.
+    await s.f.run((tx) => voidJobOrder(tx, OPTICA, s.f.actor, remade.id, { reason: "Se rehízo por error" }))
+    const charges = await ownerDb
+      .select({ voidedAt: patientCharge.voidedAt })
+      .from(patientCharge)
+      .where(inArray(patientCharge.id, order.lines.map((line) => line.chargeId!)))
+    expect(charges.every((charge) => charge.voidedAt === null)).toBe(true)
+    const back = await s.f.run((tx) => listJobOrders(tx, OPTICA, { status: "abiertos", patientId: s.f.patient.id, withMoney: true }))
+    expect(back.map((row) => row.id)).toEqual([order.id])
+  })
+
+  it("una devolución parcial en la caja la sigue el pedido: lo que falta es lo que dice la caja", async () => {
+    const s = await store()
+    const { order, ticketId } = await sell(s, {
+      lines: [{ kind: "lunas", description: "Lunas progresivas", amountCents: 50_000 }],
+      payments: [{ paymentMethodId: s.cashId, amountCents: 10_000 }],
+      cashReceivedCents: 10_000,
+    })
+    const { lines } = await s.f.run((tx) => getTicketReturnable(tx, OPTICA, s.f.patient.id, ticketId!))
+    await s.f.run((tx) =>
+      returnFromTicket(tx, ...s.f.args, ticketId!, {
+        branchId: s.branchId,
+        lines: [{ chargeId: lines[0]!.chargeId, amountCents: 5_000 }],
+        paymentMethodId: s.cashId,
+        reason: "Reclamo",
+        requestId: randomUUID(),
+      }),
+    )
+    const root = order.lines[0]!.chargeId!
+    const [live] = await ownerDb
+      .select({ id: patientCharge.id, amountCents: patientCharge.amountCents })
+      .from(patientCharge)
+      .where(and(eq(patientCharge.organizationId, OPTICA), isNull(patientCharge.voidedAt), or(eq(patientCharge.id, root), eq(patientCharge.originalChargeId, root))))
+    const applied = await ownerDb
+      .select({ amountCents: patientPaymentApplication.amountCents })
+      .from(patientPaymentApplication)
+      .where(and(eq(patientPaymentApplication.chargeId, live!.id), isNull(patientPaymentApplication.voidedAt)))
+    const expected = live!.amountCents - applied.reduce((sum, row) => sum + row.amountCents, 0)
+    const detail = await s.f.run((tx) => getJobOrder(tx, OPTICA, order.id))
+    expect(detail.lines[0]?.amountCents).toBe(live!.amountCents)
+    expect(detail.dueCents).toBe(expected)
+    expect(detail.dueCents).toBeGreaterThan(0)
+  })
+
+  it("la misma clave con otra venta es un conflicto, y el reintento vale también al día siguiente", async () => {
+    const s = await store()
+    const requestId = randomUUID()
+    const first = await sell(s, { requestId })
+    await expect(sell(s, { requestId, title: "Otra cosa" })).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
+    // La fecha prometida ya pasó cuando vuelve el reintento: devuelve la misma venta.
+    await ownerDb.update(jobOrder).set({ promisedOn: inDays(-3) }).where(eq(jobOrder.id, first.order.id))
+    const again = await s.f.run((tx) =>
+      createJobOrderSale(tx, ...s.f.args, {
+        branchId: s.branchId,
+        requestId,
+        title: "Lentes monofocales con antirreflejo",
+        maker: "Laboratorio Visión Andina",
+        promisedOn: inDays(7),
+        lines: [
+          { kind: "montura", productId: s.frameId },
+          { kind: "lunas", description: "Lunas monofocales con antirreflejo", amountCents: 25_000 },
+        ],
+        referenceId: s.prescription!.id,
+        fitting: { alturaOd: 18, alturaOi: 18.5 },
+        payments: [{ paymentMethodId: s.cashId, amountCents: 30_000 }],
+        cashReceivedCents: 30_000,
+      }),
+    )
+    expect(again.order.id).toBe(first.order.id)
+  })
+
+  it("a precio libre no hay cantidad: el precio es el de todo", async () => {
+    const s = await store()
+    await expect(sell(s, { lines: [{ kind: "lunas", description: "Lunas", amountCents: 10_000, quantity: 2 }] })).rejects.toMatchObject({
+      fields: { "lines[0].quantity": expect.any(String) },
+    })
   })
 
   it("anular pide el motivo, y anulado ya no avanza", async () => {

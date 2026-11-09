@@ -5,6 +5,7 @@ CREATE TABLE "job_order" (
 	"patient_id" uuid NOT NULL,
 	"order_number" integer NOT NULL,
 	"request_key" text,
+	"request_fingerprint" text,
 	"status" text DEFAULT 'por_enviar' NOT NULL,
 	"promised_on" date NOT NULL,
 	"maker" text NOT NULL,
@@ -57,24 +58,26 @@ ALTER TABLE "product" ADD COLUMN "brand" text;--> statement-breakpoint
 ALTER TABLE "product" ADD COLUMN "model" text;--> statement-breakpoint
 ALTER TABLE "product" ADD COLUMN "color" text;--> statement-breakpoint
 ALTER TABLE "product" ADD COLUMN "size" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "job_order_org_id_uidx" ON "job_order" USING btree ("organization_id","id");--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_branch_id_branch_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branch"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "job_order" ADD CONSTRAINT "job_order_remake_of_job_order_id_fk" FOREIGN KEY ("remake_of") REFERENCES "public"."job_order"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_patient_fk" FOREIGN KEY ("organization_id","patient_id") REFERENCES "public"."patient"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_order" ADD CONSTRAINT "job_order_remake_fk" FOREIGN KEY ("organization_id","remake_of") REFERENCES "public"."job_order"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order_event" ADD CONSTRAINT "job_order_event_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "job_order_event" ADD CONSTRAINT "job_order_event_job_order_id_job_order_id_fk" FOREIGN KEY ("job_order_id") REFERENCES "public"."job_order"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order_event" ADD CONSTRAINT "job_order_event_actor_user_id_user_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_order_event" ADD CONSTRAINT "job_order_event_order_fk" FOREIGN KEY ("organization_id","job_order_id") REFERENCES "public"."job_order"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_job_order_id_job_order_id_fk" FOREIGN KEY ("job_order_id") REFERENCES "public"."job_order"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_product_id_product_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."product"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_charge_id_patient_charge_id_fk" FOREIGN KEY ("charge_id") REFERENCES "public"."patient_charge"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_order_fk" FOREIGN KEY ("organization_id","job_order_id") REFERENCES "public"."job_order"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_product_fk" FOREIGN KEY ("organization_id","product_id") REFERENCES "public"."product"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_order_line" ADD CONSTRAINT "job_order_line_charge_fk" FOREIGN KEY ("organization_id","charge_id") REFERENCES "public"."patient_charge"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "job_order_number_uidx" ON "job_order" USING btree ("organization_id","order_number");--> statement-breakpoint
 CREATE UNIQUE INDEX "job_order_request_uidx" ON "job_order" USING btree ("organization_id","request_key");--> statement-breakpoint
 CREATE INDEX "job_order_status_idx" ON "job_order" USING btree ("organization_id","status","promised_on");--> statement-breakpoint
 CREATE INDEX "job_order_patient_idx" ON "job_order" USING btree ("organization_id","patient_id");--> statement-breakpoint
 CREATE INDEX "job_order_event_order_idx" ON "job_order_event" USING btree ("organization_id","job_order_id","at");--> statement-breakpoint
 CREATE INDEX "job_order_line_order_idx" ON "job_order_line" USING btree ("organization_id","job_order_id");--> statement-breakpoint
+CREATE INDEX "job_order_line_charge_idx" ON "job_order_line" USING btree ("organization_id","charge_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "product_org_barcode_uidx" ON "product" USING btree ("organization_id","barcode");--> statement-breakpoint
 
 -- Las reglas del pedido (ADR 0168): de la clínica, con su RLS. La historia de

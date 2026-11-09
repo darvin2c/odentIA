@@ -1,5 +1,5 @@
 {
-  "id": "1f68050a-b5c4-4221-9f9c-ebf3594dcfd2",
+  "id": "79898a04-d3b1-4475-b590-2350c134aa3a",
   "prevId": "302f9178-a50c-47e9-9c16-257c66defdb8",
   "version": "7",
   "dialect": "postgresql",
@@ -42144,6 +42144,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "request_fingerprint": {
+          "name": "request_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -42239,6 +42245,27 @@
         }
       },
       "indexes": {
+        "job_order_org_id_uidx": {
+          "name": "job_order_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "job_order_number_uidx": {
           "name": "job_order_number_uidx",
           "columns": [
@@ -42357,19 +42384,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "job_order_remake_of_job_order_id_fk": {
-          "name": "job_order_remake_of_job_order_id_fk",
-          "tableFrom": "job_order",
-          "tableTo": "job_order",
-          "columnsFrom": [
-            "remake_of"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "job_order_created_by_user_id_fk": {
           "name": "job_order_created_by_user_id_fk",
           "tableFrom": "job_order",
@@ -42391,6 +42405,21 @@
           "columnsFrom": [
             "organization_id",
             "patient_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "job_order_remake_fk": {
+          "name": "job_order_remake_fk",
+          "tableFrom": "job_order",
+          "tableTo": "job_order",
+          "columnsFrom": [
+            "organization_id",
+            "remake_of"
           ],
           "columnsTo": [
             "organization_id",
@@ -42511,19 +42540,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "job_order_event_job_order_id_job_order_id_fk": {
-          "name": "job_order_event_job_order_id_job_order_id_fk",
-          "tableFrom": "job_order_event",
-          "tableTo": "job_order",
-          "columnsFrom": [
-            "job_order_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "job_order_event_actor_user_id_user_id_fk": {
           "name": "job_order_event_actor_user_id_user_id_fk",
           "tableFrom": "job_order_event",
@@ -42533,6 +42549,21 @@
             "actor_user_id"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "job_order_event_order_fk": {
+          "name": "job_order_event_order_fk",
+          "tableFrom": "job_order_event",
+          "tableTo": "job_order",
+          "columnsFrom": [
+            "organization_id",
+            "job_order_id"
+          ],
+          "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",
@@ -42646,6 +42677,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "job_order_line_charge_idx": {
+          "name": "job_order_line_charge_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "charge_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -42662,40 +42714,46 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "job_order_line_job_order_id_job_order_id_fk": {
-          "name": "job_order_line_job_order_id_job_order_id_fk",
+        "job_order_line_order_fk": {
+          "name": "job_order_line_order_fk",
           "tableFrom": "job_order_line",
           "tableTo": "job_order",
           "columnsFrom": [
+            "organization_id",
             "job_order_id"
           ],
           "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "job_order_line_product_id_product_id_fk": {
-          "name": "job_order_line_product_id_product_id_fk",
+        "job_order_line_product_fk": {
+          "name": "job_order_line_product_fk",
           "tableFrom": "job_order_line",
           "tableTo": "product",
           "columnsFrom": [
+            "organization_id",
             "product_id"
           ],
           "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "job_order_line_charge_id_patient_charge_id_fk": {
-          "name": "job_order_line_charge_id_patient_charge_id_fk",
+        "job_order_line_charge_fk": {
+          "name": "job_order_line_charge_fk",
           "tableFrom": "job_order_line",
           "tableTo": "patient_charge",
           "columnsFrom": [
+            "organization_id",
             "charge_id"
           ],
           "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",

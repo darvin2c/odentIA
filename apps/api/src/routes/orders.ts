@@ -16,15 +16,19 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { patientLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 /**
  * El pedido al taller o al laboratorio (ADR 0168), común a los productos; vistIA
  * lo usa con los lentes. Verlo es de `orders.read`; venderlo crea cargos y cobra
- * el adelanto, así que pide además la caja (`finance.write`). Copiar la receta en
- * el pedido pide verla: la vigente (`clinical.prescription`, Ventas) o la historia.
- * Lo que falta pagar solo lo ve quien ve la caja.
+ * el adelanto, así que pide además la caja (`finance.write`), como anular (anula sus
+ * cargos) y rehacer (decide no cobrar otra vez): el taller marca cómo va y nada
+ * más. Copiar la receta en el pedido pide verla: la vigente (`clinical.prescription`,
+ * Ventas) o la historia; leer la copia, además, quien hace el pedido
+ * (`orders.prescription`, Taller), y queda en «Consultas a la historia». Lo que
+ * falta pagar solo lo ve quien ve la caja.
  */
 const text = (max: number) => z.string().trim().max(max)
 const saleInput = z
@@ -71,6 +75,7 @@ const remakeInput = z
     reason: z.string().trim().min(1, "Escribe por qué se rehace.").max(2000),
     promisedOn: z.iso.date("Elige la fecha en el calendario."),
     maker: text(200).optional(),
+    requestId: z.uuid(),
   })
   .strict()
 const LIST_STATUS = ["abiertos", "atrasados", ...JOB_ORDER_STEPS, "anulado"] as const
@@ -80,6 +85,7 @@ const FORBIDDEN = {
   write: "No tienes permiso para cambiar los pedidos",
   sell: "No tienes permiso para vender: hace falta la caja",
   prescription: "No tienes permiso para ver la receta de esta persona",
+  money: "No tienes permiso: anular o rehacer un pedido es de quien lleva la caja",
 }
 
 export function createOrdersRoute(deps: CrmDeps) {
@@ -87,6 +93,16 @@ export function createOrdersRoute(deps: CrmDeps) {
   const deny = (c: Context, message: string) => c.json(errorBody(c, "FORBIDDEN", message), 403)
   const seesPrescription = (role: string) => canAccessAny(role, ["clinical.prescription", "clinical.read"])
   const seesMoney = (role: string) => canAccess(role, "finance.read")
+  const readsCopy = (role: string) => canAccessAny(role, ["orders.prescription", "clinical.prescription", "clinical.read"])
+  /** El pedido como lo ve quien pide; si le llega la copia de la receta, queda en «Consultas a la historia». */
+  const detail = async (c: Context, id: string) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const order = await withOrgContext(deps.db, orgId, (tx) =>
+      getJobOrder(tx, orgId, id, { withMoney: seesMoney(memberRole), withPrescription: readsCopy(memberRole) }),
+    )
+    if (order.prescription) await traceClinicalRead(deps.db, { orgId, userId, patientId: order.patientId, resource: "recetas" })
+    return order
+  }
   /** Un pedido de una historia bloqueada no existe para los demás (ADR 0080). */
   const lockedOrder = async (c: Context, id: string) => {
     const { orgId } = orgContextOf(c)
@@ -120,7 +136,12 @@ export function createOrdersRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "orders.write") || !seesPrescription(memberRole)) return deny(c, FORBIDDEN.prescription)
     const patientId = z.uuid().safeParse(c.req.query("patientId"))
     if (!patientId.success) return c.json(errorBody(c, "VALIDATION", "Elige a la persona"), 400)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => saleReferencesOf(tx, orgId, patientId.data)))
+    const { userId } = orgContextOf(c)
+    return runService(c, 200, async () => {
+      const references = await withOrgContext(deps.db, orgId, (tx) => saleReferencesOf(tx, orgId, patientId.data))
+      if (references.length) await traceClinicalRead(deps.db, { orgId, userId, patientId: patientId.data, resource: "recetas" })
+      return references
+    })
   })
 
   app.post("/sale", async (c) => {
@@ -131,7 +152,10 @@ export function createOrdersRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { patientId, ...input } = parsed.data
     if (input.referenceId && !seesPrescription(memberRole)) return deny(c, FORBIDDEN.prescription)
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => createJobOrderSale(tx, orgId, userId, patientId, input)))
+    return runService(c, 201, async () => {
+      const sale = await withOrgContext(deps.db, orgId, (tx) => createJobOrderSale(tx, orgId, userId, patientId, input))
+      return { ...sale, order: await detail(c, sale.order.id) }
+    })
   })
 
   app.get("/:id", async (c) => {
@@ -141,41 +165,48 @@ export function createOrdersRoute(deps: CrmDeps) {
     if (!z.uuid().safeParse(id).success) return c.json(errorBody(c, "NOT_FOUND", "Pedido no encontrado"), 404)
     const refusal = await lockedOrder(c, id)
     if (refusal) return refusal
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getJobOrder(tx, orgId, id, { withMoney: seesMoney(memberRole) })))
+    return runService(c, 200, () => detail(c, id))
   })
 
   const change =
-    <T extends z.ZodType>(schema: T, run: (tx: Parameters<Parameters<typeof withOrgContext>[2]>[0], orgId: string, userId: string, id: string, body: z.infer<T>) => Promise<unknown>) =>
+    <T extends z.ZodType>(
+      schema: T,
+      run: (tx: Parameters<Parameters<typeof withOrgContext>[2]>[0], orgId: string, userId: string, id: string, body: z.infer<T>) => Promise<unknown>,
+      options: { money?: boolean } = {},
+    ) =>
     async (c: Context) => {
       const { orgId, userId, memberRole } = orgContextOf(c)
       if (!canAccess(memberRole, "orders.write")) return deny(c, FORBIDDEN.write)
+      if (options.money && !canAccess(memberRole, "finance.write")) return deny(c, FORBIDDEN.money)
       const id = c.req.param("id") ?? ""
       if (!z.uuid().safeParse(id).success) return c.json(errorBody(c, "NOT_FOUND", "Pedido no encontrado"), 404)
       const parsed = schema.safeParse(await c.req.json().catch(() => null))
       if (!parsed.success) return validationError(c, parsed.error.issues)
       const refusal = await lockedOrder(c, id)
       if (refusal) return refusal
-      return runService(c, 200, () =>
-        withOrgContext(deps.db, orgId, async (tx) => {
-          await run(tx, orgId, userId, id, parsed.data)
-          return getJobOrder(tx, orgId, id, { withMoney: seesMoney(memberRole) })
-        }),
-      )
+      return runService(c, 200, async () => {
+        await withOrgContext(deps.db, orgId, (tx) => run(tx, orgId, userId, id, parsed.data))
+        return detail(c, id)
+      })
     }
 
   app.post("/:id/advance", change(advanceInput, (tx, orgId, userId, id, body) => advanceJobOrder(tx, orgId, userId, id, body)))
-  app.post("/:id/void", change(reasonInput, (tx, orgId, userId, id, body) => voidJobOrder(tx, orgId, userId, id, body)))
+  app.post("/:id/void", change(reasonInput, (tx, orgId, userId, id, body) => voidJobOrder(tx, orgId, userId, id, body), { money: true }))
   // Rehacer crea otro pedido: la respuesta es el nuevo.
   app.post("/:id/remake", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "orders.write")) return deny(c, FORBIDDEN.write)
+    if (!canAccess(memberRole, "finance.write")) return deny(c, FORBIDDEN.money)
     const id = c.req.param("id")
     if (!z.uuid().safeParse(id).success) return c.json(errorBody(c, "NOT_FOUND", "Pedido no encontrado"), 404)
     const parsed = remakeInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const refusal = await lockedOrder(c, id)
     if (refusal) return refusal
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => remakeJobOrder(tx, orgId, userId, id, parsed.data)))
+    return runService(c, 201, async () => {
+      const remade = await withOrgContext(deps.db, orgId, (tx) => remakeJobOrder(tx, orgId, userId, id, parsed.data))
+      return detail(c, remade.id)
+    })
   })
 
   return app

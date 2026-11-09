@@ -38,7 +38,7 @@
  * Rol o permiso desconocido siempre deniega, incluso para owner/admin.
  */
 
-import { type ClinicalProduct, productWords } from "@odentia/clinical";
+import { BASE_PRODUCT, type ClinicalProduct, productWords } from "@odentia/clinical";
 
 /** Roles de membresía de la organización. */
 export const ORG_ROLES = ["owner", "admin", "reception", "clinician", "cashier", "sales", "workshop", "member"] as const;
@@ -91,7 +91,8 @@ export type Permission =
   | "catalog.read"
   | "inventory.stock"
   | "inventory.receive"
-  | "clinical.prescription";
+  | "clinical.prescription"
+  | "orders.prescription";
 
 /** Etiquetas en español para la UI de miembros. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
@@ -149,6 +150,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "inventory.receive",
   // La receta de lentes vigente, sin el resto de la historia (Ventas en vistIA).
   "clinical.prescription",
+  // La copia de la receta en el pedido, para hacerlo (Taller en vistIA, ADR 0168).
+  "orders.prescription",
 ];
 
 /**
@@ -252,7 +255,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "orders.write",
   ],
   // Taller (vistIA): los pedidos con sus medidas y cómo van; nada más.
-  workshop: ["orders.read", "orders.write", "tasks.read", "tasks.write"],
+  workshop: ["orders.read", "orders.write", "orders.prescription", "tasks.read", "tasks.write"],
   member: ["tasks.read"],
 };
 
@@ -276,7 +279,8 @@ function isPermission(permission: string): permission is Permission {
     permission === "catalog.read" ||
     permission === "inventory.stock" ||
     permission === "inventory.receive" ||
-    permission === "clinical.prescription"
+    permission === "clinical.prescription" ||
+    permission === "orders.prescription"
   ) return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;
@@ -332,7 +336,7 @@ export function seesBilling(role: string): boolean {
 }
 
 /** Roles que `memberRole` puede asignar a otros (sin escalada propia), entre los del producto de la clínica. */
-export function assignableRoles(memberRole: string, product: ClinicalProduct = "dental"): OrgRole[] {
+export function assignableRoles(memberRole: string, product: ClinicalProduct = BASE_PRODUCT): OrgRole[] {
   const normalized = normalizeRole(memberRole);
   const roles = PRODUCT_ROLES[product];
   if (normalized === "owner") return [...roles];
