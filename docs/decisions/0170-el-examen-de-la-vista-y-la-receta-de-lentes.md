@@ -27,4 +27,4 @@ Una óptica examina la vista y entrega una receta: la de anteojos y, aparte, la 
 
 ## Referencias
 
-`packages/optical/src/eye-exam.ts` y `lens-prescription.ts`, `packages/db/drizzle/0076_receta_de_lentes.sql`, `packages/services/src/optical/` (examen, recetas, PDF), `apps/api/src/routes/optical/lens-prescriptions.ts`, `apps/optical-clinic/src/product/optical/`.
+`packages/optical/src/eye-exam.ts` y `lens-prescription.ts`, `packages/db/drizzle/0078_receta_de_lentes.sql`, `packages/services/src/optical/` (examen, recetas, PDF), `apps/api/src/routes/optical/lens-prescriptions.ts`, `apps/optical-clinic/src/product/optical/`.

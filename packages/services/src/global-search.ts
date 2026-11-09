@@ -18,6 +18,7 @@
  *   respuestas: quien llama decide si la frase puede ir al proveedor.
  * - Buscar nunca identifica: un teléfono compartido trae a las dos personas.
  */
+import { expenseCategoryWord } from "@odentia/clinical"
 import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
@@ -515,14 +516,15 @@ export async function searchEverything(
   // Lo que cada profesional cobra de comisión es de quien administra comisiones (ADR 0066:
   // cada resultado pide el permiso de su pantalla); `commissions.read` solo ve lo propio.
   const seesAllCommissions = can("commissions.write")
-  if (can("finance.read") && on("dinero") && !digits) {
+  // Un número también busca gastos: el n.º de operación de Yape o el del comprobante son solo números.
+  if (can("finance.read") && on("dinero")) {
     const expenses = await rows(sql`
       select e.id, e.concept, e.category, e.amount_cents, e.currency, e.spent_at, e.branch_id, s.id as supplier_id, s.name as supplier
       from expense e
       left join purchase_order po on po.organization_id = e.organization_id and po.id = e.purchase_order_id
       left join supplier s on s.organization_id = po.organization_id and s.id = po.supplier_id
       where e.organization_id = ${orgId} and e.voided_at is null
-        and ${foldedWordsMatch([sql`e.concept`, sql`e.category`, sql`e.notes`, sql`s.name`], q)}
+        and ${foldedWordsMatch([sql`e.concept`, sql`e.category`, sql`e.notes`, sql`s.name`, sql`e.supplier_name`, sql`e.receipt_number`, sql`e.payment_reference`, sql`nullif(e.receipt_kind, 'ninguno')`], q)}
         -- Lo que se le paga a una persona (comisiones y todo el tipo «Personal», que también es el
         -- pago de una comisión) dice a quién y cuánto: solo lo encuentra quien administra comisiones (ADR 0166).
         ${seesAllCommissions ? sql`` : sql`and e.category <> 'Personal' and not exists (select 1 from commission_settlement cs where cs.organization_id = e.organization_id and cs.expense_id = e.id)`}
@@ -532,7 +534,7 @@ export async function searchEverything(
         id: String(row.id),
         type: "dinero",
         kind: "gasto",
-        title: [str(row.concept), str(row.category)].filter(Boolean).join(" · "),
+        title: [str(row.concept), row.category ? expenseCategoryWord(String(row.category)) : null].filter(Boolean).join(" · "),
         detail: null,
         at: iso(row.spent_at),
         amount: { cents: num(row.amount_cents), currency: String(row.currency) },

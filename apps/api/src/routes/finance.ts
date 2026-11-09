@@ -42,7 +42,10 @@ import {
   skipRecurringOccurrence,
   unskipRecurringOccurrence,
   updateRecurringExpense,
+  correctExpense,
   getMonthExpenses,
+  listExpenseSuppliers,
+  noteRecurringExpense,
   purchaseLookalikes,
   getPurchasesToPay,
   listClosures,
@@ -349,26 +352,40 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
 
   const recurringMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "El mes debe tener formato AAAA-MM")
 
+  // Con qué se pagó, el comprobante del país y a quién (ADR 0167): lo mismo al registrar, corregir y pagar.
+  const paperFields = {
+    paymentMethodId: z.uuid().nullish(),
+    paymentReference: z.string().max(60).nullish(),
+    receiptType: z.string().max(20).nullish(),
+    supplierId: z.uuid().nullish(),
+    supplierName: z.string().max(200).nullish(),
+    supplierTaxId: z.string().max(20).nullish(),
+  }
+  const expenseFields = {
+    branchId: z.uuid(),
+    category: z.string().max(60).optional(),
+    concept: z.string().trim().min(1, "Escribe en qué se gastó.").max(500, "Escribe como mucho 500 caracteres."),
+    amountCents: cents,
+    currency: currency.optional(),
+    exchangeRate: z.string().max(40).optional(),
+    spentAt: isoDateTime.nullish(),
+    receiptKind: z.string().trim().min(1).max(60).optional(),
+    receiptNumber: z.string().max(60).nullish(),
+    notes: z.string().max(2000).nullish(),
+    fromCash: z.boolean().optional(),
+    // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
+    salesTax: z.boolean().optional(),
+    // La clave del formulario abierto: reintentar tras un corte devuelve el mismo gasto (ADR 0018).
+    requestId: z.uuid().optional(),
+    ...paperFields,
+  }
+
   app.post("/expenses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = z
       .object({
-        branchId: z.uuid(),
-        category: z.string().max(60).optional(),
-        concept: z.string().trim().min(1, "Escribe en qué se gastó.").max(500, "Escribe como mucho 500 caracteres."),
-        amountCents: cents,
-        currency: currency.optional(),
-        exchangeRate: z.string().max(40).optional(),
-        spentAt: isoDateTime.nullish(),
-        receiptKind: z.string().trim().min(1).max(60).optional(),
-        receiptNumber: z.string().max(60).nullish(),
-        notes: z.string().max(2000).nullish(),
-        fromCash: z.boolean().optional(),
-        // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
-        salesTax: z.boolean().optional(),
-        // La clave del formulario abierto: reintentar tras un corte devuelve el mismo gasto (ADR 0018).
-        requestId: z.uuid().optional(),
+        ...expenseFields,
         // «Se repite»: la plantilla, y este gasto queda como su primera ocurrencia.
         repeat: z
           .object({
@@ -413,6 +430,32 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       withOrgContext(deps.db, orgId, (tx) => getRecurringMonth(tx, orgId, parsed.data, new Date(), peopleOf(memberRole))),
     )
   })
+  // «Anotar lo que se repite» (ADR 0167): la plantilla sola, sin pagar nada.
+  app.post("/expenses/recurring", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid(),
+        category: z.string().max(60).optional(),
+        concept: z.string().trim().min(1, "Escribe en qué se gasta.").max(500, "Escribe como mucho 500 caracteres."),
+        amountCents: cents,
+        currency: currency.optional(),
+        everyMonths: z.union([z.literal(1), z.literal(6), z.literal(12)]),
+        day: z.number().int().min(1).max(31),
+        firstMonth: recurringMonthKey.nullish(),
+        memberUserId: z.string().max(200).nullish(),
+        dueNextMonth: z.boolean().optional(),
+        paymentMethodId: z.uuid().nullish(),
+        requestId: z.uuid().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => noteRecurringExpense(tx, orgId, userId, parsed.data, peopleOf(memberRole))),
+    )
+  })
   app.get("/expenses/recurring/people", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     // A quién se le anota un sueldo: lo elige quien lo verá (S1).
@@ -430,6 +473,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         memberUserId: z.string().max(200).nullish(),
         fromCash: z.boolean().optional(),
         lastMonth: recurringMonthKey.nullish(),
+        paymentMethodId: z.uuid().nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -460,6 +504,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
         requestId: z.uuid().optional(),
+        // El cambio de este pago, si es en la otra moneda; sin él, el de hoy.
+        exchangeRate: z.string().max(40).optional(),
+        ...paperFields,
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -525,6 +572,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         expectedPaidCents: z.number().int().min(0).optional(),
         // La clave del cajón: el reintento tras un corte devuelve el mismo pago (ADR 0018).
         requestId: z.uuid().optional(),
+        // Con qué se pagó (ADR 0167): manda sobre `fromCash`.
+        paymentMethodId: z.uuid().nullish(),
+        paymentReference: z.string().max(60).nullish(),
+        receiptType: z.string().max(20).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -563,6 +614,30 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => dismissExpenseGap(tx, orgId, userId, parsed.data)))
+  })
+
+  // «Corregir» (ADR 0167): anula el original con lo que cambió y registra el nuevo, en una operación.
+  app.post("/expenses/:id/correct", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
+    const parsed = z.object(expenseFields).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        correctExpense(tx, orgId, userId, c.req.param("id"), parsed.data, {
+          allowPostClose: canAccess(memberRole, "finance.admin"),
+          seesPeople: canAccess(memberRole, "commissions.write"),
+        }),
+      ),
+    )
+  })
+
+  // A quién se pagó: los proveedores de la clínica, solo nombre y documento (ADR 0167).
+  app.get("/suppliers", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listExpenseSuppliers(tx, orgId)))
   })
 
   app.post("/expenses/:id/void", async (c) => {

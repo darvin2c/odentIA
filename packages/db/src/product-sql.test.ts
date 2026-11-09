@@ -21,11 +21,11 @@ const IMAGE = "dentalagent-postgres:18.6"
  * objeto si tiene su rama o le sirve lo que ya hace.
  */
 const UNNAMED_ON_PURPOSE: Record<string, readonly ClinicalProduct[]> = {
-  // «¿Pagó?» del embudo: lo dental pide el presupuesto aceptado (0001; las ópticas, 0075).
+  // «¿Pagó?» del embudo: lo dental pide el presupuesto aceptado (0001; las ópticas, 0077).
   "vista argos.embudo": ["dental"],
-  // El área de quien atiende: «odontología» fuera de latidIA y vistIA (0036 y 0075).
+  // El área de quien atiende: «odontología» fuera de latidIA y vistIA (0036 y 0077).
   "vista argos.equipo": ["dental"],
-  // Las condiciones de pago que nacen con un consultorio de latidIA o una óptica (0025 y 0075).
+  // Las condiciones de pago que nacen con un consultorio de latidIA o una óptica (0025 y 0077).
   "función public.org_profile_budget_terms": ["dental"],
   // La prueba que abre la clínica al nacer usa el plan de odentIA: aún no sabe su
   // producto, y `startSaasTrial` la corrige para los demás (ADR 0093).
