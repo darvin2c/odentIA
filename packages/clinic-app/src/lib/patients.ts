@@ -701,8 +701,25 @@ export interface TimelineItem {
   dueAt?: string | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** Quién atendió; en una anulada, quién y cuándo la anuló. */
+  professionalName?: string | null
+  voidedByName?: string | null
+  voidedAt?: string | null
+  /** Lo que nació en la atención, dentro de su tarjeta (solo en la historia completa). */
+  born?: EncounterBorn
   /** El periodontograma de la atención: un hecho de ella. */
   periodontal?: PeriodontalBrief | null
+}
+
+/** Lo nacido en una atención; lo anulado o cancelado viene con `retired` para plegarlo. */
+export interface EncounterBorn {
+  indicated: Array<{ id: string; title: string; where: string | null; stateText: string; retired: boolean; budgetId: string | null }>
+  budgets: Array<{ id: string; budgetNumber: number; stateText: string; retired: boolean }>
+  consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
+  prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
+  orders: Array<{ id: string; title: string; state: string }>
+  forms: Array<{ id: string; title: string }>
+  followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
 export interface PlanPendingTotal {

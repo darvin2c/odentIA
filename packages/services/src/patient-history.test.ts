@@ -51,7 +51,7 @@ it("Historia: la atención anulada con su motivo y los papeles como hechos (ADR 
   })
   // El consentimiento sale a la hora en que se firmó, no cuando se preparó.
   const consent = all.data.find((item) => item.type === "consent")
-  expect(consent).toMatchObject({ title: "Firmó el consentimiento: Exodoncia de la pieza 38" })
+  expect(consent).toMatchObject({ title: "Firmó: Exodoncia de la pieza 38", detail: "Lo firmó Paciente de prueba" })
   expect(consent?.createdAt.toISOString()).toBe(signedAt.toISOString())
 
   // «Atenciones» trae solo atenciones (también la anulada); los papeles no tienen filtro propio.
@@ -107,7 +107,7 @@ it("la Historia dice que la receta se anuló y por qué, como con la orden y el 
   expect(fact?.detail).toContain("Se equivocó de dosis")
 })
 
-it("Historia: cada atención va el día en que empezó, aunque se haya cargado después, y la anulada el día en que se anuló", async () => {
+it("Historia: cada atención va el día en que empezó, aunque se haya cargado después, y la anulada también el día en que empezó (con su motivo y cuándo se anuló)", async () => {
   const f = await clinicalFixture()
   await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Abierta por error" }))
   // Firmadas como las cierra la app: primero en borrador (una por persona) y después finalizadas.
