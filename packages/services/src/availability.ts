@@ -1038,6 +1038,11 @@ export interface AgendaAvailability {
     id: string
     label: string
     nextFree: { startsAt: string; endsAt: string; roomId: string | null } | null
+    /**
+     * Viene porque se pidió (`professionalUserId`), aunque no está entre quienes
+     * atienden el servicio en la sede: la pantalla lo dice y se le reserva igual.
+     */
+    outsideService?: true
   }>
   /** Tramos de atención del rango, ya como instantes. */
   open: Array<{ professionalUserId: string; startsAt: string; endsAt: string }>
@@ -1054,6 +1059,25 @@ export interface AgendaAvailability {
  * profesional materializado en el rango, bloqueos y el primer hueco libre de
  * cada uno desde `now`. Sale de las mismas reglas que valida la reserva.
  */
+/** El primer hueco de quien se pidió fuera de la regla del servicio, con lo que dura el servicio. */
+async function outsiderNextFree(
+  tx: Db,
+  orgId: string,
+  window: SlotsQuery,
+  serviceId: string,
+): Promise<AvailableSlotsResult["slots"]> {
+  const [service] = await tx
+    .select({ durationMin: serviceCatalog.durationMin })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, serviceId)))
+    .limit(1)
+  const result = await listAvailableSlots(tx, orgId, {
+    ...window,
+    ...(service?.durationMin ? { durationMin: service.durationMin } : {}),
+  })
+  return result.slots
+}
+
 export async function getAgendaAvailability(
   tx: Db,
   orgId: string,
@@ -1066,6 +1090,13 @@ export async function getAgendaAvailability(
     ignoreAppointmentId?: string
     /** «Nueva cita» con servicio: solo quien lo atiende (ADR 0039). */
     serviceId?: string
+    /**
+     * Quien se pidió al abrir (la sesión que sigue la hace quien atendió la
+     * anterior): si el servicio no lo ofrece, viene igual, marcado. La regla
+     * decide qué se ofrece, no qué se puede guardar (ADR 0039); el equipo
+     * reserva a mano con quien elija.
+     */
+    professionalUserId?: string
   },
 ): Promise<AgendaAvailability> {
   const resolved = await requireBranch(tx, orgId, input.branchId)
@@ -1079,6 +1110,10 @@ export async function getAgendaAvailability(
   const attending = input.serviceId
     ? await attendingRule(tx, orgId, { serviceId: input.serviceId, branchId: input.branchId })
     : null
+  const outsider =
+    attending && input.professionalUserId && !attending.professionalUserIds.includes(input.professionalUserId)
+      ? input.professionalUserId
+      : null
   const rules = await tx
     .select({ rule: professionalSchedule, professionalName: user.name })
     .from(professionalSchedule)
@@ -1088,7 +1123,9 @@ export async function getAgendaAvailability(
         eq(professionalSchedule.organizationId, orgId),
         eq(professionalSchedule.branchId, input.branchId),
         eq(professionalSchedule.isActive, true),
-        attending ? inArray(professionalSchedule.professionalUserId, attending.professionalUserIds) : undefined,
+        attending
+          ? inArray(professionalSchedule.professionalUserId, outsider ? [...attending.professionalUserIds, outsider] : attending.professionalUserIds)
+          : undefined,
       ),
     )
     .orderBy(asc(user.name), asc(professionalSchedule.weekday), asc(professionalSchedule.startMin))
@@ -1115,20 +1152,24 @@ export async function getAgendaAvailability(
     dayLabel = nextLabel
   }
 
-  const [blocks, next] = await Promise.all([
+  const nextWindow = {
+    branchId: input.branchId,
+    from: now.toISOString(),
+    to: new Date(now.getTime() + NEXT_FREE_DAYS * 86_400_000).toISOString(),
+    notBefore: now.toISOString(),
+    // Recepción ve el primer cuarto de hora libre, no la hora que se ofrece a la persona.
+    stepMin: 15,
+    firstPerProfessional: true,
+  }
+  const [blocks, next, outsiderNext] = await Promise.all([
     listScheduleBlocks(tx, orgId, { branchId: input.branchId, from: input.from, to: input.to }),
-    listAvailableSlots(tx, orgId, {
-      branchId: input.branchId,
-      from: now.toISOString(),
-      to: new Date(now.getTime() + NEXT_FREE_DAYS * 86_400_000).toISOString(),
-      notBefore: now.toISOString(),
-      // Recepción ve el primer cuarto de hora libre, no la hora que se ofrece a la persona.
-      stepMin: 15,
-      firstPerProfessional: true,
-      ...(input.serviceId ? { serviceId: input.serviceId } : {}),
-    }),
+    listAvailableSlots(tx, orgId, { ...nextWindow, ...(input.serviceId ? { serviceId: input.serviceId } : {}) }),
+    // Su próximo hueco con lo que dura el servicio, sin la regla que lo deja fuera.
+    outsider && input.serviceId && rules.some((entry) => entry.rule.professionalUserId === outsider)
+      ? outsiderNextFree(tx, orgId, { ...nextWindow, professionalUserId: outsider }, input.serviceId)
+      : [],
   ])
-  const nextByProfessional = new Map(next.slots.map((slot) => [slot.professionalUserId, slot]))
+  const nextByProfessional = new Map([...next.slots, ...outsiderNext].map((slot) => [slot.professionalUserId, slot]))
   const professionals = new Map<string, AgendaAvailability["professionals"][number]>()
   for (const entry of rules) {
     if (professionals.has(entry.rule.professionalUserId)) continue
@@ -1137,6 +1178,7 @@ export async function getAgendaAvailability(
       id: entry.rule.professionalUserId,
       label: entry.professionalName,
       nextFree: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, roomId: slot.roomId } : null,
+      ...(entry.rule.professionalUserId === outsider ? { outsideService: true as const } : {}),
     })
   }
   // Tramos reservables por profesional, con las mismas reglas que valida la reserva.

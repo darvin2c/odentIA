@@ -175,6 +175,27 @@ describe("la agenda ofrece solo a quien atiende el servicio", () => {
     expect(new Set(general.slots.map((slot) => slot.professionalUserId))).toEqual(new Set([PEREZ, RIOS, ROJAS]))
   })
 
+  it("quien se pidió al abrir viene aunque el servicio no lo ofrezca, marcado y con sus horas", async () => {
+    await run((tx) => setSpecialtyProfessionals(tx, ORG, OWNER, endodonciaId, [ROJAS, LEON]))
+    const range = { branchId: centro, serviceId: endoServiceId, from: at(0), to: at(24 * 60), now: new Date(at(0)) }
+    // La sesión que sigue la hace quien atendió: Pérez no está en Endodoncia, pero viene.
+    const view = await run((tx) => getAgendaAvailability(tx, ORG, { ...range, professionalUserId: PEREZ }))
+    expect(view.attending?.professionalUserIds).toEqual([ROJAS])
+    const perez = view.professionals.find((item) => item.id === PEREZ)
+    expect(perez?.outsideService).toBe(true)
+    expect(perez?.nextFree).not.toBeNull()
+    expect(view.free.some((item) => item.professionalUserId === PEREZ)).toBe(true)
+    expect(view.professionals.find((item) => item.id === ROJAS)?.outsideService).toBeUndefined()
+    // Nadie más se suma: Ríos sigue fuera.
+    expect(view.professionals.map((item) => item.id).sort()).toEqual([PEREZ, ROJAS].sort())
+    // Pedir a quien sí atiende no marca nada; pedir a alguien sin horario en la sede no suma a nadie.
+    const rojas = await run((tx) => getAgendaAvailability(tx, ORG, { ...range, professionalUserId: ROJAS }))
+    expect(rojas.professionals.map((item) => item.id)).toEqual([ROJAS])
+    expect(rojas.professionals[0]?.outsideService).toBeUndefined()
+    const elsewhere = await run((tx) => getAgendaAvailability(tx, ORG, { ...range, professionalUserId: "nadie-de-aqui" }))
+    expect(elsewhere.professionals.map((item) => item.id)).toEqual([ROJAS])
+  })
+
   it("los huecos se ordenan por hora, mezclando a los profesionales", async () => {
     const result = await run((tx) =>
       listAvailableSlots(tx, ORG, { branchId: centro, durationMin: 30, from: at(8 * 60), to: at(12 * 60) }),
