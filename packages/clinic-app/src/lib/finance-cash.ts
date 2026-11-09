@@ -855,6 +855,10 @@ export interface ExpenseRow {
   replaced?: ExpenseBefore | null
   /** Toda la cadena de correcciones, de la más reciente a la primera. */
   history?: ExpenseBefore[]
+  /** `false` si la cadena se cortó (en un sueldo, para quien no los ve): lo último no es lo primero. */
+  historyComplete?: boolean
+  /** El pago (o una parte) de una factura por pagar (ADR 0174). */
+  payableId?: string | null
   notes: string | null
   voidedAt: string | null
   voidReason: string | null

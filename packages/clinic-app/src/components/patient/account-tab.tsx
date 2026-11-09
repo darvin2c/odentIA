@@ -639,8 +639,16 @@ export function AccountTab({
                     return (
                       <p className="text-sm">
                         {label}: <span className="font-semibold tabular-nums">{money(cost, group.currency)}</span>
-                        {owed > 0 ? ` (por pagar ${money(owed, group.currency)})` : " (pagado)"}. De lo que pagó, queda{" "}
-                        <span className="font-semibold tabular-nums">{money(group.paidCents - cost, group.currency)}</span>.
+                        {owed > 0 ? ` (por pagar ${money(owed, group.currency)})` : " (pagado)"}.{" "}
+                        {group.paidCents >= cost ? (
+                          <>
+                            De lo que pagó, queda <span className="font-semibold tabular-nums">{money(group.paidCents - cost, group.currency)}</span>.
+                          </>
+                        ) : (
+                          <>
+                            Cuesta <span className="font-semibold tabular-nums">{money(cost - group.paidCents, group.currency)}</span> más de lo que pagó hasta hoy.
+                          </>
+                        )}
                         {foreignWords ? ` Además, ${foreignWords} en otra moneda.` : ""}
                       </p>
                     )

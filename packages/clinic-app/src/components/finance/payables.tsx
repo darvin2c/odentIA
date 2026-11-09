@@ -145,7 +145,7 @@ export function PayableVoidDrawer({ payable, locale, onClose }: { payable: Payab
         description={
           voiding && voiding.paidCents > 0
             ? `Tiene ${formatMoney(voiding.paidCents, voiding.currency, locale)} pagados: anula primero esos pagos en la lista de gastos.`
-            : "Deja de estar por pagar y queda en el historial con su motivo. Es para lo anotado por error."
+            : "Deja de estar por pagar; queda registrada con su motivo en la actividad del equipo. Es para lo anotado por error."
         }
         onClose={onClose}
         onConfirm={async (reason) => {
@@ -361,7 +361,7 @@ export function NotePayableDrawer({
                   />
                   <datalist id={supplierListId}>
                     {(suppliers.data?.data ?? []).map((item) => (
-                      <option key={item.id} value={item.name} />
+                      <option key={item.name} value={item.name} />
                     ))}
                   </datalist>
                 </>

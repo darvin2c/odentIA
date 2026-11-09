@@ -8,7 +8,7 @@ import { branch } from "@odentia/db/schema/org"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { expensesMonthCsv } from "./expense-csv.js"
-import { addCashMovement, correctExpense, createExpense, getMonthExpenses, voidExpense } from "./finance.js"
+import { addCashMovement, correctExpense, createExpense, getMonthExpenses, listExpenseSuppliers, voidExpense } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -182,4 +182,27 @@ it("lo anulado para convertirlo en sueldo no dice su motivo a caja (ADR 0166)", 
   expect(JSON.stringify(cashier)).not.toContain("asistente")
   const owner = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...thisMonth(), branchId }, { seesCommissions: true }))
   expect(owner.expenses.find((row) => row.id === taxi.id)?.voidReason).toMatch(/Personal/)
+})
+
+it("los proveedores escritos a mano se sugieren con su RUC; lo pagado al personal, nunca (ADR 0166)", async () => {
+  const { f, branchId, yape } = await setup()
+  const base = { branchId, currency: "PEN", paymentMethodId: yape.id }
+  const lab = `Laboratorio QA ${randomUUID().slice(0, 8)}`
+  await f.run((tx) =>
+    createExpense(tx, "org_a", f.actor, { ...base, category: "Laboratorio", concept: "Corona", amountCents: 1_000, receiptType: "01", supplierName: lab, supplierTaxId: "20512345671" }),
+  )
+  const person = `Persona QA ${randomUUID().slice(0, 8)}`
+  await f.run((tx) =>
+    createExpense(
+      tx,
+      "org_a",
+      f.actor,
+      { ...base, category: "Personal", concept: "Honorarios", amountCents: 1_000, receiptType: "02", supplierName: person, supplierTaxId: "10456789012" },
+      {},
+      { seesPeople: true },
+    ),
+  )
+  const list = await f.run((tx) => listExpenseSuppliers(tx, "org_a"))
+  expect(list.find((row) => row.name === lab)).toMatchObject({ id: null, docType: "RUC", docNumber: "20512345671" })
+  expect(list.some((row) => row.name === person)).toBe(false)
 })

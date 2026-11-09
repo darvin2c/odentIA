@@ -577,7 +577,7 @@ export function ExpensesTab({
                 : []),
               // Cada versión anterior, de la más reciente a la primera: qué era y por qué se corrigió.
               ...(viewing.history?.length ? viewing.history : viewing.replaced ? [viewing.replaced] : []).map((was, index, all) => [
-                index === 0 ? "Antes" : index === all.length - 1 ? "Al principio" : "Antes de eso",
+                index === 0 ? "Antes" : index === all.length - 1 && viewing.historyComplete !== false ? "Al principio" : "Antes de eso",
                 `${was.concept} · ${formatMoney(was.amountCents, was.currency, locale)} · ${expenseCategoryLabel(was.category)} · ${formatDayMonth(was.spentAt, locale, zone)}${was.methodName ? ` · ${was.methodName}` : ""}${was.reason ? `. ${was.reason}` : ""}`,
               ]),
               ...(viewing.voidedAt ? [["Anulado", viewing.voidReason ?? "Sin motivo"]] : []),
@@ -622,6 +622,8 @@ export function ExpensesTab({
               : "Queda en el historial con su motivo y deja de sumar en el mes.",
           // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
           !adminVoids && voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
+          // Es el pago de una factura por pagar: vuelve a deber lo que este pago cubría (ADR 0174).
+          !adminVoids && voiding?.payableId ? "La factura vuelve a deber lo que este pago cubría." : "",
           // Es el pago de una compra: la compra vuelve a deber lo que este pago cubría de lo recibido (ADR 0061).
           !adminVoids && voiding?.purchaseOrderNumber != null
             ? `La compra ${purchaseOrderLabel(voiding.purchaseOrderNumber)} vuelve a deber lo que este pago cubría de lo recibido.`

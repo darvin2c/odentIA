@@ -1986,6 +1986,8 @@ export async function getMonthExpenses(
        * contar lo que se pagaba (ADR 0166).
        */
       history: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).map(beforeWords),
+      /** La cadena llega a su primer gasto (no se cortó en un sueldo para quien no los ve). */
+      historyComplete: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).length === chainOf(row.replacesExpenseId).length,
       commission: settlement !== undefined,
       salary: salaries.has(row.id),
       /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */
@@ -2140,8 +2142,10 @@ export async function listExpenseSuppliers(tx: Db, orgId: string) {
   // así se sugieren igual y el contador no ve dos nombres para el mismo proveedor.
   const written = await tx.execute<{ name: string; taxId: string | null }>(sql`
     select distinct on (lower(name)) name, tax_id as "taxId" from (
+      -- Nunca lo pagado al personal: su recibo por honorarios dice el nombre y el RUC de la persona (ADR 0166).
       select supplier_name as name, supplier_tax_id as tax_id, created_at from expense
         where organization_id = ${orgId} and supplier_id is null and supplier_name is not null and voided_at is null
+          and category <> ${STAFF_PAY_CATEGORY}
       union all
       select supplier_name, supplier_tax_id, created_at from expense_payable
         where organization_id = ${orgId} and supplier_id is null and voided_at is null

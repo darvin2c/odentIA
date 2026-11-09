@@ -658,6 +658,7 @@ export function ExpenseFormDrawer({
             {expenseCategoryLabel(correcting.category)} ·{" "}
             {correcting.methodName ?? (correcting.fromCash ? "Efectivo de la caja" : "Otro medio")}. Al guardar, ese queda anulado
             con lo que cambió y se registra este. Si salió de la caja, vuelve y sale lo nuevo.
+            {correcting.payableId ? " Es el pago de una factura: sigue siendo de ella, sin pasar de lo que falta." : ""}
           </p>
         ) : null}
         {fixed ? null : (
@@ -995,7 +996,7 @@ export function ExpenseFormDrawer({
                       />
                       <datalist id={supplierListId}>
                         {(suppliers.data?.data ?? []).map((item) => (
-                          <option key={item.id} value={item.name} />
+                          <option key={item.name} value={item.name} />
                         ))}
                       </datalist>
                     </>

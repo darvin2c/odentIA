@@ -18,14 +18,14 @@ La factura de la corona del laboratorio llega hoy y se paga a fin de mes, a vece
 
   Dentalink lo ata a la prestación del plan del paciente.
 - **Quién ve qué.**
-  - Anotar, pagar y anular la factura: `finance.write`, como un gasto.
+  - Anotar, pagar, corregir (sin pagos) y anular la factura: `finance.write`, como un gasto. Caja ve de qué paciente y tratamiento es la factura, porque la paga y ya ve a los pacientes; no ve el margen.
   - El costo junto a lo cobrado del tratamiento, en la cuenta de la paciente: solo `commissions.write`.
   - Una historia bloqueada (ADR 0080) no dice de quién es la factura.
 - **No se borra.** Se anula con su motivo y solo sin pagos vigentes; la base solo deja cambiar la anulación.
 - **Dónde se ve.**
   - En Gastos › Por pagar, antes de lo que se repite, con su vencimiento.
   - En Reportes › Lo que debes, como «Facturas por pagar».
-  - En la descarga del mes van sus pagos, que son gastos.
+  - En la descarga del mes van sus pagos, que son gastos. Lo emitido y aún no pagado no va: la descarga es de lo pagado (pendiente: una lista de facturas recibidas para el registro de compras).
 
 ## Alternativas descartadas
 

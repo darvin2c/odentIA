@@ -302,10 +302,19 @@ export async function correctPayable(tx: Db, orgId: string, actorUserId: string,
     (input.receiptNumber ?? null) !== owed.receiptNumber ? `número ${owed.receiptNumber ?? "sin"} → ${input.receiptNumber ?? "sin"}` : null,
     (input.dueOn ?? null) !== owed.dueOn ? `vence ${owed.dueOn ?? "sin fecha"} → ${input.dueOn ?? "sin fecha"}` : null,
   ].filter((text): text is string => text !== null)
+  const reason = `Corregida${changes.length ? `: ${changes.join("; ")}` : ""}`.slice(0, 2000)
   await tx
     .update(expensePayable)
-    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: `Corregida${changes.length ? `: ${changes.join("; ")}` : ""}`.slice(0, 2000), updatedAt: new Date() })
+    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason, updatedAt: new Date() })
     .where(and(eq(expensePayable.organizationId, orgId), eq(expensePayable.id, payableId)))
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    entity: "expense_payable",
+    entityId: payableId,
+    action: "finance.payable_corrected",
+    metadata: { reason },
+  })
   return notePayable(tx, orgId, actorUserId, { ...input, branchId: input.branchId ?? owed.branchId })
 }
 
