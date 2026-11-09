@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import { patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
@@ -17,15 +17,30 @@ import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
 import { expect, it, onTestFinished, vi } from "vitest"
 import { createRoom } from "./appointments.js"
-import { setMessageChoice } from "./automation.js"
+import { invalidateAppointmentTokens, setMessageChoice } from "./automation.js"
 import { listApprovedMessages } from "./clinic-messages.js"
-import { confirmBookingLinkAppointment, issuePersonalLink, listBookingLinkSlots, reserveBookingLink, revokePersonalLinks } from "./booking-links.js"
+import {
+  cancelBookingLinkAppointment,
+  changeBookingLinkAppointment,
+  confirmBookingLinkAppointment,
+  contactHandlesAppointment,
+  createBookingLink,
+  issueAgendaLink,
+  issuePersonalLink,
+  listBookingLinkSlots,
+  reserveBookingLink,
+  revokePersonalLinks,
+} from "./booking-links.js"
+import { grantResponsibility } from "./responsibilities.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { hidePersonalLinkRefs, personalLinkRef, personalLinkToken, resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { createBudget, deliverBudget } from "./budgets.js"
+import { sendBudget } from "./budget-send.js"
+import type { Storage } from "./storage.js"
 import {
   confirmLinkSignedConsent,
   createConsentDocument,
+  listLinkSignedToConfirm,
   createConsentTemplate,
   createFormTemplate,
   listConsentDocuments,
@@ -50,7 +65,10 @@ import {
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkView,
+  maskedAddress,
   personalLinkForEmailToken,
+  resendPersonalLink,
+  sendConsentToSign,
   sendPersonalLink,
   signPersonalLinkConsent,
   submitPersonalLinkData,
@@ -98,6 +116,11 @@ it("uno por persona; «Tus datos» pide solo lo que falta, se envía una vez y n
   // Nada de lo guardado viaja a la página: ni su celular ni su apellido.
   expect(JSON.stringify(view)).not.toContain("987111222")
   expect(JSON.stringify(view)).not.toContain("Ríos")
+  // Tampoco cuando el enlace ofrece reservar y muestra «Tus datos»: el celular va abreviado.
+  const booking = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: pedro.personId, patientId: pedro.patientId, booking: true }, { secretsKey: KEY }))
+  const bookingView = await f.run((tx) => getPersonalLinkView(tx, ORG, booking.token))
+  expect(bookingView.you?.phone).toBe("•••222")
+  expect(JSON.stringify(bookingView)).not.toContain("987111222")
 
   // Lo que no falta no se toca aunque venga en el envío.
   await f.run((tx) =>
@@ -207,7 +230,7 @@ it("si la fecha dice que es menor, desde el enlace no se registra a nadie: queda
   expect(notes.map((note) => note.body).join(" ")).toContain("Rosa Paz, DNI 42345678")
 })
 
-it("la tía: otro vínculo que abre el enlace ve solo la cita; ni presupuesto, ni consentimiento, ni sus datos", async () => {
+it("la tía: otro vínculo que abre el enlace no ve el presupuesto, el consentimiento ni sus datos (y sin autorización, tampoco la cita)", async () => {
   const f = await clinicalFixture()
   const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía", givenNames: "Marta" }).returning({ id: contact.id })
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
@@ -227,6 +250,139 @@ it("la tía: otro vínculo que abre el enlace ve solo la cita; ni presupuesto, n
   const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
   const own = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id }, { secretsKey: KEY }))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, own.token))).budgets.map((row) => row.id)).toEqual([budget.id])
+})
+
+/** Una cita por venir del paciente, en una sede nueva. */
+async function upcomingAppointment(f: Awaited<ReturnType<typeof clinicalFixture>>, patientId: string) {
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  const startsAt = new Date(Date.now() + 3 * 86_400_000)
+  const [booked] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: ORG,
+      branchId: site!.id,
+      patientId,
+      professionalUserId: f.actor,
+      roomId: room.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+    })
+    .returning({ id: appointment.id })
+  return booked!.id
+}
+
+/** Un token de «confirmar» o «cancelar» de un correo de recordatorio, para esa persona y esa cita. */
+async function emailToken(appointmentId: string, contactId: string, purpose: "confirm" | "cancel" = "confirm") {
+  const raw = randomUUID()
+  await ownerDb.insert(automationLinkToken).values({
+    tokenHash: createHash("sha256").update(raw).digest("hex"),
+    organizationId: ORG,
+    purpose,
+    appointmentId,
+    contactId,
+    expiresAt: new Date(Date.now() + 3 * 86_400_000),
+  })
+  return raw
+}
+
+it("S3: un familiar sin autorización no ve ni maneja la cita, tampoco con un enlace que ya tenía", async () => {
+  const f = await clinicalFixture()
+  const appointmentId = await upcomingAppointment(f, f.patient.id)
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía", givenNames: "Marta" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  // Un enlace que ya le llegó antes de este cambio: sigue sin mostrarle la cita ni dejarla tocar.
+  const sent = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id, appointmentId }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, sent.token))).appointment).toBeNull()
+  await expect(f.run((tx) => confirmBookingLinkAppointment(tx, ORG, sent.token))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  await expect(f.run((tx) => cancelBookingLinkAppointment(tx, ORG, sent.token))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  await expect(
+    f.run((tx) => changeBookingLinkAppointment(tx, ORG, sent.token, { startsAt: new Date(Date.now() + 4 * 86_400_000).toISOString(), professionalUserId: f.actor })),
+  ).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  const [still] = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, appointmentId))
+  expect(still?.status).toBe("programada")
+  // Sofi y la Bandeja tampoco se lo dan: lo mismo que el chat le negaría.
+  const conversationId = await chatOf(tia!.id, new Date())
+  await expect(
+    f.run((tx) => createBookingLink(tx, ORG, { conversationId, patientId: f.patient.id }, { secretsKey: KEY })),
+  ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  await expect(
+    f.run((tx) => createBookingLink(tx, ORG, { conversationId, patientId: f.patient.id, booking: false }, { secretsKey: KEY })),
+  ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  await expect(
+    f.run((tx) => issueAgendaLink(tx, ORG, { conversationId, patientId: f.patient.id }, { secretsKey: KEY })),
+  ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  // Solo la falta de autorización es «no autorizado»: un contacto desactivado no se disfraza de eso.
+  expect(await f.run((tx) => contactHandlesAppointment(tx, ORG, tia!.id, f.patient.id))).toBe(false)
+  const [primo] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Luis Primo", isActive: false }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: primo!.id, relationship: "family", createdBy: f.actor })
+  await expect(f.run((tx) => contactHandlesAppointment(tx, ORG, primo!.id, f.patient.id))).rejects.toMatchObject({ code: "NOT_FOUND" })
+  // Con su autorización vigente sí ve la cita (y nada más que la cita).
+  await f.run((tx) =>
+    grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: tia!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }),
+  )
+  const allowed = await f.run((tx) => createBookingLink(tx, ORG, { conversationId, patientId: f.patient.id, booking: false }, { secretsKey: KEY }))
+  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, allowed.token))
+  expect(view).toMatchObject({ appointment: { canConfirm: true }, budgets: [], consents: [], data: null })
+})
+
+it("S4: «Quitar enlace» y terminar el vínculo vencen los botones del correo; el correo de quien no tiene facultad no emite nada", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+    const appointmentId = await upcomingAppointment(f, f.patient.id)
+    const confirm = await emailToken(appointmentId, personId, "confirm")
+    const cancel = await emailToken(appointmentId, personId, "cancel")
+    expect((await f.run((tx) => personalLinkForEmailToken(tx, ORG, confirm, { secretsKey: KEY }))).token).toMatch(/^[0-9a-f]{64}$/)
+    // «Quitar enlace»: el botón del correo ya enviado no lo revive.
+    await f.run((tx) => revokePersonalLinks(tx, ORG, f.actor, f.patient.id))
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, confirm, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, cancel, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+    // La baja nunca se toca.
+    const baja = randomUUID()
+    await ownerDb.insert(automationLinkToken).values({
+      tokenHash: createHash("sha256").update(baja).digest("hex"),
+      organizationId: ORG, purpose: "baja", contactId: personId, expiresAt: new Date(Date.now() + 30 * 86_400_000),
+    })
+    await f.run((tx) => revokePersonalLinks(tx, ORG, f.actor, f.patient.id))
+    const [unsubscribe] = await ownerDb.select({ expiresAt: automationLinkToken.expiresAt }).from(automationLinkToken)
+      .where(eq(automationLinkToken.tokenHash, createHash("sha256").update(baja).digest("hex")))
+    expect(unsubscribe!.expiresAt.getTime()).toBeGreaterThan(Date.now())
+
+    // Terminar el vínculo de la madre vence los suyos.
+    const [madre] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Elsa Madre" }).returning({ id: contact.id })
+    await f.run((tx) => setPatientContact(tx, ORG, f.actor, f.patient.id, { contactId: madre!.id, relationship: "guardian", isPreferred: false }))
+    await f.run((tx) =>
+      grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: madre!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }),
+    )
+    const hers = await emailToken(appointmentId, madre!.id)
+    await f.run((tx) => setPatientContact(tx, ORG, f.actor, f.patient.id, { contactId: madre!.id, relationship: "family", isPreferred: false }))
+    const [row] = await ownerDb.select({ expiresAt: automationLinkToken.expiresAt }).from(automationLinkToken)
+      .where(eq(automationLinkToken.tokenHash, createHash("sha256").update(hers).digest("hex")))
+    expect(row!.expiresAt.getTime()).toBeLessThanOrEqual(Date.now())
+
+    // Un correo que llegó a un familiar sin autorización no le da el enlace de esa cita.
+    const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía" }).returning({ id: contact.id })
+    await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+    const tias = await emailToken(appointmentId, tia!.id)
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, tias, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+    const issued = await ownerDb.select({ id: appointmentBookingLink.id }).from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, tia!.id))
+    expect(issued).toEqual([])
+
+    // Usado (la cita se movió, se canceló o se atendió: `invalidateAppointmentTokens`), ya no emite ni alarga «Su enlace».
+    await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id }, { secretsKey: KEY }))
+    const used = await emailToken(appointmentId, personId, "confirm")
+    expect((await f.run((tx) => personalLinkForEmailToken(tx, ORG, used, { secretsKey: KEY }))).token).toMatch(/^[0-9a-f]{64}$/)
+    await f.run((tx) => invalidateAppointmentTokens(tx, ORG, appointmentId))
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, used, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  } finally {
+    configurePublicLinks(null)
+  }
 })
 
 it("pasada su vigencia solo queda su cita; «Quitar enlace» y cambiar el vínculo lo dejan sin efecto", async () => {
@@ -301,7 +457,14 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   // Sin enviarlo a firmar, no aparece en su enlace (solo «Tus mensajes», ADR 0040).
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([{ id: consent.id, title: "Exodoncia" }])
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([
+    { id: consent.id, title: "Exodoncia", procedureRef: "Exodoncia de la pieza 38", appointment: null, signable: true, why: null },
+  ])
+  // Otra cita (una limpieza) no es la suya: sin su tratamiento agendado ahí, el consentimiento no lleva fecha.
+  await upcomingAppointment(f, lucia.id)
+  const withVisit = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(withVisit.appointment).not.toBeNull()
+  expect(withVisit.consents[0]?.appointment).toBeNull()
   // Lee la misma hoja que el papel: la pieza, el diagnóstico, la declaración que acepta y el pie de firma.
   const sheet = await f.run((tx) => getPersonalLinkConsent(tx, ORG, link.token, consent.id))
   expect(sheet).toMatchObject({
@@ -349,9 +512,54 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect(signed?.declarationSnapshot).toMatch(/He leído y comprendido/)
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   expect(await pendingInSummary()).toMatchObject({ personSignedAt: expect.any(Date) })
-  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id))
+  // Se confirma dentro de una atención en curso de ese paciente, nunca desde la ficha ni en la de otro.
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: f.encounter.id }))).rejects.toMatchObject({
+    code: "VALIDATION",
+    fields: { encounterId: expect.any(String) },
+  })
+  const [closed] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Control", status: "finalizada", startedAt: new Date(Date.now() - 7_200_000), endedAt: new Date(Date.now() - 3_600_000) })
+    .returning({ id: encounter.id })
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: closed!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED" })
+  // El panel de antes (mientras dura el despliegue) confirma sin la atención: se le dice que recargue.
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, {}))).rejects.toMatchObject({
+    code: "CONFIRM_IN_ENCOUNTER",
+    message: "Recarga la página: ahora se confirma dentro de su atención",
+  })
+  // Una atención en borrador de hace semanas no sirve: se confirma con la persona delante, hoy (S2).
+  const [stale] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Control", startedAt: new Date(Date.now() - 21 * 86_400_000) })
+    .returning({ id: encounter.id })
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: stale!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_NOT_TODAY" })
+  await ownerDb.delete(encounter).where(eq(encounter.id, stale!.id))
+  const [attention] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia" })
+    .returning({ id: encounter.id })
+  // La atención lo muestra arriba al abrirla, aunque se haya enviado desde Documentos: quién firmó, su documento abreviado, cuándo y qué.
+  expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([
+    expect.objectContaining({
+      id: consent.id,
+      title: "Exodoncia",
+      procedureRef: "Exodoncia de la pieza 38",
+      signerName: "Lucía Fernández",
+      signerKind: "paciente",
+      signerDocument: "DNI ••••0004",
+      personSignedAt: expect.any(Date),
+    }),
+  ])
+  expect(JSON.stringify(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id)))).not.toContain("40000004")
+  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: attention!.id }))
   const [confirmed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, consent.id))
-  expect(confirmed).toMatchObject({ status: "firmado", signatureMethod: "enlace", signatureLevel: "simple", informedBy: f.actor })
+  expect(confirmed).toMatchObject({
+    status: "firmado", signatureMethod: "enlace", signatureLevel: "simple", informedBy: f.actor, informedEncounterId: attention!.id,
+  })
+  expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([])
+  // La historia dice en qué atención.
+  const history = await f.run((tx) => listConsentEvents(tx, ORG, consent.id))
+  expect(history.find((event) => event.toStatus === "informado")?.reason).toMatch(/en la atención del /)
   expect(await pendingInSummary()).toBeUndefined()
 })
 
@@ -435,6 +643,77 @@ async function consentInChat(f: Awaited<ReturnType<typeof clinicalFixture>>, wro
 
 const FINGER = { strokes: [[[10, 10], [200, 120]]] }
 
+/** Un consentimiento enviado a firmar por enlace para ese paciente. */
+async function sentToSign(f: Awaited<ReturnType<typeof clinicalFixture>>, patientId: string) {
+  const draft = await f.run((tx) =>
+    createConsentTemplate(tx, ORG, f.actor, {
+      key: `t-${randomUUID().slice(0, 8)}`,
+      title: "Exodoncia",
+      sections: { procedure: "Extracción con anestesia local.", benefits: ["Quitar el dolor"], risks: ["Sangrado"], alternatives: ["Endodoncia"], consequences: "Puede avanzar." },
+    }),
+  )
+  const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
+  const consent = await f.run((tx) =>
+    createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId, procedureRef: "Exodoncia de la pieza 38" }),
+  )
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
+  return consent.id
+}
+
+it("sin documento en la ficha de quien firma, sin fecha de nacimiento o menor: se lee la hoja y se firma en la cita", async () => {
+  const f = await clinicalFixture()
+  // Adulta sin documento en su ficha: cualquier número que escriba no se compara con nada.
+  const ana = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, { displayName: "Ana Soto", givenNames: "Ana", familyName: "Soto", birthDate: "1990-01-01", phone: "+51911000111" }),
+  )
+  const anaPerson = (await f.run((tx) => patientPersonId(tx, ORG, ana.id)))!
+  const anaConsent = await sentToSign(f, ana.id)
+  const anaLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: anaPerson, patientId: ana.id }, { secretsKey: KEY }))
+  await expect(
+    f.run((tx) => signPersonalLinkConsent(tx, ORG, anaLink.token, anaConsent, { docNumber: "12345678", comprehensionConfirmed: true, signatureData: FINGER })),
+  ).rejects.toMatchObject({ code: "SIGNER_NOT_AUTHORIZED", message: expect.stringContaining("en tu cita") })
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, anaLink.token, anaConsent))).toMatchObject({
+    signable: false,
+    why: "sin-documento",
+    speaksTo: "paciente",
+    patientFirstName: "Ana",
+    procedureRef: "Exodoncia de la pieza 38",
+  })
+  const [unsigned] = await ownerDb.select({ personSignedAt: consentDocument.personSignedAt }).from(consentDocument).where(eq(consentDocument.id, anaConsent))
+  expect(unsigned?.personSignedAt).toBeNull()
+
+  // Sin fecha de nacimiento no se sabe si es mayor de edad.
+  const beto = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, { displayName: "Beto Paz", givenNames: "Beto", familyName: "Paz", docType: "DNI", docNumber: "40000123", phone: "+51911000222" }),
+  )
+  const betoPerson = (await f.run((tx) => patientPersonId(tx, ORG, beto.id)))!
+  const betoConsent = await sentToSign(f, beto.id)
+  const betoLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: betoPerson, patientId: beto.id }, { secretsKey: KEY }))
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, betoLink.token, betoConsent))).toMatchObject({ signable: false, why: "sin-fecha" })
+
+  // Mateo, de 8 años: su madre decide por él. Sin su documento en la ficha, lo firma ella en la cita.
+  const mateo = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, { displayName: "Mateo Ruiz", givenNames: "Mateo", familyName: "Ruiz", birthDate: `${new Date().getUTCFullYear() - 8}-03-10` }),
+  )
+  const [madre] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Ruiz", givenNames: "Rosa" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: mateo.id, contactId: madre!.id, relationship: "guardian", createdBy: f.actor })
+  await ownerDb.insert(patientResponsibility).values({ organizationId: ORG, patientId: mateo.id, contactId: madre!.id, kind: "representante_legal", startsAt: "2020-01-01" })
+  const mateoConsent = await sentToSign(f, mateo.id)
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: madre!.id, patientId: mateo.id }, { secretsKey: KEY }))
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, hers.token, mateoConsent))).toMatchObject({
+    signable: false, why: "sin-documento", speaksTo: "representante", patientFirstName: "Mateo", minor: true,
+  })
+  await expect(
+    f.run((tx) => signPersonalLinkConsent(tx, ORG, hers.token, mateoConsent, { docNumber: "41111111", comprehensionConfirmed: true, signatureData: FINGER })),
+  ).rejects.toMatchObject({ code: "SIGNER_NOT_AUTHORIZED" })
+  // Con su documento en la ficha, la madre sí lo firma desde su teléfono.
+  await ownerDb.update(contact).set({ docType: "DNI", docNumber: "41111111" }).where(eq(contact.id, madre!.id))
+  expect(await f.run((tx) => getPersonalLinkConsent(tx, ORG, hers.token, mateoConsent))).toMatchObject({ signable: true, why: null })
+  await f.run((tx) => signPersonalLinkConsent(tx, ORG, hers.token, mateoConsent, { docNumber: "41111111", comprehensionConfirmed: true, signatureData: FINGER }))
+  const [signed] = await ownerDb.select({ signerKind: consentDocument.signerKind }).from(consentDocument).where(eq(consentDocument.id, mateoConsent))
+  expect(signed?.signerKind).toBe("representante")
+})
+
 async function agentTexts(conversationId: string) {
   const rows = await ownerDb
     .select({ body: message.body })
@@ -494,8 +773,22 @@ it("firmar en su enlace: la historia y el PDF lo dicen, se avisa a quien lo gene
   const notices = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, f.actor))
   expect(notices.map((notice) => notice.title)).toContain("Firmaron un consentimiento desde su enlace")
 
-  // La atención lo sabe: no se le pide otra firma, se confirma.
-  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, lucia.consentId))
+  // La atención lo sabe: no se le pide otra firma, se confirma ahí, y el PDF dice en cuál. Vale la
+  // que se abrió antes para su cita de hoy.
+  const today = await upcomingAppointment(f, lucia.patientId)
+  await ownerDb.update(appointment).set({ startsAt: new Date(), endsAt: new Date(Date.now() + 1_800_000) }).where(eq(appointment.id, today))
+  const [attention] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.patientId, professionalUserId: f.actor, reason: "Exodoncia", appointmentId: today, startedAt: new Date(Date.now() - 2 * 86_400_000) })
+    .returning({ id: encounter.id })
+  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, lucia.consentId, { encounterId: attention!.id }))
+  const lines = vi.spyOn(DocumentKit.prototype, "text")
+  try {
+    await f.run((tx) => renderHealthDocumentPdf(tx, ORG, lucia.patientId, "consent", lucia.consentId, {}, { viewing: true }))
+    expect(lines.mock.calls.map((call) => call[0])).toContainEqual(expect.stringMatching(/^Confirmado en la atención del /))
+  } finally {
+    lines.mockRestore()
+  }
   const after = await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))
   expect(after.map((event) => event.toStatus)).toEqual(["pendiente", "enlace_enviado", "enlace_firmado", "informado", "firmado"])
   expect(await agentTexts(lucia.conversationId)).toHaveLength(1)
@@ -860,6 +1153,67 @@ it("el enlace que envía el equipo queda unido a su conversación: lo que haga a
   }
 })
 
+/** Una plantilla aprobada en el WhatsApp que comparten las pruebas de este archivo, mientras dura la prueba. */
+async function approveTemplate(name: string, variables: number) {
+  const [connection] = await ownerDb
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, ORG), eq(channelConnection.channel, "whatsapp")))
+  await ownerDb.insert(channelTemplate).values({
+    organizationId: ORG, connectionId: connection!.id, name, language: "es", status: "aprobada", category: "utility", body: "Hola, {{1}}.", variables,
+  })
+  onTestFinished(async () => {
+    await ownerDb.delete(channelTemplate).where(and(eq(channelTemplate.organizationId, ORG), eq(channelTemplate.name, name)))
+  })
+}
+
+it("«Firma tu consentimiento»: abre directo la hoja, no dice nada clínico y, mientras no lo aprueban, sale «Su enlace»", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    // Escribió hace dos días: por WhatsApp solo sale un mensaje aprobado.
+    const lucia = await consentInChat(f, TWO_DAYS_AGO())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+    await approveTemplate("odentia_su_enlace_v1", 2)
+    const sentOut = () =>
+      ownerDb
+        .select({ templateName: message.templateName, body: message.body, templateLink: message.templateLink })
+        .from(message)
+        .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out")))
+    await f.run((tx) => sendConsentToSign(tx, ORG, f.actor, { patientId: lucia.patientId, consentId: lucia.consentId }, { secretsKey: KEY }))
+    expect((await sentOut()).map((row) => row.templateName)).toEqual(["odentia_su_enlace_v1"])
+    // Aprobado el suyo, sale ese: de qué clínica, para cuándo y qué es; nunca el procedimiento.
+    await approveTemplate("odentia_consentimiento_por_firmar_v1", 3)
+    await f.run((tx) => sendConsentToSign(tx, ORG, f.actor, { patientId: lucia.patientId, consentId: lucia.consentId }, { secretsKey: KEY }))
+    const own = (await sentOut()).find((row) => row.templateName === "odentia_consentimiento_por_firmar_v1")
+    expect(own?.body).toMatch(/te envía un consentimiento para leer y firmar antes de tu próxima cita\. Lo encuentras aquí\.$/)
+    expect(own?.body).not.toMatch(/Exodoncia|38/)
+    expect(own?.templateLink).toMatch(/^\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
+
+    // Dentro de las 24 horas sale escrito, con la dirección que abre la hoja.
+    const ana = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, ana.consentId))
+    await f.run((tx) => sendConsentToSign(tx, ORG, f.actor, { patientId: ana.patientId, consentId: ana.consentId }, { secretsKey: KEY }))
+    const [text] = await ownerDb
+      .select({ body: message.body })
+      .from(message)
+      .where(and(eq(message.conversationId, ana.conversationId), eq(message.direction, "out")))
+    // Lleva cuál: con otro enviado antes o después, abre este.
+    expect(text?.body).toContain(`/pendientes?abre=firma&id=${ana.consentId}&token={{su-enlace:`)
+    expect(text?.body).toMatch(/&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
+    expect(text?.body).not.toContain("Exodoncia")
+    // Sin `id` (el botón fijo de la plantilla) abre el último enviado, no el más antiguo.
+    const later = await f.run((tx) =>
+      createConsentDocument(tx, ORG, f.actor, { templateId: ana.templateId, patientId: ana.patientId, procedureRef: "Exodoncia de la pieza 48" }),
+    )
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, later.id))
+    const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId }, { secretsKey: KEY }))
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).consents.map((row) => row.id)).toEqual([later.id, ana.consentId])
+  } finally {
+    configurePublicLinks(null)
+  }
+})
+
 it("«Ver y responder»: el presupuesto aparece en el mismo enlace, se responde y deja de servir al decidirlo", async () => {
   const f = await clinicalFixture()
   await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" })
@@ -885,6 +1239,49 @@ it("«Ver y responder»: el presupuesto aparece en el mismo enlace, se responde 
   // «Elegir horario» sigue teniendo dónde: las sedes no se van al responder.
   expect(view.branches.length).toBeGreaterThan(0)
   expect(after.branches.map((row) => row.id)).toEqual(view.branches.map((row) => row.id))
+})
+
+it("«Presupuesto listo»: abre ese presupuesto y no una reserva sin usar; sin `id`, el último enviado", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  const f = await clinicalFixture()
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+  await ownerDb.update(contact).set({ email: `persona-${randomUUID().slice(0, 8)}@example.com` }).where(eq(contact.id, personId))
+  const [mailbox] = await ownerDb
+    .insert(channelConnection)
+    .values({
+      organizationId: ORG, channel: "email", provider: "gmail", displayName: "Correo de la clínica",
+      externalId: `clinica-${randomUUID().slice(0, 8)}@example.com`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
+    })
+    .returning({ id: channelConnection.id })
+  const storage = {
+    putAttachment: async ({ orgId, conversationId, bytes }: { orgId: string; conversationId: string; bytes: Uint8Array }) => ({
+      objectKey: `${orgId}/${conversationId}/${randomUUID()}.pdf`, mimeType: "application/pdf", filename: "presupuesto.pdf", size: bytes.byteLength,
+    }),
+  } as unknown as Storage
+  try {
+    // Sofi le dio su enlace para reservar y no reservó.
+    const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, booking: true }, { secretsKey: KEY }))
+    const first = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+    const budgetA = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [first.id] }))
+    await f.run((tx) => deliverBudget(tx, ...f.args, budgetA.id))
+    const second = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+    const budgetB = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [second.id] }))
+    const sent = await f.run((tx) =>
+      sendBudget(tx, ORG, { userId: f.actor }, { patientId: f.patient.id, budgetId: budgetB.id, requestId: randomUUID() }, { storage, secretsKey: KEY }),
+    )
+    const [out] = await ownerDb
+      .select({ body: message.body })
+      .from(message)
+      .where(and(eq(message.conversationId, sent.conversationId), eq(message.direction, "out")))
+    expect(out?.body).toContain(`/pendientes?abre=presupuesto&id=${budgetB.id}&token={{su-enlace:${link.linkId}}}`)
+    // El botón fijo de la plantilla (`/reserva`) ya no muestra «Elige tu cita»: lleva al presupuesto.
+    const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+    expect(view.booking).toBeNull()
+    expect(view.budgets.map((row) => row.id)).toEqual([budgetB.id, budgetA.id])
+  } finally {
+    await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, mailbox!.id))
+    configurePublicLinks(null)
+  }
 })
 
 it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace» con esa cita", async () => {
@@ -927,7 +1324,7 @@ it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace»
     })
     const redirect = await f.run((tx) => personalLinkForEmailToken(tx, ORG, raw, { secretsKey: KEY }))
     // La dirección es la de la clínica, con su subdominio, y el enlace muestra esa cita.
-    expect(redirect.url).toBe(`https://norte.odentia.test/reserva?token=${redirect.token}`)
+    expect(redirect.url).toBe(`https://norte.odentia.test/pendientes?abre=cita&token=${redirect.token}`)
     const view = await f.run((tx) => getPersonalLinkView(tx, ORG, redirect.token))
     expect(view.appointment).toMatchObject({ canConfirm: true, canChange: true, branchName: "Centro" })
     // Un token vencido, o uno que no existe, ya no lleva a ningún lado.
@@ -975,6 +1372,60 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
   const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id }, { secretsKey: KEY }))
   await expect(f.run((tx) => reserveBookingLink(tx, ORG, hers.token, pick(second)))).rejects.toMatchObject({ code: "PORTAL_FORBIDDEN" })
+})
+
+it("«Reservar otra»: quien decide reserva otra cita desde «Tu cita», hasta el tope de citas por venir", async () => {
+  const f = await clinicalFixture()
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+  const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" }).returning({ id: branch.id })
+  const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  await f.run((tx) =>
+    setProfessionalSchedule(tx, ORG, f.actor, {
+      branchId: site!.id,
+      professionalUserId: f.actor,
+      rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
+    }),
+  )
+  const from = new Date(Date.now() + 2 * 86_400_000)
+  from.setUTCHours(5, 0, 0, 0)
+  const range = { branchId: site!.id, from: from.toISOString(), to: new Date(from.getTime() + 86_400_000).toISOString() }
+  // Sin una cita a la vista, «otra» no reserva: un enlace para completar datos o firmar no ofrece reservar.
+  const bare = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, booking: false }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, bare.token))).another).toBeNull()
+  await expect(f.run((tx) => listBookingLinkSlots(tx, ORG, bare.token, { ...range, another: true }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  const startsAt = new Date(Date.now() + 5 * 86_400_000)
+  const [own] = await ownerDb.insert(appointment).values({
+    organizationId: ORG, branchId: site!.id, patientId: f.patient.id, professionalUserId: f.actor, roomId: room.id,
+    startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
+  }).returning({ id: appointment.id })
+  // Su enlace para ver su cita: no ofrece reservar, pero sí otra cita con tope.
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, appointmentId: own!.id, booking: false }, { secretsKey: KEY }))
+  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(view).toMatchObject({ booking: null, another: { upcoming: 1, cap: 2, allowed: true }, toSchedule: [], confirmVia: null, remindersVia: null })
+  expect(view.branches.map((row) => row.id)).toContain(site!.id)
+  // Sin «otra», el enlace no reserva.
+  const { slots } = await f.run((tx) => listBookingLinkSlots(tx, ORG, link.token, { ...range, another: true }))
+  const [first, second] = slots
+  if (!first || !second) throw new Error("Sin horarios")
+  const pick = (slot: typeof first) => ({ branchId: site!.id, startsAt: slot.startsAt, professionalUserId: slot.professionalUserId, ...(slot.roomId ? { roomId: slot.roomId } : {}) })
+  await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, pick(first)))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  await f.run((tx) => reserveBookingLink(tx, ORG, link.token, { ...pick(first), another: true }))
+  const after = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(after.another).toEqual({ upcoming: 2, cap: 2, allowed: false })
+  // «La que ya tienes sigue igual»: la otra, aunque sea antes, no pasa a ser «Tu cita».
+  expect(after.appointment?.startsAt).toBe(startsAt.toISOString())
+  const [stored] = await ownerDb.select({ appointmentId: appointmentBookingLink.appointmentId }).from(appointmentBookingLink).where(eq(appointmentBookingLink.id, link.linkId))
+  expect(stored?.appointmentId).toBe(own!.id)
+  // Llegó al tope: la tercera la agenda recepción.
+  await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, { ...pick(second), another: true }))).rejects.toMatchObject({
+    code: "BOOKING_ANOTHER_LIMIT",
+  })
+  // Quien no decide por el paciente no reserva otra, aunque esté autorizado a ver su cita.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  await f.run((tx) => grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: tia!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }))
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).another).toBeNull()
 })
 
 it("«Tus datos y tu salud»: la salud se pregunta solo si nadie la registró y entra declarada", async () => {
@@ -1067,3 +1518,107 @@ it("sin aviso propio, «Tus datos» muestra el sugerido con su casilla y queda a
   expect(consent?.noticeText).toBe(form.registration.privacyNotice)
 })
 
+
+it("«Enviarme uno nuevo»: desde un enlace vencido le llega otro a su canal, uno al día; usado, quitado o sin nada pendiente no se ofrece", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    const lucia = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+    const old = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId }, { secretsKey: KEY }))
+    const expire = (linkId: string) =>
+      ownerDb.update(appointmentBookingLink).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(appointmentBookingLink.id, linkId))
+    await expire(old.linkId)
+    const [person] = await ownerDb.select({ phone: contact.phone }).from(contact).where(eq(contact.id, lucia.personId))
+    const masked = `•••${person!.phone!.slice(-3)}`
+    // Venció con un consentimiento por firmar: se ofrece otro, por su WhatsApp y enmascarado.
+    expect(await f.run((tx) => getPersonalLinkView(tx, ORG, old.token))).toMatchObject({
+      status: "vencido",
+      consents: [],
+      closed: { reason: "vencido", resend: { channel: "whatsapp", to: masked, sentAt: null } },
+    })
+    const sent = await f.run((tx) => resendPersonalLink(tx, ORG, old.token, { secretsKey: KEY }))
+    expect(sent).toMatchObject({ channel: "whatsapp", to: masked })
+    expect(sent.sentAt).not.toBeNull()
+    // Sale como aviso, sin nadie del equipo, con un enlace nuevo que abre sus pendientes.
+    const out = await ownerDb
+      .select({ senderKind: message.senderKind, senderUserId: message.senderUserId, body: message.body })
+      .from(message)
+      .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out")))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ senderKind: "agent", senderUserId: null })
+    expect(out[0]?.body).toMatch(/https:\/\/norte\.odentia\.test\/pendientes\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}/)
+    const links = await ownerDb.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.patientId, lucia.patientId))
+    const fresh = links.find((row) => row.id !== old.linkId)
+    expect(fresh?.revokedAt).toBeNull()
+    expect(fresh?.conversationId).toBe(lucia.conversationId)
+    // El viejo queda sin efecto y dice cuándo salió el nuevo; un doble toque no manda otro.
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, old.token))).closed).toMatchObject({
+      reason: "vencido",
+      resend: { channel: "whatsapp", to: masked, sentAt: expect.any(String) },
+    })
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, old.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_LIMIT" })
+    // El tope es por persona y día: si el nuevo también vence hoy, tampoco sale otro.
+    const renewed = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId }, { secretsKey: KEY }))
+    expect(renewed.linkId).toBe(fresh!.id)
+    await expire(renewed.linkId)
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, renewed.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_LIMIT" })
+    expect(
+      await ownerDb.select({ id: message.id }).from(message).where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out"))),
+    ).toHaveLength(1)
+
+    // «Quitar enlace»: no se ofrece ni se envía otro.
+    const ana = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, ana.consentId))
+    const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId }, { secretsKey: KEY }))
+    await f.run((tx) => revokePersonalLinks(tx, ORG, f.actor, ana.patientId))
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).closed).toEqual({ reason: "quitado", resend: null, appointment: null })
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, hers.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+
+    // Vencido sin nada pendiente (ya envió sus datos y no tiene nada más): no sirve pedir otro.
+    const done = await consentInChat(f, new Date())
+    const empty = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: done.personId, patientId: done.patientId }, { secretsKey: KEY }))
+    await ownerDb
+      .update(appointmentBookingLink)
+      .set({ dataSubmittedAt: new Date(), expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(appointmentBookingLink.id, empty.linkId))
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, empty.token))).closed).toEqual({ reason: "hecho", resend: null, appointment: null })
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, empty.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+
+    // Un familiar sin facultad para decidir no pide uno nuevo.
+    const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía", givenNames: "Marta" }).returning({ id: contact.id })
+    await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: lucia.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+    const aunt = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: lucia.patientId }, { secretsKey: KEY }))
+    await expire(aunt.linkId)
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, aunt.token))).closed?.resend ?? null).toBeNull()
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, aunt.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+
+    // S3: sin facultad sobre la cita, tampoco le dice cuándo fue la que ya pasó.
+    const passed = await upcomingAppointment(f, lucia.patientId)
+    await ownerDb.update(appointment).set({ startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(Date.now() - 1_800_000) }).where(eq(appointment.id, passed))
+    const withPast = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: lucia.patientId, appointmentId: passed }, { secretsKey: KEY }))
+    await ownerDb.update(appointmentBookingLink).set({ expiresAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(appointmentBookingLink.id, withPast.linkId))
+    const auntClosed = (await f.run((tx) => getPersonalLinkView(tx, ORG, withPast.token))).closed
+    expect(auntClosed?.reason).not.toBe("cita-pasada")
+    expect(auntClosed?.appointment ?? null).toBeNull()
+
+    // Con Sofi apagada (o los agentes en pausa) no se ofrece ni sale: la página le dice que escriba a la clínica.
+    const off = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, off.consentId))
+    const offLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: off.personId, patientId: off.patientId }, { secretsKey: KEY }))
+    await expire(offLink.linkId)
+    await setSofi(false)
+    try {
+      expect((await f.run((tx) => getPersonalLinkView(tx, ORG, offLink.token))).closed).toMatchObject({ reason: "vencido", resend: null })
+      await expect(f.run((tx) => resendPersonalLink(tx, ORG, offLink.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+    } finally {
+      await setSofi(true)
+    }
+
+    // El correo enmascarado no deja ver el dominio, que en uno propio diría de quién es.
+    expect(maskedAddress("correo", "elsa@familia-quispe.pe")).toBe("e•••@f•••.pe")
+    expect(maskedAddress("correo", "rosa@gmail.com")).toBe("r•••@g•••.com")
+  } finally {
+    configurePublicLinks(null)
+  }
+})

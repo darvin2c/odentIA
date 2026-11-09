@@ -1,5 +1,5 @@
 /**
- * Los pedidos al taller o al laboratorio (ADR 0170): el cliente de `/api/orders`.
+ * Los pedidos al taller o al laboratorio (ADR 0171): el cliente de `/api/orders`.
  * Los tipos replican lo que entrega el servidor (`listJobOrders`, `getJobOrder`);
  * lo que se puede hacer y lo que falta pagar lo decide el servidor, aquí solo
  * se dice.

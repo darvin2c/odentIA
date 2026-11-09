@@ -35,7 +35,7 @@ export type HarnessRuntime = {
    * issue 229). Solo cuando corren sus recorridos: su panel y su app son otro build.
    */
   medicalDomain?: string
-  /** El dominio de vistIA (`vistia.<tld>`, ADR 0168), como el de latidIA: solo cuando corren sus recorridos. */
+  /** El dominio de vistIA (`vistia.<tld>`, ADR 0169), como el de latidIA: solo cuando corren sus recorridos. */
   opticalDomain?: string
   postgres?: { host: string; port: number }
   storage?: { host: string; port: number }

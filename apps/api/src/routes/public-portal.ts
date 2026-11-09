@@ -327,21 +327,6 @@ export function createPublicPortalRoute(deps: {
   // «Tus documentos»: todo lo suyo, con las reglas del servidor (ADR 0156).
   app.get("/papers", async (c) => portalCall(c, (tx, ctx) => listPortalPapers(tx, ctx)))
 
-  // Compatibilidad con la página anterior mientras dura el despliegue (las pantallas y la API no
-  // cambian a la vez): los mismos archivos de «Tus documentos», con la forma de antes. Se quitan después.
-  app.get("/documents", async (c) =>
-    portalCall(c, async (tx, ctx) =>
-      (await listPortalPapers(tx, ctx))
-        .filter((paper) => paper.kind === "archivo")
-        .map((paper) => ({ id: paper.id, category: paper.type, label: paper.title, contentType: "", sizeBytes: 0, createdAt: paper.at })),
-    ),
-  )
-  app.get("/documents/:id/url", async (c) => {
-    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    return portalCall(c, (tx, ctx) => getPortalPaperFileUrl(tx, ctx, params.data.id, deps.storage))
-  })
-
   // Un archivo subido o una imagen: una dirección firmada de 5 minutos.
   app.get("/papers/archivo/:id/url", async (c) => {
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())

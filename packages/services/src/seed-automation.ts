@@ -42,7 +42,7 @@ export async function seedChannelTemplates(
       })
   }
 
-  // Los diecinueve con los que viene la clínica, en estados distintos.
+  // Los veintidós con los que viene la clínica, en estados distintos.
   const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date; category?: string }> = {
     recordatorio_cita: { status: "aprobada", since: lastWeek },
     recordatorio_control: { status: "aprobada", since: lastWeek },
@@ -59,6 +59,8 @@ export async function seedChannelTemplates(
     aviso_cita_reservada_datos: { status: "en_revision" },
     // El recordatorio con «Completar mis datos», recién pedido: mientras tanto sale el de siempre.
     recordatorio_cita_datos: { status: "en_revision" },
+    // «Antes de tu cita», recién pedido: mientras tanto sale el de datos o el de siempre.
+    recordatorio_cita_pendientes: { status: "en_revision" },
     // El recordatorio sin «Confirmar» de una cita ya confirmada, recién pedido: mientras tanto sale el de siempre.
     recordatorio_cita_confirmada: { status: "en_revision" },
     // «¿Vienes en camino?», recién pedido: mientras tanto queda la llamada para recepción.
@@ -69,6 +71,8 @@ export async function seedChannelTemplates(
     // Aprobado: el presupuesto de la semilla puede salir pasadas las 24 horas.
     presupuesto_listo: { status: "aprobada", since: lastWeek },
     su_enlace: { status: "en_revision" },
+    // «Firma tu consentimiento», recién pedido: mientras tanto el consentimiento sale con «Su enlace».
+    consentimiento_por_firmar: { status: "en_revision" },
     // Aprobado: la respuesta del equipo a un tema pasadas las 24 horas sale con «Ver respuesta» (R1).
     ver_respuesta: { status: "aprobada", since: lastWeek },
     // Aprobado: quien completa algo en su enlace pasadas las 24 horas recibe el agradecimiento.

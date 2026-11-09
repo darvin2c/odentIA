@@ -1081,7 +1081,7 @@ export async function main(args: string[]): Promise<number> {
   // así que se levantan solo con la suite completa o con un recorrido suyo.
   const specs = args.filter((arg) => !arg.startsWith("-"))
   const medicalDomain = specs.length === 0 || specs.some((spec) => /latidia/i.test(spec)) ? `latidia.${tld}` : undefined
-  // vistIA en el suyo (ADR 0168), con la misma regla.
+  // vistIA en el suyo (ADR 0169), con la misma regla.
   const opticalDomain = specs.length === 0 || specs.some((spec) => /vistia/i.test(spec)) ? `vistia.${tld}` : undefined
   const stateDir = await mkdtemp(join(tmpdir(), "odentia-e2e-"))
   const portlessDir = join(stateDir, "portless")

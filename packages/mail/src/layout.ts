@@ -116,6 +116,18 @@ export function mailBrandName(brand: MailBrand = BASE_MAIL_BRAND): string {
   return MAIL_BRANDS[brand].name
 }
 
+/**
+ * La marca en un papel que no es un correo (la carta de bienvenida de la skill
+ * de carga): su nombre, su color y su logotipo para fondo claro, en PNG.
+ */
+export function brandPaper(brand: MailBrand): { name: string; color: string; logoPng: Uint8Array } {
+  return {
+    name: MAIL_BRANDS[brand].name,
+    color: MAIL_BRANDS[brand].marca,
+    logoPng: Buffer.from(LOGOS[logoKey(brand, "logotipo", "Claro")].base64, "base64"),
+  }
+}
+
 /* ---------- Enlaces del pie ---------- */
 
 let siteUrls: Partial<Record<MailBrand, string>> = {}

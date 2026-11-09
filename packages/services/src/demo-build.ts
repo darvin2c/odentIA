@@ -88,10 +88,10 @@ const CLINICIAN_HONORIFIC: Record<ClinicalProduct, Record<"F" | "M", string>> = 
 
 /**
  * Quien atiende el mostrador de la demo: recepción; en una óptica, Ventas, que
- * también vende y cobra (ADR 0170). Su usuario es el mismo (`…recepcion`).
+ * también vende y cobra (ADR 0171). Su usuario es el mismo (`…recepcion`).
  */
 const DEMO_DESK_ROLE: Record<ClinicalProduct, "reception" | "sales"> = { dental: "reception", medical: "reception", optical: "sales" }
-/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0170). */
+/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0171). */
 const DEMO_HAS_WORKSHOP: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
 
 /** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */

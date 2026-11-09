@@ -13,7 +13,7 @@ import { type CollectMethodInput, collectCharge, createCharge, voidCharge } from
 import { productHooks } from "./products.js"
 
 /**
- * El pedido (ADR 0170): lo que la clínica encarga a su taller o a un laboratorio
+ * El pedido (ADR 0171): lo que la clínica encarga a su taller o a un laboratorio
  * para entregárselo a la persona. Común a los productos; vistIA lo usa con los
  * lentes. La venta crea los cargos de lo que lleva (con la caja de siempre),
  * el pedido con la fecha prometida y, si deja un adelanto, lo cobra con los
