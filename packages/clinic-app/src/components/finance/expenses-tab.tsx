@@ -29,9 +29,10 @@ import { Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
 import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
-import { ExpenseFormDrawer, type ExpenseDrawerMode } from "./expense-form-drawer"
+import type { ExpenseDrawerMode } from "./expense-form-drawer"
 import { FixedOfMonth, RecurringDueSection, RepeatingList, useRecurringMonth } from "./recurring-due"
 import { useActiveBranch } from "../../lib/active-branch"
+import { DownloadButton } from "../reports/report-parts"
 import { VoidDrawer } from "./void-drawer"
 
 const MONTH_WORDS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
@@ -51,6 +52,7 @@ import {
   EXPENSE_FILTER_TYPES,
   expenseCategoryLabel,
   type ExpenseRow,
+  downloadMonthExpenses,
   fetchMonthExpenses,
   fetchPurchasesToPay,
   financeKeys,
@@ -100,6 +102,7 @@ export function ExpensesTab({
   month,
   canWrite,
   onExpense,
+  onOpenExpense,
 }: {
   branchId: string
   branchName: string
@@ -110,6 +113,11 @@ export function ExpensesTab({
   month: MonthRef
   canWrite: boolean
   onExpense: () => void
+  /**
+   * «Pagar» lo que se repite y «Corregir» un gasto: el cajón vive en Finanzas, fuera de las
+   * pestañas, como «Registrar gasto», para no perder lo escrito al mirar la Caja.
+   */
+  onOpenExpense: (mode: ExpenseDrawerMode) => void
 }) {
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
@@ -118,9 +126,8 @@ export function ExpensesTab({
   const canAdmin = usePermission("finance.admin")
   const second = useOrgSecondCurrency()
   const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
-  // El detalle de un gasto, y el cajón para corregirlo o pagar lo que se repite.
+  // El detalle de un gasto (el cajón para corregirlo o pagar lo que se repite lo abre Finanzas).
   const [viewing, setViewing] = useState<ExpenseRow | null>(null)
-  const [drawer, setDrawer] = useState<ExpenseDrawerMode | null>(null)
   const place = { branchId, branchName, currency, locale, orgTimeZone }
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
@@ -136,9 +143,9 @@ export function ExpensesTab({
     queryKey: financeKeys.purchases(branchId),
     queryFn: () => fetchPurchasesToPay(branchId),
   })
-  // Lo que se repite: «Por pagar» y «Lo fijo del mes».
+  // Lo que se repite: «Por pagar» y lo que cae en el mes, bajo el total.
   const recurring = useRecurringMonth(branchId, month, true)
-  // Con varias sedes, lo fijo de toda la clínica: lo que cuesta mantenerla al mes.
+  // Con varias sedes, lo que se repite en toda la clínica: lo que cuesta mantenerla al mes.
   const severalBranches = useActiveBranch().branches.length > 1
   const wholeClinic = useRecurringMonth("", month, severalBranches)
   const voidMutation = useMutation({
@@ -424,9 +431,15 @@ export function ExpensesTab({
 
       {data ? (
         <section aria-labelledby="gastos-total" className="elevated rounded-xl border bg-card p-4 sm:p-5">
-          <h2 id="gastos-total" className="text-sm font-medium text-muted-foreground">
-            Gastado en {monthName}
-          </h2>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h2 id="gastos-total" className="text-sm font-medium text-muted-foreground">
+              Gastado en {monthName}
+            </h2>
+            {/* Para el contador: la lista que se ve, con el comprobante, el RUC y con qué se pagó. */}
+            {data.expenses.length > 0 ? (
+              <DownloadButton label="Descargar el mes" onDownload={() => downloadMonthExpenses({ branchId, ...month, q, category })} />
+            ) : null}
+          </div>
           <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
             {formatMoney(data.totalCents, data.currency || currency, locale)}
           </p>
@@ -458,7 +471,7 @@ export function ExpensesTab({
         data={recurring.data?.data}
         locale={locale}
         canWrite={canWrite}
-        onPay={(due) => setDrawer({ kind: "pagar", due })}
+        onPay={(due) => onOpenExpense({ kind: "pagar", due })}
       />
 
       {searching ? null : listSection}
@@ -528,7 +541,7 @@ export function ExpensesTab({
                   onClick={() => {
                     // Con la caja cerrada lo corrige administración: se le pide como al anular.
                     if (correctionBlocked(viewing)) setVoiding(viewing)
-                    else setDrawer({ kind: "corregir", expense: viewing })
+                    else onOpenExpense({ kind: "corregir", expense: viewing })
                     setViewing(null)
                   }}
                 >
@@ -547,14 +560,11 @@ export function ExpensesTab({
               ...(viewing.supplierName
                 ? [["A quién", viewing.supplierTaxId ? `${viewing.supplierName} · RUC ${viewing.supplierTaxId}` : viewing.supplierName]]
                 : []),
-              ...(viewing.replaced
-                ? [
-                    [
-                      "Antes",
-                      `${formatMoney(viewing.replaced.amountCents, viewing.replaced.currency, locale)} · ${expenseCategoryLabel(viewing.replaced.category)} · ${formatDayMonth(viewing.replaced.spentAt, locale, zone)}${viewing.replaced.methodName ? ` · ${viewing.replaced.methodName}` : ""}${viewing.replaced.reason ? `. ${viewing.replaced.reason}` : ""}`,
-                    ],
-                  ]
-                : []),
+              // Cada versión anterior, de la más reciente a la primera: qué era y por qué se corrigió.
+              ...(viewing.history?.length ? viewing.history : viewing.replaced ? [viewing.replaced] : []).map((was, index, all) => [
+                index === 0 ? "Antes" : index === all.length - 1 ? "Al principio" : "Antes de eso",
+                `${was.concept} · ${formatMoney(was.amountCents, was.currency, locale)} · ${expenseCategoryLabel(was.category)} · ${formatDayMonth(was.spentAt, locale, zone)}${was.methodName ? ` · ${was.methodName}` : ""}${was.reason ? `. Se corrigió: ${was.reason}` : ""}`,
+              ]),
               ...(viewing.voidedAt ? [["Anulado", viewing.voidReason ?? "Sin motivo"]] : []),
               ...(viewing.purchaseOrderNumber != null
                 ? [
@@ -567,8 +577,8 @@ export function ExpensesTab({
                   ]
                 : []),
               ...(viewing.commission ? [["Comisión", "Se cambia en Comisiones, con su pago"]] : []),
-            ].map(([label, value]) => (
-              <div key={label} className="grid gap-0.5">
+            ].map(([label, value], index) => (
+              <div key={`${label}-${index}`} className="grid gap-0.5">
                 <dt className="text-muted-foreground">{label}</dt>
                 <dd className="[overflow-wrap:anywhere]">{value}</dd>
               </div>
@@ -576,8 +586,6 @@ export function ExpensesTab({
           </dl>
         ) : null}
       </DetailDrawer>
-
-      {drawer ? <ExpenseFormDrawer place={place} open mode={drawer} onClose={() => setDrawer(null)} /> : null}
 
       <VoidDrawer
         open={voiding !== null}

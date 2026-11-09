@@ -10,10 +10,10 @@
  */
 import type { PurchaseBalance, PurchasesToPay } from "./reports"
 import { currencyWord, expenseCategoryWord, parseMoney, upperFirst } from "@odentia/clinical"
-import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
+import { minutesToInstant, normalizeSearchText, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { ApiError, apiFetch } from "./api"
+import { ApiError, apiDownload, apiFetch } from "./api"
 import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
 import { useOrgSecondCurrency } from "./org"
@@ -800,6 +800,17 @@ export const EXPENSE_CATEGORY_HINTS: Record<string, string> = {
 /** Valor con que el servidor guarda «sin comprobante». */
 export const NO_RECEIPT = "ninguno"
 
+/** Lo que era un gasto antes de corregirlo. */
+export interface ExpenseBefore {
+  amountCents: number
+  currency: string
+  category: string
+  concept: string
+  spentAt: string
+  methodName: string | null
+  reason: string | null
+}
+
 export interface ExpenseRow {
   id: string
   branchId: string
@@ -829,15 +840,9 @@ export interface ExpenseRow {
   personName?: string | null
   /** Corrige a otro gasto: lo que era antes. */
   replacesExpenseId?: string | null
-  replaced?: {
-    amountCents: number
-    currency: string
-    category: string
-    concept: string
-    spentAt: string
-    methodName: string | null
-    reason: string | null
-  } | null
+  replaced?: ExpenseBefore | null
+  /** Toda la cadena de correcciones, de la más reciente a la primera. */
+  history?: ExpenseBefore[]
   notes: string | null
   voidedAt: string | null
   voidReason: string | null
@@ -899,6 +904,14 @@ export function fetchMonthExpenses(query: {
   if (query.q?.trim()) params.set("q", query.q.trim())
   if (query.category) params.set("category", query.category)
   return apiFetch<{ data: MonthExpenses }>(`/api/finance/expenses/month?${params}`)
+}
+
+/** La lista del mes para el contador (CSV), con lo que se busca y el tipo elegido, como en la pantalla. */
+export function downloadMonthExpenses(query: { branchId: string; year: number; month: number; q?: string; category?: string }): Promise<void> {
+  const params = new URLSearchParams({ branchId: query.branchId, year: String(query.year), month: String(query.month) })
+  if (query.q?.trim()) params.set("q", query.q.trim())
+  if (query.category) params.set("category", query.category)
+  return apiDownload(`/api/finance/expenses/month/download?${params}`, `gastos-${query.year}-${String(query.month).padStart(2, "0")}.csv`)
 }
 
 export function createExpenseApi(body: {
@@ -1030,10 +1043,43 @@ export interface RecurringMonth {
   currency: string
   timezone: string
   today: string
-  /** «Lo fijo del mes»: lo que cae en el mes, lo pagado y lo que falta. */
+  /** Lo que se repite y cae en el mes: cuánto, lo pagado y lo que falta. */
   fixed: { totalCents: number; paidCents: number; dueCents: number; count: number }
   due: RecurringDue[]
   templates: RecurringTemplate[]
+}
+
+/** Palabras que no distinguen un gasto de otro: «sueldo de la asistente», «luz del local». */
+const LINKING_WORDS = new Set(["del", "las", "los", "para", "con", "por", "una", "uno", "que", "mes", "pago", "sede", "local", "clinica", "consultorio"])
+
+function conceptWords(text: string, ignored: ReadonlySet<string> = new Set()): Set<string> {
+  return new Set(
+    normalizeSearchText(text)
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length >= 3 && !LINKING_WORDS.has(word) && !ignored.has(word)),
+  )
+}
+
+/**
+ * Lo que ya se repite y se parece a lo que se está por anotar: comparte una palabra del concepto
+ * («Luz» y «Luz sede Centro»), o es del mismo tipo y se paga el mismo día. Solo avisa: puede ser
+ * otro de verdad (dos alquileres), y quien anota decide.
+ */
+export function similarRecurring(
+  templates: readonly RecurringTemplate[],
+  draft: { concept: string; category: string; day: number | null },
+  /** El nombre de la sede: «Luz Centro» y «Agua Centro» no se parecen por «Centro». */
+  branchName = "",
+): RecurringTemplate[] {
+  const ignored = conceptWords(branchName)
+  const words = conceptWords(draft.concept, ignored)
+  return templates
+    .filter((row) => {
+      const sharesWord = [...conceptWords(row.concept, ignored)].some((word) => words.has(word))
+      const sameSlot = draft.category !== "" && row.category === draft.category && draft.day !== null && row.day === draft.day
+      return sharesWord || sameSlot
+    })
+    .slice(0, 2)
 }
 
 export function fetchRecurringMonth(query: { year: number; month: number; branchId?: string }): Promise<{ data: RecurringMonth }> {

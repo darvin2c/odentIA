@@ -44,6 +44,7 @@ import {
   updateRecurringExpense,
   correctExpense,
   getMonthExpenses,
+  expensesMonthCsv,
   listExpenseSuppliers,
   noteRecurringExpense,
   purchaseLookalikes,
@@ -309,23 +310,42 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
 
   // --- Gastos cortos (los proveedores quedan solo en Inventario) -------------------------
   // Gastos de un mes con su total por tipo (el mes es el de la clínica).
+  const monthQuery = z.object({
+    year: z.coerce.number().int().min(2000).max(2100),
+    month: z.coerce.number().int().min(1).max(12),
+    branchId: z.uuid().optional(),
+    q: z.string().max(200).optional(),
+    category: z.enum(EXPENSE_FILTER_TYPES).optional(),
+  })
   app.get("/expenses/month", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    const parsed = z
-      .object({
-        year: z.coerce.number().int().min(2000).max(2100),
-        month: z.coerce.number().int().min(1).max(12),
-        branchId: z.uuid().optional(),
-        q: z.string().max(200).optional(),
-        category: z.enum(EXPENSE_FILTER_TYPES).optional(),
-      })
-      .safeParse(c.req.query())
+    const parsed = monthQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         getMonthExpenses(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
       ),
     )
+  })
+
+  // La lista del mes para el contador, en CSV: las mismas filas que la pantalla.
+  app.get("/expenses/month/download", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    const parsed = monthQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const file = await withOrgContext(deps.db, orgId, (tx) =>
+        expensesMonthCsv(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
+      )
+      return c.body(file.body, 200, {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="${file.filename}"`,
+        "cache-control": "no-store",
+      })
+    } catch (error) {
+      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
+      throw error
+    }
   })
 
   app.get("/expenses", async (c) => {

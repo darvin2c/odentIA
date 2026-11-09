@@ -2,7 +2,7 @@
  * Finanzas › Gastos: lo que se repite y toca pagar (el alquiler, los sueldos, la
  * luz). «Pagar» abre el cajón del gasto ya lleno, con el importe y el medio de
  * siempre, y nada se paga sin verlo (ADR 0167, que cambia el «pagar es un toque»
- * del ADR 0150). «Lo fijo del mes» va dentro de la tarjeta del total, y «Lo que se
+ * del ADR 0150). «Lo que se repite en <mes>» va dentro de la tarjeta del total, y «Lo que se
  * repite» lista todo, también lo que no toca este mes, para anotarlo, cambiarlo o
  * dejar de repetirlo.
  *
@@ -31,6 +31,7 @@ import {
   type RecurringDue,
   type RecurringMonth,
   type RecurringTemplate,
+  similarRecurring,
   skipRecurringApi,
   todayIn,
   updateRecurringApi,
@@ -81,7 +82,8 @@ export function useRecurringMonth(branchId: string, month: { year: number; month
 }
 
 /**
- * «Lo fijo del mes: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», en una línea bajo el total.
+ * «Lo que se repite en noviembre: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», en una línea bajo
+ * el total. Un solo nombre en Gastos y en Reportes: «Lo que se repite» (antes «Lo fijo» y «Gastos fijos»).
  * Con varias sedes dice también lo de toda la clínica, en la misma línea (QA de Gastos, G31).
  */
 export function FixedOfMonth({
@@ -98,7 +100,8 @@ export function FixedOfMonth({
   const { totalCents, paidCents, dueCents } = data.fixed
   return (
     <p className="mt-1 text-sm text-muted-foreground">
-      Lo fijo del mes{wholeClinic ? " en esta sede" : ""}:{" "}
+      Lo que se repite en {monthWord(`${data.year}-${String(data.month).padStart(2, "0")}`)}
+      {wholeClinic ? " en esta sede" : ""}:{" "}
       <span className="font-semibold text-foreground tabular-nums">{formatMoney(totalCents, data.currency, locale)}</span>
       {" · "}pagado {plainAmount(paidCents, data.currency, locale)}
       {dueCents > 0 ? ` · falta ${plainAmount(dueCents, data.currency, locale)}` : ""}
@@ -146,6 +149,8 @@ const editableOfTemplate = (row: RecurringTemplate): Editable => ({
 /** Dónde se anota lo que se repite: la sede y el formato de la clínica. */
 export interface RecurringPlace {
   branchId: string
+  /** El nombre de la sede: no cuenta al buscar lo que se parece. */
+  branchName?: string
   currency: string
   locale: string
   orgTimeZone: string
@@ -383,7 +388,17 @@ export function RepeatingList({
           )}
         </CollapsibleContent>
       </Collapsible>
-      <NoteRecurringDrawer place={place} open={noting} onClose={() => setNoting(false)} onDone={() => setOpen(true)} />
+      <NoteRecurringDrawer
+        place={place}
+        open={noting}
+        templates={templates}
+        onClose={() => setNoting(false)}
+        onDone={() => setOpen(true)}
+        onChangeExisting={(row) => {
+          setNoting(false)
+          setChange(editableOfTemplate(row))
+        }}
+      />
       <ChangeRecurringDrawer row={change} locale={locale} onClose={() => setChange(null)} onDone={() => invalidateFinance(queryClient)} />
     </>
   )
@@ -411,13 +426,18 @@ interface NoteValues {
 function NoteRecurringDrawer({
   place,
   open,
+  templates,
   onClose,
   onDone,
+  onChangeExisting,
 }: {
   place: RecurringPlace
   open: boolean
+  /** Lo que ya se repite en la sede: si se parece, se avisa (no frena). */
+  templates: RecurringTemplate[]
   onClose: () => void
   onDone: () => void
+  onChangeExisting: (row: RecurringTemplate) => void
 }) {
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
@@ -506,6 +526,7 @@ function NoteRecurringDrawer({
   }, [open, form])
   const day = Number(values.day)
   const validDay = Number.isInteger(day) && day >= 1 && day <= 31
+  const lookalikes = similarRecurring(templates, { concept: values.concept, category: values.category, day: validDay ? day : null }, place.branchName)
   const proposed = validDay ? firstOf(day, values.dueNext) : today.slice(0, 7)
   // Desde el mes pasado (una deuda que se anota) hasta un año: si no se elige, el primero que no vence.
   const months = Array.from({ length: 14 }, (_, index) => addMonth(today.slice(0, 7), index - 1)).map((key) => ({
@@ -525,6 +546,24 @@ function NoteRecurringDrawer({
         <form.AppField name="concept">
           {(field) => <field.TextField label="En qué se gasta" maxLength={500} placeholder="Alquiler del local, luz, sueldo de la asistente" />}
         </form.AppField>
+        {/* Puede ser otro de verdad (dos alquileres): se avisa y se anota igual. */}
+        {lookalikes.length > 0 ? (
+          <div role="status" className="flex flex-col gap-1 rounded-lg border border-dashed px-3 py-2 text-sm">
+            {lookalikes.map((row) => (
+              <p key={row.id} className="flex flex-wrap items-center gap-x-2">
+                <span>
+                  Ya se repite «{row.concept}» ({formatMoney(row.amountCents, row.currency, place.locale)}
+                  {row.group === null ? `, el ${row.day}` : ""}). ¿Es el mismo?
+                </span>
+                {row.group === null ? (
+                  <Button type="button" variant="link" className="h-auto p-0" onClick={() => onChangeExisting(row)}>
+                    Cambiar ese
+                  </Button>
+                ) : null}
+              </p>
+            ))}
+          </div>
+        ) : null}
         <form.AppField name="category">
           {(field) => (
             <field.Group legend="Tipo" description={field.state.value ? EXPENSE_CATEGORY_HINTS[field.state.value] : undefined}>

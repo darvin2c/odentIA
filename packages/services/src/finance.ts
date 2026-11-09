@@ -1725,6 +1725,7 @@ function withoutCommissionNames<
         ...("fromCash" in row ? { fromCash: false } : {}),
         ...("shiftClosed" in row ? { shiftClosed: false } : {}),
         ...("replaced" in row ? { replaced: null } : {}),
+        ...("history" in row ? { history: [] } : {}),
       }
       merged.set(key, first)
       out.push(first)
@@ -1828,28 +1829,63 @@ export async function getMonthExpenses(
         ).map((row) => row.id)
       : [],
   )
-  const replacing = rows.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null)
-  const before = new Map(
-    replacing.length
-      ? (
-          await tx
-            .select({
-              id: expense.id,
-              amountCents: expense.amountCents,
-              currency: expense.currency,
-              category: expense.category,
-              concept: expense.concept,
-              spentAt: expense.spentAt,
-              methodName: expense.methodName,
-              shiftId: expense.shiftId,
-              voidReason: expense.voidReason,
-              voidedBy: expense.voidedBy,
-            })
-            .from(expense)
-            .where(and(eq(expense.organizationId, orgId), inArray(expense.id, replacing)))
-        ).map((row) => [row.id, row] as const)
-      : [],
-  )
+  // La cadena entera de correcciones: lo de antes, y lo de antes de eso (hasta 10 vueltas).
+  type Before = {
+    id: string
+    amountCents: number
+    currency: string
+    category: string
+    concept: string
+    spentAt: Date
+    methodName: string | null
+    shiftId: string | null
+    voidReason: string | null
+    replacesExpenseId: string | null
+  }
+  const before = new Map<string, Before>()
+  let pendingIds = rows.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null)
+  for (let turn = 0; turn < 10 && pendingIds.length > 0; turn += 1) {
+    const found = await tx
+      .select({
+        id: expense.id,
+        amountCents: expense.amountCents,
+        currency: expense.currency,
+        category: expense.category,
+        concept: expense.concept,
+        spentAt: expense.spentAt,
+        methodName: expense.methodName,
+        shiftId: expense.shiftId,
+        voidReason: expense.voidReason,
+        replacesExpenseId: expense.replacesExpenseId,
+      })
+      .from(expense)
+      .where(and(eq(expense.organizationId, orgId), inArray(expense.id, pendingIds)))
+    for (const row of found) before.set(row.id, row)
+    pendingIds = found.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null && !before.has(id))
+  }
+  const chainOf = (id: string | null): Before[] => {
+    const out: Before[] = []
+    for (let at = id; at && out.length < 10; at = before.get(at)?.replacesExpenseId ?? null) {
+      const row = before.get(at)
+      if (!row) break
+      out.push(row)
+    }
+    return out
+  }
+  const untilSalary = (chain: Before[], seesPeople: boolean) => {
+    if (seesPeople) return chain
+    const cut = chain.findIndex((item) => item.category === STAFF_PAY_CATEGORY)
+    return cut === -1 ? chain : chain.slice(0, cut)
+  }
+  const beforeWords = (was: Before) => ({
+    amountCents: was.amountCents,
+    currency: was.currency,
+    category: was.category,
+    concept: was.concept,
+    spentAt: was.spentAt,
+    methodName: was.methodName ?? (was.shiftId ? "Efectivo de la caja" : null),
+    reason: was.voidReason,
+  })
   // De quién es cada sueldo pagado de lo que se repite: solo para quien administra comisiones (ADR 0166).
   const persons = new Map<string, string>()
   if (viewer.seesCommissions) {
@@ -1884,17 +1920,13 @@ export async function getMonthExpenses(
       personName: row.recurringId ? (persons.get(row.recurringId) ?? null) : null,
       /** Lo que era antes de corregirlo: el importe, el tipo, la fecha y cómo se pagó. */
       // Lo de antes de un sueldo no se le dice a quien no administra comisiones (ADR 0166).
-      replaced: was && (viewer.seesCommissions || was.category !== STAFF_PAY_CATEGORY)
-        ? {
-            amountCents: was.amountCents,
-            currency: was.currency,
-            category: was.category,
-            concept: was.concept,
-            spentAt: was.spentAt,
-            methodName: was.methodName ?? (was.shiftId ? "Efectivo de la caja" : null),
-            reason: was.voidReason,
-          }
-        : null,
+      replaced: was && (viewer.seesCommissions || was.category !== STAFF_PAY_CATEGORY) ? beforeWords(was) : null,
+      /**
+       * Toda la cadena de correcciones, de la más reciente a la primera. Para quien no ve los
+       * sueldos se corta en el primero: el motivo de la versión anterior a un sueldo podría
+       * contar lo que se pagaba (ADR 0166).
+       */
+      history: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).map(beforeWords),
       commission: settlement !== undefined,
       salary: salaries.has(row.id),
       /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */

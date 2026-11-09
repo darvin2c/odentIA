@@ -973,7 +973,7 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             { key: "comisiones", label: "Comisiones", value: commissions.cents, tone: "series-2" },
             { key: "compras", label: "Compras", value: purchases.cents, tone: "series-3" },
             ...(salesTax.cents > 0 ? [{ key: "impuesto", label: taxName, value: salesTax.cents, tone: "muted" as const }] : []),
-            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Gastos fijos", value: fixed.cents, tone: "series-1" as const }] : []),
+            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Lo que se repite", value: fixed.cents, tone: "series-1" as const }] : []),
           ]}
         />
       ) : null}
@@ -1013,7 +1013,7 @@ function PayablesCard({ data }: { data: ReportFinance }) {
         {fixed.cents > 0 ? (
           <li className="flex min-w-0 flex-col">
             <span className="flex justify-between gap-2">
-              <strong>Gastos fijos vencidos</strong>
+              <strong>Lo que se repite, vencido</strong>
               <strong className="tabular-nums">{money(fixed.cents)}</strong>
             </span>
             <span className="text-[13px] text-muted-foreground">

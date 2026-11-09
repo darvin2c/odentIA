@@ -45,7 +45,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import {
   CashCloseDrawer,
@@ -55,7 +55,7 @@ import {
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { DebtsTab } from "../../components/finance/debts-tab"
 import { ExchangeRateLine } from "../../components/finance/exchange-rate-line"
-import { ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
+import { type ExpenseDrawerMode, ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
 import { ExpensesTab } from "../../components/finance/expenses-tab"
 import {
   CommissionsAdminPanel,
@@ -301,6 +301,9 @@ function FinanceWorkspace() {
     [],
   )
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
+  // «Pagar» y «Corregir» de Gastos: aquí, fuera de las pestañas, como «Registrar gasto» (QA de
+  // Gastos, UX4: al mirar la Caja se perdía lo escrito).
+  const [expenseMode, setExpenseMode] = useState<{ mode: ExpenseDrawerMode; branchId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
   const [justClosed, setJustClosed] = useState<{
     id: string
@@ -312,6 +315,10 @@ function FinanceWorkspace() {
 
   const branchId = sede.branchId ?? sede.branches[0]?.id ?? ""
   const branchName = sede.branches.find((item) => item.id === branchId)?.name ?? ""
+  // Al cambiar de sede, «Pagar» o «Corregir» de la otra se cierra: no vuelve al regresar.
+  useEffect(() => {
+    setExpenseMode((current) => (current && current.branchId !== branchId ? null : current))
+  }, [branchId])
   const prof = profile.data?.data ?? null
   const branchZone = useBranchesStatus()
   // La zona de la sede la dice su caja; mientras llega, la de la clínica.
@@ -605,6 +612,7 @@ function FinanceWorkspace() {
                 month={period}
                 canWrite={canWrite}
                 onExpense={() => openPanel("gasto")}
+                onOpenExpense={(mode) => setExpenseMode({ mode, branchId: ws.branchId })}
               />
             ) : null}
           </TabsContent>
@@ -641,6 +649,10 @@ function FinanceWorkspace() {
             open={openPanels.has("gasto")}
             onClose={() => closePanel("gasto")}
           />
+          {/* Lo de otra sede no se paga ni se corrige en esta: al cambiar de sede se cierra. */}
+          {expenseMode && expenseMode.branchId === ws.branchId ? (
+            <ExpenseFormDrawer place={ws} open mode={expenseMode.mode} onClose={() => setExpenseMode(null)} />
+          ) : null}
           <CashMoveDrawer
             branchId={ws.branchId}
             currency={ws.currency}
