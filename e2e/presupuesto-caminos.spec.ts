@@ -91,8 +91,11 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   await expect(question).toBeVisible()
   await shot("atencion-pregunta")
   await question.getByRole("button", { name: "Es otro camino", exact: true }).click()
-  await expect(panel.getByText(/dos caminos/).first()).toBeVisible()
-  await expect(panel.getByText("Cada camino tiene su total: nunca se suman.")).toBeVisible()
+  await expect(panel.getByText(/dos opciones/).first()).toBeVisible()
+  await expect(panel.getByText("Cada opción tiene su total: nunca se suman.")).toBeVisible()
+  // Cada camino se llama como en el papel, «Opción A», y dice su total (QA del 8 nov).
+  await expect(panel.getByRole("region", { name: /^Opción A: / })).toContainText(/Total[^:]*: S\//)
+  await expect(panel.getByRole("region", { name: /^Opción B: / })).toContainText(/Total[^:]*: S\//)
   await views("atencion-caminos")
 
   // El presupuesto nació con dos opciones; se entrega.
@@ -109,13 +112,13 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   // En el plan, la 46 está por decidir, fuera de las fases.
   const person = await call<{ personId: string }>(page, "GET", `/api/people/by-patient/${ids.patientId}`, slug)
   await gotoHydrated(page, tenant(slug, `/people/${person.personId}?tab=plan`))
-  await expect(page.getByText(/por decidir entre dos caminos/).first()).toBeVisible()
+  await expect(page.getByText(/por decidir entre dos opciones/).first()).toBeVisible()
   await views("plan-caminos")
 
   // «¿Qué respondió?» de «Qué sigue» abre directo su cajón: acepta la limpieza y lo de la 46 lo piensa, sin elegir.
   await page.getByRole("button", { name: "¿Qué respondió?", exact: true }).first().click()
   const drawer = surface(page, { name: /^¿Qué respondió / })
-  await expect(drawer.getByText(/Va en (los dos|todos los) caminos/)).toBeVisible()
+  await expect(drawer.getByText(/Va en (las dos|todas las) opciones/)).toBeVisible()
   // Lo común: la limpieza y la endodoncia de la 36 las acepta.
   for (const group of await drawer.getByRole("group", { name: /^Respuesta para / }).all())
     await group.getByRole("button", { name: "Acepta", exact: true }).click()
@@ -125,7 +128,7 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   await expect(drawer).toBeHidden()
   // Guardado: la 46 sigue agrupada por decidir y el presupuesto dice que falta elegir.
   await expect(page.getByText(/falta elegir el camino/).first()).toBeVisible()
-  await expect(page.getByText(/por decidir entre dos caminos/).first()).toBeVisible()
+  await expect(page.getByText(/por decidir entre dos opciones/).first()).toBeVisible()
   await views("respondio-lo-comun")
 
   // El servidor: la limpieza aceptada, lo de la 46 pensándolo, sin opción elegida.
@@ -174,7 +177,7 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
     .locator("xpath=ancestor::*[.//button][1]")
     .getByRole("button", { name: "Abrir", exact: true })
     .click()
-  await expect(page.getByText("Ya no se pide: no lo aceptó o eligió otro camino")).toBeVisible()
+  await expect(page.getByText("Ya no se pide: no lo aceptó o eligió otra opción")).toBeVisible()
   await expect(page.getByText(/^Faltan? las? firmas? de /)).toHaveCount(0)
   await views("atencion-camino-elegido")
 

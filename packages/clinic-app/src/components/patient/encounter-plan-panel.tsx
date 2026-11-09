@@ -9,7 +9,7 @@
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
  */
-import { formatMoney } from "@odentia/clinical"
+import { budgetOptionLabel, formatMoney, moneyTotalsText } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -29,9 +29,9 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
+import { budgetNumberLabel, commonPlanItemIds, fetchBudgetDetail, fetchTreatmentPlans, planDecisionLabel, totalsOf } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel } from "../../lib/patients"
@@ -42,8 +42,9 @@ import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { EncounterTreatments } from "./encounter-treatments"
-import { treatmentSiteLabel } from "./plan/budget-parts"
+import { treatmentSiteLabel, useBudgetFormat } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
+import { AnsweredBy } from "./plan/budget-response"
 import { BudgetShowActions } from "./plan/budget-show"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
@@ -306,6 +307,7 @@ export function EncounterPlanPanel({
             {pathGroups.map((group) => (
               <PathsBox
                 key={group.budgetId}
+                patientId={patientId}
                 group={group}
                 chooser={chooser}
                 today={today}
@@ -462,7 +464,7 @@ function PathQuestionRow({
   const { group } = question
   return (
     <fieldset className={box}>
-      <legend className={legend}>¿En qué camino va {lowerFirst(item.title)}?</legend>
+      <legend className={legend}>¿En qué opción va {lowerFirst(item.title)}?</legend>
       <div className="clear-both flex flex-wrap gap-2">
         {group.paths.map((path) => (
           <Button
@@ -473,7 +475,7 @@ function PathQuestionRow({
             disabled={pending}
             onClick={() => onPlace(path.position as PathTarget)}
           >
-            {path.title || `Camino ${path.position}`}
+            {path.title || budgetOptionLabel(path.position)}
           </Button>
         ))}
         <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>
@@ -489,6 +491,7 @@ function PathQuestionRow({
  * indicado hoy y sin respuesta se puede pasar de un camino a otro.
  */
 function PathsBox({
+  patientId,
   group,
   chooser,
   today,
@@ -498,6 +501,7 @@ function PathsBox({
   errorFor,
   onPlace,
 }: {
+  patientId: string
   group: PlanPathGroup
   /** «Ana» o «la persona». */
   chooser: string
@@ -509,9 +513,24 @@ function PathsBox({
   onPlace: (planItemId: string, path: PathTarget) => void
 }): React.JSX.Element {
   const count = pathCountWord(group.pathCount)
+  // El total de cada opción es el del presupuesto (con lo que va en todas, descuentos y su
+  // moneda), el mismo del papel: sin él no se promete (QA del 8 nov).
+  const detail = useQuery({
+    queryKey: ["budget", patientId, group.budgetId],
+    queryFn: () => fetchBudgetDetail(patientId, group.budgetId),
+  }).data?.data
+  const totalOf = (position: number): string | null => {
+    const option = detail?.options.find((candidate) => candidate.position === position)
+    if (!detail || !option || !locale) return null
+    // Sin un precio en alguna línea, el total no es una cifra: se dice así.
+    return moneyTotalsText(totalsOf(option, detail.currency), (cents, unit) => formatMoney(cents, unit, locale), "") || "por definir"
+  }
+  // El total suma también lo que va en todas (la limpieza): se dice, para que cuadre con lo que se ve.
+  const withShared = detail ? commonPlanItemIds(detail.items, detail.options.length).size > 0 : false
+  const totalWords = withShared ? `Total con lo que va en ${group.pathCount === 2 ? "las dos" : "todas"}` : "Total de la opción"
   const heading = group.site
-    ? `${group.site} · ${count} caminos: ${chooser} elegirá uno`
-    : `${count.charAt(0).toUpperCase()}${count.slice(1)} caminos: ${chooser} elegirá uno`
+    ? `${group.site} · ${count} opciones: ${chooser} elegirá una`
+    : `${count.charAt(0).toUpperCase()}${count.slice(1)} opciones: ${chooser} elegirá una`
   // Lo que va en más de un camino se mueve desde el primero en que aparece.
   const withSelect = new Set<string>()
   return (
@@ -519,16 +538,24 @@ function PathsBox({
       <h4 className="text-sm font-medium">{heading}</h4>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
         {group.paths.map((path) => {
-          const title = path.title || `Camino ${path.position}`
+          // El nombre de cada camino es el del papel y del presupuesto: «Opción A» (QA del 8 nov).
+          const label = budgetOptionLabel(path.position)
+          const title = path.title || label
+          const total = totalOf(path.position)
           return (
             <section
               key={path.position}
-              aria-label={`Camino ${path.position}: ${title}`}
+              aria-label={`${label}: ${title}`}
               className="flex min-w-0 flex-col gap-2 rounded-md border bg-card p-3"
             >
               <div className="flex flex-col">
-                <span className="text-xs text-muted-foreground">Camino {path.position}</span>
+                <span className="text-xs text-muted-foreground">{label}</span>
                 <h5 className="text-sm font-medium">{title}</h5>
+                {total ? (
+                  <span className="text-sm tabular-nums">
+                    {totalWords}: {total}
+                  </span>
+                ) : null}
               </div>
               {path.items.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Sin tratamientos.</p>
@@ -573,7 +600,7 @@ function PathsBox({
                         ) : null}
                         {movable ? (
                           <ChoiceSelect
-                            aria-label={`Camino de ${item.title}`}
+                            aria-label={`Opción de ${item.title}`}
                             value={current}
                             disabled={pending}
                             onChange={(event) => {
@@ -584,7 +611,7 @@ function PathsBox({
                           >
                             {group.paths.map((option) => (
                               <option key={option.position} value={String(option.position)}>
-                                {`Camino ${option.position}${option.title ? `: ${option.title}` : ""}`}
+                                {`${budgetOptionLabel(option.position)}${option.title ? `: ${option.title}` : ""}`}
                               </option>
                             ))}
                             <option value="todos">{inAllPathsLabel(group.pathCount)}</option>
@@ -604,7 +631,9 @@ function PathsBox({
           )
         })}
       </div>
-      <p className="text-xs text-muted-foreground">Cada camino tiene su total: nunca se suman.</p>
+      {detail ? (
+        <p className="text-xs text-muted-foreground">Cada opción tiene su total: nunca se suman.</p>
+      ) : null}
     </section>
   )
 }
@@ -630,6 +659,18 @@ export function EncounterBudgetSend({
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
   const step = usePlanNextStep(patientId, canSend).data?.data ?? null
+  // El presupuesto que se ofreció enviar en esta atención: si se envía o se anota su respuesta,
+  // la franja no desaparece sin rastro, queda su estado y quién decidió (QA del 8 nov). Se
+  // recuerda por paciente fuera del componente: la franja compacta y la del bloque abierto
+  // se montan por turnos. Al recargar la página se olvida (el Plan lo sigue diciendo).
+  const offeredNow = step?.kind === "enviar" ? (step.action?.budgetId ?? null) : null
+  const [offered, setOffered] = useState<string | null>(() => OFFERED_BUDGET.get(patientId) ?? null)
+  useEffect(() => {
+    if (!offeredNow) return
+    OFFERED_BUDGET.set(patientId, offeredNow)
+    setOffered(offeredNow)
+  }, [offeredNow, patientId])
+  if (canSend && !offeredNow && offered) return <EncounterBudgetAfter patientId={patientId} budgetId={offered} />
   if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return null
   if (compact) {
     return (
@@ -677,6 +718,31 @@ export function EncounterBudgetSend({
         />
       </div>
     </BlockPart>
+  )
+}
+
+/** El presupuesto que se ofreció enviar en la atención abierta de cada paciente (ver `EncounterBudgetSend`). */
+const OFFERED_BUDGET = new Map<string, string>()
+
+/**
+ * Lo que quedó del presupuesto ofrecido en esta atención: su número, su estado y,
+ * si se anotó en la clínica, quién decide y quién lo anotó. Es constancia: sin
+ * botones (se cambia en el Plan).
+ */
+function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budgetId: string }): React.JSX.Element | null {
+  const format = useBudgetFormat()
+  const budget = useQuery({
+    queryKey: ["budget", patientId, budgetId],
+    queryFn: () => fetchBudgetDetail(patientId, budgetId),
+  }).data?.data
+  if (!budget || budget.status === "borrador") return null
+  return (
+    <div className="flex w-full flex-col gap-0.5 rounded-lg border bg-background px-3 py-2" role="status">
+      <span className="text-sm">
+        {budgetNumberLabel(budget.budgetNumber)} · {budget.stateText}
+      </span>
+      {budget.decidedAt ? <AnsweredBy budget={budget} formatDay={(iso) => format.day(iso)} /> : null}
+    </div>
   )
 }
 

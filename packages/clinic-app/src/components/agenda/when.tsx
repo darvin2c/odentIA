@@ -78,6 +78,24 @@ export interface WhenInput {
   enabled?: boolean
   /** Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039). */
   serviceId?: string
+  /**
+   * La sesión siguiente, con el servicio de la semilla: quien se pidió (quien
+   * atendió la anterior) sigue elegido aunque la regla del servicio no lo
+   * ofrezca, y se dice por qué. La regla decide qué se ofrece, no qué se guarda.
+   */
+  keepProfessional?: boolean
+}
+
+/**
+ * Por qué quien se pidió al abrir no es como los demás (QA del 8 nov): no tiene
+ * horario en la sede, o el servicio lo atiende otra especialidad. Viene igual,
+ * marcado, y se dice en una línea; la persona decide.
+ */
+export interface SeedNote {
+  kind: "noSchedule" | "otherSpecialty"
+  label: string
+  /** Con servicio de una especialidad que alguien atiende aquí: cuál y quiénes. */
+  specialty: { name: string; attending: ScheduleColumn[] } | null
 }
 
 /** Una excepción de la agenda: fuera del horario, sobre algo ocupado o las dos. */
@@ -108,6 +126,8 @@ export interface WhenState {
   nextFree: { startsAt: string; endsAt: string } | null
   /** Si el servicio tiene quien lo atienda en la sede: la agenda solo ofrece a esas personas. */
   attending: { specialtyName: string } | null
+  /** Quien se pidió al abrir, si no tiene horario aquí o no atiende el servicio. */
+  seedNote: SeedNote | null
   /** «09:00 a 13:00» por cada turno de quien se eligió ese día. */
   hoursThatDay: string[]
   loading: boolean
@@ -146,36 +166,57 @@ export function useWhen(input: WhenInput): WhenState {
   const to = minutesToInstant(addDays(week[6] ?? date, 1), 0, timeZone)
   const ignore = moving?.id
   const serviceId = input.serviceId
+  const seedProfessional = input.professionalUserId
+  const seedLabel = input.professionalLabel
+  // La sesión siguiente: quien se pidió viene aunque la regla del servicio no lo ofrezca (ADR 0039).
+  const keep = Boolean(input.keepProfessional && seedProfessional)
+  const asked = keep && serviceId && seedProfessional ? seedProfessional : null
   const availabilityQuery = useQuery({
-    queryKey: ["agenda-availability", branchId, from, to, ignore ?? null, serviceId ?? null],
+    queryKey: ["agenda-availability", branchId, from, to, ignore ?? null, serviceId ?? null, asked],
     queryFn: () =>
       apiFetch<{ data: AgendaAvailability }>(
-        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${ignore ? `&ignoreAppointmentId=${ignore}` : ""}${serviceId ? `&serviceId=${serviceId}` : ""}`,
+        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${ignore ? `&ignoreAppointmentId=${ignore}` : ""}${serviceId ? `&serviceId=${serviceId}` : ""}${asked ? `&professionalUserId=${encodeURIComponent(asked)}` : ""}`,
       ),
     enabled: input.enabled ?? true,
     placeholderData: (previous) => previous,
   })
   const availability = availabilityQuery.data?.data
-  const seedProfessional = input.professionalUserId
-  const seedLabel = input.professionalLabel
   const team = React.useMemo((): ScheduleColumn[] => {
     const listed: ScheduleColumn[] = (availability?.professionals ?? []).map((item) => ({
       id: item.id,
       label: item.label,
       tone: toneOf(item.id),
     }))
+    if (!seedProfessional) return listed
+    const seedColumn = { id: seedProfessional, label: seedLabel ?? "", tone: toneOf(seedProfessional) }
+    if (keep) {
+      // La sesión siguiente: quien atendió va primero y, sin horario en la sede, se suma igual
+      // (se le reserva fuera de su horario, con su aviso).
+      const seed = listed.find((item) => item.id === seedProfessional)
+      const others = listed.filter((item) => item.id !== seedProfessional)
+      return seed ? [seed, ...others] : seedLabel ? [seedColumn, ...others] : listed
+    }
     // Con servicio elegido manda quién lo atiende: no se vuelve a sumar a quien no lo hace (ADR 0039).
-    return !serviceId && seedProfessional && seedLabel && !listed.some((item) => item.id === seedProfessional)
-      ? [...listed, { id: seedProfessional, label: seedLabel, tone: toneOf(seedProfessional) }]
-      : listed
-  }, [availability, toneOf, seedProfessional, seedLabel, serviceId])
-  // Si quien se miraba no atiende el servicio elegido, se ve a quienes sí lo atienden.
+    return !serviceId && seedLabel && !listed.some((item) => item.id === seedProfessional) ? [...listed, seedColumn] : listed
+  }, [availability, toneOf, seedProfessional, seedLabel, serviceId, keep])
+  const seedNote = React.useMemo(
+    () => (keep ? seedNoteOf(availability, team, seedProfessional ?? null, seedLabel ?? null) : null),
+    [keep, availability, team, seedProfessional, seedLabel],
+  )
+  // «Cualquiera» con servicio es entre quienes lo atienden: quien se pidió fuera de la regla
+  // solo se mira si se lo elige (si no, el primer hueco podría caer en él sin decirlo).
+  const offered = React.useMemo(() => {
+    if (!availability?.attending) return team
+    const listed = new Set(availability.professionals.filter((item) => !item.outsideService).map((item) => item.id))
+    return team.filter((item) => listed.has(item.id))
+  }, [team, availability])
+  // Si quien se elegía en las fichas no atiende el servicio elegido, se ve a quienes sí lo atienden.
   const lanes = React.useMemo(
     () =>
       professionalFilter && team.some((item) => item.id === professionalFilter)
         ? team.filter((item) => item.id === professionalFilter)
-        : team,
-    [team, professionalFilter],
+        : offered,
+    [team, offered, professionalFilter],
   )
   const free = React.useMemo(
     (): ScheduleAvailability[] =>
@@ -333,6 +374,7 @@ export function useWhen(input: WhenInput): WhenState {
     nextFree:
       availability?.professionals.find((item) => item.id === shown?.columnId)?.nextFree ?? null,
     attending: availability?.attending ? { specialtyName: availability.attending.specialtyName } : null,
+    seedNote,
     hoursThatDay: shown
       ? open
           .filter((item) => item.columnId === shown.columnId)
@@ -362,6 +404,27 @@ export function useWhen(input: WhenInput): WhenState {
     },
     refetch: () => void availabilityQuery.refetch(),
   }
+}
+
+/**
+ * Lo que se dice de quien se pidió al abrir: nada si la agenda lo ofrece como a
+ * los demás; si no tiene horario en la sede o el servicio es de otra
+ * especialidad, por qué, con quienes sí lo atienden.
+ */
+export function seedNoteOf(
+  availability: Pick<AgendaAvailability, "professionals" | "attending"> | undefined,
+  team: ScheduleColumn[],
+  seed: string | null,
+  seedLabel: string | null,
+): SeedNote | null {
+  if (!availability || !seed) return null
+  const rule = availability.attending
+  const ids = new Set(rule?.professionalUserIds ?? [])
+  const specialty = rule ? { name: rule.specialtyName, attending: team.filter((item) => ids.has(item.id)) } : null
+  const listed = availability.professionals.find((item) => item.id === seed)
+  if (!listed) return seedLabel ? { kind: "noSchedule", label: seedLabel, specialty } : null
+  if (!listed.outsideService || !specialty) return null
+  return { kind: "otherSpecialty", label: listed.label, specialty }
 }
 
 /** Lo que se le dice al servidor de una excepción ya avisada: solo lo que se avisó. */
@@ -488,7 +551,45 @@ function WhenProfessional({ when }: { when: WhenState }) {
         allLabel="Cualquiera"
         onChange={when.pickProfessional}
       />
+      <SeedNoteLine when={when} />
       {error}
+    </div>
+  )
+}
+
+/**
+ * Por qué quien se pidió (la sesión siguiente, con quien atendió) no es como los
+ * demás, mientras sigue elegido: una línea con la salida, sin frenar.
+ */
+function SeedNoteLine({ when }: { when: WhenState }) {
+  const note = when.seedNote
+  if (!note || when.professionalFilter !== when.input.professionalUserId) return null
+  const attending = note.specialty?.attending ?? []
+  const [only] = attending
+  const names = attending.map((item) => item.label)
+  const who = names.length > 1 ? `la atienden ${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}` : `la atiende ${names[0]}`
+  // Dice con quién queda la cita y por qué se avisa, sin sonar a error: quien atendió ya hizo la sesión anterior.
+  const said =
+    note.kind === "noSchedule"
+      ? `${note.label} no tiene horario en esta sede: toca una hora y la cita queda con ${shortName(note.label)}, fuera de su horario.`
+      : `La cita queda con ${note.label}, aunque no figura en ${note.specialty?.name} en esta sede.`
+  return (
+    <div role="status" className="grid gap-1 text-sm text-muted-foreground">
+      <p>
+        {said}
+        {note.specialty && names.length > 0 ? ` En esta sede, ${note.specialty.name} ${who}.` : ""}
+      </p>
+      {only && attending.length === 1 ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-2.5 justify-self-start text-primary"
+          onClick={() => when.pickProfessional(only.id)}
+        >
+          {`Cambiar a ${shortName(only.label)}`}
+        </Button>
+      ) : null}
     </div>
   )
 }
