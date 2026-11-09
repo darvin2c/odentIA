@@ -613,6 +613,17 @@ export function CollectDrawer({
   const [selectInit, setSelectInit] = useState(false)
   /** El importe sigue a lo marcado hasta que la persona escribe otro. */
   const [amountTouched, setAmountTouched] = useState(false)
+  /**
+   * El adelanto escrito antes de pasar a «Cobrar lo pendiente»: un cobro es lo
+   * pendiente o un adelanto, no los dos (`collectCharge`). Se guarda y se avisa, y
+   * vuelve escrito al volver a «Cobrar un adelanto» (QA del 9 nov: se borraba sin aviso).
+   */
+  const [advanceDraft, setAdvanceDraft] = useState<{
+    amount: string
+    advanceFor: string
+    debtCurrency: string
+    payCurrency: string
+  } | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [adding, setAdding] = useState(false)
   const [addingProduct, setAddingProduct] = useState(false)
@@ -757,6 +768,7 @@ export function CollectDrawer({
     form.reset()
     setSelectInit(false)
     setAmountTouched(false)
+    setAdvanceDraft(null)
     setEditor(null)
     setAdding(false)
     setAddingProduct(false)
@@ -912,6 +924,15 @@ export function CollectDrawer({
     locale,
     form,
   ])
+
+  /** El adelanto guardado, con su moneda («S/ 400.00»); si no se lee como importe, tal cual. */
+  const draftSaid = (draft: { amount: string; payCurrency: string }): string => {
+    try {
+      return formatMoney(parseMoney(draft.amount, draft.payCurrency, locale), draft.payCurrency, locale)
+    } catch {
+      return draft.amount
+    }
+  }
 
   /** Lo escrito estaba en otra moneda: vuelve a empezar y a seguir a lo marcado. */
   const resetWritten = () => {
@@ -1741,6 +1762,14 @@ export function CollectDrawer({
                                 size="sm"
                                 disabled={busy}
                                 onClick={() => {
+                                  const written = form.state.values.amount.trim()
+                                  if (written)
+                                    setAdvanceDraft({
+                                      amount: written,
+                                      advanceFor: form.state.values.advanceFor,
+                                      debtCurrency: form.state.values.debtCurrency,
+                                      payCurrency: form.state.values.payCurrency,
+                                    })
                                   form.setFieldValue("advance", false)
                                   setAmountTouched(false)
                                   // Lo pendiente está en otra moneda: el cobro va a ella.
@@ -1760,9 +1789,10 @@ export function CollectDrawer({
                               onClick={() => {
                                 closeInline()
                                 form.setFieldValue("advance", true)
-                                form.setFieldValue("amount", "")
+                                // Lo que ya había escrito del adelanto vuelve, con su «Para».
+                                form.setFieldValue("amount", advanceDraft?.amount ?? "")
                                 form.setFieldValue("payments", [])
-                                setAmountTouched(false)
+                                setAmountTouched(advanceDraft !== null)
                                 // Por defecto, a cuenta de la moneda de su plan aceptado.
                                 if (
                                   second &&
@@ -1772,11 +1802,25 @@ export function CollectDrawer({
                                   form.setFieldValue("debtCurrency", data.planCurrency)
                                   form.setFieldValue("payCurrency", data.planCurrency)
                                 }
+                                // Con su «Para» y su moneda, como estaba escrito.
+                                if (advanceDraft) {
+                                  form.setFieldValue("advanceFor", advanceDraft.advanceFor)
+                                  if (advanceDraft.debtCurrency) form.setFieldValue("debtCurrency", advanceDraft.debtCurrency)
+                                  if (advanceDraft.payCurrency) form.setFieldValue("payCurrency", advanceDraft.payCurrency)
+                                }
+                                setAdvanceDraft(null)
                               }}
                             >
                               Cobrar un adelanto
                             </Button>
                           )}
+                          {!values.advance && advanceDraft ? (
+                            <p role="status" className="basis-full text-sm text-muted-foreground">
+                              El adelanto de {draftSaid(advanceDraft)} va en otro cobro: cobra lo pendiente y
+                              después «Cobrar un adelanto» por {draftSaid(advanceDraft)}. Si vuelves ahora a
+                              «Cobrar un adelanto», lo trae escrito.
+                            </p>
+                          ) : null}
                         </div>
                       ) : null}
                     </>
@@ -2849,7 +2893,15 @@ function AdvanceForChoice({
       </span>
       {/* Botones si caben; un nombre largo («Endodoncia posterior vital · Pieza 46») va en la lista. */}
       {options.length <= 3 && options.every((option) => option.label.length <= 30) ? (
-        <ChoiceButtons aria-labelledby={`${uid}-para`} tone="primary" value={value} options={options} onChange={onChange} />
+        // Tampoco en los botones: un valor vacío se mandaba como el id que inventa el botón
+        // («base-ui-…») y el cobro respondía «Elige una opción de la lista» (QA del 9 nov).
+        <ChoiceButtons
+          aria-labelledby={`${uid}-para`}
+          tone="primary"
+          value={value || NEXT_PAYMENT}
+          options={options.map((option) => ({ ...option, value: option.value || NEXT_PAYMENT }))}
+          onChange={(picked) => onChange(picked === NEXT_PAYMENT ? "" : picked)}
+        />
       ) : (
         // Un valor vacío no se elige en la lista: «lo próximo» va con su propia clave.
         <ChoiceSelect

@@ -131,6 +131,7 @@ import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { EncounterVisitStrip } from "./encounter-visit"
+import { CollectButton } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { PatientClinicalStrip } from "./patient-header"
 import { BudgetSendButton } from "./plan/budget-send"
@@ -482,6 +483,8 @@ export function EncounterEditor({
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canReadFinance,
   })
+  /** Lo que debe en total, por moneda, para «Atención finalizada» (solo quien ve la caja). */
+  const finalizedOwed = (accountQuery.data?.data.byCurrency ?? []).filter((row) => row.saldo > 0)
 
   // El examen y los signos vitales son los del producto (issue 229).
   const exam = productUi().encounter.examination
@@ -1247,6 +1250,8 @@ export function EncounterEditor({
       setFinalizedKeptOpen(result.data.keptOpen ?? [])
       setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedBilling(result.data.billing)
+      // «Debe en total» cuenta lo que este cierre acaba de cargar.
+      if (canReadFinance) void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
         void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
@@ -2760,9 +2765,10 @@ export function EncounterEditor({
           <DialogHeader>
             <DialogTitle>Atención finalizada</DialogTitle>
             <DialogDescription>
+              {/* «No dejó nada que cobrar» se leía como que no debía nada (QA del 9 nov). */}
               {chargedLines.length > 0
                 ? "Caja ya lo ve en su lista de por cobrar."
-                : "Esta atención no dejó nada que cobrar."}
+                : "Esta atención no dejó cargos nuevos."}
             </DialogDescription>
           </DialogHeader>
           {finalizedNext.length > 0 ? (
@@ -2851,6 +2857,19 @@ export function EncounterEditor({
                 </p>
               ) : null}
             </section>
+          ) : null}
+          {/* Lo que debe en total, con lo de antes (la sesión 1 de la endodoncia), y «Cobrar» a
+              quien cobra: solo quien ve la caja (QA del 9 nov; el odontólogo no la ve). */}
+          {canReadFinance && !accountQuery.isFetching && finalizedOwed.length > 0 && orgLocale ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+              <span>
+                Debe en total{" "}
+                <span className="font-semibold tabular-nums">
+                  {finalizedOwed.map((row) => formatMoney(row.saldo, row.currency, orgLocale)).join(" y ")}
+                </span>
+              </span>
+              <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" />
+            </div>
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>

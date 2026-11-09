@@ -9,6 +9,7 @@
  */
 import {
   formatMoney,
+  ticketCreditSummary,
   ticketFooterLines,
   type TicketTender,
   ticketTenderTitle,
@@ -199,6 +200,18 @@ function thermalRule(kit: DocumentKit) {
 }
 
 function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
+  // Con saldo a favor: la suma de las líneas, lo que se restó y lo pagado hoy, para que
+  // cuadre a la vista (QA del 9 nov). Solo presentación: lo congelado no cambia.
+  const credit = ticketCreditSummary({
+    lineCents: snap.lines.map((line) => line.amountCents),
+    advanceCents: snap.advanceCents,
+    creditAppliedCents: snap.creditAppliedCents,
+    totalCents: snap.totalCents,
+  })
+  if (credit) {
+    moneyRow(kit, "Suma", money(credit.sumCents))
+    moneyRow(kit, "Saldo a favor usado", `−${money(credit.creditCents)}`)
+  }
   if (snap.taxes) {
     // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa.
     moneyRow(kit, "Subtotal", money(snap.taxes.subtotalCents))
@@ -209,11 +222,11 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
   }
   if (kit.thermal) {
     kit.gap(2)
-    kit.total("TOTAL", money(snap.totalCents))
+    kit.total(credit ? "PAGADO HOY" : "TOTAL", money(snap.totalCents))
   } else {
     kit.gap(4)
     kit.rule({ tone: "ink" })
-    kit.total({ text: "Total", face: "sansSemi" }, money(snap.totalCents), { before: 5 })
+    kit.total({ text: credit ? "Pagado hoy" : "Total", face: "sansSemi" }, money(snap.totalCents), { before: 5 })
   }
 }
 
@@ -230,8 +243,6 @@ function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) 
     )
     if (method.reference) smallNote(kit, `Operación ${method.reference}`)
   }
-  if (snap.creditAppliedCents > 0)
-    moneyRow(kit, "Saldo a favor usado", money(snap.creditAppliedCents))
   if (snap.cashReceivedCents != null) moneyRow(kit, "Recibido", paid(snap.cashReceivedCents))
   if (snap.changeCents != null && snap.changeCents > 0)
     moneyRow(
