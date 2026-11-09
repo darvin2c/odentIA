@@ -44,7 +44,12 @@ import {
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { firstName } from "./automation-routing.js"
 import { BUDGET_CALLBACK_KEY } from "./budget-callback.js"
-import { listBudgets, listBudgetsForPatients, valueOptionOf, type BudgetWithTotals } from "./budgets.js"
+import {
+  type BudgetWithTotals,
+  listBudgets,
+  listBudgetsForPatients,
+  valueOptionOf,
+} from "./budgets.js"
 import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -57,12 +62,14 @@ import {
   isControlWindowOpen,
   isOverdueControl,
   isToSchedule,
-  servedToday,
-  todayLiveAppointments,
   LIVE_APPOINTMENT_STATUSES,
+  pairsWithAccepted,
   type SessionCount,
+  servedToday,
   sessionCountsOf,
   TO_SCHEDULE_STATUSES,
+  todayLiveAppointments,
+  waitingFor,
 } from "./to-schedule.js"
 
 /**
@@ -633,13 +640,6 @@ interface PlanFacts {
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
 }
 
-/**
- * Hasta cuántos días por venir puede abrir su ventana el control de un tratamiento para ir en la
- * misma cita que lo aceptado de esa pieza. Supuesto a confirmar con una clínica: el control de
- * corto plazo de una endodoncia, no el radiográfico de meses.
- */
-const PAIRED_CONTROL_DAYS = 30
-
 /** Sin nada que hacer en el plan. */
 const NOTHING: PlanNextStep = { kind: "ninguno", text: "Nada pendiente en el plan", detail: null, action: null }
 
@@ -689,21 +689,11 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   // una fase anterior del plan: la corona, a la endodoncia (QA de la ficha del 9 nov: se
   // proponía reservarla hoy, antes de la sesión 2). Las fases son del producto: latidIA tiene
   // una sola y nunca espera nada. Es un aviso: la reserva se puede hacer igual.
+  // La regla vive en `to-schedule.ts` (`waitingFor`): la misma de «Hoy viene a…», Inicio y Argos.
   const phases = context.phases ?? []
-  const rankOf = (item: PlanItemRow) => phases.indexOf(item.phase)
   const sameSite = (a: PlanItemRow, b: PlanItemRow) =>
     !!a.siteCode && a.siteSystem === b.siteSystem && a.siteCode === b.siteCode
-  // Una endodoncia pausada también va antes: retomarla es lo primero (QA antes de entregar).
-  const unfinished = (item: PlanItemRow) =>
-    item.decisionStatus === "aceptado" && ([...TO_SCHEDULE_STATUSES, "suspendido"] as readonly string[]).includes(item.status)
-  const blockerOf = (item: PlanItemRow): PlanItemRow | null => {
-    if (!notStarted(item) || rankOf(item) <= 0) return null
-    const before = items.filter(
-      (other) => other.id !== item.id && unfinished(other) && sameSite(other, item) && rankOf(other) >= 0 && rankOf(other) < rankOf(item),
-    )
-    // El que ya empezó primero: es el que se está terminando.
-    return before.find((other) => other.status === "en_curso") ?? before[0] ?? null
-  }
+  const blockerOf = (item: PlanItemRow): PlanItemRow | null => waitingFor(item, items, phases)
   const ready = toStart.filter((item) => !blockerOf(item))
   const awaiting = budgets.filter((budget) => budget.awaitsAnswer).at(-1) ?? null
   // Un tratamiento en curso sin cita para su próxima sesión, o uno que ya tiene
@@ -748,7 +738,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     open.find((control) => {
       if (!isTreatmentControl(control) || control.status !== "pendiente" || servedNow(control) || servedLater(control)) return false
       // Solo un control cercano: uno a 6 meses atrasaría la corona meses (QA antes de entregar).
-      if (controlWindowStart(control).getTime() > Date.now() + PAIRED_CONTROL_DAYS * 86_400_000) return false
+      if (!pairsWithAccepted(control)) return false
       const treated = treatedOf(control)
       return !!treated && ready.some((item) => sameSite(item, treated))
     }) ?? null
@@ -766,10 +756,24 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     const n = countOf(item).done + countOf(item).booked + 1
     const numbered = showsSession(n, item.plannedSessions)
     const session = numbered ? ` · ${sessionWords(n, item.plannedSessions)}` : ""
+    // Lo que va después ya tiene su cita (la corona reservada mientras la endodoncia pide otra
+    // sesión): esa cita llega antes que esta sesión. Se avisa donde se reserva (repaso del 9 nov).
+    const laterBooked = items
+      .map((later) => ({ later, at: facts.carriedAt?.get(later.id) }))
+      .filter(
+        (row): row is { later: PlanItemRow; at: Date } =>
+          !!row.at && waitingFor(row.later, items, phases)?.id === item.id,
+      )
+      .sort((a, b) => a.at.getTime() - b.at.getTime())[0]
     return {
       kind: "continuar",
       text: `Falta la cita de la próxima sesión: ${item.title}${session}`,
       detail: bookedBy,
+      ...(laterBooked && seesAgenda
+        ? {
+            notice: `${laterBooked.later.title} ya tiene cita el ${day(laterBooked.at)}, y va después: revisa esa cita.`,
+          }
+        : {}),
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
         ? { label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión", planItemIds: [item.id], serviceId: item.serviceId }

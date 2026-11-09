@@ -33,11 +33,12 @@ import { notFound, ServiceError } from "./errors.js"
 
 const conflict = (code: string, message: string): ServiceError =>
   new ServiceError(code, 409, message)
+
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { TO_SCHEDULE_STATUSES } from "./to-schedule.js"
+import { goesBeforeSql, planItemSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy. */
 export interface VisitTreatment {
@@ -56,6 +57,12 @@ export interface VisitTreatment {
   registered: boolean
   /** Lo trae la cita de esta atención: «Hoy no» no lo saca (el cierre avisa si no se hizo). */
   broughtByAppointment: boolean
+  /**
+   * Va después de otro tratamiento de la misma pieza (`waitingFor`, la regla de «Qué sigue»): la
+   * corona tras la endodoncia. `today`: lo de antes se hace en esta atención. Es un aviso: «Hacerla
+   * hoy» sigue, como segunda opción (entrega 8).
+   */
+  after: { title: string; today: boolean } | null
 }
 
 /** Un control con su ventana abierta: esta visita puede cumplirlo. */
@@ -110,7 +117,8 @@ export async function encounterVisitOf(
   row: EncounterRow,
 ): Promise<EncounterVisit | null> {
   if (row.status !== "borrador") return null
-  const { site, budgetRequired } = await productHooks(tx, orgId)
+  const { site, budgetRequired, planPhases } = await productHooks(tx, orgId)
+  const goesBefore = goesBeforeSql(planItemSql("i"), planItemSql("before_item"), planPhases)
   const rows = await tx.execute<{
     id: string
     title: string
@@ -122,6 +130,8 @@ export async function encounterVisitOf(
     linked: boolean
     registered: boolean
     by_appointment: boolean
+    after_title: string | null
+    after_today: boolean | null
   }>(sql`
     select i.id, i.title, i.site_system, i.site_code, i.status, i.planned_sessions as m,
       (select count(distinct done_procedure.encounter_id)::int from encounter_procedure done_procedure
@@ -139,7 +149,13 @@ export async function encounterVisitOf(
           ? sql`exists (select 1 from appointment_plan_item brought where brought.organization_id = i.organization_id
         and brought.plan_item_id = i.id and brought.appointment_id = ${row.appointmentId})`
           : sql`false`
-      } as by_appointment
+      } as by_appointment,
+      (select before_item.title from treatment_plan_item before_item where ${goesBefore}
+        order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_title,
+      (select exists (select 1 from encounter_plan_item today_before where today_before.organization_id = before_item.organization_id
+        and today_before.plan_item_id = before_item.id and today_before.encounter_id = ${row.id})
+        from treatment_plan_item before_item where ${goesBefore}
+        order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_today
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
       ${
@@ -150,7 +166,10 @@ export async function encounterVisitOf(
         where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))`
       }
     order by linked desc, (i.status = 'en_curso') desc, i.sort_order, i.created_at, i.id`)
-  const treatments = rows.slice(0, VISIT_TREATMENTS).map((item) => {
+  // Lo que va después de otro, al final (salvo que ya se eligió para hoy): primero lo que toca.
+  const place = (item: (typeof rows)[number]) => (item.linked ? 0 : item.after_title ? 2 : 1)
+  const ordered = [...rows].sort((x, y) => place(x) - place(y))
+  const treatments = ordered.slice(0, VISIT_TREATMENTS).map((item) => {
     const done = Number(item.done_before)
     return {
       planItemId: item.id,
@@ -162,6 +181,9 @@ export async function encounterVisitOf(
       linked: Boolean(item.linked),
       registered: Boolean(item.registered),
       broughtByAppointment: Boolean(item.by_appointment),
+      after: item.after_title
+        ? { title: item.after_title, today: Boolean(item.after_today) }
+        : null,
     }
   })
   const { timezone } = await findOrgLocale(tx, orgId)

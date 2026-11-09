@@ -3,7 +3,6 @@ import { isWhatsAppAccountFailure, type NormalizedTemplateStatus } from "@odenti
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
-import { recordAgentAction } from "./agent-actions.js"
 import type {
   AutomationCause,
   AutomationJobStatus,
@@ -33,36 +32,48 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } from "./admin-lines.js"
-import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
-import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCalendarInvite } from "./appointment-calendar.js"
+import { recordAgentAction } from "./agent-actions.js"
+import {
+  APPOINTMENT_CALENDAR_FILENAME,
+  APPOINTMENT_CALENDAR_MIME,
+  appointmentCalendarInvite,
+} from "./appointment-calendar.js"
+import { type ConfirmedItem, confirmationReply } from "./appointment-confirm-words.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_ARRIVAL_KEY,
   APPOINTMENT_DATA_NOTICE_KEY,
-  REMINDER_CONFIRMED_KEY,
-  REMINDER_DATA_KEY,
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
   type AutomationMessage,
   automationMessageOf,
   CHOOSE_MESSAGES_LINK,
-  isStopWord,
-  optInReply,
-  optOutReply,
-  SWITCHABLE_PURPOSES,
   generalPermissionButtons,
   generalPermissionWords,
   isAppointmentNotice,
+  isStopWord,
+  optInReply,
+  optOutReply,
   parseReplyId,
+  REMINDER_CONFIRMED_KEY,
+  REMINDER_DATA_KEY,
+  SWITCHABLE_PURPOSES,
   withLinkLine,
 } from "./automation-messages.js"
-import { clinicName, type ComposedMessage, composeJobMessage, previewMessageRoute, routeMessage } from "./automation-routing.js"
-import { permissionRefusal, writingTimeFor } from "./message-gate.js"
-import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
+import {
+  type ComposedMessage,
+  clinicName,
+  composeJobMessage,
+  previewMessageRoute,
+  routeMessage,
+} from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { answerBudgetButton } from "./budget-send.js"
-import { appointmentServesControlSql, TO_SCHEDULE_STATUSES, toScheduleSql } from "./to-schedule.js"
-import { applyTemplateStatuses, reviewConnectionTemplates, type TemplateDeps } from "./channel-templates.js"
+import {
+  applyTemplateStatuses,
+  reviewConnectionTemplates,
+  type TemplateDeps,
+} from "./channel-templates.js"
 import {
   currentAutomationMessage,
   currentAutomationMessageOf,
@@ -74,22 +85,41 @@ import {
 } from "./clinic-messages.js"
 import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
-import { lapsedToInvite, recordInvitation } from "./return-invites.js"
+import { permissionRefusal, writingTimeFor } from "./message-gate.js"
+import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { updateOpportunity } from "./opportunities.js"
+import { isPatientLocked, joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
+import { patientCreditSql } from "./payments.js"
 import { personalLinkRef } from "./personal-link-token.js"
-import { contactDecides, listDecisionRecipients, patientAge, representationEnded } from "./responsibilities.js"
-import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
-import { createTask, settleTask } from "./tasks.js"
-import { upsertWorkspaceNotification } from "./workspace.js"
+import { productHooks } from "./products.js"
+import {
+  clinicOriginOf,
+  personalLinkMessageUrl,
+  personalLinkUrl,
+  publicLinksConfigured,
+} from "./public-links.js"
+import {
+  contactDecides,
+  listDecisionRecipients,
+  patientAge,
+  representationEnded,
+} from "./responsibilities.js"
+import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
-import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
-import { isPatientLocked, joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { productHooks } from "./products.js"
+import { createTask, settleTask } from "./tasks.js"
+import {
+  appointmentServesControlSql,
+  awaitsBookedSql,
+  planItemSql,
+  TO_SCHEDULE_STATUSES,
+  toScheduleSql,
+} from "./to-schedule.js"
+import { upsertWorkspaceNotification } from "./workspace.js"
+import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -1713,15 +1743,29 @@ async function stillValid(
     // agenda. El caso es de la persona: sigue mientras le quede algo aceptado sin cita, de este
     // presupuesto o de otro. Si no, el motivo dice por qué: una cita lo lleva, o ya no está por hacer.
     const at = sql`${now.toISOString()}::timestamptz`
-    const item = { id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` }
+    const item = planItemSql("i")
+    const { planPhases } = await productHooks(tx, orgId)
     const whose = job.patientId
       ? sql`i.organization_id = ${orgId} and i.patient_id = ${job.patientId}::uuid`
       : sql`i.organization_id = ${orgId} and i.id in (select l.plan_item_id from treatment_budget_item l where l.organization_id = ${orgId} and l.budget_id = ${job.budgetId}::uuid and l.decision = 'aceptado')`
-    const [state] = await tx.execute<{ open: boolean; pending: boolean }>(sql`
-      select exists (select 1 from treatment_plan_item i where ${whose} and ${toScheduleSql(item, at)}) as open,
+    const [state] = await tx.execute<{ open: boolean; pending: boolean; waiting: boolean }>(sql`
+      select exists (select 1 from treatment_plan_item i where ${whose} and ${toScheduleSql(item, planPhases, at)}) as open,
+        exists (select 1 from treatment_plan_item i where ${whose} and ${awaitsBookedSql(item, planPhases, at)}) as waiting,
         exists (select 1 from treatment_plan_item i where ${whose} and i.decision_status = 'aceptado'
-          and i.status in (${sql.join(TO_SCHEDULE_STATUSES.map((status) => sql`${status}`), sql`, `)})) as pending`)
-    if (!state?.open) return { valid: false, reason: state?.pending ? "Lo aceptado ya tiene cita" : "Lo aceptado ya no está por hacer" }
+          and i.status in (${sql.join(
+            TO_SCHEDULE_STATUSES.map((status) => sql`${status}`),
+            sql`, `,
+          )})) as pending`)
+    // Lo que queda va después de otro tratamiento que ya tiene su cita (la corona tras la endodoncia): no es que tenga cita.
+    if (!state?.open)
+      return {
+        valid: false,
+        reason: state?.waiting
+          ? "Lo aceptado va después de otro tratamiento que ya tiene su cita"
+          : state?.pending
+            ? "Lo aceptado ya tiene cita"
+            : "Lo aceptado ya no está por hacer",
+      }
     return { valid: true }
   }
   if (job.kind === "seguimiento_comercial" && job.opportunityId) {
@@ -2659,14 +2703,13 @@ export async function deliverJob(
   // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
   // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
   // Igual el recordatorio de la cita: lleva «Completar mis datos» mientras falten (fase 3).
-  const withData =
-    confirmed
-      ? null
-      : spec && job.kind === "aviso_cita_reservada"
-        ? await dataNoticeFor(tx, orgId, job, contactId, deps)
-        : spec && job.kind === "recordatorio_cita"
-          ? await dataNoticeFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
-          : null
+  const withData = confirmed
+    ? null
+    : spec && job.kind === "aviso_cita_reservada"
+      ? await dataNoticeFor(tx, orgId, job, contactId, deps)
+      : spec && job.kind === "recordatorio_cita"
+        ? await dataNoticeFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
+        : null
   let link = confirmed?.link ?? withData?.link ?? null
   // El título de la línea con su enlace, cuando el texto es el de siempre (respuesta o correo del recordatorio).
   let linkTitle: { title: string } | undefined

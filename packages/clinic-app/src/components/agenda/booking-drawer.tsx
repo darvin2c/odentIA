@@ -420,10 +420,19 @@ export function BookingDrawer({
   // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
   // Uno solo de varias sesiones dice cuál sería esta cita: «Endodoncia · sesión 2 de 2».
   const toScheduleRows = React.useMemo(() => {
-    const rows = new Map<string, { key: string; title: string; ids: string[]; session: string | null }>()
+    const rows = new Map<
+      string,
+      { key: string; title: string; ids: string[]; session: string | null; after: string | null }
+    >()
     for (const item of toSchedule) {
       const key = `${item.serviceId ?? ""}|${item.title}`
-      const row = rows.get(key) ?? { key, title: item.title, ids: [], session: null }
+      const row = rows.get(key) ?? {
+        key,
+        title: item.title,
+        ids: [],
+        session: null,
+        after: item.after ?? null,
+      }
       row.ids.push(item.id)
       const next = item.nextSession
       row.session = row.ids.length === 1 && next && showsSession(next.n, next.m) ? sessionWords(next.n, next.m) : null
@@ -828,6 +837,10 @@ export function BookingDrawer({
                       {row.title}
                       {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
                       {row.session ? ` · ${row.session}` : ""}
+                      {/* Lo dice como «Qué sigue»: marcarlo igual es decisión de quien reserva (entrega 8). */}
+                      {row.after ? (
+                        <span className="text-muted-foreground">{` · va después de ${row.after}`}</span>
+                      ) : null}
                     </FieldLabel>
                   </Field>
                 ))}

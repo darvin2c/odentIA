@@ -176,7 +176,10 @@ export function EncounterVisitStrip({
                         ? "Está en «Realizado hoy»: ahí registras su sesión cuando la hagas"
                         : item.started
                           ? "En curso"
-                          : "Aceptado, sin empezar"}
+                          : item.after
+                            ? // La misma regla de «Qué sigue»: avisa, y «Hacerla hoy» queda como segunda opción.
+                              `Aceptado · va después de terminar ${item.after.title}${item.after.today ? ", que se hace hoy" : ""}`
+                            : "Aceptado, sin empezar"}
                   </span>
                 </span>
                 {item.registered ? null : item.linked ? (
@@ -202,7 +205,7 @@ export function EncounterVisitStrip({
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant={item.after ? "ghost" : "outline"}
                     disabled={disabled || busy !== null}
                     aria-label={`${item.started ? "Continuar hoy" : "Hacerla hoy"}: ${words}`}
                     onClick={() =>

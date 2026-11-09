@@ -16,8 +16,9 @@ import { SCHEDULABLE_ITEM_STATUSES } from "./appointments.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./follow-ups.js"
 import { findOrgLocale } from "./locale.js"
-import { scheduledItems } from "./plan-next.js"
 import { listPlanItems } from "./plan.js"
+import { scheduledItems } from "./plan-next.js"
+import { productHooks } from "./products.js"
 import {
   appointmentServesControl,
   isToSchedule,
@@ -25,6 +26,7 @@ import {
   nextControlOf,
   sessionCountsOf,
   sessionsLeft,
+  waitingFor,
 } from "./to-schedule.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
@@ -91,6 +93,8 @@ export interface TreatmentCoordination {
     sessionsLeft: number
     /** La sesión que sería una cita nueva al final: hechas + en pie + 1, de las previstas. */
     nextSession: { n: number; m: number }
+    /** Lo que va antes en su pieza y sigue sin terminar (`waitingFor`): «va después de Endodoncia». */
+    after: string | null
   }>
 }
 
@@ -147,6 +151,7 @@ export async function getTreatmentCoordination(
   const toSchedule = new Set(open.filter((item) => isToSchedule(item, withAppointment)).map((item) => item.id))
   const counts = await sessionCountsOf(tx, orgId, schedulable.map((item) => item.id))
   const countOf = (id: string) => counts.get(id) ?? { done: 0, booked: 0 }
+  const { planPhases } = await productHooks(tx, orgId)
   return {
     budgetsAwaitingDecision: budgets,
     followUps: followUps
@@ -161,7 +166,11 @@ export async function getTreatmentCoordination(
       serviceId: item.serviceId,
       toSchedule: toSchedule.has(item.id),
       sessionsLeft: sessionsLeft(item, countOf(item.id)),
-      nextSession: { n: countOf(item.id).done + countOf(item.id).booked + 1, m: item.plannedSessions },
+      nextSession: {
+        n: countOf(item.id).done + countOf(item.id).booked + 1,
+        m: item.plannedSessions,
+      },
+      after: waitingFor(item, open, planPhases)?.title ?? null,
     })),
   }
 }

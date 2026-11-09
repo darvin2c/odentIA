@@ -87,6 +87,10 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
           },
         ]
       if (/Guardar en tu atención de hoy/.test(faq.q)) return []
+      // latidIA tiene una sola fase en su plan: nada «va después» de otro tratamiento de la misma pieza.
+      if (faq.q.includes("va después de terminar")) return []
+      // Las piezas son de odentIA: el aviso del tratamiento para otras piezas no existe en latidIA.
+      if (faq.q.includes("para otras piezas")) return []
       if (faq.q === "¿Qué le doy al paciente para su seguro?")
         return [{ ...faq, a: faq.a.replace("; el odontograma, a color", "") }]
       if (faq.q === "¿Dónde quedaron los contactos?")

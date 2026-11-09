@@ -13,7 +13,6 @@ import type { AppointmentStatus } from "./agenda"
 import { apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
-import { appWords } from "./product-words"
 import type {
   Encounter,
   PatientDocument,
@@ -23,6 +22,7 @@ import type {
   TreatmentNextAction,
   TreatmentPlan,
 } from "./patients"
+import { appWords } from "./product-words"
 
 const base = (patientId: string) => `/api/patients/${patientId}`
 
@@ -291,6 +291,8 @@ export interface TreatmentCoordination {
     toSchedule: boolean
     sessionsLeft: number
     nextSession: { n: number; m: number }
+    /** Va después de otro tratamiento de su pieza que sigue sin terminar: su título. */
+    after?: string | null
   }>
 }
 
