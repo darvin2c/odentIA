@@ -9,7 +9,7 @@
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
  */
-import { budgetOptionLabel, formatMoney, moneyTotalsText } from "@odentia/clinical"
+import { budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -31,7 +31,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { budgetNumberLabel, commonPlanItemIds, fetchBudgetDetail, fetchTreatmentPlans, planDecisionLabel, totalsOf } from "../../lib/budgets"
+import { removeIndicatedApi } from "../../lib/encounters"
+import { groupFindings } from "../../lib/site-findings"
+import {
+  budgetNumberLabel,
+  commonPlanItemIds,
+  fetchBudgetDetail,
+  fetchTreatmentPlans,
+  planDecisionLabel,
+  totalsOf,
+} from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel } from "../../lib/patients"
@@ -41,11 +50,10 @@ import { partNames } from "../../product/site-fields"
 import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
-import { EncounterTreatments } from "./encounter-treatments"
 import { treatmentSiteLabel, useBudgetFormat } from "./plan/budget-parts"
-import { BudgetSendButton } from "./plan/budget-send"
 import { AnsweredBy } from "./plan/budget-response"
 import { BudgetShowActions } from "./plan/budget-show"
+import { AnswerInPersonButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
   groupPlanPaths,
@@ -111,10 +119,11 @@ const EMPTY_INDICATION: IndicationValues = {
   diagnosisCode: "",
 }
 
-/** Lo que falta para indicar, en el campo que hay que completar. */
-function indicationErrors(value: IndicationValues): Record<string, string> {
+/** Lo que falta para indicar, en el campo que hay que completar. Al cambiar, el servicio puede quedar como estaba. */
+function indicationErrors(value: IndicationValues, editing?: PlanItem): Record<string, string> {
   const fields: Record<string, string> = {}
-  if (!value.service) fields.service = "Busca y elige la prestación de la lista de servicios."
+  if (!value.service && !editing)
+    fields.service = "Busca y elige la prestación de la lista de servicios."
   if ((value.scope === "tooth" || value.scope === "surfaces") && value.teeth.length === 0)
     fields.teeth = "Selecciona la pieza."
   if (value.scope === "surfaces" && value.teeth.length > 0 && value.surfaces.length === 0)
@@ -140,12 +149,9 @@ function BlockPart({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <section
-      aria-label={title}
-      className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6"
-    >
+    <section aria-label={title} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-heading text-base font-medium">{title}</h3>
+        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
         {action}
       </div>
       {children}
@@ -156,7 +162,6 @@ function BlockPart({
 export function EncounterPlanPanel({
   patientId,
   encounterId,
-  plannedItems,
   indicatedItems,
   attentionItems,
   disabled = false,
@@ -165,19 +170,23 @@ export function EncounterPlanPanel({
   onChanged,
   onPendingChange,
   patientName,
-  sessionItemIds,
-  onRegisterSession,
+  removableIds,
+  indicationDefaults,
+  showControls = true,
 }: {
   patientId: string
   encounterId: string
-  /** Tratamientos con un procedimiento vigente en esta atención: ya tienen la sesión de hoy. */
-  sessionItemIds: ReadonlySet<string>
-  /** «Registrar la sesión»: abre «Registrar procedimiento» con ese tratamiento puesto. */
-  onRegisterSession: (itemId: string) => void
+  /** Lo indicado hoy que quien atiende aún puede quitar o cambiar (lo decide el servidor). */
+  removableIds: ReadonlySet<string>
+  /** Al indicar, la pieza y el diagnóstico del último hallazgo de hoy. */
+  indicationDefaults?: Partial<IndicationValues>
+  /**
+   * «Próximo control» solo cuando esta atención ya indicó uno: si no, «¿Cuándo
+   * vuelve?» lo pregunta al firmar y aquí sería un recuadro vacío.
+   */
+  showControls?: boolean
   /** Para «Mostrar a Rosa» el presupuesto en borrador. */
   patientName: string
-  /** Tratamientos vinculados a esta atención (sesión registrada o traídos por la cita). */
-  plannedItems: PlanItem[]
   /** Indicados en esta atención: se marcan «Hoy» en el plan en corto. */
   indicatedItems: PlanItem[]
   /** Unos y otros, para ligar un control a su tratamiento. */
@@ -210,6 +219,81 @@ export function EncounterPlanPanel({
     .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
   const [indicating, setIndicating] = useState(autoOpen)
+  /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
+  const [changing, setChanging] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<{ itemId: string; message: string } | null>(null)
+  const queryClient = useQueryClient()
+  /** «Quitar»: sale del plan y de su presupuesto en borrador (el servidor dice si aún se puede). */
+  const remove = async (itemId: string) => {
+    if (removing) return
+    setRemoving(itemId)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await removeIndicatedApi(patientId, encounterId, itemId)
+      await Promise.all(
+        [
+          "treatment-plans",
+          "treatment-plan",
+          "plan-items",
+          "patient-summary",
+          "plan-next",
+          "budget",
+          "budgets",
+        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
+      await onChanged()
+    } catch (err) {
+      setRowError({ itemId, message: submitErrorMessage(err) })
+    } finally {
+      setRemoving(null)
+      onPendingChange(false)
+    }
+  }
+  /** Las acciones de un renglón indicado hoy, mientras se pueda corregir. */
+  const rowActions = (item: PlanItem) =>
+    canWrite && !disabled && removableIds.has(item.id) ? (
+      <span className="flex gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-expanded={changing === item.id}
+          aria-label={`Cambiar ${item.title}`}
+          disabled={removing !== null}
+          onClick={() => setChanging((current) => (current === item.id ? null : item.id))}
+        >
+          Cambiar
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-label={`Quitar ${item.title}`}
+          disabled={removing !== null}
+          onClick={() => void remove(item.id)}
+        >
+          {removing === item.id ? "Quitando…" : "Quitar"}
+        </Button>
+      </span>
+    ) : null
+  const changeForm = (item: PlanItem) =>
+    changing === item.id ? (
+      <div className="basis-full">
+        <IndicationForm
+          patientId={patientId}
+          encounterId={encounterId}
+          disabled={disabled}
+          beforeWrite={beforeWrite}
+          onChanged={onChanged}
+          onPendingChange={onPendingChange}
+          editing={item}
+          onDone={() => setChanging(null)}
+        />
+      </div>
+    ) : null
 
   // Caminos (conservar la 46 o extraerla): lo que compite va en su recuadro; lo común, en filas.
   const canBudget = usePermission("budgets.write")
@@ -237,7 +321,7 @@ export function EncounterPlanPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <BlockPart title="Plan">
+      <BlockPart title="Lo que sigue por hacer">
         {itemsQuery.isPending || plansQuery.isPending ? (
           <LoadingState message="Cargando el plan…" />
         ) : brief.length === 0 ? (
@@ -264,7 +348,7 @@ export function EncounterPlanPanel({
                           {item.title}
                           {today.has(item.id) ? (
                             <Badge variant="default" className="ml-2 align-middle">
-                              Hoy
+                              Indicado hoy
                             </Badge>
                           ) : null}
                         </span>
@@ -279,12 +363,24 @@ export function EncounterPlanPanel({
                             .join(" · ")}
                         </span>
                       </span>
-                      <span className="flex gap-1">
-                        <Badge variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}>
+                      <span className="flex flex-wrap items-center gap-1">
+                        <Badge
+                          variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
+                        >
                           {planDecisionLabel(item.decisionStatus)}
                         </Badge>
-                        <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                        {/* Lo que no eligió o no aceptó no se hará: «Pendiente» al lado confundía (QA del 8 nov). */}
+                        {isLeftOut(item.decisionStatus) ? null : (
+                          <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                        )}
+                        {rowActions(item)}
                       </span>
+                      {changeForm(item)}
+                      {rowError?.itemId === item.id ? (
+                        <p role="alert" className="basis-full text-sm text-destructive">
+                          {rowError.message}
+                        </p>
+                      ) : null}
                       {question ? (
                         <PathQuestionRow
                           item={item}
@@ -314,8 +410,16 @@ export function EncounterPlanPanel({
                 locale={orgLocale}
                 editable={canPlace}
                 pending={place.isPending}
-                errorFor={(itemId) => (placeError?.itemId === itemId ? placeError.message : null)}
+                errorFor={(itemId) =>
+                  placeError?.itemId === itemId
+                    ? placeError.message
+                    : rowError?.itemId === itemId
+                      ? rowError.message
+                      : null
+                }
                 onPlace={placeIn}
+                rowActions={rowActions}
+                changeForm={changeForm}
               />
             ))}
           </>
@@ -351,36 +455,28 @@ export function EncounterPlanPanel({
                 beforeWrite={beforeWrite}
                 onChanged={onChanged}
                 onPendingChange={onPendingChange}
+                defaults={indicationDefaults}
               />
             </CollapsibleContent>
           </Collapsible>
         ) : null}
       </BlockPart>
 
-      <EncounterTreatments
-        patientId={patientId}
-        encounterId={encounterId}
-        items={plannedItems}
-        sessionItemIds={sessionItemIds}
-        onRegisterSession={onRegisterSession}
-        disabled={disabled}
-        beforeWrite={beforeWrite}
-        onChanged={() => void onChanged()}
-      />
-
-      <ControlesPanel
-        patientId={patientId}
-        encounterId={encounterId}
-        encounterOnly
-        items={attentionItems}
-        heading="Próximo control"
-      />
-
       <EncounterBudgetSend
         patientId={patientId}
         patientName={patientName}
         beforeWrite={beforeWrite}
       />
+
+      {showControls ? (
+        <ControlesPanel
+          patientId={patientId}
+          encounterId={encounterId}
+          encounterOnly
+          items={attentionItems}
+          heading="Próximo control"
+        />
+      ) : null}
     </div>
   )
 }
@@ -500,6 +596,8 @@ function PathsBox({
   pending,
   errorFor,
   onPlace,
+  rowActions,
+  changeForm,
 }: {
   patientId: string
   group: PlanPathGroup
@@ -511,6 +609,9 @@ function PathsBox({
   pending: boolean
   errorFor: (itemId: string) => string | null
   onPlace: (planItemId: string, path: PathTarget) => void
+  /** «Cambiar» y «Quitar» del renglón indicado hoy, y su formulario abierto. */
+  rowActions: (item: PlanItem) => React.ReactNode
+  changeForm: (item: PlanItem) => React.ReactNode
 }): React.JSX.Element {
   const count = pathCountWord(group.pathCount)
   // El total de cada opción es el del presupuesto (con lo que va en todas, descuentos y su
@@ -581,7 +682,7 @@ function PathsBox({
                             {item.title}
                             {today.has(item.id) ? (
                               <Badge variant="default" className="ml-2 align-middle">
-                                Hoy
+                                Indicado hoy
                               </Badge>
                             ) : null}
                           </span>
@@ -598,6 +699,8 @@ function PathsBox({
                             {planDecisionLabel(item.decisionStatus)}
                           </span>
                         ) : null}
+                        {first ? rowActions(item) : null}
+                        {first ? changeForm(item) : null}
                         {movable ? (
                           <ChoiceSelect
                             aria-label={`Opción de ${item.title}`}
@@ -639,30 +742,28 @@ function PathsBox({
 }
 
 /**
- * «Enviar presupuesto» mientras la persona sigue en la unidad dental: el borrador que
- * ya está armado (de una atención anterior, revisado o armado a pedido con
- * Clío). Se le muestra a pantalla completa, se imprime o se envía sin salir de
- * la atención. Lo de esta atención se suma al firmar, y el cierre pregunta
- * «¿Enviárselo ahora?». La misma regla de «Qué sigue» decide si hay algo que enviar.
+ * El presupuesto de la atención en una línea honesta (QA de la atención del 8
+ * nov): «Opción A S/ 1,350 · Opción B S/ 150 · falta que elija» (la frase es del
+ * servidor, `budgetLine`), un solo botón principal, «Anotar su respuesta», y
+ * «Mostrar · Imprimir · Enviar» en un menú. Lo de esta atención ya se puede
+ * mostrar y responder en plena consulta; si nadie lo hace, se arma al firmar y
+ * el cierre pregunta «¿Enviárselo ahora?». La misma regla de «Qué sigue» decide
+ * si hay algo que enviar.
  */
 export function EncounterBudgetSend({
   patientId,
   patientName,
   beforeWrite,
-  compact = false,
 }: {
   patientId: string
   patientName: string
   beforeWrite: () => Promise<void>
-  /** En el bloque cerrado de la atención: una fila, sin abrir el bloque (lo armado por Clío se ve ahí). */
-  compact?: boolean
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
   const step = usePlanNextStep(patientId, canSend).data?.data ?? null
-  // El presupuesto que se ofreció enviar en esta atención: si se envía o se anota su respuesta,
-  // la franja no desaparece sin rastro, queda su estado y quién decidió (QA del 8 nov). Se
-  // recuerda por paciente fuera del componente: la franja compacta y la del bloque abierto
-  // se montan por turnos. Al recargar la página se olvida (el Plan lo sigue diciendo).
+  // El presupuesto que se ofreció en esta atención: si se envía o se anota su respuesta, la
+  // línea no desaparece sin rastro, queda qué eligió (QA del 8 nov). Se recuerda por paciente
+  // fuera del componente; al recargar la página se olvida (el Plan lo sigue diciendo).
   const offeredNow = step?.kind === "enviar" ? (step.action?.budgetId ?? null) : null
   const [offered, setOffered] = useState<string | null>(() => OFFERED_BUDGET.get(patientId) ?? null)
   useEffect(() => {
@@ -672,74 +773,69 @@ export function EncounterBudgetSend({
   }, [offeredNow, patientId])
   if (canSend && !offeredNow && offered) return <EncounterBudgetAfter patientId={patientId} budgetId={offered} />
   if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return null
-  if (compact) {
-    return (
-      <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2">
-        <span className="min-w-0 flex-1 text-sm">
-          Presupuesto por enviar{step.detail ? ` · ${step.detail}` : ""}
-        </span>
-        <div className="flex flex-wrap items-center gap-2">
-          <BudgetShowActions
-            patientId={patientId}
-            budgetId={step.action.budgetId}
-            patientName={patientName}
-            beforeWrite={beforeWrite}
-          />
-          <BudgetSendButton
-            patientId={patientId}
-            budgetId={step.action.budgetId}
-            size="sm"
-            beforeSend={beforeWrite}
-            reviewable
-          />
-        </div>
-      </div>
-    )
-  }
+  const budgetId = step.action.budgetId
   return (
-    <BlockPart title="Presupuesto por enviar">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-          {step.detail ?? "Ya está armado y nadie lo envió."} Lo que indiques hoy se suma al firmar. Si ya te
-          respondió, anota su respuesta sin imprimir ni enviar.
-        </p>
-        <BudgetSendButton
+    <section
+      aria-label="Presupuesto"
+      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border bg-background px-3 py-2"
+    >
+      <p className="min-w-0 flex-1 basis-60 text-sm">
+        <span className="font-medium">Presupuesto</span>
+        {step.detail ? (
+          <span className="text-muted-foreground">
+            {" "}
+            · {step.detail.replace(/ · por enviar desde el .*$/, "")}
+          </span>
+        ) : null}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <AnswerInPersonButton
           patientId={patientId}
-          budgetId={step.action.budgetId}
-          size="sm"
-          beforeSend={beforeWrite}
-          reviewable
+          budgetId={budgetId}
+          beforeOpen={beforeWrite}
+          variant="default"
         />
         <BudgetShowActions
           patientId={patientId}
-          budgetId={step.action.budgetId}
+          budgetId={budgetId}
           patientName={patientName}
           beforeWrite={beforeWrite}
+          menu
         />
       </div>
-    </BlockPart>
+    </section>
   )
 }
 
-/** El presupuesto que se ofreció enviar en la atención abierta de cada paciente (ver `EncounterBudgetSend`). */
+/** El presupuesto que se ofreció en la atención abierta de cada paciente (ver `EncounterBudgetSend`). */
 const OFFERED_BUDGET = new Map<string, string>()
 
 /**
- * Lo que quedó del presupuesto ofrecido en esta atención: su número, su estado y,
- * si se anotó en la clínica, quién decide y quién lo anotó. Es constancia: sin
- * botones (se cambia en el Plan).
+ * Lo que quedó del presupuesto ofrecido en esta atención: su número y qué
+ * eligió, con el total de esa opción («Eligió la opción A · S/ 1,350»; nunca
+ * «Aceptó todo» si eligió una), y quién lo anotó. Es constancia: se cambia en el Plan.
  */
 function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budgetId: string }): React.JSX.Element | null {
   const format = useBudgetFormat()
+  const orgLocale = useOrgProfile().data?.locale
   const budget = useQuery({
     queryKey: ["budget", patientId, budgetId],
     queryFn: () => fetchBudgetDetail(patientId, budgetId),
   }).data?.data
   if (!budget || budget.status === "borrador") return null
+  const chosen =
+    budget.options.length > 1
+      ? budget.options.find((option) => option.decision === "elegida")
+      : undefined
+  const money = (cents: number, currency: string) =>
+    orgLocale ? formatMoney(cents, currency, orgLocale) : "…"
+  const state = chosen
+    ? `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${moneyTotalsText(totalsOf(chosen, budget.currency), money, "precio por definir")}`
+    : budget.stateText
   return (
     <div className="flex w-full flex-col gap-0.5 rounded-lg border bg-background px-3 py-2" role="status">
       <span className="text-sm">
-        {budgetNumberLabel(budget.budgetNumber)} · {budget.stateText}
+        {budgetNumberLabel(budget.budgetNumber)} · {state}
       </span>
       {budget.decidedAt ? <AnsweredBy budget={budget} formatDay={(iso) => format.day(iso)} /> : null}
     </div>
@@ -754,6 +850,9 @@ function IndicationForm({
   beforeWrite,
   onChanged,
   onPendingChange,
+  defaults,
+  editing,
+  onDone,
 }: {
   patientId: string
   encounterId: string
@@ -761,6 +860,11 @@ function IndicationForm({
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
   onPendingChange: (pending: boolean) => void
+  /** Con qué empieza (la pieza, el hallazgo y el diagnóstico de lo último registrado hoy). */
+  defaults?: Partial<IndicationValues>
+  /** «Cambiar»: el renglón indicado hoy que se corrige; guardar lo cambia en vez de añadir otro. */
+  editing?: PlanItem
+  onDone?: () => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
@@ -768,15 +872,75 @@ function IndicationForm({
   const uid = useId()
   const rootRef = useRef<HTMLDivElement>(null)
 
+  // Al cambiar, lo que ya tiene el renglón (el servicio se vuelve a elegir si se cambia).
+  const initial: IndicationValues = editing
+    ? {
+        ...EMPTY_INDICATION,
+        scope:
+          editing.scope ??
+          (editing.toothNumber != null
+            ? editing.surfaces.length > 0
+              ? "surfaces"
+              : "tooth"
+            : "general"),
+        teeth: editing.toothNumber != null ? [editing.toothNumber] : [],
+        surfaces: editing.surfaces ?? [],
+        quadrant: editing.quadrant != null ? String(editing.quadrant) : "",
+        arch: editing.arch ?? "",
+        odontogramEntryId: editing.odontogramEntryId ?? "",
+        detail: editing.detail ?? "",
+        diagnosisCode: editing.diagnosisCode ?? "",
+      }
+    : { ...EMPTY_INDICATION, ...defaults }
   const form = useAppForm({
-    defaultValues: EMPTY_INDICATION,
+    defaultValues: initial,
     validators: {
       onSubmit: ({ value }) => {
-        const fields = indicationErrors(value)
+        const fields = indicationErrors(value, editing)
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
     onSubmit: async ({ value }) => {
+      if (editing) {
+        // «Cambiar»: lo mismo que el Plan (`updatePlanItem`), en la atención donde se indicó.
+        const patch: Record<string, unknown> = {
+          encounterId,
+          detail: value.detail.trim() === "" ? null : value.detail.trim(),
+          diagnosisCode: value.diagnosisCode.trim() === "" ? null : value.diagnosisCode.trim(),
+          ...(value.service && value.service.id !== editing.serviceId
+            ? { serviceId: value.service.id }
+            : {}),
+        }
+        if (value.scope === "tooth" || value.scope === "surfaces")
+          patch.toothNumber = value.teeth[0] ?? null
+        if (value.scope === "surfaces") patch.surfaces = value.surfaces
+        if (value.scope === "quadrant" && value.quadrant) patch.quadrant = Number(value.quadrant)
+        if (value.scope === "arch" && value.arch) patch.arch = value.arch
+        onPendingChange(true)
+        try {
+          await beforeWrite()
+          await apiFetch(`/api/patients/${patientId}/plan/items/${editing.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+          })
+          await Promise.all(
+            [
+              "treatment-plans",
+              "treatment-plan",
+              "plan-items",
+              "patient-summary",
+              "plan-next",
+              "budget",
+              "budgets",
+            ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+          )
+          await onChanged()
+          onDone?.()
+        } finally {
+          onPendingChange(false)
+        }
+        return
+      }
       if (!value.service) return
       const tooth = value.teeth[0] ?? null
       // Sin plan: el servidor usa el abierto o lo crea con esta atención como origen.
@@ -806,14 +970,13 @@ function IndicationForm({
           ),
         )
         await onChanged()
-        // Se conserva el ámbito y el sitio para indicar el siguiente.
+        // Se conserva el ámbito, el sitio, el hallazgo y el diagnóstico para indicar el siguiente
+        // de la misma pieza (la corona después de la endodoncia); cambiar la pieza los limpia.
         form.reset({
           ...value,
           service: null,
           sessions: "",
           detail: "",
-          diagnosisCode: "",
-          odontogramEntryId: "",
         })
       } finally {
         onPendingChange(false)
@@ -887,9 +1050,10 @@ function IndicationForm({
                 label="Hallazgo que motiva"
                 placeholder="Sin hallazgo asociado"
                 disabled={blocked}
-                options={findings.map((entry) => ({
-                  value: entry.id,
-                  label: `${site?.findingName(entry.condition) ?? entry.condition}${entry.surface ? ` · ${partNames([entry.surface])}` : ""}`,
+                // Una caries de dos caras es un hallazgo: se elige una vez, con sus caras.
+                options={groupFindings(findings).map((group) => ({
+                  value: group.first.id,
+                  label: `${site?.findingName(group.first.condition) ?? group.first.condition}${group.surfaces.length ? ` · ${partNames(group.surfaces)}` : ""}`,
                 }))}
               />
             )}
@@ -960,7 +1124,14 @@ function IndicationForm({
 
       <form.AppField name="service">
         {(field) => (
-          <field.Control id={`${uid}-service`} label="Tratamiento">
+          <field.Control
+            id={`${uid}-service`}
+            label={
+              editing
+                ? `Tratamiento (ahora: ${editing.title}; elige otro solo si cambia)`
+                : "Tratamiento"
+            }
+          >
             {(control) => (
               <ServicePicker
                 id={control.id}
@@ -989,7 +1160,7 @@ function IndicationForm({
             : ""}
         </p>
       ) : null}
-      {service ? (
+      {service && !editing ? (
         <form.AppField name="sessions">
           {(field) => (
             <field.TextField
@@ -1037,22 +1208,35 @@ function IndicationForm({
       </form.AppField>
 
       <div className="flex flex-col gap-1">
-        <Button
-          type="button"
-          className="self-start"
-          disabled={blocked}
-          onClick={() =>
-            void submitForm(form, { root: rootRef.current, fieldMap: INDICATION_FIELD_MAP })
-          }
-        >
-          {pending ? "Añadiendo…" : "Añadir al plan"}
-        </Button>
+        <span className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            className="self-start"
+            disabled={blocked}
+            onClick={() =>
+              void submitForm(form, { root: rootRef.current, fieldMap: INDICATION_FIELD_MAP })
+            }
+          >
+            {editing
+              ? pending
+                ? "Guardando…"
+                : "Guardar el cambio"
+              : pending
+                ? "Añadiendo…"
+                : "Añadir al plan"}
+          </Button>
+          {editing ? (
+            <Button type="button" variant="ghost" disabled={pending} onClick={onDone}>
+              Cancelar
+            </Button>
+          ) : null}
+        </span>
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         ) : null}
-        {productUi().plan.budgetRequired ? (
+        {editing ? null : productUi().plan.budgetRequired ? (
           <p className="text-xs text-muted-foreground">
             Se conserva la pieza elegida para indicar el siguiente. Al firmar la atención, lo
             indicado se suma al presupuesto por enviar.

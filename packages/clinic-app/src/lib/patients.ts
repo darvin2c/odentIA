@@ -501,6 +501,8 @@ export interface PlanItem {
   /** Sesiones previstas y hechas (atenciones distintas con un procedimiento vigente). */
   plannedSessions?: number
   sessionsDone?: number
+  /** En la atención: indicado en ella, sin respuesta ni entregar; quien la lleva lo puede quitar. Lo decide el servidor. */
+  removable?: boolean
   decidedAt: string | null
   decidedByContactId: string | null
   decidedByName: string | null
@@ -612,6 +614,38 @@ export interface EncounterDetail {
   documents: PatientDocument[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
+  /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
+  visit?: EncounterVisit | null
+}
+
+/** Un tratamiento aceptado por hacer, con la sesión que le toca hoy («sesión 2 de 2»). */
+export interface VisitTreatment {
+  planItemId: string
+  title: string
+  toothNumber: number | null
+  n: number
+  m: number
+  started: boolean
+  /** Ya está en esta atención (lo trajo su cita o «Hacerla hoy»). */
+  linked: boolean
+  /** Su sesión de hoy ya está registrada. */
+  registered: boolean
+}
+
+/** Un control con su ventana abierta: esta visita lo cumple si se marca. */
+export interface VisitControl {
+  id: string
+  title: string
+  dueAt: string
+  overdue: boolean
+  byName: string | null
+  chosen: boolean
+}
+
+export interface EncounterVisit {
+  treatments: VisitTreatment[]
+  moreTreatments: number
+  controls: VisitControl[]
 }
 
 export type TimelineType =

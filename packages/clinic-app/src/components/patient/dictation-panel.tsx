@@ -1,10 +1,19 @@
 import { upperFirst } from "../../lib/product-words"
-import { Button } from "@odentia/ui"
-import { AgentMark, AgentSurface, ListeningIndicator, submitForm, SubmitButton, useAppForm, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
+import { Button, Popover, PopoverContent, PopoverTrigger } from "@odentia/ui"
+import {
+  AgentMark,
+  AgentSurface,
+  ListeningIndicator,
+  submitForm,
+  SubmitButton,
+  useAppForm,
+  useListeningStatus,
+  useMicLevel,
+} from "@odentia/ui-patterns"
 import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
 import { seesBilling } from "@odentia/auth/permissions"
 import { Link } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { PLAN_PATH } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
@@ -84,19 +93,141 @@ function readiness(session: DictationSession): string {
  * a la historia hasta que el odontólogo confirma. No se muestra si la clínica
  * no encendió el asistente.
  */
+/**
+ * Sin dictar, sin sugerencias ni nada que avisar: la barra no ocupa la atención
+ * (QA de la atención del 8 nov: el cuadro fijo eran ~270 px). Dictar es un
+ * botón de la cabecera (`DictationHeaderButton`) y los ejemplos se ven la
+ * primera vez o con «¿Qué puedo decir?».
+ */
+export function dictationIdle(session: DictationSession): boolean {
+  return (
+    session.enabled &&
+    !session.dictating &&
+    session.pending === 0 &&
+    session.removedByVoice.length === 0 &&
+    !session.transcript &&
+    !session.blocked &&
+    !session.micError &&
+    !session.organizing &&
+    session.failed.length === 0 &&
+    !session.confirmReady.isError &&
+    session.unused.phrases.length === 0 &&
+    !session.unused.unnamed
+  )
+}
+
+/** La primera vez que alguien dicta, la barra muestra los ejemplos; después, con «¿Qué puedo decir?». */
+const EXAMPLES_SEEN = "odentia:dictado:ejemplos-vistos"
+
+function examplesSeen(): boolean {
+  try {
+    return window.localStorage.getItem(EXAMPLES_SEEN) === "1"
+  } catch {
+    return true
+  }
+}
+
+/**
+ * «Dictar» en la cabecera de la atención, con «¿Qué puedo decir?» al lado: los
+ * ejemplos, lo que cuesta (ADR 0141: donde se decide dictar) y «Escribir en vez
+ * de dictar». Solo cuando la barra no tiene nada que decir.
+ */
+export function DictationHeaderButton({
+  session,
+  onStart,
+  onType,
+}: {
+  session: DictationSession
+  onStart: () => void
+  /** «Escribir en vez de dictar»: abre la barra con el cuadro para escribir. */
+  onType: () => void
+}): React.JSX.Element | null {
+  const role = useMyRole()
+  const [open, setOpen] = useState(false)
+  if (!dictationIdle(session)) return null
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {session.canListen ? (
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            setOpen(false)
+            onStart()
+            session.start()
+          }}
+        >
+          <Mic className="size-4" aria-hidden /> Dictar
+        </Button>
+      ) : null}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger render={<Button type="button" size="sm" variant="ghost" />}>
+          ¿Qué puedo decir?
+        </PopoverTrigger>
+        <PopoverContent align="end" className="flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-3">
+          <p className="text-sm">
+            Habla como le contarías a un colega: {CLINICAL_NAME} lo deja como sugerencias en cada
+            parte de la atención. Nada entra a la historia hasta que confirmes.
+          </p>
+          <DictationExamples />
+          <p className="text-xs text-muted-foreground">
+            Si confirmas algo, al cerrar la atención se cuenta como una consulta de {CLINICAL_NAME}{" "}
+            de tu plan.
+            {seesBilling(role) ? (
+              <>
+                {" "}
+                <Link to={PLAN_PATH} className="text-primary underline underline-offset-4">
+                  Ver precios
+                </Link>
+              </>
+            ) : null}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="self-start"
+            onClick={() => {
+              setOpen(false)
+              onType()
+            }}
+          >
+            Escribir en vez de dictar
+          </Button>
+        </PopoverContent>
+      </Popover>
+    </span>
+  )
+}
+
 export function DictationPanel({
   session,
   onStart,
   onFinish,
   onShowTranscript,
+  typing,
+  onTypingChange,
 }: {
   session: DictationSession
   /** Empieza o se reanuda el dictado: la pantalla despeja lo que tape la atención. */
   onStart: () => void
   onFinish: () => void
   onShowTranscript: () => void
+  /** «Escribir en vez de dictar»: lo abre también el botón de la cabecera. */
+  typing: boolean
+  onTypingChange: (typing: boolean) => void
 }) {
-  const [typing, setTyping] = useState(false)
+  const setTyping = onTypingChange
+  // La primera vez que dicta ve, mientras escucha, qué puede decir; se recuerda al empezar.
+  const [firstTime] = useState(() => !examplesSeen())
+  useEffect(() => {
+    if (!session.dictating || !firstTime) return
+    try {
+      window.localStorage.setItem(EXAMPLES_SEEN, "1")
+    } catch {
+      // Sin almacenamiento se vuelven a mostrar la próxima vez: no estorba.
+    }
+  }, [session.dictating, firstTime])
   const typedRootRef = useRef<HTMLDivElement>(null)
   const typedForm = useAppForm({
     defaultValues: { text: "" },
@@ -127,6 +258,8 @@ export function DictationPanel({
   // El «No te oigo» con la misma regla que todo lo que escucha (Bandeja incluida).
   const { silent: silentNotice } = useListeningStatus(listening, metering)
   if (!session.enabled) return null
+  // Sin nada que decir, dictar vive en la cabecera.
+  if (dictationIdle(session) && !typing) return null
 
   const status = (
     <>
@@ -205,6 +338,12 @@ export function DictationPanel({
           {pending > 0 ? plural(pending, "sugerencia", "sugerencias") : null}
           {session.organizing ? (pending > 0 ? " y ordenando lo último que dijiste" : "Ordenando lo que dijiste…") : null}
         </p>
+        {firstTime && pending === 0 ? (
+          <div className="flex flex-col gap-2 rounded-xl bg-background p-3">
+            <p className="text-sm font-semibold">Por ejemplo</p>
+            <DictationExamples />
+          </div>
+        ) : null}
         {session.interim ? (
           <p className="border-l-[3px] border-primary py-0.5 pl-2.5 text-sm [overflow-wrap:anywhere]">
             <span className="block text-[11px] font-bold tracking-wide text-muted-foreground uppercase">Lo último que oí</span>

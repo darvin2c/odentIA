@@ -95,6 +95,8 @@ export interface ClosingDueControl {
   dueAt: string
   /** Quien firma atendió la atención donde se indicó: viene marcado. */
   mine: boolean
+  /** Se eligió al empezar («Viene a su control»): también viene marcado. */
+  chosen?: boolean
   repeatEveryMonths: number | null
 }
 
@@ -470,4 +472,41 @@ export function registrationLabel(
   return profile.registrationNumber
     ? `${profile.registrationBody} ${profile.registrationNumber}`
     : null
+}
+
+/** «Hacerla hoy»: trae a la atención un tratamiento aceptado por hacer (motivo y diagnóstico si faltan). */
+export function bringTreatmentApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch<{ data: { reasonSet: boolean; diagnosisAdded: boolean } }>(
+    `${base(patientId)}/encounters/${encounterId}/visit/treatments`,
+    { method: "POST", body: JSON.stringify({ planItemId }) },
+  )
+}
+
+/** Deshace «Hacerla hoy» mientras no tenga su sesión registrada. */
+export function leaveTreatmentApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch(`${base(patientId)}/encounters/${encounterId}/visit/treatments/${planItemId}`, {
+    method: "DELETE",
+  })
+}
+
+/** «Viene a su control» (o `null`: ninguno): se cumple al firmar. */
+export function chooseVisitControlApi(
+  patientId: string,
+  encounterId: string,
+  followUpId: string | null,
+) {
+  return apiFetch<{ data: { reasonSet: boolean } }>(
+    `${base(patientId)}/encounters/${encounterId}/visit/control`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ followUpId }),
+    },
+  )
+}
+
+/** «Quitar» un renglón indicado en esta misma atención, antes de que responda. */
+export function removeIndicatedApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch(`${base(patientId)}/encounters/${encounterId}/indicated/${planItemId}`, {
+    method: "DELETE",
+  })
 }

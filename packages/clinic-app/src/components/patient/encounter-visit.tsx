@@ -1,0 +1,276 @@
+/**
+ * «Hoy viene a…» (QA de la atención del 8 nov, propuesta 4.1): arriba de la
+ * atención, con o sin cita, lo que el servidor sabe que la persona viene a
+ * hacer: lo que trae su cita, sus tratamientos aceptados por hacer con la
+ * sesión que le toca y los controles por cumplir. Un toque prepara la atención
+ * (motivo, diagnóstico que sigue, el tratamiento en «Realizado hoy»); nada se da
+ * por hecho: la sesión cuenta al registrarla y el control se cumple al firmar.
+ */
+import { Button } from "@odentia/ui"
+import { submitErrorMessage } from "@odentia/ui-patterns"
+import { useState } from "react"
+import { bringTreatmentApi, chooseVisitControlApi, leaveTreatmentApi } from "../../lib/encounters"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import type { EncounterVisit, VisitControl, VisitTreatment } from "../../lib/patients"
+
+/** «4 may», en la zona de la clínica. */
+function shortDay(iso: string): string {
+  return new Date(iso)
+    .toLocaleDateString(activeOrgLocale(), {
+      day: "numeric",
+      month: "short",
+      timeZone: activeOrgTimeZone(),
+    })
+    .replace(".", "")
+}
+
+/** «Endodoncia anterior vital · 46 · sesión 2 de 2». */
+export function visitTreatmentWords(item: VisitTreatment): string {
+  return [
+    item.title,
+    item.toothNumber != null ? String(item.toothNumber) : null,
+    item.m > 1 ? `sesión ${item.n} de ${item.m}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/** «vencido el 4 may · lo indicó Dr. Hugo». */
+function controlWords(control: VisitControl): string {
+  return [
+    control.overdue
+      ? `vencido el ${shortDay(control.dueAt)}`
+      : `toca el ${shortDay(control.dueAt)}`,
+    control.byName ? `lo indicó ${control.byName}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+const row = "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2"
+
+export function EncounterVisitStrip({
+  patientId,
+  encounterId,
+  visit,
+  fromAppointment,
+  offeredReason,
+  onUseReason,
+  reasonEmpty,
+  onUrgency,
+  onRegisterSession,
+  disabled,
+  beforeWrite,
+  onChanged,
+}: {
+  patientId: string
+  encounterId: string
+  visit: EncounterVisit | null | undefined
+  /** La atención viene de una cita: lo que la cita trae no se saca desde aquí. */
+  fromAppointment: boolean
+  /** El motivo que trae la cita, mientras no haya otro. */
+  offeredReason: string | null
+  onUseReason: () => void
+  reasonEmpty: boolean
+  /** «Es una urgencia»: deja el motivo listo para escribir. */
+  onUrgency: () => void
+  /** «Registrar la sesión»: abre el registro con ese tratamiento puesto. */
+  onRegisterSession: (planItemId: string) => void
+  disabled: boolean
+  beforeWrite: () => Promise<void>
+  onChanged: () => Promise<void>
+}): React.JSX.Element | null {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const treatments = visit?.treatments ?? []
+  const controls = visit?.controls ?? []
+  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason
+
+  const run = async (key: string, write: () => Promise<unknown>) => {
+    if (busy) return
+    setBusy(key)
+    setError(null)
+    try {
+      await beforeWrite()
+      await write()
+      await onChanged()
+    } catch (err) {
+      setError(submitErrorMessage(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <section
+      aria-labelledby={`${encounterId}-visit`}
+      className="flex flex-col gap-1 rounded-sm bg-card px-6 py-4"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id={`${encounterId}-visit`} className="font-heading text-base font-medium">
+          Hoy viene a…
+        </h2>
+        {reasonEmpty ? (
+          <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onUrgency}>
+            Es una urgencia
+          </Button>
+        ) : null}
+      </div>
+      {nothing ? (
+        <p className="text-sm text-muted-foreground">
+          Sin cita, tratamiento por hacer ni control por cumplir. Escribe el motivo abajo.
+        </p>
+      ) : (
+        <ul className="flex flex-col divide-y text-sm">
+          {offeredReason ? (
+            <li className={row}>
+              <span className="min-w-0">
+                <span className="text-muted-foreground">Su cita: </span>«{offeredReason}»
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                disabled={disabled}
+                aria-label={`Usar «${offeredReason}» como motivo`}
+                onClick={onUseReason}
+              >
+                Usar como motivo
+              </Button>
+            </li>
+          ) : null}
+          {treatments.map((item) => {
+            const words = visitTreatmentWords(item)
+            return (
+              <li key={item.planItemId} className={row}>
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-medium">{words}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {item.registered
+                      ? "Sesión de hoy registrada en «Realizado hoy»"
+                      : item.linked
+                        ? "Está en «Realizado hoy»: registra la sesión cuando la hagas"
+                        : item.started
+                          ? "En curso"
+                          : "Aceptado, sin empezar"}
+                  </span>
+                </span>
+                {item.registered ? null : item.linked ? (
+                  <span className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={disabled}
+                      aria-label={`Registrar la sesión de ${words}`}
+                      onClick={() => onRegisterSession(item.planItemId)}
+                    >
+                      Registrar la sesión
+                    </Button>
+                    {fromAppointment ? null : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={disabled || busy !== null}
+                        aria-label={`Hoy no: ${words}`}
+                        onClick={() =>
+                          void run(item.planItemId, () =>
+                            leaveTreatmentApi(patientId, encounterId, item.planItemId),
+                          )
+                        }
+                      >
+                        Hoy no
+                      </Button>
+                    )}
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={disabled || busy !== null}
+                    aria-label={`${item.started ? "Continuar hoy" : "Hacerla hoy"}: ${words}`}
+                    onClick={() =>
+                      void run(item.planItemId, () =>
+                        bringTreatmentApi(patientId, encounterId, item.planItemId),
+                      )
+                    }
+                  >
+                    {busy === item.planItemId
+                      ? "Preparando…"
+                      : item.started
+                        ? "Continuar hoy"
+                        : "Hacerla hoy"}
+                  </Button>
+                )}
+              </li>
+            )
+          })}
+          {visit && visit.moreTreatments > 0 ? (
+            <li className="py-2 text-xs text-muted-foreground">
+              Y {visit.moreTreatments}{" "}
+              {visit.moreTreatments === 1
+                ? "tratamiento aceptado más"
+                : "tratamientos aceptados más"}{" "}
+              en su Plan.
+            </li>
+          ) : null}
+          {controls.map((control) => (
+            <li key={control.id} className={row}>
+              <span className="flex min-w-0 flex-col">
+                <span className="font-medium">{control.title}</span>
+                <span
+                  className={
+                    control.overdue ? "text-xs text-warning" : "text-xs text-muted-foreground"
+                  }
+                >
+                  {controlWords(control)}
+                  {control.chosen ? " · viene a este control: se cumple al firmar" : ""}
+                </span>
+              </span>
+              {control.chosen ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={disabled || busy !== null}
+                  aria-label={`No viene a ${control.title}`}
+                  onClick={() =>
+                    void run(control.id, () => chooseVisitControlApi(patientId, encounterId, null))
+                  }
+                >
+                  No es este
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled || busy !== null}
+                  aria-label={`Viene a su control: ${control.title}`}
+                  onClick={() =>
+                    void run(control.id, () =>
+                      chooseVisitControlApi(patientId, encounterId, control.id),
+                    )
+                  }
+                >
+                  {busy === control.id ? "Anotando…" : "Viene a su control"}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!nothing ? (
+        <p className="text-xs text-muted-foreground">
+          Elegir no da nada por hecho: pone el motivo y el diagnóstico que sigue si faltan, la
+          sesión cuenta al registrarla y el control se cumple al firmar.
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </section>
+  )
+}
