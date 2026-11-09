@@ -401,6 +401,23 @@ export function sentenceEnd(text: string): string {
   return /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`
 }
 
+/** Un pedido en el portal (ADR 0172): qué es, cómo va, para cuándo y lo que falta pagar. */
+export interface PortalOrder {
+  id: string
+  orderNumber: number
+  title: string
+  statusLabel: string
+  ready: boolean
+  promisedOn: string
+  dueCents: number
+  currency: string | null
+}
+
+export async function fetchPortalOrders(sessionToken: string): Promise<{ locale: string | null; items: PortalOrder[] }> {
+  const res = await portalFetch<{ data: { locale: string | null; items: PortalOrder[] } }>(sessionToken, "/orders")
+  return res.data
+}
+
 export async function fetchPortalAccount(sessionToken: string): Promise<PortalAccount> {
   const res = await portalFetch<{ data: PortalAccount }>(sessionToken, "/account")
   return res.data

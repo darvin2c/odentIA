@@ -45,6 +45,7 @@ import {
   downloadPortalCalendar,
   exchangePortalTokenApi,
   fetchPortalAccount,
+  fetchPortalOrders,
   fetchPortalAppointments,
   fetchPortalBudgets,
   fetchPortalPaperFileUrl,
@@ -578,6 +579,8 @@ function PortalDashboard({
         {scope.appointments ? <QuestionnaireBlock sessionToken={sessionToken} /> : null}
         {scope.budgets ? <BudgetsBlock sessionToken={sessionToken} /> : null}
         {scope.papers ? <DocumentsBlock sessionToken={sessionToken} /> : null}
+        {/* Sus pedidos van con «Tu cuenta» (ADR 0172), donde la clínica trabaja con pedidos. */}
+        {scope.account && productUi().orders ? <OrdersBlock sessionToken={sessionToken} /> : null}
         {scope.account ? (
           <Block title="Tu cuenta">
             <AccountBlock sessionToken={sessionToken} />
@@ -1129,6 +1132,49 @@ function formatPortalDay(iso: string): string {
   } catch {
     return formatPortalDate(iso)
   }
+}
+
+/**
+ * «Tus pedidos» (ADR 0172): lo que se encargó para la persona, si ya está listo
+ * para recoger, para cuándo se le prometió y lo que le falta pagar. Sin pedidos
+ * no se muestra; un fallo se dice con «Reintentar».
+ */
+function OrdersBlock({ sessionToken }: { sessionToken: string }) {
+  const orders = useQuery({
+    queryKey: ["portal-orders", sessionToken],
+    queryFn: () => fetchPortalOrders(sessionToken),
+    retry: false,
+  })
+  if (orders.isPending) return null
+  if (orders.isError)
+    return (
+      <Block title="Tus pedidos">
+        <ErrorState title="No pudimos cargar tus pedidos" message={portalErrorMessage(orders.error)} onRetry={() => orders.refetch()} />
+      </Block>
+    )
+  const { items, locale } = orders.data
+  if (items.length === 0) return null
+  return (
+    <Block title="Tus pedidos" count={items.filter((item) => item.ready).length || undefined}>
+      <ul className="flex flex-col divide-y">
+        {items.map((item) => (
+          <li key={item.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{item.title}</span>
+              <Badge variant={item.ready ? "success" : "secondary"}>{item.ready ? "Listo para recoger" : item.statusLabel}</Badge>
+            </div>
+            <span className="text-sm text-muted-foreground">
+              Pedido N.º {item.orderNumber}
+              {item.statusLabel === "Entregado" ? "" : ` · para el ${formatPortalDate(`${item.promisedOn}T12:00:00Z`, { locale })}`}
+            </span>
+            {item.dueCents > 0 && item.currency ? (
+              <span className="text-sm">Te falta pagar {formatPortalMoney(item.dueCents, item.currency, locale)}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </Block>
+  )
 }
 
 function AccountBlock({ sessionToken }: { sessionToken: string }) {

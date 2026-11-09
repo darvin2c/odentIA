@@ -21,6 +21,7 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  ConfirmDialog,
   DatePickerButton,
   DetailDrawer,
   DetailField,
@@ -56,6 +57,7 @@ import {
   orderMoney,
   orderNumberWords,
   remakeOrder,
+  resendOrderNotice,
   voidOrder,
 } from "../../lib/orders"
 import { QueryErrorState } from "../../lib/query-error"
@@ -144,6 +146,11 @@ function OrderBody({ order, onOpen }: { order: OrderDetail; onOpen: (id: string)
           </span>
         </DetailField>
         <DetailField label="Lo hace">{order.maker}</DetailField>
+        {order.readyNotice ? (
+          <DetailField label="Aviso de que está listo">
+            <ReadyNotice order={order} />
+          </DetailField>
+        ) : null}
         {due ? (
           <DetailField label={due.label}>
             <span className="tabular-nums">{due.amount}</span>
@@ -246,6 +253,60 @@ function OrderBody({ order, onOpen }: { order: OrderDetail; onOpen: (id: string)
           ))}
         </ol>
       </DetailSection>
+    </div>
+  )
+}
+
+/**
+ * Cómo va «Pedido listo», en las palabras del servidor. El que no salió o falló
+ * se vuelve a enviar con un toque; el que no se sabe si llegó, solo después de
+ * confirmarlo con la persona, para no mandarlo dos veces.
+ */
+function ReadyNotice({ order }: { order: OrderDetail }) {
+  const notice = order.readyNotice
+  const canWrite = usePermission("orders.write")
+  const queryClient = useQueryClient()
+  const [confirming, setConfirming] = React.useState(false)
+  const resend = useMutation({
+    mutationFn: (confirmDoubtful: boolean) => resendOrderNotice(order.id, confirmDoubtful),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(orderKeys.detail(updated.id), updated)
+      invalidateOrders(queryClient)
+      setConfirming(false)
+      const words = updated.readyNotice?.words ?? "Aviso enviado"
+      if (updated.readyNotice?.status === "no_salio" || updated.readyNotice?.status === "fallo") toast.error(words)
+      else toast.success(words)
+    },
+    onError: (error) => toast.error(submitErrorMessage(error)),
+  })
+  if (!notice) return null
+  const doubtful = notice.status === "dudoso"
+  const offer = canWrite && order.status === "listo" && !order.remadeAs && (notice.canResend || doubtful)
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <span role="status" className={notice.status === "fallo" || notice.status === "no_salio" ? "text-destructive" : undefined}>
+        {notice.words}
+      </span>
+      {offer ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={resend.isPending}
+          onClick={() => (doubtful ? setConfirming(true) : resend.mutate(false))}
+        >
+          {doubtful ? "Enviarlo otra vez" : "Enviar el aviso"}
+        </Button>
+      ) : null}
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={() => resend.mutate(true)}
+        title="Enviar el aviso otra vez"
+        description="No sabemos si el anterior llegó. Si ya lo recibió, le llegará dos veces: confírmalo con la persona antes."
+        confirmLabel="Enviarlo otra vez"
+        pending={resend.isPending}
+      />
     </div>
   )
 }

@@ -65,8 +65,9 @@ export const OPTICAL_AGENT_TEXTS: ProductAgentTexts = {
   room: "sala de examen",
   site: "",
   receptionRules: [
-    "Si la persona pregunta si sus lentes ya están listos, cuándo los entregan o cuánto le falta pagar, dile que lo confirmas con el equipo de la óptica; no inventes fechas ni montos.",
+    "Si la persona pregunta si sus lentes ya están listos, cuándo los entregan o cuánto le falta pagar, consulta ver_pedidos y dile lo que dice, con sus palabras: el paso en que está y la fecha que se le prometió. Si no aparece su pedido o el dato que pide, dile que lo confirmas con el equipo de la óptica; no inventes fechas ni montos.",
   ],
+  orders: { noun: "sus lentes" },
   tagExample: "interesado-progresivos",
   searchExamples: "«no veo bien de lejos», «pupilentes», «lentes para leer»",
   care: {

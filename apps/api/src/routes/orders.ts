@@ -9,6 +9,7 @@ import {
   listJobOrders,
   remakeJobOrder,
   saleReferencesOf,
+  sendOrderReadyNotice,
   voidJobOrder,
 } from "@odentia/services"
 import type { Context } from "hono"
@@ -78,6 +79,7 @@ const remakeInput = z
     requestId: z.uuid(),
   })
   .strict()
+const noticeInput = z.object({ confirmDoubtful: z.boolean().optional() }).strict()
 const LIST_STATUS = ["abiertos", "atrasados", ...JOB_ORDER_STEPS, "anulado"] as const
 
 const FORBIDDEN = {
@@ -191,6 +193,13 @@ export function createOrdersRoute(deps: CrmDeps) {
     }
 
   app.post("/:id/advance", change(advanceInput, (tx, orgId, userId, id, body) => advanceJobOrder(tx, orgId, userId, id, body)))
+  // «Pedido listo» otra vez (ADR 0172): solo el que no salió o falló; el dudoso, confirmándolo.
+  app.post(
+    "/:id/notice",
+    change(noticeInput, (tx, orgId, userId, id, body) =>
+      sendOrderReadyNotice(tx, orgId, userId, id, { resend: true, confirmDoubtful: body.confirmDoubtful === true }),
+    ),
+  )
   app.post("/:id/void", change(reasonInput, (tx, orgId, userId, id, body) => voidJobOrder(tx, orgId, userId, id, body), { money: true }))
   // Rehacer crea otro pedido: la respuesta es el nuevo.
   app.post("/:id/remake", async (c) => {

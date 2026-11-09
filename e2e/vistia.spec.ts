@@ -276,6 +276,12 @@ test("vistIA: la óptica con su marca, la receta del examen y la venta de lentes
   }
   await expect(detail.getByRole("button", { name: "Entregar", exact: true })).toBeVisible()
   await expect(detail.getByRole("status").filter({ hasText: "Falta pagar" })).toBeVisible()
+  // «Tus lentes están listos» (entrega 5): sin WhatsApp conectado no sale, y el pedido dice por qué y ofrece enviarlo.
+  await expect(detail.getByText("Aviso de que está listo")).toBeVisible()
+  await expect(detail.getByText(/No salió el aviso/)).toBeVisible()
+  await expect(detail.getByRole("button", { name: "Enviar el aviso", exact: true })).toBeVisible()
+  const notice = (await call<OrderView & { readyNotice: { status: string } | null }>(page, "GET", `/api/orders/${orderId}`, slug)).readyNotice
+  expect(notice?.status).toBe("no_salio")
 
   // Listo: está en «Listos».
   await detail.getByRole("button", { name: "Cerrar" }).first().click()

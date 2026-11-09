@@ -10,6 +10,7 @@ import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { type CollectMethodInput, collectCharge, createCharge, voidCharge } from "./payments.js"
+import { orderNoticeOf, sendOrderReadyNotice } from "./job-order-notice.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -344,6 +345,8 @@ export async function advanceJobOrder(
     at: now,
   })
   await audit(tx, orgId, actorUserId, "job_order.advanced", id, { from: row.status, to: next })
+  // Listo: le avisa a la persona que puede recogerlo (ADR 0172). Si no sale, el pedido lo dice.
+  if (next === "listo") await sendOrderReadyNotice(tx, orgId, actorUserId, id)
   return getJobOrder(tx, orgId, id)
 }
 
@@ -647,7 +650,20 @@ export async function getJobOrder(
     })),
     dueCents: withMoney ? (due.get(id) ?? 0) : null,
     currency: await orgCurrency(tx, orgId),
+    /** «Pedido listo»: si salió, si llegó, si falló o si no se sabe (ADR 0172). */
+    readyNotice:
+      order.status === "listo"
+        ? await orderNoticeOf(tx, orgId, order)
+        : order.status === "entregado"
+          ? deliveredNotice(await orderNoticeOf(tx, orgId, order))
+          : null,
   }
+}
+
+/** Entregado, solo se dice el aviso que salió: lo que no salió ya no hace falta. */
+function deliveredNotice(notice: Awaited<ReturnType<typeof orderNoticeOf>>) {
+  if (!notice || notice.status === "no_salio" || notice.status === "fallo" || notice.status === "dudoso") return null
+  return { ...notice, canResend: false }
 }
 
 /** Lo que el producto muestra al vender y copia en el pedido (vistIA: las recetas de lentes vigentes). */

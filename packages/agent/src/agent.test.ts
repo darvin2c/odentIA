@@ -16,6 +16,7 @@ import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
+import { agentTextsFor } from "@odentia/services"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import {
   AGENT_ROLES,
@@ -2366,7 +2367,10 @@ it("la ficha de Recepción declara exactamente las herramientas que el agente ti
   // herramienta que no existe, rompe esta igualdad.
   const ficha = AGENT_ROLES.recepcion
   const declared = [...new Set([...ficha.always, ...ficha.functions.flatMap((fn) => fn.tools)])]
-  expect(makeAgentTools(ctx).map((tool) => tool.name).sort()).toEqual(declared.sort())
+  // Las de todos los productos: `ver_pedidos` solo existe donde se trabaja con pedidos (ADR 0172).
+  const products: Record<Parameters<typeof agentTextsFor>[0], true> = { dental: true, medical: true, optical: true }
+  const tools = new Set((Object.keys(products) as Array<keyof typeof products>).flatMap((product) => makeAgentTools({ ...ctx, texts: agentTextsFor(product) }).map((tool) => tool.name)))
+  expect([...tools].sort()).toEqual(declared.sort())
 
   // Ninguna herramienta declara campos por su cuenta: o toma los de la
   // operación que comparte con la pantalla, o solo lee, o figura con su motivo

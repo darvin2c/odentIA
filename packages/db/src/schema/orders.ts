@@ -45,6 +45,10 @@ export const jobOrder = pgTable(
     /** El pedido que este rehace, con los mismos cargos (no se cobra otra vez); con su motivo. */
     remakeOf: uuid("remake_of"),
     remakeReason: text("remake_reason"),
+    /** El mensaje de «Pedido listo» (ADR 0172): la pantalla dice si salió, si llegó o si no se sabe. */
+    readyMessageId: uuid("ready_message_id"),
+    /** Por qué no salió el aviso, si no salió: para que el equipo avise por otra vía. */
+    readyNoticeNote: text("ready_notice_note"),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidReason: text("void_reason"),

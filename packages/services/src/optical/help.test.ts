@@ -70,6 +70,13 @@ const OWN_QUOTED = [
   "Marcar listo",
   "Rehacer",
   "Cambiar rol",
+  // «Tus lentes están listos» (entrega 5).
+  "Tus lentes ya están listos para recoger",
+  "Aviso de que está listo",
+  "Enviar el aviso",
+  "Enviarlo otra vez",
+  "Tus pedidos",
+  "Tu cuenta",
   "Emitir otra desde su examen",
 ]
 

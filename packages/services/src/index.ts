@@ -120,6 +120,7 @@ export * from "./inbox-person.js"
 export * from "./inventory.js"
 export * from "./inventory-stock.js"
 export * from "./job-orders.js"
+export { type OrderNotice, orderNoticeOf, sendOrderReadyNotice } from "./job-order-notice.js"
 export * from "./knowledge.js"
 export {
   acceptClinicAgreement,

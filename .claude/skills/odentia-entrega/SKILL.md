@@ -141,7 +141,7 @@ Si no se pudo abrir la pantalla, la QA lo dice y el PR lo lleva como límite. Un
 
 Aplica si cambia lo que un agente lee o puede hacer: prompt, herramientas, camino o modelo. Se mide al final, sobre el código ya revisado y pasado por la QA, porque cuesta y cualquier cambio posterior lo invalida. Si solo cambia cuándo corre o algo a su alrededor, se juzga por sus pruebas y el PR explica por qué.
 
-- Sofi: auditoría al azar con `packages/agent/src/auditoria-masiva.ts`, con los mismos casos contra `main` y en los dos productos, y las dos versiones calificadas por un solo juez.
+- Sofi: auditoría al azar con `packages/agent/src/auditoria-masiva.ts`, con los mismos casos contra `main` y en cada producto que cambia (`PRODUCTO=odentia|latidia|vistia`; los pedidos de vistIA, con `PEDIDOS=1`), y las dos versiones calificadas por un solo juez.
 - Argos, Clío, el modelo de decisión y Ariadna: el `eval:*` o banco que nombra la regla en `packages/agent/AGENTS.md` o `packages/services/AGENTS.md`.
 - Antes de gastar, comprobar que la medición puede ver este error. El juez de la auditoría, por ejemplo, no juzga horarios: un error de horarios se mide con casos propios, y la auditoría solo dice si el cambio hace daño.
 - Comprobar que el camino cambiado corrió, con una línea que lo cuente. Si no corrió, la medición no dice nada.

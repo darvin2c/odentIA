@@ -19,6 +19,16 @@ import type { ProductAgentTexts } from "./product-agent.js"
 import type { ProductDictation, ProductHooks } from "./product-hooks.js"
 
 /**
+ * Si el producto trabaja con pedidos (ADR 0171): su pantalla Pedidos, «Pedido
+ * listo» en sus mensajes y lo que Sofi responde de ellos. El pedido es común; hoy
+ * solo una óptica lo usa.
+ */
+const ORDERS: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
+export function worksWithOrders(product: ClinicalProduct): boolean {
+  return ORDERS[product]
+}
+
+/**
  * El único lugar de lo común que conoce los productos (ADR 0079): qué hace
  * cada uno en cada momento.
  */
