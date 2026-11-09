@@ -123,7 +123,8 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
         { conversationId: parsed.data.conversationId, createdBy: userId, ...(parsed.data.patientId ? { patientId: parsed.data.patientId, booking: false } : {}) },
         { secretsKey: deps.secretsKey },
       )
-      const url = await personalLinkUrl(tx, orgId, link.token)
+      // Sin ficha, «Elige tu cita»; con ella, «Tus pendientes» (lo que le falta y su cita).
+      const url = await personalLinkUrl(tx, orgId, link.token, parsed.data.patientId ? "pendientes" : "reserva")
       if (!url) throw new Error("La organización no tiene dirección pública")
       return { url, expiresAt: link.expiresAt.toISOString(), needsRegistration: link.needsRegistration, patientName: link.patientName }
     }))

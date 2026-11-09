@@ -5,8 +5,9 @@ import { API_URL } from "./auth-client"
 import type { PortalBudget } from "./portal"
 
 /**
- * «Su enlace» (ADR 0037): la página personal de cada persona, `/reserva`.
- * Sin sesión: lo único que identifica es el enlace, y nunca trae lo guardado.
+ * «Su enlace» (ADR 0037 y 0167): `/pendientes` con lo que tiene por hacer, cada
+ * mensaje abre lo suyo (`?abre=`), y `/reserva` para elegir su cita. Sin sesión:
+ * lo único que identifica es el enlace, y nunca trae lo guardado.
  */
 export interface BookingAppointment {
   startsAt: string
@@ -63,6 +64,7 @@ export interface PersonalLinkView {
   /** Qué falta de sus datos y si se le pregunta su salud (opcional); `missing` vacío: solo su salud. */
   data: { missing: MissingDatum[]; health: boolean } | null
   /** Quien ya es paciente, al reservar: lo que ya sabemos, con el documento abreviado; sus nombres, para corregirlos. */
+  /** `document` y `phone` llegan abreviados del servidor («DNI ••••8912», «•••701»): se muestran tal cual. */
   you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
   /**
    * Lo que aún no aceptó (el aviso) o no respondió (promociones): se pide en el mismo paso.
@@ -70,10 +72,54 @@ export interface PersonalLinkView {
    */
   pending: { privacy: boolean; promotions: boolean; promotionsOffer: boolean } | null
   budgets: PortalBudget[]
-  consents: Array<{ id: string; title: string }>
+  consents: PersonalLinkConsent[]
   questionnaire: { title: string } | null
+  /** Lo que aceptó de su presupuesto y aún no tiene cita: «Lo que aceptaste, por agendar». */
+  toSchedule: Array<{ planItemId: string; title: string }>
+  /** «Reservar otra» en «Tu cita»: las citas por venir y el tope; nulo si no le corresponde. */
+  another: { upcoming: number; cap: number; allowed: boolean } | null
+  /** Por dónde se le confirma lo que haga aquí; nulo: la página no promete ningún mensaje. */
+  confirmVia: "whatsapp" | "chat" | "correo" | null
+  /** Por dónde le llegan los recordatorios de su cita; nulo: no se le promete ninguno. */
+  remindersVia: "whatsapp" | "correo" | null
+  /** Con `vencido`: por qué ya no sirve y si puede pedir uno nuevo. */
+  closed: PersonalLinkClosed | null
   /** «Tus mensajes» (ADR 0040): solo para quien recibe los mensajes. */
   messages: PersonalLinkMessages | null
+}
+
+/** La cita para la que es algo: día y hora en la zona de su sede. */
+export interface PersonalLinkWhen {
+  startsAt: string
+  timeZone: string
+}
+
+/** Por qué no se firma desde el teléfono: el propio menor, sin fecha de nacimiento o sin documento en la ficha. */
+export type RemoteSignBlock = "menor" | "sin-fecha" | "sin-documento"
+
+export interface PersonalLinkConsent {
+  id: string
+  title: string
+  /** Lo que se consiente, como en el papel; solo en la página, nunca en un mensaje. */
+  procedureRef: string | null
+  appointment: PersonalLinkWhen | null
+  /** Se firma desde el teléfono; si no, se lee y se firma en la cita. */
+  signable: boolean
+  why: RemoteSignBlock | null
+}
+
+export interface PersonalLinkResend {
+  channel: "whatsapp" | "correo"
+  /** «•••701»; vacío si no hay qué mostrar. */
+  to: string
+  /** Cuándo salió el de hoy: con él ya no se pide otro. */
+  sentAt: string | null
+}
+
+export interface PersonalLinkClosed {
+  reason: "hecho" | "vencido" | "cita-pasada" | "quitado"
+  resend: PersonalLinkResend | null
+  appointment: PersonalLinkWhen | null
 }
 
 export interface PersonalLinkMessages {
@@ -117,8 +163,33 @@ async function publicFetch<T>(url: string, init?: RequestInit): Promise<T> {
 const base = (slug: string) => `${API_URL}/api/public/booking/${encodeURIComponent(slug)}`
 const post = <T>(url: string, body: unknown) => publicFetch<T>(url, { method: "POST", body: JSON.stringify(body) })
 
-export function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
-  return publicFetch(`${base(slug)}?token=${encodeURIComponent(token)}`)
+/**
+ * Mientras dura una entrega la página puede llegar antes que la API (Cloudflare y el VPS se
+ * publican por separado): lo que la API anterior aún no devuelve llega vacío, así la página no
+ * se rompe ni ofrece lo que esa API no sabe hacer («Reservar otra» sin `another`). Lo de antes
+ * se firmaba siempre desde el teléfono: sin `signable`, se puede firmar.
+ */
+export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
+  return {
+    ...view,
+    consents: (view.consents ?? []).map((consent) => ({
+      ...consent,
+      procedureRef: consent.procedureRef ?? null,
+      appointment: consent.appointment ?? null,
+      signable: consent.signable ?? true,
+      why: consent.why ?? null,
+    })),
+    toSchedule: view.toSchedule ?? [],
+    another: view.another ?? null,
+    confirmVia: view.confirmVia ?? null,
+    remindersVia: view.remindersVia ?? null,
+    closed: view.closed ?? null,
+  }
+}
+
+export async function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
+  const result = await publicFetch<{ data: PersonalLinkView }>(`${base(slug)}?token=${encodeURIComponent(token)}`)
+  return { ...result, data: withLinkViewDefaults(result.data) }
 }
 
 /** A dónde lleva el enlace corto para llegar a una sede (`/llegar/<sede>`). */
@@ -151,12 +222,15 @@ function linkPost(url: string, body: Record<string, unknown>): Promise<Response>
   })
 }
 
+/** Las horas para cambiar su cita (`cambiar`) o para otra cita, con su tope (`otra`). */
+export type BookingSlotsMode = "cambiar" | "otra" | null
+
 export function fetchBookingSlots(
   slug: string,
   token: string,
-  range: { branchId: string; from: string; to: string; changing?: boolean },
+  range: { branchId: string; from: string; to: string; mode?: BookingSlotsMode },
 ): Promise<{ data: { slots: BookingSlot[]; timeZone: string; truncated: boolean } }> {
-  const query = new URLSearchParams({ token, branchId: range.branchId, from: range.from, to: range.to, ...(range.changing ? { mode: "cambiar" } : {}) })
+  const query = new URLSearchParams({ token, branchId: range.branchId, from: range.from, to: range.to, ...(range.mode ? { mode: range.mode } : {}) })
   return publicFetch(`${base(slug)}/slots?${query.toString()}`)
 }
 
@@ -179,8 +253,8 @@ export interface BookingProfessionals {
 }
 
 /** Con quién se puede reservar en la sede y el próximo horario libre de cada uno: lo entrega el servidor. */
-export function fetchBookingProfessionals(slug: string, token: string, branchId: string, changing = false): Promise<{ data: BookingProfessionals }> {
-  const query = new URLSearchParams({ token, branchId, ...(changing ? { mode: "cambiar" } : {}) })
+export function fetchBookingProfessionals(slug: string, token: string, branchId: string, mode: BookingSlotsMode = null): Promise<{ data: BookingProfessionals }> {
+  const query = new URLSearchParams({ token, branchId, ...(mode ? { mode } : {}) })
   return publicFetch(`${base(slug)}/professionals?${query.toString()}`)
 }
 
@@ -234,9 +308,24 @@ export interface BookingYou {
 
 export function reserveBooking(
   slug: string,
-  input: { token: string; branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[]; you?: BookingYou },
+  input: {
+    token: string
+    branchId: string
+    startsAt: string
+    professionalUserId: string
+    roomId?: string
+    planItemIds?: string[]
+    you?: BookingYou
+    /** «Reservar otra» desde «Tu cita», con el tope de citas por venir. */
+    another?: true
+  },
 ): Promise<{ data: BookingAppointment }> {
   return post(`${base(slug)}/reserve`, input)
+}
+
+/** «Enviarme uno nuevo» desde un enlace vencido: sale a su canal registrado, uno al día. */
+export function resendPersonalLink(slug: string, token: string): Promise<{ data: PersonalLinkResend }> {
+  return post(`${base(slug)}/resend`, { token })
 }
 
 /** Cambia de horario la cita del enlace. */
@@ -339,6 +428,15 @@ export interface LinkConsent {
   minor: boolean
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
+  /** Se firma desde el teléfono; si no (`why`), se lee entera y se firma en la cita. */
+  signable: boolean
+  why: RemoteSignBlock | null
+  /** A quién le habla la página: al paciente o a quien decide por él. */
+  speaksTo: "paciente" | "representante"
+  /** Primer nombre del paciente: «Consentimiento de Mateo». */
+  patientFirstName: string
+  /** La cita para la que es. */
+  appointment: PersonalLinkWhen | null
 }
 
 export function fetchLinkConsent(slug: string, token: string, consentId: string): Promise<{ data: LinkConsent }> {
