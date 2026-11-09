@@ -38,9 +38,9 @@ export function pathCountWord(count: number): string {
   return String(count)
 }
 
-/** «En los dos» o «En todos». */
+/** «En las dos» o «En todas» (las opciones). */
 export function inAllPathsLabel(count: number): string {
-  return count === 2 ? "En los dos" : "En todos"
+  return count === 2 ? "En las dos" : "En todas"
 }
 
 /** Primera letra en minúscula, salvo siglas («PRF» queda igual). */

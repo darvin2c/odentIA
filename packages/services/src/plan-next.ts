@@ -245,12 +245,19 @@ async function planFactsOf(tx: Db, orgId: string, patientId: string): Promise<{ 
  * página): lo mismo que `getPlanNextStep` de cada uno, con la misma regla
  * (`planNextStepFrom`) y un puñado de consultas en total, no varias por
  * paciente. Un paciente que no existe no aparece.
+ *
+ * `prefer`: la lista de Pacientes filtrada por un atajo dice el paso de ese
+ * atajo, si lo tiene (QA del 8 nov: filtrada por «Control vencido», la fila
+ * decía «Reservar lo aceptado»). Es el mismo paso de la lista de la ficha
+ * (`planStepsFrom`); la regla de un solo paso no cambia, ni lo que cuentan los
+ * atajos ni lo que lee el agente.
  */
 export async function planNextStepsOf(
   tx: Db,
   orgId: string,
   patientIds: string[],
   can: Can,
+  prefer: readonly PlanNextKind[] = [],
 ): Promise<Map<string, PlanNextStep>> {
   const out = new Map<string, PlanNextStep>()
   if (patientIds.length === 0) return out
@@ -320,24 +327,19 @@ export async function planNextStepsOf(
   const controlOf = new Map(controls.map((row) => [row.patientId, row]))
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   for (const person of people) {
-    out.set(
-      person.id,
-      planNextStepFrom(
-        {
-          name: firstName(person),
-          budgets: budgets.get(person.id) ?? [],
-          items: itemsOf.get(person.id) ?? [],
-          withAppointment,
-          sessions,
-          control: controlOf.get(person.id),
-          nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
-          nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
-          today: todayOf.get(person.id) ?? null,
-        },
-        context,
-        can,
-      ),
-    )
+    const facts: PlanFacts = {
+      name: firstName(person),
+      budgets: budgets.get(person.id) ?? [],
+      items: itemsOf.get(person.id) ?? [],
+      withAppointment,
+      sessions,
+      control: controlOf.get(person.id),
+      nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
+      nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
+      today: todayOf.get(person.id) ?? null,
+    }
+    const preferred = prefer.length > 0 ? planStepsFrom(facts, context, can).find((step) => prefer.includes(step.kind)) : undefined
+    out.set(person.id, preferred ?? planNextStepFrom(facts, context, can))
   }
   return out
 }
