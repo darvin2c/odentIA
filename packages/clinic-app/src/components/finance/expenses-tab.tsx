@@ -338,18 +338,6 @@ export function ExpensesTab({
                 </Link>
               </div>
             ) : null
-          ) : row.original.voidedAt === null && canWrite && !row.original.salary ? (
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label={`Anular el gasto ${row.original.concept}`}
-                onClick={() => setVoiding(row.original)}
-              >
-                Anular
-              </Button>
-            </div>
           ) : null,
       },
     ],
@@ -564,7 +552,14 @@ export function ExpensesTab({
                 : []),
               ...(viewing.voidedAt ? [["Anulado", viewing.voidReason ?? "Sin motivo"]] : []),
               ...(viewing.purchaseOrderNumber != null
-                ? [["Compra", `${purchaseOrderLabel(viewing.purchaseOrderNumber)}: se cambia en la compra, en Inventario`]]
+                ? [
+                    [
+                      "Compra",
+                      canInventory
+                        ? `${purchaseOrderLabel(viewing.purchaseOrderNumber)}: se cambia en la compra, en Inventario`
+                        : `${purchaseOrderLabel(viewing.purchaseOrderNumber)}: se cambia en la compra; lo hace quien lleva el inventario`,
+                    ],
+                  ]
                 : []),
               ...(viewing.commission ? [["Comisión", "Se cambia en Comisiones, con su pago"]] : []),
             ].map(([label, value]) => (
@@ -582,6 +577,7 @@ export function ExpensesTab({
       <VoidDrawer
         open={voiding !== null}
         title={adminVoids ? "Pedírselo a administración" : "Anular gasto"}
+        cancelLabel={adminVoids ? "Cancelar" : "No anular"}
         // Lo que pasa de verdad, dicho antes de escribir el motivo (QA de Gastos, G15). Si lo anula
         // administración, el motivo se le pide como tarea: el gasto sigue hasta que lo anule.
         submitLabel={adminVoids ? "Pedírselo a administración" : "Anular"}

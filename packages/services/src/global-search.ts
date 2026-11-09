@@ -513,7 +513,8 @@ export async function searchEverything(
   // Lo que cada profesional cobra de comisión es de quien administra comisiones (ADR 0066:
   // cada resultado pide el permiso de su pantalla); `commissions.read` solo ve lo propio.
   const seesAllCommissions = can("commissions.write")
-  if (can("finance.read") && on("dinero") && !digits) {
+  // Un número también busca gastos: el n.º de operación de Yape o el del comprobante son solo números.
+  if (can("finance.read") && on("dinero")) {
     const expenses = await rows(sql`
       select e.id, e.concept, e.category, e.amount_cents, e.currency, e.spent_at, e.branch_id, s.id as supplier_id, s.name as supplier
       from expense e

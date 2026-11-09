@@ -23,8 +23,8 @@ import {
   rucLooksValid,
   suggestedReceiptType,
 } from "@odentia/clinical"
-import { Button, cn, FieldDescription, FieldError, FieldLabel, Input, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
-import { DatePickerButton, FormDrawer, useAppForm, useFieldContext, useFieldControl, useFormSurface } from "@odentia/ui-patterns"
+import { Button, FieldDescription, Input, toast } from "@odentia/ui"
+import { DatePickerButton, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
@@ -128,79 +128,32 @@ interface ExpenseValues {
   spentDay: string
 }
 
-/** «¿Es el pago de una compra de Inventario?»: «No» primero, las de esta sede por pagar, y las demás a pedido. */
-function PurchaseChoice({
-  orders,
-  branchId,
-  money,
-  onChoose,
-}: {
-  orders: PurchaseBalance[]
-  branchId: string
-  money: (cents: number, currency: string) => string
-  onChoose: (orderId: string) => void
-}) {
-  const field = useFieldContext<string>()
-  const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: true })
-  const legendId = `${control.id}-leyenda`
-  // Primero lo que se debe en esta sede (QA de Gastos, G24); lo demás, a pedido.
+/**
+ * Las opciones de «¿Es el pago de una compra?» (QA de Gastos, G4 y G24): «No» primero, después lo
+ * que se debe en esta sede y al final lo demás. En un desplegable, como prometía el lienzo: la lista
+ * entera empujaba el medio de pago fuera de la vista. Sin «Inventario» ni «OC» delante: el número va
+ * al final, para distinguir dos compras al mismo proveedor.
+ */
+function purchaseOptions(
+  orders: PurchaseBalance[],
+  branchId: string,
+  money: (cents: number, currency: string) => string,
+): Array<{ value: string; label: string }> {
   const here = orders.filter((order) => order.branchId === branchId && order.dueCents > 0)
   const rest = orders.filter((order) => !here.includes(order))
-  const [all, setAll] = useState(here.length === 0 || rest.some((order) => order.orderId === field.state.value))
-  const shown = all ? [...here, ...rest] : here
-  return (
-    <fieldset data-invalid={control.invalid || undefined} className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3.5">
-      <legend id={legendId} className="px-1 font-semibold">
-        ¿Es el pago de una compra de Inventario?
-      </legend>
-      {/* El error arriba, junto a la pregunta: debajo de una lista larga quedaba fuera de la vista. */}
-      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
-      <RadioGroup
-        id={control.id}
-        aria-labelledby={legendId}
-        aria-describedby={control.describedBy}
-        aria-invalid={control.invalid || undefined}
-        value={field.state.value}
-        onValueChange={(value) => onChoose(String(value))}
-        onBlur={(event: React.FocusEvent<HTMLDivElement>) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) control.onBlur()
-        }}
-        className="flex flex-col gap-1"
-      >
-        <FieldLabel className="flex min-h-11 cursor-pointer items-center gap-2.5 font-semibold">
-          <RadioGroupItem value={OTHER} />
-          No, es otro gasto
-        </FieldLabel>
-        {shown.map((order) => (
-          <FieldLabel key={order.orderId} className="flex min-h-11 cursor-pointer items-center gap-2.5 font-normal">
-            <RadioGroupItem value={order.orderId} />
-            <span className="min-w-0 flex-1">
-              Compra a {order.supplierName}{" "}
-              <span className="text-muted-foreground">
-                · {purchaseOrderLabel(order.orderNumber)}
-                {order.branchId !== branchId ? ` · ${order.branchName}` : ""}
-              </span>
-            </span>
-            <span className={cn("shrink-0 text-sm font-semibold", order.dueCents > 0 ? "text-warning" : "text-muted-foreground")}>
-              {order.dueCents > 0
-                ? `por pagar ${money(order.dueCents, order.currency)}`
-                : order.receivedCents === 0
-                  ? "aún no llega"
-                  : "al día, falta que llegue"}
-            </span>
-          </FieldLabel>
-        ))}
-      </RadioGroup>
-      {!all && rest.length > 0 ? (
-        <Button type="button" variant="link" className="h-auto self-start p-0" onClick={() => setAll(true)}>
-          Ver las demás compras ({rest.length})
-        </Button>
-      ) : null}
-      <p id={descriptionId} className="text-sm text-muted-foreground">
-        Si es una compra, el monto se llena solo y la compra queda al día en Inventario: así no se cuenta dos veces.
-      </p>
-    </fieldset>
-  )
+  const label = (order: PurchaseBalance) =>
+    [
+      `Compra a ${order.supplierName}`,
+      order.dueCents > 0
+        ? `por pagar ${money(order.dueCents, order.currency)}`
+        : order.receivedCents === 0
+          ? "aún no llega"
+          : "al día, falta que llegue",
+      order.branchId !== branchId ? order.branchName : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") + ` (${purchaseOrderLabel(order.orderNumber)})`
+  return [{ value: OTHER, label: "No, es otro gasto" }, ...[...here, ...rest].map((order) => ({ value: order.orderId, label: label(order) }))]
 }
 
 export function ExpenseFormDrawer({
@@ -593,7 +546,6 @@ export function ExpenseFormDrawer({
   })
 
   const choosePurchase = (value: string) => {
-    form.setFieldValue("purchase", value)
     const order = orders.find((item) => item.orderId === value)
     setSeen(order ? { due: order.dueCents, paid: order.paidCents } : null)
     if (order) {
@@ -793,13 +745,13 @@ export function ExpenseFormDrawer({
           </form.AppField>
         ) : null}
         {asksPurchase ? (
-          <form.AppField name="purchase">
-            {() => (
-              <PurchaseChoice
-                orders={orders}
-                branchId={branchId}
-                money={(amount, currency) => formatMoney(amount, currency, locale)}
-                onChoose={choosePurchase}
+          <form.AppField name="purchase" listeners={{ onChange: ({ value }) => choosePurchase(value) }}>
+            {(field) => (
+              <field.SelectField
+                label="¿Es el pago de una compra?"
+                description="Si es una compra, el monto se llena solo y la compra queda al día: así no se cuenta dos veces."
+                placeholder="Elige si es una compra"
+                options={purchaseOptions(orders, branchId, (amount, currency) => formatMoney(amount, currency, locale))}
               />
             )}
           </form.AppField>
@@ -916,7 +868,14 @@ export function ExpenseFormDrawer({
           </form.AppField>
           {(values.receiptType && values.receiptType !== NO_RECEIPT_TYPE) ? (
             <form.AppField name="receiptNumber">
-              {(field) => <field.TextField label="Número" maxLength={60} autoComplete="off" placeholder="B001-2345" />}
+              {(field) => (
+                <field.TextField
+                  label="Número"
+                  maxLength={60}
+                  autoComplete="off"
+                  placeholder={values.receiptType === "01" ? "F001-2345" : values.receiptType === "03" ? "B001-2345" : undefined}
+                />
+              )}
             </form.AppField>
           ) : null}
         </div>

@@ -492,9 +492,11 @@ function NoteRecurringDrawer({
     enabled: open && values.category === "Personal" && canStaffPay,
     staleTime: 60_000,
   })
+  const [pickMonth, setPickMonth] = useState(false)
   useEffect(() => {
     if (!open) return
     requestId.current = crypto.randomUUID()
+    setPickMonth(false)
     form.reset()
   }, [open, form])
   const day = Number(values.day)
@@ -508,7 +510,6 @@ function NoteRecurringDrawer({
   return (
     <FormDrawer
       {...surface}
-      dock={false}
       open={open}
       onClose={onClose}
       title="Anotar lo que se repite"
@@ -560,7 +561,6 @@ function NoteRecurringDrawer({
           {(field) => (
             <field.TextField
               label={`Lo de siempre, en ${currencyWord(values.currency, locale)}`}
-              description="Se propone cada vez que toca pagar; si un mes llega otro, se cambia al pagar."
               inputMode="decimal"
               inputClassName="w-40"
             />
@@ -587,23 +587,24 @@ function NoteRecurringDrawer({
             </field.Group>
           )}
         </form.AppField>
-        <form.AppField name="firstMonth">
-          {(field) => (
-            <field.SelectField
-              label="El primero que se paga"
-              description={
-                validDay
-                  ? `Si no eliges, ${monthWord(proposed)}: el primero cuyo día aún no pasó. Lo de antes que ya se pagó, regístralo como gasto.`
-                  : "Si no eliges, el primero cuyo día aún no pasó."
-              }
-              placeholder={validDay ? monthWord(proposed) : "Escribe antes el día"}
-              options={months}
-            />
-          )}
-        </form.AppField>
+        {/* El primer mes casi nunca se elige: se dice cuál será, y se cambia solo si hace falta (UX 4). */}
+        {pickMonth ? (
+          <form.AppField name="firstMonth">
+            {(field) => (
+              <field.SelectField label="Desde qué mes" placeholder={monthWord(proposed)} options={months} />
+            )}
+          </form.AppField>
+        ) : validDay ? (
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            Queda por pagar desde {monthWord(proposed)}.
+            <Button type="button" variant="link" className="h-auto p-0" onClick={() => setPickMonth(true)}>
+              Otro mes
+            </Button>
+          </p>
+        ) : null}
         <form.AppField name="method">
           {(field) => (
-            <field.Group legend="Con qué se suele pagar (opcional)" description="Se propone al pagar; se cambia en cada pago.">
+            <field.Group legend="Con qué se suele pagar (opcional)">
               {(control) => (
                 <PaymentMethodButtons
                   id={control.id}

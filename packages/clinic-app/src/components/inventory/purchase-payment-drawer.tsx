@@ -10,7 +10,7 @@
  * cancela es siempre lo de la compra. Sin ella no aparece nada de esto.
  */
 import { currencyWord, expenseReceiptTypes, formatMoney, formatMoneyInput, NO_RECEIPT_TYPE } from "@odentia/clinical"
-import { FieldLegend, FieldSet, toast } from "@odentia/ui"
+import { Button, FieldLegend, FieldSet, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { Link } from "@tanstack/react-router"
@@ -37,6 +37,7 @@ import type { PurchaseOrderDetail } from "../../lib/inventory"
 import { useOrgProfile, useTodayRate } from "../../lib/org"
 import { purchaseOrderLabel } from "../../lib/reports"
 import { ChoiceButtons } from "../choice-buttons"
+import { CashMoveDrawer } from "../finance/cash-close-drawer"
 import { PaymentMethodButtons } from "../finance/collect-drawer"
 import { ExpenseMoneyFields } from "../finance/expense-money-fields"
 import { MoneyInput } from "./fields"
@@ -49,6 +50,8 @@ interface PaymentValues {
   useCredit: boolean
   /** Con qué se pagó: un medio de la clínica, como en un gasto (ADR 0167). */
   method: string
+  /** El n.º de operación de lo que no es efectivo. */
+  reference: string
   day: string
   receiptKind: string
   receiptNumber: string
@@ -96,6 +99,8 @@ export function PurchasePaymentDrawer({
   const business = profile?.currency ?? order.currency
   const currencies = second ? [business, second.currency] : []
   const uid = useId()
+  // «Ingresar lo que falta»: el cajón del efectivo se apila encima, sin cerrar el pago.
+  const [cashOpen, setCashOpen] = useState(false)
   // Con qué se paga: decide de qué caja se habla. Sin otra moneda es siempre la de siempre.
   const [payIn, setPayIn] = useState(order.currency)
   const balance = order.balance
@@ -181,7 +186,7 @@ export function PurchasePaymentDrawer({
           ctx.addIssue({
             code: "custom",
             path: ["method"],
-            message: `En la caja solo hay ${second ? formatMoney(state.cashOnHandCents, payIn, locale) : money(state.cashOnHandCents)}: no alcanza para pagar con el efectivo. Elige otro medio o ingresa lo que falta en Finanzas › Caja.`,
+            message: "No alcanza el efectivo de la caja: ingresa lo que falta o elige con qué se pagó.",
           })
         if (value.day > today) ctx.addIssue({ code: "custom", path: ["day"], message: "La fecha del pago no puede ser futura." })
 
@@ -199,6 +204,7 @@ export function PurchasePaymentDrawer({
         ...(creditCents > 0 ? { creditCents } : {}),
         fromCash: methodOf(value.method)?.typeCode === CASH_TYPE_CODE,
         ...(value.method ? { paymentMethodId: value.method } : {}),
+        ...(value.reference.trim() && methodOf(value.method)?.typeCode !== CASH_TYPE_CODE ? { paymentReference: value.reference.trim() } : {}),
         ...(value.day === today ? {} : { spentAt: noonOf(value.day, timeZone) }),
         ...(value.receiptKind ? { receiptType: value.receiptKind } : {}),
         ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
@@ -215,6 +221,7 @@ export function PurchasePaymentDrawer({
     rate: todayRate,
     useCredit: false,
     method: "",
+    reference: "",
     day: todayIn(timeZone),
     receiptKind: "",
     receiptNumber: "",
@@ -429,6 +436,26 @@ export function PurchasePaymentDrawer({
             </field.Group>
           )}
         </form.AppField>
+        {/* La caja en una línea, con su salida, como en «Registrar gasto» (QA de Gastos, G8). */}
+        {methodOf(values.method)?.typeCode === CASH_TYPE_CODE && state && figures.outCents !== null ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm">
+            <span>
+              {state.cashOnHandCents >= figures.outCents
+                ? `En la caja hay ${formatMoney(state.cashOnHandCents, figures.payIn, locale)}: queda ${formatMoney(state.cashOnHandCents - figures.outCents, figures.payIn, locale)}.`
+                : `En la caja hay ${formatMoney(state.cashOnHandCents, figures.payIn, locale)}: faltan ${formatMoney(figures.outCents - state.cashOnHandCents, figures.payIn, locale)}.`}
+            </span>
+            {state.cashOnHandCents < figures.outCents ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
+                Ingresar {formatMoney(figures.outCents - state.cashOnHandCents, figures.payIn, locale)}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {values.method && methodOf(values.method)?.typeCode !== CASH_TYPE_CODE ? (
+          <form.AppField name="reference">
+            {(field) => <field.TextField id={`${uid}-operacion`} label="N.º de operación (opcional)" maxLength={60} autoComplete="off" />}
+          </form.AppField>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
           <form.AppField name="receiptKind">
             {(field) => (
@@ -452,6 +479,14 @@ export function PurchasePaymentDrawer({
           Queda como gasto de <strong>Materiales</strong> de {balance?.branchName ?? "la sede del almacén"}, enlazado a esta compra. En Finanzas se ve como cualquier gasto, con el enlace a la compra.
         </p>
       </div>
+      <CashMoveDrawer
+        branchId={branchId}
+        currency={figures.payIn}
+        locale={locale}
+        open={cashOpen}
+        onClose={() => setCashOpen(false)}
+        initialAmountCents={state && figures.outCents !== null && state.cashOnHandCents < figures.outCents ? figures.outCents - state.cashOnHandCents : undefined}
+      />
     </FormDrawer>
   )
 }
