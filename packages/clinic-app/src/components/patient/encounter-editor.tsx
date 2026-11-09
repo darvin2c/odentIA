@@ -1335,13 +1335,9 @@ export function EncounterEditor({
   const followUps = (followUpsQuery.data?.data ?? []).filter(
     (row) => row.originEncounterId === encounterId,
   )
-  // Tratamientos que esta atención deja por ejecutar: los indicados aquí y los
-  // vinculados que siguen abiertos. No basta `plannedItems`: el vínculo nace
-  // cuando la sesión arranca, así que una indicación recién propuesta solo
-  // aparece en `indicatedItems`.
-  const pendingTreatments = attentionItems.filter((item) =>
-    ["pendiente", "programado", "en_curso"].includes(item.status),
-  ).length
+  // Tratamientos que esta atención deja por ejecutar: los cuenta el servidor, sin
+  // lo que la persona no aceptó ni el camino que no eligió.
+  const pendingTreatments = detail.pendingTreatments
 
   /**
    * Bloques disponibles con su resumen real. `empty` significa «no hay nada

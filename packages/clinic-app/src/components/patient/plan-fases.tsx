@@ -1,5 +1,6 @@
 import {
   diagnosisCodeLabel,
+  isLeftOut,
 } from "@odentia/clinical"
 import {
   AlertDialog,
@@ -170,8 +171,7 @@ function PlanPhasesGroup({
   // El avance cuenta solo lo que se hará.
   const active = phased.filter(
     (item) =>
-      !["cancelado", "reemplazado"].includes(item.status) &&
-      !["rechazado", "reemplazado"].includes(item.decisionStatus),
+      !["cancelado", "reemplazado"].includes(item.status) && !isLeftOut(item.decisionStatus),
   )
   const done = active.filter((item) => item.status === "realizado").length
   const inProgress = active.filter((item) => item.status === "en_curso").length

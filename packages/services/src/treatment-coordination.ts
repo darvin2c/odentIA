@@ -7,6 +7,7 @@
  * importes, instrucciones ni notas. Las reglas siguen en sus servicios; aquí
  * solo se proyecta lo que estos ya devuelven.
  */
+import { isLeftOut } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { treatmentBudget } from "@odentia/db/schema/clinical"
@@ -27,8 +28,6 @@ import {
 } from "./to-schedule.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
-// Lo que no aceptó, lo reemplazado y lo que estaba solo en una opción no elegida.
-const DISCARDED_DECISIONS = ["rechazado", "reemplazado", "no_elegida"]
 
 export interface CoordinationFollowUp {
   id: string
@@ -139,7 +138,8 @@ export async function getTreatmentCoordination(
   const open = items.filter(
     (item) =>
       OPEN_TREATMENT_STATUSES.includes(item.status) &&
-      !DISCARDED_DECISIONS.includes(item.decisionStatus),
+      // Lo que no aceptó, lo reemplazado y lo que estaba solo en un camino no elegido.
+      !isLeftOut(item.decisionStatus),
   )
   // La regla de «Por agendar» (`isToSchedule`): aceptado, por hacer y sin una cita por venir que lo lleve.
   const schedulable = open.filter((item) => item.decisionStatus === "aceptado" && SCHEDULABLE_ITEM_STATUSES.includes(item.status))

@@ -1,8 +1,9 @@
 /**
  * Presupuesto con caminos (ADR 0153): en la atención se marca «otro camino»
  * para la misma pieza; el plan los agrupa fuera de las fases; recepción anota
- * «acepta lo común, lo de la 46 lo piensa» sin elegir; y la revisión de un
- * precio dice qué cambió y pregunta solo por eso.
+ * «acepta lo común, lo de la 46 lo piensa» sin elegir; el camino que no eligió
+ * deja de pedir su consentimiento en la atención; y la revisión de un precio
+ * dice qué cambió y pregunta solo por eso.
  */
 import { tenant } from "./env"
 import { call, expect, test } from "./fixtures"
@@ -51,6 +52,31 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   const endoItem = await indicate(endodoncia.id, 46)
   const coronaItem = await indicate(corona.id, 46)
   const exoItem = await indicate(exodoncia.id, 46)
+  // Cada camino pide su consentimiento: la endodoncia el suyo y la exodoncia el suyo.
+  const sections = {
+    procedure: "Tratamiento de la pieza con anestesia local.",
+    benefits: ["Quitar el dolor"],
+    risks: ["Dolor los primeros días"],
+    alternatives: ["Otro tratamiento"],
+    consequences: "La infección puede avanzar.",
+  }
+  for (const [key, title, serviceId] of [
+    ["e2e-endodoncia", "Consentimiento de endodoncia", endodoncia.id],
+    ["e2e-exodoncia", "Consentimiento de exodoncia", exodoncia.id],
+  ] as const) {
+    const template = await call<{ id: string }>(page, "POST", "/api/clinical-forms/consent-templates", slug, { key, title, sections }, 201)
+    await call(page, "POST", `/api/clinical-forms/consent-templates/${template.id}/publish`, slug, {}, 201)
+    await call(page, "PUT", `/api/clinical-forms/consent-templates/${template.id}/services`, slug, { serviceIds: [serviceId] })
+  }
+  const consentAsked = async () =>
+    (
+      await call<Array<{ title: string }>>(
+        page,
+        "GET",
+        `/api/clinical-forms/consent-needs?patientId=${ids.patientId}&encounterId=${visit.id}`,
+        slug,
+      )
+    ).map((need) => need.title)
 
   // En la atención, la exodoncia pregunta si es otro camino para la 46.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit.id}`))
@@ -120,7 +146,15 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
     "pospuesto",
   ])
 
-  // Elige conservar; después sube la corona: la revisión pregunta solo por ella.
+  // Mientras lo piensa, la atención pide los dos consentimientos; el de la exodoncia ya se preparó.
+  expect((await consentAsked()).sort()).toEqual(["Consentimiento de endodoncia", "Consentimiento de exodoncia"])
+  await call(page, "POST", "/api/clinical-forms/consent-needs/prepare", slug, {
+    patientId: ids.patientId,
+    encounterId: visit.id,
+    templateKeys: ["e2e-exodoncia"],
+  }, 201)
+
+  // Elige conservar: la exodoncia que no eligió deja de pedir su consentimiento.
   const conservar = draft.options.find((option) => option.position === 1)!
   await call(page, "POST", `${apiPath}/budgets/${draft.id}/decision`, slug, {
     optionId: conservar.id,
@@ -129,6 +163,22 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
       { planItemId: coronaItem.id, decision: "aceptado" },
     ],
   })
+  expect(await consentAsked()).toEqual(["Consentimiento de endodoncia"])
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit.id}`))
+  const asks = page.getByText(/^Necesita consentimiento · /).first()
+  await expect(asks).toHaveText("Necesita consentimiento · Consentimiento de endodoncia")
+  // El de la exodoncia, ya preparado, sigue a la vista pero no se ofrece para firmar.
+  await page
+    .getByText("Documentos", { exact: true })
+    .first()
+    .locator("xpath=ancestor::*[.//button][1]")
+    .getByRole("button", { name: "Abrir", exact: true })
+    .click()
+  await expect(page.getByText("Ya no se pide: no lo aceptó o eligió otro camino")).toBeVisible()
+  await expect(page.getByText(/^Faltan? las? firmas? de /)).toHaveCount(0)
+  await views("atencion-camino-elegido")
+
+  // Después sube la corona: la revisión pregunta solo por ella.
   const revision = await call<{ id: string }>(page, "POST", `${apiPath}/budgets/${draft.id}/revise`, slug, {
     itemIds: [ids.itemId, limpiezaItem.id, endoItem.id, coronaItem.id],
     reason: "Sube el laboratorio",
