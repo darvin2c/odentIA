@@ -970,13 +970,15 @@ function IndicationForm({
           ),
         )
         await onChanged()
-        // Se conserva el ámbito, el sitio, el hallazgo y el diagnóstico para indicar el siguiente
-        // de la misma pieza (la corona después de la endodoncia); cambiar la pieza los limpia.
+        // Se conserva el ámbito, el sitio y el hallazgo para indicar el siguiente de la misma pieza
+        // (la corona después de la endodoncia); cambiar la pieza los limpia.
         form.reset({
           ...value,
           service: null,
           sessions: "",
           detail: "",
+          // El diagnóstico es de cada tratamiento: la corona no hereda la pulpitis de la endodoncia.
+          diagnosisCode: "",
         })
       } finally {
         onPendingChange(false)
@@ -987,6 +989,7 @@ function IndicationForm({
   const pending = useStore(form.store, (state) => state.isSubmitting)
   const scope = useStore(form.store, (state) => state.values.scope)
   const tooth = useStore(form.store, (state) => state.values.teeth[0] ?? null)
+  const entryId = useStore(form.store, (state) => state.values.odontogramEntryId)
   const service = useStore(form.store, (state) => state.values.service)
 
   const vigentes = productUi().useFindings(patientId, canRead)
@@ -1073,7 +1076,8 @@ function IndicationForm({
                 disabled={blocked}
                 // Una caries de dos caras es un hallazgo: se elige una vez, con sus caras.
                 options={groupFindings(findings).map((group) => ({
-                  value: group.first.id,
+                  // El valor es el que ya trae el formulario si es una de sus caras (el último hallazgo de hoy).
+                  value: group.ids.includes(entryId) ? entryId : group.first.id,
                   label: `${site?.findingName(group.first.condition) ?? group.first.condition}${group.surfaces.length ? ` · ${partNames(group.surfaces)}` : ""}`,
                 }))}
               />

@@ -294,3 +294,17 @@ it("el presupuesto en una línea: cada opción con su total y «falta que elija�
   )
   expect(chosen).toMatch(/^Eligió la opción A · S\/\s?1,350\.00$/)
 })
+
+it("«Hacerla hoy» de lo que aún no empezó no arrastra el diagnóstico de otro, y «Hoy no» se lleva el motivo que puso", async () => {
+  const f = await clinicalFixture()
+  await f.ready(f.encounter.id)
+  const item = await accepted(f, 2)
+  const today = await secondVisit(f)
+  const brought = await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, item.id))
+  // Sin empezar: el diagnóstico de la atención donde se indicó no se copia (la corona no hereda la pulpitis).
+  expect(brought).toEqual({ reasonSet: true, diagnosisAdded: false })
+  await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, today, item.id))
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect(detail.encounter.reason).toBeNull()
+  expect(detail.diagnoses).toEqual([])
+})

@@ -351,7 +351,19 @@ export async function bringTreatmentToEncounter(
       .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
     reasonSet = true
   }
-  const diagnosisAdded = await continuingDiagnosis(
+  // El diagnóstico sigue solo con lo que ya empezó (la sesión 2 de la endodoncia): la corona que
+  // se empieza semanas después no hereda la pulpitis (segunda mesa del 9 nov); su diagnóstico
+  // propio, si lo tiene, se propone con «Usar».
+  const started =
+    item.status === "en_curso" ||
+    (
+      await tx.execute<{ id: string }>(sql`
+        select done.id from encounter_procedure done
+        join encounter done_encounter on done_encounter.organization_id = done.organization_id and done_encounter.id = done.encounter_id
+        where done.organization_id = ${orgId} and done.plan_item_id = ${planItemId} and done.voided_at is null
+          and done_encounter.status <> 'anulada' and done_encounter.id <> ${encounterId} limit 1`)
+    ).length > 0
+  const diagnosisAdded = started && await continuingDiagnosis(
     tx,
     orgId,
     actorUserId,
@@ -409,6 +421,21 @@ export async function leaveTreatmentFromEncounter(
         eq(encounterPlanItem.planItemId, planItemId),
       ),
     )
+  // El motivo que puso «Continuar hoy», si nadie lo cambió, se va con él; lo escrito se queda.
+  const [item] = await tx
+    .select({ title: treatmentPlanItem.title, siteSystem: treatmentPlanItem.siteSystem, siteCode: treatmentPlanItem.siteCode })
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, planItemId)))
+    .limit(1)
+  if (item && row.reason) {
+    const { site } = await productHooks(tx, orgId)
+    const tooth = item.siteSystem === site.system ? site.value(item.siteCode) : null
+    if (row.reason === continuesWords(item.title, tooth).slice(0, 2000))
+      await tx
+        .update(encounter)
+        .set({ reason: null, updatedAt: new Date() })
+        .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
+  }
   await audit(tx, orgId, actorUserId, "encounter.treatment_left", encounterId, {
     patientId,
     planItemId,
