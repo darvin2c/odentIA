@@ -1,6 +1,6 @@
 import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { z } from "zod"
-import type { ClinicalProduct } from "./products.js"
+import { CLINICAL_PRODUCTS, type ClinicalProduct } from "./products.js"
 import {
   type ClinicalCountryProfile,
   clinicalProfileFor,
@@ -244,6 +244,8 @@ export const registrationAnswersSchema = z.strictObject({
       lactancia: z.boolean().optional(), tabaco: z.enum(["nunca", "fuma", "dejo"]).optional(),
       alcohol: z.enum(["no", "ocasional", "frecuente"]).optional(),
     }).optional(),
+    /** vistIA todavía no pregunta nada propio en el registro: sus antecedentes de la vista llegan con el examen. */
+    optical: z.strictObject({}).optional(),
   }).optional(),
   privacyAccepted: z.boolean(),
   // Permisos de mensajes: solo cuentan si el registro los pregunta y se aceptó el aviso.
@@ -399,11 +401,27 @@ export function validateDemographics(
   countryErrors(data, profile, previous, errors)
   return errors
 }
+/**
+ * Los apartados de la salud con nombre propio: la entrevista (`personal.*`) y lo
+ * de cada producto (`dental.*`, `medical.*`). Un producto nuevo trae el suyo en
+ * `health`, o el compilador lo pide aquí.
+ */
+const HEALTH_SECTIONS = ["personal", ...CLINICAL_PRODUCTS] as const
+type HealthSection = (typeof HEALTH_SECTIONS)[number]
+
+/** El apartado de la salud de una clave del registro («dental.bruxismo» → «dental»); null si no es de uno. */
+export function registrationHealthSection(key: string): HealthSection | null {
+  const prefix = key.slice(0, key.indexOf("."))
+  return HEALTH_SECTIONS.find((section) => section === prefix) ?? null
+}
+
 function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGISTRATION_FIELDS)[number]): unknown {
   const key = field.key
-  if (key.startsWith("dental.")) return data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
-  if (key.startsWith("medical.")) return data.health?.medical?.[key.slice(8) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["medical"]>]
-  if (key.startsWith("personal.")) return data.health?.personal?.[key.slice(9) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["personal"]>]
+  const section = registrationHealthSection(key)
+  if (section) {
+    const answers: Record<string, unknown> | undefined = data.health?.[section]
+    return answers?.[key.slice(section.length + 1)]
+  }
   if (field.step === "salud") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
   return data.demographics[key as keyof RegistrationDemographics]
 }

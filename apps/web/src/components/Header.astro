@@ -1,12 +1,9 @@
 ---
 // Cabecera: se superpone a la portada oscura de cada página; en teléfono, un menú desplegable.
-// Una entrada con `menu` («Agentes», y en latidIA «El sistema») abre su desplegable con clic o Enter, y se
+// Una entrada con `menu` («Agentes» y «El sistema») abre su desplegable con clic o Enter, y se
 // cierra con Esc o afuera; solo uno abierto a la vez.
-import latidiaDark from "../assets/latidia-logotipo-dark.svg?raw"
-import latidiaLight from "../assets/latidia-logotipo-light.svg?raw"
-import logoDark from "../assets/logotipo-dark.svg?raw"
-import logoLight from "../assets/logotipo-light.svg?raw"
-import { MEDICAL, WORDS } from "../lib/product"
+import { LOGO } from "../lib/logos"
+import { WORDS } from "../lib/product"
 import { ctaOf, loginUrl, mainNav, type NavEntry } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
@@ -20,7 +17,7 @@ const current = (href: string) => path === href || path.startsWith(`${href}/`)
 const showCta = !current(cta.href)
 /** Un desplegable está en curso si lo está su página que reúne todo o cualquiera de sus filas. */
 const inMenu = (l: NavEntry) => Boolean(l.menu && ((l.menu.all && current(l.menu.all.href)) || l.menu.items.some((i) => current(i.href))))
-const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : variant === "dark" ? logoDark : logoLight
+const logo = LOGO[variant]
 ---
 <header class:list={["site-head", variant]}>
   <div class="wrap row">

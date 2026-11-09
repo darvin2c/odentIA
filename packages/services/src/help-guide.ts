@@ -54,6 +54,13 @@ const SETTINGS = "Configuración"
 /** Pantallas que se abren desde Integraciones: no están en la lista, pero se llega por ahí. */
 const INTEGRATIONS = `${SETTINGS} › Integraciones`
 
+/**
+ * Pantallas comunes que solo muestra el producto que las declara (los pedidos:
+ * `productUi().orders`, ADR 0171): están en las rutas de todas las apps, pero su
+ * tema lo pone la guía de ese producto, y las demás no las nombran.
+ */
+export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
+
 export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "inicio",
@@ -1000,6 +1007,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "cambio de hoy",
       "tipo de cambio",
       "vuelto",
+      "venta de mostrador",
+      "mostrador",
+      "vender sin ficha",
     ],
     writePermission: "finance.write",
     faqs: [
@@ -1065,6 +1075,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo cobro una atención?",
         a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega en PDF por su chat o su correo, y queda en su portal.",
         forms: ["como cobro", "como le cobro a un paciente", "como registro un pago", "como registro un cobro"],
+      },
+      {
+        q: "¿Cómo vendo algo a quien no es paciente?",
+        a: "En Finanzas › Caja o Cobros, «Venta de mostrador»: buscas o escaneas lo que se vende, con su cantidad, y en «Para quién (opcional)» eliges «Buscar a la persona», «Solo su nombre» o «Sin nombre». Se paga entera, con uno o varios medios; en efectivo escribes lo que recibes y ves el vuelto. No abre una ficha ni entra en la cuenta de nadie, aunque la persona sea paciente: el ticket dice «Cliente» o «Venta de mostrador», el producto sale de la sede y el dinero entra en su caja. Se imprime, se devuelve o se anula como cualquier ticket; lo devuelto siempre se le paga, porque sin ficha no queda a favor.",
+        forms: [
+          "venta sin ficha",
+          "vender sin ficha",
+          "venta de mostrador",
+          "vender a alguien que no es paciente",
+          "vender un producto sin paciente",
+          "vender lentes de sol",
+          "cobrar a un cliente sin historia",
+          "venta rapida",
+        ],
       },
       {
         q: "¿Cómo cobro en otra moneda?",
@@ -2089,6 +2113,8 @@ const SAME_WORD: Readonly<Record<string, string>> = Object.fromEntries(
       ["inasistencia", "inasistencias faltaron falto"],
       ["correo", "email mail"],
       ["comision", "comisiones porcentaje"],
+      // vistIA: «lentes» sería «lent», como «lento»; con «anteojos» no se confunde.
+      ["anteojos", "lente lentes gafas"],
     ] as const
   ).flatMap(([word, others]) => others.split(" ").map((other) => [other, word] as const)),
 )

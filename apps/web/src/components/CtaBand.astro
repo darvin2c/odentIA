@@ -1,6 +1,7 @@
 ---
 // Cierre de cada página: una sola llamada a la acción y otra para hablar con una persona.
 import { shownPlan } from "../lib/pricing"
+import { ofProduct } from "../lib/product"
 import { contactHref, ctaOf } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
@@ -9,11 +10,17 @@ interface Props {
   text?: string
 }
 const plan = shownPlan(Astro.locals.pricing)
+// Lo que dice el cierre sin otro texto: odentIA y latidIA, «tu clínica» desde siempre; vistIA, su óptica.
+const [people, place] = ofProduct({
+  dental: ["pacientes", "tu clínica"],
+  medical: ["pacientes", "tu clínica"],
+  optical: ["clientes", "tu óptica"],
+})
 const {
-  title = "Tu equipo, de vuelta con sus pacientes.",
+  title = `Tu equipo, de vuelta con sus ${people}.`,
   text = plan
-    ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.`
-    : "Tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.",
+    ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en ${place} desde el primer día, sin tarjeta.`
+    : `Tus agentes trabajan en ${place} desde el primer día, sin tarjeta.`,
 } = Astro.props
 ---
 <section class="hero band" id="empezar">

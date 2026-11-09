@@ -61,6 +61,7 @@ import {
 } from "./opportunities.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { collectCharge, createCharge } from "./payments.js"
+import { seedCounterSales } from "./seed-counter-sales.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { createPromotion } from "./promotions.js"
 import {
@@ -312,6 +313,7 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       usedInCare: !item.onlySale,
       forSale: item.sale !== undefined,
       salePriceCents: item.sale !== undefined ? demoPriceCents(item.sale, country) : null,
+      ...(item.label ?? {}),
       // Las compras llegan a la sede principal: la otra solo recibe guantes y no lleva mínimos
       // (con ellos, todo saldría como que hace falta).
       minimums: min > 0 ? [{ branchId: main, minQuantity: min }] : [],
@@ -608,6 +610,14 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
         requestId: randomUUID(),
       })
   }
+  // Y hoy, quien no es paciente se llevó lo que se vende sin abrir una ficha (ADR 0173).
+  await seedCounterSales(tx, {
+    orgId,
+    ownerUserId,
+    branchId: main,
+    productIds: forSale.map((line) => id(line.item.sku)),
+    requestIds: ["50206010-0000-4000-8000-000000000301", "50206010-0000-4000-8000-000000000302"],
+  })
   return { products: ids.size, orders, discounted }
 }
 

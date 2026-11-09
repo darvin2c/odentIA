@@ -6,14 +6,14 @@ export const COOKIES: LegalDoc = {
   path: "/cookies",
   title: "Política de cookies",
   description:
-    "Las webs de odentIA y latidIA no usan cookies. La aplicación usa solo cookies necesarias para la sesión, una que recuerda el menú lateral y almacenamiento local para preferencias y borradores.",
+    "Las webs de odentIA, latidIA y vistIA no usan cookies. La aplicación usa solo cookies necesarias para la sesión, una que recuerda el menú lateral y almacenamiento local para preferencias y borradores.",
   intro: [
     "Las cookies son pequeños archivos que un sitio web guarda en su navegador. El almacenamiento local es un espacio similar del navegador que una aplicación usa para recordar información en su dispositivo.",
   ],
   sections: [
     {
       id: "web",
-      title: "Las webs de odentIA y latidIA",
+      title: "Las webs de odentIA, latidIA y vistIA",
       blocks: [
         "Esta web no instala cookies ni carga herramientas de analítica, publicidad, redes sociales o tipografías de terceros. Para conocer el tráfico de forma agregada, usamos los registros de nuestro propio servidor, como se explica en la [política de privacidad](/privacidad).",
         "Por eso no le pedimos que acepte cookies al visitar la web.",
@@ -23,7 +23,7 @@ export const COOKIES: LegalDoc = {
       id: "aplicacion",
       title: "La aplicación",
       blocks: [
-        "La aplicación que usan las clínicas y los consultorios usa cookies estrictamente necesarias para iniciar y mantener la sesión, una cookie que recuerda si el menú lateral está abierto, y el almacenamiento local del navegador para recordar preferencias y conservar borradores. No usa cookies de analítica ni de publicidad.",
+        "La aplicación que usan las clínicas, los consultorios y las ópticas usa cookies estrictamente necesarias para iniciar y mantener la sesión, una cookie que recuerda si el menú lateral está abierto, y el almacenamiento local del navegador para recordar preferencias y conservar borradores. No usa cookies de analítica ni de publicidad.",
         "Como sirven para que el servicio funcione o para recordar lo que el propio usuario eligió, no requieren consentimiento. Si bloquea las de sesión, no podrá iniciar sesión.",
         {
           table: {

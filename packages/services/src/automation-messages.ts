@@ -106,13 +106,21 @@ export type MessageVariable = keyof typeof MESSAGE_VARIABLES
  * línea de Argos y lo que se manda a Meta para aprobar la plantilla no deben
  * hablar de ortodoncia en latidIA.
  */
-const PRODUCT_EXAMPLES: Partial<Record<ClinicalProduct, Partial<Record<MessageVariable, string>>>> = {
+const PRODUCT_EXAMPLES: Record<ClinicalProduct, Partial<Record<MessageVariable, string>>> = {
+  dental: {},
   medical: {
     lugar: "Consultorio Vida, sede Centro",
     clinica: "Consultorio Vida",
     control: "Control de presión arterial",
     presupuesto: "Chequeo preventivo",
     oportunidad: "Chequeo preventivo",
+  },
+  optical: {
+    lugar: "Óptica Clara, sede Centro",
+    clinica: "Óptica Clara",
+    control: "Control anual de la vista",
+    presupuesto: "Lentes progresivos",
+    oportunidad: "Lentes progresivos",
   },
 }
 
@@ -405,15 +413,23 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
 }
 
 /**
- * Lo que cambia en un producto (issue 229): latidIA invita a volver al año
- * (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
- * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia.
+ * Lo que cambia en un producto (issue 229): latidIA y vistIA invitan a volver al
+ * año (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
+ * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia. La de
+ * vistIA ofrece revisar la vista, sin decir que fue un examen: cuenta cualquier visita.
  */
-const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>>> = {
+const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>> = {
+  dental: {},
   medical: {
     invitar_a_volver: {
       template: "latidia_invitar_a_volver_v1",
       body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para tu control?",
+    },
+  },
+  optical: {
+    invitar_a_volver: {
+      template: "vistia_invitar_a_volver_v1",
+      body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para revisar tu vista?",
     },
   },
 }
@@ -422,14 +438,14 @@ const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<Automatio
 export function productTemplatesOf(key: AutomationMessageKey): string[] {
   return [
     AUTOMATION_MESSAGES[key].template,
-    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages?.[key] ? [messages[key].template] : [])),
+    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages[key] ? [messages[key].template] : [])),
   ]
 }
 
 export function automationMessageOf(kind: string, product: ClinicalProduct = "dental"): AutomationMessage | null {
   if (!(AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(kind)) return null
   const key = kind as AutomationMessageKey
-  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product]?.[key] }
+  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product][key] }
 }
 
 /**
@@ -570,8 +586,47 @@ export const DOCUMENT_READY_MESSAGE: MessageSpec = {
 }
 
 /**
+ * «Pedido listo» (entrega 5 del plan de vistIA, ADR 0172): sale al marcar
+ * «Listo» un pedido, a quien recibe los avisos de la persona. Cada producto que
+ * trabaja con pedidos dice lo suyo (vistIA: «Tus lentes ya están listos»). Es un
+ * aviso de lo que pasó: solo lo frena «No quiero ningún mensaje». No dice cuánto
+ * falta pagar: eso lo responde Sofi o el equipo si la persona pregunta.
+ */
+export const ORDER_READY_MESSAGE_KEY = "pedido_listo"
+export const ORDER_READY_MESSAGE: MessageSpec = {
+  key: ORDER_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_pedido_listo_v1",
+  body: "Hola, {{1}}. Tu pedido ya está listo para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
+  variables: ["persona", "clinica"],
+  buttons: [],
+}
+/** Asunto cuando «Pedido listo» sale por correo. */
+export const ORDER_READY_SUBJECT = "Tu pedido está listo"
+
+/** «Pedido listo» en cada producto que trabaja con pedidos: su texto y su plantilla, que Meta aprueba aparte. */
+const ORDER_READY_BY_PRODUCT: Record<ClinicalProduct, (Pick<MessageSpec, "template" | "body"> & { subject: string }) | null> = {
+  dental: null,
+  medical: null,
+  optical: {
+    subject: "Tus lentes están listos",
+    template: "vistia_lentes_listos_v1",
+    body: "Hola, {{1}}. Tus lentes ya están listos para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
+  },
+}
+
+/** El asunto de «Pedido listo» por correo en un producto (vistIA: «Tus lentes están listos»). */
+export function orderReadySubjectOf(product: ClinicalProduct): string {
+  return ORDER_READY_BY_PRODUCT[product]?.subject ?? ORDER_READY_SUBJECT
+}
+
+/** Los mensajes que solo tiene el producto que trabaja con pedidos (ADR 0171): los demás no los piden ni los listan. */
+export const ORDER_MESSAGE_KEYS: readonly string[] = [ORDER_READY_MESSAGE_KEY]
+
+/**
  * El tipo de los avisos que no son de una línea: «Presupuesto listo», «Su
- * enlace», «Retomar la conversación» y los papeles («Documento listo»).
+ * enlace», «Retomar la conversación», los papeles («Documento listo») y
+ * «Pedido listo».
  * Salen siempre y solo los frena «No quiero ningún mensaje» (ADR 0040).
  */
 export const NOTICE_PURPOSE = "avisos" satisfies ConsentPurpose
@@ -586,6 +641,7 @@ export const CATALOG_MESSAGE_KEYS = [
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
   DOCUMENT_READY_MESSAGE_KEY,
+  ORDER_READY_MESSAGE_KEY,
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
@@ -597,11 +653,17 @@ export function catalogMessageOf(key: string, product: ClinicalProduct = "dental
   if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
   if (key === LINK_RECEIVED_MESSAGE_KEY) return LINK_RECEIVED_MESSAGE
   if (key === DOCUMENT_READY_MESSAGE_KEY) return DOCUMENT_READY_MESSAGE
+  if (key === ORDER_READY_MESSAGE_KEY) return { ...ORDER_READY_MESSAGE, ...ORDER_READY_BY_PRODUCT[product] }
   return automationMessageOf(key, product)
 }
 
 /** Las plantillas de un mensaje del catálogo en todos los productos. */
 export function catalogTemplatesOf(key: string): string[] {
+  if (key === ORDER_READY_MESSAGE_KEY)
+    return [
+      ORDER_READY_MESSAGE.template,
+      ...Object.values(ORDER_READY_BY_PRODUCT).flatMap((own) => (own ? [own.template] : [])),
+    ]
   return (AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(key)
     ? productTemplatesOf(key as AutomationMessageKey)
     : [catalogMessageOf(key)?.template ?? ""]

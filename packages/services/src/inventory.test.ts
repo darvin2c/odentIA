@@ -101,6 +101,34 @@ async function stocked(c: Clinic, productId: string, quantity: number, lotCode: 
   return order
 }
 
+it("lo de la etiqueta: el escáner encuentra por el código de barras, se busca por marca y modelo, y un código repetido se dice en su campo", async () => {
+  const c = await clinic()
+  const frame = await c.run((tx) =>
+    createProduct(tx, c.orgId, c.actor, {
+      name: "Montura de acetato",
+      unit: "montura",
+      usedInCare: false,
+      forSale: true,
+      salePriceCents: 15_000,
+      barcode: " 7 501234 567890 ",
+      brand: "Ray-Ban",
+      model: "RB5154",
+      color: "Carey",
+      size: "51□21 140",
+    }),
+  )
+  expect(frame).toMatchObject({ barcode: "7501234567890", brand: "Ray-Ban", model: "RB5154", color: "Carey", size: "51□21 140" })
+  const find = async (q: string) => (await c.run((tx) => listProducts(tx, c.orgId, { branchId: c.sede.id, q }))).items.map((item) => item.id)
+  expect(await find("7501234567890")).toEqual([frame.id])
+  expect(await find("ray ban")).toEqual([frame.id])
+  expect(await find("rb5154")).toEqual([frame.id])
+  await expect(
+    c.run((tx) => createProduct(tx, c.orgId, c.actor, { name: "Otra montura", unit: "montura", usedInCare: false, forSale: true, barcode: "7501234567890" })),
+  ).rejects.toMatchObject({ fields: { barcode: expect.any(String) } })
+  const cleared = await c.run((tx) => updateProduct(tx, c.orgId, c.actor, frame.id, { color: "", barcode: null }))
+  expect(cleared).toMatchObject({ color: null, barcode: null, brand: "Ray-Ban" })
+})
+
 it("recibir: dos entregas iguales con claves distintas aplican; el reintento no duplica, también después de completar; otra cosa con la misma clave es un conflicto", async () => {
   const c = await clinic()
   const item = await c.run((tx) => createProduct(tx, c.orgId, c.actor, { name: "Resina A2", unit: "jeringa" }))

@@ -159,7 +159,7 @@ export interface PortalCurrencyTotal {
   totalCents: number | null
 }
 
-export type PortalPaperKind = "receta" | "orden" | "descanso" | "hoja" | "consentimiento" | "comprobante" | "archivo"
+export type PortalPaperKind = "receta" | "orden" | "descanso" | "hoja" | "consentimiento" | "comprobante" | "archivo" | "producto"
 
 /** Un papel de «Tus documentos», dicho con palabras por el servidor. */
 export interface PortalPaper {
@@ -399,6 +399,23 @@ export async function fetchPortalPaperPdf(
 /** «… termina el 8 nov 2026, 11:27 p. m.»: una frase que ya acaba en punto no lleva otro. */
 export function sentenceEnd(text: string): string {
   return /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`
+}
+
+/** Un pedido en el portal (ADR 0172): qué es, cómo va, para cuándo y lo que falta pagar. */
+export interface PortalOrder {
+  id: string
+  orderNumber: number
+  title: string
+  statusLabel: string
+  ready: boolean
+  promisedOn: string
+  dueCents: number
+  currency: string | null
+}
+
+export async function fetchPortalOrders(sessionToken: string): Promise<{ locale: string | null; items: PortalOrder[] }> {
+  const res = await portalFetch<{ data: { locale: string | null; items: PortalOrder[] } }>(sessionToken, "/orders")
+  return res.data
 }
 
 export async function fetchPortalAccount(sessionToken: string): Promise<PortalAccount> {

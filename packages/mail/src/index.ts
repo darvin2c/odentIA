@@ -1,7 +1,8 @@
 import nodemailer, { type Transporter } from "nodemailer"
-import { logoAttachments, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "./layout.js"
+import { BASE_MAIL_BRAND, logoAttachments, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "./layout.js"
 
 export {
+  BASE_MAIL_BRAND,
   brandPaper,
   configureMailLinks,
   type EmailContent,
@@ -11,6 +12,7 @@ export {
   LOGO_CIDS,
   logoAttachments,
   type MailBrand,
+  type MailBrandDomains,
   mailBrandName,
   type MailTemplate,
   renderEmail,
@@ -44,7 +46,7 @@ export interface MailMessage {
 
 /** «odentIA <no-reply@…>» con el nombre de otra marca: «latidIA <no-reply@…>». */
 export function senderFor(from: string, brand: MailBrand): string {
-  if (brand === "odentia") return from
+  if (brand === BASE_MAIL_BRAND) return from
   const address = from.match(/<([^>]+)>/)?.[1] ?? from.trim()
   return `${mailBrandName(brand)} <${address}>`
 }
@@ -63,7 +65,7 @@ export function createMailer(env: MailerEnv): Mailer {
     auth: env.user ? { user: env.user, pass: env.pass ?? "" } : undefined,
   })
   return {
-    async send({ to, subject, html, text, replyTo, brand = "odentia" }) {
+    async send({ to, subject, html, text, replyTo, brand = BASE_MAIL_BRAND }) {
       await transporter.sendMail({
         from: env.fromByBrand?.[brand] ?? senderFor(env.from, brand),
         to,

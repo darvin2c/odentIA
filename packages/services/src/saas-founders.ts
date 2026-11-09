@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto"
-import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
@@ -43,23 +43,45 @@ export { founderInvitationEmail, moneyText, waitlistReceivedEmail } from "./saas
 
 /* ---------- Cómo se abren clínicas ---------- */
 
+type SignupPolicyRow = { mode: string; medicalMode: string; opticalMode: string }
+
+/**
+ * Dónde guarda cada producto cómo se abren sus clínicas (`saas_signup_policy`,
+ * una columna por producto; ADR 0093): un producto nuevo trae la suya.
+ */
+const SIGNUP_MODE_COLUMN: Record<
+  ClinicalProduct,
+  { read: (row: SignupPolicyRow) => string; write: (mode: SaasSignupMode) => Partial<SignupPolicyRow> }
+> = {
+  dental: { read: (row) => row.mode, write: (mode) => ({ mode }) },
+  medical: { read: (row) => row.medicalMode, write: (mode) => ({ medicalMode: mode }) },
+  optical: { read: (row) => row.opticalMode, write: (mode) => ({ opticalMode: mode }) },
+}
+
 /**
  * Cómo se abren las clínicas de un producto (ADR 0093). «Solo con invitación»
  * si no hay fila: lo seguro mientras no se diga otra cosa.
  */
 export async function getSignupMode(tx: Db, product: ClinicalProduct = "dental"): Promise<SaasSignupMode> {
   const [row] = await tx
-    .select({ mode: saasSignupPolicy.mode, medicalMode: saasSignupPolicy.medicalMode })
+    .select({
+      mode: saasSignupPolicy.mode,
+      medicalMode: saasSignupPolicy.medicalMode,
+      opticalMode: saasSignupPolicy.opticalMode,
+    })
     .from(saasSignupPolicy)
     .where(eq(saasSignupPolicy.id, 1))
     .limit(1)
-  const mode = product === "medical" ? row?.medicalMode : row?.mode
+  const mode = row ? SIGNUP_MODE_COLUMN[product].read(row) : undefined
   return mode === "abierta" ? "abierta" : "invitacion"
 }
 
 /** Cómo se abren las clínicas de cada producto, para la administración. */
 export async function getSignupModes(tx: Db): Promise<Record<ClinicalProduct, SaasSignupMode>> {
-  return { dental: await getSignupMode(tx, "dental"), medical: await getSignupMode(tx, "medical") }
+  const modes: Partial<Record<ClinicalProduct, SaasSignupMode>> = {}
+  // Una tras otra: comparten la transacción.
+  for (const product of CLINICAL_PRODUCTS) modes[product] = await getSignupMode(tx, product)
+  return modes as Record<ClinicalProduct, SaasSignupMode>
 }
 
 export async function setSignupMode(
@@ -70,7 +92,7 @@ export async function setSignupMode(
 ): Promise<SaasSignupMode> {
   if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración cambia cómo se abren clínicas")
   if (mode !== "invitacion" && mode !== "abierta") throw validation("Elige «Solo con invitación» o «Abierta»")
-  const column = product === "medical" ? { medicalMode: mode } : { mode }
+  const column = SIGNUP_MODE_COLUMN[product].write(mode)
   await tx
     .insert(saasSignupPolicy)
     .values({ id: 1, ...column, updatedBy: actor.userId })
@@ -284,10 +306,12 @@ export async function listWaitlist(tx: Db, filter: WaitlistFilter = {}, now = ne
     const plan = await invitationPlan(tx, product)
     return plan ? await founderSeats(tx, plan.id, now) : null
   }
+  const seats: Partial<Record<ClinicalProduct, FounderSeats | null>> = {}
+  for (const product of CLINICAL_PRODUCTS) seats[product] = await seatsOf(product)
   return {
     rows: rows.map(({ row, planName, organizationName, decidedByName }) => toWaitlistRow(row, planName, organizationName, decidedByName, timeline)),
     counts,
-    seats: { dental: await seatsOf("dental"), medical: await seatsOf("medical") },
+    seats: seats as Record<ClinicalProduct, FounderSeats | null>,
     modes: await getSignupModes(tx),
     answerDays: timeline.at(now).waitlistAnswerDays,
   }

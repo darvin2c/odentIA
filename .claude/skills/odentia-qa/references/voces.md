@@ -69,7 +69,7 @@ Su base son los catálogos de procesos clínicos, con las comprobaciones de cada
 
 - odentIA: `references/clinica/odontologia.md`
 - latidIA: `references/clinica/medicina.md`
-- vistIA: `references/clinica/optica.md` (mientras no esté en `main`, se revisa sobre la rama `vistia/*` más avanzada)
+- vistIA: `references/clinica/optica.md`
 - Todos, lo que rodea a la atención (perfil del profesional, configuración, de la cita a la atención, portal, papeles, datos, materiales y Sofi): `references/clinica/comunes.md`
 
 El catálogo es el piso, no el techo: lo que se supervisa siempre, más todo lo que el profesional encuentre en el camino. **Buscar flujos que el catálogo no tiene es parte de cada revisión, no un extra.** Un flujo que nadie puso en la lista es justo el que nadie revisa.

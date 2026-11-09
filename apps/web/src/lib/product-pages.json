@@ -1,0 +1,61 @@
+{
+  "medical": {
+    "serves": [
+      "/",
+      "/agentes",
+      "/agentes/recepcion",
+      "/agentes/asistente-clinico",
+      "/agentes/administrador",
+      "/historia-clinica-electronica",
+      "/receta-y-descanso-medico",
+      "/agenda-medica",
+      "/radiografias-y-ecografias",
+      "/buscador",
+      "/omnicanal",
+      "/caja-y-cobros",
+      "/reportes",
+      "/portal-del-paciente",
+      "/seguridad",
+      "/contacto",
+      "/precios",
+      "/solicitar-invitacion",
+      "/presentacion",
+      "/presentacion/fundadores",
+      "/terminos",
+      "/privacidad",
+      "/cookies",
+      "/encargo-de-tratamiento",
+      "/subencargados",
+      "/aviso-legal",
+      "/pe/libro-de-reclamaciones"
+    ],
+    "own": ["/historia-clinica-electronica", "/receta-y-descanso-medico", "/agenda-medica", "/radiografias-y-ecografias"]
+  },
+  "optical": {
+    "serves": [
+      "/",
+      "/agentes",
+      "/agentes/recepcion",
+      "/agentes/administrador",
+      "/agenda-para-opticas",
+      "/historia-clinica-electronica",
+      "/buscador",
+      "/omnicanal",
+      "/caja-y-cobros",
+      "/reportes",
+      "/portal-del-cliente",
+      "/seguridad",
+      "/contacto",
+      "/precios",
+      "/solicitar-invitacion",
+      "/terminos",
+      "/privacidad",
+      "/cookies",
+      "/encargo-de-tratamiento",
+      "/subencargados",
+      "/aviso-legal",
+      "/pe/libro-de-reclamaciones"
+    ],
+    "own": ["/agenda-para-opticas", "/portal-del-cliente"]
+  }
+}

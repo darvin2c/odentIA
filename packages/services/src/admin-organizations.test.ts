@@ -356,7 +356,7 @@ it("la administración distingue el producto de cada clínica: lo marca, lo cuen
   await ownerDb.insert(organization).values({ id: "t-filtro-sin-perfil", name: "Filtro Sin Perfil", slug: "t-filtro-sin-perfil", createdAt: new Date() })
 
   const all = await listOrganizations(ownerDb, support, { q: "filtro" })
-  expect(all.byProduct).toEqual({ dental: 2, medical: 1 })
+  expect(all.byProduct).toEqual({ dental: 2, medical: 1, optical: 0 })
   expect(Object.fromEntries(all.items.map((item) => [item.slug, item.product]))).toEqual({
     "t-filtro-latidia": "medical",
     "t-filtro-odentia": "dental",
@@ -367,7 +367,7 @@ it("la administración distingue el producto de cada clínica: lo marca, lo cuen
   expect(onlyMedical.items.map((item) => item.slug)).toEqual(["t-filtro-latidia"])
   expect(onlyMedical.total).toBe(1)
   // La cuenta por producto no depende del producto elegido.
-  expect(onlyMedical.byProduct).toEqual({ dental: 2, medical: 1 })
+  expect(onlyMedical.byProduct).toEqual({ dental: 2, medical: 1, optical: 0 })
   const onlyDental = await listOrganizations(ownerDb, support, { q: "filtro", product: "dental" })
   expect(onlyDental.items.map((item) => item.slug).sort()).toEqual(["t-filtro-odentia", "t-filtro-sin-perfil"])
 

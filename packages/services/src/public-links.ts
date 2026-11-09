@@ -1,4 +1,4 @@
-import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
+import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct, type ProductDomains } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
@@ -22,7 +22,7 @@ export interface PublicLinkConfig {
   /** El dominio de odentIA, y el de todo producto que no tenga el suyo. */
   cookieDomain: string
   /** El dominio de cada otro producto (latidIA: «latidia72.com»). */
-  productDomains?: Partial<Record<ClinicalProduct, string>>
+  productDomains?: ProductDomains
 }
 
 let configured: PublicLinkConfig | null = null
@@ -35,10 +35,15 @@ export function publicLinksConfigured(): boolean {
   return configured !== null
 }
 
+/** El dominio propio de un producto; el base no tiene: el suyo es el de la plataforma. */
+function ownDomain(product: ClinicalProduct, config: PublicLinkConfig): string | undefined {
+  return product === BASE_PRODUCT ? undefined : config.productDomains?.[product]
+}
+
 /** El dominio de un producto: el suyo o, si no tiene, el de odentIA. */
 export function productDomainOf(product: ClinicalProduct, config: PublicLinkConfig | null = configured): string | null {
   if (!config) return null
-  return (config.productDomains?.[product] ?? config.cookieDomain).replace(/^\./, "")
+  return (ownDomain(product, config) ?? config.cookieDomain).replace(/^\./, "")
 }
 
 /**
@@ -47,7 +52,7 @@ export function productDomainOf(product: ClinicalProduct, config: PublicLinkConf
  */
 export function clinicOrigin(
   slug: string,
-  product: ClinicalProduct = "dental",
+  product: ClinicalProduct = BASE_PRODUCT,
   config: PublicLinkConfig | null = configured,
 ): string | null {
   const domain = productDomainOf(product, config)
@@ -65,11 +70,11 @@ export function clinicOrigin(
  * y desde ahí se entra a Plan y pagos. odentIA, el de `webURL`; sin
  * configurar, ninguno.
  */
-export function panelOrigin(product: ClinicalProduct = "dental", config: PublicLinkConfig | null = configured): string | null {
+export function panelOrigin(product: ClinicalProduct = BASE_PRODUCT, config: PublicLinkConfig | null = configured): string | null {
   if (!config) return null
   const url = new URL(config.webURL)
-  const domain = config.productDomains?.[product]
-  if (domain && product !== "dental") url.hostname = `app.${domain.replace(/^\./, "")}`
+  const domain = ownDomain(product, config)
+  if (domain) url.hostname = `app.${domain.replace(/^\./, "")}`
   return url.origin
 }
 
@@ -132,7 +137,7 @@ export async function clinicAddressOf(
     .where(eq(organization.id, orgId))
     .limit(1)
   if (!row?.slug) return null
-  return { slug: row.slug, product: isClinicalProduct(row.product) ? row.product : "dental" }
+  return { slug: row.slug, product: isClinicalProduct(row.product) ? row.product : BASE_PRODUCT }
 }
 
 /** Origen público de una clínica por su id; nulo sin dirección pública configurada. */

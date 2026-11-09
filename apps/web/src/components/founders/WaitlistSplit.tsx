@@ -3,7 +3,7 @@
 // derecha la solicitud. Al enviarla, la misma pantalla dice qué sigue. La solicitud va a la ruta
 // pública de la API (excepción a ADR 0046, como el Libro de Reclamaciones). Cada error, también lo que
 // rechaza el servidor, va bajo su campo y el foco al primero.
-import { AGENTS, CalmPulseScene, CalmToothScene, type DayEvent } from "@odentia/brand-scene"
+import { AGENTS, CalmChartScene, CalmPulseScene, CalmToothScene, type DayEvent } from "@odentia/brand-scene"
 import { useForm, useStore } from "@tanstack/react-form"
 import { type SyntheticEvent, useEffect, useState } from "react"
 import {
@@ -17,7 +17,7 @@ import {
   SubmitRejected,
 } from "../../lib/form"
 import { businessDays } from "../../lib/pricing"
-import { MEDICAL, WORDS } from "../../lib/product"
+import { ofProduct, WORDS } from "../../lib/product"
 import { waitlistApiUrl } from "../../lib/site"
 import "./waitlist.css"
 
@@ -66,6 +66,9 @@ const TOOLS: [string, string][] = [
   ["cuaderno_excel", "Cuaderno o Excel"],
   ["otro_software", "Otro software"],
 ]
+
+/** Quién invita a alguien a su equipo: odentIA y latidIA dicen «una clínica» desde siempre. */
+const INVITED_BY = ofProduct({ dental: "una clínica", medical: "una clínica", optical: "una óptica" })
 
 /** El país del dispositivo, si está en la lista; si no, ninguno (se elige). */
 function deviceCountry(): string {
@@ -131,8 +134,8 @@ function validate(v: Values): Partial<Record<Field, string>> {
         ? "El celular es demasiado largo; escríbelo sin el código del país"
         : "Escribe un celular válido, solo con números"
   if (!v.clinicName.trim())
-    e.clinicName = MEDICAL ? "Escribe el nombre del consultorio" : "Escribe el nombre de la clínica"
-  if (!v.professionals) e.professionals = `Elige cuántos ${MEDICAL ? "médicos" : "odontólogos"} atienden`
+    e.clinicName = `Escribe el nombre ${WORDS.ofTheClinic}`
+  if (!v.professionals) e.professionals = `Elige cuántos ${WORDS.clinicians} atienden`
   if (!v.currentTool) e.currentTool = "Elige qué usan hoy"
   return e
 }
@@ -277,8 +280,12 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
             </>
           )}
         </div>
-        {/* latidIA: el pulso de su acceso en lugar de las piezas de odentIA. */}
-        {MEDICAL ? <CalmPulseScene className="wl-scene" /> : <CalmToothScene className="wl-scene" onWork={setWork} />}
+        {/* La escena del acceso de cada producto: las piezas de odentIA, el pulso de latidIA y la cartilla de vistIA. */}
+        {ofProduct({
+          dental: <CalmToothScene className="wl-scene" onWork={setWork} />,
+          medical: <CalmPulseScene className="wl-scene" />,
+          optical: <CalmChartScene className="wl-scene" />,
+        })}
         {agent && work ? (
           <div className="wl-work">
             <span className="wl-dot" style={{ background: agent.color }} aria-hidden="true" />
@@ -449,7 +456,7 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
                   const fieldMessage = fieldError(field.state.meta)
                   return (
                     <div className="wl-field wl-wide-sm">
-                      <label htmlFor="wl-clinicName">{MEDICAL ? "Nombre del consultorio" : "Nombre de la clínica"}</label>
+                      <label htmlFor="wl-clinicName">{`Nombre ${WORDS.ofTheClinic}`}</label>
                       <input
                         {...a11y("clinicName", fieldMessage)}
                         autoComplete="organization"
@@ -468,7 +475,7 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
                   const fieldMessage = fieldError(field.state.meta)
                   return (
                     <div className="wl-field">
-                      <label htmlFor="wl-professionals">{MEDICAL ? "Médicos que atienden" : "Odontólogos que atienden"}</label>
+                      <label htmlFor="wl-professionals">{`${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.slice(1)} que atienden`}</label>
                       <select
                         {...a11y("professionals", fieldMessage)}
                         required
@@ -527,7 +534,7 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
             <button className="btn btn-p wl-submit" type="submit" disabled={pending}>
               {pending ? "Enviando…" : gift ? `Quiero mis ${gift}` : "Solicitar invitación"}
             </button>
-            <p className="wl-note wl-center">¿Te invitó una clínica a su equipo? Abre el enlace de tu correo.</p>
+            <p className="wl-note wl-center">{`¿Te invitó ${INVITED_BY} a su equipo? Abre el enlace de tu correo.`}</p>
           </form>
         )}
       </div>

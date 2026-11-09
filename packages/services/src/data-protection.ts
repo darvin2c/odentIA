@@ -6,7 +6,7 @@
  * la pantalla y en el PDF para la autoridad.
  */
 import { DATA_PROCESSORS, type DataProcessor } from "@odentia/auth/data-processors"
-import { productWords } from "@odentia/clinical"
+import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
@@ -23,6 +23,14 @@ import {
 } from "./document-kit.js"
 import { clinicToday } from "./inventory-stock.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE, orgProduct } from "./locale.js"
+import { productDictation } from "./products.js"
+
+/** Lo de la historia que nombra el registro de tratamiento, en cada producto. */
+const RECORD_DETAIL: Record<ClinicalProduct, string> = {
+  dental: "odontograma",
+  medical: "examen físico",
+  optical: "examen de la vista",
+}
 
 export interface DataProtectionActivity {
   id: "atender" | "citas" | "conversar" | "cobrar" | "novedades"
@@ -180,7 +188,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     {
       id: "atender",
       purpose: "Atenderla",
-      data: `Identidad, contacto, historia clínica, ${product === "dental" ? "odontograma" : "examen físico"}, imágenes, recetas y consentimientos`,
+      data: `Identidad, contacto, historia clínica, ${RECORD_DETAIL[product]}, imágenes, recetas y consentimientos`,
       basis: "Su atención de salud y la ley",
       keep: "Lo que pide la norma de salud del país",
     },
@@ -217,6 +225,8 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     },
   )
 
+  // Clío encendido en un producto donde no dicta (vistIA) no usa a nadie para dictar.
+  const dictating = agent.clinicalAssistantEnabled && (await productDictation(tx, orgId)) !== null
   const inUse: DataProtectionProcessor[] = []
   const always: DataProtectionProcessor[] = []
   const usedProviders = new Set<string>()
@@ -226,19 +236,19 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         always.push(processorRow(p, null))
         break
       case "agentes":
-        if (agent.enabled || agent.clinicalAssistantEnabled || argosOn) {
+        if (agent.enabled || dictating || argosOn) {
           // El modelo lo usan Recepción, Argos y el dictado; la decisión y la búsqueda, solo los agentes.
           if (p.id === "openai") {
             const uses = [
               agent.enabled || argosOn ? "agentes encendidos" : null,
-              agent.clinicalAssistantEnabled ? "dictado encendido" : null,
+              dictating ? "dictado encendido" : null,
             ]
             inUse.push(processorRow(p, uses.filter(Boolean).join(" y ")))
           } else if (agent.enabled || argosOn) inUse.push(processorRow(p, "agentes encendidos"))
         }
         break
       case "dictado":
-        if (agent.clinicalAssistantEnabled) inUse.push(processorRow(p, "dictado encendido"))
+        if (dictating) inUse.push(processorRow(p, "dictado encendido"))
         break
       case "canal": {
         const mine = p.use.providers.filter((provider) => connected.has(provider))

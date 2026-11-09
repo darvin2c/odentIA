@@ -55,6 +55,8 @@ export interface DemoProductRecipe {
   onlySale?: boolean
   /** Ya no se usa: queda desactivado, con su compra de antes. */
   retired?: boolean
+  /** Lo de su etiqueta, si la tiene (una montura: su código de barras, marca, modelo, color y medidas). */
+  label?: { barcode?: string; brand?: string; model?: string; color?: string; size?: string }
 }
 
 /** Lo que una demo tiene en Inventario y lo que gasta cada servicio. */
@@ -301,7 +303,8 @@ export const DEMO_COUNTRIES: Record<DemoCountry["code"], DemoCountry> = {
       { name: "Tarjeta", typeCode: "48", weight: 26 },
       { name: "Transferencia", typeCode: "30", weight: 10 },
     ],
-    registration: { dental: "COP", medical: "CMP" },
+    // El optómetra se colegia como tecnólogo médico (Colegio Tecnólogo Médico del Perú).
+    registration: { dental: "COP", medical: "CMP", optical: "CTMP" },
     places: [
       "Los Olivos",
       "Miraflores",
@@ -409,6 +412,7 @@ export const DEMO_COUNTRIES: Record<DemoCountry["code"], DemoCountry> = {
     registration: {
       dental: "Tarjeta profesional (RETHUS)",
       medical: "Tarjeta profesional (RETHUS)",
+      optical: "Tarjeta profesional (RETHUS)",
     },
     places: [
       "Chapinero",
@@ -503,7 +507,7 @@ export const DEMO_COUNTRIES: Record<DemoCountry["code"], DemoCountry> = {
       { name: "Tarjeta", typeCode: "48", weight: 38 },
       { name: "Transferencia", typeCode: "30", weight: 26 },
     ],
-    registration: { dental: "Cédula profesional", medical: "Cédula profesional" },
+    registration: { dental: "Cédula profesional", medical: "Cédula profesional", optical: "Cédula profesional" },
     places: [
       "Polanco",
       "Del Valle",

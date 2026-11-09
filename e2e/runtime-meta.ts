@@ -26,8 +26,26 @@ export interface RuntimeProcessMeta {
 export interface RuntimeMeta {
   runId: string
   stateDir: string
-  outDirs: { panel: string; platform: string; admin: string; latidiaPanel?: string; latidia?: string }
-  ports: { proxy: number; api: number; panel: number; platform: number; admin: number; latidiaPanel?: number; latidia?: number }
+  outDirs: {
+    panel: string
+    platform: string
+    admin: string
+    latidiaPanel?: string
+    latidia?: string
+    vistiaPanel?: string
+    vistia?: string
+  }
+  ports: {
+    proxy: number
+    api: number
+    panel: number
+    platform: number
+    admin: number
+    latidiaPanel?: number
+    latidia?: number
+    vistiaPanel?: number
+    vistia?: number
+  }
   containers: RuntimeContainerMeta[]
   processes: RuntimeProcessMeta[]
 }

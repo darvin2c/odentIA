@@ -1,5 +1,5 @@
-import type { FilterDef, PageHeaderMenuItem, PageHeaderPrimary } from "@odentia/ui-patterns"
-import { Banknote, CalendarCheck, Lock, LogOut, Plus, SquarePen } from "lucide-react"
+import type { FilterDef, PageHeaderMenuItem, PageHeaderPrimary, PageHeaderProps } from "@odentia/ui-patterns"
+import { Banknote, CalendarCheck, Lock, LogOut, Plus, ShoppingBag, SquarePen } from "lucide-react"
 import type { ReactNode } from "react"
 import { productUi } from "../product/product-ui"
 
@@ -41,12 +41,20 @@ export function financeAccess(can: Can) {
 }
 export type FinanceAccess = ReturnType<typeof financeAccess>
 
-/** En el escritorio, la acción principal de la sección y lo demás en ⋯. */
+/**
+ * En el escritorio, la acción principal de la sección y lo demás en ⋯. En Caja y
+ * Cobros, junto a «Cobrar», «Venta de mostrador» (ADR 0173): productos sin ficha;
+ * en el teléfono va en ⋯.
+ */
 export function financeHeader(
   view: string,
   access: FinanceAccess,
-  run?: { collect: () => void; close: () => void; expense: () => void },
-): { primary?: PageHeaderPrimary; menu: PageHeaderMenuItem[] } {
+  run?: { collect: () => void; close: () => void; expense: () => void; counter: () => void },
+): { primary?: PageHeaderPrimary; secondary?: PageHeaderProps["secondary"]; menu: PageHeaderMenuItem[] } {
+  const secondary =
+    (view === "caja" || view === "cobros") && access.write
+      ? { label: "Venta de mostrador", icon: <ShoppingBag aria-hidden />, ...(run ? { onClick: run.counter } : { disabled: true }) }
+      : undefined
   const primary =
     (view === "caja" || view === "cobros" || view === "deudas") && access.write
       ? action("Cobrar", <Banknote aria-hidden />, run?.collect)
@@ -62,7 +70,7 @@ export function financeHeader(
           ...(access.close ? [menuItem("Cerrar caja", run?.close, <Lock aria-hidden />)] : []),
         ]
       : []
-  return { primary, menu }
+  return { primary, secondary, menu }
 }
 
 export interface FinancePhoneAction {
@@ -247,6 +255,16 @@ export function tasksPrimary(can: Can, run?: () => void): PageHeaderPrimary | un
 /** «Toda la clínica» solo la ven el propietario y el administrador. */
 export function tasksFilters(can: Can): FilterDef[] {
   return can("tasks.all") ? [{ key: "alcance", label: "Alcance", type: "select", options: [{ value: "clinica", label: "Toda la clínica" }] }] : []
+}
+
+/** Vender crea los cargos y cobra el adelanto: pide los pedidos y la caja, y que el producto venda con pedido. */
+export function canSellOrders(can: Can): boolean {
+  return Boolean(productUi().orders) && can("orders.write") && can("finance.write")
+}
+
+export function ordersPrimary(can: Can, run?: () => void): PageHeaderPrimary | undefined {
+  const orders = productUi().orders
+  return orders && canSellOrders(can) ? action(orders.sellLabel, PLUS, run) : undefined
 }
 
 export function pipelinePrimary(can: Can, run?: () => void): PageHeaderPrimary | undefined {

@@ -12,7 +12,7 @@
  * - El color de la marca (ADR 0162) es uno solo para toda la clínica, en
  *   `org_profile.brand_color`: lo ven el equipo, el paciente y la línea del papel.
  */
-import { brandPalette, normalizeBrandColor, PRODUCT_BRAND_COLORS } from "@odentia/clinical"
+import { BASE_PRODUCT, brandPalette, isClinicalProduct, normalizeBrandColor, PRODUCT_BRAND_COLORS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
@@ -72,7 +72,7 @@ export async function getClinicBrandColor(
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  return { brandColor: row?.brandColor ?? null, product: row?.product === "medical" ? "medical" : "dental" }
+  return { brandColor: row?.brandColor ?? null, product: isClinicalProduct(row?.product) ? row.product : BASE_PRODUCT }
 }
 
 /**

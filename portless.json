@@ -3,6 +3,7 @@
   "apps": {
     "apps/dental-clinic": { "name": "odentia" },
     "apps/medical-clinic": { "name": "latidia" },
+    "apps/optical-clinic": { "name": "vistia" },
     "apps/panel": { "name": "app.odentia" },
     "apps/admin": { "name": "admin.odentia" },
     "apps/api": { "name": "api.odentia" },

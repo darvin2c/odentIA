@@ -1,0 +1,20 @@
+key,kind,common,name
+examen-de-la-vista,examen,true,Examen de la vista
+control-de-la-vista,examen,true,Control de la vista
+examen-de-la-vista-ninos,examen,true,Examen de la vista para niños
+medicion-agudeza-visual,examen,false,Medición de agudeza visual
+evaluacion-baja-vision,examen,false,Evaluación de baja visión
+adaptacion-lentes-de-contacto,contacto,true,Adaptación de lentes de contacto
+control-lentes-de-contacto,contacto,false,Control de lentes de contacto
+adaptacion-anteojos-monofocales,taller,false,Adaptación de anteojos monofocales
+adaptacion-anteojos-bifocales,taller,false,Adaptación de anteojos bifocales
+adaptacion-anteojos-progresivos,taller,true,Adaptación de anteojos progresivos
+reparacion-de-anteojos,taller,true,Reparación y ajuste de anteojos
+tonometria,pruebas,false,Medición de la presión del ojo
+campo-visual,pruebas,false,Campo visual computarizado
+topografia-corneal,pruebas,false,Topografía corneal
+retinografia,pruebas,false,Retinografía (foto del fondo de ojo)
+tomografia-optica,pruebas,false,Tomografía de coherencia óptica (OCT)
+vision-de-colores,pruebas,false,Prueba de visión de colores
+evaluacion-vision-binocular,terapia,false,Evaluación de la visión binocular
+terapia-visual,terapia,true,Sesión de terapia visual

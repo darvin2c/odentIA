@@ -1,22 +1,27 @@
-import { BrandProvider, Toaster } from "@odentia/ui"
+import { type BrandId, BrandProvider, Toaster } from "@odentia/ui"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import favicon from "../../../../assets/brand/favicon.svg?url"
 import faviconIco from "../../../../assets/brand/favicon.ico?url"
 import latidiaFavicon from "../../../../assets/brand/latidia/favicon.svg?url"
+import vistiaFavicon from "../../../../assets/brand/vistia/favicon.svg?url"
 import { ApiError } from "../lib/api"
 import { panelWords } from "../lib/brand"
 import appCss from "../styles/app.css?url"
 
-/** El ícono de la marca de este panel: odentIA con su .ico para los navegadores viejos; latidIA, el SVG. */
-const ICONS =
-  panelWords.brand === "latidia"
-    ? [{ rel: "icon", href: latidiaFavicon, type: "image/svg+xml" }]
-    : [
-        { rel: "icon", href: faviconIco, sizes: "16x16 32x32 48x48 64x64" },
-        { rel: "icon", href: favicon, type: "image/svg+xml" },
-      ]
+/** El ícono de cada marca: odentIA con su .ico para los navegadores viejos; latidIA y vistIA, el SVG. */
+const BRAND_ICONS: Record<BrandId, Array<{ rel: string; href: string; type?: string; sizes?: string }>> = {
+  odentia: [
+    { rel: "icon", href: faviconIco, sizes: "16x16 32x32 48x48 64x64" },
+    { rel: "icon", href: favicon, type: "image/svg+xml" },
+  ],
+  latidia: [{ rel: "icon", href: latidiaFavicon, type: "image/svg+xml" }],
+  vistia: [{ rel: "icon", href: vistiaFavicon, type: "image/svg+xml" }],
+}
+
+/** El ícono de la marca de este panel. */
+const ICONS = BRAND_ICONS[panelWords.brand]
 
 export const Route = createRootRoute({
   head: () => ({

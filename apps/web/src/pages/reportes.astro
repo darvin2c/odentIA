@@ -1,8 +1,11 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.reportes). Cada web tiene su página, con la misma estructura:
-// odentIA (components/reports) y latidIA (components/latidia/reports).
+// Contenido en src/lib/pages-data.ts (PAGES.reportes). Cada web tiene su página: odentIA
+// (components/reports), latidIA (components/latidia/reports) y vistIA (components/vistia).
 import ReportsPage from "../components/latidia/reports/ReportsPage.astro"
 import DentalReportsPage from "../components/reports/ReportsPage.astro"
-import { MEDICAL } from "../lib/product"
+import VistiaPage from "../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../lib/product"
+
+const Page = ofProduct({ dental: DentalReportsPage, medical: ReportsPage, optical: VistiaPage })
 ---
-{MEDICAL ? <ReportsPage /> : <DentalReportsPage />}
+<Page />

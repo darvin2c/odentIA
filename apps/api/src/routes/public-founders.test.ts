@@ -58,7 +58,7 @@ function buildApp(auth: Auth, mailer = recordingMailer()): Hono {
     adminURL: "https://admin.odentia.localhost",
     mailer,
     listenUrl: "postgres://localhost:5432/dentalagent",
-    productDomains: { medical: "latidia.localhost" },
+    productDomains: { medical: "latidia.localhost", optical: "vistia.localhost" },
     registrationRemoteAddress: () => `10.0.0.${Math.floor(Math.random() * 250)}`,
   })
 }

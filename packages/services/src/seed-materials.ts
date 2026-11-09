@@ -12,6 +12,7 @@ import { product } from "@odentia/db/schema/inventory"
 import { and, desc, eq, inArray, isNull } from "drizzle-orm"
 import { listPaymentMethods } from "./payment-methods.js"
 import { collectCharge, createCharge, returnFromTicket } from "./payments.js"
+import { seedCounterSales } from "./seed-counter-sales.js"
 import { discountEncounterMaterials, setServiceMaterials } from "./service-materials.js"
 
 export interface SeedMaterialsInput {
@@ -130,5 +131,15 @@ export async function seedMaterialsAndSales(tx: Db, input: SeedMaterialsInput): 
     chargeIds: [rinseSale.id],
     payments: [{ paymentMethodId: cash.id, amountCents: rinseSale.amountCents }],
     requestId: "50206010-0000-4000-8000-000000000203",
+  })
+
+  // Venta de mostrador (ADR 0173): hoy, quien no es paciente se llevó un enjuague (sin nombre, con
+  // vuelto) y dos cepillos (a nombre de quien los pidió), sin abrir una ficha.
+  await seedCounterSales(tx, {
+    orgId,
+    ownerUserId,
+    branchId,
+    productIds: [rinse, brush],
+    requestIds: ["50206010-0000-4000-8000-000000000204", "50206010-0000-4000-8000-000000000205"],
   })
 }
