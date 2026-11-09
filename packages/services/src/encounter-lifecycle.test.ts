@@ -266,7 +266,9 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     // La persona nueva: nunca se le preguntó por su salud; sin anestesia, nada más que decir.
     health: { gaps: ["allergies", "conditions", "medications", "asa"], anesthetics: [] },
     // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?».
-    sessions: { finishing: [], continuing: [], notRegistered: [] },
+    sessions: { finishing: [], continuing: [], notRegistered: [], accepted: [] },
+    // Sin tratamiento terminado hoy, no hay diagnóstico que resolver.
+    resolvable: [],
     // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.
     controls: { recallMonths: 6, byAppointment: [], shortcuts: expect.any(Object), due: [], next: null },
   })

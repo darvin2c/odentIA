@@ -546,7 +546,11 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     else {
       if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Escribe el teléfono o el correo del responsable"
       if (minor && data.representative.relationship !== "guardian") errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
-      if (minor && (!data.representative.docType || !data.representative.docNumber)) errors["representative.docNumber"] = "Escribe el documento del representante legal"
+      // En la clínica, el documento de quien lo representa no frena registrar al menor: se pide al
+      // firmar un consentimiento (la firma lo exige y lo deja escribir). Desde fuera sí: es lo que
+      // identifica a quien registra (QA de la ficha del 9 nov; lo legal, NTS 139, queda por validar).
+      if (minor && context.mode === "public" && (!data.representative.docType || !data.representative.docNumber))
+        errors["representative.docNumber"] = "Escribe el documento del representante legal"
       representativeDocumentErrors(data.representative, profile, errors)
     }
   } else if (data.representative) errors.representative = "Selecciona registrar a otra persona"
@@ -603,7 +607,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       if (config.fields[field.key] !== "required" || field.group === "health") continue
       if (field.key === "phone") {
         if (!data.demographics.phone && !data.demographics.email && !representativeContact)
-          errors["demographics.phone"] = "Teléfono o correo: hace falta uno para atenderla"
+          errors["demographics.phone"] = "Teléfono o correo: hace falta uno para la atención"
         continue
       }
       if (needsRepresentative && (field.key === "email") && representativeContact) continue

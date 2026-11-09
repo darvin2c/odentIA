@@ -1091,19 +1091,16 @@ const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
       causeAt: new Date(Date.now() + 2 * 24 * 3600_000),
     })
   },
-  // Pasó sola: presupuesto presentado.
+  // Interesado, con quien la lleva. No se mueve a «Presupuesto enviado» a mano: ahí llegan
+  // solas las de los presupuestos que la demo sí entrega (QA del 8 nov: una oportunidad en
+  // «Presupuesto enviado» cuyo cajón decía «Sin presupuesto»).
   "Carlos Paredes": async (contactId) => {
-    const opp = await createOpportunity(
+    await createOpportunity(
       db,
       ORG_A,
       { contactId, title: "Endodoncia", assignedUserId: ANA_ID },
       { userId: ANA_ID },
     )
-    await moveOpportunity(db, ORG_A, opp.id, stageOf("presupuesto_enviado").id, {
-      userId: null,
-      origin: "automatico",
-      cause: "presupuesto_presentado",
-    })
   },
   // Ganada: aceptó el presupuesto.
   "Lucía Fernández": async (contactId) => {
@@ -3430,6 +3427,8 @@ const marco = await createPatient(db, ORG_A, ANA_ID, {
   phone: "+51987650600",
   registeredBranchId: miraflores.id,
 })
+// Con su nombre, para su cita de la Agenda (abajo).
+patientIdByName.set("Marco Torres", marco.id)
 const marcoEval = await createEncounter(db, ORG_A, ANA_ID, marco.id, {
   reason: "Evaluación de ortodoncia",
   branchId: miraflores.id,
@@ -4266,7 +4265,8 @@ const agendaSeed: Array<{
     day: 1,
     start: "09:00",
     end: "10:00",
-    service: "ENDODONCIA",
+    // La 46 es un molar: su endodoncia es la posterior, como su tratamiento (QA del 9 nov).
+    service: "ENDODONCIA_POSTERIOR",
     status: "programada",
     planItemIds: [endo46.id],
   },
@@ -4277,11 +4277,26 @@ const agendaSeed: Array<{
     day: 8,
     start: "09:00",
     end: "10:00",
-    service: "ENDODONCIA",
+    // La 46 es un molar: su endodoncia es la posterior, como su tratamiento (QA del 9 nov).
+    service: "ENDODONCIA_POSTERIOR",
     status: "programada",
     planItemIds: [endo46.id],
   },
-  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino».
+  // Marco vino a su control de ortodoncia hace 9 días y la cita quedó «atendida», pero nadie
+  // registró el control: su «Qué sigue» lo avisa al reservar (QA de la ficha del 8 nov).
+  {
+    patient: "Marco Torres",
+    professional: ANA_ID,
+    room: 1,
+    day: -9,
+    start: "16:00",
+    end: "16:30",
+    service: "ORTODONCIA_CTRL",
+    status: "atendida",
+    planItemIds: [marcoCtrl.id],
+  },
+  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino»,
+  // y su ficha, en «Qué sigue», con «¿Vino?».
   {
     patient: "Elena Huamán",
     professional: ANA_ID,
@@ -4406,6 +4421,15 @@ for (const item of agendaSeed) {
     })
   }
 }
+// Marco: su control de ortodoncia se aceptó y se reservó antes de esa cita de hace 9 días (la
+// semilla lo crea hoy; aquí queda en sus fechas, así la cita de verdad lo llevaba).
+await db.update(treatmentPlanItem).set({ createdAt: daysAgo(14) }).where(eq(treatmentPlanItem.id, marcoCtrl.id))
+await db
+  .update(treatmentBudget)
+  .set({ createdAt: daysAgo(14), presentedAt: daysAgo(13), decidedAt: daysAgo(12) })
+  .where(eq(treatmentBudget.id, marcoBudget.id))
+await db.update(appointmentPlanItem).set({ createdAt: daysAgo(12) }).where(eq(appointmentPlanItem.planItemId, marcoCtrl.id))
+
 // La sala de espera de la Dra. Ana hoy (tablero 7): Lucía llegó y espera, y
 // Rosa ya está en atención (su evaluación en borrador de hoy se une a su cita
 // y la llegada queda marcada a esa hora). Ana es propietaria y atiende: su

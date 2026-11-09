@@ -34,9 +34,10 @@ import { PlanPhasesSkeleton } from "../skeletons/person-sections"
 import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "./clinical-panels"
 import { NewEncounterButton } from "./new-encounter-button"
-import { PlanBudgets, useScheduleAccepted } from "./plan/plan-budgets"
+import { PlanBudgets } from "./plan/plan-budgets"
 import { CoordinationControls, CoordinationTreatments } from "./plan/plan-coordination"
-import { PlanNextCard, usePlanNextStep } from "./plan/plan-next"
+import { usePlanNextSteps } from "./next-up"
+import { PlanNextCard } from "./plan/plan-next"
 import { PlanPhases } from "./plan-fases"
 import { RecorridoClinicoTab } from "./recorrido-tab"
 import { useOpenWide } from "./wide-section"
@@ -118,12 +119,15 @@ export function PlanTab({
   // Vigentes, todos los que tienen algo por hacer; anteriores, solo los terminados.
   const { current, previous } = splitPlans(plans)
   const openItems = items.filter((item) => current.some((row) => row.plan.id === item.planId))
-  const schedule = useScheduleAccepted({ id: patientId, name: patientName })
-  // La misma regla de «Qué sigue»: lo aceptado sin cita también se agenda desde la tarjeta del presupuesto.
-  const nextStep = usePlanNextStep(patientId).data?.data ?? null
 
 
 
+  // Los controles que «Qué sigue» ya ofrece reservar: abajo no llevan otro botón.
+  const nextSteps = usePlanNextSteps(patientId).data?.data
+  const reservedInNext = useMemo(
+    () => new Set((nextSteps ?? []).flatMap((step) => (step.action?.followUpId ? [step.action.followUpId] : []))),
+    [nextSteps],
+  )
   const journeyItem = items.find((item) => item.id === journeyItemId) ?? null
   const summary = summaryQuery.data?.data ?? null
   // Un control «de» la atención en curso solo lo indica quien la lleva; si es de otro
@@ -194,10 +198,6 @@ export function PlanTab({
             patientId={patientId}
             planItems={canClinical ? items : null}
             focusBudgetId={focusBudgetId}
-            scheduleItemIds={
-              nextStep?.kind === "agendar" ? (nextStep.action?.planItemIds ?? []) : (nextStep?.alsoToSchedule ?? [])
-            }
-            onSchedule={(planItemIds, serviceId) => schedule(planItemIds, serviceId)}
           />
         </Section>
       ) : null}
@@ -209,11 +209,12 @@ export function PlanTab({
             patientId={patientId}
             items={items}
             encounterId={ownEncounterId}
+            reservedInNext={reservedInNext}
           />
         </section>
       ) : canAgenda ? (
         <Section title="Controles" sectionRef={controlsRef}>
-          <CoordinationControls patientId={patientId} scheduleFollowUpId={null} />
+          <CoordinationControls patientId={patientId} scheduleFollowUpId={null} reservedInNext={reservedInNext} />
         </Section>
       ) : null}
 

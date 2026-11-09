@@ -48,7 +48,12 @@ async function journeyOf(page: Page, title: string): Promise<Locator> {
 
 /** Abre un tratamiento del plan por fases con «Ver»: su recorrido se abre al lado. */
 async function openTreatment(page: Page, title: string): Promise<Locator> {
-  const row = page.getByRole("listitem").filter({ hasText: title }).first()
+  // La fila del tratamiento (la que tiene «Ver»): «Qué sigue» también lo nombra en su lista.
+  const row = page
+    .getByRole("listitem")
+    .filter({ hasText: title })
+    .filter({ has: page.getByRole("button", { name: "Ver", exact: true }) })
+    .first()
   await row.getByRole("button", { name: "Ver", exact: true }).click()
   return journeyOf(page, title)
 }
@@ -68,7 +73,7 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
 
   // Para quien atiende el Resumen es el clínico (ADR 0035): alergias y alertas,
   // «Qué sigue» (con su próxima cita) y última atención, más lo pendiente.
-  await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Antecedentes y alertas" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Qué sigue" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Última atención" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
@@ -153,7 +158,7 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
   await expect(page.getByRole("heading", { name: "¿Qué respondió?" })).toBeVisible()
 
   // Responsables: el rol vigente habilita registrar quién decide la propuesta.
-  await openSection(page, "Datos", "Responsables")
+  await openSection(page, "Datos", "Familia y responsables")
   await page.getByRole("button", { name: "Asignar responsabilidad" }).click()
   const responsibility = surface(page, { name: "Asignar responsabilidad" })
   // Quien habla por ella ya viene elegida; el buscador de personas sirve para elegir a otra.
@@ -283,8 +288,9 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   await expect(page.getByText("Control post-endodoncia").first()).toBeVisible()
   // «Reservar» toma un hueco real del profesional y lo vincula al control.
   await page
-    .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar cita", exact: true })
+    // El control se reserva desde «Qué sigue», el único botón de reservar del Plan (QA de la ficha del 8 nov).
+    .getByRole("region", { name: "Qué sigue" })
+    .getByRole("button", { name: "Reservar el control", exact: true })
     .first()
     .click()
   const schedule = surface(page, { name: "Programar control" })
@@ -322,20 +328,11 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   // Iniciar sesión crea la atención y navega a su página: el registro del
   // procedimiento y el cierre ocurren allí, no en una pestaña del paciente.
   await expect(page).toHaveURL(/\/encounters\//)
-  const agregarServicios = page.getByRole("button", { name: "Agregar Procedimientos" })
-  await expect(
-    agregarServicios.or(
-      page.getByRole("button", { name: "Registrar procedimiento", exact: true }),
-    ),
-  ).toBeVisible()
-  if ((await agregarServicios.count()) > 0) {
-    // Un bloque nuevo abre su formulario al agregarlo, sin un clic de más (fase 3, paso 2B).
-    await agregarServicios.click()
-  } else {
-    const registrar = page.getByRole("button", { name: "Registrar procedimiento", exact: true }).first()
-    await expect(registrar).toBeEnabled()
-    await registrar.click()
-  }
+  // Una sola página: «Realizado hoy» está a la vista, sin agregarlo ni abrirlo.
+  const realizado = page.getByRole("region", { name: "Realizado hoy", exact: true })
+  const registrar = realizado.getByRole("button", { name: "Registrar lo de hoy", exact: true })
+  await expect(registrar).toBeEnabled()
+  await registrar.click()
   const procedureDrawer = surface(page, { name: "Registrar procedimiento" })
   await expect(procedureDrawer).toBeVisible()
   await procedureDrawer.getByLabel("Tratamiento del presupuesto").click()
@@ -344,17 +341,14 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   await procedureDrawer
     .getByRole("button", { name: "Registrar procedimiento", exact: true })
     .click()
-  // Lo hecho hoy y «Completar» viven en «Plan y controles» (ADR 0034).
-  await page
-    .getByRole("region", { name: "Plan y controles" })
-    .getByRole("button", { name: "Abrir", exact: true })
-    .click()
-  await expect(page.getByText("En curso desde", { exact: false }).first()).toBeVisible()
+  // Lo hecho hoy y «Completar» se ven en «Realizado hoy», sin abrir nada.
+  await expect(realizado.getByText("En curso desde", { exact: false }).first()).toBeVisible()
 
   // Completar el tratamiento ocurre aquí, con la atención abierta.
-  await page.getByRole("button", { name: "Completar", exact: true }).click()
-  await expect(page.getByText(/Completado el/).first()).toBeVisible()
-  // Sin evolución, «Finalizar y firmar» lleva a su bloque y la marca en su campo.
+  await realizado.getByRole("button", { name: "Completar", exact: true }).click()
+  // Antes de firmar dice que queda realizado al firmar, no «Completado» (QA del 9 nov).
+  await expect(realizado.getByText("Queda realizado al firmar").first()).toBeVisible()
+  // Sin evolución, «Finalizar y firmar» lleva a su campo, en la misma página, y lo marca.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
   await expect(page.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()
@@ -433,9 +427,10 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
 
   // Historia: cada evento del recorrido se abre donde corresponde, no como anamnesis.
   await openSection(page, "Clínica", "Historia")
-  await expect(page.getByText("Presupuesto", { exact: true }).first()).toBeVisible()
+  // El presupuesto de lo indicado en la atención va dentro de su tarjeta (QA de la ficha del 8 nov).
+  await expect(page.getByText(/^Presupuesto N\.º \d+/).first()).toBeVisible()
   await expect(page.getByText("Pago", { exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Ver el presupuesto", exact: true }).first().click()
+  await page.getByRole("button", { name: /^Ver el presupuesto/ }).first().click()
   // Se abre encima: la Historia sigue debajo, sin cambiar de pestaña.
   const planOver = surface(page, { name: /^Plan de / })
   await expect(planOver.getByRole("heading", { name: "Presupuesto", exact: true })).toBeVisible()
@@ -512,7 +507,7 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
 
     if (role === "reception") {
       // Recepción ve el Plan: títulos y estados, el presupuesto y los controles (ADR 0034).
-      await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Plan", "Datos"])
+      await expect(areas).toHaveText(["Resumen", "Citas", "Plan", "Datos"])
       await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
       // Única excepción clínica: la alerta de alergia, sin el resto de la ficha.
       await expect(allergy).toBeVisible()
@@ -531,17 +526,17 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
       await expect(page.getByRole("heading", { name: "Datos personales" })).toBeVisible()
     }
     if (role === "clinician") {
-      await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Clínica", "Plan", "Datos"])
+      await expect(areas).toHaveText(["Resumen", "Citas", "Clínica", "Plan", "Datos"])
       // Sin el CRM ve sus conversaciones sin errores; las notas son de recepción.
       expect(chats.status).toBe(200)
       expect(notes.status).toBe(403)
-      await openSection(page, "Conversaciones")
-      await expect(page.getByRole("heading", { name: "Conversaciones" })).toBeVisible()
-      await expect(page.getByText("Todavía no ha escrito", { exact: true })).toBeVisible()
+      // Sus conversaciones están en el Resumen (ya no hay pestaña Conversaciones).
+      await expect(page.getByRole("heading", { name: "Conversaciones", exact: true })).toBeVisible()
+      await expect(page.getByText("Todavía no ha escrito.", { exact: true })).toBeVisible()
       // Su Resumen es el clínico: abrir la página ya es una lectura de la historia (ADR 0035).
       expect(summaryReads.length).toBeGreaterThan(0)
       await openSection(page, "Resumen")
-      await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Antecedentes y alertas" })).toBeVisible()
       // El odontograma, en la dentición de su edad.
       await openSection(page, "Clínica", "Odontograma")
       await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
@@ -641,8 +636,9 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
 
   // Reserva un hueco real: misma operación que la vía clínica.
   await page
-    .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar cita", exact: true })
+    // El control se reserva desde «Qué sigue», el único botón de reservar del Plan (QA de la ficha del 8 nov).
+    .getByRole("region", { name: "Qué sigue" })
+    .getByRole("button", { name: "Reservar el control", exact: true })
     .click()
   const dialog = surface(page, { name: "Programar control" })
   // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.
@@ -784,7 +780,8 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await gotoHydrated(page, tenant(slug, `/contacts/${own?.contactId}`))
   await expect(page).toHaveURL(tenantPattern(slug, `/people/${own?.contactId}`))
   await expect(page.getByRole("heading", { level: 1, name: "Lucía Quispe" })).toBeVisible()
-  await expect(page.getByText("Habla por ella:")).toBeVisible()
+  // Sin sexo registrado no se supone ninguno.
+  await expect(page.getByText("Habla en su nombre:")).toBeVisible()
 
   // La identidad se edita con el formulario de la ficha y llega a las dos.
   await page.getByRole("button", { name: "Más acciones" }).click()
@@ -807,13 +804,12 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await expect(page.getByText("Tarea: Llamar por el laboratorio")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("resumen-con-tarea.png"), fullPage: true })
 
-  // «Seguimiento» de la ficha anterior abre ahora las conversaciones.
+  // «Seguimiento» de la ficha anterior abre el Resumen, donde están sus conversaciones.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=seguimiento`))
-  await expect(page).toHaveURL(/tab=conversaciones/)
-  await expect(page.getByRole("heading", { name: "Conversaciones" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Conversaciones y oportunidades" })).toBeVisible()
 
   // Quién habla por ella se gestiona en Datos; la propia persona no se ofrece para desvincular.
-  await openSection(page, "Datos", "Personas vinculadas")
+  await openSection(page, "Datos", "Familia y responsables")
   await expect(page.getByRole("heading", { name: "Quién habla por ella" })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Acciones de Madre de Lucía/ })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Acciones de Lucía Quispe/ })).toHaveCount(0)
@@ -826,7 +822,7 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
 
   // Para quien lee la clínica, abrir la página ya es una lectura de la historia
   // (ADR 0035, que precisa el 0029): quien audita ve quién la consultó.
-  await openSection(page, "Datos", "Consultas a la historia")
+  await openSection(page, "Datos", "Privacidad y pedidos")
   await expect(page.getByRole("heading", { name: "Consultas a la historia clínica" })).toBeVisible()
   await expect(page.getByRole("cell", { name: "Ana Pruebas" }).first()).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("consultas-historia.png"), fullPage: true })
@@ -848,9 +844,9 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   })
   await gotoHydrated(page, tenant(slug, `/people/${rosa.id}`))
   const areas = page.getByRole("tablist", { name: "Pestañas de la página" }).getByRole("tab")
-  await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Datos"])
+  await expect(areas).toHaveText(["Resumen", "Citas", "Datos"])
   await expect(page.getByText("Contacto nuevo", { exact: true }).first()).toBeVisible()
-  await expect(page.getByText("Falta registrarla como paciente")).toBeVisible()
+  await expect(page.getByText("Falta su registro como paciente")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("por-registrar.png"), fullPage: true })
 
   // El cajón trae lo que ya se sabe de ella.
@@ -874,9 +870,9 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   }, 201)
   await page.reload()
   await expect(page).toHaveURL(tenantPattern(slug, `/people/${rosa.id}`))
-  await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Clínica", "Plan", "Cobros", "Datos"])
+  await expect(areas).toHaveText(["Resumen", "Citas", "Clínica", "Plan", "Cobros", "Datos"])
   await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible()
-  await expect(page.getByText("Falta registrarla como paciente")).toHaveCount(0)
+  await expect(page.getByText("Falta su registro como paciente")).toHaveCount(0)
 })
 
 test("quien solo dijo sus nombres: editar otro dato no pide apellidos, y registrarla los pide con lo guardado ya escrito", async ({ owner }) => {

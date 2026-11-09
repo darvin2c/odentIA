@@ -39,7 +39,10 @@ export function OdontogramArch({
   selected,
   disabled = false,
   onToggle,
+  single,
 }: {
+  /** Una sola arcada a lo ancho (en el celular), para que cada pieza se pueda tocar. */
+  single?: "upper" | "lower"
   teeth: ArchRows
   /** Segundo arco concéntrico (temporales en dentición mixta); sus números van hacia el centro. */
   inner?: ArchRows
@@ -51,15 +54,22 @@ export function OdontogramArch({
   const ref = useRef<HTMLDivElement | null>(null)
   const hintId = useId()
   const width = useArchWidth(ref)
+  // Con una sola arcada, solo sus filas.
+  const shownTeeth = single ? { upper: single === "upper" ? teeth.upper : [], lower: single === "lower" ? teeth.lower : [] } : teeth
+  const shownInner =
+    inner && single ? { upper: single === "upper" ? inner.upper : [], lower: single === "lower" ? inner.lower : [] } : inner
+  // biome-ignore lint/correctness/useExhaustiveDependencies: las filas cambian con la dentición y la arcada.
   const layout = useMemo(
-    () => archLayout(width, teeth, inner),
+    () => archLayout(width, shownTeeth, shownInner, single ? { single } : {}),
     // Las filas son las constantes FDI: cambian solo al cambiar de dentición.
-    [width, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
+    [width, single, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
   )
   // De arriba abajo, tal como se ven: así ↑ ↓ pasan a la fila de al lado.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: las filas cambian con la dentición y la arcada.
   const rows = useMemo(
-    () => [teeth.upper, inner?.upper ?? [], inner?.lower ?? [], teeth.lower].filter((row) => row.length > 0),
-    [teeth.upper, teeth.lower, inner?.upper, inner?.lower],
+    () =>
+      [shownTeeth.upper, shownInner?.upper ?? [], shownInner?.lower ?? [], shownTeeth.lower].filter((row) => row.length > 0),
+    [single, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
   )
   const [visited, setVisited] = useState<number | null>(null)
   const visible = rows.flat()
@@ -92,7 +102,7 @@ export function OdontogramArch({
   return (
     <div
       ref={ref}
-      className="relative mx-auto aspect-[10/9] w-full min-w-0 max-w-[520px]"
+      className={`relative mx-auto w-full min-w-0 max-w-[520px] ${single ? "aspect-[10/11]" : "aspect-[10/9]"}`}
       role="group"
       aria-label="Odontograma"
       aria-describedby={hintId}

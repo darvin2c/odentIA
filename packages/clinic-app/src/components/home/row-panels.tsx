@@ -115,7 +115,8 @@ export function VisitPanel({
                   onClick={() =>
                     attend.mutate({
                       patientId: row.patientId,
-                      appointment: { id: row.id, professionalUserId: row.professionalUserId, professionalName: row.professionalName ?? "otro profesional" },
+                      // Una cita de otro día: si hay otra atención abierta, no se escribe en ella.
+                      appointment: { id: row.id, professionalUserId: row.professionalUserId, professionalName: row.professionalName ?? "otro profesional", pastVisit: true },
                     })
                   }
                 >

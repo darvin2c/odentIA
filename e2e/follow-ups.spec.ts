@@ -64,8 +64,9 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   // Los controles viven en el Plan, con «Reservar» (ADR 0034).
   await gotoHydrated(page, tenant(slug, `${patientPath}?tab=plan`))
   await page
-    .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar cita", exact: true })
+    // El control se reserva desde «Qué sigue», el único botón de reservar del Plan (QA de la ficha del 8 nov).
+    .getByRole("region", { name: "Qué sigue" })
+    .getByRole("button", { name: "Reservar el control", exact: true })
     .first()
     .click()
   const dialog = surface(page, { name: "Programar control" })
@@ -83,7 +84,11 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   await expect(page.getByText(/Cita reservada/)).toBeVisible({ timeout: 15_000 })
 
   // «Ver la cita» abre esa cita al lado, sin salir de la ficha.
-  await page.getByRole("button", { name: "Ver la cita", exact: true, disabled: false }).click()
+  // La del control, en Controles («Qué sigue» también la ofrece).
+  await page
+    .getByRole("region", { name: "Controles" })
+    .getByRole("button", { name: "Ver la cita", exact: true, disabled: false })
+    .click()
   await expect(page).toHaveURL(/\/(patients|people)\//)
   await expect(surface(page, { name: /Lucía Quispe/ })).toBeVisible()
   await page.keyboard.press("Escape")
