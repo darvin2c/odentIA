@@ -383,7 +383,7 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
  * Lo que cambia en un producto (issue 229): latidIA y vistIA invitan a volver al
  * año (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
  * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia. La de
- * vistIA habla del examen de la vista: es el control que la óptica ofrece.
+ * vistIA ofrece revisar la vista, sin decir que fue un examen: cuenta cualquier visita.
  */
 const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>> = {
   dental: {},
@@ -396,7 +396,7 @@ const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessage
   optical: {
     invitar_a_volver: {
       template: "vistia_invitar_a_volver_v1",
-      body: "Hola, {{1}}. Ya pasó un año desde tu último examen de la vista en {{2}}. ¿Te buscamos un horario para revisarla?",
+      body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para revisar tu vista?",
     },
   },
 }

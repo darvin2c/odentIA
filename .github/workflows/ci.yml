@@ -314,7 +314,8 @@ jobs:
       (needs.arquitectura.result == 'success' || needs.arquitectura.result == 'skipped'))) }}
     needs: [alcance, ya-probado, check, e2e, arquitectura]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Con vistIA son hasta diez armados seguidos (tres webs, tres paneles, la administración y tres apps).
+    timeout-minutes: 40
     concurrency:
       group: deploy-web-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || github.sha }}
       cancel-in-progress: false

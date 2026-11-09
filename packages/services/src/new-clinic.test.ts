@@ -59,6 +59,10 @@ describe("una clínica nueva nace con todo encendido (ADR 0141)", () => {
     await c.run((tx) => setUpNewClinic(tx, c.orgId, c.ownerId))
     const [agent] = await ownerDb.select().from(agentConfig).where(eq(agentConfig.organizationId, c.orgId))
     expect(agent).toMatchObject({ enabled: true, clinicalAssistantEnabled: false, advisor: { enabled: true } })
+    // Tampoco se enciende después: Clío no dicta en una óptica.
+    await expect(
+      c.run((tx) => upsertAgentConfig(tx, c.orgId, { clinicalAssistantEnabled: true }, { actorUserId: c.ownerId })),
+    ).rejects.toMatchObject({ status: 400, fields: { clinicalAssistantEnabled: expect.any(String) } })
   })
 
   it("Sofi, Clío, Argos y sus líneas, el registro, el portal y el resumen del lunes, a nombre de quien la crea", async () => {

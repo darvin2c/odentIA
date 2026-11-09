@@ -36,8 +36,7 @@ const OUTSIDE = [
 ]
 /**
  * Lo óptico de los servicios y de la base, y los `products.ts`: los únicos
- * lugares que conectan cada producto con lo común. La semilla de desarrollo de
- * odentIA también crea la demo de la óptica (`seed:dev`), solo a mano.
+ * lugares que conectan cada producto con lo común.
  */
 const OPTICAL_INSIDE = [
   "packages/services/src/optical/",
@@ -47,7 +46,6 @@ const OPTICAL_INSIDE = [
   // Las rutas de vistIA en la API, y donde la API une las de cada producto.
   "apps/api/src/routes/optical/",
   "apps/api/src/routes/products.ts",
-  "packages/services/src/dental/seed-demo.ts",
 ]
 
 function filesUnder(dir: string): string[] {

@@ -2,6 +2,7 @@ import { isDiagnosisSystem } from "@odentia/clinical"
 import {
   OPTICAL_CONSENT_TEMPLATES,
   OPTICAL_IMAGING_TYPES,
+  OPTICAL_MEDICATION_CATALOG,
   OPTICAL_PLAN_PHASE,
   opticalDiagnosisPattern,
 } from "@odentia/optical"
@@ -50,4 +51,6 @@ export const opticalHooks: ProductHooks = {
       },
     ]
   },
+  // Su lista propia, no la dental: lubricantes y lo del ojo irritado o alérgico.
+  prescribing: { catalog: OPTICAL_MEDICATION_CATALOG, review: async () => ({ errors: [], warnings: [] }) },
 }

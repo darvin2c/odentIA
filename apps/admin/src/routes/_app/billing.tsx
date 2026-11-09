@@ -1231,9 +1231,10 @@ function SignupModeSection({ products }: { products: readonly ClinicalProduct[] 
               </FieldLegend>
               <RadioGroup
                 aria-labelledby={`alta-${product}`}
-                value={mode.data.modes[product]}
+                // Sin su modo (la API anterior, mientras se despliega), el seguro: «Solo con invitación».
+                value={mode.data.modes[product] ?? "invitacion"}
                 onValueChange={(value) => {
-                  if (value !== mode.data.modes[product]) setConfirming({ mode: value as SignupMode, product })
+                  if (value !== (mode.data.modes[product] ?? "invitacion")) setConfirming({ mode: value as SignupMode, product })
                 }}
                 className="gap-3"
               >
