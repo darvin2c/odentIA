@@ -25,10 +25,12 @@ import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { expense, expenseRecurring, expenseRecurringSkip, RECURRING_EVERY_MONTHS } from "@odentia/db/schema/finance"
 import { auditEvent, branch } from "@odentia/db/schema/org"
+import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
   addMonthKey,
+  dueDayIn,
   isMonthKey,
   loadOccurrences,
   monthIndex,
@@ -300,6 +302,133 @@ export async function registerRecurringExpense(
   return { ...row, expense: row, recurring: template }
 }
 
+export interface NoteRecurringInput {
+  branchId: string
+  category?: string
+  concept: string
+  /** Lo de siempre: lo que se propone cada vez que toca pagar. */
+  amountCents: number
+  currency?: string
+  everyMonths: number
+  day: number
+  /**
+   * El primer mes que se paga (`YYYY-MM`). Sin él, el primero cuyo día aún no pasó: anotar el
+   * alquiler el 9 con el día 1 empieza el mes que viene, y lo de este mes, si se debe, se paga como
+   * un gasto. Puede ser el mes pasado (una deuda que se anota) y hasta un año adelante.
+   */
+  firstMonth?: string | null
+  memberUserId?: string | null
+  dueNextMonth?: boolean
+  /** Con qué se suele pagar: se propone al pagar. Opcional. */
+  paymentMethodId?: string | null
+  requestId?: string | null
+}
+
+/** El medio activo de la clínica que se propone al pagar lo que se repite. */
+async function recurringMethod(tx: Db, orgId: string, id: string, field = "paymentMethodId") {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw invalidField(field, "Elige con qué se paga")
+  const [method] = await tx
+    .select({ id: organizationPaymentMethod.id, typeCode: organizationPaymentMethod.typeCode })
+    .from(organizationPaymentMethod)
+    .where(
+      and(
+        eq(organizationPaymentMethod.organizationId, orgId),
+        eq(organizationPaymentMethod.id, id),
+        eq(organizationPaymentMethod.isActive, true),
+      ),
+    )
+  if (!method) throw invalidField(field, "Ese medio ya no está activo: elige otro")
+  return method
+}
+
+/**
+ * «Anotar lo que se repite» (ADR 0167; QA de Gastos, UX 4): la plantilla sola, desde su sección y no
+ * desde «Registrar gasto». Anotar no paga: queda «por pagar» cada vez que toca, y nunca se registra
+ * dinero que nadie pagó (ADR 0150).
+ */
+export async function noteRecurringExpense(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: NoteRecurringInput,
+  viewer: PayViewer = HIDDEN,
+  now: Date = new Date(),
+) {
+  const category = input.category?.trim() || "Otros"
+  if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category)) throw invalidField("category", "Tipo de gasto inválido")
+  requireSeesPerson({ category }, viewer)
+  const requestId = requestKey(input.requestId)
+  if (requestId) {
+    await lockRequest(tx, "expense", orgId, requestId)
+    const [replay] = await tx
+      .select()
+      .from(expenseRecurring)
+      .where(and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.requestId, requestId)))
+    if (replay) {
+      if (
+        replay.concept !== input.concept.trim() ||
+        replay.amountCents !== input.amountCents ||
+        replay.day !== input.day ||
+        replay.everyMonths !== input.everyMonths ||
+        replay.category !== category
+      )
+        throw requestReused()
+      return replay
+    }
+  }
+  const everyMonths = everyOf(input.everyMonths, "everyMonths")
+  const day = dayOf(input.day, "day")
+  const memberUserId = input.memberUserId?.trim() || null
+  if (memberUserId) {
+    if (category !== SALARY_CATEGORY) throw invalidField("memberUserId", "Solo un gasto de Personal es de una persona")
+    await requireTeamMember(tx, orgId, memberUserId, "memberUserId")
+  }
+  const branchRow = await requireBranch(tx, orgId, input.branchId)
+  const unit = await lockOrgUnit(tx, orgId, input.currency)
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const today = reportDayOf(timezone, now)
+  const current = today.slice(0, 7)
+  const dueNextMonth = input.dueNextMonth === true
+  // El primero que aún no vence: este mes si su día no pasó, si no el que sigue.
+  const dueOn = (month: string) => {
+    const due = dueNextMonth ? addMonthKey(month, 1) : month
+    return `${due}-${String(dueDayIn(day, due)).padStart(2, "0")}`
+  }
+  const firstMonth = input.firstMonth?.trim() || (dueOn(current) >= today ? current : addMonthKey(current, 1))
+  if (!isMonthKey(firstMonth)) throw invalidField("firstMonth", "El mes debe tener formato AAAA-MM")
+  if (firstMonth < addMonthKey(current, -1) || firstMonth > addMonthKey(current, 12))
+    throw invalidField("firstMonth", "Elige un mes desde el pasado hasta dentro de un año")
+  const method = input.paymentMethodId ? await recurringMethod(tx, orgId, input.paymentMethodId) : null
+  const [template] = await tx
+    .insert(expenseRecurring)
+    .values({
+      organizationId: orgId,
+      branchId: branchRow.id,
+      category,
+      concept: conceptOf(input.concept),
+      amountCents: centsOf(input.amountCents),
+      currency: unit,
+      everyMonths,
+      day,
+      firstMonth,
+      memberUserId,
+      fromCash: method?.typeCode === "10",
+      paymentMethodId: method?.id ?? null,
+      dueNextMonth,
+      requestId,
+      createdBy: actorUserId,
+    })
+    .returning()
+  await audit(tx, orgId, actorUserId, template.id, "finance.expense_recurring_created", {
+    firstMonth,
+    everyMonths,
+    day,
+    paid: false,
+    dueNextMonth,
+  })
+  return template
+}
+
 export interface UpdateRecurringInput {
   concept?: string
   amountCents?: number
@@ -309,6 +438,8 @@ export interface UpdateRecurringInput {
   fromCash?: boolean
   /** El último mes con ocurrencia (`YYYY-MM`) o `null` para que vuelva a repetirse («Deshacer»). */
   lastMonth?: string | null
+  /** Con qué se suele pagar; `null` lo quita. */
+  paymentMethodId?: string | null
 }
 
 /** El último mes ya resuelto (pagado o «este mes no»), o null si ninguno. */
@@ -345,6 +476,12 @@ export async function updateRecurringExpense(
   if (input.amountCents !== undefined) next.amountCents = centsOf(input.amountCents)
   if (input.day !== undefined) next.day = dayOf(input.day, "day")
   if (input.fromCash !== undefined) next.fromCash = input.fromCash
+  if (input.paymentMethodId !== undefined) {
+    const method = input.paymentMethodId ? await recurringMethod(tx, orgId, input.paymentMethodId) : null
+    next.paymentMethodId = method?.id ?? null
+    // Lo de antes que lee `from_cash` sigue de acuerdo con el medio.
+    if (method) next.fromCash = method.typeCode === "10"
+  }
   if (input.memberUserId !== undefined && (input.memberUserId?.trim() || null) !== current.memberUserId)
     throw invalidField(
       "memberUserId",
@@ -504,6 +641,13 @@ export interface PayRecurringInput {
   notes?: string | null
   /** La clave del cajón de pago: el reintento devuelve el mismo pago (ADR 0018). */
   requestId?: string | null
+  /** Con qué se pagó (ADR 0167); sin él, el de la plantilla. */
+  paymentMethodId?: string | null
+  paymentReference?: string | null
+  receiptType?: string | null
+  supplierId?: string | null
+  supplierName?: string | null
+  supplierTaxId?: string | null
 }
 
 /**
@@ -523,10 +667,19 @@ export async function payRecurringOccurrence(
   const template = await lockTemplate(tx, orgId, id, viewer)
   await requireOccurrence(tx, orgId, template, input.month)
   const suggested = (await suggestedAmounts(tx, orgId, [template])).get(template.id) ?? template.amountCents
+  // Con qué se paga: lo que se dijo; si no, el medio de la plantilla, y si no tiene, la casilla de antes.
+  const paymentMethodId =
+    input.paymentMethodId ?? (input.fromCash === undefined ? (template.paymentMethodId ?? undefined) : undefined)
   const replay = await replayedExpense(
     tx,
     orgId,
-    { requestId: input.requestId, branchId: template.branchId, amountCents: input.amountCents ?? suggested, concept: template.concept },
+    {
+      requestId: input.requestId,
+      branchId: template.branchId,
+      amountCents: input.amountCents ?? suggested,
+      concept: template.concept,
+      ...(paymentMethodId ? { paymentMethodId } : {}),
+    },
     { recurringId: template.id, recurringMonth: input.month },
   )
   if (replay) return { ...replay, fromCash: replay.shiftId !== null }
@@ -546,6 +699,12 @@ export async function payRecurringOccurrence(
         amountCents: input.amountCents ?? suggested,
         currency: template.currency,
         fromCash: input.fromCash ?? template.fromCash,
+        ...(paymentMethodId ? { paymentMethodId } : {}),
+        paymentReference: input.paymentReference,
+        receiptType: input.receiptType,
+        supplierId: input.supplierId,
+        supplierName: input.supplierName,
+        supplierTaxId: input.supplierTaxId,
         spentAt: input.spentAt ?? null,
         receiptKind: input.receiptKind,
         receiptNumber: input.receiptNumber,
@@ -636,6 +795,8 @@ export interface RecurringDue {
   amountCents: number
   currency: string
   fromCash: boolean
+  /** Con qué se suele pagar: se propone al pagar (ADR 0167). */
+  paymentMethodId: string | null
   everyMonths: number
   /**
    * Varios sueldos juntos, para quien no administra comisiones: cuántos son. No se pagan
@@ -750,6 +911,7 @@ export async function getRecurringMonth(
       amountCents: item.suggestedCents,
       currency: item.template.currency,
       fromCash: item.template.fromCash,
+      paymentMethodId: item.template.paymentMethodId,
       everyMonths: item.template.everyMonths,
       group: null as number | null,
     }))
@@ -773,6 +935,8 @@ export async function getRecurringMonth(
     memberUserId: template.memberUserId,
     memberName: template.memberUserId ? (names.get(template.memberUserId) ?? null) : null,
     fromCash: template.fromCash,
+    paymentMethodId: template.paymentMethodId,
+    dueNextMonth: template.dueNextMonth,
     nextMonth: nextOf(template),
     group: null as number | null,
   }))
@@ -799,6 +963,7 @@ export async function getRecurringMonth(
           recurringId: `sueldos:${key}`,
           concept: SALARIES_CONCEPT,
           fromCash: false,
+          paymentMethodId: null,
         })),
     templates: viewer.seesPeople
       ? templates
@@ -807,6 +972,7 @@ export async function getRecurringMonth(
           id: `sueldos:${key}`,
           concept: SALARIES_CONCEPT,
           fromCash: false,
+          paymentMethodId: null,
         })),
   }
 }
