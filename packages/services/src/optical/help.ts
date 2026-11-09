@@ -448,6 +448,21 @@ const OPTICAL_ONLY_TOPICS: readonly HelpTopic[] = [
         forms: ["como marco que llegaron los lentes", "como paso el pedido a listo", "como entrego los lentes", "en que paso esta el pedido"],
       },
       {
+        q: "¿Se le avisa cuando sus lentes están listos?",
+        a: "Sí: al marcar el pedido listo le llega «Tus lentes ya están listos para recoger», por WhatsApp con su mensaje aprobado, escrito si te escribió en las últimas 24 horas, o por correo. El pedido dice en «Aviso de que está listo» si salió, si llegó, si falló o si no se sabe. Si no salió o falló, «Enviar el aviso»; si no se sabe si llegó, confírmalo con la persona antes de «Enviarlo otra vez», para que no le llegue dos veces.",
+        forms: ["se le avisa que sus lentes estan listos", "como le aviso que ya estan sus lentes", "mensaje de lentes listos", "no le llego el aviso"],
+      },
+      {
+        q: "¿Sofi responde si ya están sus lentes?",
+        a: "Sí: le dice en qué paso está su pedido y para cuándo se le prometió. Cuánto le falta pagar solo se lo dice a la persona, a su representante o a quien paga por ella. Nunca le dice la receta.",
+        forms: ["sofi dice si estan mis lentes", "el agente responde por el pedido", "cuanto me falta pagar sofi"],
+      },
+      {
+        q: "¿El cliente ve su pedido en su portal?",
+        a: "Sí, en «Tus pedidos», junto a «Tu cuenta»: si ya está listo para recoger, para cuándo y lo que le falta pagar. Si su cuenta no se muestra en el portal, sus pedidos tampoco.",
+        forms: ["el cliente ve su pedido", "pedido en el portal", "puede ver si estan sus lentes"],
+      },
+      {
         q: "¿Y si le falta pagar al recogerlos?",
         a: "El pedido listo dice cuánto falta y ofrece el cobro de siempre, el mismo de Cobros. Entregar no lo exige: tú decides.",
         forms: ["cobrar el saldo de los lentes", "cuanto le falta pagar", "pagar el resto del pedido"],

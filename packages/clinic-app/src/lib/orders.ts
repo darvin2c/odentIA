@@ -82,6 +82,18 @@ export interface OrderDetail extends Omit<OrderRow, "remadeAs"> {
     at: string
     actorName: string | null
   }>
+  /** «Pedido listo» (ADR 0169): si salió, si llegó, si falló o si no se sabe; null antes de estar listo. */
+  readyNotice: OrderNotice | null
+}
+
+export interface OrderNotice {
+  status: "sin_enviar" | "no_salio" | "en_cola" | "enviado" | "entregado" | "leido" | "fallo" | "dudoso"
+  /** Lo que se dice, ya en palabras del servidor. */
+  words: string
+  channel: "whatsapp" | "email" | null
+  at: string | null
+  /** Se vuelve a enviar sin preguntar; el dudoso pide confirmarlo antes. */
+  canResend: boolean
 }
 
 /** Lo que se ofrece copiar al vender (vistIA: sus recetas vigentes), con lo que dice y sus avisos. */
@@ -162,6 +174,14 @@ export function advanceOrder(id: string, status: OrderStep): Promise<OrderDetail
   return apiFetch<{ data: OrderDetail }>(`/api/orders/${id}/advance`, {
     method: "POST",
     body: JSON.stringify({ status }),
+  }).then((body) => body.data)
+}
+
+/** «Pedido listo» otra vez: el que no salió o falló; el dudoso, con `confirmDoubtful`. */
+export function resendOrderNotice(id: string, confirmDoubtful = false): Promise<OrderDetail> {
+  return apiFetch<{ data: OrderDetail }>(`/api/orders/${id}/notice`, {
+    method: "POST",
+    body: JSON.stringify(confirmDoubtful ? { confirmDoubtful: true } : {}),
   }).then((body) => body.data)
 }
 
