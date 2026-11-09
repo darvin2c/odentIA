@@ -5,6 +5,12 @@ import {
   readBillingModes,
   removeBudgetItems,
 } from "./budgets.js"
+import {
+  checkEncounterVoidBudgets,
+  type EncounterVoidPreview,
+  encounterVoidBudgets,
+  settleEncounterVoidBudgets,
+} from "./encounter-void-budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -3176,13 +3182,43 @@ async function undoCompletionsOf(
   }
 }
 
+export interface VoidEncounterInput {
+  reason: string
+  /**
+   * Lo entregado que se anula con la atención, como lo mostró el diálogo
+   * (`getEncounterVoidPreview().confirm`): si no coincide con lo que hay al
+   * anular, no se anula nada y se pide revisar.
+   */
+  budgets?: ReadonlyArray<{ id: string; status: string }>
+}
+
+/**
+ * Qué se lleva anular esta atención: lo que el diálogo muestra antes de
+ * confirmar. Solo para quien la lleva (es quien puede anularla).
+ */
+export async function getEncounterVoidPreview(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  /** `seesCharges`: quien ve la caja (`finance.read`) lee qué tratamiento se cobró. */
+  opts: { memberRole?: string; seesCharges?: boolean } = {},
+): Promise<EncounterVoidPreview> {
+  await requirePatient(tx, orgId, patientId)
+  const row = await requireEncounter(tx, orgId, patientId, encounterId)
+  assertOpenDraft(row, actorUserId)
+  return encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, ...opts })
+}
+
 export async function voidEncounter(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  input: { reason: string },
+  input: VoidEncounterInput,
+  opts: { memberRole?: string; seesCharges?: boolean } = {},
 ): Promise<EncounterRow> {
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
@@ -3190,26 +3226,15 @@ export async function voidEncounter(
   assertOpenDraft(locked, actorUserId)
   const reason = cleanReason(input.reason)
   const cascade = `Atención anulada: ${reason}`.slice(0, 2000)
-  // Lo indicado aquí que ya entró a una propuesta no desaparece en silencio.
-  const [budgeted] = await tx
-    .select({ id: treatmentPlanItem.id })
-    .from(treatmentPlanItem)
-    .where(
-      and(
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.sourceEncounterId, encounterId),
-        isNotNull(treatmentPlanItem.budgetId),
-        inArray(treatmentPlanItem.status, ["pendiente", "programado", "en_curso", "suspendido"]),
-      ),
-    )
-    .limit(1)
-  if (budgeted) {
-    throw conflict(
-      "INDICATIONS_BUDGETED",
-      "Esta atención indicó tratamientos que ya están en una propuesta: cancélala o revísala antes de anular",
-    )
-  }
+  // Lo indicado aquí que ya está en un presupuesto no desaparece en silencio:
+  // lo no entregado se anula (o se le quita lo de aquí) y lo entregado, solo
+  // si quien anula lo confirmó; lo que no se deshace frena.
+  const budgets = await checkEncounterVoidBudgets(tx, orgId, patientId, encounterId, {
+    actorUserId,
+    memberRole: opts.memberRole,
+    seesCharges: opts.seesCharges,
+    confirmed: input.budgets,
+  })
   const at = new Date()
   const procedures = await tx
     .select()
@@ -3278,6 +3303,7 @@ export async function voidEncounter(
     )
   await voidEncounterPapers(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   await undoCompletionsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
+  await settleEncounterVoidBudgets(tx, orgId, actorUserId, patientId, encounterId, budgets)
   const [row] = await tx
     .update(encounter)
     .set({
@@ -3294,6 +3320,7 @@ export async function voidEncounter(
     patientId,
     reason,
     procedures: procedures.length,
+    ...(budgets.length > 0 ? { budgets: budgets.map((budget) => ({ id: budget.id, effect: budget.effect })) } : {}),
   })
   // La Agenda deja de decir «En atención»: la cita vuelve a poder atenderse y
   // su llegada se conserva (ADR 0032).
