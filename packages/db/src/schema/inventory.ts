@@ -111,6 +111,16 @@ export const product = pgTable(
     organizationId: orgFk("organization_id"),
     sku: text("sku").notNull(),
     name: text("name").notNull(),
+    /**
+     * Lo que dice la etiqueta, todo opcional (ADR 0168): el código de barras (GTIN/EAN,
+     * el que lee el escáner), la marca, el modelo, el color y las medidas (en una
+     * montura, calibre, puente y varilla: «52□18 140»).
+     */
+    barcode: text("barcode"),
+    brand: text("brand"),
+    model: text("model"),
+    color: text("color"),
+    size: text("size"),
     /** «Se usa en las atenciones»: entra en los materiales de un servicio. */
     usedInCare: boolean("used_in_care").notNull().default(true),
     /** «Se vende»: aparece en «Cobrar» con su precio de venta. */
@@ -135,6 +145,7 @@ export const product = pgTable(
   (table) => [
     uniqueIndex("product_org_id_uidx").on(table.organizationId, table.id),
     uniqueIndex("product_org_sku_uidx").on(table.organizationId, table.sku),
+    uniqueIndex("product_org_barcode_uidx").on(table.organizationId, table.barcode),
     check("product_use_check", sql`${table.usedInCare} OR ${table.forSale}`),
     check("product_purchase_factor_check", sql`${table.purchaseFactor} BETWEEN 1 AND 100000`),
     check(

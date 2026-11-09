@@ -52,6 +52,11 @@ CREATE TABLE "job_order_line" (
 	CONSTRAINT "job_order_line_quantity_check" CHECK ("job_order_line"."quantity" BETWEEN 1 AND 99)
 );
 --> statement-breakpoint
+ALTER TABLE "product" ADD COLUMN "barcode" text;--> statement-breakpoint
+ALTER TABLE "product" ADD COLUMN "brand" text;--> statement-breakpoint
+ALTER TABLE "product" ADD COLUMN "model" text;--> statement-breakpoint
+ALTER TABLE "product" ADD COLUMN "color" text;--> statement-breakpoint
+ALTER TABLE "product" ADD COLUMN "size" text;--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_branch_id_branch_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branch"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_order" ADD CONSTRAINT "job_order_remake_of_job_order_id_fk" FOREIGN KEY ("remake_of") REFERENCES "public"."job_order"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -70,6 +75,7 @@ CREATE INDEX "job_order_status_idx" ON "job_order" USING btree ("organization_id
 CREATE INDEX "job_order_patient_idx" ON "job_order" USING btree ("organization_id","patient_id");--> statement-breakpoint
 CREATE INDEX "job_order_event_order_idx" ON "job_order_event" USING btree ("organization_id","job_order_id","at");--> statement-breakpoint
 CREATE INDEX "job_order_line_order_idx" ON "job_order_line" USING btree ("organization_id","job_order_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "product_org_barcode_uidx" ON "product" USING btree ("organization_id","barcode");--> statement-breakpoint
 
 -- Las reglas del pedido (ADR 0168): de la clínica, con su RLS. La historia de
 -- estados y las líneas solo se agregan; del pedido solo cambia su paso, la fecha

@@ -1,5 +1,5 @@
 {
-  "id": "4b2fe66c-db73-4db4-abb4-0d8cd246b23d",
+  "id": "1f68050a-b5c4-4221-9f9c-ebf3594dcfd2",
   "prevId": "302f9178-a50c-47e9-9c16-257c66defdb8",
   "version": "7",
   "dialect": "postgresql",
@@ -32323,6 +32323,36 @@
           "primaryKey": false,
           "notNull": true
         },
+        "barcode": {
+          "name": "barcode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "brand": {
+          "name": "brand",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "color": {
+          "name": "color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "size": {
+          "name": "size",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "used_in_care": {
           "name": "used_in_care",
           "type": "boolean",
@@ -32443,6 +32473,27 @@
             },
             {
               "expression": "sku",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "product_org_barcode_uidx": {
+          "name": "product_org_barcode_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "barcode",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
