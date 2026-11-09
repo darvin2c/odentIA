@@ -1,6 +1,6 @@
 {
-  "id": "7b752c62-cc42-4b6d-a48f-f3f0decb0216",
-  "prevId": "cec9f5cc-3932-43b4-9534-7d3881f97c09",
+  "id": "2e80f519-0174-4f63-8dfe-4fa1e5e0b20f",
+  "prevId": "a230e6e8-c9f7-42e4-82e0-aa8712f503fc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -30239,6 +30239,60 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payment_method_id": {
+          "name": "payment_method_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method_name": {
+          "name": "method_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method_type_code": {
+          "name": "method_type_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_reference": {
+          "name": "payment_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "receipt_type": {
+          "name": "receipt_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_id": {
+          "name": "supplier_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_name": {
+          "name": "supplier_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_tax_id": {
+          "name": "supplier_tax_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "replaces_expense_id": {
+          "name": "replaces_expense_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -30297,6 +30351,49 @@
           ],
           "isUnique": true,
           "where": "\"expense\".\"request_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_org_id_uidx": {
+          "name": "expense_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_replaces_uidx": {
+          "name": "expense_replaces_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "replaces_expense_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"expense\".\"replaces_expense_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -30447,6 +30544,51 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "expense_payment_method_org_fk": {
+          "name": "expense_payment_method_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "organization_payment_method",
+          "columnsFrom": [
+            "organization_id",
+            "payment_method_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_supplier_org_fk": {
+          "name": "expense_supplier_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "supplier",
+          "columnsFrom": [
+            "organization_id",
+            "supplier_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_replaces_org_fk": {
+          "name": "expense_replaces_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "expense",
+          "columnsFrom": [
+            "organization_id",
+            "replaces_expense_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "expense_recurring_id_org_fk": {
           "name": "expense_recurring_id_org_fk",
           "tableFrom": "expense",
@@ -30482,6 +30624,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "expense_method_check": {
+          "name": "expense_method_check",
+          "value": "(\"expense\".\"payment_method_id\" IS NULL OR \"expense\".\"method_name\" IS NOT NULL) AND (\"expense\".\"method_type_code\" IS NULL OR \"expense\".\"method_type_code\" IN ('10','48','30','68','20','1'))"
+        },
         "expense_recurring_link_check": {
           "name": "expense_recurring_link_check",
           "value": "(\"expense\".\"recurring_id\" IS NULL) = (\"expense\".\"recurring_month\" IS NULL) AND (\"expense\".\"recurring_month\" IS NULL OR \"expense\".\"recurring_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')"
@@ -30709,6 +30855,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payment_method_id": {
+          "name": "payment_method_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -30868,6 +31020,21 @@
             "created_by"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_payment_method_org_fk": {
+          "name": "expense_recurring_payment_method_org_fk",
+          "tableFrom": "expense_recurring",
+          "tableTo": "organization_payment_method",
+          "columnsFrom": [
+            "organization_id",
+            "payment_method_id"
+          ],
+          "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",
@@ -32436,36 +32603,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "barcode": {
-          "name": "barcode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "brand": {
-          "name": "brand",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "color": {
-          "name": "color",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "size": {
-          "name": "size",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "used_in_care": {
           "name": "used_in_care",
           "type": "boolean",
@@ -32586,27 +32723,6 @@
             },
             {
               "expression": "sku",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "product_org_barcode_uidx": {
-          "name": "product_org_barcode_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "barcode",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -42215,1026 +42331,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.job_order": {
-      "name": "job_order",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "branch_id": {
-          "name": "branch_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "order_number": {
-          "name": "order_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_key": {
-          "name": "request_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "request_fingerprint": {
-          "name": "request_fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'por_enviar'"
-        },
-        "promised_on": {
-          "name": "promised_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "maker": {
-          "name": "maker",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prescription": {
-          "name": "prescription",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fitting": {
-          "name": "fitting",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "remake_of": {
-          "name": "remake_of",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "remake_reason": {
-          "name": "remake_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_at": {
-          "name": "voided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "void_reason": {
-          "name": "void_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "job_order_org_id_uidx": {
-          "name": "job_order_org_id_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "job_order_number_uidx": {
-          "name": "job_order_number_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "order_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "job_order_request_uidx": {
-          "name": "job_order_request_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "job_order_status_idx": {
-          "name": "job_order_status_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "promised_on",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "job_order_patient_idx": {
-          "name": "job_order_patient_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "job_order_organization_id_organization_id_fk": {
-          "name": "job_order_organization_id_organization_id_fk",
-          "tableFrom": "job_order",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_branch_id_branch_id_fk": {
-          "name": "job_order_branch_id_branch_id_fk",
-          "tableFrom": "job_order",
-          "tableTo": "branch",
-          "columnsFrom": [
-            "branch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_created_by_user_id_fk": {
-          "name": "job_order_created_by_user_id_fk",
-          "tableFrom": "job_order",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_patient_fk": {
-          "name": "job_order_patient_fk",
-          "tableFrom": "job_order",
-          "tableTo": "patient",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_remake_fk": {
-          "name": "job_order_remake_fk",
-          "tableFrom": "job_order",
-          "tableTo": "job_order",
-          "columnsFrom": [
-            "organization_id",
-            "remake_of"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "job_order_status_check": {
-          "name": "job_order_status_check",
-          "value": "\"job_order\".\"status\" IN ('por_enviar','en_laboratorio','por_revisar','listo','entregado','anulado')"
-        },
-        "job_order_remake_check": {
-          "name": "job_order_remake_check",
-          "value": "(\"job_order\".\"remake_of\" IS NULL) = (\"job_order\".\"remake_reason\" IS NULL)"
-        },
-        "job_order_void_check": {
-          "name": "job_order_void_check",
-          "value": "(\"job_order\".\"status\" = 'anulado') = (\"job_order\".\"voided_at\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.job_order_event": {
-      "name": "job_order_event",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "job_order_id": {
-          "name": "job_order_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_user_id": {
-          "name": "actor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "job_order_event_order_idx": {
-          "name": "job_order_event_order_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "job_order_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "job_order_event_organization_id_organization_id_fk": {
-          "name": "job_order_event_organization_id_organization_id_fk",
-          "tableFrom": "job_order_event",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_event_actor_user_id_user_id_fk": {
-          "name": "job_order_event_actor_user_id_user_id_fk",
-          "tableFrom": "job_order_event",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_event_order_fk": {
-          "name": "job_order_event_order_fk",
-          "tableFrom": "job_order_event",
-          "tableTo": "job_order",
-          "columnsFrom": [
-            "organization_id",
-            "job_order_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "job_order_event_status_check": {
-          "name": "job_order_event_status_check",
-          "value": "\"job_order_event\".\"status\" IN ('por_enviar','en_laboratorio','por_revisar','listo','entregado','anulado')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.job_order_line": {
-      "name": "job_order_line",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "job_order_id": {
-          "name": "job_order_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "quantity": {
-          "name": "quantity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "charge_id": {
-          "name": "charge_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "job_order_line_order_idx": {
-          "name": "job_order_line_order_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "job_order_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "job_order_line_charge_idx": {
-          "name": "job_order_line_charge_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "charge_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "job_order_line_organization_id_organization_id_fk": {
-          "name": "job_order_line_organization_id_organization_id_fk",
-          "tableFrom": "job_order_line",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_line_order_fk": {
-          "name": "job_order_line_order_fk",
-          "tableFrom": "job_order_line",
-          "tableTo": "job_order",
-          "columnsFrom": [
-            "organization_id",
-            "job_order_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_line_product_fk": {
-          "name": "job_order_line_product_fk",
-          "tableFrom": "job_order_line",
-          "tableTo": "product",
-          "columnsFrom": [
-            "organization_id",
-            "product_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "job_order_line_charge_fk": {
-          "name": "job_order_line_charge_fk",
-          "tableFrom": "job_order_line",
-          "tableTo": "patient_charge",
-          "columnsFrom": [
-            "organization_id",
-            "charge_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "job_order_line_kind_check": {
-          "name": "job_order_line_kind_check",
-          "value": "\"job_order_line\".\"kind\" IN ('montura','lunas','contacto','otro')"
-        },
-        "job_order_line_quantity_check": {
-          "name": "job_order_line_quantity_check",
-          "value": "\"job_order_line\".\"quantity\" BETWEEN 1 AND 99"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "optical.lens_prescription": {
-      "name": "lens_prescription",
-      "schema": "optical",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "encounter_id": {
-          "name": "encounter_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "lenses": {
-          "name": "lenses",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pupillary_distance": {
-          "name": "pupillary_distance",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "issued_on": {
-          "name": "issued_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "valid_until": {
-          "name": "valid_until",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prescriber_user_id": {
-          "name": "prescriber_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "prescriber_name": {
-          "name": "prescriber_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prescriber_registration": {
-          "name": "prescriber_registration",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "photo_document_id": {
-          "name": "photo_document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "verified_at": {
-          "name": "verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "verified_by": {
-          "name": "verified_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_at": {
-          "name": "voided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_by": {
-          "name": "voided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "void_reason": {
-          "name": "void_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "lens_prescription_patient_idx": {
-          "name": "lens_prescription_patient_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "issued_on",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "lens_prescription_encounter_kind_uidx": {
-          "name": "lens_prescription_encounter_kind_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "encounter_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"optical\".\"lens_prescription\".\"encounter_id\" IS NOT NULL AND \"optical\".\"lens_prescription\".\"voided_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "lens_prescription_organization_id_organization_id_fk": {
-          "name": "lens_prescription_organization_id_organization_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_prescriber_user_id_user_id_fk": {
-          "name": "lens_prescription_prescriber_user_id_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "prescriber_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_verified_by_user_id_fk": {
-          "name": "lens_prescription_verified_by_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "verified_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_voided_by_user_id_fk": {
-          "name": "lens_prescription_voided_by_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "voided_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_created_by_user_id_fk": {
-          "name": "lens_prescription_created_by_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_patient_fk": {
-          "name": "lens_prescription_patient_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "patient",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_encounter_fk": {
-          "name": "lens_prescription_encounter_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "encounter_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_photo_fk": {
-          "name": "lens_prescription_photo_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "patient_document",
-          "columnsFrom": [
-            "organization_id",
-            "photo_document_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "lens_prescription_kind_check": {
-          "name": "lens_prescription_kind_check",
-          "value": "\"optical\".\"lens_prescription\".\"kind\" IN ('anteojos','contacto')"
-        },
-        "lens_prescription_source_check": {
-          "name": "lens_prescription_source_check",
-          "value": "\"optical\".\"lens_prescription\".\"source\" IN ('examen','externa')"
-        },
-        "lens_prescription_source_encounter_check": {
-          "name": "lens_prescription_source_encounter_check",
-          "value": "(\"optical\".\"lens_prescription\".\"source\" = 'examen') = (\"optical\".\"lens_prescription\".\"encounter_id\" IS NOT NULL)"
-        },
-        "lens_prescription_valid_check": {
-          "name": "lens_prescription_valid_check",
-          "value": "\"optical\".\"lens_prescription\".\"valid_until\" >= \"optical\".\"lens_prescription\".\"issued_on\""
-        },
-        "lens_prescription_void_check": {
-          "name": "lens_prescription_void_check",
-          "value": "(\"optical\".\"lens_prescription\".\"voided_at\" IS NULL) = (\"optical\".\"lens_prescription\".\"void_reason\" IS NULL)"
-        }
-      },
-      "isRLSEnabled": false
     }
   },
   "enums": {},
@@ -43242,8 +42338,7 @@
     "admin": "admin",
     "auth": "auth",
     "catalog": "catalog",
-    "dental": "dental",
-    "optical": "optical"
+    "dental": "dental"
   },
   "sequences": {},
   "roles": {},

@@ -4,7 +4,7 @@ import { patient } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import type { Page, TestInfo } from "@playwright/test"
 import { tenant } from "./env"
-import { api, call, expect, test, type OwnerFixture } from "./fixtures"
+import { api, call, chooseOption, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
@@ -64,11 +64,12 @@ test("una compra recibida llega a Finanzas: se avisa, se paga como gasto de Mate
   await page.getByRole("button", { name: "Registrar gasto", exact: true }).first().click()
   const form = surface(page, { name: "Registrar gasto" })
   await form.getByRole("radio", { name: "Materiales" }).check()
-  await form.getByRole("radio", { name: new RegExp(`^${label} · Insumos de prueba`) }).check()
+  // La compra se elige en un desplegable (QA de Gastos, UX 1): por su valor, el id de la orden.
+  await chooseOption(form.getByLabel("¿Es el pago de una compra?", { exact: true }), order.id)
   await expect(form.getByLabel("Importe", { exact: true })).toHaveValue("500.00")
   await expect(form.getByText("Por pagar: S/ 500.00. Puedes pagar una parte.")).toBeVisible()
-  // Se pagó por transferencia: no sale del efectivo de la caja.
-  await form.getByRole("checkbox", { name: "Se pagó con el efectivo de la caja" }).uncheck()
+  // Se pagó por transferencia: no sale del efectivo de la caja (ADR 0167).
+  await form.getByRole("button", { name: "Transferencia", exact: true }).click()
   await observe(page, info, "pagar-compra")
   await form.getByRole("button", { name: "Registrar pago" }).click()
   await expect(page.getByText(`Pago registrado: ${label} queda al día en Inventario`)).toBeVisible()

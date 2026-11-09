@@ -16,7 +16,7 @@ import { AlertTriangle, ArrowDown, Bot } from "lucide-react"
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
-import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory } from "../../lib/finance-cash"
+import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory, expenseCategoryLabel } from "../../lib/finance-cash"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   amountsWords,
@@ -436,13 +436,14 @@ function Cascade({ data }: { data: ReportFinance }) {
     },
     ...cascade.categories.map((item) => ({
       key: item.category,
-      label: item.category,
+      // La misma palabra que en Gastos («Sueldos», «Servicios básicos»; QA de Gastos, G25).
+      label: expenseCategoryLabel(item.category),
       value: item.cents,
       kind: "less" as const,
       note:
         item.category === "Materiales"
           ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
-          : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
+          : (CATEGORY_NOTE[item.category] ?? `Gastos de ${expenseCategoryLabel(item.category)} registrados en Finanzas › Gastos.`),
       link: canFinance ? (
         <Link
           to="/finance"
