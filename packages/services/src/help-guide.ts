@@ -1008,13 +1008,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dejo el alquiler o los sueldos de cada mes?",
-        a: "Al registrar el gasto, marca «Se repite» y di si ya se pagó: con «Todavía no» se anota sin registrar ningún pago y queda «por pagar». Elige cada cuánto (cada mes, cada 6 meses o cada año), el día, si es el pago de este mes o del anterior, y si se paga en ese mes o al mes siguiente (el sueldo de noviembre que se paga el 2 de diciembre), para que no salga vencido antes de tiempo. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo; «Lo que se repite» lista todo, también lo que no toca este mes. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ve también caja, que lo paga. Para cambiar la persona, deja de repetirlo y anota otro. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
+        a: "Al registrar el gasto, marca «Se repite» y di si ya se pagó: con «Todavía no» se anota sin registrar ningún pago y queda «por pagar». Elige cada cuánto (cada mes, cada 6 meses o cada año), el día, si es el pago de este mes o del anterior, y si se paga en ese mes o al mes siguiente (el sueldo de noviembre que se paga el 2 de diciembre), para que no salga vencido antes de tiempo. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo: deja de repetirse desde el mes que viene, y lo vencido y lo de este mes siguen por pagar (si este mes no hubo, márcalo «No hubo este mes»). «Lo que se repite» lista todo, también lo que no toca este mes. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ven, pagan y cambian solo quienes administran las comisiones; caja y los demás ven «Sueldos» en una sola fila, sin nombres, y el pago sale en Caja como «Pago de sueldo». Para cambiar la persona, deja de repetirlo y anota otro. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
         forms: ["gasto fijo", "gastos fijos", "pago mensual", "alquiler cada mes", "sueldo de la recepcionista", "gasto que se repite", "gasto recurrente"],
       },
       {
         q: "¿Por qué en Gastos sale «Pago de comisiones» sin decir a quién?",
         a: "Porque la comisión de cada profesional solo la ve quien administra las comisiones. Los demás ven en Gastos una sola fila por sede con el total pagado en comisiones ese mes: suma igual que antes, pero no dice a quién se pagó. Quien administra ve cada pago con «Ver el pago», que lo lleva a Comisiones; el pago de una comisión se anula allí, no en Gastos.",
         forms: ["pago de comisiones en gastos", "por que no veo a quien se pago la comision", "anular el gasto de una comision"],
+      },
+      {
+        q: "¿Por qué el pago del impuesto de lo cobrado no suma en «Gastado»?",
+        a: "Porque no es un gasto: ese impuesto (el IGV en el Perú) ya salió de lo cobrado, y la clínica solo lo entrega. Al registrarlo con el tipo «Impuestos» queda en la lista con la marca «No suma», y debajo de «Gastado» se dice cuánto fue. Así Gastos y Reportes dicen lo mismo del mes. Los otros impuestos (renta, municipales) sí son gastos y suman.",
+        forms: ["el igv no suma en gastos", "por que gastos no cuenta el igv", "gastado no coincide con reportes", "pague el igv y no aparece en el total"],
       },
       {
         q: "¿Anulo el ticket o hago una devolución?",

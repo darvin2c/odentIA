@@ -237,6 +237,9 @@ export function ExpenseFormDrawer({
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
+  // Lo que se le paga al personal lo anota quien lo ve, como en el servidor (ADR 0166).
+  const canStaffPay = usePermission("commissions.write")
+  const categoryOptions = canStaffPay ? CATEGORY_OPTIONS : CATEGORY_OPTIONS.filter((option) => option.value !== "Personal")
   const { second, todayRate } = useTodayRate(locale)
   const today = todayIn(orgTimeZone)
   const salesTaxHelpId = useId()
@@ -248,12 +251,16 @@ export function ExpenseFormDrawer({
   const [cashOpen, setCashOpen] = useState(false)
   const canMoveCash = canWrite
   const currencies = second ? [place.currency, second.currency] : []
+  // Una clave por cajón abierto (ADR 0018): si se corta la red y se vuelve a guardar, el servidor
+  // devuelve el mismo gasto en vez de registrar otro y sacar el efectivo dos veces (G2).
+  const requestId = useRef<string>(crypto.randomUUID())
 
   const form = useAppForm({
     defaultValues: {
       category: "",
       salesTax: null,
-      purchase: OTHER,
+      // Sin respuesta: con compras por pagar en la sede, la persona elige (QA de Gastos, G4).
+      purchase: "",
       concept: "",
       currency: place.currency,
       amount: "",
@@ -277,6 +284,10 @@ export function ExpenseFormDrawer({
         const { chosen, asksSalesTax, cents, after, paid } = derive(value)
         const fields: Record<string, string> = {}
         if (value.category === "") fields.category = "Elige el tipo de gasto."
+        // Con compras por pagar en esta sede, que sea o no una de ellas lo dice la persona: si ya
+        // venía respondido «No», la misma compra se pagaba otra vez en Inventario (G4).
+        if (value.category === "Materiales" && value.purchase === "" && orders.some((order) => order.branchId === branchId && order.dueCents > 0))
+          fields.purchase = "Elige si es el pago de una de estas compras o de otro gasto."
         if (asksSalesTax && value.salesTax === null) fields.salesTax = "Elige qué impuesto pagas."
         if (!chosen && !value.concept.trim()) fields.concept = "Escribe en qué se gastó."
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
@@ -322,6 +333,7 @@ export function ExpenseFormDrawer({
         return
       }
       await createMutation.mutateAsync({
+        requestId: requestId.current,
         branchId,
         concept: value.concept.trim(),
         amountCents: cents,
@@ -374,11 +386,12 @@ export function ExpenseFormDrawer({
     }
     if (filled.current) return
     filled.current = true
+    requestId.current = crypto.randomUUID()
     const day = todayIn(orgTimeZone)
     form.reset({
       category: initial?.category ?? "",
       salesTax: null,
-      purchase: OTHER,
+      purchase: "",
       concept: initial?.concept ?? "",
       currency: place.currency,
       amount: initial ? formatMoneyInput(initial.amountCents, place.currency, locale) : "",
@@ -568,7 +581,10 @@ export function ExpenseFormDrawer({
       <div className="flex flex-col gap-5">
         <form.AppField name="category">
           {(field) => (
-            <field.Group legend="Tipo">
+            <field.Group
+              legend="Tipo"
+              description={canStaffPay ? undefined : "Los sueldos y lo que se le paga al personal los anota administración."}
+            >
               {(control) => (
                 <ChoiceChips
                   id={control.id}
@@ -576,7 +592,7 @@ export function ExpenseFormDrawer({
                   aria-describedby={control.describedBy}
                   onBlur={control.onBlur}
                   value={field.state.value}
-                  options={CATEGORY_OPTIONS}
+                  options={categoryOptions}
                   onChange={(next) => field.handleChange(next)}
                 />
               )}

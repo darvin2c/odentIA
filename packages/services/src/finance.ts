@@ -478,8 +478,9 @@ function methodTotals(movements: CashMove[]): MethodTotal[] {
 
 /**
  * La caja la ve caja, que no ve a quién se pagó cada comisión (ADR 0018, D-14 de la ronda de
- * comisiones): el movimiento del pago de una comisión se llama «Pago de comisiones», como su
- * fila en Gastos. Lo nuevo ya se guarda así; esto cubre lo guardado antes con el nombre.
+ * comisiones) ni cada sueldo (S1 de la QA de Gastos): el movimiento del pago de una comisión se
+ * llama «Pago de comisiones» y el de un sueldo, «Pago de sueldo», como su fila en Gastos. Lo nuevo
+ * ya se guarda así; esto cubre lo guardado antes con el nombre.
  */
 async function withoutCommissionPayees<T extends { expenseId: string | null; concept: string }>(
   tx: Db,
@@ -493,7 +494,37 @@ async function withoutCommissionPayees<T extends { expenseId: string | null; con
     .from(commissionSettlement)
     .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, ids)))
   const paid = new Set(rows.map((row) => row.expenseId))
-  return movements.map((m) => (m.expenseId && paid.has(m.expenseId) ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT } : m))
+  const salaries = await salaryPaymentsOf(tx, orgId, ids)
+  return movements.map((m) =>
+    m.expenseId && paid.has(m.expenseId)
+      ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT }
+      : m.expenseId && salaries.has(m.expenseId)
+        ? { ...m, concept: SALARY_PAYMENT_CONCEPT }
+        : m,
+  )
+}
+
+/** El tipo de lo que se le paga al personal: lo ve con detalle quien administra comisiones (ADR 0166). */
+export const STAFF_PAY_CATEGORY = "Personal"
+
+/**
+ * Los gastos que son pagos al personal (el tipo «Personal»), sin los de comisión, que tienen su
+ * propia fila: con persona o sin ella, porque el nombre también puede ir en el concepto.
+ */
+async function salaryPaymentsOf(tx: Db, orgId: string, expenseIds: string[]): Promise<Set<string>> {
+  if (expenseIds.length === 0) return new Set()
+  const rows = await tx
+    .select({ id: expense.id })
+    .from(expense)
+    .where(
+      and(
+        eq(expense.organizationId, orgId),
+        inArray(expense.id, expenseIds),
+        eq(expense.category, STAFF_PAY_CATEGORY),
+        sql`not exists (select 1 from commission_settlement s where s.organization_id = ${expense.organizationId} and s.expense_id = ${expense.id})`,
+      ),
+    )
+  return new Set(rows.map((row) => row.id))
 }
 
 /** Turno con movimientos vigentes y esperado de efectivo calculado en vivo. */
@@ -539,6 +570,28 @@ export interface AddMovementInput {
   kind: "aporte" | "retiro"
   amountCents: number
   concept: string
+  /** La clave del formulario: el mismo pedido devuelve el mismo movimiento (ADR 0018). */
+  requestId?: string | null
+}
+
+/** Una clave de pedido (`requestId`) es un UUID que genera la pantalla al abrir el formulario. */
+function requestKey(value: string | null | undefined): string | null {
+  if (!value) return null
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+    throw invalidField("requestId", "La clave del pedido debe ser un UUID")
+  return value.toLowerCase()
+}
+
+/** Dos envíos con la misma clave se esperan en fila: el segundo ve lo que dejó el primero. */
+async function lockRequest(tx: Db, kind: string, orgId: string, requestId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${kind} || ':' || ${orgId} || ':' || ${requestId}))`)
+}
+
+function requestReused(): ServiceError {
+  return conflict(
+    "REQUEST_ID_CONFLICT",
+    "Este formulario ya registró algo antes de cortarse la conexión: ciérralo y revisa la lista antes de anotarlo otra vez",
+  )
 }
 
 /**
@@ -560,6 +613,19 @@ export async function addShiftMovement(
   if ((input.kind === "aporte") !== (input.direction === "ingreso"))
     throw validation("Ingresar efectivo es un aporte y retirarlo es un retiro")
   const amount = assertCents(input.amountCents, "El importe", "amountCents")
+  const requestId = requestKey(input.requestId)
+  if (requestId) {
+    await lockRequest(tx, "cash-move", orgId, requestId)
+    const [replay] = await tx
+      .select()
+      .from(cashMovement)
+      .where(and(eq(cashMovement.organizationId, orgId), eq(cashMovement.requestId, requestId)))
+    if (replay) {
+      // El reintento de lo mismo devuelve lo que ya quedó, sin mover el efectivo otra vez.
+      if (replay.kind !== input.kind || replay.amountCents !== amount || replay.shiftId !== shift.id) throw requestReused()
+      return replay
+    }
+  }
   // El efectivo nunca queda negativo: el egreso no supera el contado actual.
   if (input.direction === "egreso") await requireCashAvailable(tx, orgId, shift.id, amount, "amountCents")
   const [row] = await tx
@@ -572,6 +638,7 @@ export async function addShiftMovement(
       amountCents: amount,
       currency: shift.currency,
       concept: concept(input.concept, "concept"),
+      requestId,
       createdBy: actorUserId,
     })
     .returning()
@@ -586,6 +653,7 @@ export interface CashMovementInput {
   amountCents: number
   concept: string
   currency?: string
+  requestId?: string | null
 }
 
 /**
@@ -605,6 +673,7 @@ export async function addCashMovement(
     kind: input.kind,
     amountCents: input.amountCents,
     concept: input.concept,
+    requestId: input.requestId,
   })
 }
 
@@ -1179,6 +1248,11 @@ export interface CreateExpenseInput {
    * ADR 0083): no resta de lo que deja, porque ese impuesto ya salió de lo cobrado.
    */
   salesTax?: boolean
+  /**
+   * La clave del formulario abierto (ADR 0018, como el cobro): reintentar después de un corte
+   * devuelve el mismo gasto, sin otro gasto ni otra salida de caja (QA de Gastos, G2).
+   */
+  requestId?: string | null
 }
 
 /** Lo que salió en otra moneda que la que cancela un gasto. */
@@ -1247,6 +1321,36 @@ function frozenExpense(
 }
 
 /**
+ * El gasto que ya dejó este mismo pedido (`requestId`), con la clave bloqueada hasta el final de la
+ * transacción. Otra cosa con la misma clave es un error: la clave es de un solo formulario.
+ */
+export async function replayedExpense(
+  tx: Db,
+  orgId: string,
+  input: Pick<CreateExpenseInput, "requestId" | "branchId" | "amountCents" | "concept">,
+  link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string } = {},
+) {
+  const requestId = requestKey(input.requestId)
+  if (!requestId) return null
+  await lockRequest(tx, "expense", orgId, requestId)
+  const [row] = await tx
+    .select()
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
+  if (!row) return null
+  if (
+    row.branchId !== input.branchId ||
+    row.amountCents !== input.amountCents ||
+    row.concept !== input.concept.trim() ||
+    row.purchaseOrderId !== (link.purchaseOrderId ?? null) ||
+    row.recurringId !== (link.recurringId ?? null) ||
+    row.recurringMonth !== (link.recurringMonth ?? null)
+  )
+    throw requestReused()
+  return row
+}
+
+/**
  * Registra un gasto con su tipo. Con `fromCash` el egreso sale del efectivo
  * de la ventana abierta (movimiento + gasto en la misma transacción); sin
  * caja es gasto directo. Sin proveedor ni turno a mano. La caja que se usa es la
@@ -1262,10 +1366,19 @@ export async function createExpense(
    * otra moneda, lo que salió. Un gasto suelto no cruza monedas. Solo
    * `expense-recurring.ts`: el gasto es el pago de ese mes de un gasto que se repite.
    */
-  link: { purchaseOrderId?: string; tender?: ExpenseTender; recurringId?: string; recurringMonth?: string } = {},
+  link: {
+    purchaseOrderId?: string
+    tender?: ExpenseTender
+    recurringId?: string
+    recurringMonth?: string
+    /** Cómo se llama su movimiento de caja si no es el concepto: «Pago de sueldo», sin a quién. */
+    cashConcept?: string
+  } = {},
 ) {
   if (Boolean(link.recurringId) !== Boolean(link.recurringMonth))
     throw validation("El pago de un gasto que se repite lleva su plantilla y su mes")
+  const replay = await replayedExpense(tx, orgId, input, link)
+  if (replay) return replay
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const profile = await lockOrgMoney(tx, orgId)
   if (!input.currency && !profile) throw orgProfileRequired()
@@ -1327,6 +1440,7 @@ export async function createExpense(
       salesTax,
       recurringId: link.recurringId ?? null,
       recurringMonth: link.recurringMonth ?? null,
+      requestId: requestKey(input.requestId),
       createdBy: actorUserId,
     })
     .returning()
@@ -1335,7 +1449,7 @@ export async function createExpense(
       kind: "gasto",
       amountCents: out.cents,
       currency: out.currency,
-      concept: row.concept,
+      concept: link.cashConcept ?? row.concept,
       expenseId: row.id,
       amountField: frozen?.tender ? "tenderCents" : "amountCents",
     })
@@ -1366,9 +1480,10 @@ export async function listExpenses(
   if (viewer.seesCommissions || rows.length === 0) return rows
   // Quien no administra comisiones no lee a quién se pagó ni cuánto a cada uno (ver `getMonthExpenses`).
   const paid = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
-  return withoutCommissionNames(rows.map((row) => ({ ...row, commission: paid.has(row.id) }))).map(
-    ({ commission: _commission, ...row }) => row,
-  )
+  const salaries = await salaryPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  return withoutCommissionNames(
+    rows.map((row) => ({ ...row, commission: paid.has(row.id), salary: salaries.has(row.id) })),
+  ).map(({ commission: _commission, salary: _salary, ...row }) => row)
 }
 
 /** El pago de comisión de cada gasto que lo es, con su profesional y su mes. */
@@ -1390,6 +1505,12 @@ async function commissionPaymentsOf(tx: Db, orgId: string, expenseIds: string[])
 
 /** Concepto con que ve el pago de comisiones quien no administra comisiones. */
 export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
+
+/** Concepto con que ve los sueldos pagados quien no administra comisiones (S1). */
+export const SALARY_PAYMENTS_CONCEPT = "Pago de sueldos"
+
+/** El movimiento de caja del pago de un sueldo: sin a quién, como el de una comisión. */
+export const SALARY_PAYMENT_CONCEPT = "Pago de sueldo"
 
 /**
  * Concepto del efectivo que devuelve un profesional de comisiones ya pagadas (ADR 0157): como el
@@ -1420,25 +1541,30 @@ function withoutCommissionNames<
     receiptNumber: string | null
     createdBy: string | null
     voidedAt: Date | null
+    recurringId: string | null
+    recurringMonth: string | null
     commission: boolean
+    /** El pago del sueldo de una persona: se junta igual, como «Pago de sueldos» (S1). */
+    salary: boolean
   },
 >(rows: T[]): T[] {
   const merged = new Map<string, T>()
   const out: T[] = []
   for (const row of rows) {
-    if (!row.commission) {
+    if (!row.commission && !row.salary) {
       out.push(row)
       continue
     }
     if (row.voidedAt) continue
-    const key = `${row.branchId}|${row.currency}`
+    const kind = row.commission ? "comisiones" : "sueldos"
+    const key = `${kind}|${row.branchId}|${row.currency}`
     const seen = merged.get(key)
     if (!seen) {
       // Las filas llegan de la más reciente a la más antigua: la fecha es la del último pago.
       const first: T = {
         ...row,
-        id: `comisiones:${row.branchId}:${row.currency}`,
-        concept: COMMISSION_PAYMENTS_CONCEPT,
+        id: `${kind}:${row.branchId}:${row.currency}`,
+        concept: row.commission ? COMMISSION_PAYMENTS_CONCEPT : SALARY_PAYMENTS_CONCEPT,
         businessCents: null,
         tenderCents: null,
         tenderCurrency: null,
@@ -1446,6 +1572,8 @@ function withoutCommissionNames<
         notes: null,
         receiptNumber: null,
         createdBy: null,
+        recurringId: null,
+        recurringMonth: null,
       }
       merged.set(key, first)
       out.push(first)
@@ -1488,11 +1616,15 @@ export async function getMonthExpenses(
   const valueOf = (row: { amountCents: number; businessCents: number | null; currency: string }) =>
     orgPartValue(row.amountCents, row, money)
   const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
+  // El pago del impuesto de lo cobrado no es un gasto (ADR 0083): se ve en la lista y no suma, como
+  // en Reportes, para que «Gastado» diga lo mismo en las dos pantallas (QA de Gastos, G12).
+  const spent = live.filter((row) => !row.salesTax)
   const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  const salaries = viewer.seesCommissions ? new Set<string>() : await salaryPaymentsOf(tx, orgId, rows.map((row) => row.id))
   // El pago de comisiones va aparte de «Personal», como en Reportes: así «Personal» dice lo mismo en
   // las dos pantallas (los sueldos) y el pago de comisiones tiene su propia cifra.
   const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
-  for (const row of live) {
+  for (const row of spent) {
     const key = settlementOf.has(row.id) ? COMMISSION_PAYMENTS_CONCEPT : row.category
     const list = byCategoryValues.get(key) ?? []
     list.push(valueOf(row))
@@ -1513,6 +1645,19 @@ export async function getMonthExpenses(
         .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
+  // La caja de cada gasto en efectivo, cerrada o no: anularlo después del cierre es de administración,
+  // y la pantalla lo dice antes de pedir el motivo (QA de Gastos, G15).
+  const shiftIds = [...new Set(rows.map((row) => row.shiftId).filter((id): id is string => id !== null))]
+  const closedShifts = new Set(
+    shiftIds.length
+      ? (
+          await tx
+            .select({ id: cashShift.id })
+            .from(cashShift)
+            .where(and(eq(cashShift.organizationId, orgId), inArray(cashShift.id, shiftIds), eq(cashShift.status, "cerrada")))
+        ).map((shift) => shift.id)
+      : [],
+  )
   const detailed = rows.map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
@@ -1521,9 +1666,12 @@ export async function getMonthExpenses(
       // El tipo con que se ve y se filtra: el mismo que su cifra del mes (`byCategory`).
       category: settlement !== undefined ? COMMISSION_PAYMENTS_CONCEPT : row.category,
       fromCash: row.shiftId !== null,
+      /** Salió de una caja que ya se cerró. */
+      shiftClosed: row.shiftId !== null && closedShifts.has(row.shiftId),
       purchaseOrderNumber: order?.orderNumber ?? null,
       supplierName: order?.supplierName ?? null,
       commission: settlement !== undefined,
+      salary: salaries.has(row.id),
       /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */
       commissionPayment: viewer.seesCommissions && settlement ? settlement : null,
     }
@@ -1531,13 +1679,15 @@ export async function getMonthExpenses(
   const expenses = (viewer.seesCommissions ? detailed : withoutCommissionNames(detailed))
     .filter((row) => !query.category || row.category === query.category)
     .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
-  const shownLive = expenses.filter((row) => !row.voidedAt && valueOf(row) !== null)
+  const shownLive = expenses.filter((row) => !row.voidedAt && !row.salesTax && valueOf(row) !== null)
   return {
     year: query.year,
     month: query.month,
     currency: unit,
     timezone,
-    totalCents: roundMoneyValue(sumMoneyValues(live.map(valueOf))),
+    totalCents: roundMoneyValue(sumMoneyValues(spent.map(valueOf))),
+    /** Lo pagado del impuesto de lo cobrado en el mes: está en la lista y no suma en el total. */
+    salesTaxCents: roundMoneyValue(sumMoneyValues(live.filter((row) => row.salesTax).map(valueOf))),
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
@@ -1566,13 +1716,17 @@ export async function voidExpense(
    * cuya caja ya cerró; la caja de hoy recibe la «Compensación por anulación»,
    * como al anular un cobro (`reverseCashIncome`). Lo cerrado no se toca.
    */
-  opts: { fromCommission?: boolean; allowPostClose?: boolean } = {},
+  opts: { fromCommission?: boolean; allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   const [found] = await tx
     .select({ purchaseOrderId: expense.purchaseOrderId })
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
   if (!found) throw notFound("Gasto")
+  // Lo pagado al personal lo anula quien lo ve (`commissions.write`, ADR 0166); el pago de una
+  // comisión se anula con su pago, que ya pide ese permiso.
+  if (!opts.fromCommission && opts.seesPeople !== true && (await salaryPaymentsOf(tx, orgId, [expenseId])).size > 0)
+    throw new ServiceError("FORBIDDEN", 403, "Lo que se le paga al personal lo ven y lo anulan quienes administran las comisiones")
   // El pago de una compra se anula con su orden y su proveedor bloqueados antes
   // que el gasto, en el mismo orden que al pagarla o cancelarla: dos de esas
   // operaciones a la vez se esperan en fila en vez de bloquearse entre sí.
@@ -1978,6 +2132,38 @@ export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId
     ),
     credits: (await supplierCredits(tx, orgId)).filter((credit) => credit.cents > 0),
   }
+}
+
+/**
+ * Gastos sueltos de Materiales que pueden ser el pago de esta compra, anotados antes como otro
+ * gasto (QA de Gastos, G4): misma sede y moneda, sin compra, vigentes, desde una semana antes de
+ * pedirla, y por lo recibido, lo que falta o lo pedido. Pagar la compra los contaría dos veces;
+ * la pantalla lo avisa sin frenar, y quien paga decide (anular el suelto o es otro gasto).
+ */
+export async function purchaseLookalikes(tx: Db, orgId: string, orderId: string) {
+  if (!looksLikeId(orderId)) throw purchaseOrderNotFound()
+  const [balance] = (await purchaseBalances(tx, orgId, { orderIds: [orderId] })) ?? []
+  if (!balance) throw purchaseOrderNotFound()
+  const amounts = [...new Set([balance.dueCents, balance.receivedCents, balance.orderedCents].filter((cents) => cents > 0))]
+  if (amounts.length === 0) return []
+  const since = new Date(balance.createdAt.getTime() - 7 * 24 * 60 * 60 * 1000)
+  return tx
+    .select({ id: expense.id, concept: expense.concept, amountCents: expense.amountCents, currency: expense.currency, spentAt: expense.spentAt })
+    .from(expense)
+    .where(
+      and(
+        eq(expense.organizationId, orgId),
+        eq(expense.branchId, balance.branchId),
+        eq(expense.category, PURCHASE_EXPENSE_CATEGORY),
+        eq(expense.currency, balance.currency),
+        isNull(expense.purchaseOrderId),
+        isNull(expense.voidedAt),
+        gte(expense.spentAt, since),
+        inArray(expense.amountCents, amounts),
+      ),
+    )
+    .orderBy(desc(expense.spentAt))
+    .limit(3)
 }
 
 /**

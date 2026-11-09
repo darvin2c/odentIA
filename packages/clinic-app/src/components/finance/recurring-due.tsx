@@ -188,11 +188,14 @@ export function RecurringDueSection({
     onSuccess: (result, row) => {
       refresh()
       const { stillDue, previousLastMonth } = result.data
+      // Lo vencido y lo de este mes no se borran: siguen por pagar, y se dice (QA de Gastos, G3).
+      const thisMonth = stillDue.includes(data?.today.slice(0, 7) ?? "")
       toast.success(
         stillDue.length > 0
-          ? `${row.concept} ya no se repite. Lo de ${joinMonths(stillDue)} sigue por pagar.`
-          : `${row.concept} ya no se repite. Lo pagado queda en Gastos.`,
+          ? `${row.concept} ya no se repite. Sigue por pagar lo de ${joinMonths(stillDue)}${thisMonth ? "; si este mes no hubo, márcalo «No hubo este mes»" : ""}.`
+          : `${row.concept} ya no se repite.`,
         {
+          duration: 10_000,
           action: {
             label: "Deshacer",
             onClick: () =>
@@ -240,11 +243,14 @@ export function RecurringDueSection({
                       {row.concept}
                     </span>
                     <span className={row.overdue ? "text-sm font-medium text-warning" : "text-sm text-muted-foreground"}>
-                      {[row.category, row.memberName, when].filter(Boolean).join(" · ")}
+                      {[row.category, row.memberName, when, row.group !== null ? "los paga administración" : null]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                   </span>
                   <span className="shrink-0 font-semibold tabular-nums">{money(row.amountCents, row.currency)}</span>
-                  {canWrite ? (
+                  {/* Los sueldos juntos no se pagan desde aquí: el de cada persona lo paga quien lo ve (S1). */}
+                  {canWrite && row.group === null ? (
                     <span className="flex shrink-0 items-center gap-1">
                       <Button
                         type="button"
@@ -329,16 +335,16 @@ function RepeatingList({
                   {[
                     row.category,
                     row.memberName,
-                    `${EVERY_WORDS[row.everyMonths] ?? ""}, el ${row.day}`,
-                    row.fromCash ? "de la caja" : "fuera de la caja",
-                    row.nextMonth ? `toca en ${monthWord(row.nextMonth)}` : null,
+                    `${EVERY_WORDS[row.everyMonths] ?? ""}${row.group === null ? `, el ${row.day}` : ""}`,
+                    row.group !== null ? "los anota administración" : row.fromCash ? "de la caja" : "fuera de la caja",
+                    row.nextMonth && row.group === null ? `toca en ${monthWord(row.nextMonth)}` : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
               </span>
               <span className="shrink-0 font-semibold tabular-nums">{formatMoney(row.amountCents, row.currency, locale)}</span>
-              {canWrite ? (
+              {canWrite && row.group === null ? (
                 <RowActions
                   label={`Más acciones de ${row.concept}`}
                   items={[
@@ -381,16 +387,21 @@ function PayOtherDrawer({
       if (!row) return
       const amountCents = cents(value.amount)
       if (amountCents === null) return
-      await payRecurringApi(row.recurringId, { month: row.month, amountCents, fromCash: value.fromCash })
+      await payRecurringApi(row.recurringId, { month: row.month, amountCents, fromCash: value.fromCash, requestId: requestId.current })
       onDone()
       toast.success(`${row.concept} registrado · ${formatMoney(amountCents, row.currency, locale)}`)
       onClose()
     },
   })
   const surface = useFormSurface(form, { fieldMap: { amountCents: "amount" } })
+  // Una clave por cajón abierto: reintentar tras un corte devuelve el mismo pago (G2).
+  const requestId = useRef<string>(crypto.randomUUID())
   useEffect(() => {
     // Parte de lo que se propone y por el medio de siempre.
-    if (row) form.reset({ amount: formatMoneyInput(row.amountCents, row.currency, locale), fromCash: row.fromCash })
+    if (row) {
+      requestId.current = crypto.randomUUID()
+      form.reset({ amount: formatMoneyInput(row.amountCents, row.currency, locale), fromCash: row.fromCash })
+    }
   }, [row, form, locale])
   return (
     <FormDrawer

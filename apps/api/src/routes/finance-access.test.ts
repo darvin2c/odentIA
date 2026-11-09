@@ -929,3 +929,15 @@ it("anular un ticket con la comisión ya pagada: quien administra comisiones ve 
   expect((await buildApp("clinician", DENT1).request(returnable)).status).toBe(403)
   expect((await buildApp("reception", RECEP).request(returnable)).status).toBe(403)
 })
+
+it("lo que se le paga al personal: caja no lo anota ni elige a quién; administración sí (ADR 0166)", async () => {
+  const cashier = buildApp("cashier", CASH)
+  const admin = buildApp("admin", ADMIN)
+  const salary = { branchId: BRANCH_A, category: "Personal", concept: "Sueldo de Rosa", amountCents: 1000 }
+  expect((await postJson(cashier, "/finance/expenses", salary)).status).toBe(403)
+  expect((await cashier.request("/finance/expenses/recurring/people")).status).toBe(403)
+  expect((await postJson(admin, "/finance/expenses", salary)).status).toBe(201)
+  expect((await admin.request("/finance/expenses/recurring/people")).status).toBe(200)
+  // Lo demás lo sigue anotando caja.
+  expect((await postJson(cashier, "/finance/expenses", { ...salary, category: "Otros", concept: "Útiles" })).status).toBe(201)
+})

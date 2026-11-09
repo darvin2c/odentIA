@@ -91,6 +91,8 @@ export function ExpensesTab({
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
   const canInventory = usePermission("inventory.read")
+  // Anular un gasto de una caja ya cerrada es de administración (`finance.admin`), como en el servidor.
+  const canAdmin = usePermission("finance.admin")
   const second = useOrgSecondCurrency()
   const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
   const q = listSearch.get("q") ?? ""
@@ -152,11 +154,12 @@ export function ExpensesTab({
           const voided = expense.voidedAt !== null
           return (
             <div className="flex min-w-0 flex-col gap-1">
-              <span className={cn("font-medium break-words", voided && "text-muted-foreground line-through")}>
+              {/* Solo el texto libre parte una palabra larga; el monto y «Anular» no se salen de la tabla (QA del 8 nov, G28). */}
+              <span className={cn("font-medium [overflow-wrap:anywhere]", voided && "text-muted-foreground line-through")}>
                 {expense.concept}
               </span>
               <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                {expense.supplierName ? <span>{expense.supplierName}</span> : null}
+                {expense.supplierName ? <span className="[overflow-wrap:anywhere]">{expense.supplierName}</span> : null}
                 {expense.purchaseOrderId && expense.purchaseOrderNumber !== null ? (
                   canInventory ? (
                     <Link
@@ -171,10 +174,12 @@ export function ExpensesTab({
                   )
                 ) : null}
                 {expense.commission ? <Badge variant="secondary">Comisión</Badge> : null}
+                {/* Pagar el impuesto de lo cobrado no es un gasto: se ve aquí y no suma (ADR 0083, G12). */}
+                {expense.salesTax ? <Badge variant="secondary">No suma: es el impuesto de lo cobrado</Badge> : null}
                 {voided ? <Badge variant="destructive">Anulado</Badge> : null}
               </span>
               {voided && expense.voidReason ? (
-                <span className="text-xs text-muted-foreground">Motivo: {expense.voidReason}</span>
+                <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Motivo: {expense.voidReason}</span>
               ) : null}
             </div>
           )
@@ -185,7 +190,7 @@ export function ExpensesTab({
       {
         id: "comprobante",
         header: "Comprobante",
-        cell: ({ row }) => <span>{receiptText(row.original) ?? <span className="text-muted-foreground">Sin comprobante</span>}</span>,
+        cell: ({ row }) => <span className="[overflow-wrap:anywhere]">{receiptText(row.original) ?? <span className="text-muted-foreground">Sin comprobante</span>}</span>,
       },
       {
         id: "salio",
@@ -271,7 +276,7 @@ export function ExpensesTab({
                 </Link>
               </div>
             ) : null
-          ) : row.original.voidedAt === null && canWrite ? (
+          ) : row.original.voidedAt === null && canWrite && !row.original.salary ? (
             <div className="flex justify-end">
               <Button
                 type="button"
@@ -313,6 +318,12 @@ export function ExpensesTab({
           <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
             {formatMoney(data.totalCents, data.currency || currency, locale)}
           </p>
+          {data.salesTaxCents ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Sin contar {formatMoney(data.salesTaxCents, data.currency || currency, locale)} del impuesto de lo cobrado: ya
+              salió de lo cobrado y no es un gasto, como en Reportes.
+            </p>
+          ) : null}
           <FixedOfMonth
             data={recurring.data?.data}
             wholeClinic={severalBranches ? wholeClinic.data?.data : undefined}
@@ -402,7 +413,7 @@ export function ExpensesTab({
         )
       ) : (
         <DataTable
-          className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]"
+          className="[&_td]:align-top [&_td]:whitespace-normal"
           table={table}
           isFetching={expenses.isFetching}
         />
@@ -413,12 +424,24 @@ export function ExpensesTab({
       <VoidDrawer
         open={voiding !== null}
         title="Anular gasto"
+        // Lo que pasa de verdad, dicho antes de escribir el motivo (QA de Gastos, G15).
+        blocked={
+          voiding?.fromCash && voiding.shiftClosed && !canAdmin
+            ? "La caja de ese día ya se cerró: este gasto lo anula administración, y el efectivo vuelve a la caja de hoy."
+            : null
+        }
         description={[
           voiding?.fromCash
-            ? "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja si aún no se cerró."
+            ? voiding.shiftClosed
+              ? "Queda en el historial con su motivo y deja de sumar en el mes. Su caja ya se cerró: el efectivo vuelve a la caja de hoy como «Compensación por anulación»."
+              : "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja."
             : "Queda en el historial con su motivo y deja de sumar en el mes.",
           // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
           voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
+          // Es el pago de una compra: la compra vuelve a deber lo que este pago cubría (ADR 0061).
+          voiding?.purchaseOrderNumber != null
+            ? `La compra ${purchaseOrderLabel(voiding.purchaseOrderNumber)} vuelve a quedar por pagar ${formatMoney(voiding.amountCents, voiding.currency, locale)}.`
+            : "",
         ]
           .filter(Boolean)
           .join(" ")}

@@ -43,6 +43,8 @@ import {
   unskipRecurringOccurrence,
   updateRecurringExpense,
   getMonthExpenses,
+  purchaseLookalikes,
+  STAFF_PAY_CATEGORY,
   getPurchasesToPay,
   listClosures,
   listExpenses,
@@ -94,6 +96,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         amountCents: cents,
         concept: z.string().trim().min(1, "Cuenta para qué es el movimiento.").max(500, "Escribe como mucho 500 caracteres."),
         currency: currency.optional(),
+        // La clave del formulario: reintentar tras un corte no mueve el efectivo dos veces (ADR 0018).
+        requestId: z.uuid().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -341,6 +345,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  // El sueldo de cada persona lo ve quien administra comisiones, como lo que cobra de comisión (S1).
+  const peopleOf = (role: Parameters<typeof canAccess>[0]) => ({ seesPeople: canAccess(role, "commissions.write") })
+
   const recurringMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "El mes debe tener formato AAAA-MM")
 
   app.post("/expenses", async (c) => {
@@ -361,6 +368,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         fromCash: z.boolean().optional(),
         // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
         salesTax: z.boolean().optional(),
+        // La clave del formulario abierto: reintentar tras un corte devuelve el mismo gasto (ADR 0018).
+        requestId: z.uuid().optional(),
         // «Se repite»: la plantilla, y este gasto queda como su primera ocurrencia.
         repeat: z
           .object({
@@ -380,11 +389,17 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    // Lo que se le paga al personal lo anota quien lo ve (`commissions.write`, ADR 0166).
+    if (parsed.data.category?.trim() === STAFF_PAY_CATEGORY && !canAccess(memberRole, "commissions.write"))
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Lo que se le paga al personal lo anotan quienes administran las comisiones"),
+        403,
+      )
     const { repeat, ...expenseInput } = parsed.data
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
         repeat
-          ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat })
+          ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat }, peopleOf(memberRole))
           : createExpense(tx, orgId, userId, expenseInput),
       ),
     )
@@ -392,7 +407,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
 
   // --- Gastos que se repiten: lo por pagar del mes, pagar con un toque, «este mes no» ------------
   app.get("/expenses/recurring", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const parsed = z
       .object({
         year: z.coerce.number().int().min(2000).max(2100),
@@ -401,11 +416,14 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getRecurringMonth(tx, orgId, parsed.data)))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getRecurringMonth(tx, orgId, parsed.data, new Date(), peopleOf(memberRole))),
+    )
   })
   app.get("/expenses/recurring/people", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    // A quién se le anota un sueldo: lo elige quien lo verá (S1).
+    if (!canAccess(memberRole, "finance.write") || !canAccess(memberRole, "commissions.write")) return forbid(c)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listRecurringPeople(tx, orgId)))
   })
   app.patch("/expenses/recurring/:id", async (c) => {
@@ -424,14 +442,16 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => updateRecurringExpense(tx, orgId, userId, c.req.param("id"), parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        updateRecurringExpense(tx, orgId, userId, c.req.param("id"), parsed.data, peopleOf(memberRole)),
+      ),
     )
   })
   app.post("/expenses/recurring/:id/end", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => endRecurringExpense(tx, orgId, userId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, (tx) => endRecurringExpense(tx, orgId, userId, c.req.param("id"), peopleOf(memberRole))),
     )
   })
   app.post("/expenses/recurring/:id/pay", async (c) => {
@@ -446,12 +466,15 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         receiptKind: z.string().trim().min(1).max(60).optional(),
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
+        requestId: z.uuid().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => payRecurringOccurrence(tx, orgId, userId, c.req.param("id"), parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        payRecurringOccurrence(tx, orgId, userId, c.req.param("id"), parsed.data, peopleOf(memberRole)),
+      ),
     )
   })
   for (const [path, action] of [
@@ -464,7 +487,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       const parsed = z.object({ month: recurringMonthKey }).strict().safeParse(await c.req.json().catch(() => null))
       if (!parsed.success) return validationError(c, parsed.error.issues)
       return runService(c, 200, () =>
-        withOrgContext(deps.db, orgId, (tx) => action(tx, orgId, userId, c.req.param("id"), parsed.data)),
+        withOrgContext(deps.db, orgId, (tx) => action(tx, orgId, userId, c.req.param("id"), parsed.data, peopleOf(memberRole))),
       )
     })
   }
@@ -476,6 +499,15 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     const parsed = z.object({ branchId: z.uuid().optional() }).safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPurchasesToPay(tx, orgId, parsed.data)))
+  })
+
+  // Lo que pagar esta compra contaría dos veces: gastos sueltos de Materiales parecidos (G4).
+  app.get("/purchases/:orderId/lookalikes", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const orderId = z.uuid().safeParse(c.req.param("orderId"))
+    if (!orderId.success) return validationError(c, orderId.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => purchaseLookalikes(tx, orgId, orderId.data)))
   })
 
   // Registrar el pago de una compra: en partes, por adelantado o con lo que se tiene a favor.
@@ -549,6 +581,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       withOrgContext(deps.db, orgId, (tx) =>
         voidExpense(tx, orgId, userId, c.req.param("id"), parsed.data, {
           allowPostClose: canAccess(memberRole, "finance.admin"),
+          seesPeople: canAccess(memberRole, "commissions.write"),
         }),
       ),
     )
