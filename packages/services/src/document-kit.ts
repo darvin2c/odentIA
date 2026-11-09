@@ -1710,6 +1710,10 @@ export class DocumentKit {
 
   /** Desde la página 2: el nombre de la clínica y el título del documento. */
   private shortHeader(): void {
+    if (this.clinic.wordmark && this.logoImage) {
+      this.wordmarkShortHeader(this.logoImage)
+      return
+    }
     const name = this.lay(this.clinic.tradeName, this.width * 0.55, {
       face: "serif",
       size: 12.75,
@@ -1727,6 +1731,32 @@ export class DocumentKit {
     if (title) this.drawLineAt(title, this.left, top - (height - title.height), this.width)
     this.y = top - height - 7.5
     this.rule({ tone: "ink", thickness: 1.5 })
+    this.y -= 13
+  }
+
+  /**
+   * Desde la página 2, con logotipo (`wordmark`): el logotipo chico y la línea en
+   * el color de la marca, para que la hoja suelta se reconozca como la misma.
+   */
+  private wordmarkShortHeader(logo: PDFImage): void {
+    const height = 16
+    const width = Math.min(this.width * 0.3, height * (logo.width / logo.height))
+    const title = this.lay(this.options.title, this.width * 0.42, {
+      size: SIZE.second,
+      tone: "gray",
+      leading: 1.3,
+      align: "right",
+    })[0]
+    const top = this.y
+    this.page.drawImage(logo, { x: this.left, y: top - height, width, height: width / (logo.width / logo.height) })
+    if (title) this.drawLineAt(title, this.left, top - (height - title.height), this.width)
+    this.y = top - height - 7.5
+    this.page.drawLine({
+      start: { x: this.left, y: this.y },
+      end: { x: this.right, y: this.y },
+      thickness: 1.5,
+      color: this.brandInk,
+    })
     this.y -= 13
   }
 

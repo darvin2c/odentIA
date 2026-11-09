@@ -22,6 +22,8 @@ function words(content: ReturnType<typeof welcomeLetterContent>): string {
     ...content.intro,
     ...content.steps.flatMap((step) => [step.lead, step.rest]),
     content.help.body,
+    content.send.title,
+    content.send.body,
     ...content.after,
     ...content.clinicData,
     content.list.lead,
@@ -46,6 +48,8 @@ describe("welcomeLetterContent", () => {
     expect(WELCOME_LETTER_RETENTION_DAYS).toBe(30)
     expect(text).toContain("una marca de SALLCA GROUP E.I.R.L.")
     expect(text).toContain("contrato de encargo de datos")
+    expect(text).toContain("Hasta que lo acepten, no podemos abrir lo que nos envíen")
+    expect(content.send.title).toBe("Envíen todo a soporte@odentia32.com hasta el viernes 13 de noviembre")
     expect(text).toContain("No los envíen por WhatsApp")
     // El celular va con espacios que no cortan: no se parte entre dos líneas.
     expect(content.help.body).toContain("carlos@odentia32.com · 987 654 321")
@@ -54,7 +58,7 @@ describe("welcomeLetterContent", () => {
   it("pide los datos de la clínica para cargarlos, no solo para tenerlos a mano", () => {
     const data = welcomeLetterContent(base).clinicData.join("\n")
     expect(data).toContain("razón social, RUC, nombre comercial y su logo")
-    expect(data).toContain("Cada sede: nombre, dirección, teléfono y horario de atención")
+    expect(data).toContain("Cada sede o local: nombre, dirección, teléfono y horario de atención")
     expect(data).toContain("Sus unidades dentales: cuántas hay en cada sede")
     expect(data).toContain("de los odontólogos, su especialidad y su número de colegiatura (COP)")
     expect(data).toContain("Sus servicios y precios")
@@ -82,9 +86,11 @@ describe("welcomeLetterContent", () => {
       "Escríbanle a Carlos Ruiz, quien los acompaña en el alta: carlos@odentia32.com.",
     )
     expect(content.currentSystem).toBeNull()
-    expect(welcomeLetterContent(base).currentSystem).toContain(
-      "Cuéntenle también a quien los acompaña",
-    )
+    expect(content.steps[2]?.rest).not.toContain("Cuéntennos")
+    const asking = welcomeLetterContent(base)
+    expect(asking.currentSystem).toContain("Cuéntennos ahí qué usan hoy")
+    expect(asking.steps[2]?.rest).toContain(asking.currentSystem ?? "")
+    expect(asking.steps[2]?.rest).toContain("que Carlos Ruiz coordina con ustedes")
   })
 
   it("otro buzón si se indica; la fecha límite de otro año lleva el año", () => {

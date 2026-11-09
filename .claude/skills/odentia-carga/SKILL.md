@@ -43,7 +43,7 @@ Cuando la pidan, pregunta en un solo mensaje lo que falte de esto (lo que ya se 
 - **La clínica:** su nombre, como lo conocen sus pacientes. El producto se deduce de si es dental o médica y se dice, sin preguntarlo; sin saberlo, odentIA.
 - **A quién va:** su nombre, como lo escribe ella, y su cargo si lo dicen («Dra. Ana Pérez, directora»). El cargo no se inventa: sin él, solo el nombre.
 - **Quién acompaña el alta:** nombre y correo y, si quiere, celular. Es el contacto para dudas, nunca para recibir la lista.
-- **Hasta cuándo** enviar la lista. Sugiere una fecha: unos días hábiles después de la carta.
+- **Hasta cuándo** enviar los datos y la lista. Sugiere una fecha: unos días hábiles después de la carta.
 - **Si ya se sabe qué usa la clínica** para sus pacientes. Si no, la carta se lo pregunta (`askCurrentSystem`).
 
 Escribe `carta.json` en la carpeta privada de la clínica, fuera del repositorio (`~/odentia-cargas/<clinica>/`, con el nombre de la clínica en minúsculas y guiones), y genera el PDF, que queda junto a él. `date` se pone solo para fechar la carta otro día que hoy:
