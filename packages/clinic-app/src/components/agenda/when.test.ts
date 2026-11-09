@@ -21,7 +21,17 @@ describe("lo que se dice de quien se pidió al abrir", () => {
       professionals: [oscar],
       attending: { specialtyName: "Endodoncia", professionalUserIds: ["oscar"] },
     }
-    expect(seedNoteOf(availability, lanes([oscar, ana]), "ana", "Dra. Ana Torres")).toEqual({ kind: "noSchedule", label: "Dra. Ana Torres" })
+    expect(seedNoteOf(availability, lanes([oscar, ana]), "ana", "Dra. Ana Torres")).toEqual({
+      kind: "noSchedule",
+      label: "Dra. Ana Torres",
+      specialty: { name: "Endodoncia", attending: lanes([oscar]) },
+    })
+    // Sin especialidad que restrinja, solo el horario.
+    expect(seedNoteOf({ professionals: [oscar], attending: null }, lanes([oscar, ana]), "ana", "Dra. Ana Torres")).toEqual({
+      kind: "noSchedule",
+      label: "Dra. Ana Torres",
+      specialty: null,
+    })
   })
 
   it("de otra especialidad: lo dice con quienes la atienden", () => {
@@ -30,8 +40,7 @@ describe("lo que se dice de quien se pidió al abrir", () => {
       attending: { specialtyName: "Endodoncia", professionalUserIds: ["oscar"] },
     }
     const note = seedNoteOf(availability, lanes([ana, oscar]), "ana", "Dra. Ana Torres")
-    expect(note).toMatchObject({ kind: "otherSpecialty", label: "Dra. Ana Torres", specialtyName: "Endodoncia" })
-    expect(note?.kind === "otherSpecialty" ? note.attending.map((item) => item.id) : []).toEqual(["oscar"])
+    expect(note).toEqual({ kind: "otherSpecialty", label: "Dra. Ana Torres", specialty: { name: "Endodoncia", attending: lanes([oscar]) } })
   })
 
   it("nada mientras la disponibilidad no llega o si no se pidió a nadie", () => {

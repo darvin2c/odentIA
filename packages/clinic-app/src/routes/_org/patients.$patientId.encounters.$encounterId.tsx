@@ -2,7 +2,7 @@ import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "../../components/patient/clinical-panels"
 import { EncounterBreadcrumb } from "../../components/patient/encounter-breadcrumb"
@@ -64,6 +64,11 @@ function EncounterPage() {
   // y la cita que se estaba reservando (QA del 8 nov). Sigue montado, con lo que tenía, hasta cerrarlo.
   const [signedHere, setSignedHere] = useState<string | null>(null)
   const lastDraft = useRef<EncounterDetail | null>(null)
+  // La página se reutiliza al ir a otra atención: lo firmado aquí no se arrastra a la vuelta.
+  useEffect(() => {
+    setSignedHere(null)
+    lastDraft.current = null
+  }, [encounterId])
   const changed = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] }),

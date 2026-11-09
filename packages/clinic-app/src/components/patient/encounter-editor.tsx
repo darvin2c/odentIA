@@ -55,7 +55,7 @@ import {
   fetchFollowUps,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
-import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
@@ -451,6 +451,7 @@ export function EncounterEditor({
   const canRead = usePermission("clinical.read")
   const canReadFinance = usePermission("finance.read")
   const memberName = useMemberName()
+  const members = useOrgMembers()
   const orgProfile = useOrgProfile().data
   const orgLocale = orgProfile?.locale
   const uid = useId()
@@ -2765,7 +2766,7 @@ export function EncounterEditor({
               listRef={nextSessionsRef}
               canBook={canBook}
               onBook={(ids) => setBookingNext(ids)}
-              nameOf={memberName}
+              nameOf={(userId) => members.find((item) => item.userId === userId)?.user.name}
             />
           ) : null}
           {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Reservar la sesión 2». */}
@@ -2781,6 +2782,7 @@ export function EncounterEditor({
                 // La sesión siguiente suele hacerla quien atendió hoy: su columna, que se puede cambiar.
                 professionalUserId: encounter.professionalUserId,
                 professionalLabel: memberName(encounter.professionalUserId),
+                keepProfessional: true,
               }}
               onClose={() => setBookingNext(null)}
               onSaved={(appointment) => {
@@ -2796,6 +2798,7 @@ export function EncounterEditor({
                             appointmentId: appointment.id,
                             startsAt: appointment.startsAt,
                             professionalUserId: appointment.professionalUserId,
+                            professionalName: appointment.professionalName,
                             n: booked.n,
                             m: booked.m,
                           },

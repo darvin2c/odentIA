@@ -61,6 +61,12 @@ export interface BookingSeed {
   professionalUserId?: string | null
   /** Su nombre, por si no tiene horario en la sede (se sumó a la vista para una excepción). */
   professionalLabel?: string
+  /**
+   * La sesión siguiente de un tratamiento («Reservar la sesión 2» al firmar): con el
+   * servicio de la semilla, quien atendió sigue elegido aunque el servicio no lo
+   * ofrezca, y se dice por qué (QA del 8 nov).
+   */
+  keepProfessional?: boolean
   /** Instante del hueco ya elegido. */
   startsAt?: string
   /** Día en que se abre el selector. */
@@ -510,6 +516,8 @@ export function BookingDrawer({
     startsAt: seed.startsAt,
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: serviceId || undefined,
+    // Solo mientras el servicio es el de la sesión: otro servicio elegido a mano sigue la regla.
+    keepProfessional: Boolean(seed.keepProfessional && (seed.serviceId ?? "") === (serviceId ?? "")),
   })
   const { shown } = when
 
@@ -802,8 +810,8 @@ export function BookingDrawer({
               </field.Control>
             )}
           </form.AppField>
-          {/* Con quien se pidió fuera de la especialidad, lo dice su línea bajo «Profesional». */}
-          {when.attending && when.seedNote?.kind !== "otherSpecialty" ? (
+          {/* Mientras se mira a quien se pidió y no es como los demás, lo dice su línea bajo «Profesional». */}
+          {when.attending && !(when.seedNote && when.professionalFilter === when.input.professionalUserId) ? (
             <p role="status" className="-mt-2 text-xs text-muted-foreground">
               {`Solo se ofrecen las horas de quien atiende ${when.attending.specialtyName}.`}
             </p>

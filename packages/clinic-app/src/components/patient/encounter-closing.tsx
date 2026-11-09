@@ -634,7 +634,7 @@ export function FinalizedNextSessions({
   sessions: NextSession[]
   /** «Endodoncia · 46». */
   labelOf: (session: NextSession) => string
-  /** El nombre de quien atiende la cita: lo reservado dice con quién. */
+  /** El nombre de quien atiende la cita (nulo si no es del equipo): lo reservado dice con quién. */
   nameOf: (userId: string) => string | null | undefined
   /** Recibe el foco al reservar: el botón que abrió la reserva ya no está. */
   listRef?: React.Ref<HTMLUListElement>
@@ -642,6 +642,11 @@ export function FinalizedNextSessions({
   onBook: (planItemIds: string[]) => void
 }): React.JSX.Element | null {
   if (sessions.length === 0) return null
+  // Sin nombre conocido no se dice «con …»: nunca «con Profesional fuera del equipo».
+  const withWhom = (booked: BookedSession) => {
+    const name = booked.professionalName ?? nameOf(booked.professionalUserId)
+    return name ? ` con ${name}` : ""
+  }
   const toBook = sessions.filter((session) => session.toBook)
   const only = toBook.length === 1 ? toBook[0]?.toBook : null
   return (
@@ -656,7 +661,7 @@ export function FinalizedNextSessions({
               <Check aria-hidden className="size-4 shrink-0 self-center text-success" />
               <span>
                 Vuelve {visitWhenSaid(session.booked.startsAt)}
-                {nameOf(session.booked.professionalUserId) ? ` con ${nameOf(session.booked.professionalUserId)}` : ""} para{" "}
+                {withWhom(session.booked)} para{" "}
                 {sessionLine(labelOf(session), session.booked.n, session.booked.m)}.
               </span>
             </li>

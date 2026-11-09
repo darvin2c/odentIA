@@ -161,10 +161,21 @@ test("la sesión 2 viene con quien atendió aunque no tenga horario o no esté e
   const chips = booking.getByRole("group", { name: "Profesional" })
   const mine = chips.getByRole("button", { name: shortName(owner.user.name) })
   await expect(mine).toHaveAttribute("aria-pressed", "true")
+  const first = shortName(owner.user.name)
   await expect(
-    booking.getByText(`${owner.user.name} no tiene horario en esta sede. Toca una hora y se le reserva fuera de su horario, o elige a otra persona.`),
+    booking.getByText(
+      `${owner.user.name} no tiene horario en esta sede: toca una hora y la cita queda con ${first}, fuera de su horario. En esta sede, Endodoncia la atiende Dra. Clara Viera.`,
+    ),
   ).toBeVisible()
+  await expect(booking.getByRole("button", { name: "Cambiar a Dra. Clara" })).toBeVisible()
+  // La línea general de la especialidad no la contradice.
+  await expect(booking.getByText("Solo se ofrecen las horas de quien atiende Endodoncia.")).toHaveCount(0)
   await expect(chips.getByRole("button", { name: "Cualquiera" })).toHaveAttribute("aria-pressed", "false")
+  // Tocar una hora (la semana que viene, nada ya pasado) la propone fuera de su horario, con el aviso de siempre.
+  await booking.getByRole("button", { name: "Semana siguiente" }).click()
+  await booking.getByRole("group", { name: owner.user.name, exact: true }).click({ position: { x: 20, y: 80 } })
+  await expect(booking.getByText(`Es fuera del horario de ${owner.user.name}.`)).toBeVisible()
+  await expect(booking.getByRole("button", { name: "Reservar fuera de horario" })).toBeVisible()
   await shot("sesion-2-sin-horario")
   await booking.getByRole("button", { name: "Cancelar" }).click()
   await expect(booking).toBeHidden()
@@ -172,18 +183,28 @@ test("la sesión 2 viene con quien atendió aunque no tenga horario o no esté e
   // Con horario pero fuera de la especialidad: viene marcada con sus horas, y la línea dice quién la atiende.
   await enableAgenda(owner)
   await next.getByRole("button", { name: "Reservar la sesión 2" }).click()
-  // Otra semana: la disponibilidad se lee de nuevo, ya con su horario.
+  // Otra semana que no se miró: la disponibilidad se lee de nuevo, ya con su horario.
+  await booking.getByRole("button", { name: "Semana siguiente" }).click()
   await booking.getByRole("button", { name: "Semana siguiente" }).click()
   await expect(mine).toHaveAttribute("aria-pressed", "true")
   await expect(
-    booking.getByText(`${owner.user.name} no está en Endodoncia en esta sede: se le reserva igual. En esta sede, Endodoncia la atiende Dra. Clara Viera.`),
+    booking.getByText(`La cita queda con ${owner.user.name}, aunque no figura en Endodoncia en esta sede. En esta sede, Endodoncia la atiende Dra. Clara Viera.`),
   ).toBeVisible()
-  await expect(booking.getByRole("button", { name: "Elegir a Dra. Clara" })).toBeVisible()
+  await expect(booking.getByRole("button", { name: "Cambiar a Dra. Clara" })).toBeVisible()
   // La línea general de la especialidad no se repite.
   await expect(booking.getByText("Solo se ofrecen las horas de quien atiende Endodoncia.")).toHaveCount(0)
+  // «Cualquiera» es entre quienes atienden Endodoncia: el hueco no cae en quien está fuera sin decirlo.
+  await chips.getByRole("button", { name: "Cualquiera" }).click()
+  await expect(booking.getByText("Solo se ofrecen las horas de quien atiende Endodoncia.")).toBeVisible()
+  await expect(booking.getByText("con Dra. Clara Viera", { exact: true })).toBeVisible()
+  await mine.click()
+  await expect(mine).toHaveAttribute("aria-pressed", "true")
   const reserve = booking.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ })
   await expect(reserve).toBeVisible()
   await shot("sesion-2-fuera-de-la-especialidad")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("sesion-2-fuera-de-la-especialidad-telefono")
+  await page.setViewportSize({ width: 1280, height: 800 })
   await reserve.click()
   await expect(booking).toBeHidden()
   await expect(next.getByText(new RegExp(`^Vuelve el .+ con ${escapeRegExp(owner.user.name)} para Endodoncia unirradicular · 36 · sesión 2 de 2\\.$`))).toBeVisible()

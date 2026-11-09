@@ -69,6 +69,8 @@ export interface BookedSession {
   startsAt: string
   /** Con quién es la cita. */
   professionalUserId: string
+  /** Su nombre, cuando lo dio el servidor al reservarla aquí mismo. */
+  professionalName?: string
   n: number
   m: number
 }
