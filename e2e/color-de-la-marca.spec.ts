@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test"
 import { tenant } from "./env"
-import { call, expect, test } from "./fixtures"
+import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { latestHtmlFor } from "./mailpit"
 
 /**
  * El color de la marca (ADR 0162): quien configura lo elige en Datos de la clínica, se
@@ -136,6 +137,10 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   expect(["#fff", "#ffffff"]).toContain(await token(page, "--card"))
   expect(["#fff", "#ffffff"]).toContain(await token(page, "--sidebar"))
   expect(await token(page, "--muted-foreground")).toBe("#545454")
+  // Los campos se ven: un borde de 3:1 sobre la tarjeta, no solo un relleno gris.
+  expect(await token(page, "--input-border")).toBe("#868686")
+  const tradeName = page.getByLabel("Nombre comercial")
+  expect(await tradeName.evaluate((el) => getComputedStyle(el).borderTopColor)).toBe("rgb(134, 134, 134)")
   await settled(page)
   await testInfo.attach("naranja-claro", { body: await page.screenshot(), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
@@ -143,6 +148,44 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await settled(page)
   await testInfo.attach("naranja-oscuro", { body: await page.screenshot(), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // La invitación al equipo es de la clínica: el botón va en su naranja; la cabecera, en odentIA.
+  const invitee = `equipo-${org.slug}@test.dev`
+  const invited = await api(page, "POST", "/api/auth/organization/invite-member", org.slug, {
+    email: invitee,
+    role: "clinician",
+    organizationId: org.id,
+  })
+  expect(invited.status).toBe(200)
+  const invitation = await latestHtmlFor(invitee, "Te invitaron a")
+  expect(invitation).toContain("background-color:#cc4d0a;")
+  expect(invitation).toContain("cid:logotipo-claro@odentia")
+
+  // Sacar el color de una foto del letrero: se lee en el navegador y nada se guarda hasta elegir.
+  const photo = await page.evaluate(() => {
+    const canvas = document.createElement("canvas")
+    canvas.width = 200
+    canvas.height = 120
+    const context = canvas.getContext("2d")
+    if (!context) throw new Error("sin canvas")
+    context.fillStyle = "#dddddd"
+    context.fillRect(0, 0, 200, 120)
+    context.fillStyle = "#1d5fa8"
+    context.fillRect(40, 30, 120, 60)
+    return canvas.toDataURL("image/png").split(",")[1] ?? ""
+  })
+  await block.locator('input[type="file"]').setInputFiles({ name: "letrero.png", mimeType: "image/png", buffer: Buffer.from(photo, "base64") })
+  const fromPhoto = block.getByRole("group", { name: "De tu foto" })
+  await expect(fromPhoto.getByRole("button", { name: "Azul", exact: true })).toBeVisible()
+  await expect(fromPhoto.getByText("La foto no se guarda.", { exact: false })).toBeVisible()
+  // Tocar el letrero en la foto elige su color; la app sigue en naranja hasta «Usar este color».
+  await fromPhoto.getByRole("img").click({ position: { x: 20, y: 20 } })
+  await fromPhoto.getByRole("img").click()
+  await expect(fromPhoto.getByRole("button", { name: "Azul", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await expect(block.getByText("Aún no se guarda")).toBeVisible()
+  expect(await token(page, "--primary-fill")).toBe("#cc4d0a")
+  await testInfo.attach("de-una-foto", { body: await block.screenshot(), contentType: "image/png" })
+  await block.getByRole("button", { name: "Naranja", exact: true }).click()
 
   // Volver al de fábrica quita el color: la cabecera ya no lo escribe.
   await block.getByRole("button", { name: "Volver al turquesa de odentIA" }).click()

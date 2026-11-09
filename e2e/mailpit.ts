@@ -30,8 +30,22 @@ function summaries(value: unknown): MailpitMessageSummary[] {
   return value.messages
 }
 
+/** El HTML del último correo para esa dirección con ese asunto: para mirar cómo se ve, no solo su enlace. */
+export async function latestHtmlFor(email: string, subjectIncludes: string, timeoutMs = 20_000): Promise<string> {
+  let html = ""
+  await latestLinkFor(email, subjectIncludes, timeoutMs, (decoded) => {
+    html = decoded
+  })
+  return html
+}
+
 /** Busca en el buzón del caso, aunque haya más de 50 correos ajenos recientes. */
-export async function latestLinkFor(email: string, subjectIncludes: string, timeoutMs = 20_000): Promise<string> {
+export async function latestLinkFor(
+  email: string,
+  subjectIncludes: string,
+  timeoutMs = 20_000,
+  onHtml?: (html: string) => void,
+): Promise<string> {
   const base = process.env.MAILPIT_API
   if (!process.env.E2E_RUN_ID || !base) throw new Error("Ejecuta pnpm e2e para crear un entorno aislado")
   const query = new URLSearchParams({ query: `to:${email}`, start: "0", limit: "50" })
@@ -52,6 +66,7 @@ export async function latestLinkFor(email: string, subjectIncludes: string, time
         throw new Error("Contenido de correo Mailpit inválido")
       }
       const decoded = ("HTML" in result ? result.HTML as string : "").replaceAll("&amp;", "&")
+      onHtml?.(decoded)
       const text = "Text" in result ? result.Text as string : ""
       const href = decoded.match(/href="(https:[^"]+)"/)?.[1]
       if (href) return href
