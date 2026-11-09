@@ -70,7 +70,7 @@ export function ReturnDrawer({
 }: {
   open: boolean
   onClose: () => void
-  /** Nulo: una venta de mostrador (ADR 0172), sin cuenta donde dejarlo a favor. */
+  /** Nulo: una venta de mostrador (ADR 0173), sin cuenta donde dejarlo a favor. */
   patientId: string | null
   patientName: string
   ticketId: string

@@ -1,6 +1,6 @@
 {
-  "id": "9a58da6d-5ad7-4618-87f4-ed0a001e4ffd",
-  "prevId": "6e2e73de-441f-49f2-ac20-ff23f1f0d846",
+  "id": "7b752c62-cc42-4b6d-a48f-f3f0decb0216",
+  "prevId": "cec9f5cc-3932-43b4-9534-7d3881f97c09",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9999,6 +9999,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "informed_encounter_id": {
+          "name": "informed_encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10199,6 +10205,23 @@
           "columnsTo": [
             "system_key",
             "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consent_document_informed_encounter_fk": {
+          "name": "consent_document_informed_encounter_fk",
+          "tableFrom": "consent_document",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "informed_encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -42291,18 +42314,6 @@
         },
         "remake_reason": {
           "name": "remake_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ready_message_id": {
-          "name": "ready_message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ready_notice_note": {
-          "name": "ready_notice_note",
           "type": "text",
           "primaryKey": false,
           "notNull": false

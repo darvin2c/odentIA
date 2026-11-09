@@ -73,7 +73,7 @@ export interface TicketSnapshot {
   voidReason: string | null
   /**
    * Cómo se dice a quién es: «Paciente», «Cliente» (una venta de mostrador a
-   * alguien) o nulo, una venta de mostrador sin nombre (ADR 0172).
+   * alguien) o nulo, una venta de mostrador sin nombre (ADR 0173).
    */
   partyLabel: "Paciente" | "Cliente" | null
   /** El paciente, quien compró en el mostrador o «Venta de mostrador». */
@@ -114,7 +114,7 @@ export interface TicketSnapshot {
 export async function buildTicketSnapshot(
   tx: Db,
   orgId: string,
-  /** Nulo: el ticket de una venta de mostrador (ADR 0172). */
+  /** Nulo: el ticket de una venta de mostrador (ADR 0173). */
   patientId: string | null,
   documentId: string,
 ): Promise<TicketSnapshot> {
@@ -301,7 +301,7 @@ function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number
 
 /**
  * A quién es, en el rollo: «Paciente: …», «Cliente: …» o, en una venta de
- * mostrador sin nombre, «Venta de mostrador» solo (ADR 0172).
+ * mostrador sin nombre, «Venta de mostrador» solo (ADR 0173).
  */
 function partyLine(kit: DocumentKit, label: "Paciente" | "Cliente" | null, name: string) {
   kit.text(label ? [{ text: `${label}: `, face: "sansSemi" }, name] : [{ text: name, face: "sansSemi" }], {
@@ -551,7 +551,7 @@ export async function getRefundReceiptPdf(
 export async function renderReturnPdf(
   tx: Db,
   orgId: string,
-  /** Nulo: la devolución de una venta de mostrador (ADR 0172). */
+  /** Nulo: la devolución de una venta de mostrador (ADR 0173). */
   patientId: string | null,
   returnId: string,
   paper?: string | null,

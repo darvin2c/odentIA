@@ -489,7 +489,7 @@ const APPOINTMENT_VERSION = /\bversión \d+/g
  */
 const PAGE_CURSOR = /(?<![\w-])eyJ[\w-]+/g
 
-/** El número de un pedido («Pedido N.º 150», `ver_pedidos`, ADR 0171): no respalda «S/ 150». */
+/** El número de un pedido («Pedido N.º 150», `ver_pedidos`, ADR 0172): no respalda «S/ 150». */
 const ORDER_NUMBER = /\bN\.º \d+/g
 
 /** Lo que no se lee como dato en una fuente; se tapa sin mover las posiciones del texto. */

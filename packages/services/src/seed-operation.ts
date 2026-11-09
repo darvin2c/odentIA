@@ -602,7 +602,7 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
         requestId: randomUUID(),
       })
   }
-  // Y hoy, quien no es paciente se llevó lo que se vende sin abrir una ficha (ADR 0172).
+  // Y hoy, quien no es paciente se llevó lo que se vende sin abrir una ficha (ADR 0173).
   await seedCounterSales(tx, {
     orgId,
     ownerUserId,

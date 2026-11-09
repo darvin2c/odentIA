@@ -2824,7 +2824,7 @@ async function collectedApplications(
     .where(and(...filters))
   return rows.flatMap((r) => {
     const appValue = orgPartValue(r.app.amountCents, r.payment, money)
-    // Lo de una atención siempre es de una ficha: una venta de mostrador no tiene (ADR 0172).
+    // Lo de una atención siempre es de una ficha: una venta de mostrador no tiene (ADR 0173).
     const patientId = r.app.patientId
     if (!appValue || patientId === null) return []
     return [
@@ -4498,7 +4498,7 @@ export async function getDebts(
     outstandingOnly: true,
     ...(query.patientIds ? { patientIds: query.patientIds } : {}),
   })
-  // Una venta de mostrador se paga entera al venderse (ADR 0172): nunca deja deuda ni es de una ficha.
+  // Una venta de mostrador se paga entera al venderse (ADR 0173): nunca deja deuda ni es de una ficha.
   const live = rows.flatMap((r) =>
     r.outstandingCents > 0 && r.charge.patientId !== null ? [{ ...r, patientId: r.charge.patientId }] : [],
   )
@@ -4856,7 +4856,7 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
     {
       ticketId: string | null
       ticketNumber: number | null
-      /** Nulo en una venta de mostrador (ADR 0172): entonces el nombre es el de quien compró. */
+      /** Nulo en una venta de mostrador (ADR 0173): entonces el nombre es el de quien compró. */
       patientId: string | null
       patientName: string
       exchangeRate: string | null
@@ -4936,7 +4936,7 @@ async function countedMovements(tx: Db, orgId: string, shiftId: string) {
 export interface VoidedTicketOfDay {
   ticketId: string
   ticketNumber: number
-  /** Nulo en una venta de mostrador (ADR 0172): el nombre es el de quien compró. */
+  /** Nulo en una venta de mostrador (ADR 0173): el nombre es el de quien compró. */
   patientId: string | null
   patientName: string
   currency: string
@@ -5381,7 +5381,7 @@ export interface TicketListQuery {
 export interface TicketListRow {
   id: string
   number: number
-  /** Nulo en una venta de mostrador (ADR 0172): `displayName` es quien compró o «Venta de mostrador». */
+  /** Nulo en una venta de mostrador (ADR 0173): `displayName` es quien compró o «Venta de mostrador». */
   patientId: string | null
   /** La persona que compró en el mostrador, si se eligió: su página se abre desde la fila. */
   buyerContactId: string | null
@@ -5467,7 +5467,7 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
   // El nombre y el documento como se congelaron en el ticket (un nombre cambiado después también encuentra).
   const frozenName = sql`${paymentTicket.snapshot}->'patient'->>'displayName'`
   const frozenDocument = sql`${paymentTicket.snapshot}->'patient'->>'docNumber'`
-  // Una venta de mostrador (ADR 0172) se busca por quien compró o por cómo se llama.
+  // Una venta de mostrador (ADR 0173) se busca por quien compró o por cómo se llama.
   const frozenBuyer = sql`${paymentTicket.snapshot}->'buyer'->>'displayName'`
   const counterLabel = sql`case when ${paymentTicket.patientId} is null then ${COUNTER_SALE_LABEL} end`
 

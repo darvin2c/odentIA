@@ -79,7 +79,7 @@ const reasonInput = z
   })
   .strict()
 
-// Venta de mostrador (ADR 0172): productos sin ficha, a una persona elegida, a un nombre o a nadie.
+// Venta de mostrador (ADR 0173): productos sin ficha, a una persona elegida, a un nombre o a nadie.
 const counterSaleInput = z
   .object({
     branchId: z.uuid({ error: "Elige la sede de la venta" }),
@@ -357,7 +357,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  // --- Venta de mostrador (ADR 0172) -------------------------------------------------
+  // --- Venta de mostrador (ADR 0173) -------------------------------------------------
   // Productos sin ficha: el ticket, la caja y el almacén como en «Cobrar». Lo que se hace después
   // con su ticket (anular, devolver, imprimir) va por aquí; uno con paciente no existe por aquí.
   app.post("/counter-sales", async (c) => {

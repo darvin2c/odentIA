@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { routeToolsFor } from "./route.js"
 
 /**
- * «¿Ya están mis lentes?» (ADR 0171): donde la clínica trabaja con pedidos, los
+ * «¿Ya están mis lentes?» (ADR 0172): donde la clínica trabaja con pedidos, los
  * caminos donde se pregunta por ellos traen `ver_pedidos`; donde no, nada cambia.
  */
 describe("los pedidos en el camino del turno", () => {

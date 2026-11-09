@@ -12,7 +12,7 @@ import { exchangePortalToken, listPortalOrders, requirePortalSession } from "../
 import { appDb, insertOrg, ownerDb, setupTestDb } from "../test-setup.js"
 
 /**
- * «Tus pedidos» en el portal (entrega 5 de vistIA, ADR 0171): lo que se encargó,
+ * «Tus pedidos» en el portal (entrega 5 de vistIA, ADR 0172): lo que se encargó,
  * si ya está listo y lo que falta pagar, con «Su cuenta»; quien no la ve no los ve.
  */
 setupTestDb()

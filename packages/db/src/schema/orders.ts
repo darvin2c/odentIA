@@ -7,7 +7,7 @@ import { product } from "./inventory.js"
 import { branch } from "./org.js"
 
 /**
- * El pedido (ADR 0170): lo que la clínica encarga a su taller o a un laboratorio
+ * El pedido (ADR 0171): lo que la clínica encarga a su taller o a un laboratorio
  * para entregárselo a la persona. Es común a los productos: vistIA lo usa con los
  * lentes (entrega 4 del plan) y odentIA podrá usarlo con sus trabajos de
  * laboratorio. Pocos estados que dicen hechos de la clínica, con quién marcó cada
@@ -45,7 +45,7 @@ export const jobOrder = pgTable(
     /** El pedido que este rehace, con los mismos cargos (no se cobra otra vez); con su motivo. */
     remakeOf: uuid("remake_of"),
     remakeReason: text("remake_reason"),
-    /** El mensaje de «Pedido listo» (ADR 0171): la pantalla dice si salió, si llegó o si no se sabe. */
+    /** El mensaje de «Pedido listo» (ADR 0172): la pantalla dice si salió, si llegó o si no se sabe. */
     readyMessageId: uuid("ready_message_id"),
     /** Por qué no salió el aviso, si no salió: para que el equipo avise por otra vía. */
     readyNoticeNote: text("ready_notice_note"),

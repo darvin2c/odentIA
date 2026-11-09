@@ -1,12 +1,12 @@
 # Procesos clínicos de vistIA
 
-El catálogo que supervisa la voz clínica en vistIA, el producto de las ópticas (ADR 0168). Quien atiende es el **optómetra** (en el Perú, el tecnólogo médico en optometría, con su colegiatura del CTMP), no el oftalmólogo: mide la vista, hace la receta de lentes y deriva al oftalmólogo lo que lo necesita. Después de examinar, la óptica vende, encarga los lentes al taller y avisa cuando están listos. Por eso el recorrido clínico sigue hasta que la persona se lleva sus lentes y ve bien con ellos.
+El catálogo que supervisa la voz clínica en vistIA, el producto de las ópticas (ADR 0169). Quien atiende es el **optómetra** (en el Perú, el tecnólogo médico en optometría, con su colegiatura del CTMP), no el oftalmólogo: mide la vista, hace la receta de lentes y deriva al oftalmólogo lo que lo necesita. Después de examinar, la óptica vende, encarga los lentes al taller y avisa cuando están listos. Por eso el recorrido clínico sigue hasta que la persona se lleva sus lentes y ve bien con ellos.
 
 **Cómo se usa:** igual que `odontologia.md` y `medicina.md`. Las comprobaciones se marcan como cumple, no cumple o no se pudo ver; los huecos conocidos se miran por lo que cuestan; la lista crece con «Para el catálogo». Lo que rodea a la atención está en `comunes.md`.
 
-**Dónde está el código.** En `main`, como odentIA y latidIA. Rutas: `O` = `packages/optical/src/`, `SO` = `packages/services/src/optical/`, `AO` = `apps/optical-clinic/src/product/optical/`. ADR 0169 a 0172.
+**Dónde está el código.** En `main`, como odentIA y latidIA. Rutas: `O` = `packages/optical/src/`, `SO` = `packages/services/src/optical/`, `AO` = `apps/optical-clinic/src/product/optical/`. ADR 0168 a 0173.
 
-**La regla que más pesa:** un signo, un eje o un ojo cambiado es un lente mal hecho. Por eso Clío no dicta en vistIA (ADR 0168). La voz revisa que el dato de cada ojo (OD y OI) sea el mismo en el examen, la receta, su PDF, la copia del pedido, lo que ve el taller y el portal.
+**La regla que más pesa:** un signo, un eje o un ojo cambiado es un lente mal hecho. Por eso Clío no dicta en vistIA (ADR 0169). La voz revisa que el dato de cada ojo (OD y OI) sea el mismo en el examen, la receta, su PDF, la copia del pedido, lo que ve el taller y el portal.
 
 ---
 
@@ -38,7 +38,7 @@ La persona entra sin cita y pide que le midan la vista.
 
 ### P-OPT-15 El mostrador con mucha gente
 
-**Dónde:** «Venta de mostrador» en Finanzas (ADR 0172), el escáner del inventario y la caja.
+**Dónde:** «Venta de mostrador» en Finanzas (ADR 0173), el escáner del inventario y la caja.
 
 - [ ] Vender un producto sin ficha (lentes de sol, de lectura ya hechos, estuches, líquidos o cordones) son pocos toques: escanear o buscar, cobrar y dar el ticket.
 - [ ] Unos lentes de lectura ya hechos se venden por mostrador, sin receta, porque son un producto. Unos lentes graduados a medida no se venden sin receta.
@@ -115,7 +115,7 @@ Una persona `QA` nueva hace las etapas 1 a 5 el mismo día, marcando los pasos d
 Común con los demás productos (P-ODO-01, P-MED-01).
 
 - [ ] Un menor queda con su representante, y el examen dice quién lo acompañó.
-- [ ] Quien solo compra en el mostrador no necesita ficha (ADR 0172), y una venta de mostrador no entra en la cuenta de un paciente.
+- [ ] Quien solo compra en el mostrador no necesita ficha (ADR 0173), y una venta de mostrador no entra en la cuenta de un paciente.
 
 ## P-OPT-02 Examen de la vista
 
@@ -133,7 +133,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] En un niño: quién lo acompaña (hoy es opcional y no mira la edad), si se hizo la refracción con cicloplejía (hoy no hay campo) y la agudeza por ojo para detectar la ambliopía.
 - [ ] El examen sale igual en la Historia, el PDF y la copia de la historia. En FHIR hoy salen solo Observations del examen: ni la receta como VisionPrescription, ni la distancia pupilar, ni quién acompaña.
 
-**Fuentes:** ISO 21987 (pasos de graduación); HL7 FHIR VisionPrescription; ADR 0169.
+**Fuentes:** ISO 21987 (pasos de graduación); HL7 FHIR VisionPrescription; ADR 0170.
 
 ## P-OPT-03 Derivar al oftalmólogo
 
@@ -146,7 +146,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] Una diferencia grande con la receta anterior, una diferencia grande entre los dos ojos (ambliopía en un niño, aunque los dos pasen 20/40) o una visión que no mejora con estenopeico también sugieren derivar. Hoy `referralSigns` no mira nada de esto.
 
 **Huecos conocidos:** la constancia de que se le explicó la derivación y si la persona fue (el rechazo informado está en P-COM-13); no compara con la receta anterior ni entre ojos.
-**Fuentes:** ADR 0169; guías de práctica de la AOA (American Optometric Association) para derivar.
+**Fuentes:** ADR 0170; guías de práctica de la AOA (American Optometric Association) para derivar.
 
 ## P-OPT-04 Receta de lentes
 
@@ -164,7 +164,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] El cliente la ve en «Tus documentos» del portal; la externa, solo después de verificada.
 
 **Huecos conocidos:** cuánto dura de verdad la receta (adulto, niño, lentes de contacto) se confirma con la primera óptica real.
-**Fuentes:** ISO 21987; HL7 FHIR VisionPrescription; ADR 0169.
+**Fuentes:** ISO 21987; HL7 FHIR VisionPrescription; ADR 0170.
 
 ## P-OPT-05 Lentes de contacto
 
@@ -178,7 +178,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 
 ## P-OPT-06 La venta de lentes y el pedido
 
-**Dónde:** «Vender lentes» y Pedidos (`AO/orders-section.tsx`, `AO/orders.ts`, `packages/services/src/job-orders.ts`, `packages/db/src/schema/orders.ts`); ADR 0170.
+**Dónde:** «Vender lentes» y Pedidos (`AO/orders-section.tsx`, `AO/orders.ts`, `packages/services/src/job-orders.ts`, `packages/db/src/schema/orders.ts`); ADR 0171.
 
 - [ ] La venta toma la receta vigente. Hoy solo ofrece la más reciente de cada tipo (`SO/lens-prescriptions.ts`): una segunda receta de anteojos (la de cerca o la ocupacional) no se puede usar.
 - [ ] La montura sale del inventario (con el escáner o la búsqueda) y las lunas van a precio libre o de la lista.
@@ -203,7 +203,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 
 ## P-OPT-08 «Tus lentes están listos» y la entrega
 
-**Dónde:** ADR 0171; el aviso al marcar «Listo», `ver_pedidos` de Sofi y «Tus pedidos» en el portal.
+**Dónde:** ADR 0172; el aviso al marcar «Listo», `ver_pedidos` de Sofi y «Tus pedidos» en el portal.
 
 - [ ] El aviso sale a quien recibe los avisos de la persona y el pedido dice si salió, llegó o falló. Nunca se reenvía solo: se reenvía con un toque el que falló y, el dudoso, después de confirmarlo con la persona.
 - [ ] Sofi dice en qué paso está cada pedido y cuánto falta pagar, esto último solo a quien puede oírlo. Nunca dice la receta.
@@ -251,7 +251,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 
 ## P-OPT-13 Venta de mostrador: sus reglas
 
-**Dónde:** «Venta de mostrador» en Finanzas (ADR 0172). Cómo rinde con mucha gente está en P-OPT-15; aquí van sus reglas.
+**Dónde:** «Venta de mostrador» en Finanzas (ADR 0173). Cómo rinde con mucha gente está en P-OPT-15; aquí van sus reglas.
 
 - [ ] Se vende un estuche, un líquido o unas gotas sin ficha, se paga entero y deja ticket.
 - [ ] Nada clínico entra por aquí: unos lentes con graduación, y los de contacto (también los de colores, que son dispositivo médico), no se venden por mostrador sin receta. Hoy no hay ninguna regla ni marca en el producto que lo impida (`counter-sale.ts`), y la demo vende lentes de contacto mensuales y de colores como cualquier producto.

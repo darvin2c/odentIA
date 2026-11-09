@@ -2287,7 +2287,7 @@ export const patientCharge = pgTable(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     /**
-     * Nulo solo en una venta de mostrador (ADR 0172): un producto que se cobra
+     * Nulo solo en una venta de mostrador (ADR 0173): un producto que se cobra
      * sin ficha, a un contacto, a un nombre o a nadie. Nunca un tratamiento.
      */
     patientId: uuid("patient_id").references(() => patient.id),
@@ -2395,7 +2395,7 @@ export const patientCharge = pgTable(
       "patient_charge_product_check",
       sql`(${table.productId} IS NULL) = (${table.productQuantity} IS NULL) AND (${table.productQuantity} IS NULL OR ${table.productQuantity} BETWEEN 1 AND 9999)`,
     ),
-    // Sin ficha solo se vende un producto: nada clínico ni del plan (ADR 0172).
+    // Sin ficha solo se vende un producto: nada clínico ni del plan (ADR 0173).
     check(
       "patient_charge_counter_check",
       sql`${table.patientId} IS NOT NULL OR (${table.productId} IS NOT NULL AND ${table.planItemId} IS NULL AND ${table.budgetItemId} IS NULL AND ${table.encounterProcedureId} IS NULL AND ${table.promotionId} IS NULL AND ${table.commissionSessions} IS NULL)`,
@@ -2408,7 +2408,7 @@ export const patientPayment = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    /** Nulo solo en el pago de una venta de mostrador, siempre con su ticket (ADR 0172). */
+    /** Nulo solo en el pago de una venta de mostrador, siempre con su ticket (ADR 0173). */
     patientId: uuid("patient_id").references(() => patient.id),
     /** Ticket del cobro atómico (un ticket agrupa un pago por medio). */
     ticketId: uuid("ticket_id").references(() => paymentTicket.id),
@@ -2481,7 +2481,7 @@ export const patientPaymentApplication = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    /** Nulo solo dentro de una venta de mostrador (ADR 0172). */
+    /** Nulo solo dentro de una venta de mostrador (ADR 0173). */
     patientId: uuid("patient_id").references(() => patient.id),
     paymentId: uuid("payment_id")
       .notNull()
@@ -2522,7 +2522,7 @@ export const patientPaymentRefund = pgTable(
     organizationId: orgFk("organization_id"),
     /**
      * Nulo solo al devolver una venta de mostrador: sin cuenta no hay saldo a
-     * favor que devolver, así que sale siempre de una devolución (ADR 0172).
+     * favor que devolver, así que sale siempre de una devolución (ADR 0173).
      */
     patientId: uuid("patient_id").references(() => patient.id),
     paymentId: uuid("payment_id")
@@ -2573,7 +2573,7 @@ export const paymentTicket = pgTable(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     /**
-     * Nulo en una venta de mostrador (ADR 0172): productos cobrados sin abrir
+     * Nulo en una venta de mostrador (ADR 0173): productos cobrados sin abrir
      * una historia. Entonces quien compra es un contacto (`buyerContactId`), un
      * nombre escrito (`buyerName`) o nadie («Venta de mostrador»).
      */
@@ -2627,7 +2627,7 @@ export const paymentTicket = pgTable(
     index("payment_ticket_org_buyer_idx")
       .on(table.organizationId, table.buyerContactId)
       .where(sql`${table.buyerContactId} IS NOT NULL`),
-    // Venta de mostrador (ADR 0172): sin ficha no hay saldo a favor que usar ni quién
+    // Venta de mostrador (ADR 0173): sin ficha no hay saldo a favor que usar ni quién
     // pague por el paciente; quien compra es un contacto o un nombre, nunca los dos.
     check(
       "payment_ticket_counter_check",
@@ -2660,7 +2660,7 @@ export const paymentReturn = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    /** Nulo al devolver una venta de mostrador: entonces siempre se le paga (ADR 0172). */
+    /** Nulo al devolver una venta de mostrador: entonces siempre se le paga (ADR 0173). */
     patientId: uuid("patient_id").references(() => patient.id),
     /** El ticket del que sale: sigue valiendo, con la devolución anotada. */
     ticketId: uuid("ticket_id").notNull(),

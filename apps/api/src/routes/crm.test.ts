@@ -870,9 +870,10 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(wa).toMatchObject({
     webhookVerifiedAt: null,
     health: null,
-    // Los cinco con el botón de «Su enlace» no se piden sin la dirección pública de la clínica,
-    // y «Documento listo» espera el perfil de la clínica para armar su PDF de muestra (ADR 0156).
-    messages: { aprobados: 0, enRevision: 14, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 6 },
+    // Los siete con el botón de «Su enlace» (con «Antes de tu cita» y «Firma tu consentimiento»)
+    // no se piden sin la dirección pública de la clínica, y «Documento listo» espera el perfil
+    // de la clínica para armar su PDF de muestra (ADR 0156).
+    messages: { aprobados: 0, enRevision: 14, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 8 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -926,6 +927,8 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   expect(items.map((item) => [item.id, item.origin])).toEqual([
     ["recordatorio_cita", "agente"],
     ["recordatorio_cita_datos", "agente"],
+    // «Antes de tu cita» recuerda la cita a quien tiene cosas por hacer antes de venir.
+    ["recordatorio_cita_pendientes", "agente"],
     ["recordatorio_cita_confirmada", "agente"],
     ["cita_sin_llegar", "agente"],
     ["aviso_cita_reservada", "agente"],
@@ -942,6 +945,8 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     // Los de «Su enlace» los envía quien trabaja el plan (fase 3, decisión 8).
     ["presupuesto_listo", "plan"],
     ["su_enlace", "plan"],
+    // «Firma tu consentimiento» lo envía el equipo con «Enviar para firmar».
+    ["consentimiento_por_firmar", "plan"],
     // «Ver respuesta» lo envía el sistema cuando el equipo responde pasadas las 24 horas (R1).
     ["ver_respuesta", "plan"],
     // «Recibido desde su enlace» lo envía el sistema cuando WhatsApp ya no deja responderle (ADR 0129).
@@ -987,7 +992,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(20)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(22)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {

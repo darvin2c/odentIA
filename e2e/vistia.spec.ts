@@ -11,7 +11,7 @@ import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
 /**
- * vistIA abre en su dominio (ADR 0168) y vende lentes con su pedido (ADR 0170):
+ * vistIA abre en su dominio (ADR 0169) y vende lentes con su pedido (ADR 0171):
  * la óptica se ve con su marca y tiene «Pedidos»; la receta sale del examen de la
  * vista, se vende con ella (las lunas a medida, con un adelanto en efectivo) y el
  * pedido avanza hasta «Listos». Taller ve el pedido con la copia de la receta y lo

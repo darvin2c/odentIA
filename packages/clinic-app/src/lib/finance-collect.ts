@@ -229,7 +229,7 @@ export interface CollectSnapshotMethod {
  * opcionales faltan en tickets emitidos antes de congelarlos.
  */
 export interface CollectSnapshot {
-  /** Nulo en una venta de mostrador (ADR 0172): entonces dice `buyer`. */
+  /** Nulo en una venta de mostrador (ADR 0173): entonces dice `buyer`. */
   patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null } | null
   /** Quién compró en una venta de mostrador: un contacto o un nombre escrito; nulo si nadie. */
   buyer?: { contactId: string | null; displayName: string } | null
@@ -278,7 +278,7 @@ export interface CollectSnapshotTaxes {
 /** Fila real de `payment_ticket` con su snapshot inmutable. */
 export interface CollectTicketRow {
   id: string
-  /** Nulo en una venta de mostrador (ADR 0172). */
+  /** Nulo en una venta de mostrador (ADR 0173). */
   patientId: string | null
   /** La persona que compró en el mostrador, si se eligió. */
   buyerContactId?: string | null
@@ -380,7 +380,7 @@ export interface VoidTicketResult {
 }
 
 /**
- * Lo que se hace con el ticket de una venta de mostrador (ADR 0172) va por
+ * Lo que se hace con el ticket de una venta de mostrador (ADR 0173) va por
  * Finanzas, sin ficha: `/finance/counter-sales/:ticketId/…`.
  */
 function ticketBase(patientId: string | null, ticketId: string): string {
@@ -560,7 +560,7 @@ export function returnPdfPath(patientId: string | null, returnId: string, ticket
   return `/api/patients/${patientId}/financial-document-pdf?${params}`
 }
 
-// --- Venta de mostrador (ADR 0172): POST /finance/counter-sales ---------------------
+// --- Venta de mostrador (ADR 0173): POST /finance/counter-sales ---------------------
 
 /** El nombre con que se dice una venta de mostrador sin nadie que la compre. */
 export const COUNTER_SALE_LABEL = "Venta de mostrador"

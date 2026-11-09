@@ -372,7 +372,7 @@ export async function prescriptionRecordLines(tx: Db, orgId: string, patientId: 
 }
 
 /**
- * Las recetas vigentes para vender (ADR 0170): la de anteojos y la de lentes de
+ * Las recetas vigentes para vender (ADR 0171): la de anteojos y la de lentes de
  * contacto, con su graduación por ojo y su aviso si venció o no se verificó.
  */
 export async function saleLensPrescriptions(tx: Db, orgId: string, patientId: string): Promise<SaleReference[]> {

@@ -43,7 +43,7 @@ export type FinanceAccess = ReturnType<typeof financeAccess>
 
 /**
  * En el escritorio, la acción principal de la sección y lo demás en ⋯. En Caja y
- * Cobros, junto a «Cobrar», «Venta de mostrador» (ADR 0172): productos sin ficha;
+ * Cobros, junto a «Cobrar», «Venta de mostrador» (ADR 0173): productos sin ficha;
  * en el teléfono va en ⋯.
  */
 export function financeHeader(

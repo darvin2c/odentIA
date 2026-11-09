@@ -21,6 +21,7 @@ Lo que no se negocia: la persona es única (0001), nunca se une a dos personas p
 - **Las mismas operaciones de siempre.** Cada persona se crea con `createPatient` o `createPerson`, con sus validaciones y su auditoría, y quien habla por ella se vincula como en el registro. Quien ya está en la clínica con ese documento no se toca.
 - **Repetir no duplica.** Cada fila del origen tiene una clave estable (su número de historia o una huella de su identidad), y lo que entró queda en `admin.clinic_import_row`. Una tanda repetida o una carga cortada sigue sin crear otra ficha.
 - **Solo administración.** Muestra y escribe datos de pacientes. Va por la API de la administración, con su segundo factor, y queda en la auditoría administrativa con la huella del plan.
+- **Cómo llega la lista (2026-11-09).** Se pide con una carta de bienvenida en PDF, con la marca del producto y su titular, que arma la skill (`import:carta`). Pide también los datos de la clínica (empresa, sedes, unidades dentales o consultorios, equipo, servicios y precios) para cargar todo lo posible. La clínica los envía por correo al buzón de soporte de su marca. El correo y su adjunto se borran al terminar la carga y, como máximo, a los 30 días de recibido: la carta lo promete y la skill lo cumple. El adjunto se abre solo si la clínica aceptó el contrato de encargo; que la administración muestre si lo aceptó queda pendiente.
 
 ## Alternativas descartadas
 
@@ -29,15 +30,17 @@ Lo que no se negocia: la persona es única (0001), nunca se une a dos personas p
 - **Que Claude lea el archivo y escriba el plan fila por fila:** no escala a miles de filas, no es repetible y pondría cada dato en el modelo. El mapa más el código dan el mismo plan cada vez.
 - **«Pegar mi lista» de pacientes en la clínica, ya:** es el destino si los formatos se repiten, pero hoy se diseñaría sin conocerlos.
 - **WebMCP como vía de carga (issue 88):** el estándar todavía cambia y no resuelve leer los archivos de la clínica.
+- **Que la clínica suba la lista dentro de odentIA:** es lo más seguro (sin otro encargado, borrado automático y registro de quién la abrió), pero hay que construir la subida, la descarga en la administración y el borrado. Queda para cuando lleguen clínicas reales; el correo sirve mientras tanto.
+- **Una carpeta compartida por clínica:** suma un proveedor y permisos a mano por cada clínica, sin ventaja sobre el correo.
 
 ## Consecuencias
 
 - **Beneficio:** una clínica empieza con sus pacientes y sus vínculos, sin duplicados y con cada fila explicada: entró, ya estaba, no entró y por qué, o quedó fuera al preparar.
 - **Sacrificio:** depende del equipo de odentIA (no es autoservicio). No lee el Excel antiguo (`.xls`: se guarda como `.xlsx`), PDF ni fotos. Un teléfono fijo sin código no se puede llevar a E.164 y se carga sin él solo si el mapa lo pide. El nombre en una sola columna no se separa: queda en «Faltan datos».
 - **Orden de los datos:** primero la clínica (sedes, equipo, servicios) y los pacientes; las citas y los saldos el día de corte; la historia anterior, después. Las etapas y lo que hoy se carga están en la skill.
-- **Pendiente legal**, antes de la primera clínica real: el contrato de encargo aceptado por la clínica y Anthropic entre los subencargados.
+- **Pendiente legal**, antes de la primera clínica real: el contrato de encargo aceptado por la clínica, y Anthropic y el proveedor del buzón de soporte entre los subencargados.
 - **Revisar** cuando se repitan los formatos (pasar a «Pegar mi lista» en la clínica) o cuando haga falta traer citas, saldos o historia.
 
 ## Referencias
 
-`packages/services/src/clinic-import-plan.ts`, `clinic-import-prepare.ts`, `clinic-import-cli.ts` y `clinic-import.ts`; el lector de `.xlsx` en `packages/db/src/xlsx.ts`, el mismo de la CIE-10 del MINSA (0103); `packages/db/src/schema/admin-imports.ts` y la migración `0017_carga_de_datos.sql`; `apps/api/src/routes/admin-imports.ts`; `apps/admin/src/components/org-import.tsx`; `.claude/skills/odentia-carga/SKILL.md`.
+`packages/services/src/clinic-import-plan.ts`, `clinic-import-prepare.ts`, `clinic-import-cli.ts`, `clinic-import-letter.ts` y `clinic-import.ts`; el lector de `.xlsx` en `packages/db/src/xlsx.ts`, el mismo de la CIE-10 del MINSA (0103); `packages/db/src/schema/admin-imports.ts` y la migración `0017_carga_de_datos.sql`; `apps/api/src/routes/admin-imports.ts`; `apps/admin/src/components/org-import.tsx`; `.claude/skills/odentia-carga/SKILL.md`.

@@ -1,5 +1,5 @@
 /**
- * «Venta de mostrador» (ADR 0172): cobrar productos sin ficha —unos lentes de
+ * «Venta de mostrador» (ADR 0173): cobrar productos sin ficha —unos lentes de
  * sol, unas gotas, un cepillo— a una persona, a un nombre escrito o a nadie.
  * Lo que se vende sale de la búsqueda de «Agregar producto» (también con el
  * lector de códigos de barras), con su cantidad; se paga entero, con uno o

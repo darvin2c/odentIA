@@ -1,5 +1,5 @@
 /**
- * Venta de mostrador (ADR 0172): productos cobrados sin ficha, a un contacto, a
+ * Venta de mostrador (ADR 0173): productos cobrados sin ficha, a un contacto, a
  * un nombre o a nadie. Mismo ticket, misma serie, misma caja y mismas lecturas
  * que un cobro; nunca deja deuda ni saldo a favor, y no se mezcla con la cuenta
  * de un paciente.

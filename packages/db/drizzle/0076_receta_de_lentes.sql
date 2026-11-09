@@ -42,7 +42,7 @@ ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_phot
 CREATE INDEX "lens_prescription_patient_idx" ON "optical"."lens_prescription" USING btree ("organization_id","patient_id","issued_on");--> statement-breakpoint
 CREATE UNIQUE INDEX "lens_prescription_encounter_kind_uidx" ON "optical"."lens_prescription" USING btree ("organization_id","encounter_id","kind") WHERE "optical"."lens_prescription"."encounter_id" IS NOT NULL AND "optical"."lens_prescription"."voided_at" IS NULL;--> statement-breakpoint
 
--- Las reglas de la receta de lentes de vistIA (ADR 0169). Lo de vistIA vive en su
+-- Las reglas de la receta de lentes de vistIA (ADR 0170). Lo de vistIA vive en su
 -- esquema y el SQL a mano lo nombra sin esquema, como lo dental: el search_path lo
 -- incluye. Vale para cada conexión nueva; set_config cubre esta misma.
 DO $$

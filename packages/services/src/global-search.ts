@@ -126,7 +126,7 @@ export type SearchOwnerKind =
   | "respuesta"
   | "gasto"
   | "tarea"
-  /** El ticket de una venta de mostrador (ADR 0172): no es de nadie, es su propia fila. */
+  /** El ticket de una venta de mostrador (ADR 0173): no es de nadie, es su propia fila. */
   | "comprobante"
 
 export interface SearchOwner {
@@ -495,7 +495,7 @@ export async function searchEverything(
       order by at desc limit ${PER_TYPE}`)
     for (const row of budgets) addToPerson(String(row.person_id), budgetItem(row, true))
   }
-  // Una venta de mostrador (ADR 0172) no es de ninguna ficha: se busca por su número o por quien
+  // Una venta de mostrador (ADR 0173) no es de ninguna ficha: se busca por su número o por quien
   // compró (el contacto elegido o el nombre escrito) y es su propia fila, abierta en Cobros.
   const counterTickets =
     can("finance.read") && on("dinero") && (docNumber != null || !digits)

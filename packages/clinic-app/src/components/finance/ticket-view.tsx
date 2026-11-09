@@ -67,7 +67,7 @@ export function ticketDisplayNumber(number: number): string {
 
 /**
  * PDF del servidor para un ticket: sin `paper` sale en la térmica configurada. El de
- * una venta de mostrador (ADR 0172), sin ficha, sale de Finanzas.
+ * una venta de mostrador (ADR 0173), sin ficha, sale de Finanzas.
  */
 export function ticketPdfPath(patientId: string | null, ticketId: string): string {
   if (patientId === null) return `/api/finance/counter-sales/${ticketId}/pdf`
@@ -186,7 +186,7 @@ export function TicketView({
   const second = useOrgSecondCurrency()
 
   const snapshot = ticket.snapshot
-  // Una venta de mostrador (ADR 0172): sin ficha ni cuenta, a una persona, a un nombre o a nadie.
+  // Una venta de mostrador (ADR 0173): sin ficha ni cuenta, a una persona, a un nombre o a nadie.
   const counter = ticket.patientId === null
   const party = ticketPartyOf(snapshot)
   const currency = ticket.currency

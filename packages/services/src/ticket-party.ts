@@ -1,5 +1,5 @@
 /**
- * A quién es un ticket (ADR 0172): su paciente o, en una venta de mostrador,
+ * A quién es un ticket (ADR 0173): su paciente o, en una venta de mostrador,
  * quien compró (un contacto o un nombre escrito) o nadie. Una sola regla para
  * la pantalla, el PDF, las listas de Finanzas y el buscador.
  */

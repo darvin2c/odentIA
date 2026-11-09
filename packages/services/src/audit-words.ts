@@ -330,7 +330,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "cash.egreso_recorded": say("Registró una salida de caja"),
   "cash.commission_returned": say("Registró en la caja la devolución de comisiones"),
   "charge.created": say("Registró un cargo"),
-  // El pedido (ADR 0170 y 0171).
+  // El pedido (ADR 0171 y 0172).
   "job_order.created": say("Registró un pedido"),
   "job_order.advanced": say("Marcó cómo va un pedido"),
   "job_order.voided": say("Anuló un pedido"),

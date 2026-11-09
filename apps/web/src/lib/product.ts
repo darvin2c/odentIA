@@ -1,6 +1,6 @@
 // La web de cada producto: el mismo servidor publica una web por producto, la de odentIA, la de
 // latidIA (`VITE_PRODUCT=medical`) y la de vistIA (`VITE_PRODUCT=optical`), cada una en su dominio.
-// Lo que cambia de una a otra se decide con un mapa completo por producto (ADR 0167): al sumar uno,
+// Lo que cambia de una a otra se decide con un mapa completo por producto (ADR 0168): al sumar uno,
 // el compilador señala cada lugar que tiene que decir algo de él. Las webs con producto propio sirven
 // solo sus páginas (`product-pages.json`: `serves`) y algunas existen solo en ellas (`own`); la de
 // odentIA, el producto base, sirve todas menos las propias de las demás.

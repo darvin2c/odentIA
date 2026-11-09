@@ -133,7 +133,7 @@ export async function seedMaterialsAndSales(tx: Db, input: SeedMaterialsInput): 
     requestId: "50206010-0000-4000-8000-000000000203",
   })
 
-  // Venta de mostrador (ADR 0172): hoy, quien no es paciente se llevó un enjuague (sin nombre, con
+  // Venta de mostrador (ADR 0173): hoy, quien no es paciente se llevó un enjuague (sin nombre, con
   // vuelto) y dos cepillos (a nombre de quien los pidió), sin abrir una ficha.
   await seedCounterSales(tx, {
     orgId,

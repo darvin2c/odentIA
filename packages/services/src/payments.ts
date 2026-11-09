@@ -133,7 +133,7 @@ async function lockAccount(tx: Db, orgId: string, patientId: string) {
 }
 
 /**
- * Lo mismo para un ticket de una venta de mostrador (ADR 0172): sin cuenta que
+ * Lo mismo para un ticket de una venta de mostrador (ADR 0173): sin cuenta que
  * bloquear, se bloquea el ticket, así su anulación y sus devoluciones van una
  * detrás de otra. Uno con paciente no se toca por aquí: es «no encontrado».
  */
@@ -152,7 +152,7 @@ async function lockCounterTicket(tx: Db, orgId: string, ticketId: string) {
   if (!row) throw notFound("Ticket")
 }
 
-/** «De este paciente», o de ninguno en una venta de mostrador (ADR 0172): `= NULL` no encontraría nada. */
+/** «De este paciente», o de ninguno en una venta de mostrador (ADR 0173): `= NULL` no encontraría nada. */
 function ofPatient(column: Column, patientId: string | null): SQL {
   return patientId === null ? isNull(column) : eq(column, patientId)
 }
@@ -619,7 +619,7 @@ export async function sellFromStock(
   input: {
     chargeId: string
     sale: { productId: string; quantity: number; branchId: string }
-    /** Nulo en una venta de mostrador (ADR 0172). */
+    /** Nulo en una venta de mostrador (ADR 0173). */
     patientId: string | null
     reason: string
   },
@@ -1100,7 +1100,7 @@ export async function nextTicketNumber(tx: Db, orgId: string): Promise<number> {
 export interface TicketFrozen {
   /** Huella del pedido (idempotencia). */
   request: string
-  /** Nulo en una venta de mostrador (ADR 0172): entonces dice `buyer`. */
+  /** Nulo en una venta de mostrador (ADR 0173): entonces dice `buyer`. */
   patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null } | null
   /**
    * Quién compró en una venta de mostrador: un contacto (con su nombre de ese
@@ -1471,7 +1471,7 @@ export async function insertTicketPayments(
   orgId: string,
   actorUserId: string,
   input: {
-    /** Nulo en una venta de mostrador (ADR 0172). */
+    /** Nulo en una venta de mostrador (ADR 0173). */
     patientId: string | null
     ticketId: string
     branchId: string
@@ -2062,7 +2062,7 @@ export async function voidTicket(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  /** Nulo: el ticket de una venta de mostrador (ADR 0172). */
+  /** Nulo: el ticket de una venta de mostrador (ADR 0173). */
   patientId: string | null,
   ticketId: string,
   input: VoidTicketInput,
@@ -2696,7 +2696,7 @@ export function sixDigits(value: number): string {
 export interface ReturnFrozen {
   /** Huella del pedido (idempotencia). */
   request: string
-  /** Nulo al devolver una venta de mostrador (ADR 0172): entonces dice `buyer`, como su ticket. */
+  /** Nulo al devolver una venta de mostrador (ADR 0173): entonces dice `buyer`, como su ticket. */
   patient: { id: string; displayName: string; docType: string | null; docNumber: string | null } | null
   buyer?: { contactId: string | null; displayName: string } | null
   issuer: { userId: string; name: string }
@@ -2868,7 +2868,7 @@ async function returnsOfTickets(tx: Db, orgId: string, ticketIds: string[]) {
 export async function getTicketReturnable(
   tx: Db,
   orgId: string,
-  /** Nulo: el ticket de una venta de mostrador (ADR 0172). */
+  /** Nulo: el ticket de una venta de mostrador (ADR 0173). */
   patientId: string | null,
   ticketId: string,
 ) {
@@ -2964,7 +2964,7 @@ export async function returnFromTicket(
   orgId: string,
   actorUserId: string,
   /**
-   * Nulo: el ticket de una venta de mostrador (ADR 0172). Sin cuenta no hay
+   * Nulo: el ticket de una venta de mostrador (ADR 0173). Sin cuenta no hay
    * dónde dejarlo a favor: siempre se le paga.
    */
   patientId: string | null,
@@ -3024,7 +3024,7 @@ export async function returnFromTicket(
   if (!ticket) throw notFound("Ticket")
   if (ticket.voidedAt)
     throw conflict("TICKET_VOIDED", "El ticket está anulado: no hay nada que devolver")
-  // Sin ficha no hay cuenta donde dejar lo devuelto a favor (ADR 0172).
+  // Sin ficha no hay cuenta donde dejar lo devuelto a favor (ADR 0173).
   if (patientId === null && !input.paymentMethodId)
     throw invalidField(
       "paymentMethodId",
@@ -3399,7 +3399,7 @@ export async function returnFromTicket(
 export async function getPaymentReturn(
   tx: Db,
   orgId: string,
-  /** Nulo: la devolución de una venta de mostrador (ADR 0172). */
+  /** Nulo: la devolución de una venta de mostrador (ADR 0173). */
   patientId: string | null,
   returnId: string,
 ) {
@@ -4038,7 +4038,7 @@ function coveredPlanItems(charges: Array<{ planItemId: string | null }>): string
 export async function getTicketReceipt(
   tx: Db,
   orgId: string,
-  /** Nulo: el ticket de una venta de mostrador (ADR 0172). */
+  /** Nulo: el ticket de una venta de mostrador (ADR 0173). */
   patientId: string | null,
   ticketId: string,
 ) {

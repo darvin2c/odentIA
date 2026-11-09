@@ -579,7 +579,7 @@ function PortalDashboard({
         {scope.appointments ? <QuestionnaireBlock sessionToken={sessionToken} /> : null}
         {scope.budgets ? <BudgetsBlock sessionToken={sessionToken} /> : null}
         {scope.papers ? <DocumentsBlock sessionToken={sessionToken} /> : null}
-        {/* Sus pedidos van con «Tu cuenta» (ADR 0171), donde la clínica trabaja con pedidos. */}
+        {/* Sus pedidos van con «Tu cuenta» (ADR 0172), donde la clínica trabaja con pedidos. */}
         {scope.account && productUi().orders ? <OrdersBlock sessionToken={sessionToken} /> : null}
         {scope.account ? (
           <Block title="Tu cuenta">
@@ -1135,7 +1135,7 @@ function formatPortalDay(iso: string): string {
 }
 
 /**
- * «Tus pedidos» (ADR 0171): lo que se encargó para la persona, si ya está listo
+ * «Tus pedidos» (ADR 0172): lo que se encargó para la persona, si ya está listo
  * para recoger, para cuándo se le prometió y lo que le falta pagar. Sin pedidos
  * no se muestra; un fallo se dice con «Reintentar».
  */

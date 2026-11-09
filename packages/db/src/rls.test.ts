@@ -1118,7 +1118,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     "plan_item_finding",
     "service_finding",
   ])
-  // Lo de vistIA también vive en su esquema (ADR 0169): solo la receta de lentes.
+  // Lo de vistIA también vive en su esquema (ADR 0170): solo la receta de lentes.
   const optica = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace

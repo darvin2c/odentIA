@@ -1,6 +1,6 @@
 {
-  "id": "fa0583eb-89b7-4cce-a7db-7836e9e7c999",
-  "prevId": "9a58da6d-5ad7-4618-87f4-ed0a001e4ffd",
+  "id": "e77f6961-8bd1-4d5b-a55d-c35d446909e1",
+  "prevId": "7b752c62-cc42-4b6d-a48f-f3f0decb0216",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9999,6 +9999,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "informed_encounter_id": {
+          "name": "informed_encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10199,6 +10205,23 @@
           "columnsTo": [
             "system_key",
             "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consent_document_informed_encounter_fk": {
+          "name": "consent_document_informed_encounter_fk",
+          "tableFrom": "consent_document",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "informed_encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -15709,7 +15732,7 @@
           "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "plan_item_id": {
           "name": "plan_item_id",
@@ -16181,10 +16204,6 @@
         "patient_charge_product_check": {
           "name": "patient_charge_product_check",
           "value": "(\"patient_charge\".\"product_id\" IS NULL) = (\"patient_charge\".\"product_quantity\" IS NULL) AND (\"patient_charge\".\"product_quantity\" IS NULL OR \"patient_charge\".\"product_quantity\" BETWEEN 1 AND 9999)"
-        },
-        "patient_charge_counter_check": {
-          "name": "patient_charge_counter_check",
-          "value": "\"patient_charge\".\"patient_id\" IS NOT NULL OR (\"patient_charge\".\"product_id\" IS NOT NULL AND \"patient_charge\".\"plan_item_id\" IS NULL AND \"patient_charge\".\"budget_item_id\" IS NULL AND \"patient_charge\".\"encounter_procedure_id\" IS NULL AND \"patient_charge\".\"promotion_id\" IS NULL AND \"patient_charge\".\"commission_sessions\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -18091,7 +18110,7 @@
           "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "ticket_id": {
           "name": "ticket_id",
@@ -18392,10 +18411,6 @@
         "patient_payment_method_type_check": {
           "name": "patient_payment_method_type_check",
           "value": "\"patient_payment\".\"method_type_code\" IS NULL OR \"patient_payment\".\"method_type_code\" IN ('10','48','30','68','20','1')"
-        },
-        "patient_payment_counter_check": {
-          "name": "patient_payment_counter_check",
-          "value": "\"patient_payment\".\"patient_id\" IS NOT NULL OR \"patient_payment\".\"ticket_id\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -18421,7 +18436,7 @@
           "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "payment_id": {
           "name": "payment_id",
@@ -18679,10 +18694,6 @@
         "payment_application_amount_check": {
           "name": "payment_application_amount_check",
           "value": "\"patient_payment_application\".\"amount_cents\" > 0"
-        },
-        "payment_application_counter_check": {
-          "name": "payment_application_counter_check",
-          "value": "\"patient_payment_application\".\"patient_id\" IS NOT NULL OR \"patient_payment_application\".\"ticket_id\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -18708,7 +18719,7 @@
           "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "payment_id": {
           "name": "payment_id",
@@ -18915,10 +18926,6 @@
         "payment_refund_tender_check": {
           "name": "payment_refund_tender_check",
           "value": "\"patient_payment_refund\".\"tender_cents\" IS NULL OR \"patient_payment_refund\".\"tender_cents\" >= 0"
-        },
-        "payment_refund_counter_check": {
-          "name": "payment_refund_counter_check",
-          "value": "\"patient_payment_refund\".\"patient_id\" IS NOT NULL OR \"patient_payment_refund\".\"return_id\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -19759,7 +19766,7 @@
           "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "ticket_id": {
           "name": "ticket_id",
@@ -20008,10 +20015,6 @@
           "name": "payment_return_outcome_check",
           "value": "\"payment_return\".\"outcome\" IN ('pagado','a_favor')"
         },
-        "payment_return_counter_check": {
-          "name": "payment_return_counter_check",
-          "value": "\"payment_return\".\"patient_id\" IS NOT NULL OR \"payment_return\".\"outcome\" = 'pagado'"
-        },
         "payment_return_method_check": {
           "name": "payment_return_method_check",
           "value": "(\"payment_return\".\"outcome\" = 'pagado') = (\"payment_return\".\"method_name\" IS NOT NULL) AND (\"payment_return\".\"method_type_code\" IS NULL OR \"payment_return\".\"method_type_code\" IN ('10','48','30','68','20','1'))"
@@ -20040,19 +20043,7 @@
           "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
-        },
-        "buyer_contact_id": {
-          "name": "buyer_contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "buyer_name": {
-          "name": "buyer_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "branch_id": {
           "name": "branch_id",
@@ -20238,28 +20229,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "payment_ticket_org_buyer_idx": {
-          "name": "payment_ticket_org_buyer_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "buyer_contact_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"payment_ticket\".\"buyer_contact_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -20342,21 +20311,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "payment_ticket_buyer_contact_fk": {
-          "name": "payment_ticket_buyer_contact_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "contact",
-          "columnsFrom": [
-            "organization_id",
-            "buyer_contact_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -20370,14 +20324,6 @@
         "payment_ticket_change_currency_check": {
           "name": "payment_ticket_change_currency_check",
           "value": "\"payment_ticket\".\"change_currency\" IS NULL OR \"payment_ticket\".\"change_currency\" ~ '^[A-Z]{3}$'"
-        },
-        "payment_ticket_counter_check": {
-          "name": "payment_ticket_counter_check",
-          "value": "(\"payment_ticket\".\"patient_id\" IS NOT NULL AND \"payment_ticket\".\"buyer_contact_id\" IS NULL AND \"payment_ticket\".\"buyer_name\" IS NULL) OR (\"payment_ticket\".\"patient_id\" IS NULL AND \"payment_ticket\".\"credit_applied_cents\" = 0 AND \"payment_ticket\".\"payer_contact_id\" IS NULL AND (\"payment_ticket\".\"buyer_contact_id\" IS NULL OR \"payment_ticket\".\"buyer_name\" IS NULL))"
-        },
-        "payment_ticket_buyer_name_check": {
-          "name": "payment_ticket_buyer_name_check",
-          "value": "\"payment_ticket\".\"buyer_name\" IS NULL OR (\"payment_ticket\".\"buyer_name\" = btrim(\"payment_ticket\".\"buyer_name\") AND char_length(\"payment_ticket\".\"buyer_name\") BETWEEN 1 AND 200)"
         }
       },
       "isRLSEnabled": false

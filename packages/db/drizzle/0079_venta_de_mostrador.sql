@@ -16,7 +16,7 @@ ALTER TABLE "payment_return" ADD CONSTRAINT "payment_return_counter_check" CHECK
 ALTER TABLE "payment_ticket" ADD CONSTRAINT "payment_ticket_counter_check" CHECK (("payment_ticket"."patient_id" IS NOT NULL AND "payment_ticket"."buyer_contact_id" IS NULL AND "payment_ticket"."buyer_name" IS NULL) OR ("payment_ticket"."patient_id" IS NULL AND "payment_ticket"."credit_applied_cents" = 0 AND "payment_ticket"."payer_contact_id" IS NULL AND ("payment_ticket"."buyer_contact_id" IS NULL OR "payment_ticket"."buyer_name" IS NULL)));--> statement-breakpoint
 ALTER TABLE "payment_ticket" ADD CONSTRAINT "payment_ticket_buyer_name_check" CHECK ("payment_ticket"."buyer_name" IS NULL OR ("payment_ticket"."buyer_name" = btrim("payment_ticket"."buyer_name") AND char_length("payment_ticket"."buyer_name") BETWEEN 1 AND 200));--> statement-breakpoint
 
--- Venta de mostrador (ADR 0172): productos cobrados sin ficha, a un contacto, a un
+-- Venta de mostrador (ADR 0173): productos cobrados sin ficha, a un contacto, a un
 -- nombre o a nadie. Los checks de arriba dicen lo que cada fila sin paciente puede
 -- ser; esto dice con qué se une: lo que no tiene ficha solo se une a lo que tampoco
 -- la tiene, para que una venta de mostrador nunca pague ni reciba la cuenta de un

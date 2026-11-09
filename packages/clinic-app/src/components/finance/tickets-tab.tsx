@@ -182,7 +182,7 @@ export function TicketsTab({
         cell: ({ row }) => {
           const ticket = row.original
           const doc = ticket.docNumber ? documentText(ticket.docType, ticket.docNumber) : ""
-          // Una venta de mostrador (ADR 0172) no tiene ficha: se abre la página de quien compró, si se eligió.
+          // Una venta de mostrador (ADR 0173) no tiene ficha: se abre la página de quien compró, si se eligió.
           const counter = ticket.patientId === null
           return (
             <div className="flex min-w-0 flex-col">

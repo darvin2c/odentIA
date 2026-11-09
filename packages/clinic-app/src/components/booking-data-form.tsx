@@ -42,7 +42,6 @@ import {
   BirthDateInput,
   clearSubmitErrors,
   ErrorState,
-  internationalText,
   LoadingState,
   PhoneInput,
   SubmitButton,
@@ -1225,6 +1224,13 @@ export function youInput(
   }
 }
 
+/** B2: solo se promete un mensaje por donde de verdad sale; si no sale por ninguna vía, nada. */
+export function remindersWords(via: PersonalLinkView["remindersVia"], what: string): string {
+  if (via === "whatsapp") return ` Te escribiremos por WhatsApp sobre ${what}.`
+  if (via === "correo") return ` Te escribiremos por correo sobre ${what}.`
+  return ""
+}
+
 /**
  * «Revisa y reserva» de quien ya es paciente: lo que ya sabemos (el documento
  * abreviado: el enlace prueba que tiene su chat, no quién es), lo que le falta
@@ -1244,6 +1250,7 @@ export function YouReview({
   countryCode,
   clinicName,
   slug,
+  remindersVia,
 }: {
   you: NonNullable<PersonalLinkView["you"]>
   fields: readonly YouField[]
@@ -1254,12 +1261,14 @@ export function YouReview({
   countryCode: string | null
   clinicName: string
   slug: string
+  /** Por dónde le llegarán de verdad los mensajes de la cita (B2); nulo: no se promete ninguna vía. */
+  remindersVia: PersonalLinkView["remindersVia"]
 }) {
-  const phoneShown = you.phone ? internationalText(you.phone) : null
+  // Llega abreviado («•••701»): se muestra tal cual.
+  const phoneShown = you.phone
   const asks = (field: YouField) => fields.includes(field)
-  const whatsappLine = asks("phone")
-    ? "Te escribiremos por WhatsApp a este número sobre esta cita: la confirmación, los recordatorios y los cambios."
-    : `Te escribiremos por WhatsApp ${phoneShown ? `al ${phoneShown}` : "a tu número"} sobre esta cita: la confirmación, los recordatorios y los cambios.`
+  // Sin el número abreviado («•••701»): no le deja comprobar a cuál le escribiremos.
+  const remindersLine = remindersWords(remindersVia, "esta cita: la confirmación, los recordatorios y los cambios").trim()
   // Corregir el nombre solo si ya hay uno; si falta, se pide abajo como cualquier dato.
   const canRename = !asks("givenNames") && !asks("familyName")
   const renaming = useStore(form.store, (state) => state.values.renaming)
@@ -1360,8 +1369,7 @@ export function YouReview({
         </FieldSet>
       ) : null}
 
-      {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado al reservar. */}
-      <p className="text-sm">{whatsappLine}</p>
+      {remindersLine ? <p className="text-sm">{remindersLine}</p> : null}
 
       {pending?.promotions ? (
         <form.AppField name="promotions">{() => <PromotionsQuestion id={youId("promotions")} clinicName={clinicName} />}</form.AppField>

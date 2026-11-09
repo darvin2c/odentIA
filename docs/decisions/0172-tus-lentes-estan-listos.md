@@ -1,10 +1,10 @@
-# 0171 · «Tus lentes están listos»: el aviso, Sofi y el portal
+# 0172 · «Tus lentes están listos»: el aviso, Sofi y el portal
 
-Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0170](0170-el-pedido-y-los-roles-ventas-y-taller.md). Entrega 5 del plan «vistIA: plan para ópticas».
+Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0171](0171-el-pedido-y-los-roles-ventas-y-taller.md). Entrega 5 del plan «vistIA: plan para ópticas».
 
 ## Problema
 
-Con el pedido en marcha (ADR 0170), la persona espera sus lentes y pregunta: «¿ya están?», «¿cuánto me falta?». Hasta ahora alguien de la óptica tenía que acordarse de llamarla, Sofi decía que lo confirmaba con el equipo y el portal no mostraba nada del pedido.
+Con el pedido en marcha (ADR 0171), la persona espera sus lentes y pregunta: «¿ya están?», «¿cuánto me falta?». Hasta ahora alguien de la óptica tenía que acordarse de llamarla, Sofi decía que lo confirmaba con el equipo y el portal no mostraba nada del pedido.
 
 ## Decisión y motivo
 
