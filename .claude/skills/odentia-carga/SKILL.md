@@ -34,7 +34,9 @@ Mientras las etapas 3 y 4 no tengan carga, solo se pregunta si se pueden exporta
 
 ## La carta de bienvenida
 
-Los datos de las etapas 1 y 2 se piden con una carta en PDF con la marca del producto de la clínica (odentIA o latidIA) y su titular, SALLCA GROUP E.I.R.L. La idea es cargar todo lo que se pueda. La primera hoja da la bienvenida y dice qué hacer y para cuándo: entrar y aceptar el contrato de encargo, enviar a soporte en un solo correo los datos de la clínica y la lista de pacientes, y revisarlos juntos en la reunión de alta. También dice qué pasa después, y que el correo se borra, como máximo, a los 30 días. La segunda hoja es lo que hay que enviar, para que lo reúnan. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
+Los datos de las etapas 1 y 2 se piden con una carta en PDF con la marca del producto de la clínica (odentIA o latidIA) y su titular, SALLCA GROUP E.I.R.L. La idea es cargar todo lo que se pueda. Es una carta formal, que trata de usted a quien la recibe.
+- **La primera hoja:** fecha, destinatario, asunto y «De nuestra consideración:». Después, los próximos pasos: entrar y aceptar el contrato de encargo, enviar a soporte en un solo correo los datos de la clínica y la lista de pacientes, y la reunión de implementación. Luego, el tratamiento de su información, incluido que el correo se borra, como máximo, a los 30 días. Cierra con la despedida y la firma de quien acompaña.
+- **La segunda hoja:** el anexo con lo que hay que enviar, para que lo reúnan. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
 
 La carta es para clínicas de Perú: pide el RUC y la colegiatura. Le pide aceptar la invitación que le llegó al correo: se entrega cuando la clínica ya está creada en la administración (alta asistida) y su invitación salió. Si todavía no, dilo al entregarla.
 
@@ -42,7 +44,7 @@ Cuando la pidan, pregunta en un solo mensaje lo que falte de esto (lo que ya se 
 
 - **La clínica:** su nombre, como lo conocen sus pacientes. El producto se deduce de si es dental o médica y se dice, sin preguntarlo; sin saberlo, odentIA.
 - **A quién va:** su nombre, como lo escribe ella, y su cargo si lo dicen («Dra. Ana Pérez, directora»). El cargo no se inventa: sin él, solo el nombre.
-- **Quién acompaña el alta:** nombre y correo y, si quiere, celular. Es el contacto para dudas, nunca para recibir la lista.
+- **Quién acompaña el alta**, que firma la carta: nombre, cargo, correo de odentia32.com (o latidia72.com) y, si quiere, celular. Es el contacto para dudas, nunca para recibir la lista. Sin cargo, la firma lleva solo el nombre y la marca.
 - **Hasta cuándo** enviar los datos y la lista. Sugiere una fecha: unos días hábiles después de la carta.
 - **Si ya se sabe qué usa la clínica** para sus pacientes. Si no, la carta se lo pregunta (`askCurrentSystem`).
 
@@ -57,7 +59,7 @@ pnpm --filter @odentia/services import:carta -- <carpeta>/carta.json
   "product": "dental",                   // o "medical" (latidIA)
   "clinic": "Clínica Dental Sonrisa",
   "to": "Dra. Ana Pérez, directora",
-  "companion": { "name": "Carlos Ruiz", "email": "carlos@odentia32.com", "phone": "987 654 321" },
+  "companion": { "name": "Carlos Ruiz", "role": "Implementación", "email": "carlos@odentia32.com", "phone": "987 654 321" },
   "deadline": "2026-11-13",              // AAAA-MM-DD
   "askCurrentSystem": true,              // false si ya se sabe qué usa
   "date": "2026-11-09"                   // opcional: sin él, hoy en Lima
@@ -66,7 +68,7 @@ pnpm --filter @odentia/services import:carta -- <carpeta>/carta.json
 
 El buzón es `soporte@odentia32.com` o, en latidIA, `soporte@latidia72.com`; otro, solo con `inbox`. Antes de la primera carta de latidIA, comprueba que `soporte@latidia72.com` recibe correo.
 
-El comando dice cuántas páginas salió: son dos, y si pasan, falla. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda sus datos a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
+El comando dice cuántas páginas salió: son dos, y si pasan, falla. `hojasDeLaCarta` tiene que ser 1: la firma en la primera hoja y el anexo en la segunda. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda sus datos a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
 
 ## Antes de empezar
 

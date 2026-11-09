@@ -147,12 +147,12 @@ async function main(): Promise<void> {
   const [command, target] = process.argv.slice(2).filter((value) => value !== "--")
   if (command === "letter" && target) {
     const letterPath = resolve(cwd, target)
-    const { bytes, pages, content } = await welcomeLetterPdf(JSON.parse(readFileSync(letterPath, "utf-8")))
+    const { bytes, pages, letterPages, content } = await welcomeLetterPdf(JSON.parse(readFileSync(letterPath, "utf-8")))
     const out = resolve(dirname(letterPath), `carta-${fileSlug(content.clinic)}.pdf`)
     // La carta va en dos hojas: si pasa, no se escribe, se dice y el comando falla para que se acorte.
     const aviso = pages > 2 ? `Salió en ${pages} páginas: acorta el nombre de la clínica, el destinatario o quien acompaña` : undefined
     if (!aviso) writeFileSync(out, bytes)
-    console.log(JSON.stringify({ escrito: aviso ? null : out, paginas: pages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
+    console.log(JSON.stringify({ escrito: aviso ? null : out, paginas: pages, hojasDeLaCarta: letterPages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
     if (aviso) process.exitCode = 1
     return
   }
