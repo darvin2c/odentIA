@@ -40,16 +40,8 @@ export function PhoneWhatsAppNote({ contactId, value }: { contactId: string; val
     <span className="mt-1 flex flex-wrap items-center gap-2">
       <Badge variant="outline">Aún no es su WhatsApp</Badge>
       {canUse ? (
-        // En una columna angosta (Datos con el cajón abierto) el botón baja de línea y parte su
-        // texto en vez de cortarse (QA de la ficha del 8 nov).
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-auto min-h-8 max-w-full py-1 text-left whitespace-normal"
-          disabled={use.isPending}
-          onClick={() => use.mutate()}
-        >
+        // Baja de línea entero, junto al aviso; Datos se acomoda a su propio ancho (QA de la ficha del 8 nov).
+        <Button type="button" size="sm" variant="outline" disabled={use.isPending} onClick={() => use.mutate()}>
           {use.isPending ? "Guardando…" : "Usarlo como su WhatsApp"}
         </Button>
       ) : null}
