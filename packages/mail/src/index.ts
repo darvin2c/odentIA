@@ -2,6 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer"
 import { logoAttachments, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "./layout.js"
 
 export {
+  brandPaper,
   configureMailLinks,
   type EmailContent,
   type EmailFact,

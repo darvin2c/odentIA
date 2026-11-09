@@ -51,6 +51,12 @@ export interface DocumentClinic {
   branchName: string | null
   logo: DocumentLogo | null
   /**
+   * El logo ya dice el nombre (el logotipo de odentIA o latidIA en su carta de
+   * bienvenida): el membrete no lo repite al lado, el logotipo sale más ancho y
+   * la razón social con su documento pasa a la derecha.
+   */
+  wordmark?: boolean
+  /**
    * El color de la marca en el papel (ADR 0162), ya legible sobre blanco: solo la línea
    * bajo el membrete y el cuadro de iniciales. Sin él, tinta, como siempre.
    */
@@ -1607,9 +1613,13 @@ export class DocumentKit {
       return
     }
     const clinic = this.clinic
-    const rightItems = [clinic.branchName, clinic.address, clinic.phone].filter(
-      (item): item is string => !!item,
-    )
+    const wordmark = !!(clinic.wordmark && this.logoImage)
+    const rightItems = [
+      wordmark ? this.fiscalLine() : null,
+      clinic.branchName,
+      clinic.address,
+      clinic.phone,
+    ].filter((item): item is string => !!item)
     const rightMax = this.width * 0.42
     const rightLines = rightItems.flatMap((item) =>
       this.lay(item, rightMax, { size: SIZE.second, tone: "gray", leading: 1.4, align: "right" }),
@@ -1619,15 +1629,13 @@ export class DocumentKit {
     let markWidth = 39
     if (this.logoImage) {
       const ratio = this.logoImage.width / this.logoImage.height
-      markWidth = Math.min(72, 39 * ratio)
+      markWidth = wordmark ? Math.min(this.width * 0.4, 30 * ratio) : Math.min(72, 39 * ratio)
     }
     const nameWidth = Math.max(this.width - rightWidth - 18 - markWidth - 10.5, this.width * 0.25)
-    const nameLines = this.lay(clinic.tradeName, nameWidth, {
-      face: "serif",
-      size: 16.5,
-      leading: 1.2,
-    })
-    const fiscal = this.fiscalLine()
+    const nameLines = wordmark
+      ? []
+      : this.lay(clinic.tradeName, nameWidth, { face: "serif", size: 16.5, leading: 1.2 })
+    const fiscal = wordmark ? "" : this.fiscalLine()
     const fiscalLines = fiscal
       ? this.lay(fiscal, nameWidth, { size: SIZE.second, tone: "gray", leading: 1.35 })
       : []
