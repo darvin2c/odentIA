@@ -188,6 +188,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Al indicar, la pieza y el diagnóstico vienen del último hallazgo, sin escribirlos de nuevo.
 - [ ] El servicio corresponde a la pieza: una endodoncia de molar no se ofrece como «anterior», y el tarifario tiene la de anterior, premolar y molar.
 - [ ] El servicio coincide con el grupo de la pieza (anterior, premolar o molar) y la dentición (permanente o temporal); si no, avisa sin frenar y ofrece el mismo servicio del grupo correcto. Sin él en el tarifario, no ofrece otro grupo (la bicúspide no sirve en un molar). Fuentes: CPMS (RM 550-2023-MINSA) y CDT D3310–D3348.
+- [ ] El diagnóstico pulpar y la endodoncia coinciden: con necrosis o periodontitis apical, la «no vital»; si no, se avisa antes del consentimiento (AAE). Una endodoncia de permanente en una pieza temporal avisa y ofrece la pulpectomía o pulpotomía de temporales si está activa (AAPD).
 - [ ] Caminos alternativos para la misma pieza (endodoncia más corona, o exodoncia) se ven como opciones que no se suman.
 - [ ] Las fases (urgencia, básica, quirúrgica, rehabilitadora y mantenimiento) siguen el orden clínico: **la corona no se propone ni se hace antes de terminar la endodoncia de esa pieza**, y lo urgente va primero.
 - [ ] Cada tratamiento dice sus sesiones previstas (las habituales del servicio, ADR 0164) y pregunta las sesiones por cualquier camino, también si se indica desde el odontograma.
@@ -482,6 +483,7 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | C13 | Hipertenso que llega con 185/115 para una exodoncia programada. | 02, 04, 10 | La presión se nota antes de anestesiar y el aviso no bloquea (hoy no hay aviso). |
 | C14 | Tomografía para planear un implante en la 36, guardada en la atención de hoy. | 14, 21 | Ir a la 36; medir con escala; guardar la vista en la atención correcta; la orden se completa. |
 | C15 | Toda la consulta C1 dictada a Clío. | 19 y los de C1 | Cada propuesta se confirma; el odontograma, el diagnóstico y la receta dictados son correctos. |
+| C17 | Niño de 6 años con pulpitis en la 75 a quien se le indica «Endodoncia posterior vital». | 05, 06, 07 | Avisa que la pieza es temporal; ofrece la pulpectomía si la clínica la tiene. |
 | C16 | Adulto con necrosis en la 14, a quien se le indica «Endodoncia posterior no vital». | 05, 06, 07, 09 | Avisa y ofrece la de bicúspide no vital; el consentimiento dice premolar. |
 
 ### El recorrido largo
