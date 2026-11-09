@@ -78,6 +78,7 @@ import { createWorkspaceNotification } from "./workspace.js"
 import { salaryOfMonth } from "./expense-recurring-occurrences.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
+import { buyerPerson, COUNTER_SALE_LABEL, joinBuyerPerson, ticketPartyNameSql } from "./ticket-party.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
@@ -2593,7 +2594,9 @@ async function collectedApplications(
     .where(and(...filters))
   return rows.flatMap((r) => {
     const appValue = orgPartValue(r.app.amountCents, r.payment, money)
-    if (!appValue) return []
+    // Lo de una atención siempre es de una ficha: una venta de mostrador no tiene (ADR 0170).
+    const patientId = r.app.patientId
+    if (!appValue || patientId === null) return []
     return [
       {
         appId: r.app.id,
@@ -2613,7 +2616,7 @@ async function collectedApplications(
         paidAt: r.payment.paidAt,
         methodLabel: r.payment.methodName,
         cashMethod: methodCashOf(r.payment),
-        patientId: r.app.patientId,
+        patientId,
         professionalUserId: r.professionalUserId,
       },
     ]
@@ -4265,7 +4268,10 @@ export async function getDebts(
     outstandingOnly: true,
     ...(query.patientIds ? { patientIds: query.patientIds } : {}),
   })
-  const live = rows.filter((r) => r.outstandingCents > 0)
+  // Una venta de mostrador se paga entera al venderse (ADR 0170): nunca deja deuda ni es de una ficha.
+  const live = rows.flatMap((r) =>
+    r.outstandingCents > 0 && r.charge.patientId !== null ? [{ ...r, patientId: r.charge.patientId }] : [],
+  )
   if (live.length === 0) return []
   const groups: Record<string, DebtRow & { latestCharge: string | null }> = {}
   const chargesOf: Record<string, Array<{ id: string; procedureId: string | null }>> = {}
@@ -4275,9 +4281,9 @@ export async function getDebts(
     // se debe igual: se ve en la caja de cualquier sede, nunca en ninguna.
     if (query.branchId && own !== null && own !== query.branchId) continue
     const branchId = query.branchId ?? own
-    const key = `${row.charge.patientId}|${branchId ?? ""}|${row.charge.currency}`
+    const key = `${row.patientId}|${branchId ?? ""}|${row.charge.currency}`
     const entry = groups[key] ?? {
-      patientId: row.charge.patientId,
+      patientId: row.patientId,
       displayName: "",
       branchId,
       currency: row.charge.currency,
@@ -4474,7 +4480,7 @@ export async function getCashToday(tx: Db, orgId: string, query: { branchId: str
     select distinct c.patient_id from patient_charge c
       left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
       left join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
-    where c.organization_id = ${orgId} and c.voided_at is null
+    where c.organization_id = ${orgId} and c.voided_at is null and c.patient_id is not null
       and (c.created_at >= now() - interval '2 days' or e.finalized_at >= now() - interval '2 days')`)
   const toCollect = (await getDebts(tx, orgId, { branchId: branchRow.id, patientIds: recent.map((row) => row.patient_id) }))
     .filter((row): row is DebtRow & { attendedTodayAt: Date } => row.attendedTodayAt !== null)
@@ -4620,7 +4626,8 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
     {
       ticketId: string | null
       ticketNumber: number | null
-      patientId: string
+      /** Nulo en una venta de mostrador (ADR 0170): entonces el nombre es el de quien compró. */
+      patientId: string | null
       patientName: string
       exchangeRate: string | null
       ticketCurrency: string | null
@@ -4637,7 +4644,7 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
         ticketId: patientPayment.ticketId,
         ticketNumber: paymentTicket.ticketNumber,
         patientId: patientPayment.patientId,
-        patientName: patientPerson.displayName,
+        patientName: ticketPartyNameSql(),
         exchangeRate: patientPayment.exchangeRate,
         ticketCurrency: paymentTicket.currency,
         ticketTotalCents: paymentTicket.totalCents,
@@ -4646,12 +4653,13 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
         changeCurrency: paymentTicket.changeCurrency,
       })
       .from(patientPayment)
-      .innerJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
-      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+      .leftJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
+      .leftJoin(patientPerson, joinPatientPerson(patientPerson))
       .leftJoin(
         paymentTicket,
         and(eq(paymentTicket.id, patientPayment.ticketId), eq(paymentTicket.organizationId, orgId)),
       )
+      .leftJoin(buyerPerson, joinBuyerPerson())
       .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, paymentIds)))
     for (const row of rows) origin.set(row.paymentId, row)
   }
@@ -4698,7 +4706,8 @@ async function countedMovements(tx: Db, orgId: string, shiftId: string) {
 export interface VoidedTicketOfDay {
   ticketId: string
   ticketNumber: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0170): el nombre es el de quien compró. */
+  patientId: string | null
   patientName: string
   currency: string
   totalCents: number
@@ -4727,10 +4736,11 @@ async function voidedTicketsOfDay(
   ]
   if (unit) filters.push(eq(paymentTicket.currency, currency(unit)))
   const rows = await tx
-    .select({ ticket: paymentTicket, patientName: patientPerson.displayName })
+    .select({ ticket: paymentTicket, patientName: ticketPartyNameSql() })
     .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(and(...filters))
     .orderBy(asc(paymentTicket.createdAt), asc(paymentTicket.id))
   return rows.map(({ ticket, patientName }) => {
@@ -5141,7 +5151,10 @@ export interface TicketListQuery {
 export interface TicketListRow {
   id: string
   number: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0170): `displayName` es quien compró o «Venta de mostrador». */
+  patientId: string | null
+  /** La persona que compró en el mostrador, si se eligió: su página se abre desde la fila. */
+  buyerContactId: string | null
   displayName: string
   docType: string | null
   docNumber: string | null
@@ -5224,12 +5237,15 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
   // El nombre y el documento como se congelaron en el ticket (un nombre cambiado después también encuentra).
   const frozenName = sql`${paymentTicket.snapshot}->'patient'->>'displayName'`
   const frozenDocument = sql`${paymentTicket.snapshot}->'patient'->>'docNumber'`
+  // Una venta de mostrador (ADR 0170) se busca por quien compró o por cómo se llama.
+  const frozenBuyer = sql`${paymentTicket.snapshot}->'buyer'->>'displayName'`
+  const counterLabel = sql`case when ${paymentTicket.patientId} is null then ${COUNTER_SALE_LABEL} end`
 
   const filters: SQL[] = [eq(paymentTicket.organizationId, orgId), eq(paymentTicket.branchId, branchRow.id)]
   // Una historia bloqueada (ADR 0080) guarda sus comprobantes, que siguen
   // sumando; pero su nombre y su documento quedan solo dentro de la historia:
   // no se buscan por ellos ni se muestran aquí.
-  const unlocked = isNull(patientPerson.recordLockedAt)
+  const unlocked = and(isNull(patientPerson.recordLockedAt), isNull(buyerPerson.recordLockedAt))!
   if (q)
     filters.push(
       allDates
@@ -5238,7 +5254,13 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
             digits ? and(unlocked, digitsContain(patientPerson.docNumber, digits))! : sql`false`,
             digits ? and(unlocked, digitsContain(frozenDocument, digits))! : sql`false`,
           )!
-        : and(unlocked, foldedWordsMatch([patientPerson.displayName, frozenName], q))!,
+        : and(
+            unlocked,
+            foldedWordsMatch(
+              [patientPerson.displayName, frozenName, buyerPerson.displayName, paymentTicket.buyerName, frozenBuyer, counterLabel],
+              q,
+            ),
+          )!,
     )
   if (!allDates && query.from) filters.push(gte(paymentTicket.createdAt, dayBoundsUTC(day(query.from), timezone).start))
   if (!allDates && query.to) filters.push(lt(paymentTicket.createdAt, dayBoundsUTC(day(query.to), timezone).end))
@@ -5279,14 +5301,15 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
     .select({
       ticket: paymentTicket,
       at: sql<string>`${paymentTicket.createdAt}::text`,
-      displayName: patientPerson.displayName,
+      displayName: ticketPartyNameSql(),
       docType: patientPerson.docType,
       docNumber: patientPerson.docNumber,
-      lockedAt: patientPerson.recordLockedAt,
+      lockedAt: sql<Date | null>`coalesce(${patientPerson.recordLockedAt}, ${buyerPerson.recordLockedAt})`,
     })
     .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(and(where, after))
     .orderBy(...order)
     .limit(limit + 1)
@@ -5335,6 +5358,7 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
         id: ticket.id,
         number: ticket.ticketNumber,
         patientId: ticket.patientId,
+        buyerContactId: locked ? null : ticket.buyerContactId,
         displayName: locked ? LOCKED_RECORD_NAME : displayName,
         docType: locked ? null : (docType ?? frozen?.patient?.docType ?? null),
         docNumber: locked ? null : (docNumber ?? frozen?.patient?.docNumber ?? null),
@@ -5384,8 +5408,9 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       cents: sql<string>`coalesce(sum(${enteredCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
     })
     .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .innerJoin(paid, sql`true`)
     .where(where)
     .groupBy(entered)
@@ -5401,8 +5426,9 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       paymentTicket,
       and(eq(paymentTicket.organizationId, patientPayment.organizationId), eq(paymentTicket.id, patientPayment.ticketId)),
     )
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(
       and(
         where,
@@ -5436,8 +5462,9 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       paymentTicket,
       and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
     )
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(where)
     .groupBy(methodCurrency)
   const totals: TicketTotals[] = counts.map((row) => {
