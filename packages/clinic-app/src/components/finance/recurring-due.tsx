@@ -203,6 +203,7 @@ export function RecurringDueSection({
   onPayInvoice,
   onNoteInvoice,
   onCorrectInvoice,
+  onShowInvoicePayments,
 }: {
   data: RecurringMonth | undefined
   locale: string
@@ -217,6 +218,8 @@ export function RecurringDueSection({
   onNoteInvoice?: () => void
   /** «Corregir la factura» (sin pagos). */
   onCorrectInvoice?: (payable: Payable) => void
+  /** «Ver sus pagos»: la lista del mes filtrada por la factura. */
+  onShowInvoicePayments?: (payable: Payable) => void
 }) {
   const queryClient = useQueryClient()
   const [change, setChange] = useState<Editable | null>(null)
@@ -282,6 +285,13 @@ export function RecurringDueSection({
           ) : null}
         </h2>
         {canWrite && onNoteInvoice ? <NotePayableButton onClick={onNoteInvoice} /> : null}
+        {/* Con facturas y lo que se repite, el total dice de qué es cada parte. */}
+        {invoicesInMain.length > 0 && inMain.length > 0 ? (
+          <p className="w-full text-sm text-muted-foreground">
+            Facturas {formatMoney(invoicesInMain.reduce((sum, row) => sum + row.dueCents, 0), data.currency, locale)} · Lo que se repite{" "}
+            {formatMoney(inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0), data.currency, locale)}
+          </p>
+        ) : null}
       </div>
       <ul className="flex min-w-0 flex-col divide-y">
         {payables.length > 0 && onPayInvoice ? (
@@ -293,6 +303,7 @@ export function RecurringDueSection({
             onPay={onPayInvoice}
             onVoid={setVoidingInvoice}
             onCorrect={(payable) => onCorrectInvoice?.(payable)}
+            onShowPayments={(payable) => onShowInvoicePayments?.(payable)}
           />
         ) : null}
         {shown.map((row) => {
@@ -344,7 +355,7 @@ export function RecurringDueSection({
       {!all && data.due.length > FEW ? (
         <div className="border-t px-4 py-2">
           <Button type="button" variant="link" className="h-auto p-0" onClick={() => setAll(true)}>
-            Ver todo lo por pagar ({data.due.length})
+            Ver {data.due.length - FEW} más de lo que se repite
           </Button>
         </div>
       ) : null}

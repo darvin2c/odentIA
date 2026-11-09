@@ -487,6 +487,7 @@ export function ExpensesTab({
         onPayInvoice={(payable) => onOpenExpense({ kind: "factura", payable })}
         onNoteInvoice={() => onNoteInvoice(null)}
         onCorrectInvoice={(payable) => onNoteInvoice(payable)}
+        onShowInvoicePayments={(payable) => listSearch.setParams({ q: payable.receiptNumber ?? payable.supplierName })}
       />
 
       {searching ? null : listSection}
@@ -592,6 +593,12 @@ export function ExpensesTab({
                   ]
                 : []),
               ...(viewing.commission ? [["Comisión", "Se cambia en Comisiones, con su pago"]] : []),
+              ...(viewing.payableId
+                ? (() => {
+                    const owed = (payables.data?.data.payables ?? []).find((row) => row.id === viewing.payableId)
+                    return [["Factura", owed ? `${owed.concept} · quedan ${formatMoney(owed.dueCents, owed.currency, locale)} por pagar` : "Pagada"]]
+                  })()
+                : []),
             ].map(([label, value], index) => (
               <div key={`${label}-${index}`} className="grid gap-0.5">
                 <dt className="text-muted-foreground">{label}</dt>
@@ -623,7 +630,7 @@ export function ExpensesTab({
           // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
           !adminVoids && voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
           // Es el pago de una factura por pagar: vuelve a deber lo que este pago cubría (ADR 0174).
-          !adminVoids && voiding?.payableId ? "La factura vuelve a deber lo que este pago cubría." : "",
+          !adminVoids && voiding?.payableId ? `La factura vuelve a deber ${formatMoney(voiding.amountCents, voiding.currency, locale)}.` : "",
           // Es el pago de una compra: la compra vuelve a deber lo que este pago cubría de lo recibido (ADR 0061).
           !adminVoids && voiding?.purchaseOrderNumber != null
             ? `La compra ${purchaseOrderLabel(voiding.purchaseOrderNumber)} vuelve a deber lo que este pago cubría de lo recibido.`

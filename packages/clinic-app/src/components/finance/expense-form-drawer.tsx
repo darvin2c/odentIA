@@ -931,6 +931,14 @@ export function ExpenseFormDrawer({
             {(field) => <field.TextField label="N.º de operación (opcional)" maxLength={60} autoComplete="off" inputClassName="sm:w-56" />}
           </form.AppField>
         ) : null}
+        {invoice ? (
+          // La factura ya dice su papel y a quién: el pago no lo vuelve a preguntar.
+          <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm [overflow-wrap:anywhere]">
+            {invoice.concept}
+            {invoice.supplierTaxId ? ` · RUC ${invoice.supplierTaxId}` : ""}
+          </p>
+        ) : (
+        <>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,10rem)]">
           <form.AppField
             name="receiptType"
@@ -1024,6 +1032,8 @@ export function ExpenseFormDrawer({
             ) : null}
           </div>
         ) : null}
+        </>
+        )}
         <form.AppField name="spentDay">
           {(field) => (
             <field.Control label="Fecha">

@@ -69,6 +69,7 @@ export function PayableRows({
   onPay,
   onVoid,
   onCorrect,
+  onShowPayments,
 }: {
   payables: Payable[]
   today: string
@@ -78,6 +79,8 @@ export function PayableRows({
   onVoid: (payable: Payable) => void
   /** «Corregir la factura»: solo sin pagos. */
   onCorrect: (payable: Payable) => void
+  /** Con pagos no se corrige ni se anula: primero se ven (y se anulan) sus pagos. */
+  onShowPayments: (payable: Payable) => void
 }) {
   return (
     <>
@@ -120,10 +123,14 @@ export function PayableRows({
                 </Button>
                 <RowActions
                   label={`Más acciones de ${row.concept}`}
-                  items={[
-                    ...(row.paidCents === 0 ? [{ key: "corregir", label: "Corregir la factura", onSelect: () => onCorrect(row) }] : []),
-                    { key: "anular", label: "Anular la factura", onSelect: () => onVoid(row) },
-                  ]}
+                  items={
+                    row.paidCents === 0
+                      ? [
+                          { key: "corregir", label: "Corregir la factura", onSelect: () => onCorrect(row) },
+                          { key: "anular", label: "Anular la factura", onSelect: () => onVoid(row) },
+                        ]
+                      : [{ key: "pagos", label: "Ver sus pagos", onSelect: () => onShowPayments(row) }]
+                  }
                 />
               </span>
             ) : null}
@@ -293,6 +300,10 @@ export function NotePayableDrawer({
   })
   const lines = (accepted.data?.data ?? []).flatMap((group) => group.lines)
   const pickedType = receiptTypes.find((item) => item.code === values.receiptType) ?? null
+  const [moreOpen, setMoreOpen] = useState(false)
+  useEffect(() => {
+    if (open) setMoreOpen(Boolean(correcting))
+  }, [open, correcting])
 
   return (
     <FormDrawer
@@ -310,30 +321,6 @@ export function NotePayableDrawer({
       submitLabel={correcting ? "Guardar corrección" : "Anotar"}
     >
       <div className="flex flex-col gap-5">
-        <form.AppField name="category">
-          {(field) => (
-            <field.Group
-              legend="Tipo"
-              description={
-                field.state.value === "Materiales"
-                  ? "Si es mercadería de una compra de Inventario, se paga en la compra: no la anotes aquí."
-                  : expenseCategoryHint(field.state.value)
-              }
-            >
-              {(control) => (
-                <ChoiceChips
-                  id={control.id}
-                  invalid={control.invalid}
-                  aria-describedby={control.describedBy}
-                  onBlur={control.onBlur}
-                  value={field.state.value}
-                  options={CATEGORY_OPTIONS}
-                  onChange={(next) => field.handleChange(next)}
-                />
-              )}
-            </field.Group>
-          )}
-        </form.AppField>
         <form.AppField
           name="supplier"
           listeners={{
@@ -383,7 +370,7 @@ export function NotePayableDrawer({
           </form.AppField>
           {values.receiptType && values.receiptType !== NO_RECEIPT_TYPE ? (
             <form.AppField name="receiptNumber">
-              {(field) => <field.TextField label="Número" maxLength={60} placeholder="F001-000123" />}
+              {(field) => <field.TextField label="Número (opcional)" maxLength={60} placeholder="F001-000123" />}
             </form.AppField>
           ) : null}
         </div>
@@ -426,23 +413,6 @@ export function NotePayableDrawer({
           {(field) => <field.TextField label={`Importe, en ${currencyWord(values.currency, locale)}`} inputMode="decimal" inputClassName="w-40" />}
         </form.AppField>
         <div className="grid gap-4 sm:grid-cols-2">
-          <form.AppField name="issuedOn">
-            {(field) => (
-              <field.Control label="Emitida">
-                {(control) => (
-                  <DatePickerButton
-                    {...control.props}
-                    className="justify-start font-normal"
-                    value={field.state.value}
-                    max={today}
-                    onChange={(day) => field.handleChange(day)}
-                  >
-                    {formatDayKey(field.state.value, locale, today)}
-                  </DatePickerButton>
-                )}
-              </field.Control>
-            )}
-          </form.AppField>
           <form.AppField name="dueOn">
             {(field) => (
               <field.Control label="Vence (opcional)">
@@ -461,6 +431,59 @@ export function NotePayableDrawer({
             )}
           </form.AppField>
         </div>
+        {/* El tipo y la emisión casi nunca cambian: una línea quieta, y se cambian si hace falta. */}
+        {moreOpen ? (
+          <>
+        <form.AppField name="category">
+          {(field) => (
+            <field.Group
+              legend="Tipo"
+              description={
+                field.state.value === "Materiales"
+                  ? "Si es mercadería de una compra de Inventario, se paga en la compra: no la anotes aquí."
+                  : expenseCategoryHint(field.state.value)
+              }
+            >
+              {(control) => (
+                <ChoiceChips
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  options={CATEGORY_OPTIONS}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+          <form.AppField name="issuedOn">
+            {(field) => (
+              <field.Control label="Emitida">
+                {(control) => (
+                  <DatePickerButton
+                    {...control.props}
+                    className="justify-start font-normal"
+                    value={field.state.value}
+                    max={today}
+                    onChange={(day) => field.handleChange(day)}
+                  >
+                    {formatDayKey(field.state.value, locale, today)}
+                  </DatePickerButton>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          </>
+        ) : (
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            {expenseCategoryLabel(values.category)} · emitida {formatDayKey(values.issuedOn, locale, today).toLocaleLowerCase("es")}.
+            <Button type="button" variant="link" className="h-auto p-0" onClick={() => setMoreOpen(true)}>
+              Cambiar
+            </Button>
+          </p>
+        )}
         <form.AppField name="patient">
           {(field) => (
             <field.Control label="¿De qué paciente? (opcional)" description="Para ver su costo junto a lo cobrado de su tratamiento.">

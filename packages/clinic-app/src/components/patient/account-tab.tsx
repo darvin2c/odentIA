@@ -618,41 +618,36 @@ export function AccountTab({
                       </div>
                     ))}
                   </dl>
-                  {(() => {
-                    // Las facturas de este tratamiento (su laboratorio): lo que cuesta junto a lo pagado.
-                    const items = new Set(group.lines.map((line) => line.planItemId))
-                    const all = (labInvoices.data?.data.payables ?? []).filter((row) => row.planItemId !== null && items.has(row.planItemId))
+                  {/* El laboratorio de cada tratamiento, junto a lo acordado de ese tratamiento (ADR 0174). */}
+                  {group.lines.map((line) => {
+                    const all = (labInvoices.data?.data.payables ?? []).filter((row) => row.planItemId === line.planItemId)
                     if (all.length === 0) return null
-                    // Una factura en otra moneda no se resta de lo pagado: se dice aparte (ADR 0135).
-                    const invoices = all.filter((row) => row.currency === group.currency)
+                    const same = all.filter((row) => row.currency === group.currency)
                     const foreign = all.filter((row) => row.currency !== group.currency)
-                    const foreignWords = [...new Set(foreign.map((row) => row.currency))]
-                      .map((unit) => money(foreign.filter((row) => row.currency === unit).reduce((sum, row) => sum + row.amountCents, 0), unit))
-                      .join(" y ")
-                    const cost = invoices.reduce((sum, row) => sum + row.amountCents, 0)
-                    const owed = invoices.reduce((sum, row) => sum + row.dueCents, 0)
-                    if (invoices.length === 0)
-                      return <p className="text-sm">Laboratorio: <span className="font-semibold tabular-nums">{foreignWords}</span>, en otra moneda que lo cobrado.</p>
-                    // Casi siempre es el laboratorio; si hay de varios tipos, se dice «Facturas».
-                    const kinds = new Set(invoices.map((row) => row.category))
-                    const label = kinds.size === 1 ? expenseCategoryLabel(invoices[0]?.category ?? "") : "Facturas"
+                    const cost = same.reduce((sum, row) => sum + row.amountCents, 0)
+                    const owed = all.reduce((sum, row) => sum + row.dueCents, 0)
+                    const kinds = new Set(all.map((row) => row.category))
+                    const label = kinds.size === 1 ? expenseCategoryLabel(all[0]?.category ?? "").toLocaleLowerCase("es") : "facturas"
+                    const costWords = [
+                      ...(cost > 0 ? [money(cost, group.currency)] : []),
+                      ...[...new Set(foreign.map((row) => row.currency))].map((unit) =>
+                        money(foreign.filter((row) => row.currency === unit).reduce((sum, row) => sum + row.amountCents, 0), unit),
+                      ),
+                    ].join(" y ")
                     return (
-                      <p className="text-sm">
-                        {label}: <span className="font-semibold tabular-nums">{money(cost, group.currency)}</span>
-                        {owed > 0 ? ` (por pagar ${money(owed, group.currency)})` : " (pagado)"}.{" "}
-                        {group.paidCents >= cost ? (
+                      <p key={line.planItemId} className="text-sm">
+                        {treatmentLineName(line, placeName)}: {label} <span className="font-semibold tabular-nums">{costWords}</span>
+                        {owed > 0 ? ", aún no se le paga todo al laboratorio" : ", ya pagado al laboratorio"}.
+                        {cost > 0 && foreign.length === 0 ? (
                           <>
-                            De lo que pagó, queda <span className="font-semibold tabular-nums">{money(group.paidCents - cost, group.currency)}</span>.
+                            {" "}
+                            De lo acordado ({money(line.agreedCents, group.currency)}), quedan{" "}
+                            <span className="font-semibold tabular-nums">{money(line.agreedCents - cost, group.currency)}</span>.
                           </>
-                        ) : (
-                          <>
-                            Cuesta <span className="font-semibold tabular-nums">{money(cost - group.paidCents, group.currency)}</span> más de lo que pagó hasta hoy.
-                          </>
-                        )}
-                        {foreignWords ? ` Además, ${foreignWords} en otra moneda.` : ""}
+                        ) : null}
                       </p>
                     )
-                  })()}
+                  })}
                   {/* «Falta» junta lo ya hecho sin pagar (en Pendiente) y lo que aún no se hace (segunda mesa). */}
                   {group.remainingCents > 0 ? (
                     <p className="text-sm text-muted-foreground">
