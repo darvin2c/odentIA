@@ -29,7 +29,7 @@ import {
 import { usePermission } from "../../lib/crm"
 import type { ServiceCatalogItem } from "../../lib/services"
 import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
-import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
+import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
 import { ServiceSelect } from "../service-select"
 
 /** Hasta cuántos días después de su fecha se miran las citas en pie para ofrecer «Usar esa cita». */
@@ -220,6 +220,8 @@ function ScheduleForm({
           serviceId: service?.id || undefined,
           startsAt: target.start,
           endsAt: target.end,
+          // Fuera del horario de quien lo indicó, como en «Nueva cita»: lo avisado se reserva igual.
+          ...exceptionFlags(when.exception),
         },
       })
     },

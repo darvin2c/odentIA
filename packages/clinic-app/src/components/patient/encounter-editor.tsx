@@ -1467,10 +1467,10 @@ export function EncounterEditor({
   )
   // Lo indicado hoy que sigue en pie (lo quitado queda cancelado y no cuenta).
   const liveIndicated = detail.indicatedItems.filter((item) => item.status !== "cancelado")
-  // Lo indicado que sigue por hacer: lo que se indicó y se terminó hoy (la consulta, la profilaxis)
-  // ya cuenta en «Realizado hoy» y no es «indicado» (QA del 9 nov, repaso 3).
+  // Lo indicado para otro día: lo que se indicó y se hizo hoy (la consulta, la profilaxis, la
+  // sesión 1 de la endodoncia) ya cuenta en «Realizado hoy» y no es «indicado» (QA del 9 nov, repaso 3).
   const openIndicated = liveIndicated.filter(
-    (item) => !(item.status === "realizado" && detail.procedures.some((procedure) => procedure.planItemId === item.id)),
+    (item) => !detail.procedures.some((procedure) => procedure.planItemId === item.id && !procedure.voidedAt),
   )
   const sections: Array<{
     key: SectionKey

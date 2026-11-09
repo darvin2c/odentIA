@@ -291,14 +291,17 @@ function payoutRows(
  * guardaban solo lo que faltaba de sus conceptos.
  */
 function owesOrKeeps(snap: TicketSnapshot): boolean {
-  if (snap.accountDueCents != null) return snap.accountDueCents > 0 || (snap.accountCreditCents ?? 0) > 0
+  if (snap.accountDueCents != null) return snap.accountDueCents !== (snap.accountCreditCents ?? 0)
   return snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0
 }
 
 /** Lo que falta del tratamiento va aparte del pago, con su nombre, y solo si falta algo. */
 function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
   if (!owesOrKeeps(snap)) return
-  const owed = snap.accountDueCents ?? snap.remainingCents ?? 0
+  // Una sola cifra, como su cuenta: lo que tiene a favor ya se descuenta de lo que falta.
+  const gross = snap.accountDueCents ?? snap.remainingCents ?? 0
+  const credit = snap.accountCreditCents ?? 0
+  const owed = Math.max(0, gross - credit)
   // En la hoja, «Le falta pagar» ya es el título de la sección.
   if (owed > 0)
     moneyRow(
@@ -307,7 +310,8 @@ function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number
       money(owed),
       { strong: true },
     )
-  if ((snap.accountCreditCents ?? 0) > 0) moneyRow(kit, "Le queda a favor", money(snap.accountCreditCents ?? 0))
+  if (owed > 0 && credit > 0) smallNote(kit, `Ya descuenta ${money(Math.min(gross, credit))} que tiene a favor.`)
+  if (credit > gross) moneyRow(kit, "Le queda a favor", money(credit - gross))
   for (const item of snap.pending ?? []) {
     smallNote(
       kit,
@@ -460,7 +464,7 @@ export async function renderTicketPdf(
   })
   howPaid(kit, snap, money)
   if (owesOrKeeps(snap)) {
-    const owes = (snap.accountDueCents ?? snap.remainingCents ?? 0) > 0
+    const owes = (snap.accountDueCents ?? snap.remainingCents ?? 0) > (snap.accountCreditCents ?? 0)
     kit.subheading(owes ? "Le falta pagar" : "Su cuenta", { face: "sansSemi", before: 14, after: 3 })
     stillOwed(kit, snap, money)
   }

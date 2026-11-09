@@ -190,6 +190,8 @@ export type ScheduleFollowUpBody =
         startsAt: string
         endsAt?: string
         durationMin?: number
+        outsideSchedule?: true
+        overrideBusy?: true
       }
     }
 

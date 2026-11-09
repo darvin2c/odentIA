@@ -436,6 +436,16 @@ function noRoute(
   if (facts.noWhatsapp && !facts.rawEmail) {
     return { cause: "no_entregado", detail: "Su número no tiene WhatsApp y no tiene correo registrado" }
   }
+  // Un número de prueba guardado como su WhatsApp tampoco recibe nada: se dice eso, no lo de la
+  // plantilla (verificación de la entrega 9: decía «WhatsApp aún no aprueba el mensaje»).
+  if (identity && isFictionalPhone(`+${identity.externalUserId.replace(/\D/g, "")}`)) {
+    return {
+      cause: "sin_destino",
+      detail: facts.rawEmail
+        ? "Su número es de prueba (a ese número no le llega ningún mensaje)"
+        : PHONE_WITHOUT_WHATSAPP_DETAIL.numero_de_prueba,
+    }
+  }
   if (!identity && !facts.rawEmail) {
     return {
       cause: "sin_destino",
