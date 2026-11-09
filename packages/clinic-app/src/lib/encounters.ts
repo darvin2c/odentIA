@@ -170,7 +170,8 @@ export interface FinalizedMaterials {
 
 /** Lo que el cierre hizo con los controles: el que indicó «¿Cuándo vuelve?» y los que cumplió. */
 export interface FinalizedControls {
-  next: { id: string; title: string; dueAt: string } | null
+  /** `joinsNext`: va en la misma cita que lo aceptado que «Reservar» ofrece, desde `from` (`YYYY-MM-DD`). */
+  next: { id: string; title: string; dueAt: string; joinsNext?: { from: string } } | null
   fulfilled: Array<{ id: string; title: string }>
 }
 
@@ -196,7 +197,12 @@ export function finalizedControlsWords(controls: FinalizedControls, now = new Da
   const words: string[] = []
   if (controls.next) {
     const day = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(controls.next.dueAt))
-    words.push(`Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`)
+    // Si va en la misma cita que lo aceptado, «Reservar su próxima cita» ya lo trae: no se manda a recepción.
+    words.push(
+      controls.next.joinsNext
+        ? `${controls.next.title} (toca el ${controlDaySaid(day, now)}): «Reservar su próxima cita» lo trae en la misma cita.`
+        : `Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`,
+    )
   }
   if (controls.fulfilled.length > 0) {
     const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")

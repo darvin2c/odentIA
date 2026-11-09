@@ -1,4 +1,5 @@
-import { encounterProcedure } from "@odentia/db/schema/clinical"
+import { encounterProcedure, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem, listPlanItems, updatePlanItemPlanning } from "./plan.js"
@@ -74,4 +75,31 @@ it("el progreso cuenta las sesiones hechas y no admite prever menos", async () =
     updatePlanItemPlanning(tx, ...f.args, item.id, { plannedSessions: 2 }),
   )
   expect(two).toMatchObject({ plannedSessions: 2, sessionsDone: 1 })
+})
+
+it("el plan dice lo que va después de otro tratamiento de la misma pieza: «Registrar lo de hoy» no lo trae puesto", async () => {
+  const f = await withItems()
+  const endo = await f.add()
+  const crown = await f.add({ phase: "rehabilitadora" })
+  const elsewhere = await f.add({ phase: "rehabilitadora" })
+  const site = (id: string, tooth: string, title: string, phase: string) =>
+    ownerDb
+      .update(treatmentPlanItem)
+      .set({ title, siteSystem: "FDI", siteCode: tooth, phase, decisionStatus: "aceptado" })
+      .where(eq(treatmentPlanItem.id, id))
+  await site(endo.id, "46", "Endodoncia", "basica")
+  await site(crown.id, "46", "Corona metal-cerámica", "rehabilitadora")
+  await site(elsewhere.id, "36", "Corona metal-cerámica", "rehabilitadora")
+  const items = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
+  const of = (id: string) => items.find((row) => row.id === id)
+  expect(of(crown.id)?.waitsFor).toEqual({ id: endo.id, title: "Endodoncia" })
+  expect(of(endo.id)?.waitsFor).toBeNull()
+  expect(of(elsewhere.id)?.waitsFor).toBeNull()
+  // Terminada la endodoncia, la corona ya no espera.
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ status: "realizado" })
+    .where(eq(treatmentPlanItem.id, endo.id))
+  const after = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
+  expect(after.find((row) => row.id === crown.id)?.waitsFor).toBeNull()
 })

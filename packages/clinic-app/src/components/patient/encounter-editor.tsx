@@ -62,6 +62,7 @@ import {
   type FinalizedMaterials,
   type NextSession,
   fetchEncounterClosing,
+  controlDaySaid,
   finalizedControlsWords,
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
@@ -399,6 +400,15 @@ function FinalizedBudgetSummary({
   )
 }
 
+/** Lo aceptado que va después de lo que sigue en curso y ya tiene su cita. */
+interface FinalizedBookedAfter {
+  planItemId: string
+  title: string
+  beforeTitle: string
+  startsAt: string
+  professionalName: string | null
+}
+
 export interface FinalizeBilling {
   /** El total de su única moneda; con dos, nulo: lo dice `totals`. */
   chargedCents: number | null
@@ -417,7 +427,8 @@ export interface FinalizeBilling {
 function skippedReasonLabel(reason: string | null): string {
   switch (reason) {
     case "covered":
-      return "ya estaba incluido en lo cobrado del tratamiento"
+      // «Cobrado» se leía como pagado mientras aún debía (repaso del 9 nov, N4): se carga una vez.
+      return "el tratamiento se carga una sola vez y ya se cargó en una sesión anterior"
     case "free_act":
       return "se registró sin servicio de la lista"
     case "zero_price":
@@ -552,7 +563,11 @@ export function EncounterEditor({
   // Lo que el cierre hizo con sus controles: «Atención finalizada» dice qué verá recepción.
   const [finalizedControls, setFinalizedControls] = useState<FinalizedControls | null>(null)
   /** Lo que la firma iba a terminar y no pudo: sigue en curso, con su motivo. */
-  const [finalizedKeptOpen, setFinalizedKeptOpen] = useState<Array<{ planItemId: string; title: string; reason: string }>>([])
+  const [finalizedKeptOpen, setFinalizedKeptOpen] = useState<
+    Array<{ planItemId: string; title: string; reason: string }>
+  >([])
+  /** Lo que va después de lo que sigue en curso y ya tiene su cita (la corona reservada): se avisa. */
+  const [finalizedBookedAfter, setFinalizedBookedAfter] = useState<FinalizedBookedAfter[]>([])
   /** Lo que sigue en curso tras firmar, con su próxima sesión: «Reservar la sesión 2» ahí mismo. */
   const [finalizedNext, setFinalizedNext] = useState<NextSession[]>([])
   /** Los tratamientos con que se abrió «Nueva cita» desde «Atención finalizada». */
@@ -1129,12 +1144,18 @@ export function EncounterEditor({
     }
   }
 
-  // Si debe lo mismo que acaba de quedar por cobrar, no se dice dos veces: el mismo importe
-  // repetido se leía como que debía el doble (segunda mesa del 9 nov).
+  // Si debe justo lo que se cargó hoy, se dice que es eso: el mismo importe en dos renglones se
+  // leía como que debía el doble (segunda mesa del 9 nov).
   const owedSameAsToday =
     finalizedOwed.length === 1 &&
     finalizedBilling?.currency === finalizedOwed[0]?.currency &&
     finalizedBilling?.chargedCents === finalizedOwed[0]?.saldo
+  // La cuenta ya leída (con lo que se acaba de cobrar) y sin saldo: pagó todo.
+  const finalizedPaidUp =
+    canReadFinance &&
+    accountQuery.isSuccess &&
+    !accountQuery.isFetching &&
+    finalizedOwed.length === 0
   const chargedLines = finalizedBilling?.lines.filter((line) => line.status === "charged") ?? []
   const skippedLines = finalizedBilling?.lines.filter((line) => line.status !== "charged") ?? []
   const closeFinalized = () => {
@@ -1145,6 +1166,7 @@ export function EncounterEditor({
     setFinalizedMaterials(null)
     setFinalizedControls(null)
     setFinalizedKeptOpen([])
+    setFinalizedBookedAfter([])
     setFinalizedNext([])
     setBookingNext(null)
     setBudgetLater(false)
@@ -1224,6 +1246,7 @@ export function EncounterEditor({
           materials?: FinalizedMaterials | null
           controls?: FinalizedControls
           keptOpen?: Array<{ planItemId: string; title: string; reason: string }>
+          bookedAfter?: FinalizedBookedAfter[]
           nextSessions?: NextSession[]
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
@@ -1255,6 +1278,7 @@ export function EncounterEditor({
       setFinalizedMaterials(result.data.materials ?? null)
       setFinalizedControls(result.data.controls ?? null)
       setFinalizedKeptOpen(result.data.keptOpen ?? [])
+      setFinalizedBookedAfter(result.data.bookedAfter ?? [])
       setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedBilling(result.data.billing)
       // «Debe en total» cuenta lo que este cierre acaba de cargar.
@@ -2801,9 +2825,12 @@ export function EncounterEditor({
             <DialogTitle>Atención finalizada</DialogTitle>
             <DialogDescription>
               {/* «No dejó nada que cobrar» se leía como que no debía nada (QA del 9 nov). */}
-              {chargedLines.length > 0
-                ? "Caja ya lo ve en su lista de por cobrar."
-                : "Esta atención no dejó cargos nuevos."}
+              {/* Lo que dice tiene que seguir siendo cierto después de cobrar aquí mismo (entrega 8). */}
+              {chargedLines.length === 0
+                ? "Hoy no se carga nada."
+                : finalizedPaidUp
+                  ? "Pagado: no debe nada."
+                  : "Caja ya lo ve en su lista de por cobrar."}
             </DialogDescription>
           </DialogHeader>
           {finalizedNext.length > 0 ? (
@@ -2831,8 +2858,23 @@ export function EncounterEditor({
                 professionalLabel: memberName(encounter.professionalUserId),
                 keepProfessional: true,
                 // La sesión que sigue no es hoy: el buscador empieza mañana (QA del 9 nov
-                // proponía «Reservar hoy a las 11:30»); hoy queda a una flecha.
-                date: addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
+                // proponía «Reservar hoy a las 11:30»); hoy queda a una flecha. Con el control de lo
+                // que terminó hoy en la misma cita (la corona y el control de su endodoncia, como en
+                // «Qué sigue»), desde que ese control se puede hacer (repaso del 9 nov, N6).
+                date: [
+                  addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
+                  finalizedControls?.next?.joinsNext?.from ?? "",
+                ].sort()[1]!,
+                ...(finalizedControls?.next?.joinsNext
+                  ? {
+                      followUpIds: [finalizedControls.next.id],
+                      // Por qué empieza ese día, como en «Qué sigue» (QA antes de entregar).
+                      note: `${finalizedControls.next.title} toca el ${controlDaySaid(
+                        new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(finalizedControls.next.dueAt)),
+                      )}; se puede hacer desde el ${controlDaySaid(finalizedControls.next.joinsNext.from)}.`,
+                      notBefore: finalizedControls.next.joinsNext.from,
+                    }
+                  : {}),
               }}
               onClose={() => setBookingNext(null)}
               onSaved={(appointment) => {
@@ -2863,8 +2905,11 @@ export function EncounterEditor({
             />
           ) : null}
           {chargedLines.length > 0 ? (
-            <section className="flex flex-col gap-2" aria-label="Quedó por cobrar">
-              <h3 className="text-sm font-semibold">Quedó por cobrar</h3>
+            // Lo que se cargó hoy no cambia al cobrar; lo que debe sí: por eso «Se cargó hoy» y no
+            // «Quedó por cobrar», que tras un pago parcial decía S/ 450 junto a «Debe S/ 200»
+            // (repaso del 9 nov, N2). El único total es «Debe en total», de la cuenta.
+            <section className="flex flex-col gap-2" aria-label="Se cargó hoy a su cuenta">
+              <h3 className="text-sm font-semibold">Se cargó hoy a su cuenta</h3>
               <ul className="flex flex-col gap-1">
                 {chargedLines.map((line) => (
                   <li key={line.procedureId} className="flex items-baseline justify-between gap-3 text-sm">
@@ -2877,9 +2922,9 @@ export function EncounterEditor({
                   </li>
                 ))}
               </ul>
-              {finalizedBilling?.currency && orgLocale ? (
+              {finalizedBilling?.currency && orgLocale && chargedLines.length > 1 ? (
                 <p className="flex items-baseline justify-between gap-3 border-t pt-2 text-sm font-semibold">
-                  <span>Total</span>
+                  <span>Total de hoy</span>
                   <span className="tabular-nums">
                     {moneyTotalsText(
                       finalizedBilling.totals?.length
@@ -2898,16 +2943,13 @@ export function EncounterEditor({
           {canReadFinance && !accountQuery.isFetching && finalizedOwed.length > 0 && orgLocale ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
               <span>
-                {owedSameAsToday ? (
-                  "Caja puede cobrarlo ahora."
-                ) : (
-                  <>
-                    Debe en total{" "}
-                    <span className="font-semibold tabular-nums">
-                      {finalizedOwed.map((row) => formatMoney(row.saldo, row.currency, orgLocale)).join(" y ")}
-                    </span>
-                  </>
-                )}
+                Debe en total{" "}
+                <span className="font-semibold tabular-nums">
+                  {finalizedOwed
+                    .map((row) => formatMoney(row.saldo, row.currency, orgLocale))
+                    .join(" y ")}
+                </span>
+                {owedSameAsToday ? " · lo de hoy" : null}
               </span>
               {/* Secundario: la acción de quien atiende es reservar lo que sigue. */}
               <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" variant="outline" />
@@ -2915,6 +2957,31 @@ export function EncounterEditor({
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
+          ) : null}
+          {/* La corona ya reservada mientras la endodoncia pide otra sesión: revisar esa cita (repaso
+              del 9 nov). Avisa sin frenar; quien atiende decide si esa cita sirve para la sesión. */}
+          {finalizedBookedAfter.length > 0 ? (
+            <ul role="status" className="flex flex-col gap-1 text-sm text-warning">
+              {finalizedBookedAfter.map((row) => (
+                <li key={row.planItemId}>
+                  {`«${row.title}» ya tiene cita el ${new Date(row.startsAt)
+                    .toLocaleDateString(activeOrgLocale(), {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      timeZone: activeOrgTimeZone(),
+                    })
+                    .replace(/[.,]/g, "")}, ${new Date(row.startsAt).toLocaleTimeString(
+                    activeOrgLocale(),
+                    {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZone: activeOrgTimeZone(),
+                    },
+                  )}${row.professionalName ? ` con ${row.professionalName}` : ""}, y «${row.beforeTitle}» aún no termina: revisa esa cita; puede servir para su próxima sesión.`}
+                </li>
+              ))}
+            </ul>
           ) : null}
           {/* Lo que se iba a terminar al firmar y no se pudo: sigue en curso, y se dice por qué. */}
           {finalizedKeptOpen.length > 0 ? (

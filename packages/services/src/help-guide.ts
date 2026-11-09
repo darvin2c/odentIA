@@ -452,7 +452,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué significa «Faltan datos para la atención»?",
-        a: "Que le falta algo de lo necesario para atenderla o atenderlo (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla en su nombre) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes; sin su sexo registrado se dice «para la atención». «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
+        a: "Que le falta algo de lo necesario para atenderla o atenderlo (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla en su nombre) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes; sin su sexo registrado se dice «para la atención». Si es menor de edad, también el documento de su representante legal cuando su ficha no lo tiene: se escribe en la ficha de esa persona o al firmar el consentimiento, y queda guardado en ella. «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
       },
       {
         q: "¿Por qué el documento, el seguro y la dirección cambian según la clínica?",
@@ -537,6 +537,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Dentro de la atención, en el Odontograma, que siempre está a la vista con lo registrado hoy debajo (una caries de varias caras es un solo hallazgo; en la ficha, bajo el dibujo, está la lista de todo lo que tiene la boca, y tocar un renglón abre esa pieza): eliges la pieza y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
       },
       {
+        q: "¿Por qué me avisa que el tratamiento es para otras piezas?",
+        a: "Los tratamientos de la biblioteca saben para qué piezas son: la endodoncia anterior vital es para dientes anteriores y la posterior, para molares. Si indicas uno en una pieza de otro grupo (la anterior en la 46), te lo dice sin frenarte debajo del tratamiento elegido, en el panel de la pieza o en «Indicar un tratamiento», y en su fila de «Indicado hoy»; si tu lista tiene el que encaja, ofrece «Usar» con su nombre y su precio, y tocarlo cambia el servicio. Si no lo tiene, te dice que el consentimiento llevará el nombre del que elegiste y, a quien configura los servicios, ofrece «Agregarla en Servicios y precios». Un servicio propio, sin biblioteca, no avisa. El paciente no ve el aviso.",
+      },
+      {
         q: "¿Por qué la pieza quedó dibujada después del tratamiento?",
         a: "Lo tratado queda dibujado: al completar un tratamiento cuyo servicio dice qué deja en la pieza (la resina deja una restauración; la exodoncia, una pieza ausente), eso se registra solo en la atención, en buen estado (azul), y lo que se trató deja de estar pendiente al cerrar. Los servicios de la biblioteca de odentIA ya lo traen; en uno propio se elige en Servicios › «Deja en la pieza».",
       },
@@ -571,6 +575,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Cómo dejo dicho cuándo vuelve?",
         a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso y «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte; «Indicar también un control» lo pide igual.",
+      },
+      {
+        q: "¿Por qué la corona dice «va después de terminar» la endodoncia?",
+        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue» y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, «Hacerla hoy» y «Reservar» siguen ahí.",
+      },
+      {
+        q: "Al firmar, ¿qué es «Se cargó hoy a su cuenta» y qué es «Debe en total»?",
+        a: "«Se cargó hoy a su cuenta» es lo que esta atención sumó a su cuenta y no cambia. «Debe en total» es lo que le falta pagar, con lo de antes y con lo que pague ahí mismo con «Cobrar». Un tratamiento que se cobra una vez se carga en su primera sesión: en las siguientes, el cierre dice que ya se cargó.",
       },
       {
         q: "¿Cuándo queda hecho un control si vino por otra cosa?",

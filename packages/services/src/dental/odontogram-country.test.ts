@@ -1,20 +1,14 @@
-import { withPlanItemDental } from "./plan-finding.js"
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { validateLeavesFinding } from "@odentia/dental"
+import { withOrgContext } from "@odentia/db"
+import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDiagnosis, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { odontogramEntry, serviceFinding } from "@odentia/db/schema/dental"
+import { validateLeavesFinding } from "@odentia/dental"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "../budgets.js"
-import {
-  addOdontogramEntries,
-  closingOdontogramOf,
-  createOdontogramAssessment,
-  getOdontogram,
-  listOdontogramAssessments,
-} from "./odontogram.js"
 import { makeSigner, readyToClose, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import {
   addEncounterProcedure,
@@ -26,12 +20,18 @@ import { nextPatientNumber } from "../patients.js"
 import { addPlanItem, setPlanItemStatus } from "../plan.js"
 import { createService } from "../service-catalog.js"
 import { librarySpecialtyIds } from "../specialties.js"
+import { insertTestPatients } from "../test-patient.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
+import {
+  addOdontogramEntries,
+  closingOdontogramOf,
+  createOdontogramAssessment,
+  getOdontogram,
+  listOdontogramAssessments,
+} from "./odontogram.js"
+import { withPlanItemDental } from "./plan-finding.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { drawTreatedFinding } from "./treated-findings.js"
-import { withOrgContext } from "@odentia/db"
-import { seedOdentiaCatalog } from "@odentia/db/dental"
-import { insertTestPatients } from "../test-patient.js"
 
 setupTestDb()
 
@@ -448,6 +448,48 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
     before.length,
   )
   expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, draft))).toHaveLength(1)
+})
+
+it("la caries guarda su código aunque junto se elija la pulpitis (segundo repaso del 9 nov, N8)", async () => {
+  const f = await attending("org_a")
+  await seedDiagnosisCodes([
+    { code: "K02.5", title: "Caries con exposición pulpar" },
+    { code: "K04.0", title: "Pulpitis" },
+  ])
+  const draft = await f.open()
+  // 46: caries CDP en oclusal y distal, y «Pulpitis» elegida en el mismo panel.
+  const deep = await f.run((tx) =>
+    registerToothFinding(tx, ...f.args, {
+      encounterId: draft,
+      toothNumbers: [46],
+      condition: "caries",
+      surfaces: ["occlusal", "distal"],
+      details: { variant: "pulpal_involvement" },
+      diagnosis: { diagnosisCode: "K04.0", diagnosisType: "confirmed" },
+    }),
+  )
+  expect(deep.entries.length).toBeGreaterThan(0)
+  for (const entry of deep.entries)
+    expect(entry).toMatchObject({ diagnosisSystem: "ICD-10-PE", diagnosisCode: "K02.5" })
+  // La pulpitis queda como diagnóstico de la atención, en su pieza.
+  const [pulpitis] = await ownerDb
+    .select()
+    .from(encounterDiagnosis)
+    .where(eq(encounterDiagnosis.encounterId, draft))
+  expect(pulpitis).toMatchObject({ diagnosisCode: "K04.0", siteCode: "46" })
+
+  // Otra caries elegida (la de la dentina) es de la misma categoría: vale lo elegido.
+  const chosen = await f.run((tx) =>
+    registerToothFinding(tx, ...f.args, {
+      encounterId: draft,
+      toothNumbers: [36],
+      condition: "caries",
+      surfaces: ["occlusal"],
+      details: { variant: "pulpal_involvement" },
+      diagnosis: { diagnosisCode: "K02.1", diagnosisType: "provisional" },
+    }),
+  )
+  expect(chosen.entries[0]).toMatchObject({ diagnosisCode: "K02.1" })
 })
 
 it("lo que deja cada tratamiento de la biblioteca encaja con su ámbito y es un hallazgo completo", () => {

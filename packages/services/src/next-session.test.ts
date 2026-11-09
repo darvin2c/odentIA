@@ -15,8 +15,8 @@ import { createAppointment } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "./encounters.js"
-import { getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
+import { getPlanNextStep, getPlanNextSteps, planNextStepsOf } from "./plan-next.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -171,6 +171,44 @@ it("«Falta otra sesión» deja por reservar la que se sumó; lo que se termina 
     sql`select metadata->>'nextControl' as next from audit_event where action = 'encounter.finalized' and entity_id = ${second}`,
   )
   expect(audit!.next).toBe("sesion_en_curso")
+})
+
+it("la corona ya reservada se avisa al firmar si la endodoncia de su pieza pide otra sesión, salvo que esa sesión ya tenga cita antes (entrega 8)", async () => {
+  const f = await clinicalFixture()
+  const endo = await acceptedTreatment(f, 1)
+  const corona = await acceptedTreatment(f, 1)
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "basica" })
+    .where(eq(treatmentPlanItem.id, endo.id))
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "rehabilitadora", title: "Corona" })
+    .where(eq(treatmentPlanItem.id, corona.id))
+  const book = await booker(f)
+  await book(3, [corona.id])
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  // Antes no decía nada: la corona quedaba en su cita aunque la endodoncia no hubiera terminado.
+  const closed = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, f.encounter.id, { addSessionPlanItemIds: [endo.id] }),
+  )
+  expect(closed.bookedAfter).toEqual([
+    expect.objectContaining({ planItemId: corona.id, title: "Corona", beforeTitle: endo.title }),
+  ])
+  // «Qué sigue» de recepción también lo avisa en la fila de la sesión que falta.
+  const steps = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  expect(steps.steps.find((step) => step.kind === "continuar")?.notice).toMatch(
+    /^Corona ya tiene cita el .+, y va después: revisa esa cita.$/,
+  )
+  // Con la sesión 2 reservada antes que la corona, no hay nada que revisar.
+  await book(1, [endo.id])
+  const second = await attention(f)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: endo.id }))
+  const again = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, second, { addSessionPlanItemIds: [endo.id] }),
+  )
+  expect(again.bookedAfter).toEqual([])
 })
 
 it("la cita de la propia atención no es la próxima sesión, aunque su hora sea después", async () => {

@@ -1,18 +1,15 @@
-import { budgetStateText, isLeftOut, isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
+import { canAttend } from "@odentia/auth/permissions"
 import {
-  type AssembledBudget,
-  assembleEncounterBudget,
-  readBillingModes,
-  removeBudgetItems,
-} from "./budgets.js"
-import {
-  checkEncounterVoidBudgets,
-  type EncounterVoidPreview,
-  encounterVoidBudgets,
-  settleEncounterVoidBudgets,
-} from "./encounter-void-budgets.js"
+  budgetStateText,
+  isLeftOut,
+  isLocalAnestheticName,
+  parseVitals,
+  sumByCurrency,
+  vitalsErrors,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
+import { member, user } from "@odentia/db/schema/auth"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
@@ -26,25 +23,78 @@ import {
   patient,
   patientCharge,
   prescription,
+  serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlan,
-  serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { member, user } from "@odentia/db/schema/auth"
-import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
+import {
+  clinicalOrder,
+  consentDocument,
+  consentEvent,
+  medicalLeave,
+} from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { canAttend } from "@odentia/auth/permissions"
-import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
-import { appointmentSessionsOf, markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
-import { type HealthGap, healthGapsOf, listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm"
 import { acceptedBudgetLines } from "./agreed-lines.js"
-import { assertAttending } from "./encounter-attending.js"
-import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
+import {
+  appointmentSessionsOf,
+  markArrivedOnAttend,
+  notifyAppointmentChanged,
+  setAppointmentStatus,
+} from "./appointments.js"
+import { zonedTimeToUtc } from "./availability.js"
+import {
+  type AssembledBudget,
+  assembleEncounterBudget,
+  readBillingModes,
+  removeBudgetItems,
+} from "./budgets.js"
+import {
+  type HealthGap,
+  healthGapsOf,
+  listEncounterDocuments,
+  type PatientDocumentWithContext,
+} from "./clinical.js"
+import {
+  type ConsentNeed,
+  cancelDerivationTask,
+  getEncounterConsentNeeds,
+} from "./clinical-forms.js"
+import {
+  type ClosingResolvable,
+  resolvableDiagnosesOf,
+  resolveDiagnosesOnSign,
+} from "./closing-diagnoses.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { assertAttending } from "./encounter-attending.js"
+import { removableFromEncounter } from "./encounter-plan-remove.js"
+import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
+import {
+  checkEncounterVoidBudgets,
+  type EncounterVoidPreview,
+  encounterVoidBudgets,
+  settleEncounterVoidBudgets,
+} from "./encounter-void-budgets.js"
 import {
   branchNotFound,
   invalidField,
@@ -54,11 +104,9 @@ import {
   validation,
 } from "./errors.js"
 import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
-import { zonedTimeToUtc } from "./availability.js"
-import { controlWindowOpenSql, dayKeyIn } from "./to-schedule.js"
+import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
 import {
   addPlanItem,
   createTreatmentPlan,
@@ -67,17 +115,7 @@ import {
   surfaceLimits,
   updatePlanItemPlanning,
 } from "./plan.js"
-import { canBookAnother, LIVE_APPOINTMENT_STATUSES, sessionCountsOf, sessionsDoneSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
-import { requireServiceForIndication } from "./service-catalog.js"
-import { findOrgLocale, orgClinicalProfile } from "./locale.js"
-import {
-  type ClosingMaterials,
-  closingMaterialsOf,
-  type DiscountedMaterials,
-  discountEncounterMaterials,
-} from "./service-materials.js"
-import { countConsultationAction } from "./saas-actions.js"
 import {
   type ProductParts,
   type ProductSite,
@@ -87,9 +125,28 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
-import { removableFromEncounter } from "./encounter-plan-remove.js"
-import { type ClosingResolvable, resolvableDiagnosesOf, resolveDiagnosesOnSign } from "./closing-diagnoses.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
+import { countConsultationAction } from "./saas-actions.js"
+import { requireServiceForIndication } from "./service-catalog.js"
+import {
+  type ClosingMaterials,
+  closingMaterialsOf,
+  type DiscountedMaterials,
+  discountEncounterMaterials,
+} from "./service-materials.js"
+import {
+  canBookAnother,
+  controlWindowOpenSql,
+  controlWindowStart,
+  dayKeyIn,
+  goesBeforeSql,
+  LIVE_APPOINTMENT_STATUSES,
+  pairsWithAccepted,
+  planItemSql,
+  sessionCountsOf,
+  sessionsDoneSql,
+  TO_SCHEDULE_STATUSES,
+} from "./to-schedule.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
@@ -1841,6 +1898,11 @@ export interface FinalizeEncounterBase {
   /** Lo que se iba a terminar al firmar (ADR 0161) y quedó en curso, con su motivo. */
   keptOpen: SessionKeptOpen[]
   /**
+   * Lo que va después de lo que sigue en curso y ya tiene su cita (la corona reservada mientras la
+   * endodoncia pide otra sesión): el cierre lo avisa para revisar esa cita (repaso del 9 nov).
+   */
+  bookedAfter: BookedAfter[]
+  /**
    * Lo trabajado hoy que sigue en curso, con su próxima sesión: la cita que ya la
    * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
    */
@@ -1873,7 +1935,12 @@ export interface FinalizeEncounterBase {
    * «¿Cuándo vuelve?» y los que esta visita cumplió.
    */
   controls: {
-    next: { id: string; title: string; dueAt: Date } | null
+    /**
+     * El control indicado al firmar. `joinsNext`: va en la misma cita que lo aceptado que se ofrece
+     * reservar (la corona con el control de su endodoncia, `pairsWithAccepted`), desde `from`
+     * (`YYYY-MM-DD`, el día en que abre su ventana), como en «Qué sigue».
+     */
+    next: { id: string; title: string; dueAt: Date; joinsNext?: { from: string } } | null
     fulfilled: Array<{ id: string; title: string }>
   }
 }
@@ -1991,6 +2058,69 @@ export interface NextSession {
   booked: BookedSession | null
   /** La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no le falta. */
   toBook: { n: number; m: number } | null
+}
+
+/** Lo aceptado que va después de otro tratamiento sin terminar y ya tiene su cita. */
+export interface BookedAfter {
+  planItemId: string
+  title: string
+  /** Lo que va antes y sigue en curso. */
+  beforeTitle: string
+  startsAt: Date
+  professionalName: string | null
+}
+
+/**
+ * De lo que sigue en curso (`beforeIds`), lo que va después (`goesBeforeSql`) y ya tiene una cita
+ * por venir antes de la próxima sesión de lo de antes (o sin ella): la primera de cada uno.
+ */
+export async function bookedAfterOf(
+  tx: Db,
+  orgId: string,
+  beforeIds: readonly string[],
+): Promise<BookedAfter[]> {
+  if (beforeIds.length === 0) return []
+  const { planPhases } = await productHooks(tx, orgId)
+  const later = planItemSql("later")
+  const rows = await tx.execute<{
+    id: string
+    title: string
+    before_title: string
+    starts_at: Date | string
+    professional_name: string | null
+  }>(sql`
+    select distinct on (later.id) later.id, later.title, before_item.title as before_title, a.starts_at, u.name as professional_name
+    from treatment_plan_item later
+    join treatment_plan_item before_item on ${goesBeforeSql(later, planItemSql("before_item"), planPhases)}
+    join appointment_plan_item carried on carried.organization_id = later.organization_id and carried.plan_item_id = later.id
+    join appointment a on a.organization_id = carried.organization_id and a.id = carried.appointment_id
+      and a.status in (${sql.join(
+        LIVE_APPOINTMENT_STATUSES.map((status) => sql`${status}`),
+        sql`, `,
+      )}) and a.starts_at > now()
+    left join "user" u on u.id = a.professional_user_id
+    where later.organization_id = ${orgId} and later.decision_status = 'aceptado'
+      and before_item.id in (${sql.join(
+        beforeIds.map((id) => sql`${id}`),
+        sql`, `,
+      )})
+      -- Si su próxima sesión ya tiene cita antes (o en la misma cita), no hay nada que revisar.
+      and not exists (select 1 from appointment_plan_item next_session
+        join appointment b on b.organization_id = next_session.organization_id and b.id = next_session.appointment_id
+        where next_session.organization_id = before_item.organization_id and next_session.plan_item_id = before_item.id
+          and b.status in (${sql.join(
+            LIVE_APPOINTMENT_STATUSES.map((status) => sql`${status}`),
+            sql`, `,
+          )})
+          and b.starts_at > now() and b.starts_at <= a.starts_at)
+    order by later.id, a.starts_at`)
+  return rows.map((row) => ({
+    planItemId: row.id,
+    title: row.title,
+    beforeTitle: row.before_title,
+    startsAt: new Date(row.starts_at),
+    professionalName: row.professional_name,
+  }))
 }
 
 /**
@@ -2955,6 +3085,12 @@ export async function finalizeEncounter(
   // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras terminar la
   // endodoncia): «Reservar» lo deja con su cita ahí mismo. Mientras algo sigue, no: la corona
   // no va en la cita de la sesión 2 (QA del 9 nov).
+  // Lo que va después de lo que sigue en curso y ya tiene su cita: el cierre lo avisa.
+  const bookedAfter = await bookedAfterOf(
+    tx,
+    orgId,
+    continuingNext.map((session) => session.planItemId),
+  )
   const nextSessions = continuingNext.length
     ? continuingNext
     : await nextSessionsOf(tx, orgId, closing.sessions.accepted.map((session) => session.planItemId), row.appointmentId ?? null)
@@ -3009,8 +3145,26 @@ export async function finalizeEncounter(
     skippedCharges,
     budget,
     materials,
-    controls: { next: nextControl, fulfilled },
+    controls: {
+      next:
+        nextControl &&
+        continuingNext.length === 0 &&
+        nextSessions.some((session) => session.toBook !== null) &&
+        pairsWithAccepted({ dueAt: nextControl.dueAt, createdAt: now })
+          ? {
+              ...nextControl,
+              joinsNext: {
+                from: dayKeyIn(
+                  controlWindowStart({ dueAt: nextControl.dueAt, createdAt: now }),
+                  timezone,
+                ),
+              },
+            }
+          : nextControl,
+      fulfilled,
+    },
     keptOpen,
+    bookedAfter,
     nextSessions,
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,

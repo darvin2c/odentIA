@@ -75,7 +75,7 @@ export function NextStepButton({
   /** Lo que lleva esa cita: suma o quita, con la versión que tiene ahora. */
   const changeAppointment = async (appointmentId: string, change: { add?: string[]; remove?: string[] }) => {
     const current = await apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointmentId}`)
-    return apiFetch<{ data: AgendaAppointment & { usualMinutes: number | null; added: string[] } }>(
+    return apiFetch<{ data: AgendaAppointment & { usualMinutes: number | null; added: string[]; outsideService?: string[] } }>(
       `/api/appointments/${appointmentId}/plan-items`,
       { method: "POST", body: JSON.stringify({ expectedVersion: current.data.version, ...change }) },
     )
@@ -93,13 +93,20 @@ export function NextStepButton({
       const usual = appointment.usualMinutes
       const minutes = Math.round((new Date(appointment.endsAt).getTime() - new Date(appointment.startsAt).getTime()) / 60_000)
       const tooShort = !!usual && usual > minutes
+      // Quien tiene la cita no atiende lo que se sumó (otra especialidad): se dice, no se frena (entrega 8).
+      const outside = appointment.outsideService ?? []
+      const outsideWords = outside.length
+        ? `${appointment.professionalName} no atiende ${outside.join(" · ")}: se sumó igual. Si debe hacerlo otro profesional, cambia la cita en la Agenda.`
+        : null
+      const tooShortWords = tooShort
+        ? `Su cita está reservada por ${minutes} minutos y con esto suele necesitar unos ${usual}. Si no alcanza, alárgala en la Agenda.`
+        : null
+      const stays = tooShort || outside.length > 0
       toast.success(`${join.label.replace(/^Sumar/, "Sumado")} con ${appointment.professionalName}`, {
         // La cita no se alarga sola: si lo que lleva suele durar más, se dice y el aviso se queda
         // hasta cerrarlo (segunda mesa del 9 nov: se iba solo y no se entendía «105»).
-        description: tooShort
-          ? `Su cita está reservada por ${minutes} minutos y con esto suele necesitar unos ${usual}. Si no alcanza, alárgala en la Agenda.`
-          : undefined,
-        ...(tooShort ? { duration: Number.POSITIVE_INFINITY, closeButton: true } : {}),
+        description: [outsideWords, tooShortWords].filter(Boolean).join(" ") || undefined,
+        ...(stays ? { duration: Number.POSITIVE_INFINITY, closeButton: true } : {}),
         action: {
           label: "Deshacer",
           onClick: () =>

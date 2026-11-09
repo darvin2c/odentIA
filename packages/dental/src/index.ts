@@ -6,17 +6,18 @@
  */
 export * from "./anatomy.js"
 export * from "./catalog.js"
-export * from "./findings.js"
-export * from "./treated-findings.js"
-export * from "./signed-odontogram.js"
-export * from "./treatment-templates.js"
-export * from "./periodontal.js"
 export * from "./cbct-demo.js"
 export * from "./country.js"
-export * from "./site.js"
 export * from "./diagnoses.js"
-export * from "./interview.js"
 export * from "./examination.js"
+export * from "./findings.js"
+export * from "./interview.js"
+export * from "./periodontal.js"
+export * from "./signed-odontogram.js"
+export * from "./site.js"
+export * from "./treated-findings.js"
+export * from "./treatment-anatomy.js"
+export * from "./treatment-templates.js"
 export type {
   FindingColorKind,
   FindingDefinition,

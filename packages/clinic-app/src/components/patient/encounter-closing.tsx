@@ -1,3 +1,4 @@
+import { sessionWords, showsSession } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -16,13 +17,20 @@ import {
   Input,
   ScrollArea,
 } from "@odentia/ui"
-import { sessionWords, showsSession } from "@odentia/clinical"
-import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError, zonedDateOf } from "@odentia/ui-patterns"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
+import {
+  DatePickerButton,
+  TimeSelect,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  zonedDateOf,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { Check } from "lucide-react"
 import { useId, useRef } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
+import { usePermission } from "../../lib/crm"
 import type { ConsentNeed } from "../../lib/encounter-documents"
 import {
   type BookedSession,
@@ -174,6 +182,8 @@ export interface ContinuingVisit {
   booked?: BookedSession
   /** Lo aceptado sin empezar a lo que vuelve (la corona): lo de hoy ya terminó. */
   accepted?: boolean
+  /** Con lo aceptado: lo que termina hoy («Endodoncia»), para nombrar su control. */
+  after?: string
 }
 
 /**
@@ -202,7 +212,36 @@ export function continuingAfterSign(
   ]
   // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras la endodoncia):
   // no un control genérico que pedía otra cita (QA del 9 nov). La regla del servidor (`finalizeEncounter`).
-  return going.length > 0 ? going : (sessions.accepted ?? []).map((session) => ({ ...visit(session, session.m), accepted: true }))
+  if (going.length > 0) return going
+  const after = sessions.finishing.find((session) => answers[session.planItemId] !== "otra")?.title
+  return (sessions.accepted ?? []).map((session) => ({
+    ...visit(session, session.m),
+    accepted: true,
+    ...(after ? { after } : {}),
+  }))
+}
+
+/**
+ * Con algo ya ofrecido para volver (la corona tras la endodoncia, o la sesión 2
+ * que sigue), el control que se pide aparte: su título, como lo nombra el
+ * servidor al crearlo («Control de endodoncia»), y lo que queda con o sin plazo.
+ * Sin nada ofrecido, null: se dice lo de siempre (QA del 9 nov: «No indicaste
+ * cuándo vuelve» salía debajo de «Vuelve para…»).
+ */
+export function controlBesideAccepted(
+  continuing: ContinuingVisit[],
+  day: string,
+): { title: string; line: string } | null {
+  if (continuing.length === 0) return null
+  const after = continuing.find((visit) => visit.after)?.after
+  const names = continuing.map((visit) => `«${visit.label}»`)
+  const what = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
+  return {
+    title: after ? `Control de ${inSentence(after)}` : "Control",
+    line: day
+      ? `Control hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
+      : `Sin plazo, el control no queda anotado: solo ${what}.`,
+  }
 }
 
 /** «el lun 9 a las 10:45», «mañana a las 17:00», en la zona de la clínica. */
@@ -309,6 +348,8 @@ export function ClosingNextVisit({
   const set = <K extends keyof ClosingValues>(name: K, value: ClosingValues[K]) => form.setFieldValue(name, value as never)
   const day = chosenDay(values, controls)
   const none = values.nextControl === "none"
+  // Pedido aparte de lo aceptado que ya se ofrece (la corona): se nombra como control.
+  const beside = values.askControl ? controlBesideAccepted(continuing, day) : null
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
       {controls.due.length > 0 ? (
@@ -377,9 +418,14 @@ export function ClosingNextVisit({
           </p>
         ) : (
           <>
+            {beside ? (
+              <p id={`${ids}-control`} className="text-sm font-medium">
+                {beside.title}
+              </p>
+            ) : null}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
               <ToggleGroup
-                aria-labelledby={`${ids}-cuando`}
+                aria-labelledby={beside ? `${ids}-control` : `${ids}-cuando`}
                 value={values.nextControl && !none ? [values.nextControl] : []}
                 onValueChange={(next: unknown[]) => {
                   const picked = next[0]
@@ -430,13 +476,15 @@ export function ClosingNextVisit({
               </form.AppField>
             ) : null}
             <p className="text-xs text-muted-foreground" aria-live="polite">
-              {day
-                ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
-                : none
-                  ? "Queda dicho que no hace falta otro control."
-                  : values.nextControl === "date"
-                    ? "Elige el día en el calendario."
-                    : "No indicaste cuándo vuelve: recepción no lo verá"}
+              {none
+                ? "Queda dicho que no hace falta otro control."
+                : values.nextControl === "date" && !day
+                  ? "Elige el día en el calendario."
+                  : beside
+                    ? beside.line
+                    : day
+                      ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
+                      : "No indicaste cuándo vuelve: recepción no lo verá"}
             </p>
           </>
         )}
@@ -906,6 +954,8 @@ export function EncounterClosingDialog({
   onCompleteHealth?: () => void
 }): React.JSX.Element {
   const ids = useId()
+  // Quien no ve la caja no recibe lo que debe en «Atención finalizada»: no se le promete (QA antes de entregar).
+  const seesFinance = usePermission("finance.read")
   const ProductClosing = productUi().encounter.Closing
   const bounds = endTimeBounds(startedAt)
   const needsReason = consents.length > 0
@@ -1048,7 +1098,9 @@ export function EncounterClosingDialog({
                 </p>
               ) : null}
               <p className="text-xs text-muted-foreground">
-                Después: lo que quedó por cobrar, para avisar a caja.
+                {seesFinance
+                  ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
+                  : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
               </p>
               {nextVisit}
             </div>

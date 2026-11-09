@@ -25,6 +25,8 @@ import { useId, useMemo, useState } from "react"
 import { staffAddressSource } from "../../lib/address-suggestions"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useClinicalProfile } from "../../lib/org"
+import { attendWord } from "../../lib/patient-overview"
+import { filiationGapsText, type Patient } from "../../lib/patients"
 import type { PersonPage } from "../../lib/people"
 import {
   countryChoices,
@@ -35,13 +37,11 @@ import {
   insuranceFromChoice,
   maritalChoices,
 } from "../../lib/person-data"
-import { filiationGapsText, type Patient } from "../../lib/patients"
 import { AddressStreetField } from "../address/address-street-field"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
 import { placeErrors } from "./form-errors"
 import { PersonalLinkActions } from "./send-personal-link"
-import { attendWord } from "../../lib/patient-overview"
 
 type FieldKind =
   | { kind: "text"; max: number; wide?: boolean }
@@ -195,6 +195,8 @@ const COMPLETE_FIELDS: Record<MissingPersonDatum["key"], Array<SectionField["key
   emergencyContactName: ["emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone"],
   emergencyContactPhone: ["emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone"],
   insuranceType: ["insuranceType", "insurerName", "affiliationNumber"],
+  // Es de su representante: se escribe en la ficha de esa persona o al firmar su consentimiento.
+  representativeDoc: [],
 }
 
 /**
@@ -411,6 +413,10 @@ export function FiliacionSectionDrawer({
   const description = completing
     ? `Solo lo que falta para ${attendWord(patient?.sex ?? person?.sex)}. Al guardar, los apellidos quedan confirmados.`
     : sections[section].description
+  const representativeDocMissing = (missing ?? []).some(
+    (datum) => datum.key === "representativeDoc",
+  )
+  const ownMissing = (missing ?? []).filter((datum) => datum.key !== "representativeDoc")
   // Apellidos a la vista en «Completar», aunque no falten.
   const namesInView = completing && !wanted?.has("givenNames") && !wanted?.has("familyName")
   return (
@@ -429,9 +435,15 @@ export function FiliacionSectionDrawer({
             <Badge variant="warning">
               {missing?.length === 1 ? "Falta 1" : `Faltan ${missing?.length ?? 0}`}
             </Badge>
-            {/* O que lo complete ella desde su teléfono, con «Su enlace» (decisión 8). */}
-            {patient && missing && missing.length > 0 ? (
-              <PersonalLinkActions patientId={patient.id} missing={filiationGapsText(missing)} />
+            {/* O que lo complete ella desde su teléfono, con «Su enlace» (decisión 8): lo suyo, no lo de su representante. */}
+            {patient && ownMissing.length > 0 ? (
+              <PersonalLinkActions patientId={patient.id} missing={filiationGapsText(ownMissing)} />
+            ) : null}
+            {representativeDocMissing ? (
+              <p className="text-sm text-muted-foreground">
+                Falta el documento de su representante: se escribe en la ficha de esa persona o al
+                firmar su consentimiento, y queda guardado ahí.
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -546,8 +558,10 @@ export function FiliacionSectionDrawer({
             </form.AppField>
           )
         })}
-        {completing && fields.length === 0 ? (
-          <p className="text-sm text-muted-foreground sm:col-span-2">No le falta nada para {attendWord(patient?.sex ?? person?.sex)}.</p>
+        {completing && fields.length === 0 && !representativeDocMissing ? (
+          <p className="text-sm text-muted-foreground sm:col-span-2">
+            No le falta nada para {attendWord(patient?.sex ?? person?.sex)}.
+          </p>
         ) : null}
       </div>
     </FormDrawer>

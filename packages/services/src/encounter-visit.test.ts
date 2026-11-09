@@ -5,12 +5,12 @@
  * hace hoy; «Quitar» corrige lo indicado hoy sin ensuciar el Plan; y el
  * presupuesto se dice en una línea honesta.
  */
-import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
+
 import { randomUUID } from "node:crypto"
+import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   createConsentTemplate,
   getEncounterConsentNeeds,
@@ -18,6 +18,7 @@ import {
   publishConsentTemplate,
   setConsentTemplateServices,
 } from "./clinical-forms.js"
+import { clinicalFixture } from "./clinical-test-fixture.js"
 import { removeIndicatedFromEncounter } from "./encounter-plan-remove.js"
 import {
   bringTreatmentToEncounter,
@@ -71,6 +72,37 @@ async function secondVisit(f: Fixture): Promise<string> {
     .returning({ id: encounter.id })
   return row!.id
 }
+
+it("«Hoy viene a…» dice que la corona va después de la endodoncia en curso de su pieza, y la deja como segunda opción (entrega 8)", async () => {
+  const f = await clinicalFixture()
+  await f.ready(f.encounter.id)
+  const endo = await accepted(f, 2)
+  const corona = await accepted(f, 1)
+  // La endodoncia y la corona en la 46, cada una en su fase; la sesión 1 de la endodoncia ya se hizo.
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "basica" })
+    .where(eq(treatmentPlanItem.id, endo.id))
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "rehabilitadora" })
+    .where(eq(treatmentPlanItem.id, corona.id))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  const today = await secondVisit(f)
+  const visit = (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))).visit
+  // Antes: «Corona · Aceptado, sin empezar [Hacerla hoy]», sin decir que va después.
+  expect(visit?.treatments.map((row) => [row.planItemId, row.after])).toEqual([
+    [endo.id, null],
+    [corona.id, { title: endo.title, today: false }],
+  ])
+  // Traída la endodoncia a hoy, la corona dice que va después de lo de hoy.
+  await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, endo.id))
+  const again = (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))).visit
+  expect(again?.treatments.find((row) => row.planItemId === corona.id)?.after).toEqual({
+    title: endo.title,
+    today: true,
+  })
+})
 
 it("sin cita, la sesión 2 viene a la atención: «Continuar hoy» la trae con motivo y diagnóstico, y cuenta la de hoy", async () => {
   const f = await clinicalFixture()
