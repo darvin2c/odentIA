@@ -195,7 +195,7 @@ export async function createJobOrderSale(
     .where(and(eq(jobOrder.organizationId, orgId), eq(jobOrder.requestKey, input.requestId), isNull(jobOrder.remakeOf)))
   if (replay) {
     if (replay.fingerprint !== fingerprint)
-      throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave ya es de otra venta")
+      throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esta venta ya se guardó con otros datos: búscala en Pedidos antes de volver a venderla")
     const [ticket] = await tx
       .select({ id: paymentTicket.id })
       .from(paymentTicket)
@@ -410,7 +410,7 @@ export async function remakeJobOrder(
     .from(jobOrder)
     .where(and(eq(jobOrder.organizationId, orgId), eq(jobOrder.requestKey, input.requestId)))
   if (replay) {
-    if (original.remadeAs !== replay.id) throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave ya es de otro pedido")
+    if (original.remadeAs !== replay.id) throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Este pedido ya se rehízo con otros datos: búscalo en Pedidos")
     return getJobOrder(tx, orgId, replay.id)
   }
   const reason = text(input.reason, "reason", "por qué se rehace", NOTES_MAX)
