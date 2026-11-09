@@ -45,8 +45,14 @@ describe("el correo", () => {
   it("con el color de la clínica, el botón lo lleva; sin él, el de odentIA", () => {
     const input = { firstName: "Ana", clinic: "Clínica Sonríe", week: "w", collected: "S/ 0.00", facts: [], changes: [], recommendation: null, reportsUrl: "https://dental-smile.odentia.localhost/reports", stopUrl: null }
     const orange = brandEmailColors("#ea580c")
-    expect(reportDigestEmail({ ...input, accent: orange }).html).toContain(`background-color:${orange.boton};`)
-    expect(reportDigestEmail(input).html).toContain("background-color:#0e7490;")
+    const colored = reportDigestEmail({ ...input, accent: orange }).html
+    expect(colored).toContain(`background-color:${orange.boton};`)
+    // La línea sobre el título (el nombre de la clínica) también cambia de tono en oscuro.
+    expect(colored).toContain(`<p class="ceja" style="margin:0 0 4px 0;`)
+    expect(colored).toContain(`.ceja{color:${orange.oscuro.enlace}!important}`)
+    const plain = reportDigestEmail(input).html
+    expect(plain).toContain("background-color:#0e7490;")
+    expect(plain).not.toContain("ceja")
   })
 
   it("sin nada que mirar, el asunto solo dice lo cobrado", () => {

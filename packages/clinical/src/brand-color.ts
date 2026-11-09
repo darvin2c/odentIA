@@ -296,6 +296,11 @@ export function brandPalette(hex: string): BrandPalette {
   }
 }
 
+/** La línea del membrete y el cuadro de iniciales en el papel; sin color elegido, tinta (null). */
+export function brandPaperInk(hex: string | null): string | null {
+  return hex ? brandPalette(hex).paper : null
+}
+
 /**
  * El color de la clínica en un correo suyo a su equipo: el botón con su relleno y su
  * letra, como en la app, y los enlaces en el tono legible, en claro y en oscuro. Tiene la

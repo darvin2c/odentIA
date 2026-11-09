@@ -255,6 +255,7 @@ body,.fondo{background-color:#0c1118!important}
 .boton td{background-color:${(accent ?? brand).oscuro.boton}!important}
 .boton a{color:${(accent ?? brand).oscuro.botonTinta}!important}
 a.enlace{color:${brand.oscuro.enlace}!important}${accent ? `
+.ceja{color:${accent.oscuro.enlace}!important}
 a.accion{color:${accent.oscuro.enlace}!important}` : ""}
 }`
 
@@ -353,7 +354,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
 
   const head =
     (content.eyebrow
-      ? `<p style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${A?.enlace ?? B.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
+      ? `<p${A ? ' class="ceja"' : ""} style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${A?.enlace ?? B.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
       : "") +
     `<h1 class="t1" style="margin:0;${FONT}font-size:22px;line-height:28px;font-weight:bold;color:${C.tinta};">${escapeHtml(content.title)}</h1>` +
     content.paragraphs

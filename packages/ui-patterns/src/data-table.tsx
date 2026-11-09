@@ -235,8 +235,9 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refresh
           return (
             <Item
               key={row.id}
+              variant="outline"
               className={cn(
-                "rounded-md border bg-card",
+                "rounded-md bg-card",
                 onRowClick && "cursor-pointer",
                 active && activeRowClass,
               )}
@@ -516,7 +517,7 @@ function ListSkeleton({ rowCount, showPagination, label }: SkeletonShape) {
     <div {...statusProps(label)} className="flex flex-col gap-2">
       <div aria-hidden="true" className="flex flex-col gap-2">
         {rows.map((rowKey, rowIndex) => (
-          <Item key={rowKey} className="rounded-md border bg-card">
+          <Item key={rowKey} variant="outline" className="rounded-md bg-card">
             <ItemMedia variant="image">
               <Skeleton className="size-full rounded-sm" />
             </ItemMedia>

@@ -116,9 +116,9 @@ describe("el color de la clínica", () => {
     expect(mail.html).toContain(".boton a{color:#111111!important}")
   })
 
-  it("sin color, el correo es el de siempre", () => {
+  // Que sin color sea idéntico al de antes lo cuida el snapshot de `invitacion`.
+  it("sin color, el botón y los enlaces son los de la marca", () => {
     const plain = invitationTemplate({ organizationName: "Clínica Sonrisa", inviterName: "María Pérez", url: URL })
-    expect(plain.html).toBe(TEMPLATES.invitacion!().html)
     expect(plain.html).not.toContain("a.accion")
     expect(plain.html).not.toContain("enlace accion")
     expect(plain.html).toContain("background-color:#0e7490;")

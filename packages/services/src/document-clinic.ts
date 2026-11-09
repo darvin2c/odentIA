@@ -7,7 +7,7 @@
  * clínica subió a su carpeta del bucket público. Una dirección guardada a mano
  * que apunte a otro lado no se sigue (SSRF). Falla en silencio: sale con iniciales.
  */
-import { brandPalette, dominantColors } from "@odentia/clinical"
+import { brandPaperInk, dominantColors } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
@@ -151,7 +151,7 @@ export async function loadDocumentClinic(tx: Db, orgId: string): Promise<Documen
     phone: only?.phone ?? null,
     branchName: only?.name ?? null,
     logo: await clinicLogoOf(tx, orgId),
-    brandInk: profile.brandColor ? brandPalette(profile.brandColor).paper : null,
+    brandInk: brandPaperInk(profile.brandColor),
     locale: profile.locale,
     timezone: profile.timezone,
     sheetSize: profile.sheetSize,
@@ -250,6 +250,6 @@ export async function loadDocumentLetterhead(tx: Db, orgId: string): Promise<Doc
     branchName: only?.name ?? null,
     address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null,
     phone: only?.phone ?? null,
-    brandInk: profile?.brandColor ? brandPalette(profile.brandColor).paper : null,
+    brandInk: brandPaperInk(profile?.brandColor ?? null),
   }
 }
