@@ -1,5 +1,5 @@
 /**
- * «Hecho hoy», dentro de «Plan y controles»: los tratamientos vinculados a la
+ * «Realizado hoy» de la atención: los tratamientos vinculados a la
  * atención en curso (por una sesión registrada o porque los trajo la cita).
  *
  * Muestra en qué estado clínico están y permite cerrarlos cuando el trabajo
@@ -88,23 +88,16 @@ export function EncounterTreatments({
     })
   }
 
+  // Sin tratamientos del plan en la atención, «Realizado hoy» muestra solo lo registrado.
+  if (items.length === 0) return <>{null}</>
   return (
-    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-col gap-1.5">
-        <h3 className="font-heading text-base font-medium">Hecho hoy</h3>
-        <p className="text-sm text-muted-foreground">
-          ¿Hiciste la sesión de hoy? Regístrala. Lo que con ella llega a sus sesiones previstas
-          queda realizado al firmar; «Completar» lo termina antes.
-        </p>
-      </div>
-
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Ningún tratamiento del plan en esta atención. Al registrar un procedimiento de un
-          tratamiento indicado, aparece aquí.
-        </p>
-      ) : (
-        <ul className="flex flex-col divide-y">
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-muted-foreground">
+        Lo que con la sesión de hoy llega a sus sesiones previstas queda realizado al firmar;
+        «Completar» lo termina antes.
+      </p>
+      {
+        <ul className="flex flex-col divide-y" aria-label="Tratamientos de esta atención">
           {items.map((item) => {
             const open =
               item.decisionStatus === "aceptado" &&
@@ -113,8 +106,12 @@ export function EncounterTreatments({
             const hasSession = sessionItemIds.has(item.id)
             // Mientras falten sesiones previstas, «Completar» no es la acción principal.
             const planned = item.plannedSessions ?? 1
+            // Las hechas cuentan esta atención si ya tiene su sesión (el servidor la cuenta); si no, hoy es la siguiente.
             const done = item.sessionsDone ?? 0
-            const session = showsSession(Math.max(done, 1), planned) ? ` · ${sessionWords(Math.max(done, 1), planned)}` : ""
+            const today = hasSession ? Math.max(done, 1) : done + 1
+            const session = showsSession(today, planned)
+              ? ` · ${sessionWords(today, planned)}${hasSession ? "" : " · por registrar"}`
+              : ""
             return (
               <li key={item.id} className="flex flex-col gap-2 py-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -128,7 +125,7 @@ export function EncounterTreatments({
                       ? `Completado el ${formatDate(item.completedAt)}`
                       : item.startedAt
                         ? `En curso desde ${formatDate(item.startedAt)}${session}`
-                        : ""}
+                        : session.replace(/^ · /, "")}
                   </span>
                 </div>
                 {item.statusReason ? (
@@ -140,7 +137,7 @@ export function EncounterTreatments({
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="ghost"
                     onClick={() => openJourney(item.id)}
                   >
                     Ver recorrido
@@ -166,7 +163,7 @@ export function EncounterTreatments({
             )
           })}
         </ul>
-      )}
+      }
 
       {error ? (
         <p role="alert" className="text-sm text-destructive">

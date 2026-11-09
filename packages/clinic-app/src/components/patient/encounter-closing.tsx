@@ -114,10 +114,13 @@ export interface DictatedControl {
 
 /**
  * El control por cumplir queda cumplido con esta visita: lo marcado, o lo que
- * viene marcado si nadie lo tocó (solo el que indicó quien firma).
+ * viene marcado si nadie lo tocó (el que indicó quien firma o el que se eligió al empezar).
  */
-export function fulfills(value: Pick<ClosingValues, "fulfill">, control: ClosingDueControl): boolean {
-  return value.fulfill[control.id] ?? control.mine
+export function fulfills(
+  value: Pick<ClosingValues, "fulfill">,
+  control: ClosingDueControl,
+): boolean {
+  return value.fulfill[control.id] ?? (control.mine || control.chosen === true)
 }
 
 /** Lo que ya dice cuándo vuelve, sin preguntar: así no quedan dos controles. */
@@ -323,7 +326,8 @@ export function ClosingNextVisit({
             ))}
           </FieldGroup>
           <FieldDescription>
-            Por qué: cualquier atención desde unos días antes de su fecha le sirve. Viene marcado si lo indicaste tú.
+            Por qué: cualquier atención desde unos días antes de su fecha le sirve. Viene marcado si
+            lo indicaste tú o si dijiste que viene a él.
           </FieldDescription>
         </FieldSet>
       ) : null}
@@ -604,13 +608,14 @@ export function ClosingSessions({
       {sessions.continuing.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
           {/* Si sus sesiones habituales eran más de las que hizo falta, terminarlo es un toque. */}
-          Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Hecho hoy».
+          Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Realizado hoy».
         </li>
       ))}
       {/* Avisa, no frena: quizá hoy no se pudo hacer. */}
       {notRegistered.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
-          La cita traía {line(session)} y no registraste su sesión: si la hiciste, regístrala en «Hecho hoy».
+          Venía a {line(session)} y no registraste su sesión: si la hiciste, regístrala en
+          «Realizado hoy».
         </li>
       ))}
     </ul>

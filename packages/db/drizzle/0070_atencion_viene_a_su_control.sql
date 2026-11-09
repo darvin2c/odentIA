@@ -1,0 +1,1 @@
+ALTER TABLE "encounter" ADD COLUMN "visit_follow_up_id" uuid;

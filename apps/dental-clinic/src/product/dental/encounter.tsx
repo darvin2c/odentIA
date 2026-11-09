@@ -15,6 +15,7 @@ import { lazyPart } from "./lazy-part"
 import { ApiError } from "@odentia/clinic-app/lib/api"
 import type { ClosingCheck, ClosingOdontogram } from "@odentia/clinic-app/lib/encounters"
 import { type EncounterDetail, statusLabel } from "@odentia/clinic-app/lib/patients"
+import { type FindingGroup, groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import type {
   EncounterBlockContext,
   ProductEncounterBlocks,
@@ -36,8 +37,11 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
   // El periodontograma de esta atención, si se empezó (issue 49).
   const periodontal = useEncounterPeriodontal(ctx.patientId, ctx.encounterId)
   const [capture, setCapture] = useState<string | null>(null)
-  // odentIA siempre los trae en el detalle (`encounterDetailParts`).
-  const findings = (ctx.detail.odontogramEntries ?? []).length
+  // odentIA siempre los trae en el detalle (`encounterDetailParts`). Una caries de varias caras es un hallazgo.
+  const groups = groupFindings(
+    (ctx.detail.odontogramEntries ?? []).filter((entry) => !entry.voidedAt),
+  )
+  const findings = groups.length
   return {
     blocks: [
       {
@@ -72,6 +76,23 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
                 disabled={ctx.locked}
                 readOnly={!ctx.canWrite}
               />
+            )}
+            {/* Lo registrado hoy, debajo del dibujo: lo que se ve en la atención firmada. */}
+            {groups.length > 0 ? (
+              <ul
+                className="flex flex-col divide-y text-sm"
+                aria-label="Hallazgos de esta atención"
+              >
+                {groups.map((group) => (
+                  <li key={group.ids.join(",")} className="py-1.5">
+                    {findingWords(group)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {ctx.canWrite ? "Toca una pieza para registrar lo que encuentras." : NO_FINDINGS}
+              </p>
             )}
           </div>
         ),
@@ -195,32 +216,47 @@ function DentalClosing({
   )
 }
 
+/** «Pieza 46 · Lesión de caries dental · Oclusal y distal · Pendiente · CIE-11 · DA08.0». */
+function findingWords(group: FindingGroup): string {
+  const entry = group.first
+  return [
+    `Pieza ${entry.toothNumber}`,
+    conditionLabel(entry.condition),
+    group.surfaces.length ? surfacesWords(group.surfaces) : null,
+    statusLabel(entry.status),
+    entry.diagnosisCode ? diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/** «Oclusal y distal». */
+function surfacesWords(surfaces: string[]): string {
+  const words = surfaces.map((surface, index) =>
+    index === 0 ? surfaceLabel(surface) : surfaceLabel(surface).toLowerCase(),
+  )
+  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
+}
+
 /** El odontograma vinculado a la atención, con lo registrado; sin hallazgos no se muestra. */
 function DentalDetailRecorded({ detail }: { detail: EncounterDetail }) {
-  const entries = detail.odontogramEntries ?? []
-  if (entries.length === 0) return null
+  const groups = groupFindings(detail.odontogramEntries ?? [])
+  if (groups.length === 0) return null
   return (
     <section aria-label="Odontograma vinculado">
       <h4 className="mb-2 text-sm font-medium">Odontograma</h4>
-      {(
-        <ul className="flex flex-col gap-2">
-          {entries.map((entry) => (
-            <li key={entry.id} className="border-b pb-2 text-sm last:border-0">
-              <p>
-                Pieza {entry.toothNumber} · {conditionLabel(entry.condition)}
-                {entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""} ·{" "}
-                {statusLabel(entry.status)}
-                {entry.diagnosisCode
-                  ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}`
-                  : ""}
+      <ul className="flex flex-col gap-2">
+        {groups.map((group) => (
+          <li key={group.ids.join(",")} className="border-b pb-2 text-sm last:border-0">
+            <p>{findingWords(group)}</p>
+            {group.first.note ? (
+              <p className="whitespace-pre-wrap text-xs text-muted-foreground">
+                {group.first.note}
               </p>
-              {entry.note ? (
-                <p className="whitespace-pre-wrap text-xs text-muted-foreground">{entry.note}</p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

@@ -491,6 +491,20 @@
       "when": 1794181453136,
       "tag": "0069_argos_lee_lo_mismo",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794199774154,
+      "tag": "0070_atencion_viene_a_su_control",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794202116111,
+      "tag": "0071_hoy_no_quita_lo_traido",
+      "breakpoints": true
     }
   ]
 }

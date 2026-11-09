@@ -427,44 +427,11 @@ export function EncounterProcedures({
   }
 
   return (
-    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-col gap-1.5">
-        <div className="font-heading text-base font-medium">
-          Procedimientos ({detail.procedures.filter((proc) => !proc.voidedAt).length})
-        </div>
-      </div>
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3">
-        <section aria-label="Tratamientos vinculados en curso">
-          {detail.plannedItems.filter(
-            (item) =>
-              item.status === "pendiente" ||
-              item.status === "programado" ||
-              item.status === "en_curso",
-          ).length === 0 ? null : (
-            <ul className="mb-3 flex flex-col gap-2">
-              {detail.plannedItems
-                .filter(
-                  (item) =>
-                    item.status === "pendiente" ||
-                    item.status === "programado" ||
-                    item.status === "en_curso",
-                )
-                .map((item) => (
-                  <li key={item.id} className="rounded-md border border-dashed p-2 text-sm">
-                    <p>{item.title}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Vinculado al abrir
-                      {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""} ·{" "}
-                      {planStatusLabel(item.status)}
-                    </p>
-                  </li>
-                ))}
-            </ul>
-          )}
-        </section>
         <section aria-label="Procedimientos registrados">
           {detail.procedures.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
+            <p className="text-sm text-muted-foreground">Sin procedimientos registrados hoy.</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {detail.procedures.map((proc) => {
@@ -535,7 +502,7 @@ export function EncounterProcedures({
               disabled={!canOpen}
               onClick={() => setOpen(true)}
             >
-              Registrar procedimiento
+              Registrar lo de hoy
             </Button>
           </div>
         )}
@@ -554,6 +521,94 @@ export function EncounterProcedures({
             submitLabel="Registrar procedimiento"
           >
             <div className="flex flex-col gap-4">
+              {/* Primero lo que ya está aceptado o en curso: es lo más común en una sesión (QA del 8 nov). */}
+              {!freeMode && (
+                <form.AppField name="planItemId">
+                  {(field) => (
+                    <field.Control
+                      label={
+                        productUi().plan.budgetRequired
+                          ? "Tratamiento aceptado del presupuesto"
+                          : "Tratamiento indicado"
+                      }
+                    >
+                      {(control) => (
+                        <>
+                          {planQuery.isLoading ? (
+                            <p className="text-sm text-muted-foreground">Cargando plan…</p>
+                          ) : planQuery.isError ? (
+                            <div className="flex flex-col gap-2">
+                              <p role="alert" className="text-sm text-destructive">
+                                No se pudo cargar el plan de tratamiento.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="self-start"
+                                disabled={busy}
+                                onClick={() => void planQuery.refetch()}
+                              >
+                                Reintentar
+                              </Button>
+                            </div>
+                          ) : (
+                            <Select
+                              value={field.state.value === "" ? NO_PLAN : field.state.value}
+                              items={planItems}
+                              onValueChange={onPlanChange}
+                              disabled={busy}
+                            >
+                              <SelectTrigger
+                                {...control.props}
+                                aria-label={
+                                  productUi().plan.budgetRequired
+                                    ? "Tratamiento del presupuesto"
+                                    : "Tratamiento indicado"
+                                }
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={NO_PLAN}>
+                                  Seleccionar otro servicio del catálogo
+                                </SelectItem>
+                                {options.map((item) => (
+                                  <SelectItem key={item.id} value={item.id}>
+                                    {planOptionLabel(item, orgLocale)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                          {options.length === 0 && !selectedPlan && (
+                            <p className="text-xs text-muted-foreground">
+                              Sin tratamientos aceptados pendientes: registra un servicio directo
+                              del catálogo.
+                            </p>
+                          )}
+                          {selectedPlan && (
+                            <p className="text-xs text-muted-foreground">
+                              Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta
+                              atención.
+                              {/* Con la de hoy llega a sus sesiones previstas: la firma lo termina (ADR 0161). */}
+                              {(selectedPlan.sessionsDone ?? 0) +
+                                (detail.procedures.some(
+                                  (proc) => !proc.voidedAt && proc.planItemId === selectedPlan.id,
+                                )
+                                  ? 0
+                                  : 1) >=
+                              (selectedPlan.plannedSessions ?? 1)
+                                ? " Al firmar la atención queda realizado; si falta otra sesión, lo indicas al firmar."
+                                : ""}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
+              )}
               <form.AppField
                 name="freeMode"
                 listeners={{
@@ -750,81 +805,6 @@ export function EncounterProcedures({
                   </field.Control>
                 )}
               </form.AppField>
-
-              {!freeMode && (
-                <form.AppField name="planItemId">
-                  {(field) => (
-                    <field.Control
-                      label={productUi().plan.budgetRequired ? "Tratamiento aceptado del presupuesto" : "Tratamiento indicado"}
-                    >
-                      {(control) => (
-                        <>
-                          {planQuery.isLoading ? (
-                            <p className="text-sm text-muted-foreground">Cargando plan…</p>
-                          ) : planQuery.isError ? (
-                            <div className="flex flex-col gap-2">
-                              <p role="alert" className="text-sm text-destructive">
-                                No se pudo cargar el plan de tratamiento.
-                              </p>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="self-start"
-                                disabled={busy}
-                                onClick={() => void planQuery.refetch()}
-                              >
-                                Reintentar
-                              </Button>
-                            </div>
-                          ) : (
-                            <Select
-                              value={field.state.value === "" ? NO_PLAN : field.state.value}
-                              items={planItems}
-                              onValueChange={onPlanChange}
-                              disabled={busy}
-                            >
-                              <SelectTrigger
-                                {...control.props}
-                                aria-label={productUi().plan.budgetRequired ? "Tratamiento del presupuesto" : "Tratamiento indicado"}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value={NO_PLAN}>
-                                  Seleccionar otro servicio del catálogo
-                                </SelectItem>
-                                {options.map((item) => (
-                                  <SelectItem key={item.id} value={item.id}>
-                                    {planOptionLabel(item, orgLocale)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                          {options.length === 0 && !selectedPlan && (
-                            <p className="text-xs text-muted-foreground">
-                              Sin tratamientos aceptados pendientes: registra un servicio directo del
-                              catálogo.
-                            </p>
-                          )}
-                          {selectedPlan && (
-                            <p className="text-xs text-muted-foreground">
-                              Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta atención.
-                              {/* Con la de hoy llega a sus sesiones previstas: la firma lo termina (ADR 0161). */}
-                              {(selectedPlan.sessionsDone ?? 0) +
-                                (detail.procedures.some((proc) => !proc.voidedAt && proc.planItemId === selectedPlan.id) ? 0 : 1) >=
-                              (selectedPlan.plannedSessions ?? 1)
-                                ? " Al firmar la atención queda realizado; si falta otra sesión, lo indicas al firmar."
-                                : ""}
-                            </p>
-                          )}
-                        </>
-                      )}
-                    </field.Control>
-                  )}
-                </form.AppField>
-              )}
             </div>
           </FormDrawer>
         )}
