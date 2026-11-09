@@ -628,7 +628,12 @@ export function CollectDrawer({
    * El importe parcial de lo pendiente escrito antes de ir a «Cobrar un adelanto»: vuelve escrito
    * al volver (repaso del 9 nov, N3: 250 volvía a 450 y el botón cobraba 450 sin que se notara).
    */
-  const [pendingDraft, setPendingDraft] = useState<string | null>(null)
+  const [pendingDraft, setPendingDraft] = useState<{
+    amount: string
+    debtCurrency: string
+    payCurrency: string
+    chargeIds: string[]
+  } | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [adding, setAdding] = useState(false)
   const [addingProduct, setAddingProduct] = useState(false)
@@ -774,6 +779,7 @@ export function CollectDrawer({
     setSelectInit(false)
     setAmountTouched(false)
     setAdvanceDraft(null)
+    setPendingDraft(null)
     setEditor(null)
     setAdding(false)
     setAddingProduct(false)
@@ -946,6 +952,8 @@ export function CollectDrawer({
     form.setFieldValue("amount", "")
     form.setFieldValue("payments", [])
     setAmountTouched(false)
+    // Lo escrito para lo pendiente era de otra moneda o de otro cobro: no vuelve.
+    setPendingDraft(null)
   }
 
   /** Otra moneda de deuda: lo marcado es lo de ella. */
@@ -1002,6 +1010,7 @@ export function CollectDrawer({
     const target = advanceTargets.find((row) => row.budgetItemId === presetAdvanceFor)
     if (!target) return
     presetDone.current = true
+    setPendingDraft(null)
     form.setFieldValue("advance", true)
     form.setFieldValue("advanceFor", target.budgetItemId)
     form.setFieldValue("amount", "")
@@ -1776,14 +1785,22 @@ export function CollectDrawer({
                                       payCurrency: form.state.values.payCurrency,
                                     })
                                   form.setFieldValue("advance", false)
-                                  // Lo que había escrito de lo pendiente vuelve; si no, sigue a lo marcado.
-                                  if (pendingDraft !== null)
-                                    form.setFieldValue("amount", pendingDraft)
-                                  setAmountTouched(pendingDraft !== null)
+                                  // Lo que había escrito de lo pendiente vuelve con su moneda y lo marcado;
+                                  // si no, sigue a lo marcado.
+                                  const draft = pendingDraft
                                   setPendingDraft(null)
-                                  // Lo pendiente está en otra moneda: el cobro va a ella.
-                                  if (pending.length === 0)
-                                    chooseDebt(owedByCurrency[0]?.code ?? debt)
+                                  if (draft) {
+                                    form.setFieldValue("debtCurrency", draft.debtCurrency)
+                                    form.setFieldValue("payCurrency", draft.payCurrency)
+                                    form.setFieldValue("chargeIds", draft.chargeIds)
+                                    form.setFieldValue("amount", draft.amount)
+                                    setAmountTouched(true)
+                                  } else {
+                                    setAmountTouched(false)
+                                    // Lo pendiente está en otra moneda: el cobro va a ella.
+                                    if (pending.length === 0)
+                                      chooseDebt(owedByCurrency[0]?.code ?? debt)
+                                  }
                                 }}
                               >
                                 Cobrar lo pendiente
@@ -1798,7 +1815,16 @@ export function CollectDrawer({
                               onClick={() => {
                                 closeInline()
                                 // Un importe escrito a mano para lo pendiente se guarda para la vuelta.
-                                setPendingDraft(amountTouched ? form.state.values.amount : null)
+                                setPendingDraft(
+                                  amountTouched
+                                    ? {
+                                        amount: form.state.values.amount,
+                                        debtCurrency: form.state.values.debtCurrency,
+                                        payCurrency: form.state.values.payCurrency,
+                                        chargeIds: form.state.values.chargeIds,
+                                      }
+                                    : null,
+                                )
                                 form.setFieldValue("advance", true)
                                 // Lo que ya había escrito del adelanto vuelve, con su «Para».
                                 form.setFieldValue("amount", advanceDraft?.amount ?? "")
