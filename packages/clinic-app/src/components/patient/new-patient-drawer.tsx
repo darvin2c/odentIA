@@ -11,6 +11,7 @@ import {
 } from "@odentia/clinical"
 import {
   Button,
+  cn,
   Input,
   Item,
   ItemActions,
@@ -36,7 +37,7 @@ import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Check } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { brandedQrDataUrl } from "../../lib/branded-qr"
 import { useCan } from "../../lib/crm"
@@ -253,6 +254,8 @@ export function NewPatientDrawer({
 
   const [stage, setStage] = useState<Stage>("form")
   const [picked, setPicked] = useState<PersonPage | null>(fromPerson)
+  // Lo que se había escrito antes de tocar «Es esta persona»: «No es esta persona» lo devuelve.
+  const [typedBeforePick, setTypedBeforePick] = useState<Draft | null>(null)
   const [showNotice, setShowNotice] = useState(false)
   const [created, setCreated] = useState<Created | null>(null)
   // No se pudo anotar lo que dijo de sus mensajes: se dice al terminar, sin deshacer el registro.
@@ -453,6 +456,7 @@ export function NewPatientDrawer({
     if (!open) return
     setStage("form")
     setPicked(target.kind === "person" ? target.person : null)
+    setTypedBeforePick(null)
     form.reset(initialDraft(target))
     setShowNotice(false)
     setCreated(null)
@@ -519,6 +523,7 @@ export function NewPatientDrawer({
     setPicked(page.data)
     // Lo que ya se sabía de ella, sin perder el celular que se acaba de escribir.
     const typed = form.state.values
+    setTypedBeforePick(typed)
     form.reset({ ...draftFromPerson(page.data), phone: page.data.phone ?? typed.phone, who: typed.who })
     setStage("form")
   }
@@ -572,6 +577,24 @@ export function NewPatientDrawer({
     >
       {stage === "form" ? (
         <div className="flex min-w-0 flex-col gap-5">
+          {picked && typedBeforePick ? (
+            <p className="flex flex-wrap items-center gap-x-2 rounded-2xl bg-muted px-3 py-2 text-sm" role="status">
+              <span>Registras a {picked.displayName}, que ya estaba en la clínica.</span>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0"
+                onClick={() => {
+                  // Se equivocó de persona: vuelve lo que había escrito, como si no la hubiera elegido.
+                  setPicked(null)
+                  form.reset(typedBeforePick)
+                  setTypedBeforePick(null)
+                }}
+              >
+                No es esta persona: volver a lo que escribí
+              </Button>
+            </p>
+          ) : null}
           {guardian ? (
             <form.AppField name="relation">
               {(field) => (
@@ -648,6 +671,7 @@ export function NewPatientDrawer({
           {lookup ? (
             <MatchesNote
               searching={probes.length > 0 && matches.isFetching && !matches.data}
+              refreshing={probes.length > 0 && matches.isFetching && !!matches.data}
               asked={probes.length > 0 && (matches.isSuccess || matches.isPlaceholderData)}
               rows={probes.length > 0 ? (matches.data ?? []) : []}
               onPick={(row) => void startFrom(row)}
@@ -914,11 +938,48 @@ export function NewPatientDrawer({
  */
 function MatchesNote({
   searching,
+  refreshing = false,
   asked,
   rows,
   onPick,
 }: {
   searching: boolean
+  /** Vuelve a buscar con lo nuevo que se escribió: lo anterior sigue a la vista, atenuado. */
+  refreshing?: boolean
+  asked: boolean
+  rows: PersonListItem[]
+  onPick: (row: PersonListItem) => void
+}) {
+  // Mientras se escribe, el recuadro no se achica: lo que viene debajo no salta y un clic
+  // para salir del campo no cae en «Es esta persona» (QA del 8 nov: cambió el formulario por
+  // otra persona sin querer). Vuelve a su alto cuando ya no hay nada que buscar.
+  const box = useRef<HTMLDivElement>(null)
+  const [minHeight, setMinHeight] = useState(0)
+  const active = searching || asked
+  useLayoutEffect(() => {
+    if (!active) {
+      if (minHeight !== 0) setMinHeight(0)
+      return
+    }
+    const height = box.current?.offsetHeight ?? 0
+    if (height > minHeight) setMinHeight(height)
+  })
+  return (
+    <div ref={box} style={active && minHeight ? { minHeight } : undefined} className="min-w-0">
+      <MatchesNoteBody searching={searching} refreshing={refreshing} asked={asked} rows={rows} onPick={onPick} />
+    </div>
+  )
+}
+
+function MatchesNoteBody({
+  searching,
+  refreshing,
+  asked,
+  rows,
+  onPick,
+}: {
+  searching: boolean
+  refreshing: boolean
   asked: boolean
   rows: PersonListItem[]
   onPick: (row: PersonListItem) => void
@@ -937,14 +998,21 @@ function MatchesNote({
         className="flex items-center gap-2 rounded-2xl bg-success-soft px-3 py-2 text-sm text-success"
         aria-live="polite"
       >
-        <Check aria-hidden className="size-4 shrink-0" />
+        {refreshing ? <Spinner className="size-4" aria-hidden /> : <Check aria-hidden className="size-4 shrink-0" />}
         No hay nadie con estos datos: es nuevo.
       </p>
     )
   }
   return (
-    <div className="flex min-w-0 flex-col gap-2 rounded-3xl bg-warning-soft p-3" aria-live="polite">
-      <span className="px-1 text-sm font-medium text-warning">¿Es alguna de estas personas?</span>
+    <div
+      className={cn("flex min-w-0 flex-col gap-2 rounded-3xl bg-warning-soft p-3", refreshing && "opacity-70")}
+      aria-live="polite"
+      aria-busy={refreshing || undefined}
+    >
+      <span className="flex items-center gap-2 px-1 text-sm font-medium text-warning">
+        ¿Es alguna de estas personas?
+        {refreshing ? <Spinner className="size-3.5" aria-hidden /> : null}
+      </span>
       {rows.map((row) => (
         <Item key={row.id} variant="outline" className="rounded-2xl bg-background">
           <ItemMedia>
@@ -961,12 +1029,8 @@ function MatchesNote({
             <ItemDescription className="line-clamp-none">{personLine(row)}</ItemDescription>
           </ItemContent>
           <ItemActions className="ms-auto">
-            <Button
-              type="button"
-              size="sm"
-              variant={row.patient ? "secondary" : "default"}
-              onClick={() => onPick(row)}
-            >
+            {/* Los dos iguales: el aviso no empuja a elegir a nadie. */}
+            <Button type="button" size="sm" variant="secondary" onClick={() => onPick(row)}>
               {row.patient ? "Abrir" : "Es esta persona"}
             </Button>
           </ItemActions>

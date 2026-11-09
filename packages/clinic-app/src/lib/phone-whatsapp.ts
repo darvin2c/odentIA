@@ -10,4 +10,6 @@ export interface PhoneWhatsApp {
   phone: string | null
   /** La clínica tiene WhatsApp conectado: «Usarlo como su WhatsApp» sirve. */
   canUse: boolean
+  /** Su WhatsApp, si es otro número que el de «Teléfono»; ausente en respuestas antiguas. */
+  otherNumber?: string | null
 }

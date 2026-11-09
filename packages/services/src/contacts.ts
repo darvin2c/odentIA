@@ -1036,6 +1036,11 @@ export interface PhoneWhatsApp {
   state: PhoneWhatsAppState
   phone: string | null
   canUse: boolean
+  /**
+   * Su WhatsApp, si es otro número que el de «Teléfono» (`+<dígitos>`): el Resumen
+   * dice cuál es en vez de dar por WhatsApp un número que no lo es (QA del 8 nov).
+   */
+  otherNumber: string | null
 }
 
 export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: string): Promise<PhoneWhatsApp> {
@@ -1057,7 +1062,9 @@ export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: strin
     .limit(1)
   const phone = person?.phone ?? null
   const digits = phone?.replace(/\D/g, "") ?? ""
-  if (!digits) return { state: "sin_telefono", phone, canUse: !!connected }
+  const whatsapp = await whatsappNumberOf(tx, orgId, contactId)
+  const otherNumber = whatsapp && whatsapp.replace(/\D/g, "") !== digits ? whatsapp : null
+  if (!digits) return { state: "sin_telefono", phone, canUse: !!connected, otherNumber }
   const [identity] = await tx
     .select({ noWhatsappAt: contactIdentity.noWhatsappAt })
     .from(contactIdentity)
@@ -1072,7 +1079,7 @@ export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: strin
     )
     .limit(1)
   const state: PhoneWhatsAppState = !identity ? "aun_no" : identity.noWhatsappAt ? "no_tiene" : "es_su_whatsapp"
-  return { state, phone, canUse: !!connected }
+  return { state, phone, canUse: !!connected, otherNumber: state === "es_su_whatsapp" ? null : otherNumber }
 }
 
 /**

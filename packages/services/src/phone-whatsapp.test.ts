@@ -35,7 +35,13 @@ it("caso 2: el teléfono de la ficha aún no es su WhatsApp hasta que alguien de
   )
   expect(await c.run((tx) => phoneWhatsAppState(tx, c.orgId, carmen.id))).toMatchObject({ state: "aun_no", canUse: true })
   const used = await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, carmen.id))
-  expect(used.state).toBe("es_su_whatsapp")
+  expect(used).toMatchObject({ state: "es_su_whatsapp", otherNumber: null })
+  // Cambia de teléfono: su WhatsApp sigue siendo el anterior, y se dice cuál (QA del 8 nov).
+  await ownerDb.update(contact).set({ phone: "+51987650109" }).where(eq(contact.id, carmen.id))
+  expect(await c.run((tx) => phoneWhatsAppState(tx, c.orgId, carmen.id))).toMatchObject({
+    state: "aun_no",
+    otherNumber: "+51987650101",
+  })
   // Sin teléfono no hay nada que usar.
   const sin = await c.run((tx) => createPerson(tx, c.orgId, { userId: null }, { givenNames: "Sin", familyName: "Teléfono" }))
   expect((await c.run((tx) => phoneWhatsAppState(tx, c.orgId, sin.id))).state).toBe("sin_telefono")

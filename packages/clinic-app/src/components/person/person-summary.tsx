@@ -172,6 +172,8 @@ export function PersonSummary({
   const phoneText = person.phone ? internationalText(person.phone) : null
   // Sin teléfono propio, el de quien habla por ella (la preferida primero, como la entrega el servidor).
   const spokenPhone = phoneText ? null : (person.spokenForBy.find((other) => other.phone) ?? null)
+  // El número de su WhatsApp es dato de canal: solo para quien ve sus canales.
+  const whatsappElsewhere = person.channels.includes("whatsapp") ? (person.phoneWhatsApp.otherNumber ?? null) : null
 
   const clinicalData = summary?.data?.data
   // Lo que debe ya lo dice Pendientes, con su botón: aquí, que no debe nada o, si Pendientes no llegó, que algo debe.
@@ -250,10 +252,16 @@ export function PersonSummary({
           {/* Para todos: antes, quien lee la clínica lo veía en «Próxima cita». */}
           <Fact label="Teléfono">
             {phoneText
-              ? `${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
+              ? `${phoneText}${person.phoneWhatsApp.state === "es_su_whatsapp" ? " · WhatsApp" : ""}`
               : spokenPhone?.phone
                 ? `el de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
                 : "Sin teléfono"}
+            {/* «· WhatsApp» solo si ese número lo es; si su WhatsApp es otro, se dice cuál (QA del 8 nov). */}
+            {whatsappElsewhere ? (
+              <span className="block text-xs font-normal text-muted-foreground">
+                Su WhatsApp es otro: {internationalText(whatsappElsewhere)}
+              </span>
+            ) : null}
           </Fact>
           {(canChats || canCrm) && person.channels.length > 0 ? (
             <Fact label="Canales">

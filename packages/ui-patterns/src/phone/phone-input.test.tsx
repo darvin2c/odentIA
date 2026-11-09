@@ -316,3 +316,36 @@ describe("PhoneInput", () => {
     expect(renderField().input.getAttribute("aria-invalid")).toBeNull()
   })
 })
+
+// QA del 8 nov (M10): un +44 se abría como «PE +51», el «+» tecleado se perdía y la lista no se podía buscar.
+describe("números de otro país", () => {
+  it("un +44 guardado se abre como Reino Unido y no se reescribe", () => {
+    const { input, onChange } = renderField({ initialValue: "+447700900877", defaultCountry: "PE" })
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("GB +44")
+    expect(input.value).toBe("07700 900877")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("escribir «+44…» pone el país del prefijo y, al salir, deja el número nacional", async () => {
+    const user = userEvent.setup()
+    const { input, onChange } = renderField({ defaultCountry: "PE" })
+    await user.type(input, "+447700900878")
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("GB +44")
+    expect(lastValue(onChange)).toBe("+447700900878")
+    await user.tab()
+    expect(input.value).toBe("07700 900878")
+    expect(lastValue(onChange)).toBe("+447700900878")
+  })
+
+  it("el buscador de países encuentra por prefijo, con el país principal primero", async () => {
+    const user = userEvent.setup()
+    renderField({ defaultCountry: "PE" })
+    await user.click(screen.getByLabelText(common.phone.country))
+    await user.type(await screen.findByLabelText("Buscar país"), "44")
+    const options = await screen.findAllByRole("option")
+    expect(options[0]?.textContent).toMatch(/\(\+44\)$/)
+    expect(options.every((option) => option.textContent?.includes("(+44)"))).toBe(true)
+    await user.click(options[0]!)
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("GB +44")
+  })
+})
