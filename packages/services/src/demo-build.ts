@@ -715,6 +715,8 @@ export async function buildDemo(
   // Con su historia armada, el WhatsApp de la demo queda desconectado: no tiene un número
   // de verdad, así que no dice «Conectado» ni intenta enviar (la Bandeja lo dice al escribir).
   await setConnectionStatus(tx, orgId, connection.id, "disabled")
+  // Lo propio del producto sobre la historia ya armada (vistIA: las recetas de lentes).
+  await (await productHooks(tx, orgId)).demoBuilt?.(tx, orgId)
   await step(DEMO_BUILD_STEPS, "listo")
   return { organizationId: orgId, historyThrough: through, slug }
 }

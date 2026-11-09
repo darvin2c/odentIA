@@ -16,7 +16,7 @@ import {
   prescriptionNotices,
   readEyeExam,
 } from "@odentia/optical"
-import { and, desc, eq, isNull } from "drizzle-orm"
+import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { assertAttending } from "../encounter-attending.js"
 import { invalidField, notFound, ServiceError } from "../errors.js"
 import { clinicToday } from "../inventory-stock.js"
@@ -265,6 +265,31 @@ export async function listLensPrescriptions(tx: Db, orgId: string, patientId: st
     .where(and(eq(lensPrescription.organizationId, orgId), eq(lensPrescription.patientId, patientId)))
     .orderBy(desc(lensPrescription.issuedOn), desc(lensPrescription.createdAt))
   return rows.map((row) => toView(row, today))
+}
+
+/**
+ * Las recetas de una demo (entrega 3): la de anteojos de cada atención firmada con
+ * refracción en su examen, como la habría emitido quien atendió, el día de la
+ * atención. Lo que cuenta una demo para presentar: nada sale a una persona.
+ */
+export async function seedDemoLensPrescriptions(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(sql`
+    insert into optical.lens_prescription
+      (organization_id, patient_id, encounter_id, kind, source, lenses, pupillary_distance,
+       issued_on, valid_until, prescriber_user_id, prescriber_name, prescriber_registration,
+       verified_at, verified_by, created_by, created_at, updated_at)
+    select e.organization_id, e.patient_id, e.id, 'anteojos', 'examen', e.examination->'refraccion', e.examination->'dp',
+      (e.finalized_at at time zone coalesce(p.timezone, 'UTC'))::date,
+      ((e.finalized_at at time zone coalesce(p.timezone, 'UTC'))::date + interval '12 months')::date,
+      e.professional_user_id, u.name, nullif(trim(concat_ws(' ', pp.registration_body, pp.registration_number)), ''),
+      e.finalized_at, e.professional_user_id, e.professional_user_id, e.finalized_at, e.finalized_at
+    from encounter e
+    join org_profile p on p.organization_id = e.organization_id
+    join auth."user" u on u.id = e.professional_user_id
+    left join professional_profile pp on pp.organization_id = e.organization_id and pp.user_id = e.professional_user_id
+    where e.organization_id = ${orgId} and e.status = 'finalizada'
+      and jsonb_typeof(e.examination->'refraccion') = 'object'
+    on conflict do nothing`)
 }
 
 /** Las recetas en «Tus documentos» del portal: la vencida dice «Vencida» y la anulada, «Anulada». */
