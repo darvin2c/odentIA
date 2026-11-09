@@ -1,5 +1,5 @@
 /**
- * Lo óptico de los servicios, para lo que es de vistIA (ADR 0166 y 0167). Lo
+ * Lo óptico de los servicios, para lo que es de vistIA (ADR 0168 y 0169). Lo
  * común no lo importa: se conecta solo por `products.ts`; las rutas de vistIA lo
  * piden con `@odentia/services/optical`.
  */

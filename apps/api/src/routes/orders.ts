@@ -21,7 +21,7 @@ import { patientLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 /**
- * El pedido al taller o al laboratorio (ADR 0168), común a los productos; vistIA
+ * El pedido al taller o al laboratorio (ADR 0170), común a los productos; vistIA
  * lo usa con los lentes. Verlo es de `orders.read`; venderlo crea cargos y cobra
  * el adelanto, así que pide además la caja (`finance.write`), como anular (anula sus
  * cargos) y rehacer (decide no cobrar otra vez): el taller marca cómo va y nada

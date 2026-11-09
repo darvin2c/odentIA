@@ -717,7 +717,7 @@ function pendingRegistrationNote(who: string, config: RegistrationConfig, answer
   // («Faltan datos para atenderla»); tipo y número se dicen «documento».
   const pending = [...new Set(pendingRegistrationFields(config, answers).map((field) =>
     field.key === "docType" || field.key === "docNumber" ? "documento" : field.label.toLowerCase()))]
-  const head = `${who}. Faltan datos para atenderla: confirmar apellidos y nombres`
+  const head = `${who}. Faltan datos para la atención: confirmar apellidos y nombres`
   const named: string[] = []
   for (const label of pending) {
     const rest = pending.length - named.length - 1
@@ -1008,7 +1008,7 @@ export async function registerPatient(
       ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
       : actorUserId === null
         ? "Se registró en el chat con lo mínimo"
-        : "El equipo la registró con lo mínimo"
+        : "El equipo registró a esta persona con lo mínimo"
     const note = pendingRegistrationNote(who, config, answers)
     if (conversationId) await addAgentCaseNote(tx, orgId, conversationId, note)
     else {

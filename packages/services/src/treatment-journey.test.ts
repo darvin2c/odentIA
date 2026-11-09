@@ -200,8 +200,14 @@ it("traza la propuesta versionada, el representante, las sesiones y la evidencia
   expect(journey.followUps.map((c) => c.id)).toContain(followUp.id)
   const summary = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
   expect(summary.treatmentJourneys.find((j) => j.item.id === a.id)?.nextAction).toBe("controlar")
+  // Los hechos del recorrido están en la Historia: sueltos al filtrar (en la historia
+  // completa, lo nacido en una atención firmada va dentro de su tarjeta).
   expect(
-    (await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))).data.map((e) => e.type),
+    (
+      await f.run((tx) =>
+        getTimeline(tx, "org_a", f.patient.id, { types: ["plan", "budget", "prescription", "follow_up"] }),
+      )
+    ).data.map((e) => e.type),
   ).toEqual(expect.arrayContaining(["plan", "budget", "prescription", "follow_up"]))
   await expect(
     withOrgContext(appDb, "org_b", (tx) =>

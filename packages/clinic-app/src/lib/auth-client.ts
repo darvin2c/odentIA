@@ -29,7 +29,7 @@ export const authClient = createAuthClient({
         reception: staffRole,
         clinician: staffRole,
         cashier: staffRole,
-        // Ventas y Taller (vistIA, ADR 0168).
+        // Ventas y Taller (vistIA, ADR 0170).
         sales: staffRole,
         workshop: staffRole,
       },

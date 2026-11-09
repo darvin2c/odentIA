@@ -57,7 +57,7 @@ type FieldKind =
 /**
  * Lo que se declara como contacto de emergencia: no es un dato de la ficha,
  * el servidor lo vuelve una persona vinculada con la marca (decisión 25).
- * Solo lo pide «Completar» cuando falta; lo demás se cambia en Personas vinculadas.
+ * Solo lo pide «Completar» cuando falta; lo demás se cambia en Familia y responsables.
  */
 type EmergencyKey = "emergencyContactName" | "emergencyContactRelationship" | "emergencyContactPhone"
 
@@ -131,10 +131,11 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
       },
       contacto: {
         title: "Contacto",
-        description: "Cómo ubicarla y dónde vive. El contacto de emergencia se marca en Personas vinculadas.",
+        description: "Cómo contactar a la persona y dónde vive. El contacto de emergencia se marca en Familia y responsables.",
         fields: [
           { key: "phone", label: "Teléfono", type: { kind: "phone" } },
-          { key: "email", label: "Correo", type: { kind: "text", max: 200 } },
+          // A lo ancho: en media columna el correo se cortaba (QA de la ficha del 9 nov).
+          { key: "email", label: "Correo", type: { kind: "text", max: 200, wide: true } },
           ...addressFields,
         ],
       },

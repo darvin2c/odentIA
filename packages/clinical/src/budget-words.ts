@@ -22,6 +22,8 @@ interface WordLine {
 interface WordOption {
   id: string
   decision: string
+  /** Su lugar (1 = «Opción A»): con varias y una elegida, se dice cuál. */
+  position?: number
 }
 
 /** Líneas que cuentan para «Aceptó N de M»: las de la opción elegida, o todas si no hay. */
@@ -57,8 +59,13 @@ export function budgetStateText(budget: {
       return "Entregado · espera respuesta"
     case "pospuesto":
       return "Lo está pensando"
-    case "aceptado":
+    case "aceptado": {
+      // Con varios caminos, aceptar es elegir uno: «Aceptó todo» junto a «Exodoncia · No
+      // elegida» se leía como si hubiera aceptado las dos (QA del 9 nov).
+      const chosen = budget.options && budget.options.length > 1 ? budget.options.find((option) => option.decision === "elegida") : undefined
+      if (chosen) return chosen.position ? `Eligió la ${inSentence(budgetOptionLabel(chosen.position))}` : "Eligió una opción"
       return "Aceptó todo"
+    }
     case "parcial": {
       const lines = decidedLines(budget.items, budget.options)
       const accepted = lines.filter((line) => line.decision === "aceptado").length
@@ -118,3 +125,8 @@ export const BUDGET_OPTIONS_MAX = 3
  */
 export const BUDGET_SIGN_DECLARATION =
   "Me explicaron este presupuesto, sus precios y sus condiciones. Acepto los tratamientos que dicen «Aceptado»."
+
+/** «Opción A» → «opción A», para decirla dentro de una frase. */
+function inSentence(label: string): string {
+  return label.charAt(0).toLowerCase() + label.slice(1)
+}

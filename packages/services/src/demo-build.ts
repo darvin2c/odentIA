@@ -69,6 +69,7 @@ import {
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
+import { seedAcceptedProgress } from "./seed-reports-progress.js"
 import { demoPromotionsOf, seedOperation, seedPromotions } from "./seed-operation.js"
 import { seedRepliesRuns, seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
@@ -87,10 +88,10 @@ const CLINICIAN_HONORIFIC: Record<ClinicalProduct, Record<"F" | "M", string>> = 
 
 /**
  * Quien atiende el mostrador de la demo: recepción; en una óptica, Ventas, que
- * también vende y cobra (ADR 0168). Su usuario es el mismo (`…recepcion`).
+ * también vende y cobra (ADR 0170). Su usuario es el mismo (`…recepcion`).
  */
 const DEMO_DESK_ROLE: Record<ClinicalProduct, "reception" | "sales"> = { dental: "reception", medical: "reception", optical: "sales" }
-/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0168). */
+/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0170). */
 const DEMO_HAS_WORKSHOP: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
 
 /** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */
@@ -653,6 +654,10 @@ export async function buildDemo(
       },
     },
   })
+
+  // Lo que una visita de la historia ya hizo queda hecho, como en la demo de desarrollo: sin
+  // esto el Plan lo daba por no empezado y reservar decía «sesión 2 (1 prevista)» (QA del 8 nov).
+  await seedAcceptedProgress(tx, orgId)
 
   // --- Lo que hicieron los agentes y lo que Argos ya respondió --------------------------------
   await step(3, "agentes")

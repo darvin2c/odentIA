@@ -1,5 +1,5 @@
 /**
- * Vender con pedido (ADR 0168; vistIA: «Vender lentes»), en un solo formulario:
+ * Vender con pedido (ADR 0170; vistIA: «Vender lentes»), en un solo formulario:
  * para quién, la receta que se copia (se informa si venció o no está verificada,
  * nunca impide), lo que lleva (lo del inventario con su precio, también con el
  * lector de códigos de barras, y lo que se escribe con el suyo), las medidas para

@@ -207,7 +207,7 @@ const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
-  // Solo donde el producto vende con pedido al taller o al laboratorio (vistIA, ADR 0168).
+  // Solo donde el producto vende con pedido al taller o al laboratorio (vistIA, ADR 0170).
   { label: "Pedidos", to: "/orders", icon: PackageCheck, permission: "orders.read", shown: () => Boolean(productUi().orders) },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   // El agente es una sola entrada, junto al trabajo diario; sus secciones

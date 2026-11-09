@@ -146,21 +146,33 @@ export async function getToothHistory(
       : []
 
   const events: ToothEvent[] = []
+  // Una lesión de varias caras (una caries DO) es una fila por cara de la misma
+  // anotación: se dice en una sola línea, «(Oclusal, Distal)», por estado.
+  const lesions = new Map<string, ToothEvent>()
   for (const { row, author } of findings) {
-    events.push({
+    const status = row.voidedAt ? "anulado" : row.resolvedAt ? "tratado" : "vigente"
+    const key = [row.encounterId, row.toothNumber, row.condition, row.createdAt.getTime(), row.createdBy, status].join("|")
+    const same = lesions.get(key)
+    if (same) {
+      if (row.surface && !same.surfaces.includes(row.surface)) same.surfaces.push(row.surface)
+      continue
+    }
+    const event: ToothEvent = {
       kind: "hallazgo",
       id: row.id,
       at: row.createdAt,
       title: row.condition,
       code: row.condition,
       surfaces: row.surface ? [row.surface] : [],
-      status: row.voidedAt ? "anulado" : row.resolvedAt ? "tratado" : "vigente",
+      status,
       detail: row.note,
       encounterId: row.encounterId,
       encounterOpen: false,
       authorName: author,
       voidReason: row.voidReason,
-    })
+    }
+    lesions.set(key, event)
+    events.push(event)
   }
   for (const { row, author, description, encounterStatus } of diagnoses) {
     events.push({

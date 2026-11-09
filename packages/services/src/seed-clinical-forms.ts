@@ -4,7 +4,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { and, eq, ilike } from "drizzle-orm"
+import { and, eq, ilike, sql } from "drizzle-orm"
 import {
   advanceClinicalOrder,
   archiveSpecialty,
@@ -286,6 +286,20 @@ export async function seedClinicalForms(
           extractions.map((row) => row.id),
         )
     }
+  }
+  // Las endodoncias propias de la demo (la posterior vital, sin plantilla de la biblioteca) también
+  // piden el consentimiento de endodoncia: sin esto la de la 46 se firmaba sin él (QA del 9 nov).
+  const endodontics = await tx
+    .select({ id: serviceCatalog.id })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), ilike(serviceCatalog.name, "%endodoncia%")))
+  if (endodontics.length > 0) {
+    const linked = await tx.execute<{ serviceId: string }>(sql`
+      select service_id as "serviceId" from consent_template_service
+      where organization_id = ${orgId} and template_key = ${consentTpl.key}`)
+    await setConsentTemplateServices(tx, orgId, ownerUserId, consentTpl.id, [
+      ...new Set([...linked.map((row) => row.serviceId), ...endodontics.map((row) => row.id)]),
+    ])
   }
   // La anestesia de la exodoncia: pendiente aquí; seed-dev la deja firmada en
   // papel con la foto de la hoja.

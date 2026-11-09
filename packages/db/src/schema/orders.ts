@@ -7,7 +7,7 @@ import { product } from "./inventory.js"
 import { branch } from "./org.js"
 
 /**
- * El pedido (ADR 0168): lo que la clínica encarga a su taller o a un laboratorio
+ * El pedido (ADR 0170): lo que la clínica encarga a su taller o a un laboratorio
  * para entregárselo a la persona. Es común a los productos: vistIA lo usa con los
  * lentes (entrega 4 del plan) y odentIA podrá usarlo con sus trabajos de
  * laboratorio. Pocos estados que dicen hechos de la clínica, con quién marcó cada

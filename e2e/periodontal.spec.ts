@@ -71,7 +71,7 @@ test("periodontograma completo con el teclado, clasificado, firmado y comparado"
   const ids = await setup(owner)
   const apiPath = patientApiPath(ids.patientId)
 
-  // En la atención es un bloque más: «Agregar Periodontograma» y «Empezar».
+  // En la atención va en «También» hasta que tenga algo: «Agregar Periodontograma» lo abre en la página y «Empezar».
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${ids.encounterId}`))
   await page.getByRole("button", { name: "Agregar Periodontograma" }).click()
   await page.getByRole("button", { name: "Empezar", exact: true }).click()

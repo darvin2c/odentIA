@@ -80,7 +80,7 @@ CREATE INDEX "job_order_line_order_idx" ON "job_order_line" USING btree ("organi
 CREATE INDEX "job_order_line_charge_idx" ON "job_order_line" USING btree ("organization_id","charge_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "product_org_barcode_uidx" ON "product" USING btree ("organization_id","barcode");--> statement-breakpoint
 
--- Las reglas del pedido (ADR 0168): de la clínica, con su RLS. La historia de
+-- Las reglas del pedido (ADR 0170): de la clínica, con su RLS. La historia de
 -- estados y las líneas solo se agregan; del pedido solo cambia su paso, la fecha
 -- prometida, quién lo hace, sus notas, la entrega y la anulación.
 ALTER TABLE public.job_order ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

@@ -763,7 +763,8 @@ it("la historia declara el contexto de cada evento del recorrido", async () => {
   })
   expect(collected.status).toBe(201)
 
-  const timeline = await app.request(`/patients/${patientId}/timeline?limit=100`)
+  // Sin las atenciones: lo nacido en una (también la que sigue en curso) va dentro de su tarjeta.
+  const timeline = await app.request(`/patients/${patientId}/timeline?limit=100&types=plan,budget,note,anamnesis`)
   expect(timeline.status).toBe(200)
   const events = (
     await json<{

@@ -113,6 +113,11 @@ export const cashMovement = pgTable(
     // FK cash_movement.expense_id → expense.id en `0001_base_reglas.sql`
     // (expense se declara después).
     expenseId: uuid("expense_id"),
+    /**
+     * La clave de «Ingresar o retirar efectivo» (`requestId` del cliente, ADR 0018): reintentar
+     * después de un corte devuelve el mismo movimiento, no mueve el efectivo dos veces.
+     */
+    requestId: uuid("request_id"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -121,6 +126,9 @@ export const cashMovement = pgTable(
   },
   (table) => [
     index("cash_movement_org_shift_idx").on(table.organizationId, table.shiftId),
+    uniqueIndex("cash_movement_org_request_uidx")
+      .on(table.organizationId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
     // Un cobro real entra a caja una sola vez (solo filas vigentes), en la moneda que sea.
     // Su vuelto es otro tipo y toca dos cajas: entra el exceso en una y sale el vuelto de
     // la otra, una vez cada uno.
@@ -185,11 +193,16 @@ export const expenseRecurring = pgTable(
      * diciembre, no el 2 de noviembre. Lo elige quien lo anota.
      */
     dueNextMonth: boolean("due_next_month").notNull().default(false),
+    /** La clave del formulario que la anotó: reintentar no anota otra (ADR 0018). */
+    requestId: uuid("request_id"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("expense_recurring_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("expense_recurring_org_request_uidx")
+      .on(table.organizationId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
     index("expense_recurring_org_branch_idx").on(table.organizationId, table.branchId),
     index("expense_recurring_org_member_idx")
       .on(table.organizationId, table.memberUserId)
@@ -287,6 +300,11 @@ export const expense = pgTable(
      */
     recurringId: uuid("recurring_id"),
     recurringMonth: text("recurring_month"),
+    /**
+     * La clave del formulario que lo registró (`requestId` del cliente, como el cobro; ADR 0018):
+     * reintentar después de un corte devuelve el mismo gasto, sin otro gasto ni otra salida de caja.
+     */
+    requestId: uuid("request_id"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -294,6 +312,9 @@ export const expense = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    uniqueIndex("expense_org_request_uidx")
+      .on(table.organizationId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
     uniqueIndex("expense_recurring_month_uidx")
       .on(table.organizationId, table.recurringId, table.recurringMonth)
       .where(sql`${table.recurringId} IS NOT NULL AND ${table.voidedAt} IS NULL`),

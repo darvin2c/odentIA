@@ -223,7 +223,7 @@ export function createAuth({
             team: [],
             ac: ["read"],
           }),
-          // Ventas y Taller (vistIA, ADR 0168): como los demás roles operativos.
+          // Ventas y Taller (vistIA, ADR 0170): como los demás roles operativos.
           sales: defaultAc.newRole({
             organization: [],
             member: [],
@@ -241,7 +241,7 @@ export function createAuth({
         },
         organizationHooks: {
           beforeUpdateOrganization: lockClinicIdentityFields,
-          // Ventas y Taller son de vistIA (ADR 0168): en otro producto no se invitan ni se asignan.
+          // Ventas y Taller son de vistIA (ADR 0170): en otro producto no se invitan ni se asignan.
           beforeCreateInvitation: async ({ invitation }) => {
             await requireProductRole(ownerDb, invitation.organizationId, invitation.role)
           },
