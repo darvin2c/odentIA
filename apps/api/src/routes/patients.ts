@@ -1574,7 +1574,10 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getEncounterVoidPreview(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), { memberRole }),
+        getEncounterVoidPreview(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), {
+          memberRole,
+          seesCharges: canAccess(memberRole, "finance.read"),
+        }),
       ),
     )
   })
@@ -1591,7 +1594,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("id"),
           c.req.param("encounterId"),
           parsed.data,
-          { memberRole },
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
       ),
     )

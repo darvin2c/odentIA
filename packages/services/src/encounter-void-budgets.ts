@@ -27,6 +27,7 @@ import {
   patientCharge,
   treatmentBudget,
   treatmentBudgetItem,
+  treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { and, asc, eq, gte, inArray, isNotNull, isNull, ne, notInArray } from "drizzle-orm"
@@ -83,7 +84,8 @@ export interface EncounterVoidPreview {
   confirm: Array<{ id: string; status: string }>
 }
 
-const OPEN_ITEM = ["pendiente", "programado", "en_curso", "suspendido"]
+/** Lo cerrado ya no se anula ni se presupuesta. */
+const CLOSED_ITEM = ["cancelado", "reemplazado"]
 /** Lo que no se aceptó o no se eligió ya no compromete nada: el presupuesto queda como constancia. */
 const SETTLED_DECISION = ["rechazado", "no_elegida", "reemplazado"]
 
@@ -97,10 +99,19 @@ export async function encounterVoidBudgets(
   orgId: string,
   patientId: string,
   encounterId: string,
-  opts: { actorUserId: string; memberRole?: string; lock?: boolean },
+  opts: { actorUserId: string; memberRole?: string; seesCharges?: boolean; lock?: boolean },
 ): Promise<EncounterVoidPreview> {
+  if (opts.lock) {
+    // Antes de leer: lo que otro presupueste, responda o cobre mientras tanto espera a que termine.
+    const plans = await tx
+      .select({ id: treatmentPlan.id })
+      .from(treatmentPlan)
+      .where(and(eq(treatmentPlan.organizationId, orgId), eq(treatmentPlan.patientId, patientId)))
+      .orderBy(asc(treatmentPlan.id))
+    for (const plan of plans) await lockPlan(tx, orgId, patientId, plan.id)
+  }
   const indicated = await tx
-    .select({ planId: treatmentPlanItem.planId, budgetId: treatmentPlanItem.budgetId })
+    .select({ budgetId: treatmentPlanItem.budgetId })
     .from(treatmentPlanItem)
     .where(
       and(
@@ -108,16 +119,11 @@ export async function encounterVoidBudgets(
         eq(treatmentPlanItem.patientId, patientId),
         eq(treatmentPlanItem.sourceEncounterId, encounterId),
         isNotNull(treatmentPlanItem.budgetId),
-        inArray(treatmentPlanItem.status, OPEN_ITEM),
+        notInArray(treatmentPlanItem.status, CLOSED_ITEM),
         notInArray(treatmentPlanItem.decisionStatus, SETTLED_DECISION),
       ),
     )
   if (indicated.length === 0) return { budgets: [], blocked: false, confirm: [] }
-  if (opts.lock) {
-    for (const planId of [...new Set(indicated.map((row) => row.planId))].sort()) {
-      await lockPlan(tx, orgId, patientId, planId)
-    }
-  }
   const budgetIds = [...new Set(indicated.map((row) => row.budgetId!))]
   const budgets = await tx
     .select()
@@ -187,7 +193,8 @@ export async function encounterVoidBudgets(
         )
     : []
   const doneIds = new Set(doneElsewhere.map((row) => row.planItemId))
-  // Lo dado por realizado aquí sin una sesión suya también se deshace al anular (`undoCompletionsOf`).
+  // Lo hecho aquí (con su sesión, o dado por realizado al traerlo la cita) se
+  // deshace al anular (`voidProcedureRow`, `undoCompletionsOf`): no frena.
   const completedHere = allItemIds.length
     ? await tx
         .select({ planItemId: encounterPlanItem.planItemId })
@@ -200,7 +207,23 @@ export async function encounterVoidBudgets(
           ),
         )
     : []
-  const hereIds = new Set(completedHere.map((row) => row.planItemId))
+  const proceduresHere = allItemIds.length
+    ? await tx
+        .selectDistinct({ planItemId: encounterProcedure.planItemId })
+        .from(encounterProcedure)
+        .where(
+          and(
+            eq(encounterProcedure.organizationId, orgId),
+            eq(encounterProcedure.encounterId, encounterId),
+            inArray(encounterProcedure.planItemId, allItemIds),
+            isNull(encounterProcedure.voidedAt),
+          ),
+        )
+    : []
+  const hereIds = new Set([
+    ...completedHere.map((row) => row.planItemId),
+    ...proceduresHere.map((row) => row.planItemId),
+  ])
   for (const item of items) {
     if (item.status === "realizado" && !hereIds.has(item.id)) doneIds.add(item.id)
   }
@@ -243,7 +266,7 @@ export async function encounterVoidBudgets(
       .filter(
         (item) =>
           item.sourceEncounterId === encounterId &&
-          OPEN_ITEM.includes(item.status) &&
+          !CLOSED_ITEM.includes(item.status) &&
           !SETTLED_DECISION.includes(item.decisionStatus),
       )
       .map((item) => item.id),
@@ -283,10 +306,11 @@ export async function encounterVoidBudgets(
     ]
     const here = ids.filter((id) => hereItemIds.has(id))
     if (here.length === 0) continue
+    // Lo de otras atenciones que sigue en pie. Lo de esta que no aceptó o no
+    // eligió no es «otro»: se cancela con ella y queda en el presupuesto como constancia.
     const others = ids.filter((id) => {
-      if (here.includes(id)) return false
       const item = itemById.get(id)
-      return !!item && !["cancelado", "reemplazado"].includes(item.status)
+      return !!item && item.sourceEncounterId !== encounterId && !CLOSED_ITEM.includes(item.status)
     }).length
     const delivered = budget.status !== "borrador"
     const blocks: EncounterVoidBlock[] = []
@@ -310,7 +334,9 @@ export async function encounterVoidBudgets(
       if (others > 0 && budget.status === "presentado" && own && !own.has(budget.id))
         blocks.push({ kind: "ajeno", others })
       const charges = ids.filter((id) => chargedIds.has(id))
-      if (charges.length > 0) blocks.push({ kind: "cobro", treatments: charges.map(name) })
+      // Qué cobró caja solo lo lee quien ve la caja: a los demás, que hay un cobro.
+      if (charges.length > 0)
+        blocks.push({ kind: "cobro", treatments: opts.seesCharges ? charges.map(name) : [] })
       const done = ids.filter((id) => doneIds.has(id))
       if (done.length > 0) blocks.push({ kind: "hecho", treatments: done.map(name) })
     }
@@ -350,7 +376,7 @@ function blockedMessage(budget: EncounterVoidBudget): string {
   const which = `el presupuesto N.º ${budget.budgetNumber}`
   switch (block?.kind) {
     case "cobro":
-      return `No se puede anular todavía: caja cobró ${block.treatments.join(", ")} de ${which}. Hay que anular ese cobro primero.`
+      return `No se puede anular todavía: caja ya cobró ${block.treatments.length > 0 ? block.treatments.join(", ") : "un tratamiento"} de ${which}. Hay que anular ese cobro primero.`
     case "hecho":
       return `No se puede anular todavía: ${block.treatments.join(", ")} de ${which} ya se hizo en otra atención.`
     case "firma":
@@ -380,6 +406,7 @@ export async function checkEncounterVoidBudgets(
   opts: {
     actorUserId: string
     memberRole?: string
+    seesCharges?: boolean
     confirmed?: ReadonlyArray<{ id: string; status: string }>
   },
 ): Promise<EncounterVoidBudget[]> {

@@ -12,7 +12,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { getEncounterVoidPreview, voidEncounter } from "./encounters.js"
+import { addEncounterProcedure, getEncounterVoidPreview, voidEncounter } from "./encounters.js"
 import { createCharge } from "./payments.js"
 import { addPlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -198,7 +198,7 @@ it("un cobro vigente frena y dice qué se cobró", async () => {
   expect(seen.confirm).toEqual([])
   expect(seen.budgets[0]).toMatchObject({
     effect: "frena",
-    blocks: [{ kind: "cobro", treatments: ["Tratamiento propio"] }],
+    blocks: [{ kind: "cobro", treatments: [] }],
   })
   await expect(voidIt(f)).rejects.toMatchObject({ code: "VOID_BLOCKED" })
   expect((await budgetOf(budget.id)).status).toBe("aceptado")
@@ -276,4 +276,54 @@ it("entregado sin respuesta y con lo de otra atención: se anula entero y lo otr
     .from(treatmentPlanItem)
     .where(and(eq(treatmentPlanItem.id, here.id)))
   expect(mine?.status).toBe("cancelado")
+})
+
+it("aceptó una parte (lo otro de esta atención no): se anula, sin pedir una revisión imposible", async () => {
+  const f = await clinicalFixture()
+  const yes = await indicate(f)
+  const no = await indicate(f)
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [yes.id, no.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, budget.id, {
+      decisions: [
+        { planItemId: yes.id, decision: "aceptado" },
+        { planItemId: no.id, decision: "rechazado" },
+      ],
+    }),
+  )
+  const seen = await preview(f)
+  expect(seen.budgets[0]).toMatchObject({ effect: "anula", others: 0 })
+  expect(seen.confirm).toEqual([{ id: budget.id, status: "parcial" }])
+  await voidIt(f, seen.confirm)
+  expect((await budgetOf(budget.id)).status).toBe("cancelado")
+})
+
+it("lo aceptado y hecho en esta misma atención se deshace con ella y su presupuesto se anula", async () => {
+  const f = await clinicalFixture()
+  const item = await indicate(f)
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  expect(["en_curso", "realizado"]).toContain((await itemOf(item.id)).status)
+
+  const seen = await preview(f)
+  expect(seen.budgets[0]).toMatchObject({ effect: "anula", blocks: [] })
+  await voidIt(f, seen.confirm)
+  expect((await budgetOf(budget.id)).status).toBe("cancelado")
+  expect((await itemOf(item.id)).status).toBe("cancelado")
+})
+
+it("quien ve la caja lee qué se cobró", async () => {
+  const f = await clinicalFixture()
+  const item = await indicate(f)
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  const decided = await f.run((tx) =>
+    decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }),
+  )
+  await f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: decided.items[0]!.id }))
+  const seen = await f.run((tx) => getEncounterVoidPreview(tx, ...f.args, f.encounter.id, { seesCharges: true }))
+  expect(seen.budgets[0]?.blocks).toEqual([{ kind: "cobro", treatments: ["Tratamiento propio"] }])
 })

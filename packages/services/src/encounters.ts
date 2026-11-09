@@ -3202,12 +3202,13 @@ export async function getEncounterVoidPreview(
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  opts: { memberRole?: string } = {},
+  /** `seesCharges`: quien ve la caja (`finance.read`) lee qué tratamiento se cobró. */
+  opts: { memberRole?: string; seesCharges?: boolean } = {},
 ): Promise<EncounterVoidPreview> {
   await requirePatient(tx, orgId, patientId)
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(row, actorUserId)
-  return encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, memberRole: opts.memberRole })
+  return encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, ...opts })
 }
 
 export async function voidEncounter(
@@ -3217,7 +3218,7 @@ export async function voidEncounter(
   patientId: string,
   encounterId: string,
   input: VoidEncounterInput,
-  opts: { memberRole?: string } = {},
+  opts: { memberRole?: string; seesCharges?: boolean } = {},
 ): Promise<EncounterRow> {
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
@@ -3231,6 +3232,7 @@ export async function voidEncounter(
   const budgets = await checkEncounterVoidBudgets(tx, orgId, patientId, encounterId, {
     actorUserId,
     memberRole: opts.memberRole,
+    seesCharges: opts.seesCharges,
     confirmed: input.budgets,
   })
   const at = new Date()

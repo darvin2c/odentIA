@@ -2924,14 +2924,17 @@ export function EncounterEditor({
         </DialogContent>
       </Dialog>
 
-      <EncounterVoidDialog
-        open={voidOpen}
-        patientId={patientId}
-        encounterId={encounterId}
-        onClose={() => setVoidOpen(false)}
-        onBeforeVoid={clearTimer}
-        onVoided={afterVoid}
-      />
+      {/* Montado solo al abrirse: cada vez lee de nuevo qué se anula. */}
+      {voidOpen ? (
+        <EncounterVoidDialog
+          open
+          patientId={patientId}
+          encounterId={encounterId}
+          onClose={() => setVoidOpen(false)}
+          onBeforeVoid={clearTimer}
+          onVoided={afterVoid}
+        />
+      ) : null}
 
       {profileOpen ? (
         <ProfessionalProfileDrawer

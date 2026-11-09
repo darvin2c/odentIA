@@ -75,7 +75,7 @@ function blockWords(budget: EncounterVoidBudget, block: EncounterVoidBlock): str
   const which = `el presupuesto N.º ${budget.budgetNumber}`
   switch (block.kind) {
     case "cobro":
-      return `Caja ya cobró ${joinNames(block.treatments)} de ${which}. Primero hay que anular ese cobro.`
+      return `Caja ya cobró ${block.treatments.length > 0 ? joinNames(block.treatments) : "un tratamiento"} de ${which}. Primero hay que anular ese cobro.`
     case "hecho":
       return `${joinNames(block.treatments)}, de ${which}, ya se hizo en otra atención: ese presupuesto no se anula.`
     case "firma":
@@ -317,7 +317,7 @@ export function EncounterVoidDialog({
               variant="destructive"
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90 dark:bg-destructive dark:hover:bg-destructive/90"
               pending={pending}
-              disabled={!data}
+              disabled={!data || preview.isFetching || preview.isError}
               onClick={() => void submitForm(form, { root: bodyRef.current })}
             >
               {confirmLabel}
