@@ -18,13 +18,9 @@ import { usePersonArchived } from "../../lib/person-archived"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { dueWords, isOverdue } from "../crm/crm-helpers"
 import { TaskDrawer } from "../crm/task-drawer"
-import { attendWord } from "../../lib/patient-overview"
 import { useCollectFlow } from "./collect-flow"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
-import { NextControlAction, nextControlDetail, useNextControl } from "./next-control"
-import { NextStepButton } from "./plan/next-step-action"
-import { usePlanNextStep } from "./plan/plan-next"
 import { PersonalLinkActions } from "./send-personal-link"
 import { useOpenWide, type WideTarget } from "./wide-section"
 import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
@@ -96,7 +92,7 @@ export function PendingList({ pending, loading = false }: { pending: Pending[]; 
           {/* El texto tiene un ancho mínimo: una acción ancha baja de línea en vez de dejarlo en una columna de una palabra. */}
           <div className="min-w-0 flex-[1_1_16rem]">
             <p className="text-sm font-medium">{item.title}</p>
-            <p className="text-sm text-muted-foreground">{item.detail}</p>
+            {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
           </div>
           {item.stacked ? <div className="basis-full">{item.action}</div> : item.action}
         </li>
@@ -112,8 +108,8 @@ export function PendingList({ pending, loading = false }: { pending: Pending[]; 
 
 /**
  * Pendientes del paciente para el Resumen: lo que el agente dejó esperando el
- * sí del paciente, «Qué sigue» del plan (para quien no lee la clínica: quien
- * la lee lo tiene en su propia tarjeta), saldo, datos que faltan y sus tareas.
+ * sí del paciente, saldo, datos que faltan y sus tareas. Lo del plan, la
+ * próxima cita y el control van en «Qué sigue», arriba (QA del 8 nov).
  * Para quien atiende suma lo clínico que le toca (antecedentes declarados por
  * revisar y consentimientos sin firmar). Cada bloque pide solo lo que su
  * permiso autoriza; el representante va en la cabecera. Cada botón actúa aquí
@@ -135,8 +131,6 @@ export function PatientPendingCard({
   const receptionName = useReceptionName()
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
-  const canAppointments = usePermission("appointments.read")
-  const canBudgets = usePermission("budgets.read")
   const canPatients = usePermission("patients.read")
   const canEditPatient = usePermission("patients.write")
   const canDecide = usePermission("agent.decide")
@@ -181,9 +175,6 @@ export function PatientPendingCard({
     enabled: canTasks && canPatients,
     retry: false,
   })
-  // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Si el
-  // Resumen ya muestra su tarjeta (quien lee la clínica), aquí no se repite.
-  const nextStepQuery = usePlanNextStep(patientId, (canAppointments || canBudgets) && !clinical)
   // Firmar o confirmar pide el documento entero: el Resumen solo trae su título y sus fechas.
   const pendingConsents = clinical?.summary?.pendingConsents ?? []
   const consents = useQuery({
@@ -191,8 +182,6 @@ export function PatientPendingCard({
     queryFn: () => fetchConsents({ patientId }),
     enabled: canSign && pendingConsents.length > 0,
   })
-  // El próximo control vencido sin cita va aquí; el que no venció, en su propia fila del Resumen.
-  const nextControl = useNextControl(patientId)
   const [signingId, setSigningId] = useState<string | null>(null)
   const consentOf = (id: string) => consents.data?.data.find((row) => row.id === id) ?? null
   const signing = signingId ? consentOf(signingId) : null
@@ -266,32 +255,6 @@ export function PatientPendingCard({
         </Link>
       ),
     })
-  // Con la tarjeta «Qué sigue» arriba no se repite (la consulta comparte caché con ella).
-  const nextStep = clinical ? undefined : nextStepQuery.data?.data
-  if (nextStep && nextStep.kind !== "ninguno")
-    pending.push({
-      id: "plan-next",
-      title: nextStep.text,
-      detail: nextStep.detail ?? "Lo que sigue en su plan de tratamiento.",
-      // El botón hace lo que dice aquí mismo: reservar, responder o reservar el control.
-      action: nextStep.action ? (
-        <NextStepButton
-          patient={{ id: patientId, name: detail.patient.displayName }}
-          step={nextStep}
-          size="sm"
-          variant="outline"
-        />
-      ) : (
-        open("Ver el plan", { id: "plan" })
-      ),
-    })
-  if (nextControl.control && nextControl.place === "pendientes")
-    pending.push({
-      id: `control-${nextControl.control.id}`,
-      title: `Control vencido: ${nextControl.control.title}`,
-      detail: `${nextControlDetail(nextControl.control)}.`,
-      action: <NextControlAction patientId={patientId} control={nextControl.control} />,
-    })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
     // El saldo descuenta lo que tiene a favor (decisión 22).
     if (balance.porCobrar > 0)
@@ -318,9 +281,9 @@ export function PatientPendingCard({
     if (gaps.length > 0 || review)
       pending.push({
         id: "filiacion",
-        title: gaps.length > 0 ? `Faltan datos para ${attendWord(detail.patient.sex)}` : "Apellidos por confirmar",
-        stacked: gaps.length > 0,
-        detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
+        // En una línea, qué falta (QA de la ficha del 9 nov: eran 4 líneas en casi todos).
+        title: gaps.length > 0 ? `Faltan datos: ${filiationGapsText(gaps).toLowerCase()}` : "Apellidos por confirmar",
+        detail: review,
         action: (() => {
           const complete = (
             <Button
@@ -369,9 +332,7 @@ export function PatientPendingCard({
           Boolean(clinical?.loading) ||
           accountQuery.isLoading ||
           proposalsQuery.isLoading ||
-          tasksQuery.isLoading ||
-          nextStepQuery.isLoading ||
-          nextControl.loading
+          tasksQuery.isLoading
         }
       />
       {collect.surfaces}

@@ -52,6 +52,7 @@ import { DocumentOpenButton } from "./document-open-button"
 import { PlanPhases } from "./plan-fases"
 import { ServicePicker } from "./service-picker"
 import { productUi } from "../../product/product-ui"
+import { partNames } from "../../product/site-fields"
 
 const MAX_TEXT = 2000
 const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const
@@ -82,7 +83,7 @@ function decisionBadge(status: string): "default" | "secondary" | "success" | "d
 function siteLabel(item: PlanItem): string {
   if (item.scope === "tooth" && item.toothNumber != null) return `Pieza ${item.toothNumber}`
   if (item.scope === "surfaces" && item.toothNumber != null) {
-    const surfaces = item.surfaces.length > 0 ? ` (${item.surfaces.join(", ")})` : " · cara por definir"
+    const surfaces = item.surfaces.length > 0 ? ` (${partNames(item.surfaces).toLowerCase()})` : " · cara por definir"
     return `Pieza ${item.toothNumber}${surfaces}`
   }
   // Indicado sin decir la pieza: se define al hacerlo.
@@ -363,7 +364,7 @@ export function RecorridoClinicoTab({
                     ? ` · control previsto ${formatDate(summaryRow.nextFollowUp.dueAt)}`
                     : ""}
                 </span>
-                {nextFollowUp ? (
+                {nextFollowUp && followUpAppointmentLabel(nextFollowUp) ? (
                   <span className="text-xs text-muted-foreground">
                     {followUpAppointmentLabel(nextFollowUp)}
                   </span>

@@ -475,6 +475,12 @@ it("cuenta y cobro: reception/professional 403, cashier cobra con ticket, tenanc
   expect((await buildApp("cashier", CASH).request(accountPath)).status).toBe(200)
   // Tenant: la cuenta de org_fin_a no existe en org_fin_b.
   expect((await buildApp("admin", ADMIN_B, ORG_B).request(accountPath)).status).toBe(404)
+  // Lo aceptado, pagado y por pagar de cada presupuesto: caja y presupuesto a la vez.
+  const totalsPath = `/patients/${PAT_A}/accepted-totals`
+  expect((await buildApp("reception", RECEP).request(totalsPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT1).request(totalsPath)).status).toBe(403)
+  expect((await buildApp("cashier", CASH).request(totalsPath)).status).toBe(200)
+  expect((await buildApp("admin", ADMIN_B, ORG_B).request(totalsPath)).status).toBe(404)
 
   // Adelanto con medios válidos: el 403 de rol no lo mascara la validación.
   const collectBody = (methodId: string) => ({
@@ -922,4 +928,16 @@ it("anular un ticket con la comisión ya pagada: quien administra comisiones ve 
   // Quien no ve la cuenta no llega.
   expect((await buildApp("clinician", DENT1).request(returnable)).status).toBe(403)
   expect((await buildApp("reception", RECEP).request(returnable)).status).toBe(403)
+})
+
+it("lo que se le paga al personal: caja no lo anota ni elige a quién; administración sí (ADR 0166)", async () => {
+  const cashier = buildApp("cashier", CASH)
+  const admin = buildApp("admin", ADMIN)
+  const salary = { branchId: BRANCH_A, category: "Personal", concept: "Sueldo de Rosa", amountCents: 1000 }
+  expect((await postJson(cashier, "/finance/expenses", salary)).status).toBe(403)
+  expect((await cashier.request("/finance/expenses/recurring/people")).status).toBe(403)
+  expect((await postJson(admin, "/finance/expenses", salary)).status).toBe(201)
+  expect((await admin.request("/finance/expenses/recurring/people")).status).toBe(200)
+  // Lo demás lo sigue anotando caja.
+  expect((await postJson(cashier, "/finance/expenses", { ...salary, category: "Otros", concept: "Útiles" })).status).toBe(201)
 })

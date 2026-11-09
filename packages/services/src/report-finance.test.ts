@@ -23,6 +23,7 @@ import {
   listMonthCommissions,
   payMonthCommission,
   payPurchaseOrder,
+  purchaseLookalikes,
   setCommissionRate,
   voidExpense,
   voidSupplierCreditUse,
@@ -222,6 +223,35 @@ async function purchasesClinic() {
   const credit = async () => (await run((tx) => supplierCredits(tx, orgId)))[0]?.cents ?? 0
   return { orgId, actor, branchId: site!.id, run, order, receive, pay, balance, credit }
 }
+
+it("pagar una compra avisa del gasto suelto de Materiales que puede ser el mismo pago (G4)", async () => {
+  const c = await purchasesClinic()
+  const order = await c.order(2, 10_500)
+  await c.receive(order.id, 2)
+  // La resina ya se anotó como gasto suelto de Materiales, por lo mismo que se recibió.
+  const loose = await c.run((tx) =>
+    createExpense(tx, c.orgId, c.actor, { branchId: c.branchId, category: "Materiales", concept: "Resina", amountCents: 21_000, currency: "PEN" }),
+  )
+  // Otra cosa (otro importe, u otro tipo) no se avisa.
+  await c.run((tx) =>
+    createExpense(tx, c.orgId, c.actor, { branchId: c.branchId, category: "Materiales", concept: "Algodón", amountCents: 4_200, currency: "PEN" }),
+  )
+  await c.run((tx) =>
+    createExpense(tx, c.orgId, c.actor, { branchId: c.branchId, category: "Otros", concept: "Taxi", amountCents: 21_000, currency: "PEN" }),
+  )
+  const twins = await c.run((tx) => purchaseLookalikes(tx, c.orgId, order.id))
+  expect(twins.map((row) => row.id)).toEqual([loose.id])
+  // Ya pagada la compra, lo que se pagó de ella no es un gasto suelto. El reintento del mismo
+  // cajón tras un corte devuelve el mismo pago, no otro (ADR 0018).
+  const key = randomUUID()
+  const paid = await c.run((tx) => payPurchaseOrder(tx, c.orgId, c.actor, { orderId: order.id, amountCents: 21_000, requestId: key }))
+  const retried = await c.run((tx) =>
+    payPurchaseOrder(tx, c.orgId, c.actor, { orderId: order.id, amountCents: 21_000, requestId: key, expectedPaidCents: 0 }),
+  )
+  expect(retried.expense?.id).toBe(paid.expense?.id)
+  expect(await c.balance(order.id)).toMatchObject({ paidCents: 21_000, dueCents: 0 })
+  expect((await c.run((tx) => purchaseLookalikes(tx, c.orgId, order.id))).map((row) => row.id)).toEqual([loose.id])
+})
 
 it("pagar una compra: en partes, por adelantado, de más queda a favor y lo a favor paga otra", async () => {
   const c = await purchasesClinic()

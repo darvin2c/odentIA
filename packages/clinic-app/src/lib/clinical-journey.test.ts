@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { clinicDateTimeValue, formatDate, instantFromClinicValue, encounterControls, type FollowUp, type NextControl, nextControlPlace } from "./clinical-journey"
+import { clinicDateTimeValue, formatDate, instantFromClinicValue, encounterControls, type FollowUp, followUpAppointmentLabel } from "./clinical-journey"
 import { setOrgLocale } from "./locale"
 
 afterEach(() => {
@@ -26,23 +26,19 @@ describe("fechas clínicas en la zona de la clínica, no en la del navegador", (
   })
 })
 
-// QA del 6 nov (X3): el control, también uno vencido, no aparecía en el Resumen.
-describe("dónde dice el Resumen el próximo control", () => {
-  const control: NextControl = {
-    id: "c",
-    title: "Profilaxis semestral",
-    dueAt: "2026-11-07T14:00:00.000Z",
-    status: "pendiente",
-    overdue: false,
-    appointment: null,
-  }
-  it("va en su propia fila; vencido sin cita, en Pendientes", () => {
-    expect(nextControlPlace(control, "respuesta")).toBe("fila")
-    expect(nextControlPlace({ ...control, overdue: true }, "enviar")).toBe("pendientes")
+// QA del 8 nov: lo que dice el Plan de la cita de cada control.
+describe("la cita de un control en el Plan", () => {
+  const control = { appointment: null, legacyScheduledAt: null, status: "pendiente" as const, servedBy: null }
+  it("M6: con una cita por venir que le sirve, dice esa cita, como «Qué sigue» y el Resumen", () => {
+    setOrgLocale("es-PE", "America/Lima")
+    expect(followUpAppointmentLabel(control)).toBe("Sin cita reservada")
+    expect(followUpAppointmentLabel({ ...control, servedBy: { id: "a", startsAt: "2026-11-09T15:00:00.000Z" } })).toMatch(
+      /^Sin cita propia · se puede hacer en su cita del 09\/11\/2026/,
+    )
   })
-  it("si «Qué sigue» ya habla del control no se repite, y sin control no hay nada", () => {
-    expect(nextControlPlace({ ...control, overdue: true }, "control")).toBeNull()
-    expect(nextControlPlace(null, "respuesta")).toBeNull()
+  it("B5: un control realizado o cancelado sin cita no dice «Sin cita reservada»", () => {
+    expect(followUpAppointmentLabel({ ...control, status: "realizado" })).toBeNull()
+    expect(followUpAppointmentLabel({ ...control, status: "cancelado" })).toBeNull()
   })
 })
 

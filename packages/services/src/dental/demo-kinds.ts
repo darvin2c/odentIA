@@ -13,16 +13,20 @@ import type { Random, ReportsSeedNote, ReportsSeedPerson } from "../seed-reports
 const DENTAL_EXPENSES: DemoKindRecipe["expenses"] = [
   {
     category: "Personal",
-    concept: "Planilla del mes",
+    concept: "Planilla del resto del equipo",
     cents: 3_000_00,
-    // El sueldo base de cada profesional, con su nombre (va junto a su comisión).
+    // El sueldo base de cada profesional: la persona va en la plantilla, no en el concepto (S1 de la
+    // QA de Gastos), y se ve junto a su comisión.
     perStaffCents: 900_00,
     day: 28,
   },
   { category: "Alquiler", concept: "Alquiler del local", rent: true, day: 1 },
   { category: "Laboratorio", concept: "Coronas y prótesis", revenueShare: 0.09, day: 20 },
   { category: "Materiales", concept: "Insumos", revenueShare: 0.05, day: 12 },
-  { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00, day: 18 },
+  // Tres recibos, de tres empresas y en tres fechas, como llegan (DM1 de la QA de Gastos).
+  { category: "Servicios", concept: "Luz", cents: 280_00, day: 18 },
+  { category: "Servicios", concept: "Agua", cents: 120_00, day: 10 },
+  { category: "Servicios", concept: "Internet y teléfono", cents: 250_00, day: 5 },
 ]
 
 /**
@@ -203,6 +207,11 @@ const DENTAL_INVENTORY: DemoKindRecipe["inventory"] = {
       { sku: "INS-ANESTESIA-LIDO", quantity: 2 },
       { sku: "INS-ALGODON-ROLLO", quantity: 4 },
     ],
+    "endodoncia-posterior-vital": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 2 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
     "radiografia-periapical": [{ sku: "INS-PELICULA-RX", quantity: 1 }],
     "fluor-barniz": [
       { sku: "INS-GUANTE-NITRILO", quantity: 2 },
@@ -317,11 +326,18 @@ function dentalNote(service: { name: string }, random: Random): ReportsSeedNote 
       evolution: `Caries en pieza ${piece}. Restauración con resina, oclusión controlada.`,
       diagnosisCode: "DA08.0",
     }
-  if (name.includes("endodoncia") || name.includes("pulpotom"))
+  if (name.includes("endodoncia") || name.includes("pulpotom")) {
+    // La pieza va con el nombre (QA del 8 nov): la anterior en incisivos y caninos, la posterior en molares.
+    const rootCanal = name.includes("anterior")
+      ? random.pick(["1.1", "1.2", "1.3", "2.1", "2.2", "2.3"])
+      : name.includes("posterior")
+        ? random.pick(["1.6", "2.6", "3.6", "4.6", "1.7", "3.7"])
+        : piece
     return {
-      evolution: `Pulpitis en pieza ${piece}. Tratamiento de conductos sin complicaciones; control en una semana.`,
+      evolution: `Pulpitis en pieza ${rootCanal}. Tratamiento de conductos sin complicaciones; control en una semana.`,
       diagnosisCode: "DA09.0",
     }
+  }
   if (name.includes("exodoncia"))
     return {
       evolution: `Exodoncia de pieza ${piece}. Hemostasia lograda; indicaciones posoperatorias entregadas.`,
@@ -391,7 +407,10 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
         perUnit: true,
       },
       { template: "exodoncia-simple", price: 150, durationMin: 45, weight: 8, perUnit: true },
-      { template: "endodoncia-anterior-vital", price: 450, durationMin: 90, weight: 6 },
+      // La de molar es la más frecuente; la anterior, para incisivos y caninos (QA del 8 nov: solo
+      // estaba la anterior y una endodoncia de la 36 salía como «anterior»).
+      { template: "endodoncia-posterior-vital", price: 650, durationMin: 90, weight: 4 },
+      { template: "endodoncia-anterior-vital", price: 450, durationMin: 90, weight: 2 },
       { template: "corona-metal-ceramica-metal-base", price: 900, durationMin: 60, weight: 5 },
       { template: "blanqueamiento-externo-por-arcada", price: 600, durationMin: 60, weight: 4 },
       { template: "radiografia-periapical", price: 30, durationMin: 10, weight: 6, perUnit: true },

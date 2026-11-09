@@ -1,4 +1,4 @@
-import { documentText } from "@odentia/clinical"
+import { documentText, formatMoney } from "@odentia/clinical"
 import {
   Badge,
   Breadcrumb,
@@ -36,7 +36,19 @@ import { useCan, usePermission } from "../../lib/crm"
 import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
 import { sexLabel, speaksForWords } from "../../lib/patient-overview"
-import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { clinicToday } from "../../lib/inventory"
+import { useOrgLocale } from "../../lib/locale"
+import {
+  ageFrom,
+  fetchPatientHealth,
+  filiationGapsText,
+  hcLabel,
+  isCurrentMedication,
+  type PatientFull,
+  type PatientHealth,
+  type PatientSummary,
+} from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
@@ -46,12 +58,13 @@ import { WriteToPersonDialog } from "../write-to-person"
 import { CollectButton } from "./collect-flow"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
+import { UpcomingLine, usePersonUpcoming } from "./next-up"
 import { PatientAvatar } from "./patient-avatar"
 import { useOpenWide } from "./wide-section"
 
 /** Alertas prioritarias: primero alergias severas, luego el resto. Siempre visibles, nunca tras un desplegable. */
 export function clinicalAlerts(
-  detail: PatientFull,
+  detail: Pick<PatientFull, "activeAllergies" | "activeConditions" | "currentMedications">,
 ): Array<{ id: string; label: string; tone: "destructive" | "warning" | "secondary" }> {
   // Criticidad alta (riesgo de reacción grave) o gravedad severa encabezan;
   // una alergia descartada ya no alerta.
@@ -75,31 +88,65 @@ export function clinicalAlerts(
     label: c.name,
     tone: "warning" as const,
   }))
-  return [...severe, ...other, ...conditions]
+  // Lo que toma, con su nombre: un anticoagulante cambia la anestesia y la hemostasia
+  // (mesa del 9 nov). Antes solo se contaba («2 medicamentos vigentes»).
+  const medications = detail.currentMedications.map((m) => ({
+    id: m.id,
+    label: `Toma ${[m.name, m.dose].filter(Boolean).join(" ")}`,
+    tone: "secondary" as const,
+  }))
+  return [...severe, ...other, ...conditions, ...medications]
 }
 
-/** Franja clínica reutilizable (cabecera y editor de atención): alertas + medicación, sin botones. */
+/**
+ * Franja clínica reutilizable (cabecera y editor de atención): alergias,
+ * enfermedades y lo que toma, sin botones. Sin alergias registradas dice si
+ * niega o si no se le preguntó (`allergyReview`): no es lo mismo.
+ */
 export function PatientClinicalStrip({
   detail,
   onAntecedentes,
+  medicationReview,
 }: {
-  detail: PatientFull
+  detail: Pick<PatientFull, "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview">
   onAntecedentes?: () => void
+  /** Para quien lee la historia: si se le preguntó qué toma (sin medicación registrada). */
+  medicationReview?: string | null
 }) {
   const alerts = clinicalAlerts(detail)
-  const shown = alerts.slice(0, 4)
+  const shown = alerts.slice(0, 6)
   const hidden = alerts.length - shown.length
-  const meds = detail.currentMedications
-  if (alerts.length === 0 && meds.length === 0) return null
-  const more = hidden > 0 || meds.length > 0
-  const moreLabel =
-    hidden > 0 && meds.length > 0
-      ? `+${hidden} alertas · ${meds.length} medicamentos vigentes`
-      : hidden > 0
-        ? `+${hidden} alertas`
-        : `${meds.length} medicamento${meds.length === 1 ? "" : "s"} vigente${meds.length === 1 ? "" : "s"}`
+  const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
+  const allergyWord =
+    noAllergies && detail.allergyReview === "none"
+      ? "Niega alergias"
+      : noAllergies && detail.allergyReview === "unknown"
+        ? "Alergias: no preguntado"
+        : null
+  // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
+  const medicationWord =
+    detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
+  if (alerts.length === 0 && !allergyWord && !medicationWord) return null
+  const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   return (
     <div className="flex flex-wrap items-center gap-2" aria-label="Alertas clínicas">
+      {allergyWord ? (
+        // «No preguntado» es el estado peligroso: se distingue de «niega» (mesa del 9 nov).
+        <Badge
+          variant="outline"
+          className={cn(
+            "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
+            detail.allergyReview === "unknown" && "border-warning/30 bg-warning-soft text-warning",
+          )}
+        >
+          {allergyWord}
+        </Badge>
+      ) : null}
+      {medicationWord ? (
+        <Badge variant="outline" className="h-auto min-h-5 max-w-full border-warning/30 bg-warning-soft py-px text-left whitespace-normal text-warning">
+          {medicationWord}
+        </Badge>
+      ) : null}
       {shown.map((alert) => (
         <Badge
           key={alert.id}
@@ -119,7 +166,7 @@ export function PatientClinicalStrip({
           {alert.label}
         </Badge>
       ))}
-      {more && onAntecedentes ? (
+      {hidden > 0 && onAntecedentes ? (
         <Button
           type="button"
           size="sm"
@@ -129,7 +176,7 @@ export function PatientClinicalStrip({
         >
           {moreLabel} · ver antecedentes
         </Button>
-      ) : more ? (
+      ) : hidden > 0 ? (
         <Badge
           variant="outline"
           className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal"
@@ -138,6 +185,83 @@ export function PatientClinicalStrip({
         </Badge>
       ) : null}
     </div>
+  )
+}
+
+/** La ficha con lo clínico de la salud: enfermedades activas y lo que toma hoy (la regla del Resumen). */
+function withHealth(detail: PatientFull, health: PatientHealth): PatientFull {
+  const today = clinicToday()
+  return {
+    ...detail,
+    activeConditions: health.conditions.filter((condition) => condition.status === "activa"),
+    currentMedications: health.medications.filter((medication) => isCurrentMedication(medication, today)),
+    allergyReview: health.reviewStatus.allergies,
+  }
+}
+
+/**
+ * Lo que la persona tiene por delante, según quien mira (mesa del 9 nov): su
+ * próxima cita a quien ve la agenda y lo que debe o tiene a favor a quien ve la
+ * caja, en la cabecera de todas las pestañas. Cada moneda por separado, sin
+ * sumarlas (ADR 0135), con el saldo que se cobra (lo que debe menos lo que
+ * tiene a favor), el mismo de Cobros.
+ */
+function HeaderStatus({
+  personId,
+  patientId,
+  onAccount,
+}: {
+  personId: string
+  patientId: string | null
+  onAccount: boolean
+}) {
+  const canAppointments = usePermission("appointments.read")
+  const canFinance = usePermission("finance.read")
+  const upcoming = usePersonUpcoming(patientId, canAppointments)
+  const account = useQuery({
+    queryKey: ["patient-account", patientId],
+    queryFn: () => fetchPatientAccount3(patientId ?? ""),
+    enabled: canFinance && Boolean(patientId),
+  })
+  const locale = useOrgLocale() ?? "es"
+  const balances = (account.data?.data.byCurrency ?? []).filter((row) => row.saldo !== 0)
+  const showMoney = canFinance && Boolean(patientId)
+  if (!upcoming && !showMoney) return null
+  return (
+    <section aria-label="Lo que viene" className="flex flex-col gap-1">
+      {upcoming ? <UpcomingLine {...upcoming} /> : null}
+      {showMoney ? (
+        <p className="text-sm">
+          <span className="text-muted-foreground">Cuenta: </span>
+          {account.isPending
+            ? "consultando…"
+            : account.isError
+              ? "no se pudo consultar"
+              : balances.length === 0
+                ? "no debe nada"
+                : balances
+                    .map((row) =>
+                      row.saldo > 0
+                        ? `debe ${formatMoney(row.saldo, row.currency, locale)}`
+                        : `tiene ${formatMoney(-row.saldo, row.currency, locale)} a favor`,
+                    )
+                    .join(" y ")}
+          {!onAccount && !account.isPending && !account.isError ? (
+            <>
+              {" · "}
+              <Link
+                to="/people/$personId"
+                params={{ personId }}
+                search={{ tab: "cuenta" }}
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Ver Cobros
+              </Link>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+    </section>
   )
 }
 
@@ -205,6 +329,15 @@ export function PersonHeader({
     queryFn: () => fetchResponsibilities(patient?.id ?? ""),
     enabled: canRead && Boolean(patient),
   })
+  // Quien lee la historia ve también sus enfermedades y lo que toma, en todas las
+  // pestañas (mesa del 9 nov): es la misma lectura que el Resumen, en la misma caché.
+  const canClinical = can("clinical.read")
+  const health = useQuery({
+    queryKey: ["patient-health", patient?.id ?? null],
+    queryFn: () => fetchPatientHealth(patient?.id ?? ""),
+    enabled: canClinical && Boolean(patient),
+  })
+  const clinicalHealth = health.data?.data ?? null
   const age = ageFrom(person.birthDate)
   // Menor de edad según el servidor (el día de la clínica), no la hora de este equipo.
   const isMinor = person.isMinor
@@ -389,7 +522,7 @@ export function PersonHeader({
             {speaksFor.map((other, index) => (
               <span key={other.personId}>
                 {index > 0 ? ", " : ""}
-                <PersonLink contactId={other.personId} isPatient={other.isPatient}>
+                <PersonLink contactId={other.personId} isPatient={other.isPatient} inText>
                   {other.displayName}
                 </PersonLink>
                 <span className="text-muted-foreground">
@@ -444,7 +577,14 @@ export function PersonHeader({
             )}
           </p>
         ) : null}
-        {detail ? <PatientClinicalStrip detail={detail} /> : null}
+        <HeaderStatus personId={person.id} patientId={patient?.id ?? null} onAccount={onAccount} />
+        {detail ? (
+          <PatientClinicalStrip
+            detail={clinicalHealth ? withHealth(detail, clinicalHealth) : detail}
+            medicationReview={clinicalHealth?.reviewStatus.medications ?? null}
+            onAntecedentes={canClinical && openWide ? () => openWide({ id: "antecedentes" }) : undefined}
+          />
+        ) : null}
       </div>
       <ConfirmDialog
         open={archiveOpen}

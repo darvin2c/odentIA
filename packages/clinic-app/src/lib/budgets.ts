@@ -744,7 +744,7 @@ export function fetchTreatmentPlanDetail(
 
 /** «Qué sigue» del plan: frase y botón que decide el servidor. */
 export interface PlanNextStep {
-  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
+  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "cerrar" | "ninguno"
   text: string
   detail: string | null
   action: {
@@ -754,13 +754,27 @@ export interface PlanNextStep {
     serviceId?: string | null
     followUpId?: string
     appointmentId?: string
+    /** Varios controles en la misma cita. */
+    followUpIds?: string[]
+    /** Desde qué día (`YYYY-MM-DD`) se busca hora, y por qué (lo dice el cajón). */
+    date?: string
+    note?: string
+    /** «Sumar a su cita del 10 nov»: la cita que ya tiene. */
+    join?: { appointmentId: string; label: string }
   } | null
   /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
   alsoToSchedule?: string[]
+  /** Un aviso que no frena, en su propio renglón (la cita que se atendió sin registrar lo hecho). */
+  notice?: string | null
 }
 
 export function fetchPlanNextStep(patientId: string): Promise<{ data: PlanNextStep }> {
   return apiFetch<{ data: PlanNextStep }>(`/api/patients/${patientId}/next-step`)
+}
+
+/** Todo lo que sigue, en una lista (el Resumen): la misma regla, con el control vencido primero. */
+export function fetchPlanNextSteps(patientId: string): Promise<{ data: PlanNextStep[] }> {
+  return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/next-steps`)
 }
 
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */
@@ -775,3 +789,9 @@ export const PLAN_QUERY_KEYS = [
   "treatment-coordination",
   "treatment-journey",
 ] as const
+
+/**
+ * Lo que cambia en la atención abierta cuando la persona responde: lo que no
+ * aceptó o no eligió deja de pedir consentimiento y de contar por ejecutar.
+ */
+export const ANSWER_ENCOUNTER_KEYS = ["encounter", "consent-needs", "encounter-closing"] as const

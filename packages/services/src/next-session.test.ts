@@ -81,7 +81,7 @@ it("X5: «Qué sigue» pone lo empezado sin cita antes de lo aceptado sin empeza
     kind: "continuar",
     text: "Falta la cita de la próxima sesión: Tratamiento propio · sesión 2 de 2",
     detail: "También falta la cita de lo aceptado sin empezar",
-    action: { label: "Reservar cita", planItemIds: [endo.id], serviceId: f.service.id },
+    action: { label: "Reservar la sesión 2", planItemIds: [endo.id], serviceId: f.service.id },
   })
   // La corona sigue «por agendar»: el presupuesto del Plan conserva su «Reservar cita».
   expect(next.alsoToSchedule).toHaveLength(1)
@@ -92,6 +92,11 @@ it("X5: «Qué sigue» pone lo empezado sin cita antes de lo aceptado sin empeza
   const later = await attention(f)
   const extra = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: later }))
   await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [extra.id] }))
+  // Mientras esa atención sigue en borrador, su presupuesto se está preparando: no se pide enviarlo.
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).kind).not.toBe("enviar")
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${later}`,
+  )
   const sending = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
   expect(sending.kind).toBe("enviar")
   expect(sending.detail).toContain("también falta la cita de la próxima sesión de Tratamiento propio")
@@ -128,7 +133,7 @@ it("Al firmar la sesión 1, el resultado dice la sesión que falta reservar; si 
       title: "Tratamiento propio",
       n: 1,
       m: 2,
-      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), n: 2, m: 2 },
+      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), professionalUserId: second.professionalUserId, n: 2, m: 2 },
     },
   ])
   const signed = await g.run((tx) => finalizeEncounter(tx, ...g.args, g.encounter.id))
@@ -137,7 +142,7 @@ it("Al firmar la sesión 1, el resultado dice la sesión que falta reservar; si 
       planItemId: other.id,
       title: "Tratamiento propio",
       serviceId: g.service.id,
-      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), n: 2, m: 2 },
+      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), professionalUserId: second.professionalUserId, n: 2, m: 2 },
       toBook: null,
     },
   ])

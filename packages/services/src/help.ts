@@ -484,7 +484,13 @@ export function describeHelpScreen(
 ): { title: string | null; suggestions: string[] } {
   // En la pantalla se nombra como la llama su menú («Mis honorarios»), no como el tema.
   const topic = helpTopicForScreen(screen, topics)
-  return { title: topic ? (topic.menuLabel ?? topic.title) : null, suggestions: helpSuggestions(screen, topics) }
+  // Dentro de la página de una sola cosa de la lista (la ficha), se nombra esa página.
+  const clean = screen.replace(/\/+$/, "")
+  const inItem = !!topic?.itemLabel && [topic.path, ...(topic.alsoAt ?? [])].some((base) => clean.startsWith(`${base}/`))
+  return {
+    title: topic ? (inItem ? topic.itemLabel! : (topic.menuLabel ?? topic.title)) : null,
+    suggestions: helpSuggestions(screen, topics),
+  }
 }
 
 /* ---------- Enviar a odentIA ---------- */

@@ -29,6 +29,7 @@ import {
   setAppointmentStatus,
   setBranchDefaultDuration,
   setProfessionalSchedule,
+  setAppointmentPlanItems,
   updateAppointment,
   updateRoom,
 } from "@odentia/services"
@@ -68,6 +69,14 @@ const settingsInput = z.object({
 
 // Los detalles de la cita; el estado tiene sus propias vías (`/status`, `/arrival`
 // y el cierre de la atención), cada una con sus efectos.
+const planItemsInput = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    add: z.array(z.uuid()).max(52).optional(),
+    remove: z.array(z.uuid()).max(52).optional(),
+  })
+  .strict()
+
 const patchInput = z
   .object({
     expectedVersion: z.number().int().positive(),
@@ -135,6 +144,8 @@ const availabilityQuery = z.object({
   ignoreAppointmentId: z.uuid().optional(),
   // «Nueva cita» con servicio: solo quien lo atiende (ADR 0039).
   serviceId: z.uuid().optional(),
+  // Quien se pidió al abrir: con servicio, viene aunque la regla no lo ofrezca (ADR 0039).
+  professionalUserId: z.string().trim().min(1).max(200).optional(),
 })
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
@@ -476,6 +487,21 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updateAppointment(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // Lo que lleva una cita que ya existe: «Sumar a su cita» y su «Deshacer» (la lista entera).
+  app.post("/:id/plan-items", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar citas"), 403)
+    }
+    const parsed = planItemsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setAppointmentPlanItems(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
     )
   })

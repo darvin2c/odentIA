@@ -94,6 +94,10 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
   await confirm.getByRole("button", { name: "Guardar con su firma", exact: true }).click()
   await expect(confirm).toBeHidden()
   await expect(drawer).toBeHidden()
+  // En la atención queda constancia de lo anotado, no un hueco (QA del 8 nov).
+  const after = page.getByRole("status").filter({ hasText: /^Presupuesto N\.º \d+ · Aceptó todo/ })
+  await expect(after).toContainText("Firmó Lucía Quispe en la clínica")
+  await shot("atencion-constancia")
 
   // El servidor: entregado y aceptado en una sola operación, con la firma de quien decide.
   const signed = await call<Budget>(page, "GET", `${apiPath}/budgets/${budgetId}`, slug)

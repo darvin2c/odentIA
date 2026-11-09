@@ -181,8 +181,14 @@ export function ControlesPanel({
   allowCreate = true,
   items,
   heading = "Controles",
+  reservedInNext,
 }: {
   patientId: string
+  /**
+   * Los controles que ya ofrece «Qué sigue» arriba (el Plan): se reservan ahí, no
+   * con otro botón aquí (QA de la ficha del 8 nov: tres botones para lo mismo).
+   */
+  reservedInNext?: ReadonlySet<string>
   itemId?: string
   encounterId?: string
   /** «Próximo control» dentro de la atención; «Controles» en el Plan. */
@@ -402,7 +408,9 @@ export function ControlesPanel({
                     : ""}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
+              {followUpAppointmentLabel(row) ? (
+                <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
+              ) : null}
               {row.repeatEveryMonths &&
               (row.status === "pendiente" || row.status === "programado") ? (
                 <p className="text-sm text-muted-foreground">
@@ -441,7 +449,9 @@ export function ControlesPanel({
               ) : null}
               {canWrite ? (
                 <div className="flex flex-wrap gap-2">
-                  {row.status === "pendiente" &&
+                  {row.status === "pendiente" && reservedInNext?.has(row.id) ? (
+                    <span className="self-center text-sm text-muted-foreground">Se reserva arriba, en «Qué sigue»</span>
+                  ) : row.status === "pendiente" &&
                   row.appointment?.status !== "atendida" &&
                   canSchedule ? (
                     <Button

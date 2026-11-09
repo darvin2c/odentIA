@@ -1,5 +1,7 @@
 import {
+  budgetOptionLabel,
   diagnosisCodeLabel,
+  isLeftOut,
 } from "@odentia/clinical"
 import {
   AlertDialog,
@@ -170,8 +172,7 @@ function PlanPhasesGroup({
   // El avance cuenta solo lo que se hará.
   const active = phased.filter(
     (item) =>
-      !["cancelado", "reemplazado"].includes(item.status) &&
-      !["rechazado", "reemplazado"].includes(item.decisionStatus),
+      !["cancelado", "reemplazado"].includes(item.status) && !isLeftOut(item.decisionStatus),
   )
   const done = active.filter((item) => item.status === "realizado").length
   const inProgress = active.filter((item) => item.status === "en_curso").length
@@ -248,11 +249,17 @@ function PlanPhasesGroup({
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {[
+                            // Con su nombre, como la Historia (repaso de la ficha del 9 nov).
                             item.diagnosisCode
-                              ? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)
+                              ? (item.diagnosisName ?? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode))
                               : null,
-                            // Con una revisión enviada, lo que espera es el precio nuevo.
-                            item.newTermsPending ? "Precio nuevo por responder" : planDecisionLabel(item.decisionStatus),
+                            // Con una revisión enviada, lo que espera es el precio nuevo. Lo realizado
+                            // ya no dice «Aceptado»: una etiqueta por renglón.
+                            item.newTermsPending
+                              ? "Precio nuevo por responder"
+                              : item.status === "realizado"
+                                ? null
+                                : planDecisionLabel(item.decisionStatus),
                             // Lo de una sola sesión no dice «0 de 1 sesión»: solo lo de varias.
                             // Lo que se terminó antes de sus previstas lo dice: por eso no ofrece «Falta otra sesión».
                             item.status === "realizado" && sessions < planned
@@ -266,9 +273,11 @@ function PlanPhasesGroup({
                             .join(" · ")}
                         </span>
                       </div>
-                      <Badge variant={statusVariant(item.status)}>
-                        {planStatusLabel(item.status)}
-                      </Badge>
+                      {/* «Pendiente» junto a «Aceptado · Iniciar la primera sesión» eran dos etiquetas
+                          para lo mismo: lo que no empezó lo dice su renglón. */}
+                      {item.status === "pendiente" && item.decisionStatus === "aceptado" ? null : (
+                        <Badge variant={statusVariant(item.status)}>{planStatusLabel(item.status)}</Badge>
+                      )}
                       <div className="flex items-center gap-1">
                         {canWrite && !closed ? (
                           <>
@@ -364,8 +373,8 @@ function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
   const thinking = group.items.some((item) => item.decisionStatus === "pospuesto")
   const count = pathCountWord(group.pathCount)
   const heading = group.site
-    ? `${group.site} · por decidir entre ${count} caminos`
-    : `Por decidir entre ${count} caminos`
+    ? `${group.site} · por decidir entre ${count} opciones`
+    : `Por decidir entre ${count} opciones`
   return (
     <section
       aria-labelledby={headingId}
@@ -384,7 +393,7 @@ function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
           const titles = joinTitles(path.items.map((item) => item.title))
           const words = path.name
             ? `${path.name}: ${lowerFirst(titles)}`
-            : titles || `Camino ${path.position}`
+            : titles || budgetOptionLabel(path.position)
           const total = pathTotal(path.items)
           return (
             <li key={path.position}>
@@ -411,7 +420,7 @@ function NotChosenPath({ items }: { items: PlanItem[] }): React.JSX.Element {
       <CollapsibleTrigger
         render={
           <Button type="button" variant="ghost" size="sm" className="group self-start">
-            El camino que no eligió · {open ? "Ocultar" : "Ver"}
+            La opción que no eligió · {open ? "Ocultar" : "Ver"}
             <ChevronDown
               aria-hidden
               className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
@@ -436,7 +445,11 @@ function NotChosenPath({ items }: { items: PlanItem[] }): React.JSX.Element {
 /**
  * «Falta otra sesión» de un tratamiento realizado: vuelve a «En curso» con una
  * sesión prevista más y sale otra vez en «Por agendar». Lo firmado y lo cobrado
- * no cambian. Se confirma porque cambia lo que ve recepción.
+ * no cambian y reabrir no crea ningún cargo (`reopenPlanItemForSession`). Si esa
+ * sesión se cobra lo decide la firma con su regla (`finalizeEncounter`): lo que se
+ * cobra una vez ya está cubierto y lo aceptado por sesión tiene su tope; solo lo
+ * que va por sesión sin un tope aceptado se cobra. Por eso el diálogo no lo
+ * promete y lo deja al cierre. Se confirma porque cambia lo que ve recepción.
  */
 function AnotherSessionDialog({
   patientId,
@@ -454,7 +467,8 @@ function AnotherSessionDialog({
       apiFetch(`/api/patients/${patientId}/plan/items/${item.id}/another-session`, { method: "POST" }),
     onSuccess: async () => {
       await Promise.all(
-        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next", "treatment-coordination"].map((key) =>
+        // También los presupuestos: su línea decía «Realizado» hasta recargar (QA del 8 nov).
+        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next", "treatment-coordination", "budgets", "budget"].map((key) =>
           queryClient.invalidateQueries({ queryKey: [key, patientId] }),
         ),
       )
@@ -467,7 +481,7 @@ function AnotherSessionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>¿Le falta otra sesión?</AlertDialogTitle>
           <AlertDialogDescription>
-            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Lo firmado y lo cobrado hasta hoy no cambian; esa sesión se cobra como las demás de este tratamiento.`}
+            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Reabrirlo no cobra nada: lo firmado y lo cobrado hasta hoy no cambian. Al firmar esa sesión se dice si se cobra.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {reopen.error ? (

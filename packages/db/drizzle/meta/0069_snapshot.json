@@ -1,5 +1,5 @@
 {
-  "id": "fb8a32ca-7cf7-4f0b-a604-676691a588f7",
+  "id": "eee6445f-7557-4916-8ab2-b164a6e1d5ec",
   "prevId": "6f15fc40-5758-4655-a53b-68ee36427d0b",
   "version": "7",
   "dialect": "postgresql",
@@ -9999,12 +9999,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "informed_encounter_id": {
-          "name": "informed_encounter_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10205,23 +10199,6 @@
           "columnsTo": [
             "system_key",
             "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "consent_document_informed_encounter_fk": {
-          "name": "consent_document_informed_encounter_fk",
-          "tableFrom": "consent_document",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "informed_encounter_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"

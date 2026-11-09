@@ -20,7 +20,7 @@ import { agentTextsFor } from "./products.js"
 import { listArgosNames } from "./argos-figures.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { createExpense, setCommissionRate } from "./finance.js"
+import { createExpense, setCommissionRate, voidExpense } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { collectCharge, createCharge, refundCredit, voidTicket } from "./payments.js"
 import { computeFigure, type FigureContext } from "./report-figures.js"
@@ -306,6 +306,38 @@ describe("cuadre con Reportes", () => {
     const vencido = await inMonth("deuda_vencida", () => "select sum(saldo) * 100 as v from deudas where vencida")
     expect(vencido.vistas).toBe(vencido.pantalla)
     expect(vencido.vistas).toBe(12_000)
+  })
+
+  it("un gasto anulado no está en ningún mes, como en Gastos y Reportes", async () => {
+    const f = await clinicalFixture()
+    const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+    const now = new Date()
+    const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15, 15))
+    const kept = await f.run((tx) =>
+      createExpense(tx, "org_a", f.actor, { branchId: site!.id, category: "Alquiler", concept: "Alquiler", amountCents: 50_000, spentAt: lastMonth.toISOString() }),
+    )
+    const voided = await f.run((tx) =>
+      createExpense(tx, "org_a", f.actor, { branchId: site!.id, category: "Servicios", concept: "Internet", amountCents: 8_000, spentAt: lastMonth.toISOString() }),
+    )
+    expect(kept.id).not.toBe(voided.id)
+    const range = (from: string, to: string) => `momento >= timestamptz '${from}' and momento < timestamptz '${to}'`
+    const both = async (period: string) => {
+      const pantalla = await screen("org_a", period, "gastos")
+      const vistas = await one(
+        "org_a",
+        `select coalesce(sum(monto), 0) * 100 as v from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado') and ${range(pantalla.from, pantalla.to)}`,
+      )
+      return { pantalla: Math.round(pantalla.value), vistas: Math.round(vistas) }
+    }
+    const before = { pasado: await both("mes_pasado"), este: await both("este_mes") }
+    // Se anula este mes: baja su propio mes y no resta en este.
+    await f.run((tx) => voidExpense(tx, "org_a", f.actor, voided.id, { reason: "Se registró dos veces" }, { allowPostClose: true }))
+    const after = { pasado: await both("mes_pasado"), este: await both("este_mes") }
+    expect(after.pasado.vistas).toBe(after.pasado.pantalla)
+    expect(after.este.vistas).toBe(after.este.pantalla)
+    expect(after.pasado.vistas).toBe(before.pasado.vistas - 8_000)
+    expect(after.este.vistas).toBe(before.este.vistas)
+    expect(await one("org_a", "select count(*) as v from gastos where monto < 0")).toBe(0)
   })
 
   it("lo cobrado por medio de pago resta anulaciones y devoluciones del medio del pago, como Reportes", async () => {

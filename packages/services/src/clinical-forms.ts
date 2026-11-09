@@ -5,6 +5,8 @@ import {
   type ConsentSections,
   BUDGET_SIGN_DECLARATION,
   clinicalProfileFor,
+  isLeftOut,
+  LEFT_OUT_DECISIONS,
   consentSectionsToText,
   consentSignatureNote,
   normalizeDrugText,
@@ -3325,9 +3327,11 @@ const NEED_RANK: Record<ConsentNeedStatus, number> = {
 }
 
 /**
- * Consentimientos que pide una atención: por los servicios registrados como
- * hechos y por los indicados en ella, más los pendientes que se prepararon a
- * mano en la misma atención. Uno firmado para el mismo tratamiento en otra
+ * Consentimientos que pide una atención: por lo que se hace hoy, es decir, los
+ * servicios registrados como hechos y los tratamientos que se trajeron a ella
+ * (su cita o «Hacerla hoy»), más los pendientes que se prepararon a mano en la
+ * misma atención. Lo indicado para otro día no lo pide: se consiente el día que
+ * se hace (QA de la atención del 8 nov; ADR 0165). Uno firmado para el mismo tratamiento en otra
  * visita también lo cubre. Una sola definición para el bloque Documentos, el
  * cierre y la API.
  */
@@ -3373,6 +3377,7 @@ export async function getEncounterConsentNeeds(
       siteQualifiers: treatmentPlanItem.siteQualifiers,
       diagnosisCode: treatmentPlanItem.diagnosisCode,
       diagnosisSystem: treatmentPlanItem.diagnosisSystem,
+      decisionStatus: treatmentPlanItem.decisionStatus,
     })
     .from(treatmentPlanItem)
     .innerJoin(serviceCatalog, eq(serviceCatalog.id, treatmentPlanItem.serviceId))
@@ -3380,11 +3385,15 @@ export async function getEncounterConsentNeeds(
       and(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        sql`exists (select 1 from encounter_plan_item today where today.organization_id = ${treatmentPlanItem.organizationId}
+          and today.plan_item_id = ${treatmentPlanItem.id} and today.encounter_id = ${encounterId})`,
         sql`${treatmentPlanItem.status} <> 'cancelado'`,
       ),
     )
     .orderBy(asc(treatmentPlanItem.createdAt))
+  // Lo que la persona dejó fuera (no lo aceptó o eligió otro camino) no se hará:
+  // no pide consentimiento. Si después lo acepta, su decisión cambia y vuelve.
+  const leftOut = new Set(indicated.filter((item) => isLeftOut(item.decisionStatus)).map((item) => item.id))
   const sources: NeedSource[] = []
   for (const proc of procedures) {
     if (!proc.serviceId) continue
@@ -3400,7 +3409,7 @@ export async function getEncounterConsentNeeds(
     })
   }
   for (const item of indicated) {
-    if (!item.serviceId) continue
+    if (!item.serviceId || leftOut.has(item.id)) continue
     // Lo hecho hoy ya trae este tratamiento: no se cuenta dos veces.
     if (sources.some((source) => source.planItemId === item.id)) continue
     sources.push({
@@ -3499,9 +3508,12 @@ export async function getEncounterConsentNeeds(
     const mine = sources.filter((source) => linked.has(source.serviceId))
     const published = templates.find((t) => t.key === key && t.status === "publicado") ?? null
     const latest = templates.find((t) => t.key === key) ?? null
+    // El de algo que dejó fuera no cubre a otro tratamiento con la misma plantilla
+    // (la 38 que se cambió por la 48): ese pide el suyo.
     const ownDocs = documents.filter(
       (doc) =>
         doc.key === key &&
+        !(doc.planItemId && leftOut.has(doc.planItemId)) &&
         (doc.encounterId === encounterId || (doc.planItemId && mine.some((s) => s.planItemId === doc.planItemId))),
     )
     const signed = ownDocs.find((doc) => doc.status === "firmado")
@@ -3540,6 +3552,11 @@ export async function getEncounterConsentNeeds(
   // Los pendientes que se prepararon a mano en esta atención también faltan al cerrar.
   for (const doc of documents) {
     if (covered.has(doc.id) || doc.encounterId !== encounterId || doc.status !== "pendiente") continue
+    // El preparado para lo que dejó fuera ya no falta: queda en Documentos, sin pedirse al cerrar.
+    if (doc.planItemId && leftOut.has(doc.planItemId)) continue
+    // El de un tratamiento que hoy no se hace (se quitó, «Hoy no», o es para otro día) tampoco:
+    // queda en Documentos y se firma el día que se haga (ADR 0165).
+    if (doc.planItemId && !sources.some((source) => source.planItemId === doc.planItemId)) continue
     if (needs.some((need) => need.templateKey === doc.key && need.documentId === doc.id)) continue
     needs.push({
       templateKey: doc.key,
@@ -3646,6 +3663,10 @@ export async function listConsentsToPublish(tx: Db, orgId: string): Promise<Cons
       join "treatment_plan_item" tpi
         on tpi."organization_id" = cts."organization_id" and tpi."service_id" = cts."service_id"
         and tpi."status" <> 'cancelado'
+        and tpi."decision_status" not in (${sql.join(
+          LEFT_OUT_DECISIONS.map((decision) => sql`${decision}`),
+          sql`, `,
+        )})
       join "encounter" e on e."id" = tpi."source_encounter_id" and e."organization_id" = cts."organization_id"
       where cts."organization_id" = ${orgId} and e."status" <> 'anulada'
         and e."created_at" > now() - interval '30 days'

@@ -4,7 +4,7 @@ import { AgentMark, FormDrawer, SubmitButton, useAppForm, useFormSurface } from 
 import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
@@ -713,7 +713,7 @@ const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, Editabl
     { key: "title", label: "Control", max: 200 },
     { key: "instructions", label: "Indicaciones", long: true, max: 2000 },
   ],
-  // El hallazgo, su variante y su estado se eligen en la tarjeta; aquí, la pieza y una nota.
+  // El hallazgo, su variante y su estado se eligen en la tarjeta; aquí, la pieza, sus caras (si es por cara) y una nota.
   odontograma: [
     { key: "toothNumber", label: "Pieza", number: true },
     { key: "note", label: "Nota", long: true, max: 2000 },
@@ -814,6 +814,12 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
   const { title } = suggestionText(item)
   const site = productUi().site
   const isTooth = (value: string) => value !== "" && (site?.isPlace(Number(value)) ?? false)
+  // Un hallazgo por cara (una caries): el servidor pide la cara si no se dijo, y aquí se marcan una o varias.
+  const findingFaces =
+    kind === "odontograma" &&
+    Boolean(site) &&
+    ((Array.isArray(payload["missing"]) && (payload["missing"] as string[]).includes("surfaces")) ||
+      (Array.isArray(payload["surfaces"]) && (payload["surfaces"] as string[]).length > 0))
   const layout = (values: EditValues) => {
     const tooth = Number(values.draft["toothNumber"])
     // Las caras son las de esa pieza, con los nombres del odontograma: una pieza anterior no tiene oclusal.
@@ -821,7 +827,9 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
     const scope = values.service?.scope ?? null
     // Sin «dónde» en el producto (latidIA), una indicación no lleva pieza ni caras.
     const bySite = Boolean(site) && (scope === null || scope === "tooth" || scope === "surfaces")
-    const withSurfaces = Boolean(site) && (scope === "surfaces" || (scope === null && values.surfaces.length > 0))
+    const withSurfaces = plan
+      ? Boolean(site) && (scope === "surfaces" || (scope === null && values.surfaces.length > 0))
+      : findingFaces
     return { tooth, available, bySite, withSurfaces }
   }
 
@@ -879,6 +887,10 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
         }
         // Con un hallazgo escrito, el sistema queda con hallazgos; sin texto, sin alteraciones.
         if (kind === "examen") patch["state"] = patch["finding"] ? "con_hallazgos" : "sin_alteraciones"
+        if (withSurfaces) {
+          const kept = surfaces.filter((surface) => (available as string[]).includes(surface))
+          patch["surfaces"] = kept.length ? kept : null
+        }
       }
       const result = await session.save.mutateAsync({ item, patch, confirm: true })
       if (result.confirmed) session.closeEdit()
@@ -895,6 +907,46 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
   const candidates = candidatesOf(item)
   const pick = (chosen: Candidate | ServiceCatalogItem) =>
     form.setFieldValue("service", { id: chosen.id, name: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency, scope: chosen.scope ?? null })
+
+  // Las caras de la pieza, con los nombres del odontograma: las de una indicación y las de un hallazgo.
+  const surfacesField = withSurfaces ? (
+    <form.AppField name="surfaces">
+      {(field) => (
+        <field.Group legend="Superficies">
+          {(control) =>
+            available.length > 0 ? (
+              <fieldset
+                className="flex min-w-0 flex-wrap gap-1.5"
+                aria-label={`Superficies de la pieza ${tooth}`}
+                aria-invalid={control.props["aria-invalid"]}
+                aria-describedby={control.describedBy}
+              >
+                {available.map((part) => {
+                  const pressed = field.state.value.includes(part)
+                  return (
+                    <Button
+                      key={part}
+                      type="button"
+                      size="sm"
+                      className="min-h-11"
+                      variant={pressed ? "default" : "outline"}
+                      aria-pressed={pressed}
+                      onBlur={control.onBlur}
+                      onClick={() => field.handleChange(pressed ? field.state.value.filter((entry) => entry !== part) : [...field.state.value, part])}
+                    >
+                      {partNames([part])}
+                    </Button>
+                  )
+                })}
+              </fieldset>
+            ) : (
+              <p className="text-sm text-muted-foreground">Escribe la pieza para elegir sus superficies.</p>
+            )
+          }
+        </field.Group>
+      )}
+    </form.AppField>
+  ) : null
 
   return (
     <FormDrawer
@@ -984,44 +1036,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
             ) : site ? (
               <p className="text-sm text-muted-foreground">Esta prestación no se indica por pieza.</p>
             ) : null}
-            {withSurfaces ? (
-              <form.AppField name="surfaces">
-                {(field) => (
-                  <field.Group legend="Superficies">
-                    {(control) =>
-                      available.length > 0 ? (
-                        <fieldset
-                          className="flex min-w-0 flex-wrap gap-1.5"
-                          aria-label={`Superficies de la pieza ${tooth}`}
-                          aria-invalid={control.props["aria-invalid"]}
-                          aria-describedby={control.describedBy}
-                        >
-                          {available.map((part) => {
-                            const pressed = field.state.value.includes(part)
-                            return (
-                              <Button
-                                key={part}
-                                type="button"
-                                size="sm"
-                                className="min-h-11"
-                                variant={pressed ? "default" : "outline"}
-                                aria-pressed={pressed}
-                                onBlur={control.onBlur}
-                                onClick={() => field.handleChange(pressed ? field.state.value.filter((entry) => entry !== part) : [...field.state.value, part])}
-                              >
-                                {partNames([part])}
-                              </Button>
-                            )
-                          })}
-                        </fieldset>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Escribe la pieza para elegir sus superficies.</p>
-                      )
-                    }
-                  </field.Group>
-                )}
-              </form.AppField>
-            ) : null}
+            {surfacesField}
             {done ? null : (
               <form.AppField name="draft.detail">
                 {(field) => <field.TextareaField id={`dictado-${item.id}-detalle`} label="Detalle" rows={3} maxLength={2000} placeholder="Opcional" />}
@@ -1029,8 +1044,10 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
             )}
           </>
         ) : (
-          fields.map((editable) => (
-            <form.AppField key={editable.key} name={`draft.${editable.key}`}>
+          <>
+            {fields.map((editable) => (
+            <Fragment key={editable.key}>
+            <form.AppField name={`draft.${editable.key}`}>
               {(field) =>
                 editable.long ? (
                   <field.TextareaField id={`dictado-${item.id}-${editable.key}`} label={editable.label} rows={3} maxLength={editable.max} />
@@ -1057,7 +1074,11 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
                 )
               }
             </form.AppField>
-          ))
+            {/* Las caras van después de la pieza, como en el odontograma. */}
+            {editable.key === "toothNumber" ? surfacesField : null}
+            </Fragment>
+          ))}
+          </>
         )}
 
         <Button

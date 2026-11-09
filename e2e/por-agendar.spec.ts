@@ -41,14 +41,14 @@ test("lo aceptado sin cita y el control vencido llevan a su lista; un cobro es u
   await expect(drawer.getByRole("link", { name: "Lucía Quispe" })).toBeVisible()
   await info.attach("inicio-controles", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  // Lo aceptado lleva a Pacientes › «Por agendar», con la misma persona y «Reservar cita».
+  // Lo aceptado lleva a Pacientes › «Por agendar», con la misma persona y «Reservar lo aceptado».
   await waiting.getByRole("link", { name: "Ver en Pacientes: 1 persona tiene algo aceptado sin cita" }).click()
   await expect(page).toHaveURL(/\/people\?.*atajo=por_agendar/)
   await expect(page.getByText("«Por agendar»: quien tiene algo aceptado o en curso sin una cita que lo lleve")).toBeVisible()
   const list = page.getByRole("table")
   await expect(list.getByRole("row")).toHaveCount(2)
   await expect(list).toContainText("Lucía Quispe")
-  await expect(list.getByRole("button", { name: /Reservar cita/ })).toBeVisible()
+  await expect(list.getByRole("button", { name: "Reservar lo aceptado" })).toBeVisible()
   await info.attach("pacientes-por-agendar", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
   // --- Un cobro: una sola fila en Actividad del equipo, con la persona y el ticket ---

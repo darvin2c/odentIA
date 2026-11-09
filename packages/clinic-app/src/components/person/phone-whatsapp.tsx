@@ -29,7 +29,7 @@ export function PhoneWhatsAppNote({ contactId, value }: { contactId: string; val
         </Badge>
         <span className="text-xs text-muted-foreground">
           WhatsApp no pudo entregarle un mensaje. Los recordatorios le llegan por correo; sin correo, «Te espera» pide
-          llamarla.
+          llamar.
         </span>
       </span>
     )
@@ -40,6 +40,7 @@ export function PhoneWhatsAppNote({ contactId, value }: { contactId: string; val
     <span className="mt-1 flex flex-wrap items-center gap-2">
       <Badge variant="outline">Aún no es su WhatsApp</Badge>
       {canUse ? (
+        // Baja de línea entero, junto al aviso; Datos se acomoda a su propio ancho (QA de la ficha del 8 nov).
         <Button type="button" size="sm" variant="outline" disabled={use.isPending} onClick={() => use.mutate()}>
           {use.isPending ? "Guardando…" : "Usarlo como su WhatsApp"}
         </Button>

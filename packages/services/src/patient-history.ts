@@ -1,9 +1,8 @@
-import { budgetStateText, diagnosisCodeLabel, sumByCurrency } from "@odentia/clinical"
+import { budgetAnswerText, budgetStateText, diagnosisCodeLabel, LEFT_OUT_DECISIONS, sumByCurrency } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
   clinicalNote,
-  diagnosisCatalog,
   encounter,
   encounterPlanItem,
   encounterDiagnosis,
@@ -19,15 +18,18 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
+import { user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
 import { budgetAwaitsAnswerSql, budgetValueOptionSql } from "./budget-awaiting.js"
 import { valueOptionOf } from "./budgets.js"
 import { getCurrentDocumentContexts, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
+import { diagnosisTitlesOf, namedDiagnosis } from "./diagnosis-codes.js"
 import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
+import { listFollowUps } from "./follow-ups.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -293,11 +295,26 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       linkSentAt: consentDocument.linkSentAt,
     })
     .from(consentDocument)
+    .leftJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.id, consentDocument.planItemId),
+        eq(treatmentPlanItem.organizationId, consentDocument.organizationId),
+      ),
+    )
     .where(
       and(
         eq(consentDocument.organizationId, orgId),
         eq(consentDocument.patientId, patientId),
         eq(consentDocument.status, "pendiente"),
+        // El preparado para lo que no aceptó o no eligió ya no se pide (`isLeftOut`), salvo
+        // que ya vaya por su enlace: eso sigue su curso.
+        sql`not (${treatmentPlanItem.decisionStatus} is not null
+          and ${treatmentPlanItem.decisionStatus} in (${sql.join(
+            LEFT_OUT_DECISIONS.map((decision) => sql`${decision}`),
+            sql`, `,
+          )})
+          and ${consentDocument.linkSentAt} is null and ${consentDocument.personSignedAt} is null)`,
       ),
     )
     .orderBy(asc(consentDocument.createdAt))
@@ -402,13 +419,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       ...procedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
       ...encounterNotes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),
     ].filter((row): row is { system: string; code: string } => !!row.code && !!row.system)
-    const titled = coded.length
-      ? await tx
-          .select({ system: diagnosisCatalog.systemKey, code: diagnosisCatalog.code, title: diagnosisCatalog.title })
-          .from(diagnosisCatalog)
-          .where(inArray(diagnosisCatalog.code, [...new Set(coded.map((row) => row.code))]))
-      : []
-    const titleOf = new Map(titled.map((row) => [`${row.system}|${row.code}`, row.title]))
+    const titleOf = await diagnosisTitlesOf(tx, coded)
     const diagnoses = [
       ...new Set(coded.map((row) => titleOf.get(`${row.system}|${row.code}`) ?? diagnosisCodeLabel(row.system, row.code))),
     ].sort()
@@ -677,6 +688,282 @@ export interface TimelineItemBase {
   dueAt?: Date | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** Quién atendió, y en una anulada quién la anuló y cuándo. */
+  professionalName?: string | null
+  /** Quién firmó la atención y cuándo. */
+  signerName?: string | null
+  signedAt?: Date | null
+  /** Hecho de una atención que sigue en curso (sin firmar): la historia lo dice. */
+  openEncounter?: boolean
+  voidedByName?: string | null
+  voidedAt?: Date | null
+  /**
+   * Lo que nació en la atención, dentro de su tarjeta (QA de la ficha del 8 nov:
+   * un día eran 14 tarjetas sueltas). Solo en la historia completa; lo anulado
+   * o cancelado viene marcado (`retired`) para plegarlo al pie de la tarjeta.
+   */
+  born?: EncounterBorn
+}
+
+/** Lo nacido en una atención: lo que se indicó, se pidió y se firmó. */
+export interface EncounterBorn {
+  /** Tratamientos indicados en ella, con su estado dicho en palabras. */
+  indicated: Array<{ id: string; title: string; where: string | null; stateText: string; retired: boolean; budgetId: string | null }>
+  /** Sus presupuestos (los de lo indicado en ella), con su estado en palabras. */
+  budgets: Array<{ id: string; budgetNumber: number; stateText: string; retired: boolean }>
+  /** Consentimientos (no los revocados: la revocación es un hecho propio, con su fecha). */
+  consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
+  prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
+  orders: Array<{ id: string; title: string; state: string }>
+  forms: Array<{ id: string; title: string }>
+  followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
+}
+
+/** Los estados de un tratamiento o un control, en palabras (nunca «en_curso»). */
+const PLAN_STATE_WORDS: Record<string, string> = {
+  pendiente: "Pendiente",
+  programado: "Con cita",
+  en_curso: "En curso",
+  suspendido: "Suspendido",
+  realizado: "Realizado",
+  cancelado: "Cancelado",
+  reemplazado: "Reemplazado",
+}
+
+/**
+ * Una sola etiqueta por tratamiento (U8 de la QA de la ficha): mientras no
+ * empieza, su decisión («Aceptado», «Lo está pensando»); después, su estado.
+ */
+export function planItemStateText(status: string, decision: string | null): string {
+  if ((status === "pendiente" || status === "programado") && decision && decision !== "aceptado")
+    return budgetAnswerText(decision)
+  if (status === "pendiente" && decision === "aceptado") return "Aceptado"
+  return PLAN_STATE_WORDS[status] ?? status
+}
+
+const FOLLOW_UP_STATE_WORDS: Record<string, string> = {
+  pendiente: "Por reservar",
+  programado: "Con cita",
+  realizado: "Hecho",
+  cancelado: "Cancelado",
+}
+
+/** Lo que ya no es trabajo vigente: se pliega, no se tacha. */
+const RETIRED_PLAN = new Set(["cancelado", "reemplazado"])
+
+/**
+ * Lo nacido en cada atención, de una vez para todas (sin una consulta por
+ * fila): lo indicado, sus presupuestos, consentimientos, recetas, pedidos,
+ * formularios y controles. La pantalla lo pone dentro de su tarjeta.
+ */
+async function loadBornForEncounters(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterIds: string[],
+): Promise<Map<string, EncounterBorn>> {
+  const out = new Map<string, EncounterBorn>()
+  if (encounterIds.length === 0) return out
+  const site = (await productHooks(tx, orgId)).site
+  const of = (id: string): EncounterBorn => {
+    let born = out.get(id)
+    if (!born) {
+      born = { indicated: [], budgets: [], consents: [], prescriptions: [], orders: [], forms: [], followUps: [] }
+      out.set(id, born)
+    }
+    return born
+  }
+  const [items, consents, recipes, orders, forms, controls] = await Promise.all([
+    tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          inArray(treatmentPlanItem.sourceEncounterId, encounterIds),
+        ),
+      )
+      .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id)),
+    tx
+      .select()
+      .from(consentDocument)
+      .where(
+        and(
+          eq(consentDocument.organizationId, orgId),
+          eq(consentDocument.patientId, patientId),
+          inArray(consentDocument.encounterId, encounterIds),
+        ),
+      )
+      .orderBy(asc(consentDocument.createdAt), asc(consentDocument.id)),
+    tx
+      .select()
+      .from(prescription)
+      .where(and(eq(prescription.organizationId, orgId), eq(prescription.patientId, patientId), inArray(prescription.encounterId, encounterIds)))
+      .orderBy(asc(prescription.prescriptionNumber)),
+    tx
+      .select()
+      .from(clinicalOrder)
+      .where(and(eq(clinicalOrder.organizationId, orgId), eq(clinicalOrder.patientId, patientId), inArray(clinicalOrder.encounterId, encounterIds)))
+      .orderBy(asc(clinicalOrder.createdAt), asc(clinicalOrder.id)),
+    tx
+      .select()
+      .from(clinicalFormResponse)
+      .where(
+        and(
+          eq(clinicalFormResponse.organizationId, orgId),
+          eq(clinicalFormResponse.patientId, patientId),
+          inArray(clinicalFormResponse.encounterId, encounterIds),
+          eq(clinicalFormResponse.status, "finalizado"),
+        ),
+      )
+      .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
+    tx
+      .select()
+      .from(clinicalFollowUp)
+      .where(
+        and(
+          eq(clinicalFollowUp.organizationId, orgId),
+          eq(clinicalFollowUp.patientId, patientId),
+          inArray(clinicalFollowUp.originEncounterId, encounterIds),
+        ),
+      )
+      .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id)),
+  ])
+  for (const item of items) {
+    if (!item.sourceEncounterId) continue
+    of(item.sourceEncounterId).indicated.push({
+      id: item.id,
+      title: item.title,
+      where: site.words(item, "full"),
+      stateText: planItemStateText(item.status, item.decisionStatus),
+      retired: RETIRED_PLAN.has(item.status),
+      budgetId: item.budgetId,
+    })
+  }
+  // Sus presupuestos, por sus líneas (no por el presupuesto al que hoy apunta cada
+  // tratamiento: al cancelarse o revisarse, ese vínculo cambia). Es la misma regla
+  // que lo saca del listado suelto (`getTimeline`): va dentro solo si todo lo que
+  // lleva nació en atenciones que se muestran, y en la más reciente de ellas.
+  const touched = await tx.execute<{ budgetId: string; encounterId: string | null; status: string | null; startedAt: string | null }>(sql`
+    select distinct line.budget_id as "budgetId", item.source_encounter_id as "encounterId", born.status, born.started_at::text as "startedAt"
+    from treatment_budget_item line
+    join treatment_plan_item item on item.organization_id = line.organization_id and item.id = line.plan_item_id
+    left join encounter born on born.organization_id = item.organization_id and born.id = item.source_encounter_id
+    where line.organization_id = ${orgId} and item.patient_id = ${patientId}::uuid
+      and line.budget_id in (select own_line.budget_id from treatment_budget_item own_line
+        join treatment_plan_item own_item on own_item.organization_id = own_line.organization_id and own_item.id = own_line.plan_item_id
+        where own_line.organization_id = ${orgId} and own_item.source_encounter_id in (${sql.join(
+          encounterIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )}))`)
+  const ownerOf = new Map<string, string>()
+  for (const budgetId of new Set(touched.map((row) => row.budgetId))) {
+    const sources = touched.filter((row) => row.budgetId === budgetId)
+    if (sources.some((row) => !row.encounterId || !["finalizada", "anulada", "borrador"].includes(row.status ?? ""))) continue
+    const owner = sources.reduce((a, b) => ((a.startedAt ?? "") >= (b.startedAt ?? "") ? a : b))
+    if (owner.encounterId && encounterIds.includes(owner.encounterId)) ownerOf.set(budgetId, owner.encounterId)
+  }
+  const budgetIds = [...ownerOf.keys()]
+  if (budgetIds.length) {
+    const [budgets, lines, options] = await Promise.all([
+      tx.select().from(treatmentBudget).where(and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds))),
+      tx
+        .select({
+          budgetId: treatmentBudgetItem.budgetId,
+          planItemId: treatmentBudgetItem.planItemId,
+          decision: treatmentBudgetItem.decision,
+          optionId: treatmentBudgetItem.optionId,
+        })
+        .from(treatmentBudgetItem)
+        .where(and(eq(treatmentBudgetItem.organizationId, orgId), inArray(treatmentBudgetItem.budgetId, budgetIds))),
+      tx
+        .select({
+          id: treatmentBudgetOption.id,
+          budgetId: treatmentBudgetOption.budgetId,
+          decision: treatmentBudgetOption.decision,
+          position: treatmentBudgetOption.position,
+        })
+        .from(treatmentBudgetOption)
+        .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.budgetId, budgetIds))),
+    ])
+    for (const budget of budgets.sort((a, b) => a.budgetNumber - b.budgetNumber)) {
+      const owner = ownerOf.get(budget.id)
+      if (!owner) continue
+      of(owner).budgets.push({
+        id: budget.id,
+        budgetNumber: budget.budgetNumber,
+        stateText: budgetStateText({
+          status: budget.status,
+          items: lines.filter((line) => line.budgetId === budget.id),
+          options: options.filter((option) => option.budgetId === budget.id),
+        }),
+        // Cancelado o reemplazado por su revisión: ya no vale, se pliega.
+        retired: budget.status === "cancelado" || budget.status === "sustituido",
+      })
+    }
+  }
+  for (const row of consents) {
+    // La revocación sale aparte, en su día (`getTimeline`).
+    if (!row.encounterId || row.status === "revocado") continue
+    of(row.encounterId).consents.push({
+      id: row.id,
+      title: row.titleSnapshot,
+      status: row.status,
+      signerName: row.status === "firmado" ? row.signerName : null,
+      relation: row.status === "firmado" ? row.representativeRelation : null,
+    })
+  }
+  const recipeIds = recipes.map((row) => row.id)
+  const medications = recipeIds.length
+    ? await tx
+        .select({ prescriptionId: prescriptionItem.prescriptionId, medicationName: prescriptionItem.medicationName, dose: prescriptionItem.dose })
+        .from(prescriptionItem)
+        .where(and(eq(prescriptionItem.organizationId, orgId), inArray(prescriptionItem.prescriptionId, recipeIds)))
+        .orderBy(asc(prescriptionItem.createdAt), asc(prescriptionItem.id))
+    : []
+  for (const row of recipes) {
+    if (!row.encounterId) continue
+    of(row.encounterId).prescriptions.push({
+      id: row.id,
+      number: row.prescriptionNumber,
+      detail:
+        medications
+          .filter((m) => m.prescriptionId === row.id)
+          .map((m) => `${m.medicationName} ${m.dose}`)
+          .join(" · ") || "Sin medicamentos",
+      // Una receta anulada se ve: la impresa pudo salir (mesa del 9 nov).
+      voided: row.status === "anulada",
+      reason: row.status === "anulada" ? row.cancelReason : null,
+    })
+  }
+  for (const row of orders) {
+    if (!row.encounterId) continue
+    of(row.encounterId).orders.push({
+      id: row.id,
+      title: row.title,
+      state: row.status === "completado" ? "con resultado" : row.status === "cancelado" ? "cancelada" : "sin resultado",
+    })
+  }
+  for (const row of forms) {
+    if (!row.encounterId) continue
+    of(row.encounterId).forms.push({ id: row.id, title: row.templateTitle ?? "Formulario clínico" })
+  }
+  // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
+  const overdue = controls.some((row) => row.status === "pendiente")
+    ? new Set((await listFollowUps(tx, orgId, patientId)).filter((row) => row.overdue).map((row) => row.id))
+    : new Set<string>()
+  for (const row of controls) {
+    if (!row.originEncounterId) continue
+    of(row.originEncounterId).followUps.push({
+      id: row.id,
+      title: row.title,
+      dueAt: row.dueAt,
+      stateText: overdue.has(row.id) ? "Vencido" : (FOLLOW_UP_STATE_WORDS[row.status] ?? "Por reservar"),
+      retired: row.status === "cancelado",
+    })
+  }
+  return out
 }
 
 /** Cómo se dice el tipo de una orden en la historia. */
@@ -724,26 +1011,37 @@ export async function getTimeline(
   const cmp = order === "desc" ? sql`<` : sql`>`
   const direction = order === "desc" ? sql`desc` : sql`asc`
   const branches: SQL[] = []
-  // Las atenciones firmadas, a la hora en que empezaron (la de su detalle y su
-  // resumen), y las anuladas, con su motivo, a la hora en que se anularon:
-  // Historia absorbe la lista de Atenciones (ADR 0035). El borrador en curso no
-  // es todavía un hecho: lo continúa la cabecera.
+  // Las atenciones firmadas y las anuladas, a la hora en que empezaron (la de su
+  // detalle y su resumen): una anulada queda en el día en que ocurrió, con su
+  // motivo y cuándo se anuló (QA de la ficha del 8 nov: salía en otro día,
+  // arriba de lo vigente). Historia absorbe la lista de Atenciones (ADR 0035).
+  // La atención en curso también es su tarjeta, marcada sin firmar (QA del 9 nov): antes
+  // lo nacido en ella salía suelto y la atención no se veía.
   if (types.includes("encounter"))
-    branches.push(sql`select id, 'encounter'::text as kind, case when status = 'anulada' then coalesce(voided_at, created_at) else started_at end as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
+    branches.push(sql`select id, 'encounter'::text as kind, started_at as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada', 'borrador')
     ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_site et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.site_system = ${site.system} and et.site_code = ${toothCode})`}`)
+  // En la historia completa, lo que nació en una atención que se muestra va dentro
+  // de su tarjeta (`born`) y no sale suelto, como sus documentos (QA de la ficha
+  // del 8 nov: un día eran 14 tarjetas). Lo de la atención en curso, también.
+  const absorb = types.includes("encounter")
+  const shown = (column: SQL) =>
+    sql`(${column} is not null and exists (select 1 from encounter shown where shown.organization_id = ${orgId} and shown.id = ${column} and shown.status in ('finalizada', 'anulada', 'borrador')))`
+  const outside = (column: SQL) => (absorb ? sql`and not ${shown(column)}` : sql``)
   // Los papeles, a la hora de lo que pasó con ellos: el consentimiento cuando se
   // firmó o se revocó, la orden cuando se pidió y el formulario al completarse.
+  // La revocación es un hecho propio, en su día: no se esconde en la atención.
   if (types.includes("consent") && tooth == null)
     branches.push(
-      sql`select id, 'consent'::text as kind, coalesce(revoked_at, signed_at, created_at) as created_at from consent_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid`,
+      sql`select id, 'consent'::text as kind, coalesce(revoked_at, signed_at, created_at) as created_at from consent_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid
+        ${absorb ? sql`and (status = 'revocado' or not ${shown(sql`consent_document.encounter_id`)})` : sql``}`,
     )
   if (types.includes("order") && tooth == null)
     branches.push(
-      sql`select id, 'order'::text as kind, created_at from clinical_order where organization_id = ${orgId} and patient_id = ${patientId}::uuid`,
+      sql`select id, 'order'::text as kind, created_at from clinical_order where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${outside(sql`clinical_order.encounter_id`)}`,
     )
   if (types.includes("form") && tooth == null)
     branches.push(
-      sql`select id, 'form'::text as kind, finalized_at as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null`,
+      sql`select id, 'form'::text as kind, finalized_at as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
     )
   if (types.includes("note") && tooth == null)
     branches.push(
@@ -769,8 +1067,14 @@ export async function getTimeline(
       types.includes("encounter") && !input.documentCategory
         ? sql`and not exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.encounter_id is not null)`
         : sql``
+    // El PDF de un consentimiento no es otro hecho: «Firmó: …» ya lo dice y
+    // lleva a Documentos (QA de la ficha del 8 nov: el consentimiento salía dos veces).
+    const consentPaper = types.includes("consent")
+      ? sql`and not exists (select 1 from consent_document paper where paper.organization_id = ${orgId} and paper.patient_id = ${patientId}::uuid
+          and patient_document.id in (paper.pdf_document_id, paper.revoke_pdf_document_id, paper.paper_document_id))`
+      : sql``
     branches.push(
-      sql`select id, 'document'::text as kind, created_at from patient_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${linkedFilter} ${toothFilter} ${input.documentCategory ? sql`and category = ${input.documentCategory}` : sql``}`,
+      sql`select id, 'document'::text as kind, created_at from patient_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${linkedFilter} ${consentPaper} ${toothFilter} ${input.documentCategory ? sql`and category = ${input.documentCategory}` : sql``}`,
     )
   }
   const journeySources = [
@@ -779,10 +1083,23 @@ export async function getTimeline(
     { type: "follow_up", table: "clinical_follow_up", ref: "followUpId" },
     { type: "prescription", table: "prescription", ref: "prescriptionId" },
   ] as const
+  // Dónde nació cada uno: el tratamiento en la atención que lo indicó, el control
+  // en la que lo indicó, la receta en la suya. El presupuesto no guarda su
+  // atención: va dentro solo si todo lo que lleva nació en atenciones que se ven.
+  const bornIn: Record<(typeof journeySources)[number]["type"], SQL> = {
+    plan: outside(sql`treatment_plan_item.source_encounter_id`),
+    follow_up: outside(sql`clinical_follow_up.origin_encounter_id`),
+    prescription: outside(sql`prescription.encounter_id`),
+    budget: absorb
+      ? sql`and not (exists (select 1 from treatment_budget_item line where line.organization_id = ${orgId} and line.budget_id = treatment_budget.id)
+          and not exists (select 1 from treatment_budget_item line join treatment_plan_item item on item.organization_id = line.organization_id and item.id = line.plan_item_id
+            where line.organization_id = ${orgId} and line.budget_id = treatment_budget.id and not ${shown(sql`item.source_encounter_id`)}))`
+      : sql``,
+  }
   for (const source of journeySources) {
     if (!types.includes(source.type) || tooth != null) continue
     branches.push(sql`select id, ${source.type}::text as kind, created_at from ${sql.identifier(source.table)}
-      where organization_id = ${orgId} and patient_id = ${patientId}::uuid`)
+      where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${bornIn[source.type]}`)
   }
   if (!branches.length) return { data: [], nextCursor: null, timezone, locale }
   const rows = await tx.execute<{ id: string; kind: TimelineType; cursor_ts: string }>(sql`
@@ -834,20 +1151,29 @@ export async function getTimeline(
           ),
         ),
     ])
-    const [planned, docs, productParts] = await Promise.all([
+    const people = [...new Set(records.flatMap((row) => [row.professionalUserId, row.voidedBy].filter((id): id is string => !!id)))]
+    const [planned, docs, productParts, born, titles, names] = await Promise.all([
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
       hooks.encounterParts(tx, orgId, encounters),
+      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, encounters) : Promise.resolve(new Map<string, EncounterBorn>()),
+      diagnosisTitlesOf(tx, [
+        ...procedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
+        ...notes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),
+      ]),
+      people.length ? tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, people)) : Promise.resolve([]),
     ])
+    const nameOf = new Map(names.map((row) => [row.id, row.name]))
     for (const row of records) {
       const rowProcedures = procedures.filter((p) => p.encounterId === row.id)
       const rowNotes = notes.filter((n) => n.encounterId === row.id)
       const related = docs.get(row.id) ?? []
+      // Con su nombre: «Pulpitis (CIE-11 DA09.0)», no solo el código (QA de la ficha del 8 nov).
       const diagnoses = [
         ...new Set(
           [
-            ...rowProcedures.map((p) => (p.diagnosisCode ? diagnosisCodeLabel(p.diagnosisSystem, p.diagnosisCode) : null)),
-            ...rowNotes.map((n) => diagnosisCodeLabel(n.diagnosisSystem, n.diagnosisCode)),
+            ...rowProcedures.map((p) => (p.diagnosisCode ? namedDiagnosis(titles, p.diagnosisSystem, p.diagnosisCode) : null)),
+            ...rowNotes.map((n) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)),
           ].filter((code): code is string => !!code),
         ),
       ].sort()
@@ -855,8 +1181,25 @@ export async function getTimeline(
         id: row.id,
         refId: row.id,
         type: "encounter",
-        createdAt: row.status === "anulada" ? (row.voidedAt ?? row.createdAt) : row.startedAt,
+        createdAt: row.startedAt,
         voidReason: row.voidReason,
+        voidedAt: row.voidedAt,
+        voidedByName: row.voidedBy ? (nameOf.get(row.voidedBy) ?? null) : null,
+        professionalName: nameOf.get(row.professionalUserId) ?? null,
+        // Quién la firmó y cuándo: lo que se lee es definitivo (segunda mesa del 9 nov).
+        signerName: row.status === "finalizada" ? row.signerName : null,
+        signedAt: row.status === "finalizada" ? row.finalizedAt : null,
+        // Lo que se hizo en ella no se repite en «Se indicó».
+        ...(born.has(row.id)
+          ? {
+              born: {
+                ...born.get(row.id)!,
+                indicated: born
+                  .get(row.id)!
+                  .indicated.filter((item) => !rowProcedures.some((p) => p.planItemId === item.id)),
+              },
+            }
+          : {}),
         title: row.reason || "Atención",
         detail: row.evolution,
         toothNumbers: teeth
@@ -866,7 +1209,8 @@ export async function getTimeline(
           .sort((a, b) => a - b),
         authorId: row.professionalUserId,
         status: row.status,
-        procedures: rowProcedures.map((p) => p.description),
+        // Con su pieza: un procedimiento sin el diente tratado no se lee (segunda mesa del 9 nov).
+        procedures: rowProcedures.map((p) => [p.description, site.words(p, "full")].filter(Boolean).join(" · ")),
         documentsCount: related.length,
         documents: related,
         diagnoses,
@@ -980,13 +1324,16 @@ export async function getTimeline(
         ...hydrated.get(row.id)!,
         createdAt: row.createdAt,
         title: row.title,
-        detail: `${where} · ${row.status}`,
+        // El estado va una vez, en palabras (QA de la ficha del 8 nov: «Pieza 46 · en_curso»).
+        detail: where,
         status: row.status,
+        statusText: planItemStateText(row.status, row.decisionStatus),
         decision: row.decisionStatus,
         toothNumbers: [looseValue(site, row)].filter((tooth): tooth is number => tooth !== null),
         authorId: row.createdBy,
         planId: row.planId,
         planItemId: row.id,
+        encounterId: row.sourceEncounterId,
       })
     }
   const budgetIds = ids("budget")
@@ -1012,17 +1359,17 @@ export async function getTimeline(
           ),
         )
       const options = await tx
-        .select({ id: treatmentBudgetOption.id, decision: treatmentBudgetOption.decision })
+        .select({ id: treatmentBudgetOption.id, decision: treatmentBudgetOption.decision, position: treatmentBudgetOption.position })
         .from(treatmentBudgetOption)
         .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, row.id)))
       // Un tratamiento cuenta una vez aunque esté en varias opciones.
       const total = new Set(lines.map((line) => line.planItemId)).size
-      const currency = lines.map((line) => line.currency).sort()[0]
       hydrated.set(row.id, {
         ...hydrated.get(row.id)!,
         createdAt: row.createdAt,
-        title: `Presupuesto N.º ${row.budgetNumber} · ${row.title}`,
-        detail: `Revisión ${row.revisionNumber} · ${total} tratamiento(s) · ${currency ?? row.currency}`,
+        // Sin repetir el número si su nombre ya lo lleva («Presupuesto N.º 453 · Presupuesto N.º 453»).
+        title: row.title && !row.title.includes(`N.º ${row.budgetNumber}`) ? `Presupuesto N.º ${row.budgetNumber} · ${row.title}` : `Presupuesto N.º ${row.budgetNumber}`,
+        detail: [`${total} ${total === 1 ? "tratamiento" : "tratamientos"}`, row.revisionNumber > 1 ? `revisión ${row.revisionNumber}` : null].filter(Boolean).join(" · "),
         status: row.status,
         // Los mismos nombres que Plan (ADR 0034): «Entregado · espera respuesta», «Aceptó 2 de 3»…
         statusText: budgetStateText({ status: row.status, items: lines, options }),
@@ -1032,6 +1379,11 @@ export async function getTimeline(
       })
     }
   const followUpIds = ids("follow_up")
+  // Vencido con la misma regla del Plan, el Resumen y «Control vencido» (QA del 8 nov, B4:
+  // la Historia decía «Pendiente · Vence 5/5/2026» de un control que el Plan llama «Vencido»).
+  const overdueControls = followUpIds.length
+    ? new Set((await listFollowUps(tx, orgId, patientId)).filter((row) => row.overdue).map((row) => row.id))
+    : new Set<string>()
   if (followUpIds.length)
     for (const row of await tx
       .select()
@@ -1045,10 +1397,12 @@ export async function getTimeline(
         title: row.title,
         detail: row.outcome ?? row.instructions ?? null,
         status: row.status,
+        statusText: overdueControls.has(row.id) ? "Vencido" : null,
         dueAt: row.dueAt,
         authorId: row.createdBy,
         planItemId: row.planItemId,
         followUpId: row.id,
+        encounterId: row.originEncounterId,
       })
     }
   const prescriptionIds = ids("prescription")
@@ -1085,6 +1439,7 @@ export async function getTimeline(
         authorId: row.issuedBy,
         planItemId: row.planItemId,
         prescriptionId: row.id,
+        encounterId: row.encounterId,
       })
     }
   const consentIds = ids("consent")
@@ -1093,14 +1448,19 @@ export async function getTimeline(
       .select()
       .from(consentDocument)
       .where(and(eq(consentDocument.organizationId, orgId), inArray(consentDocument.id, consentIds)))) {
+      // El rótulo ya dice «Consentimiento»: el título dice qué pasó una sola vez (QA de la ficha del 8 nov).
       const fact =
         row.status === "revocado"
-          ? { at: row.revokedAt, title: `Revocó el consentimiento: ${row.titleSnapshot}`, detail: row.revokeReason }
+          ? { at: row.revokedAt, title: `Revocó: ${row.titleSnapshot}`, detail: row.revokeReason }
           : row.status === "firmado"
-            ? { at: row.signedAt, title: `Firmó el consentimiento: ${row.titleSnapshot}`, detail: `Firmó ${row.signerName}` }
+            ? {
+                at: row.signedAt,
+                title: `Firmó: ${row.titleSnapshot}`,
+                detail: row.signerName ? `Lo firmó ${row.signerName}${row.representativeRelation ? ` (${row.representativeRelation})` : ""}` : null,
+              }
             : row.status === "anulado"
-              ? { at: null, title: `Se anuló el consentimiento: ${row.titleSnapshot}`, detail: null }
-              : { at: null, title: `Se preparó el consentimiento: ${row.titleSnapshot}`, detail: "Falta la firma" }
+              ? { at: null, title: `Se anuló: ${row.titleSnapshot}`, detail: null }
+              : { at: null, title: `Falta la firma: ${row.titleSnapshot}`, detail: null }
       hydrated.set(row.id, {
         id: row.id,
         refId: row.id,
@@ -1116,11 +1476,11 @@ export async function getTimeline(
       })
     }
   const orderIds = ids("order")
-  if (orderIds.length)
-    for (const row of await tx
-      .select()
-      .from(clinicalOrder)
-      .where(and(eq(clinicalOrder.organizationId, orgId), inArray(clinicalOrder.id, orderIds)))) {
+  const orderRows = orderIds.length
+    ? await tx.select().from(clinicalOrder).where(and(eq(clinicalOrder.organizationId, orgId), inArray(clinicalOrder.id, orderIds)))
+    : []
+  const orderTitles = await diagnosisTitlesOf(tx, orderRows.map((row) => ({ system: row.diagnosisSystem, code: row.diagnosisCode })))
+  for (const row of orderRows) {
       const state =
         row.status === "completado"
           ? "con resultado"
@@ -1135,7 +1495,7 @@ export async function getTimeline(
         title: `Se pidió: ${row.title}`,
         detail: `${ORDER_KIND_WORDS[row.kind] ?? "Orden"} · ${state}`,
         status: row.status,
-        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
+        diagnosisCode: row.diagnosisCode ? namedDiagnosis(orderTitles, row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: [],
         authorId: row.fromUserId,
         encounterId: row.encounterId,
@@ -1160,6 +1520,19 @@ export async function getTimeline(
         encounterId: row.encounterId,
       })
     }
+  // Lo de una atención que sigue en curso sale suelto (el borrador no es todavía un
+  // hecho de la historia) y lo dice, para no leerlo como cerrado (segunda mesa del 9 nov).
+  const drafts = new Set(
+    (
+      await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(and(eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId), eq(encounter.status, "borrador")))
+    ).map((row) => row.id),
+  )
+  if (drafts.size)
+    for (const item of hydrated.values())
+      if (item.type !== "encounter" && item.encounterId && drafts.has(item.encounterId)) item.openEncounter = true
   // Los pagos no son historia clínica: sus movimientos viven en la cuenta.
   const last = page[page.length - 1]!
   return {

@@ -19,6 +19,7 @@ import { countOverdueControls, getAdminRecommendation } from "./agent-admin.js"
 import { argosFigure } from "./argos-figures.js"
 import { runArgosQuery } from "./argos-query.js"
 import { setLine } from "./automation.js"
+import { listPeople } from "./people.js"
 import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
 import { getPlanNextStep } from "./plan-next.js"
@@ -189,7 +190,7 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   expect(argos.items.find((item) => item.patientId === dani)?.line).toMatch(/^Falta la cita de la próxima sesión · /)
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, gabi, all))).toMatchObject({ kind: "agendar" })
   // «Qué sigue» de Beto dice que su cita no la lleva, no que le falta una.
-  expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: su cita del .+ no lo lleva$/)
+  expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: aún no va en su cita del .+$/)
 
   // Con un presupuesto por enviar, «Qué sigue» pide enviarlo, y sigue en «Por agendar».
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: ana, title: "Otro plan" }).returning({ id: treatmentPlan.id })
@@ -282,7 +283,7 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
   expect(await c.run((tx) => countOverdueControls(tx, c.orgId))).toEqual({ controls: 1, patients: 1 })
   expect((await c.run((tx) => getAdminRecommendation(tx, c.orgId, all, "recordatorio_control"))).title).toBe("1 control vencido de un paciente sin cita")
   // «Qué sigue»: Iris tiene cita, no está «por reservar»; a Juan le toca hoy.
-  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, iris, all))).toMatchObject({ text: expect.stringMatching(/^Control de presión · tiene cita el /), action: { label: "Ver la cita" } })
+  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, iris, all))).toMatchObject({ text: expect.stringMatching(/^Control de presión · se puede hacer en su cita del /), action: { label: "Ver la cita" } })
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, juan, all))).toMatchObject({ text: "Control de presión · por reservar", detail: expect.stringMatching(/^Toca el /) })
 
   // Inicio de recepción, con Argos apagado: la fila con la misma cuenta.
@@ -296,4 +297,39 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
   // Con la línea prendida, avisa antes de que toque; lo que ya venció vuelve a esta fila.
   await c.run((tx) => setLine(tx, c.orgId, c.actor, "recordatorio_control", { enabled: true }))
   expect(await rowOf()).toMatchObject({ controls: 1, patients: 1 })
+})
+
+it("Pacientes filtrado por un atajo dice el paso de ese atajo; el paso único no cambia (QA del 8 nov)", async () => {
+  const c = await clinic()
+  const lia = await person(c, "Lía Paz")
+  // Control vencido y, además, algo aceptado sin cita: una sola fila y una cita para los dos (QA del 8 nov, entrega 3).
+  await ownerDb.insert(clinicalFollowUp).values({ organizationId: c.orgId, patientId: lia, kind: "mantenimiento", title: "Limpieza y control", dueAt: new Date(Date.now() - 20 * DAY), status: "pendiente" })
+  await accepted(c, lia)
+  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, lia, all))).toMatchObject({ kind: "agendar", action: { label: "Reservar lo aceptado y el control" } })
+  const rowIn = async (atajo?: string) =>
+    (await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes", limit: 100, ...(atajo ? { atajo } : {}) }, all))).items.find(
+      (item) => item.patient?.id === lia,
+    )?.nextStep
+  // La misma fila sin filtro, en «Control vencido» y en «Por agendar».
+  for (const atajo of [undefined, "control_por_reservar", "por_agendar"])
+    expect(await rowIn(atajo)).toMatchObject({ kind: "agendar", text: "Falta su cita: lo aceptado y el control vencido", actionLabel: "Reservar lo aceptado y el control" })
+
+  // Con un presupuesto armado y sin enviar, el paso único es enviarlo; «Por agendar» sigue diciendo lo aceptado.
+  const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: lia, title: "Otro plan" }).returning({ id: treatmentPlan.id })
+  const [item] = await ownerDb
+    .insert(treatmentPlanItem)
+    .values({ organizationId: c.orgId, patientId: lia, planId: plan!.id, title: "Resina", currency: "PEN", priceCents: 5_000 })
+    .returning({ id: treatmentPlanItem.id })
+  const [draft] = await ownerDb
+    .insert(treatmentBudget)
+    .values({ organizationId: c.orgId, patientId: lia, planId: plan!.id, budgetNumber: number++, title: "Resina", currency: "PEN", status: "borrador" })
+    .returning({ id: treatmentBudget.id })
+  const optionId = randomUUID()
+  await ownerDb.insert(treatmentBudgetOption).values({ id: optionId, organizationId: c.orgId, patientId: lia, budgetId: draft!.id, position: 1, isRecommended: true })
+  await ownerDb.insert(treatmentBudgetItem).values({
+    organizationId: c.orgId, patientId: lia, planId: plan!.id, budgetId: draft!.id, optionId, planItemId: item!.id, title: "Resina", currency: "PEN", priceCents: 5_000,
+  })
+  expect(await rowIn()).toMatchObject({ kind: "enviar" })
+  expect(await rowIn("por_agendar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado y el control" })
+  expect(await rowIn("control_por_reservar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado y el control" })
 })

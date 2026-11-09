@@ -1,3 +1,4 @@
+import { isLeftOut } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -10,11 +11,11 @@ import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-e
 import { OdontogramLoading } from "./odontogram-skeleton"
 
 const CLOSED = new Set(["realizado", "cancelado"])
-const DISCARDED = new Set(["rechazado", "reemplazado"])
 
 /** «3 tratamientos por hacer · 1 realizado». */
 function planWords(items: PlanItem[]): string {
-  const open = items.filter((item) => !CLOSED.has(item.status) && !DISCARDED.has(item.decisionStatus)).length
+  // Lo que no aceptó o el camino que no eligió no se hará: no está por hacer.
+  const open = items.filter((item) => !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus)).length
   const done = items.filter((item) => item.status === "realizado").length
   if (open === 0 && done === 0) return "Todavía no tiene tratamientos indicados."
   return `${open} ${open === 1 ? "tratamiento" : "tratamientos"} por hacer · ${done} ${done === 1 ? "realizado" : "realizados"}`

@@ -178,7 +178,7 @@ function useBudgetWrites(
   }
 }
 
-/** Ítems que pueden entrar a un presupuesto nuevo: sin presupuesto vigente, o que no se aceptaron. */
+/** Ítems que pueden entrar a un presupuesto nuevo: sin presupuesto vigente, o que dijo que no (no la opción que no eligió). */
 export function quotableItems(
   items: PlanItem[],
   budgetsById: Map<string, BudgetWithTotals>,
@@ -189,7 +189,10 @@ export function quotableItems(
     // Aceptado al hacerlo y aún en curso (una endodoncia en dos sesiones): ya está decidido.
     if (!item.budgetId && item.decision === "aceptado" && item.status === "en_curso") return false
     if (!item.budgetId) return true
-    if (item.decision === "rechazado" || item.decision === "no_elegida") return true
+    // La opción que no eligió no es algo pendiente: eligió otro camino (repaso de la ficha del 9
+    // nov: «Preparar presupuesto con lo pendiente» armaba la exodoncia de una 46 ya endodonciada).
+    // Lo que dijo que no, sí puede volver a ofrecerse.
+    if (item.decision === "rechazado") return true
     return budgetsById.get(item.budgetId)?.status === "cancelado"
   })
 }
@@ -199,8 +202,6 @@ export function PlanBudgets({
   planItems,
   focusBudgetId,
   respondBudgetId,
-  scheduleItemIds,
-  onSchedule,
 }: {
   patientId: string
   /** Tratamientos del plan (solo para quien lee la clínica): los que pueden entrar al borrador. */
@@ -209,9 +210,6 @@ export function PlanBudgets({
   focusBudgetId?: string
   /** Abre «¿Qué respondió?» de este presupuesto. */
   respondBudgetId?: string
-  /** Lo aceptado sin cita (de «Qué sigue»): la tarjeta ofrece «Agendar». */
-  scheduleItemIds: string[]
-  onSchedule: (planItemIds: string[], serviceId?: string | null) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("budgets.write")
@@ -306,10 +304,6 @@ export function PlanBudgets({
             addable={budget === draft ? quotableForDraft(budget, planItems ?? [], quotable) : []}
             defaultOpen={budget.id === focusBudgetId || budget.id === respondBudgetId}
             respond={budget.id === respondBudgetId}
-            scheduleItemIds={scheduleItemIds.filter((id) =>
-              budget.items.some((line) => line.planItemId === id),
-            )}
-            onSchedule={onSchedule}
             runWrite={runWrite}
           />
         ))
@@ -363,8 +357,6 @@ export function PlanBudgets({
                 addable={[]}
                 defaultOpen={budget.id === focusBudgetId}
                 respond={false}
-                scheduleItemIds={[]}
-                onSchedule={onSchedule}
                 runWrite={runWrite}
               />
             ))}
@@ -415,8 +407,6 @@ function BudgetCard({
   addable,
   defaultOpen,
   respond,
-  scheduleItemIds,
-  onSchedule,
   runWrite,
 }: {
   patientId: string
@@ -435,8 +425,6 @@ function BudgetCard({
   addable: PlanItem[]
   defaultOpen: boolean
   respond: boolean
-  scheduleItemIds: string[]
-  onSchedule: (planItemIds: string[], serviceId?: string | null) => void
   runWrite: <T>(operation: () => Promise<T>) => Promise<T>
 }): React.JSX.Element {
   const money = moneyForLines(baseMoney, budget.items)
@@ -570,21 +558,8 @@ function BudgetCard({
     >
       ¿Qué respondió?
     </Button>
-  ) : scheduleItemIds.length > 0 ? (
-    <Button
-      type="button"
-      size="sm"
-      onClick={() =>
-        onSchedule(
-          scheduleItemIds,
-          budget.items.find((line) => scheduleItemIds.includes(line.planItemId) && line.serviceId)
-            ?.serviceId ?? null,
-        )
-      }
-    >
-      Reservar cita
-    </Button>
-  ) : null
+  ) : // Lo aceptado se reserva desde «Qué sigue», arriba: un solo botón por cosa (QA de la ficha del 8 nov).
+  null
 
   return (
     <section
@@ -1297,14 +1272,3 @@ function ReviseBudgetDrawer({
   )
 }
 
-/** Abre «Nueva cita» al lado, con la persona, el servicio y lo aceptado ya puestos: nadie sale de la ficha. */
-export function useScheduleAccepted(patient: { id: string; name: string }) {
-  return (planItemIds: string[], serviceId?: string | null) => {
-    openBookingAnywhere({
-      patient,
-      lockedPatient: true,
-      planItemIds,
-      ...(serviceId ? { serviceId } : {}),
-    })
-  }
-}

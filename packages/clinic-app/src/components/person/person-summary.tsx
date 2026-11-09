@@ -1,25 +1,11 @@
 import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
-import { internationalText, SkeletonRegion, useScheduleNow } from "@odentia/ui-patterns"
+import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import {
-  type OpportunityListItem,
-  type TaskItem,
-  timeAgo,
-  useCan,
-  usePermission,
-} from "../../lib/crm"
-import { fetchPatientAccount3 } from "../../lib/finance-collect"
-import { conversationStatusLabel } from "../../lib/glossary"
-import { useReceptionName } from "../../lib/agent-names"
-import {
-  appointmentLine,
-  nextAppointment,
-  usePatientAppointments,
-} from "../../lib/patient-appointments"
+import { type TaskItem, useCan, usePermission } from "../../lib/crm"
 import {
   ageFrom,
   fetchPatientHealth,
@@ -28,29 +14,20 @@ import {
   type PatientSummary,
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
-import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
-import { openAppointmentAnywhere } from "../agenda/schedule-host"
-import { OpportunityDrawer } from "../crm/opportunity-drawer"
+import { type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
 import { TaskDrawer } from "../crm/task-drawer"
 import { storesTomography } from "../patient/document-labels"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
-import { NextControlCard, useNextControl } from "../patient/next-control"
-import { controlNeedsBooking } from "../../lib/clinical-journey"
-import { PlanNextCard } from "../patient/plan/plan-next"
-import {
-  ClinicalAlertsCard,
-  LastVisitCard,
-  OpenEncounterCard,
-  UpcomingCard,
-} from "../patient/resumen-clinico"
+import { NextUpCard, usePersonUpcoming } from "../patient/next-up"
+import { ClinicalAlertsCard, LastVisitCard, OpenEncounterCard } from "../patient/resumen-clinico"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { useOpenWide } from "../patient/wide-section"
 import { PersonLink } from "../person-link"
 import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
+import { PersonConversations } from "./person-conversations"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
 import { PersonTomographies } from "./person-tomographies"
-import { useOpenRecordPanel } from "./record-panel"
 import { productUi } from "../../product/product-ui"
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -62,32 +39,20 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
-/** Conversaciones de la persona: el Resumen dice la última y la pestaña las lista todas. */
-export function usePersonConversations(personId: string) {
-  const canRead = usePermission("conversations.read")
-  return useQuery({
-    queryKey: ["person-conversations", personId],
-    queryFn: () =>
-      apiFetch<{ data: PersonConversation[] }>(`/api/people/${personId}/conversations`),
-    enabled: canRead,
-    retry: false,
-  })
-}
-
 /**
  * Resumen de la persona (tablero 2): lo que hace falta para atenderla de un
  * vistazo —teléfono, alergias, próxima cita, saldo, conversación y
- * oportunidad—, «Falta registrarla como paciente» si aún no lo es, sus
+ * oportunidad—, «Falta su registro como paciente» si aún no lo es, sus
  * pendientes, sus notas y lo que recuerda el agente. Cada dato se pide con su
  * permiso.
  *
  * Para quien lee la clínica es el Resumen clínico (ADR 0035): arriba la
- * atención en curso, alergias y alertas, «Qué sigue» del plan, y última atención
- * con próxima cita; recepción y caja ven el de siempre.
+ * atención en curso, alergias y alertas, «Qué sigue» y la última atención;
+ * recepción y caja ven el de siempre, con su «Qué sigue» arriba.
  *
- * Va por filas alineadas, nunca en columnas sueltas: lo que puede crecer va solo
- * en su fila, y solo comparten fila dos tarjetas de tamaño limitado (última
- * atención y próxima cita, con cada dato en 2 líneas como máximo).
+ * «Qué sigue» es una sola lista con la próxima cita, lo del plan y el control
+ * (QA del 8 nov, propuesta 5). Va por filas alineadas, nunca en columnas
+ * sueltas: cada tarjeta en su fila.
  */
 export function PersonSummary({
   person,
@@ -100,16 +65,15 @@ export function PersonSummary({
   summary?: UseQueryResult<{ data: PatientSummary }>
 }) {
   const openWide = useOpenWide()
-  const openPanel = useOpenRecordPanel()
   const patientId = person.patient?.id ?? null
   const ProductClinicalCards = productUi().summary.ClinicalCards
   const can = useCan()
-  const receptionName = useReceptionName()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
   // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
   const receivesTomography = can("clinical.receive") && !can("clinical.read") && storesTomography()
   const canAppointments = usePermission("appointments.read")
-  const canFinance = usePermission("finance.read")
+  // «Qué sigue» lo pide quien ve alguna parte del plan (la misma condición del servidor).
+  const canPlan = can("clinical.read") || can("budgets.read") || canAppointments
   const canChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
   const canTasks = usePermission("tasks.read")
@@ -119,7 +83,6 @@ export function PersonSummary({
   const registerTarget: NewPatientTarget = { kind: "person", person }
   const [newTask, setNewTask] = useState(false)
   const [viewingTask, setViewingTask] = useState<string | null>(null)
-  const [viewingOpportunity, setViewingOpportunity] = useState<string | null>(null)
   const canTaskWrite = usePermission("tasks.write")
   const queryClient = useQueryClient()
   const [sendingLink, setSendingLink] = useState(false)
@@ -130,25 +93,6 @@ export function PersonSummary({
     queryFn: () => fetchPatientHealth(patientId ?? ""),
     enabled: clinical,
   })
-  const appointments = usePatientAppointments(
-    patientId ?? "none",
-    canAppointments && Boolean(patientId),
-  )
-  const account = useQuery({
-    queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount3(patientId ?? ""),
-    enabled: canFinance && Boolean(patientId),
-  })
-  const conversations = usePersonConversations(person.id)
-  const opportunities = useQuery({
-    queryKey: ["person-opportunities", person.id],
-    queryFn: () =>
-      apiFetch<{ data: OpportunityListItem[] }>(
-        `/api/opportunities?contactId=${person.id}&limit=5`,
-      ),
-    enabled: canCrm,
-    retry: false,
-  })
   // Sin ficha, sus tareas cuelgan de la persona (las del paciente las lista «Pendientes»).
   const tasks = useQuery({
     queryKey: ["person-tasks", person.id],
@@ -157,41 +101,18 @@ export function PersonSummary({
     retry: false,
   })
 
-  // El reloj de la Agenda: quien está en la sala sigue en la sala y su espera avanza.
-  const now = useScheduleNow()
-  const upcoming = appointments.data ? nextAppointment(appointments.data.data, Date.parse(now)) : null
-  // Con un control por reservar, «Reservar cita» va en su fila (o en «Qué sigue»), no también aquí.
-  const nextControl = useNextControl(patientId ?? "", Boolean(patientId))
-  const controlToBook = nextControl.control !== null && controlNeedsBooking(nextControl.control)
-  const outstanding = (account.data?.data.byCurrency ?? []).filter(
-    (balance) => balance.porCobrar > 0,
-  )
-  const lastConversation = conversations.data?.data[0] ?? null
-  const openOpportunity =
-    (opportunities.data?.data ?? []).find((row) => row.status === "open") ?? null
   const allergies = (detail?.activeAllergies ?? []).filter(
     (allergy) => allergy.verification !== "descartada",
   )
   const phoneText = person.phone ? internationalText(person.phone) : null
   // Sin teléfono propio, el de quien habla por ella (la preferida primero, como la entrega el servidor).
   const spokenPhone = phoneText ? null : (person.spokenForBy.find((other) => other.phone) ?? null)
+  // El número de su WhatsApp es dato de canal: solo para quien ve sus canales.
+  const whatsappElsewhere = person.channels.includes("whatsapp") ? (person.phoneWhatsApp.otherNumber ?? null) : null
 
-  const phoneLine = phoneText
-    ? `Teléfono ${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
-    : spokenPhone?.phone
-      ? `Teléfono de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
-      : "Sin teléfono"
   const clinicalData = summary?.data?.data
-  // Lo que debe ya lo dice Pendientes, con su botón: aquí, que no debe nada o, si Pendientes no llegó, que algo debe.
-  const showSaldo = Boolean(patientId) && canFinance && (outstanding.length === 0 || !detail)
-  // Lo que ya dicen las tarjetas clínicas no se repite en los datos de abajo.
-  const showFacts =
-    !clinical ||
-    person.responsibleFor.length > 0 ||
-    ((canChats || canCrm) && person.channels.length > 0) ||
-    showSaldo ||
-    canChats ||
-    canCrm
+  // La próxima cita va en la cabecera: «Qué sigue» no la repite (mesa del 9 nov).
+  const upcoming = usePersonUpcoming(patientId, canAppointments)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -212,42 +133,29 @@ export function PersonSummary({
           )}
           {/* Lo del producto debajo de las alertas (latidIA: la lista de problemas, issue 229). */}
           <ProductClinicalCards patientId={patientId} onSection={(section) => openWide?.({ id: section })} />
-          <PlanNextCard patientId={patientId} patientName={person.displayName} />
-          <div className="grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
-            {clinicalData ? (
-              <LastVisitCard
-                patientId={patientId}
-                summary={clinicalData}
-                onPeriodontal={(chartId) => openWide?.({ id: "periodontograma", opened: chartId })}
-              />
-            ) : summary?.isError ? (
-              <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
-            ) : (
-              <SummaryCard title="Última atención">
-                <SkeletonRegion message="Consultando…">
-                  <LastVisitLinesSkeleton />
-                </SkeletonRegion>
-              </SummaryCard>
-            )}
-            <UpcomingCard
+          <NextUpCard patientId={patientId} patientName={person.displayName} upcomingId={upcoming?.appointment?.id} />
+          {clinicalData ? (
+            <LastVisitCard
               patientId={patientId}
-              patientName={person.displayName}
-              upcoming={upcoming}
-              loading={canAppointments && appointments.isPending}
-              failed={!canAppointments || appointments.isError}
-              phone={phoneLine}
-              bookElsewhere={controlToBook}
-              now={now}
+              summary={clinicalData}
+              onPeriodontal={(chartId) => openWide?.({ id: "periodontograma", opened: chartId })}
             />
-          </div>
-          {/* El próximo control en su propia fila: «Qué sigue» dice una sola cosa (QA del 6 nov). */}
-          <NextControlCard patientId={patientId} />
+          ) : summary?.isError ? (
+            <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
+          ) : (
+            <SummaryCard title="Última atención">
+              <SkeletonRegion message="Consultando…">
+                <LastVisitLinesSkeleton />
+              </SkeletonRegion>
+            </SummaryCard>
+          )}
         </>
+      ) : patientId && canPlan ? (
+        <NextUpCard patientId={patientId} patientName={person.displayName} upcomingId={upcoming?.appointment?.id} />
       ) : null}
       {patientId && receivesTomography && !person.archived ? (
         <PersonTomographies patientId={patientId} />
       ) : null}
-      {showFacts ? (
       <section aria-label="Resumen" className="elevated rounded-xl border bg-card p-6">
         <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
           {person.responsibleFor.length > 0 ? (
@@ -276,15 +184,24 @@ export function PersonSummary({
               </span>
             </Fact>
           ) : null}
-          {clinical ? null : (
+          {/* Para todos: antes, quien lee la clínica lo veía en «Próxima cita». */}
           <Fact label="Teléfono">
             {phoneText
-              ? `${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
+              ? `${phoneText}${person.phoneWhatsApp.state === "es_su_whatsapp" ? " · WhatsApp" : ""}`
               : spokenPhone?.phone
                 ? `el de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
                 : "Sin teléfono"}
+            {/* «· WhatsApp» solo si ese número lo es; si su WhatsApp es otro, se dice cuál (QA del 8 nov). */}
+            {whatsappElsewhere ? (
+              <span className="block text-xs font-normal text-muted-foreground">
+                Su WhatsApp es otro: {internationalText(whatsappElsewhere)}
+              </span>
+            ) : phoneText && person.phoneWhatsApp.state === "aun_no" && person.channels.includes("whatsapp") ? (
+              // Escribe por WhatsApp desde una cuenta que no muestra su número: este teléfono no es ese
+              // WhatsApp todavía, como dice Datos (QA de la ficha del 9 nov: «Canales: WhatsApp» parecía él).
+              <span className="block text-xs font-normal text-muted-foreground">Aún no es su WhatsApp</span>
+            ) : null}
           </Fact>
-          )}
           {(canChats || canCrm) && person.channels.length > 0 ? (
             <Fact label="Canales">
               {person.channels.map((channel) => channelLabel(channel)).join(", ")}
@@ -297,96 +214,17 @@ export function PersonSummary({
                 : allergies.map((allergy) => allergyName(allergy)).join(", ")}
             </Fact>
           ) : null}
-          {canAppointments && !clinical ? (
-            <Fact label="Próxima cita">
-              {!patientId
-                ? "Ninguna"
-                : appointments.isPending
-                  ? "Consultando…"
-                  : appointments.isError
-                    ? "No disponible"
-                    : upcoming
-                      ? (
-                          <>
-                            {appointmentLine(upcoming, new Date(now))}
-                            {" · "}
-                            <Button
-                              type="button"
-                              variant="link"
-                              className="h-auto p-0"
-                              onClick={() => openAppointmentAnywhere(upcoming.id)}
-                            >
-                              Ver la cita
-                            </Button>
-                          </>
-                        )
-                      : "Ninguna"}
-            </Fact>
-          ) : null}
-          {showSaldo ? (
-            <Fact label="Saldo">
-              {account.isPending
-                ? "Consultando…"
-                : account.isError
-                  ? "No disponible"
-                  : outstanding.length > 0
-                    ? "Tiene saldo por cobrar: míralo en Cobros"
-                    : "Sin saldo por cobrar"}
-            </Fact>
-          ) : null}
-          {canChats ? (
-            <Fact label="Conversación">
-              {conversations.isPending ? (
-                "Consultando…"
-              ) : lastConversation ? (
-                <>
-                  {conversationStatusLabel(lastConversation.status, lastConversation.closure, receptionName)}
-                  {lastConversation.lastMessageAt
-                    ? ` · ${timeAgo(lastConversation.lastMessageAt)}`
-                    : ""}
-                  {" · "}
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto p-0"
-                    onClick={() => openPanel?.({ conversationId: lastConversation.id, name: person.displayName })}
-                  >
-                    Abrir
-                  </Button>
-                </>
-              ) : (
-                "Todavía no ha escrito"
-              )}
-            </Fact>
-          ) : null}
-          {canCrm ? (
-            <Fact label="Oportunidad">
-              {openOpportunity ? (
-                <Button
-                  type="button"
-                  variant="link"
-                  // Un título largo baja de línea: no se sale de la tarjeta.
-                  className="h-auto whitespace-normal p-0 text-left"
-                  onClick={() => setViewingOpportunity(openOpportunity.id)}
-                >
-                  {openOpportunity.title} · {openOpportunity.stageName}
-                </Button>
-              ) : (
-                "Ninguna abierta"
-              )}
-            </Fact>
-          ) : null}
         </dl>
       </section>
-      ) : null}
-      {patientId && !clinical && canAppointments ? <NextControlCard patientId={patientId} /> : null}
+      {/* Antes era la pestaña Conversaciones (QA de la ficha del 8 nov). */}
+      <PersonConversations person={person} />
 
       {person.kind === "por_registrar" && !person.archived ? (
         <Alert>
-          <AlertTitle>Falta registrarla como paciente</AlertTitle>
+          <AlertTitle>Falta su registro como paciente</AlertTitle>
           <AlertDescription>
             <span className="block">
-              Se necesita antes de su primera atención. Puede hacerlo ella con «Su enlace», donde también elige su cita, o tú ahora.
+              Se necesita antes de su primera atención. Puede hacerlo por su cuenta con «Su enlace», donde también elige su cita, o tú ahora.
             </span>
             {canSendLink || canRegister ? (
               <span className="mt-2 flex flex-wrap gap-2">
@@ -460,23 +298,15 @@ export function PersonSummary({
           )}
         </SummaryCard>
       ) : null}
-      <PersonNotes personId={person.id} />
-      <PersonAgentMemory personId={person.id} />
+      <PersonNotes personId={person.id}>
+        <PersonAgentMemory personId={person.id} inline />
+      </PersonNotes>
 
       <NewPatientDrawer
         open={registering}
         onClose={() => setRegistering(false)}
         target={registerTarget}
       />
-      {viewingOpportunity ? (
-        <OpportunityDrawer
-          open
-          opportunityId={viewingOpportunity}
-          contactId={person.id}
-          onClose={() => setViewingOpportunity(null)}
-          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["person-opportunities", person.id] })}
-        />
-      ) : null}
       {viewingTask ? (
         <TaskDrawer
           open

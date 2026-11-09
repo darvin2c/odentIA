@@ -1,5 +1,6 @@
 import type { Db } from "@odentia/db"
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { NEUTRAL_TIMEZONE } from "./locale.js"
 
 /**
  * Lo que falta agendar, con una sola regla para cada pregunta (propuestas O1 y
@@ -152,17 +153,29 @@ export function sessionsDoneSql(
       ${exceptAppointment ? sql`and done_encounter.appointment_id is distinct from ${exceptAppointment}` : sql``})`
 }
 
-/** La cita está en pie para el tratamiento (ver arriba), sobre una fila de `appointment` (o un alias). */
+/**
+ * La cita está en pie para el tratamiento (ver arriba), sobre una fila de `appointment` (o un alias).
+ * Una cita cuya hora ya pasó cuenta solo si es de hoy, en el día de la clínica, y la persona
+ * llegó o se la está atendiendo: es la sesión que ocurre ahora. Una de un día anterior que
+ * nadie cerró (llegó, o su atención quedó abierta, y nadie la marcó atendida) no va a volver a
+ * ocurrir: si su atención registró la sesión, ya cuenta como hecha (`sessionsDoneSql`), y si
+ * no, la sesión sigue por reservar (QA del 8 nov, entrega 3: «Reservar la sesión 2» contaba una
+ * cita ya pasada).
+ */
 export function standingForSql(
   appointment: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; startsAt: SQLWrapper; arrivedAt: SQLWrapper },
   itemId: SQLWrapper,
   now: SQLWrapper = sql`now()`,
 ): SQL {
+  const zone = sql`coalesce(nullif((select standing_zone.timezone from org_profile standing_zone
+    where standing_zone.organization_id = ${appointment.organizationId}), ''), ${NEUTRAL_TIMEZONE})`
   return sql`(${appointment.status} in (${list(LIVE_APPOINTMENT_STATUSES)})
-    and (${appointment.startsAt} > ${now} or ${appointment.arrivedAt} is not null
-      or exists (select 1 from encounter standing_encounter
-        where standing_encounter.organization_id = ${appointment.organizationId}
-          and standing_encounter.appointment_id = ${appointment.id} and standing_encounter.status <> 'anulada'))
+    and (${appointment.startsAt} > ${now}
+      or ((${appointment.startsAt} at time zone ${zone})::date = (${now} at time zone ${zone})::date
+        and (${appointment.arrivedAt} is not null
+          or exists (select 1 from encounter standing_encounter
+            where standing_encounter.organization_id = ${appointment.organizationId}
+              and standing_encounter.appointment_id = ${appointment.id} and standing_encounter.status <> 'anulada'))))
     and not exists (select 1 from encounter standing_done
       join encounter_procedure standing_procedure on standing_procedure.organization_id = standing_done.organization_id
         and standing_procedure.encounter_id = standing_done.id
@@ -271,15 +284,20 @@ export function isControlWindowOpen(
 
 /**
  * Una cita por venir le sirve al control pendiente: cae, en días de la zona de
- * la clínica, desde que abre su ventana. Al firmar esa atención el control se
- * cumple, así que no está «por reservar». La usan «Qué sigue» y el Resumen.
+ * la clínica, desde que abre su ventana hasta 30 días después de su fecha, como
+ * `appointmentServesControlSql` (ADR 0152). Una cita mucho más lejana no lo
+ * cumple a tiempo: el control sigue «por reservar» (QA del 8 nov, M6: la ficha
+ * decía que una resina de noviembre cumplía un control de mayo y el Plan, que
+ * no tenía cita). La usan «Qué sigue», el Resumen y el Plan.
  */
 export function appointmentServesControl(
   control: { dueAt: Date; createdAt: Date },
   appointmentAt: Date,
   timezone: string,
 ): boolean {
-  return dayKeyIn(appointmentAt, timezone) >= dayKeyIn(controlWindowStart(control), timezone)
+  const day = dayKeyIn(appointmentAt, timezone)
+  const latest = new Date(control.dueAt.getTime() + CONTROL_SERVED_DAYS_AFTER * DAY_MS)
+  return day >= dayKeyIn(controlWindowStart(control), timezone) && appointmentAt.getTime() <= latest.getTime()
 }
 
 /**

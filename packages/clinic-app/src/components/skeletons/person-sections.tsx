@@ -25,7 +25,7 @@ function Fact({ label, width = "w-32" }: { label?: string; width?: string }) {
   )
 }
 
-/** `PlanNextCard`: la franja «Qué sigue». */
+/** `PlanNextCard`: la franja «Qué sigue» del Plan. */
 export function PlanNextSkeleton() {
   return (
     <section className="elevated flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
@@ -35,6 +35,21 @@ export function PlanNextSkeleton() {
         <Line className="w-1/2" />
       </div>
       <Skeleton className="h-9 w-28 shrink-0 rounded-full" />
+    </section>
+  )
+}
+
+/** `NextUpCard`: «Qué sigue» del Resumen, con la línea de la próxima cita y dos filas. */
+// La próxima cita va en la cabecera: «Qué sigue» ya no la lleva (mesa del 9 nov).
+export function NextUpSkeleton(_props: { agenda: boolean }) {
+  return (
+    <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-6">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-h-8 items-center">
+          <h2 className="font-heading text-base font-medium">Qué sigue</h2>
+        </div>
+      </div>
+      <RowsShape rows={2} />
     </section>
   )
 }
@@ -83,8 +98,10 @@ export function PersonSummarySkeleton({
 }) {
   const chats = can("conversations.read")
   const crm = can("crm.read")
-  const finance = can("finance.read")
-  const showFacts = clinical !== "unknown" && (!clinical || finance || chats || crm)
+  const agenda = can("appointments.read")
+  // «Qué sigue» lo pide quien ve alguna parte del plan; sin ficha no hay.
+  const plan = patient !== false && (can("clinical.read") || can("budgets.read") || agenda)
+  const showFacts = clinical !== "unknown"
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {clinical === "unknown" ? (
@@ -98,36 +115,35 @@ export function PersonSummarySkeleton({
         </section>
       ) : clinical ? (
         <>
-          <SummaryCardShape title="Alergias y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
+          <SummaryCardShape title="Antecedentes y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
             <ul className="flex flex-col gap-2">
               <li className="rounded-lg border border-dashed px-3 py-2">
                 <Line className="w-40" />
               </li>
             </ul>
           </SummaryCardShape>
-          <PlanNextSkeleton />
-          <div className="grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
-            <SummaryCardShape title="Última atención">
-              <LastVisitLinesSkeleton />
-            </SummaryCardShape>
-            <SummaryCardShape title="Próxima cita">
-              <LastVisitLinesSkeleton />
-            </SummaryCardShape>
-          </div>
+          <NextUpSkeleton agenda={agenda} />
+          <SummaryCardShape title="Última atención">
+            <LastVisitLinesSkeleton />
+          </SummaryCardShape>
         </>
+      ) : plan ? (
+        <NextUpSkeleton agenda={agenda} />
       ) : null}
       {showFacts ? (
         <section className="elevated rounded-xl border bg-card p-6">
           <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-            {clinical ? null : <Fact label="Teléfono" />}
+            <Fact label="Teléfono" />
             {!clinical && patient !== false && (can("clinical.alerts") || can("clinical.read")) ? <Fact label={patient ? "Alergias" : undefined} /> : null}
-            {!clinical && can("appointments.read") ? <Fact label="Próxima cita" width="w-48" /> : null}
-            {/* «Saldo» solo se dice sin deuda (la deuda va en Pendientes): sin nombre hasta saberlo. */}
-            {finance && patient !== false ? <Fact /> : null}
-            {chats ? <Fact label="Conversación" width="w-44" /> : null}
-            {crm ? <Fact label="Oportunidad" /> : null}
+            {chats || crm ? <Fact label="Canales" width="w-44" /> : null}
           </dl>
         </section>
+      ) : null}
+      {/* Sus conversaciones y oportunidades, que antes eran una pestaña (`PersonConversations`). */}
+      {showFacts && (chats || crm) ? (
+        <SummaryCardShape title={chats && crm ? "Conversaciones y oportunidades" : chats ? "Conversaciones" : "Oportunidades"}>
+          <RowsShape rows={2} />
+        </SummaryCardShape>
       ) : null}
       <SummaryCardShape title="Pendientes" action={!can("tasks.write") || archived === true ? undefined : archived === null ? <ButtonBar /> : <WaitingButton>Nueva tarea</WaitingButton>}>
         <RowsShape rows={2} />
@@ -309,10 +325,6 @@ export function HistoriaSkeleton({ placeLabel, canNote }: { placeLabel?: string;
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FixedTabs label="Filtrar historia clínica" options={HISTORY_FILTERS} />
-          <div className="flex flex-wrap items-center gap-2">
-            <FixedTabs label="Agrupar historia clínica" options={["Día", "Atención"]} />
-            <FixedTabs label="Orden de historia clínica" options={["Recientes", "Antiguos"]} />
-          </div>
         </div>
         {placeLabel ? (
           <div className="flex max-w-64 flex-col gap-2">

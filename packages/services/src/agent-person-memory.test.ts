@@ -682,7 +682,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     // Lo que la clínica exige y no se pidió queda dicho en el caso.
     const pendingNote = (await run((tx) => getCaseBrief(tx, ORG, nuevo.conversationId))).known.map((item) => item.text).join(" ")
     // La fecha y el sexo se pidieron al reservar: solo queda confirmar su nombre.
-    expect(pendingNote).toContain("Faltan datos para atenderla: confirmar apellidos y nombres.")
+    expect(pendingNote).toContain("Faltan datos para la atención: confirmar apellidos y nombres.")
 
     // Ya es paciente: el mismo enlace reserva, y no vuelve a pedir datos.
     const after = await run((tx) => getBookingLinkView(tx, ORG, link.token))

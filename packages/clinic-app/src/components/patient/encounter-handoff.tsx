@@ -4,6 +4,8 @@ import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
+import { fetchConsentNeeds } from "../../lib/encounter-documents"
+import { consentsStillAsked } from "./encounter-documents"
 import {
   fetchFollowUps,
   formatDate,
@@ -56,6 +58,11 @@ export function EncounterHandoff({
     queryFn: () => fetchConsents({ patientId }),
     enabled: canClinical,
   })
+  const needs = useQuery({
+    queryKey: ["consent-needs", patientId, encounterId],
+    queryFn: () => fetchConsentNeeds(patientId, encounterId),
+    enabled: canClinical,
+  })
   const summary = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
@@ -69,8 +76,10 @@ export function EncounterHandoff({
   const ownControls = (followUps.data?.data ?? []).filter(
     (row) => row.originEncounterId === encounterId,
   )
-  const pendingConsents = (consents.data?.data ?? []).filter(
-    (row) => row.encounterId === encounterId && row.status === "pendiente",
+  // Lo que ya no se pide (no lo aceptó o eligió otro camino) no queda por recabar.
+  const { pendingSignatures: pendingConsents } = consentsStillAsked(
+    (consents.data?.data ?? []).filter((row) => row.encounterId === encounterId && row.status === "pendiente"),
+    needs,
   )
   const proposed = summary.data?.data.proposedBudgets ?? []
   const outstanding = (account.data?.data.byCurrency ?? []).filter(

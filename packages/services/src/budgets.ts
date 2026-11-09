@@ -46,12 +46,14 @@ import { livePersonalLinkToken } from "./booking-links.js"
 import { budgetAwaitsAnswer, OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
+import { settleBudgetCallback } from "./budget-callback.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
 import {
   decideBudgetOpportunity,
   linkPresentedBudget,
   releaseCancelledBudget,
+  revokeWonBudget,
   UNANSWERED_RULE_MARK,
 } from "./opportunities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -407,7 +409,7 @@ async function audit(
 }
 
 /** Lock del plan (toda mutación de presupuestos empieza aquí). */
-async function lockPlan(
+export async function lockPlan(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -1416,6 +1418,14 @@ export async function assembleEncounterBudget(
 ): Promise<AssembledBudget | null> {
   const required = (await productHooks(tx, orgId)).budgetRequired
   if (!required && !opts.onRequest) return null
+  // Lo pide quien atiende antes de firmar: solo de una atención en curso de esa persona.
+  if (opts.onRequest) {
+    const [open] = await tx.execute<{ status: string }>(sql`
+      select status from encounter where organization_id = ${orgId} and id = ${encounterId}::uuid and patient_id = ${patientId}::uuid`)
+    if (!open) throw notFound("Atención")
+    if (open.status !== "borrador")
+      throw new ServiceError("ENCOUNTER_CLOSED", 409, "Esta atención ya se cerró: su presupuesto se armó al firmarla")
+  }
   const candidates = await tx
     .select()
     .from(treatmentPlanItem)
@@ -2766,6 +2776,9 @@ export async function decideBudget(
     // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
     title: budgetInterest(own, current.title).title,
   })
+  // Ya respondió (aunque sea «lo pienso» o una parte): el «volver a llamar» de «No contesta» se
+  // cierra solo; la fila dice entonces lo que respondió.
+  await settleBudgetCallback(tx, orgId, budgetId)
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
 }
@@ -2938,6 +2951,74 @@ export async function cancelBudget(
       "El presupuesto tiene tratamientos realizados y no puede cancelarse",
     )
   }
+  return cancelBudgetRow(tx, orgId, actorUserId, patientId, current, lines)
+}
+
+/**
+ * Lo que anular una atención puede llevarse consigo: lo que aún no se entregó
+ * y lo entregado mientras sigue en pie (sin respuesta, lo está pensando o
+ * aceptado del todo o en parte). Lo rechazado, lo reemplazado y lo anulado ya
+ * no comprometen nada y quedan como constancia.
+ */
+export const BUDGET_STATUSES_VOIDED_WITH_ENCOUNTER = [
+  "borrador",
+  "presentado",
+  "pospuesto",
+  "aceptado",
+  "parcial",
+] as const
+
+/**
+ * Anula el presupuesto junto con la atención de la que salió (`voidEncounter`
+ * ya decidió con `encounterVoidBudgets` que se puede). Aquí se vuelve a mirar
+ * lo que no se deshace, con el presupuesto tomado: una firma de quien decide,
+ * algo hecho o un cobro vigente de cualquiera de sus tratamientos. Si estaba
+ * aceptado, la oportunidad que ganó deja de contarse como ganada: se reabre y
+ * `releaseCancelledBudget` la da por perdida o la suelta (ADR 0144).
+ */
+export async function cancelBudgetWithEncounter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+): Promise<BudgetPublicRow> {
+  const current = await lockForWrite(tx, orgId, patientId, budgetId)
+  if (!(BUDGET_STATUSES_VOIDED_WITH_ENCOUNTER as readonly string[]).includes(current.status)) {
+    throw conflict("BUDGET_STATUS", "Este presupuesto ya no se puede anular")
+  }
+  if (current.decisionSignedAt) {
+    throw conflict("BUDGET_SIGNED", "Quien decide firmó que acepta este presupuesto: no se anula al anular la atención")
+  }
+  const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  const used = await usedPlanItems(
+    tx,
+    orgId,
+    patientId,
+    lines.map((line) => line.planItemId),
+  )
+  if (used.size > 0 || lines.some((line) => line.itemStatus === "realizado")) {
+    throw conflict(
+      "BUDGET_HAS_REALIZED",
+      "El presupuesto tiene tratamientos hechos o cobrados y no se anula al anular la atención",
+    )
+  }
+  if (current.status === "aceptado" || current.status === "parcial") {
+    await revokeWonBudget(tx, orgId, { budgetId, userId: actorUserId })
+  }
+  return cancelBudgetRow(tx, orgId, actorUserId, patientId, current, lines, { withEncounter: true })
+}
+
+async function cancelBudgetRow(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  current: BudgetRow,
+  lines: BudgetLineWithStatus[],
+  extra: { withEncounter?: boolean } = {},
+): Promise<BudgetPublicRow> {
+  const budgetId = current.id
   const [updated] = await tx
     .update(treatmentBudget)
     .set({ status: "cancelado", updatedAt: new Date() })
@@ -2971,9 +3052,12 @@ export async function cancelBudget(
     patientId,
     from: current.status,
     itemCount: itemIds.length,
+    ...(extra.withEncounter ? { withEncounter: true } : {}),
   })
   // Su oportunidad ya no se cerrará sola al responderlo (ADR 0144).
   await releaseCancelledBudget(tx, orgId, { budgetId, userId: actorUserId })
+  // Anulado: ya no hay a quién volver a llamar por él.
+  await settleBudgetCallback(tx, orgId, budgetId, "Se anuló su presupuesto")
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
 }
@@ -3519,6 +3603,8 @@ export async function reviseBudget(
     reason,
     supersedesBudgetId: current.id,
   })
+  // Lo reemplaza una revisión: la llamada era por el anterior, y la revisión se entrega de nuevo.
+  await settleBudgetCallback(tx, orgId, current.id, "Su presupuesto se revisó")
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, revision)
 }

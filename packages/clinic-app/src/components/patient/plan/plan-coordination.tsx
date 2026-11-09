@@ -75,8 +75,11 @@ export function CoordinationControls({
   scheduleFollowUpId,
   pendingOnly = false,
   branchId,
+  reservedInNext,
 }: {
   patientId: string
+  /** Los controles que ya ofrece «Qué sigue» arriba (el Plan): se reservan ahí. */
+  reservedInNext?: ReadonlySet<string>
   /** «Reservar» desde «Qué sigue»: abre la reserva de ese control. */
   scheduleFollowUpId?: string | null
   /**
@@ -128,7 +131,10 @@ export function CoordinationControls({
                       ? `Con cita · ${formatDateTime(control.appointment.startsAt)}`
                       : control.overdue
                         ? `Vencido · tocaba el ${formatDate(control.dueAt)}`
-                        : `Por reservar · desde el ${formatDate(control.dueAt)}`}
+                        : control.servedBy
+                          ? // La misma cita que dicen «Qué sigue» y el Resumen (QA del 8 nov, M6).
+                            `Sin cita propia · se puede hacer en su cita del ${formatDateTime(control.servedBy.startsAt)}`
+                          : `Por reservar · desde el ${formatDate(control.dueAt)}`}
                   </span>
                 </div>
                 {live && control.appointment ? (
@@ -139,6 +145,8 @@ export function CoordinationControls({
                   >
                     Ver la cita
                   </Button>
+                ) : control.status === "pendiente" && reservedInNext?.has(control.id) ? (
+                  <span className="text-sm text-muted-foreground">Se reserva arriba, en «Qué sigue»</span>
                 ) : canBook && control.status === "pendiente" ? (
                   <Button size="sm" onClick={() => setScheduling(control)}>
                     Reservar cita
