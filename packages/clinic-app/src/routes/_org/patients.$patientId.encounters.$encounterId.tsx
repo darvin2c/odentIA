@@ -149,48 +149,53 @@ function EncounterPage() {
         title={detail.encounter.reason?.trim() || `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
         subtitle={
           <>
-            <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
-            <p className="min-w-0">
-              {[
-                `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`,
-                encounterWhen(detail.encounter.startedAt ?? detail.encounter.createdAt, detail.encounter.endedAt ?? null),
-                memberName(detail.encounter.professionalUserId),
-                `${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </>
+                <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
+                <p className="min-w-0">
+                  {[
+                    `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`,
+                    encounterWhen(detail.encounter.startedAt ?? detail.encounter.createdAt, detail.encounter.endedAt ?? null),
+                    memberName(detail.encounter.professionalUserId),
+                    `${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+        </>
         }
       />
       {detail.encounter.status === "finalizada" ? (
         <EncounterHandoff patientId={patientId} detail={detail} />
       ) : null}
       <EncounterDetailView patientId={patientId} detail={detail} showDocuments={false} />
-      {/* Los documentos de la atención en un solo lugar: ya no se crean aquí, pero se envían e imprimen. */}
-      <section aria-label="Documentos" className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
-        <h2 className="font-heading text-base font-medium">Documentos</h2>
-        <EncounterSigned patientId={patientId} encounterId={detail.encounter.id} />
-        <EncounterDocumentsBlock
-          patientId={patientId}
-          encounterId={detail.encounter.id}
-          patient={patient}
-          detail={detail}
-          encounters={[]}
-          attentionItems={detail.plannedItems}
-          disabled
-          beforeWrite={async () => {}}
-          onChanged={changed}
-          onPendingChange={() => {}}
-        />
-      </section>
-      <ControlesPanel
-        patientId={patientId}
-        encounterId={detail.encounter.id}
-        encounterOnly
-        allowCreate={false}
-        items={detail.plannedItems}
-      />
+      {/* Anulada, no queda nada por trabajar en ella: sus papeles anulados siguen en Documentos de la persona. */}
+      {detail.encounter.status === "anulada" ? null : (
+        <>
+          {/* Los documentos de la atención en un solo lugar: ya no se crean aquí, pero se envían e imprimen. */}
+          <section aria-label="Documentos" className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
+            <h2 className="font-heading text-base font-medium">Documentos</h2>
+            <EncounterSigned patientId={patientId} encounterId={detail.encounter.id} />
+            <EncounterDocumentsBlock
+              patientId={patientId}
+              encounterId={detail.encounter.id}
+              patient={patient}
+              detail={detail}
+              encounters={[]}
+              attentionItems={detail.plannedItems}
+              disabled
+              beforeWrite={async () => {}}
+              onChanged={changed}
+              onPendingChange={() => {}}
+            />
+          </section>
+          <ControlesPanel
+            patientId={patientId}
+            encounterId={detail.encounter.id}
+            encounterOnly
+            allowCreate={false}
+            items={detail.plannedItems}
+          />
+        </>
+      )}
     </PageShell>
   )
 }

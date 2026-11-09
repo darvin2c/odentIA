@@ -179,7 +179,7 @@ export function EncounterVoidDialog({
           <AlertDialogDescription>
             {blocked
               ? "Todavía no se puede: hay algo que no se deshace desde aquí."
-              : "Queda en la historia como anulada, con tu nombre, la hora y el motivo."}
+              : "Queda como anulada con tu nombre y el motivo; lo indicado en ella se anula también."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div ref={bodyRef} className="flex min-w-0 flex-col gap-3">
@@ -263,9 +263,9 @@ export function EncounterVoidDialog({
               ) : null}
               {!blocked ? (
                 <Collapsible className="text-sm">
-                  <CollapsibleTrigger className="group inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground">
+                  <CollapsibleTrigger className="group inline-flex min-h-11 items-center gap-1 font-medium text-muted-foreground hover:text-foreground sm:min-h-8">
                     <ChevronDown
-                      className="size-4 transition-transform group-data-[state=open]:rotate-180"
+                      className="size-4 transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
                       aria-hidden
                     />
                     Qué más se anula

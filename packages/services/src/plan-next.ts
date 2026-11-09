@@ -127,9 +127,39 @@ export async function scheduledItems(tx: Db, orgId: string, patientId: string, i
   return new Set(rows.map((row) => row.planItemId))
 }
 
-/** El presupuesto armado y sin enviar de la persona, si tiene líneas. */
-export function unsentBudgetOf(budgets: BudgetWithTotals[]): BudgetWithTotals | null {
-  return budgets.find((budget) => budget.status === "borrador" && !budget.supersedesBudgetId && budget.items.length > 0) ?? null
+/**
+ * El presupuesto armado y sin enviar de la persona, si tiene líneas. Lo que
+ * lleva algo de una atención todavía en borrador no está armado: se arma al
+ * firmarla (`assembleEncounterBudget`) y, si se anula, se anula con ella. Hasta
+ * entonces no se le pide a nadie enviarlo (`openEncounters`: las atenciones en
+ * borrador de la persona; la misma regla en SQL en `waitingUnsentBudgets`).
+ */
+export function unsentBudgetOf(
+  budgets: BudgetWithTotals[],
+  items: ReadonlyArray<{ id: string; sourceEncounterId: string | null }> = [],
+  openEncounters: ReadonlySet<string> = new Set(),
+): BudgetWithTotals | null {
+  const source = new Map(items.map((item) => [item.id, item.sourceEncounterId]))
+  const preparing = (budget: BudgetWithTotals) =>
+    budget.items.some((line) => {
+      const from = source.get(line.planItemId)
+      return !!from && openEncounters.has(from)
+    })
+  return (
+    budgets.find(
+      (budget) => budget.status === "borrador" && !budget.supersedesBudgetId && budget.items.length > 0 && !preparing(budget),
+    ) ?? null
+  )
+}
+
+/** Las atenciones en borrador de esas personas: lo que sale de ellas aún se está preparando. */
+async function openEncountersOf(tx: Db, orgId: string, patientIds: string[]): Promise<Set<string>> {
+  if (patientIds.length === 0) return new Set()
+  const rows = await tx
+    .select({ id: encounter.id })
+    .from(encounter)
+    .where(and(eq(encounter.organizationId, orgId), inArray(encounter.patientId, patientIds), eq(encounter.status, "borrador")))
+  return new Set(rows.map((row) => row.id))
 }
 
 /** «3 tratamientos · S/ 540», con el total de la opción que vale. */
@@ -228,6 +258,7 @@ async function planFactsOf(tx: Db, orgId: string, patientId: string): Promise<{ 
       name: firstName(person),
       budgets,
       items,
+      openEncounters: await openEncountersOf(tx, orgId, [patientId]),
       withAppointment,
       sessions,
       control,
@@ -326,11 +357,13 @@ export async function planNextStepsOf(
   }
   const controlOf = new Map(controls.map((row) => [row.patientId, row]))
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
+  const openEncounters = await openEncountersOf(tx, orgId, ids)
   for (const person of people) {
     const facts: PlanFacts = {
       name: firstName(person),
       budgets: budgets.get(person.id) ?? [],
       items: itemsOf.get(person.id) ?? [],
+      openEncounters,
       withAppointment,
       sessions,
       control: controlOf.get(person.id),
@@ -373,6 +406,8 @@ interface PlanFacts {
   name: string
   budgets: BudgetWithTotals[]
   items: PlanItemRow[]
+  /** Sus atenciones en borrador: su presupuesto aún se está preparando (`unsentBudgetOf`). */
+  openEncounters?: ReadonlySet<string>
   withAppointment: Set<string>
   /** Sesiones hechas y en pie de lo que puede pedir otra (`sessionCountsOf`). */
   sessions: Map<string, SessionCount>
@@ -572,7 +607,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   }
 
   return {
-    unsent: unsentBudgetOf(budgets),
+    unsent: unsentBudgetOf(budgets, facts.items, facts.openEncounters),
     startedFirst,
     toStart,
     awaiting,

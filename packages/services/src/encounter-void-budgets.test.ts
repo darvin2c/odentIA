@@ -14,7 +14,7 @@ import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, getEncounterVoidPreview, voidEncounter } from "./encounters.js"
 import { createCharge } from "./payments.js"
-import { addPlanItem } from "./plan.js"
+import { addPlanItem, listPlanItems } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -88,6 +88,9 @@ it("un presupuesto por enviar con lo de esta atención se anula con ella, sin pe
   expect(voided.status).toBe("anulada")
   expect((await budgetOf(budget.id)).status).toBe("cancelado")
   expect(await itemOf(item.id)).toMatchObject({ status: "cancelado", budgetId: null })
+  // El Plan no lo lista tachado: queda en la atención anulada y en la auditoría.
+  expect((await f.run((tx) => listPlanItems(tx, f.args[0], f.patient.id, undefined, { withoutVoided: true }))).map((row) => row.id)).not.toContain(item.id)
+  expect((await f.run((tx) => listPlanItems(tx, f.args[0], f.patient.id))).map((row) => row.id)).toContain(item.id)
 })
 
 it("un borrador que lleva además lo de otra atención solo pierde lo de esta", async () => {
