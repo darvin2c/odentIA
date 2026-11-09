@@ -40,14 +40,14 @@ export function PlanNextSkeleton() {
 }
 
 /** `NextUpCard`: «Qué sigue» del Resumen, con la línea de la próxima cita y dos filas. */
-export function NextUpSkeleton({ agenda }: { agenda: boolean }) {
+// La próxima cita va en la cabecera: «Qué sigue» ya no la lleva (mesa del 9 nov).
+export function NextUpSkeleton(_props: { agenda: boolean }) {
   return (
     <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-6">
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex min-h-8 items-center">
           <h2 className="font-heading text-base font-medium">Qué sigue</h2>
         </div>
-        {agenda ? <Line className="w-64" /> : null}
       </div>
       <RowsShape rows={2} />
     </section>
@@ -98,7 +98,6 @@ export function PersonSummarySkeleton({
 }) {
   const chats = can("conversations.read")
   const crm = can("crm.read")
-  const finance = can("finance.read")
   const agenda = can("appointments.read")
   // «Qué sigue» lo pide quien ve alguna parte del plan; sin ficha no hay.
   const plan = patient !== false && (can("clinical.read") || can("budgets.read") || agenda)
@@ -136,13 +135,15 @@ export function PersonSummarySkeleton({
           <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
             <Fact label="Teléfono" />
             {!clinical && patient !== false && (can("clinical.alerts") || can("clinical.read")) ? <Fact label={patient ? "Alergias" : undefined} /> : null}
-            {agenda && patient === false ? <Fact label="Próxima cita" width="w-48" /> : null}
-            {/* «Saldo» solo se dice sin deuda (la deuda va en Pendientes): sin nombre hasta saberlo. */}
-            {finance && patient !== false ? <Fact /> : null}
-            {chats ? <Fact label="Conversación" width="w-44" /> : null}
-            {crm ? <Fact label="Oportunidad" /> : null}
+            {chats || crm ? <Fact label="Canales" width="w-44" /> : null}
           </dl>
         </section>
+      ) : null}
+      {/* Sus conversaciones y oportunidades, que antes eran una pestaña (`PersonConversations`). */}
+      {showFacts && (chats || crm) ? (
+        <SummaryCardShape title={chats && crm ? "Conversaciones y oportunidades" : chats ? "Conversaciones" : "Oportunidades"}>
+          <RowsShape rows={2} />
+        </SummaryCardShape>
       ) : null}
       <SummaryCardShape title="Pendientes" action={!can("tasks.write") || archived === true ? undefined : archived === null ? <ButtonBar /> : <WaitingButton>Nueva tarea</WaitingButton>}>
         <RowsShape rows={2} />

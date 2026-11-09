@@ -453,7 +453,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
 
   // Recepción recibe solo la alerta de alergias; caja, nada clínico.
   type Trimmed = {
-    data: { registration: unknown; activeAllergies: { substance: string }[]; activeConditions: unknown[] }
+    data: { registration: unknown; activeAllergies: { substance: string }[]; activeConditions: unknown[]; allergyReview: string | null }
   }
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
   const receptionBody = (await asReception.json()) as Trimmed
@@ -463,12 +463,16 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   expect(receptionRegistration?.entryPoint).toBeTruthy()
   expect(receptionRegistration?.answers).not.toHaveProperty("health")
   expect(receptionBody.data.activeConditions).toEqual([])
+  // Si se le preguntó por alergias, sí (la cabecera distingue «niega» de «no preguntado»).
+  expect(receptionBody.data.allergyReview).toBe("recorded")
   const receptionHealth = await buildApp("reception").request(`/patients/${patientId}/health`, {
     method: "GET",
   })
   expect(receptionHealth.status).toBe(403)
   const asCashier = await buildApp("cashier").request(`/patients/${patientId}`, { method: "GET" })
-  expect(((await asCashier.json()) as Trimmed).data.activeAllergies).toEqual([])
+  const cashierBody = (await asCashier.json()) as Trimmed
+  expect(cashierBody.data.activeAllergies).toEqual([])
+  expect(cashierBody.data.allergyReview).toBeNull()
 
   // Motivo/examen/diagnóstico ya no pertenecen a la entrevista.
   const forbidden = await app.request(`/patients/${patientId}/health`, {

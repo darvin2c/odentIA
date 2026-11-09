@@ -376,7 +376,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Pacientes",
     parent: "Personas",
     purpose:
-      "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, conversaciones, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver.",
+      "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver. Arriba, en todas las pestañas, sus alergias (o si niega o no se le preguntó), su próxima cita si ves la agenda y lo que debe o tiene a favor si ves la caja; si lees la historia, también sus enfermedades y lo que toma. Sus conversaciones y oportunidades están en su Resumen.",
     terms: [
       "historia clínica",
       "ficha",
@@ -442,7 +442,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedaron los contactos?",
-        a: "En Pacientes: elige «Contactos nuevos» para quienes escribieron y aún no son pacientes, o «Todos». Quien habla por un paciente se ve en su página, en «Personas vinculadas». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes.",
+        a: "En Pacientes: elige «Contactos nuevos» para quienes escribieron y aún no son pacientes, o «Todos». Quien habla por un paciente se ve en su página, en Datos › «Familia y responsables». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes.",
       },
       {
         q: "¿Qué mensajes le podemos enviar sin preguntarle?",
@@ -458,7 +458,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde anoto su contacto de emergencia?",
-        a: "En su página › Datos › Personas vinculadas: vincula a la persona (o elígela si ya está) y marca «Contacto de emergencia», con su parentesco. Si la persona aún no existe, se crea en el mismo paso.",
+        a: "En su página › Datos › Familia y responsables: vincula a la persona (o elígela si ya está) y marca «Contacto de emergencia», con su parentesco. Si la persona aún no existe, se crea en el mismo paso.",
       },
       {
         q: "¿Cómo anoto que no quiere recordatorios?",
@@ -486,7 +486,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
-        a: "En el Resumen de su página, en «Qué sigue»: arriba su próxima cita (si ya llegó, dice que está en la sala de espera) y debajo, en una sola lista, todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. Si una cita suya de otro día quedó sin cerrar, va primero con «¿Vino?», que abre la cita para registrar la atención o marcar que no vino; y si una cita que llevaba lo aceptado se atendió sin registrar lo que se hizo, la fila de lo aceptado lo dice, para preguntarle a quien atendió antes de reservar. El Plan muestra la misma lista y la lista de Pacientes dice su primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles.",
+        a: "Su próxima cita está arriba de su página, en todas las pestañas (si ya llegó, dice que está en la sala de espera). En el Resumen, «Qué sigue» dice en una sola lista todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. Si una cita suya de otro día quedó sin cerrar, va primero con «¿Vino?», que abre la cita para registrar la atención o marcar que no vino; y si una cita que llevaba lo aceptado se atendió sin registrar lo que se hizo, la fila de lo aceptado lo dice, para preguntarle a quien atendió antes de reservar. El Plan muestra la misma lista y la lista de Pacientes dice su primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles, y donde falta reservar una cita dice que la reserva recepción.",
       },
       {
         q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",
@@ -494,7 +494,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
-        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
+        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
@@ -678,7 +678,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo borro a un paciente?",
-        a: "Normalmente se archiva. Borrar de verdad es de Administración y responde a un pedido: en su página, Datos › «Pedidos sobre sus datos», «Revisar y borrar…» dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y se confirma escribiendo BORRAR.",
+        a: "Normalmente se archiva. Borrar de verdad es de Administración y responde a un pedido: en su página, Datos › «Privacidad y pedidos», «Revisar y borrar…» dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y se confirma escribiendo BORRAR.",
         forms: ["quiero borrar a un paciente", "como elimino a un paciente", "eliminar paciente", "borrar paciente"],
       },
       {
@@ -995,6 +995,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Por qué el saldo es menor que lo que debe?",
         a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. Lo que se le devolvió de lo que tenía a favor sale en su cuenta, debajo del cobro de donde salió, con cuánto, cuándo y por qué. «Aplicar lo que tiene a favor» te dice el importe y la sede antes de hacerlo; al confirmar cancela la deuda y deja el movimiento registrado, sin dinero nuevo. Si no alcanza, te dice lo que falta.",
+      },
+      {
+        q: "¿Cuánto le falta pagar de su tratamiento?",
+        a: "En su página › Cobros, «Tratamiento aceptado» dice por cada presupuesto aceptado lo aceptado, lo que pagó y lo que falta, cada moneda en su renglón (soles y dólares no se suman). Lo que falta incluye lo que todavía no se cobra porque aún no se hace. Si además tiene algo a favor sin tratamiento, se dice debajo: se usa en su próximo cobro. Lo ven caja, la dueña y la administración.",
+        forms: ["cuanto le falta pagar", "cuanto me falta en total", "total del tratamiento", "cuanto debe del tratamiento", "cuanto pago del presupuesto"],
+      },
+      {
+        q: "¿Cómo cobro un adelanto para un tratamiento?",
+        a: "En su página › Cobros, en «Tratamiento aceptado», «Cobrar un adelanto» abre el cobro con «Para» ya elegido; también puedes elegirlo al cobrar un adelanto. Ese dinero queda pagado en ese tratamiento: no queda suelto a favor ni se usa en otro cobro, y al hacerlo se cobra solo lo que falta. Se paga en la moneda del tratamiento. Con «Lo próximo que pague» queda a favor, como siempre. Lo que se cobra por sesión no se adelanta así: queda a favor y cancela la visita al cobrarla.",
+        forms: ["adelanto para la corona", "adelanto para un tratamiento", "deja un adelanto", "pago a cuenta del tratamiento", "adelanto del presupuesto", "dejo plata para su tratamiento"],
       },
       {
         q: "¿Cómo dejo el alquiler o los sueldos de cada mes?",

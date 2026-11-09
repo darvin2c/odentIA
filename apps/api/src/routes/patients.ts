@@ -840,6 +840,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           registration: full.registration ? { ...full.registration, answers: declared } : null,
           activeAllergies:
             clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
+          // Sin alergias registradas no es lo mismo «niega» que «no se le preguntó»: la
+          // cabecera lo dice a quien ve las alergias (mesa del 9 nov). Nada más de su salud.
+          allergyReview:
+            clinicalRead || canAccess(memberRole, "clinical.alerts")
+              ? (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown"
+              : null,
           activeConditions: [],
           currentMedications: [],
         }

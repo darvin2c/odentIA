@@ -632,6 +632,9 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   const laterControl =
     open.find((control) => control.id !== treatmentControl?.id && control.id !== joinedControl?.id) ?? null
 
+  // Quien no reserva (caja) ve la fila sin botón: se le dice a quién le toca (QA del 9 nov).
+  const bookedBy = can("appointments.write") ? null : "la cita la reserva recepción"
+
   /** «Falta la cita de la próxima sesión: Endodoncia · sesión 2 de 2», con «Reservar la sesión 2». */
   const continueStep = (item: PlanItemRow): PlanNextStep => {
     const n = countOf(item).done + countOf(item).booked + 1
@@ -640,7 +643,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     return {
       kind: "continuar",
       text: `Falta la cita de la próxima sesión: ${item.title}${session}`,
-      detail: null,
+      detail: bookedBy,
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
         ? { label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión", planItemIds: [item.id], serviceId: item.serviceId }
@@ -719,7 +722,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       kind: "agendar",
       text,
       detail:
-        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null]
+        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null, bookedBy]
           .filter(Boolean)
           .join(" · ") || null,
       // Dice qué reserva: «Reservar cita» a secas es el de la cabecera (segunda mesa del 8 nov).

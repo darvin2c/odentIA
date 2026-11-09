@@ -227,10 +227,10 @@ function DeciderPicker({
     <Link
       to="/patients/$patientId"
       params={{ patientId }}
-      search={{ tab: "responsables" }}
+      search={{ tab: "contactos" }}
       className={cn(buttonVariants({ variant: "link", size: "sm" }), "h-auto self-start p-0")}
     >
-      Registrar un representante en Responsables
+      Registrar un representante en Familia y responsables
     </Link>
   )
   return (

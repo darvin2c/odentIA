@@ -289,6 +289,143 @@ function StudioBody({
     (entry) => entry.needsReview && entry.status !== "voided",
   ).length
   const showInlinePanel = detailMode === "panel" && wide && selection.length > 0 && drawerOpen
+  // Sin nada elegido y sin historia, «Evolución» no tiene qué mostrar: no se muestra. En la
+  // ficha, en el celular, va debajo de la lista de hallazgos: plegada encima la tapaba (QA del 9 nov).
+  const evolutionEmpty = selection.length === 0 && visibleHistory.length === 0
+  const evolutionBelow = !wide && !compact && selection.length === 0
+  const evolution = evolutionEmpty ? null : (
+            <details
+              key={selection.length > 0 ? "con-seleccion" : "sin-seleccion"}
+              open={selection.length > 0}
+            >
+              <summary className="min-h-11 cursor-pointer px-4 py-3">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {selection.length ? "Selección actual" : "Odontograma"}
+                </span>
+                <span className="block text-lg font-semibold">
+                  {selectedTooth
+                    ? toothNameOf(selectedTooth)
+                    : selection.length
+                      ? `${selection.length} piezas seleccionadas`
+                      : "Evolución"}
+                </span>
+              </summary>
+              <div className="flex flex-col gap-4 px-4 pb-4">
+                {selection.length > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      {selection.map((tooth) => (
+                        <Badge key={tooth} variant="outline">
+                          Pieza {tooth}
+                        </Badge>
+                      ))}
+                    </div>
+                    <Button disabled={disabled} onClick={() => setDrawerOpen(true)}>
+                      {locked ? "Ver selección" : "Editar selección"}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {encounterId
+                      ? "Elige una pieza para registrar lo que observas, su diagnóstico y su tratamiento."
+                      : "Elige una pieza para ver sus hallazgos, su plan y sus imágenes. Los hallazgos se registran dentro de una atención."}
+                  </p>
+                )}
+                <ScrollArea className="h-[420px] min-h-0">
+                  <div className="pr-3">
+                    {visibleHistory.length === 0 ? (
+                      <div className="flex flex-col items-start gap-4 rounded-lg border bg-background p-6">
+                        {selectedTooth && (
+                          <ToothSVG
+                            toothNumber={selectedTooth}
+                            entries={entriesOf(selectedTooth)}
+                            size="preview"
+                            showRoots={false}
+                            disabled
+                          />
+                        )}
+                        <h4 className="font-medium">
+                          {selection.length
+                            ? "Sin registros en esta selección"
+                            : "Sin hallazgos registrados"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Los diagnósticos y tratamientos quedarán asociados a la pieza que elijas.
+                        </p>
+                      </div>
+                    ) : (
+                      <ol className="ml-2 flex flex-col gap-5 border-l pl-5">
+                        {visibleHistory.map((entry) => (
+                          <li
+                            key={entry.id}
+                            className="relative rounded-lg border bg-background p-4"
+                          >
+                            <span
+                              aria-hidden
+                              className="absolute top-5 -left-[26px] size-2.5 rounded-full border-2 border-background bg-muted-foreground"
+                            />
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="text-xs text-muted-foreground">
+                                  Pieza {entry.toothNumber}
+                                  {entry.createdAt
+                                    ? ` · ${formatDate(entry.createdAt)}`
+                                    : ""}
+                                </p>
+                                <h4 className="mt-1 font-medium">
+                                  {findingWords(official, entry)}
+                                </h4>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="outline">{statusLabel(entry.status)}</Badge>
+                                {entry.resolvedAt && entry.status !== "voided" ? (
+                                  <Badge variant="outline">Tratado</Badge>
+                                ) : null}
+                                {entry.leftByPlanItemId ? (
+                                  <Badge variant="outline">Lo dejó un tratamiento</Badge>
+                                ) : null}
+                                {entry.needsReview ? (
+                                  <Badge variant="outline">
+                                    Registro previo · requiere revisión
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </div>
+                            {(entry.surface || entry.diagnosisCode) && (
+                              <p className="mt-3 text-sm text-muted-foreground">
+                                {entry.surface ? surfaceLabel(entry.surface) : "Pieza completa"}
+                                {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
+                              </p>
+                            )}
+                            {entry.note && (
+                              <p className="mt-3 rounded-md bg-muted/50 p-3 text-sm">
+                                {entry.note}
+                              </p>
+                            )}
+                            {entry.details?.specifications && (
+                              <p className="mt-2 text-sm">
+                                Especificaciones: {entry.details.specifications}
+                              </p>
+                            )}
+                            {entry.details?.observations && (
+                              <p className="mt-2 text-sm">
+                                Observaciones: {entry.details.observations}
+                              </p>
+                            )}
+                            {entry.voidReason && (
+                              <p className="mt-2 text-sm text-muted-foreground">
+                                Corrección: {entry.voidReason}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
+            </details>
+  )
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
       <div
@@ -466,139 +603,7 @@ function StudioBody({
               : "min-w-0 self-start rounded-sm bg-card"
           }
         >
-          {!showInlinePanel && (
-            <details
-              key={selection.length > 0 ? "con-seleccion" : "sin-seleccion"}
-              open={selection.length > 0}
-            >
-              <summary className="min-h-11 cursor-pointer px-4 py-3">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {selection.length ? "Selección actual" : "Odontograma"}
-                </span>
-                <span className="block text-lg font-semibold">
-                  {selectedTooth
-                    ? toothNameOf(selectedTooth)
-                    : selection.length
-                      ? `${selection.length} piezas seleccionadas`
-                      : "Evolución"}
-                </span>
-              </summary>
-              <div className="flex flex-col gap-4 px-4 pb-4">
-                {selection.length > 0 ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap gap-2">
-                      {selection.map((tooth) => (
-                        <Badge key={tooth} variant="outline">
-                          Pieza {tooth}
-                        </Badge>
-                      ))}
-                    </div>
-                    <Button disabled={disabled} onClick={() => setDrawerOpen(true)}>
-                      {locked ? "Ver selección" : "Editar selección"}
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {encounterId
-                      ? "Elige una pieza para registrar lo que observas, su diagnóstico y su tratamiento."
-                      : "Elige una pieza para ver sus hallazgos, su plan y sus imágenes. Los hallazgos se registran dentro de una atención."}
-                  </p>
-                )}
-                <ScrollArea className="h-[420px] min-h-0">
-                  <div className="pr-3">
-                    {visibleHistory.length === 0 ? (
-                      <div className="flex flex-col items-start gap-4 rounded-lg border bg-background p-6">
-                        {selectedTooth && (
-                          <ToothSVG
-                            toothNumber={selectedTooth}
-                            entries={entriesOf(selectedTooth)}
-                            size="preview"
-                            showRoots={false}
-                            disabled
-                          />
-                        )}
-                        <h4 className="font-medium">
-                          {selection.length
-                            ? "Sin registros en esta selección"
-                            : "Sin hallazgos registrados"}
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          Los diagnósticos y tratamientos quedarán asociados a la pieza que elijas.
-                        </p>
-                      </div>
-                    ) : (
-                      <ol className="ml-2 flex flex-col gap-5 border-l pl-5">
-                        {visibleHistory.map((entry) => (
-                          <li
-                            key={entry.id}
-                            className="relative rounded-lg border bg-background p-4"
-                          >
-                            <span
-                              aria-hidden
-                              className="absolute top-5 -left-[26px] size-2.5 rounded-full border-2 border-background bg-muted-foreground"
-                            />
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <p className="text-xs text-muted-foreground">
-                                  Pieza {entry.toothNumber}
-                                  {entry.createdAt
-                                    ? ` · ${formatDate(entry.createdAt)}`
-                                    : ""}
-                                </p>
-                                <h4 className="mt-1 font-medium">
-                                  {findingWords(official, entry)}
-                                </h4>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <Badge variant="outline">{statusLabel(entry.status)}</Badge>
-                                {entry.resolvedAt && entry.status !== "voided" ? (
-                                  <Badge variant="outline">Tratado</Badge>
-                                ) : null}
-                                {entry.leftByPlanItemId ? (
-                                  <Badge variant="outline">Lo dejó un tratamiento</Badge>
-                                ) : null}
-                                {entry.needsReview ? (
-                                  <Badge variant="outline">
-                                    Registro previo · requiere revisión
-                                  </Badge>
-                                ) : null}
-                              </div>
-                            </div>
-                            {(entry.surface || entry.diagnosisCode) && (
-                              <p className="mt-3 text-sm text-muted-foreground">
-                                {entry.surface ? surfaceLabel(entry.surface) : "Pieza completa"}
-                                {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
-                              </p>
-                            )}
-                            {entry.note && (
-                              <p className="mt-3 rounded-md bg-muted/50 p-3 text-sm">
-                                {entry.note}
-                              </p>
-                            )}
-                            {entry.details?.specifications && (
-                              <p className="mt-2 text-sm">
-                                Especificaciones: {entry.details.specifications}
-                              </p>
-                            )}
-                            {entry.details?.observations && (
-                              <p className="mt-2 text-sm">
-                                Observaciones: {entry.details.observations}
-                              </p>
-                            )}
-                            {entry.voidReason && (
-                              <p className="mt-2 text-sm text-muted-foreground">
-                                Corrección: {entry.voidReason}
-                              </p>
-                            )}
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                  </div>
-                </ScrollArea>
-              </div>
-            </details>
-          )}
+          {!showInlinePanel && !evolutionBelow ? evolution : null}
           {selection.length > 0 && (
             <ToothDrawer
               key={`${selection.join("-")}-${snapshot}`}
@@ -641,6 +646,11 @@ function StudioBody({
             setDrawerOpen(true)
           }}
         />
+      ) : null}
+      {evolutionBelow && !showInlinePanel && evolution ? (
+        <section aria-label="Evolución del odontograma" className="min-w-0 rounded-sm bg-card">
+          {evolution}
+        </section>
       ) : null}
       {belowChart}
       {!compact && official?.signedOdontogram ? (

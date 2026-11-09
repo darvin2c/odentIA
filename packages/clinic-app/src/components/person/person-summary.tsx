@@ -1,21 +1,11 @@
 import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
-import { internationalText, SkeletonRegion, useScheduleNow } from "@odentia/ui-patterns"
+import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import {
-  type OpportunityListItem,
-  type TaskItem,
-  timeAgo,
-  useCan,
-  usePermission,
-} from "../../lib/crm"
-import { fetchPatientAccount3 } from "../../lib/finance-collect"
-import { conversationStatusLabel } from "../../lib/glossary"
-import { useReceptionName } from "../../lib/agent-names"
-import { nextAppointment, usePatientAppointments } from "../../lib/patient-appointments"
+import { type TaskItem, useCan, usePermission } from "../../lib/crm"
 import {
   ageFrom,
   fetchPatientHealth,
@@ -24,21 +14,20 @@ import {
   type PatientSummary,
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
-import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
-import { OpportunityDrawer } from "../crm/opportunity-drawer"
+import { type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
 import { TaskDrawer } from "../crm/task-drawer"
 import { storesTomography } from "../patient/document-labels"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
-import { NextUpCard, type UpcomingState } from "../patient/next-up"
+import { NextUpCard, usePersonUpcoming } from "../patient/next-up"
 import { ClinicalAlertsCard, LastVisitCard, OpenEncounterCard } from "../patient/resumen-clinico"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { useOpenWide } from "../patient/wide-section"
 import { PersonLink } from "../person-link"
 import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
+import { PersonConversations } from "./person-conversations"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
 import { PersonTomographies } from "./person-tomographies"
-import { useOpenRecordPanel } from "./record-panel"
 import { productUi } from "../../product/product-ui"
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -48,18 +37,6 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
       <dd className="break-words text-sm font-medium">{children}</dd>
     </div>
   )
-}
-
-/** Conversaciones de la persona: el Resumen dice la última y la pestaña las lista todas. */
-export function usePersonConversations(personId: string) {
-  const canRead = usePermission("conversations.read")
-  return useQuery({
-    queryKey: ["person-conversations", personId],
-    queryFn: () =>
-      apiFetch<{ data: PersonConversation[] }>(`/api/people/${personId}/conversations`),
-    enabled: canRead,
-    retry: false,
-  })
 }
 
 /**
@@ -88,18 +65,15 @@ export function PersonSummary({
   summary?: UseQueryResult<{ data: PatientSummary }>
 }) {
   const openWide = useOpenWide()
-  const openPanel = useOpenRecordPanel()
   const patientId = person.patient?.id ?? null
   const ProductClinicalCards = productUi().summary.ClinicalCards
   const can = useCan()
-  const receptionName = useReceptionName()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
   // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
   const receivesTomography = can("clinical.receive") && !can("clinical.read") && storesTomography()
   const canAppointments = usePermission("appointments.read")
   // «Qué sigue» lo pide quien ve alguna parte del plan (la misma condición del servidor).
   const canPlan = can("clinical.read") || can("budgets.read") || canAppointments
-  const canFinance = usePermission("finance.read")
   const canChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
   const canTasks = usePermission("tasks.read")
@@ -109,7 +83,6 @@ export function PersonSummary({
   const registerTarget: NewPatientTarget = { kind: "person", person }
   const [newTask, setNewTask] = useState(false)
   const [viewingTask, setViewingTask] = useState<string | null>(null)
-  const [viewingOpportunity, setViewingOpportunity] = useState<string | null>(null)
   const canTaskWrite = usePermission("tasks.write")
   const queryClient = useQueryClient()
   const [sendingLink, setSendingLink] = useState(false)
@@ -120,25 +93,6 @@ export function PersonSummary({
     queryFn: () => fetchPatientHealth(patientId ?? ""),
     enabled: clinical,
   })
-  const appointments = usePatientAppointments(
-    patientId ?? "none",
-    canAppointments && Boolean(patientId),
-  )
-  const account = useQuery({
-    queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount3(patientId ?? ""),
-    enabled: canFinance && Boolean(patientId),
-  })
-  const conversations = usePersonConversations(person.id)
-  const opportunities = useQuery({
-    queryKey: ["person-opportunities", person.id],
-    queryFn: () =>
-      apiFetch<{ data: OpportunityListItem[] }>(
-        `/api/opportunities?contactId=${person.id}&limit=5`,
-      ),
-    enabled: canCrm,
-    retry: false,
-  })
   // Sin ficha, sus tareas cuelgan de la persona (las del paciente las lista «Pendientes»).
   const tasks = useQuery({
     queryKey: ["person-tasks", person.id],
@@ -147,25 +101,6 @@ export function PersonSummary({
     retry: false,
   })
 
-  // El reloj de la Agenda: quien está en la sala sigue en la sala y su espera avanza.
-  const now = useScheduleNow()
-  const upcoming = appointments.data ? nextAppointment(appointments.data.data, Date.parse(now)) : null
-  // La próxima cita va arriba de «Qué sigue»; sin la agenda (caja), no se dice.
-  const upcomingState: UpcomingState | null = canAppointments
-    ? {
-        appointment: upcoming,
-        loading: appointments.isPending,
-        failed: appointments.isError,
-        onRetry: () => void appointments.refetch(),
-        now,
-      }
-    : null
-  const outstanding = (account.data?.data.byCurrency ?? []).filter(
-    (balance) => balance.porCobrar > 0,
-  )
-  const lastConversation = conversations.data?.data[0] ?? null
-  const openOpportunity =
-    (opportunities.data?.data ?? []).find((row) => row.status === "open") ?? null
   const allergies = (detail?.activeAllergies ?? []).filter(
     (allergy) => allergy.verification !== "descartada",
   )
@@ -176,8 +111,8 @@ export function PersonSummary({
   const whatsappElsewhere = person.channels.includes("whatsapp") ? (person.phoneWhatsApp.otherNumber ?? null) : null
 
   const clinicalData = summary?.data?.data
-  // Lo que debe ya lo dice Pendientes, con su botón: aquí, que no debe nada o, si Pendientes no llegó, que algo debe.
-  const showSaldo = Boolean(patientId) && canFinance && (outstanding.length === 0 || !detail)
+  // La próxima cita va en la cabecera: «Qué sigue» no la repite (mesa del 9 nov).
+  const upcoming = usePersonUpcoming(patientId, canAppointments)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -198,7 +133,7 @@ export function PersonSummary({
           )}
           {/* Lo del producto debajo de las alertas (latidIA: la lista de problemas, issue 229). */}
           <ProductClinicalCards patientId={patientId} onSection={(section) => openWide?.({ id: section })} />
-          <NextUpCard patientId={patientId} patientName={person.displayName} upcoming={upcomingState} />
+          <NextUpCard patientId={patientId} patientName={person.displayName} upcomingId={upcoming?.appointment?.id} />
           {clinicalData ? (
             <LastVisitCard
               patientId={patientId}
@@ -216,7 +151,7 @@ export function PersonSummary({
           )}
         </>
       ) : patientId && canPlan ? (
-        <NextUpCard patientId={patientId} patientName={person.displayName} upcoming={upcomingState} />
+        <NextUpCard patientId={patientId} patientName={person.displayName} upcomingId={upcoming?.appointment?.id} />
       ) : null}
       {patientId && receivesTomography && !person.archived ? (
         <PersonTomographies patientId={patientId} />
@@ -275,63 +210,10 @@ export function PersonSummary({
                 : allergies.map((allergy) => allergyName(allergy)).join(", ")}
             </Fact>
           ) : null}
-          {/* Sin ficha no tiene «Qué sigue»: su próxima cita se dice aquí. */}
-          {canAppointments && !patientId ? <Fact label="Próxima cita">Ninguna</Fact> : null}
-          {showSaldo ? (
-            <Fact label="Saldo">
-              {account.isPending
-                ? "Consultando…"
-                : account.isError
-                  ? "No disponible"
-                  : outstanding.length > 0
-                    ? "Tiene saldo por cobrar: míralo en Cobros"
-                    : "Sin saldo por cobrar"}
-            </Fact>
-          ) : null}
-          {canChats ? (
-            <Fact label="Conversación">
-              {conversations.isPending ? (
-                "Consultando…"
-              ) : lastConversation ? (
-                <>
-                  {conversationStatusLabel(lastConversation.status, lastConversation.closure, receptionName)}
-                  {lastConversation.lastMessageAt
-                    ? ` · ${timeAgo(lastConversation.lastMessageAt)}`
-                    : ""}
-                  {" · "}
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto p-0"
-                    onClick={() => openPanel?.({ conversationId: lastConversation.id, name: person.displayName })}
-                  >
-                    Abrir
-                  </Button>
-                </>
-              ) : (
-                "Todavía no ha escrito"
-              )}
-            </Fact>
-          ) : null}
-          {canCrm ? (
-            <Fact label="Oportunidad">
-              {openOpportunity ? (
-                <Button
-                  type="button"
-                  variant="link"
-                  // Un título largo baja de línea: no se sale de la tarjeta.
-                  className="h-auto whitespace-normal p-0 text-left"
-                  onClick={() => setViewingOpportunity(openOpportunity.id)}
-                >
-                  {openOpportunity.title} · {openOpportunity.stageName}
-                </Button>
-              ) : (
-                "Ninguna abierta"
-              )}
-            </Fact>
-          ) : null}
         </dl>
       </section>
+      {/* Antes era la pestaña Conversaciones (QA de la ficha del 8 nov). */}
+      <PersonConversations person={person} />
 
       {person.kind === "por_registrar" && !person.archived ? (
         <Alert>
@@ -420,15 +302,6 @@ export function PersonSummary({
         onClose={() => setRegistering(false)}
         target={registerTarget}
       />
-      {viewingOpportunity ? (
-        <OpportunityDrawer
-          open
-          opportunityId={viewingOpportunity}
-          contactId={person.id}
-          onClose={() => setViewingOpportunity(null)}
-          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["person-opportunities", person.id] })}
-        />
-      ) : null}
       {viewingTask ? (
         <TaskDrawer
           open

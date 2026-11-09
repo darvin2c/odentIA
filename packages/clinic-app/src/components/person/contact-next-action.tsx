@@ -21,7 +21,8 @@ export function ContactNextAction({ row }: { row: PersonListItem }): React.JSX.E
       <Link
         to="/people/$personId"
         params={{ personId: row.id }}
-        search={row.situation === "oportunidad" ? { tab: "conversaciones" } : {}}
+        // La oportunidad está en su Resumen, junto a sus conversaciones (antes era una pestaña aparte).
+        search={{}}
         className={buttonVariants({ size: "sm", variant: "outline" })}
       >
         {label}

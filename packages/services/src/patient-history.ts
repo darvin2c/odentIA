@@ -860,7 +860,7 @@ async function loadBornForEncounters(
   const ownerOf = new Map<string, string>()
   for (const budgetId of new Set(touched.map((row) => row.budgetId))) {
     const sources = touched.filter((row) => row.budgetId === budgetId)
-    if (sources.some((row) => !row.encounterId || (row.status !== "finalizada" && row.status !== "anulada"))) continue
+    if (sources.some((row) => !row.encounterId || !["finalizada", "anulada", "borrador"].includes(row.status ?? ""))) continue
     const owner = sources.reduce((a, b) => ((a.startedAt ?? "") >= (b.startedAt ?? "") ? a : b))
     if (owner.encounterId && encounterIds.includes(owner.encounterId)) ownerOf.set(budgetId, owner.encounterId)
   }
@@ -1010,17 +1010,17 @@ export async function getTimeline(
   // detalle y su resumen): una anulada queda en el día en que ocurrió, con su
   // motivo y cuándo se anuló (QA de la ficha del 8 nov: salía en otro día,
   // arriba de lo vigente). Historia absorbe la lista de Atenciones (ADR 0035).
-  // El borrador en curso no es todavía un hecho: lo continúa la cabecera.
+  // La atención en curso también es su tarjeta, marcada sin firmar (QA del 9 nov): antes
+  // lo nacido en ella salía suelto y la atención no se veía.
   if (types.includes("encounter"))
-    branches.push(sql`select id, 'encounter'::text as kind, started_at as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
+    branches.push(sql`select id, 'encounter'::text as kind, started_at as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada', 'borrador')
     ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_site et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.site_system = ${site.system} and et.site_code = ${toothCode})`}`)
   // En la historia completa, lo que nació en una atención que se muestra va dentro
   // de su tarjeta (`born`) y no sale suelto, como sus documentos (QA de la ficha
-  // del 8 nov: un día eran 14 tarjetas). Lo de un borrador sigue suelto: el
-  // borrador no se muestra.
+  // del 8 nov: un día eran 14 tarjetas). Lo de la atención en curso, también.
   const absorb = types.includes("encounter")
   const shown = (column: SQL) =>
-    sql`(${column} is not null and exists (select 1 from encounter shown where shown.organization_id = ${orgId} and shown.id = ${column} and shown.status in ('finalizada', 'anulada')))`
+    sql`(${column} is not null and exists (select 1 from encounter shown where shown.organization_id = ${orgId} and shown.id = ${column} and shown.status in ('finalizada', 'anulada', 'borrador')))`
   const outside = (column: SQL) => (absorb ? sql`and not ${shown(column)}` : sql``)
   // Los papeles, a la hora de lo que pasó con ellos: el consentimiento cuando se
   // firmó o se revocó, la orden cuando se pidió y el formulario al completarse.
