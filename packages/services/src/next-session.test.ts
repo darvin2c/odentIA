@@ -128,7 +128,7 @@ it("Al firmar la sesión 1, el resultado dice la sesión que falta reservar; si 
       title: "Tratamiento propio",
       n: 1,
       m: 2,
-      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), n: 2, m: 2 },
+      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), professionalUserId: second.professionalUserId, n: 2, m: 2 },
     },
   ])
   const signed = await g.run((tx) => finalizeEncounter(tx, ...g.args, g.encounter.id))
@@ -137,7 +137,7 @@ it("Al firmar la sesión 1, el resultado dice la sesión que falta reservar; si 
       planItemId: other.id,
       title: "Tratamiento propio",
       serviceId: g.service.id,
-      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), n: 2, m: 2 },
+      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), professionalUserId: second.professionalUserId, n: 2, m: 2 },
       toBook: null,
     },
   ])

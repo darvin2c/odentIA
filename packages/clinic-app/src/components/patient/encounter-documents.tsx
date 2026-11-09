@@ -542,7 +542,7 @@ export function EncounterDocumentsBlock({
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
               <span className="text-xs text-muted-foreground">
-                Ya no se pide: no lo aceptó o eligió otro camino
+                Ya no se pide: no lo aceptó o eligió otra opción
               </span>
             </div>
             <Button
