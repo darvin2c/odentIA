@@ -2547,6 +2547,39 @@ export function isAffirmative(text: string | null): boolean {
   return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
 }
 
+/** Lo que cambia o condiciona lo propuesto: nunca cuenta como repetirlo, aunque la propuesta lo diga («¿o prefieres otro?»). */
+const CHANGES_WORDS = new Set([
+  "no", "ni", "pero", "sino", "mejor", "otro", "otra", "otros", "otras", "cambiar", "cambia", "cambio", "prefiero", "prefieres",
+  "puede", "podria", "podemos", "mas", "menos", "tarde", "temprano", "antes", "despues", "solo", "tampoco", "cancelar",
+])
+
+/**
+ * El sí que además repite lo propuesto: «Sí, porfa, mañana a las 10 en Miraflores» a
+ * «¿Te reservo mañana a las 10:00 en Miraflores?». Cada palabra es un sí, lo acompaña o
+ * está en lo propuesto, y nada cambia ni condiciona. Si nombra otra hora, otro día u
+ * otra sede, esa palabra no está en la propuesta y no lo da por sí. Sin el modelo de
+ * decisión (caído o sin clave), un sí así se perdía y la persona lo repetía cinco veces.
+ */
+export function repeatsProposal(text: string | null, proposed: string | null): boolean {
+  const words = plainWords(text)
+  if (!words.some((word) => YES_WORDS.has(word)) || !proposed) return false
+  const offered = new Set(proposalWords(proposed))
+  // Si lo propuesto ofrece elegir («a las 10 o a las 11»), repetir una parte no dice cuál: lo decide el modelo.
+  if (offered.has("o") || offered.has("u")) return false
+  return words.every((word) => !CHANGES_WORDS.has(word) && (YES_WORDS.has(word) || YES_COMPANY.has(word) || offered.has(word)))
+}
+
+/** Las palabras de lo propuesto, sin tildes ni signos y sin límite de largo: lo que se puede repetir. */
+function proposalWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[¡!¿?.,;:()"'*_-]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
 /** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */
 export function onlyCourtesy(text: string | null): boolean {
   const words = plainWords(text)

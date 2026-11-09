@@ -39,3 +39,11 @@ describe("el sí del paciente se entiende por su intención (ADR 0023)", () => {
     expect(await understoodYes(model("falla"), { proposed, reply: "Me sirve, ahí estaré el lunes temprano" })).toBe(false)
   })
 })
+
+describe("un sí que repite lo propuesto", () => {
+  it("se entiende sin modelo de decisión, y otra hora no", async () => {
+    // Caso 12 de la auditoría del 8 nov: sin modelo, «Sí, porfa, el lunes a las 9» no era un sí.
+    expect(await understoodYes(null, { proposed, reply: "Sí, porfa, el lunes a las 9 con la Dra. Ana" })).toBe(true)
+    expect(await understoodYes(null, { proposed, reply: "Sí, el lunes a las 10" })).toBe(false)
+  })
+})

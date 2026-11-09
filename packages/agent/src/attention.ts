@@ -103,10 +103,14 @@ export interface AttentionProgress {
   formulas: { opener: number; noted: number }
   /** Las horas (ISO 8601) de los enlaces con la hora elegida que ya le dio en esta atención (ADR 0109). */
   pickLinks: string[]
+  /** Esos enlaces tal como se los escribió, para volver a dárselos si los pide. */
+  pickLinkUrls: string[]
 }
 
 /** La hora del enlace con la hora elegida (`bookingPickAddress`), tal como queda en el mensaje; también si lleva otro destino. */
 const PICK_LINK_HOUR = /\/(?:reserva|pendientes)\?\S*?[?&]hora=([^&\s]+)/g
+/** El mismo enlace entero, con su dirección: se le puede volver a escribir tal cual. */
+const PICK_LINK_URL = /https?:\/\/\S+?\/(?:reserva|pendientes)\?\S*?[?&]hora=[^\s]+/g
 
 /**
  * Cómo va la atención: cuántas veces le respondió, si ya ofreció horarios, qué
@@ -151,6 +155,7 @@ export function attentionProgress(input: {
       noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
     },
     pickLinks: [...new Set(said.flatMap((item) => [...(item.body ?? "").matchAll(PICK_LINK_HOUR)].map((match) => decodeURIComponent(match[1] ?? ""))))],
+    pickLinkUrls: [...new Set(said.flatMap((item) => [...(item.body ?? "").matchAll(PICK_LINK_URL)].map((match) => match[0].replace(/[.,;:!?)»]+$/, ""))))],
   }
 }
 
@@ -179,7 +184,7 @@ export function attentionLines(
   // quien no quería usarlo (ronda del ADR 0109).
   if (progress.pickLinks.length) {
     lines.push(
-      "Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar ni le repitas la cita. Si escribe de nuevo, respóndele en una frase a lo que dice: al confirmar sus datos en esa página queda reservada, y se le avisa por aquí. Si no quiere o no puede usar el enlace, no insistas ni le digas que se reserva por aquí: pasa el caso a recepción una sola vez con request_human_handoff, con la hora que eligió, para que se la reserven.",
+      "Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar por iniciativa tuya ni le repitas la cita. Si te pide el enlace otra vez o dice que no le llegó o no lo ve, vuelve a llamar a la misma herramienta con el mismo hueco: te devuelve ese enlace para que se lo escribas de nuevo. Si escribe otra cosa, respóndele en una frase a lo que dice: al confirmar sus datos en esa página queda reservada, y se le avisa por aquí. Si no quiere o no puede usar el enlace, no insistas ni le digas que se reserva por aquí: pasa el caso a recepción una sola vez con request_human_handoff, con la hora que eligió, para que se la reserven.",
     )
   }
   if (progress.done && !progress.doneTold) {

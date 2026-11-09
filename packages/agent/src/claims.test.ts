@@ -83,7 +83,32 @@ describe("lo que la respuesta dice que se hizo (auditoría del ADR 0104)", () =>
       "Puedes dejarla en recepción de Miraflores, en Av. José Larco 345.",
       "Our team will be happy to see you on Thursday.",
     ]) {
-      expect(claimsOf(text), text).toEqual({ team: false, note: false, contact: false })
+      expect(claimsOf(text), text).toEqual({ team: false, note: false, contact: false, booked: false })
+    }
+  })
+})
+
+describe("decir que la cita quedó reservada", () => {
+  it("lo reconoce cuando lo da por hecho", () => {
+    for (const text of [
+      "Entiendo, disculpa la repetición. Ya quedó reservada tu cita para mañana a las 10:00.",
+      "Listo, te reservé la cita del lunes.",
+      "Tu cita está agendada para el martes.",
+      "Your appointment is booked for Monday.",
+    ]) {
+      expect(claimsOf(text).booked, text).toBe(true)
+    }
+  })
+
+  it("no cuando depende de algo, lo pregunta o lo niega", () => {
+    for (const text of [
+      "Al confirmar tus datos en esa página queda reservada, y te avisamos por aquí.",
+      "Cuando elijas la hora, queda agendada.",
+      "¿Te reservo mañana a las 10:00?",
+      "Todavía no quedó reservada: falta tu sí.",
+      "Aún no está reservada.",
+    ]) {
+      expect(claimsOf(text).booked, text).toBe(false)
     }
   })
 })

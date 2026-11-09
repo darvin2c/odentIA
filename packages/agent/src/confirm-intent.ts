@@ -1,4 +1,4 @@
-import { isAffirmative } from "@odentia/services"
+import { isAffirmative, repeatsProposal } from "@odentia/services"
 import type { DecisionModel, DecisionQuestion } from "./decision/port.js"
 
 /**
@@ -39,7 +39,7 @@ export async function understoodYes(
   decision: DecisionModel | null | undefined,
   input: { proposed: string | null; reply: string },
 ): Promise<boolean> {
-  if (isAffirmative(input.reply)) return true
+  if (isAffirmative(input.reply) || repeatsProposal(input.reply, input.proposed)) return true
   if (!decision) return false
   try {
     const result = await decision.decide(confirmState(input), [CONFIRMS_QUESTION])
