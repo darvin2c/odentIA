@@ -4549,8 +4549,8 @@ for (const seed of [
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
-// Configuración › Comisiones con cada caso: el odontólogo de la demo comisiona solo por la
-// endodoncia (sin porcentaje general), junto a quien tiene porcentaje y servicios aparte.
+// Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
+// por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.
 await db.transaction((tx) =>
   setCommissionException(tx, ORG_A, ANA_ID, {
     professionalUserId: "seed-user-dentista",

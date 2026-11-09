@@ -69,6 +69,8 @@ export function CommissionAgreementsList({
   timeZone,
   currency,
   focusId,
+  openRate = false,
+  onSaved,
 }: {
   agreements: CommissionAgreement[]
   locale: string
@@ -76,6 +78,10 @@ export function CommissionAgreementsList({
   currency: string
   /** La persona que se viene a ver (desde Finanzas): su tarjeta se lleva a la vista. */
   focusId: string | null
+  /** Se vino a ponerle su porcentaje (desde su fila en Finanzas): el panel se abre solo, una vez. */
+  openRate?: boolean
+  /** Después de guardar su porcentaje, lo que hace la página (volver a donde estaba). */
+  onSaved?: () => void
 }) {
   // El último panel pedido sigue con su persona mientras se cierra: no se vacía en la animación.
   const [editing, setEditing] = useState<Editing | null>(null)
@@ -90,6 +96,16 @@ export function CommissionAgreementsList({
     focusRef.current?.scrollIntoView({ block: "center" })
     focusRef.current?.focus({ preventScroll: true })
   }, [focusId])
+  // Desde Finanzas, «Poner su porcentaje» abre su panel: un solo paso, no dos.
+  const opened = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se abre una sola vez, al llegar.
+  useEffect(() => {
+    if (!openRate || opened.current) return
+    const agreement = agreements.find((item) => item.professionalUserId === focusId)
+    if (!agreement?.attends) return
+    opened.current = true
+    edit({ kind: "rate", agreement, start: "porcentaje" })
+  }, [openRate, focusId, agreements])
 
   if (agreements.length === 0) {
     return (
@@ -104,7 +120,8 @@ export function CommissionAgreementsList({
   return (
     <>
       <ul className="flex min-w-0 flex-col gap-3">
-        {agreements.map((agreement) => (
+        {/* Primero quien aún no tiene comisión decidida: es lo único que pide hacer algo. */}
+        {[...agreements.filter(undecided), ...agreements.filter((agreement) => !undecided(agreement))].map((agreement) => (
           <li key={agreement.professionalUserId} className="min-w-0">
             <AgreementCard
               agreement={agreement}
@@ -128,6 +145,7 @@ export function CommissionAgreementsList({
         editing={editing?.kind === "rate" ? editing : null}
         open={open && editing?.kind === "rate"}
         onClose={() => setOpen(false)}
+        onSaved={onSaved}
         locale={locale}
       />
       <ServiceCommissionDrawer
@@ -168,11 +186,15 @@ function AgreementCard({
     { hasRate: agreement.hasRate, rateBps: agreement.rateBps, exceptionCount: agreement.exceptions.length },
     locale,
   )
-  // Desde cuándo vale el porcentaje y el anterior: lo que dice si el cambio ya rige.
+  const noCommission = agreement.hasRate && agreement.rateBps === 0 && agreement.exceptions.length === 0
+  // Desde cuándo vale lo de hoy y lo que tenía antes: lo que dice si el cambio ya rige.
   const since = [
-    agreement.rateBps > 0 && agreement.rateSince ? `desde el ${day(agreement.rateSince)}` : null,
+    !agreement.attends ? "Ya no atiende pacientes" : null,
+    agreement.rateSince ? `desde el ${day(agreement.rateSince)}` : null,
     agreement.previousRateBps !== null && agreement.previousRateBps !== agreement.rateBps
-      ? `antes ${agreement.previousRateBps > 0 ? percentLabel(agreement.previousRateBps, locale) : "sin porcentaje"}`
+      ? agreement.previousRateBps > 0
+        ? `antes tenía ${percentLabel(agreement.previousRateBps, locale)}`
+        : "antes no tenía porcentaje"
       : null,
   ]
     .filter(Boolean)
@@ -207,7 +229,8 @@ function AgreementCard({
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
         <PersonAvatar name={name} fallbackClassName="text-xs" decorative />
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* El nombre tiene su espacio: si no cabe junto al porcentaje, el porcentaje baja de línea. */}
+        <div className="flex min-w-40 flex-1 flex-col">
           <h2 id={titleId} className="truncate font-medium">
             {name}
           </h2>
@@ -217,16 +240,38 @@ function AgreementCard({
             <p className="text-sm text-muted-foreground">{since}</p>
           ) : null}
         </div>
-        {agreement.rateBps > 0 ? (
-          <p className="text-lg font-semibold tabular-nums">
-            {percentLabel(agreement.rateBps, locale)}{" "}
-            <span className="text-sm font-normal text-muted-foreground">de lo cobrado</span>
+        {none ? null : (
+          <div className="ml-auto flex items-center gap-3">
+            {agreement.rateBps > 0 ? (
+              <p className="text-lg font-semibold whitespace-nowrap tabular-nums">
+                {percentLabel(agreement.rateBps, locale)}{" "}
+                <span className="text-sm font-normal text-muted-foreground">de lo cobrado</span>
+              </p>
+            ) : (
+              <p className="text-sm font-medium">{summary}</p>
+            )}
+            {agreement.attends || !noCommission ? (
+              <Button
+                type="button"
+                variant="outline"
+                aria-label={`Cambiar la comisión de ${name}`}
+                onClick={() => onEdit({ kind: "rate", agreement, start: agreement.rateBps > 0 ? "porcentaje" : "ninguno" })}
+              >
+                Cambiar
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {none ? (
+        // Las dos decisiones, debajo y a lo ancho: con el panel abierto o en el teléfono el nombre no se aprieta.
+        <>
+          <p className="text-sm text-muted-foreground">
+            Mientras no se decida, lo cobrado de lo que atiende no comisiona. La primera comisión que pongas vale
+            también para lo ya cobrado que aún no se paga.
           </p>
-        ) : !none ? (
-          <p className="text-sm font-medium">{summary}</p>
-        ) : null}
-        {none ? (
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => onEdit({ kind: "rate", agreement, start: "porcentaje" })}>
               Poner su porcentaje
             </Button>
@@ -234,23 +279,7 @@ function AgreementCard({
               No cobra comisión
             </Button>
           </div>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            aria-label={`Cambiar el porcentaje de ${name}`}
-            onClick={() => onEdit({ kind: "rate", agreement, start: agreement.rateBps > 0 ? "porcentaje" : "ninguno" })}
-          >
-            Cambiar
-          </Button>
-        )}
-      </div>
-
-      {none ? (
-        <p className="text-sm text-muted-foreground">
-          Mientras no se decida, lo cobrado de lo que atiende no comisiona. La primera comisión que pongas vale
-          también para lo ya cobrado que aún no se paga.
-        </p>
+        </>
       ) : null}
 
       {agreement.exceptions.length > 0 ? (
@@ -281,7 +310,10 @@ function AgreementCard({
                 <RowActions
                   label={`Más acciones de ${exception.serviceName}`}
                   items={[
-                    { key: "cambiar", label: "Cambiar", onSelect: () => onEdit({ kind: "service", agreement, exception }) },
+                    // A quien ya no atiende solo se le quita: una comisión nueva es de quien atiende.
+                    ...(agreement.attends
+                      ? [{ key: "cambiar", label: "Cambiar", onSelect: () => onEdit({ kind: "service", agreement, exception }) }]
+                      : []),
                     {
                       key: "quitar",
                       label: removing === exception.serviceId ? "Quitando…" : "Quitar",
@@ -296,39 +328,51 @@ function AgreementCard({
         </div>
       ) : null}
 
-      <div>
-        <Button
-          type="button"
-          variant="link"
-          size="sm"
-          className="h-auto px-0"
-          onClick={() => onEdit({ kind: "service", agreement, exception: null })}
-        >
-          <Plus aria-hidden />
-          Comisión distinta para un servicio
-        </Button>
-      </div>
+      {agreement.attends ? (
+        <div>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto px-0"
+            onClick={() => onEdit({ kind: "service", agreement, exception: null })}
+          >
+            <Plus aria-hidden />
+            {/* Quien no cobra comisión, si se le agrega un servicio, pasa a cobrar solo por ese servicio. */}
+            {noCommission
+              ? "Cobrar solo por un servicio"
+              : agreement.rateBps > 0
+                ? "Comisión distinta para un servicio"
+                : agreement.exceptions.length > 0
+                  ? "Comisión por otro servicio"
+                  : "Comisión por un servicio"}
+          </Button>
+        </div>
+      ) : null}
     </section>
   )
 }
 
 // --- Su porcentaje de lo cobrado ---------------------------------------------------------
 
-const RATE_KINDS = (hasServices: boolean) =>
+/** A quien ya no atiende solo se le deja sin comisión: un porcentaje nuevo es de quien atiende. */
+const RATE_KINDS = (hasServices: boolean, attends: boolean) =>
   [
-    { value: "porcentaje", label: "Un porcentaje de lo cobrado" },
-    { value: "ninguno", label: hasServices ? "Solo por sus servicios" : "No cobra comisión" },
-  ] as const
+    ...(attends ? [{ value: "porcentaje" as const, label: "Un porcentaje de lo cobrado" }] : []),
+    { value: "ninguno" as const, label: hasServices ? "Solo por sus servicios" : "No cobra comisión" },
+  ]
 
 function RateDrawer({
   editing,
   open,
   onClose,
+  onSaved,
   locale,
 }: {
   editing: Extract<Editing, { kind: "rate" }> | null
   open: boolean
   onClose: () => void
+  onSaved?: () => void
   locale: string
 }) {
   const queryClient = useQueryClient()
@@ -362,6 +406,7 @@ function RateDrawer({
           : hasServices
             ? `${name}: comisiona solo por sus servicios`
             : `${name}: no cobra comisión`,
+        onSaved ? { action: { label: "Volver a Finanzas", onClick: onSaved } } : undefined,
       )
       onClose()
     },
@@ -380,18 +425,20 @@ function RateDrawer({
     : current > 0
       ? `Hoy tiene ${percentLabel(current, locale)}. El nuevo vale para lo que se atienda desde hoy; lo atendido antes conserva el ${percentLabel(current, locale)}, aunque se cobre después. Se le avisa del cambio.`
       : "Vale para lo que se atienda desde hoy; lo atendido antes conserva lo que tenía. Se le avisa del cambio."
+  const keeps =
+    current > 0
+      ? ` Lo que atendió hasta hoy conserva su ${percentLabel(current, locale)} y se le paga en Finanzas › Comisiones.`
+      : ""
   const noneHelp = hasServices
-    ? "Solo comisiona por sus servicios con comisión distinta; lo demás que atiende no comisiona."
-    : `No comisiona por lo que atiende y ya no aparece en la lista para pagar del mes. Si tiene un sueldo, se paga en Gastos.${
-        current > 0 ? ` Vale desde hoy: lo atendido antes conserva su ${percentLabel(current, locale)}.` : ""
-      }`
+    ? `Desde hoy comisiona solo por sus servicios con comisión; lo demás que atienda no comisiona.${keeps}`
+    : `${current > 0 ? "Desde hoy no" : "No"} comisiona por lo que atiende, y deja de aparecer en el mes cuando no tenga nada por pagar.${keeps} Si tiene un sueldo, se paga en Gastos.`
 
   return (
     <FormDrawer
       {...surface}
       open={open}
       onClose={onClose}
-      title={agreement?.hasRate ? "Cambiar su porcentaje" : "Poner su porcentaje"}
+      title={agreement?.hasRate ? "Cambiar su comisión" : "Su comisión"}
       description={`Lo que se lleva ${name} de lo cobrado por lo que atiende.`}
       submitLabel="Guardar"
     >
@@ -406,8 +453,9 @@ function RateDrawer({
                   aria-describedby={control.describedBy}
                   onBlur={control.onBlur}
                   tone="primary"
+                  columns={(agreement?.attends ?? true) ? 2 : undefined}
                   value={field.state.value}
-                  options={RATE_KINDS(hasServices)}
+                  options={RATE_KINDS(hasServices, agreement?.attends ?? true)}
                   onChange={(next) => field.handleChange(next)}
                 />
               )}
@@ -441,8 +489,9 @@ function RateDrawer({
 
 // --- Comisión distinta para un servicio ------------------------------------------------------
 
-const SERVICE_KINDS = [
-  { value: "percent", label: "Otro porcentaje" },
+/** Con un porcentaje general, «otro»; sin él, no hay otro respecto de qué. */
+const SERVICE_KINDS = (hasGeneral: boolean) => [
+  { value: "percent", label: hasGeneral ? "Otro porcentaje" : "Un porcentaje" },
   { value: "fixed", label: "Monto fijo por cada uno" },
 ]
 
@@ -542,10 +591,16 @@ function ServiceCommissionDrawer({
       {...surface}
       open={open}
       onClose={onClose}
-      title={exception ? `Cambiar · ${exception.serviceName}` : "Comisión distinta para un servicio"}
+      title={
+        exception
+          ? `Cambiar · ${exception.serviceName}`
+          : (agreement?.rateBps ?? 0) > 0
+            ? "Comisión distinta para un servicio"
+            : "Comisión por un servicio"
+      }
       description={`Para ${name}${instead}. ${
         firstForService
-          ? "Es la primera para este servicio: vale también para lo ya cobrado de él que aún no se paga."
+          ? "Es la primera para este servicio: vale también para lo ya cobrado de él que aún no se paga. Lo demás que atiende no comisiona; si además se lleva un porcentaje de todo, ponlo primero con «Poner su porcentaje»."
           : "Vale para lo que se atienda desde hoy: lo atendido antes conserva lo que tenía, aunque se cobre después."
       }`}
       submitLabel="Guardar"
@@ -588,7 +643,7 @@ function ServiceCommissionDrawer({
                   onBlur={control.onBlur}
                   tone="primary"
                   value={field.state.value}
-                  options={SERVICE_KINDS}
+                  options={SERVICE_KINDS((agreement?.rateBps ?? 0) > 0)}
                   onChange={(next) => field.handleChange(next)}
                 />
               )}
@@ -646,15 +701,22 @@ export function AgreementLink({
   professionalUserId,
   children,
   className,
+  openRate = false,
+  label,
 }: {
   professionalUserId: string
   children: ReactNode
   className?: string
+  /** Abre allí su panel del porcentaje (quien atendió sin comisión decidida). */
+  openRate?: boolean
+  /** Nombre accesible, si el texto a la vista no dice de quién es. */
+  label?: string
 }) {
   return (
     <Link
       to="/settings/commissions"
-      search={{ profesional: professionalUserId }}
+      search={{ profesional: professionalUserId, ...(openRate ? { editar: "porcentaje" as const } : {}) }}
+      aria-label={label}
       className={cn("font-medium text-primary-soft-foreground underline-offset-2 hover:underline", className)}
     >
       {children}

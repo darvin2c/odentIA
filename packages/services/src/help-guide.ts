@@ -1717,13 +1717,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Comisiones por profesional",
     parent: SETTINGS,
     purpose:
-      "Lo que se lleva cada profesional de lo cobrado por lo que atiende: su porcentaje, los servicios con una comisión distinta (otro porcentaje o un monto fijo por cada uno) o que no cobra comisión. Aparece cada persona del equipo que puede atender, aunque aún no haya atendido. Es un acuerdo con la persona: se fija al contratarla y vale para lo que se atienda desde ese día. Lo de cada mes se liquida y se paga en Finanzas › Comisiones. Solo lo ve y lo cambia quien administra las comisiones.",
+      "Lo que se lleva cada profesional de lo cobrado por lo que atiende: su porcentaje, los servicios con una comisión distinta (otro porcentaje o un monto fijo por cada uno) o que no cobra comisión. Aparece cada persona del equipo que puede atender, aunque aún no haya atendido. Es un acuerdo con la persona: se fija al contratarla. La primera comisión vale también para lo ya cobrado que aún no se paga; un cambio después vale para lo que se atienda desde ese día. Lo de cada mes se liquida y se paga en Finanzas › Comisiones. Solo lo ve y lo cambia quien administra las comisiones.",
     terms: ["fijar comisión", "poner porcentaje", "no cobra comisión", "configurar comisiones"],
     writePermission: "commissions.write",
     faqs: [
       {
         q: "¿Puede comisionar solo por algunos servicios?",
-        a: "Sí. Agrégale sus servicios con «Comisión distinta para un servicio», sin ponerle porcentaje; si ya tenía uno, en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga.",
+        a: "Sí. Agrégale sus servicios con «Comisión por un servicio», sin ponerle porcentaje; si ya tenía uno, agrégalos y en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga.",
         forms: ["comisión solo por servicio", "solo por procedimiento", "sin porcentaje general"],
       },
     ],

@@ -497,10 +497,22 @@ export function CommissionsAdminPanel({
               // Atendió y nadie decidió aún su comisión: se dice en su fila, con el camino para ponerla.
               const undecided = row.inTeam && !row.hasRate && !row.exceptionCount
               const nothingToPay = views.every((view) => view.commissionCents === 0 && view.pendingCents === 0)
-              const rule = agreementWords(
-                { hasRate: row.hasRate, rateBps: row.rateBps, exceptionCount: row.exceptionCount ?? 0 },
-                locale,
-              )
+              // Lo que usaron los cobros del mes: si el porcentaje cambió, el de hoy no explica la cifra.
+              const used = row.ratesUsed ?? []
+              const services = row.exceptionCount
+                ? ` y ${row.exceptionCount === 1 ? "1 servicio" : `${row.exceptionCount} servicios`} con comisión distinta`
+                : ""
+              const rule =
+                used.length > 1
+                  ? `varios porcentajes${services}`
+                  : agreementWords(
+                      {
+                        hasRate: row.hasRate,
+                        rateBps: used.length === 1 ? (used[0] as number) : row.rateBps,
+                        exceptionCount: row.exceptionCount ?? 0,
+                      },
+                      locale,
+                    )
               return (
                 <li key={row.professionalUserId} className="flex min-w-0 items-stretch">
                   <Button
@@ -547,7 +559,9 @@ export function CommissionsAdminPanel({
                   {undecided && canWrite ? (
                     // Fuera del botón de la fila: un enlace dentro de otro control no se puede usar con teclado.
                     <span className="flex shrink-0 items-center pr-4 text-sm">
-                      <AgreementLink professionalUserId={row.professionalUserId}>Poner su porcentaje</AgreementLink>
+                      <AgreementLink professionalUserId={row.professionalUserId} openRate label={`Poner el porcentaje de ${name}`}>
+                        Poner su porcentaje
+                      </AgreementLink>
                     </span>
                   ) : null}
                 </li>
@@ -819,40 +833,28 @@ function AgreementSection({ detail, period, zone }: { detail: MonthlyCommissions
   const lead = current
     ? words
     : `En ${monthLabel(period, locale).toLocaleLowerCase(locale)} valía: ${words.charAt(0).toLocaleLowerCase(locale)}${words.slice(1)}`
+  // Los servicios ya salen en «Cómo se calcula»: aquí basta el resumen y el camino para cambiarla.
+  const services = exceptions
+    .map((exception) => `${exception.serviceName}: ${exceptionWords(exception, locale, detail.currency)}`)
+    .join("; ")
   return (
-    <section aria-labelledby={titleId} className="flex min-w-0 flex-col gap-2 border-t pt-4 text-sm">
+    <section aria-labelledby={titleId} className="flex min-w-0 flex-col gap-1 border-t pt-4 text-sm">
       <h3 id={titleId} className="font-semibold">
         Su comisión
       </h3>
       <p>
         {lead}
-        {current && detail.rateBps > 0 && detail.rateSince
-          ? ` · desde el ${dayLabel(detail.rateSince, locale, zone, period.year)}`
-          : ""}
+        {services ? ` (${services})` : ""}
+        {!detail.inTeam ? (
+          // Su comisión ya no cambia (solo se fija a quien puede atender); lo que ganó se le paga igual.
+          <span className="text-muted-foreground"> · Ya no está en el equipo: lo que ganó se le paga igual.</span>
+        ) : canWrite ? (
+          <>
+            {" · "}
+            <AgreementLink professionalUserId={detail.professionalUserId}>Ver o cambiar en Configuración</AgreementLink>
+          </>
+        ) : null}
       </p>
-      {exceptions.length > 0 ? (
-        <ul className="flex flex-col gap-0.5 text-muted-foreground">
-          {exceptions.map((exception) => (
-            <li key={exception.serviceId}>
-              {exception.serviceName}:{" "}
-              <span className="font-medium text-foreground tabular-nums">
-                {exceptionWords(exception, locale, detail.currency)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {!detail.inTeam ? (
-        // Su comisión ya no cambia (solo se fija a quien puede atender); lo que ganó se le paga igual.
-        <p className="text-muted-foreground">
-          Ya no está en el equipo. Lo que le corresponde por lo que atendió se le paga igual; su comisión ya no cambia.
-        </p>
-      ) : canWrite ? (
-        <p>
-          <AgreementLink professionalUserId={detail.professionalUserId}>Ver o cambiar en Configuración</AgreementLink>
-          <span className="text-muted-foreground"> · Un cambio vale desde ese día: no cambia lo ya atendido.</span>
-        </p>
-      ) : null}
     </section>
   )
 }
@@ -870,17 +872,21 @@ function shortDay(iso: string, locale: string, timeZone: string): string {
  * La regla de un cobro, solo cuando no es la de siempre: una comisión distinta para el servicio, un
  * monto fijo, otro porcentaje (el de antes de un cambio) o ninguna todavía. Nulo si usó el general.
  */
-function specialRule(line: CommissionLine, generalBps: number, locale: string, currency: string): string | null {
-  if (line.unruled) return "sin comisión decidida"
+function specialRule(
+  line: CommissionLine,
+  generalBps: number,
+  locale: string,
+  currency: string,
+  /** Con su comisión decidida, lo que queda sin regla es un monto fijo que quedó en otra moneda. */
+  decided: boolean,
+): string | null {
+  if (line.unruled) return decided ? "sin comisión: el monto fijo quedó en otra moneda" : "sin comisión decidida"
   if (line.fixedCents !== null) return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno`
   const rate = line.rateBps ?? 0
   if (line.forService) return `${percentLabel(rate, locale)} para este servicio`
   if (rate === generalBps) return null
   return rate > 0 ? percentLabel(rate, locale) : "sin comisión"
 }
-
-/** Cobros a la vista en la liquidación antes de «Ver los N cobros»: casi siempre, todos. */
-const RECEIPT_ROWS = 40
 
 /**
  * Lo de un mes en una moneda, como un recibo: lo que falta pagar con su botón, cómo se calcula (una
@@ -904,24 +910,24 @@ function CommissionCurrencyBlock({
   /** Hoy, si el mes aún no termina: la liquidación es «hasta hoy». */
   asOf: string | null
 }) {
-  const navigate = useNavigate()
   const canWrite = usePermission("commissions.write")
   const canFinance = usePermission("finance.read")
   const payHintId = useId()
   const calcId = useId()
   const linesId = useId()
-  const [showAll, setShowAll] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
   // Lo que debe: lo devolvió o se da por saldado.
   const [debtMode, setDebtMode] = useState<"devuelto" | "saldado" | null>(null)
   const locale = view.locale
   const day = (iso: string): string => dayLabel(iso, locale, zone, period.year)
   const money = (cents: number): string => formatMoney(cents, view.currency, locale)
-  // En orden de fecha, como los da el servidor y como sale en la hoja impresa.
+  // Todos, en orden de fecha, como los da el servidor y como sale en la hoja impresa: así los que se
+  // ven suman lo que dice «Cómo se calcula».
   const lines = view.lines
-  const visible = showAll ? lines : lines.slice(0, RECEIPT_ROWS)
   const counted = lines.filter((line) => !line.voidedAfterPaid).length
-  const groups = calculationGroups(lines, locale, view.currency)
+  // Con su comisión decidida, lo que queda sin regla es un monto fijo en otra moneda, no algo por decidir.
+  const decided = Boolean(view.hasRate) || (view.exceptions ?? []).length > 0
+  const groups = calculationGroups(lines, locale, view.currency, decided)
   const monthWords = monthLabel(period, locale).toLocaleLowerCase(locale)
   // Se puede registrar mientras el mes tenga cobros sin pagar; si el descuento los cubre, no sale dinero.
   const payable = view.pendingCents > 0 || view.discountCents > 0
@@ -938,7 +944,7 @@ function CommissionCurrencyBlock({
   const payNote = discountOnly
     ? `Lo de este mes (${money(view.discountCents)}) se descuenta de comisiones ya pagadas de cobros que después se anularon: no sale dinero.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
     : payable
-      ? `Anota lo que ya le pagaste: queda en Gastos como pago de comisiones. Si te equivocas, se anula con su motivo.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
+      ? `Anota lo que ya le pagaste: queda en Gastos como pago de comisiones. Si te equivocas, se anula con su motivo.${asOf ? " El mes aún no termina: lo que se cobre después queda por pagar aparte." : ""}${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
       : (view.owedCents ?? 0) > 0
         ? discountMonth
           ? `${money(view.owedCents ?? 0)} por descontar${inCurrency}: se le pagó la comisión de cobros que después se anularon. ${discountFromWords(view, locale)}`
@@ -967,7 +973,7 @@ function CommissionCurrencyBlock({
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-sm text-muted-foreground">{top.label}</span>
           <span className="text-3xl leading-tight font-bold tracking-tight tabular-nums">{money(top.cents)}</span>
-          <StatusBadge status={view.status} baseCents={view.baseCents} />
+          {payable ? null : <StatusBadge status={view.status} baseCents={view.baseCents} />}
         </p>
         {canWrite && payable ? (
           <Button type="button" className="w-full" aria-describedby={payHintId} onClick={() => setPayOpen(true)}>
@@ -1135,99 +1141,81 @@ function CommissionCurrencyBlock({
           {counted > 0 ? ` · ${counted}` : ""}
         </h3>
         {lines.length === 0 ? (
-          <EmptyState
-            title="Sin cobros este mes"
-            description="Cuando se cobre algo de lo que atendió, aparece aquí con su comisión."
-            actionLabel={canFinance ? "Abrir Finanzas" : undefined}
-            onAction={() => void navigate({ to: "/finance" })}
-          />
+          // Ya se está en Finanzas: basta decirlo, sin otro botón.
+          <p className="text-sm text-muted-foreground">
+            Sin cobros este mes. Cuando se cobre algo de lo que atendió, aparece aquí con su comisión.
+          </p>
         ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col" className="hidden h-9 w-16 pl-0 sm:table-cell">
-                    Fecha
-                  </TableHead>
-                  <TableHead scope="col" className="h-9 pl-0 sm:pl-2">
-                    Paciente y servicio
-                  </TableHead>
-                  <TableHead scope="col" className="hidden h-9 text-right sm:table-cell">
-                    Cobrado
-                  </TableHead>
-                  <TableHead scope="col" className="h-9 pr-0 text-right">
-                    Comisión
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visible.map((line) => {
-                  const facts = [
-                    specialRule(line, view.rateBps, locale, view.currency),
-                    sessionWords(line),
-                    line.promotionName,
-                  ].filter(Boolean)
-                  return (
-                    <TableRow key={lineKey(line)}>
-                      <TableCell className="hidden py-2 pl-0 align-top text-muted-foreground sm:table-cell">
-                        {shortDay(line.occurredAt, locale, zone)}
-                      </TableCell>
-                      <TableCell className="py-2 pl-0 whitespace-normal sm:pl-2">
-                        <span className="font-medium">{line.patientName || "Paciente"}</span>
-                        <span className="text-muted-foreground"> · {line.description}</span>
-                        {facts.length > 0 ? (
-                          <span className="block text-xs text-muted-foreground">{facts.join(" · ")}</span>
-                        ) : null}
-                        {/* En el teléfono la fecha y lo cobrado van debajo: no caben columnas. */}
-                        <span className="block text-xs text-muted-foreground sm:hidden">
-                          {shortDay(line.occurredAt, locale, zone)} · cobrado {money(line.baseCents)}
-                        </span>
-                        {line.voidedAfterPaid ? (
-                          <Badge variant="destructive" className="mt-1">
-                            Anulado después de pagado
-                          </Badge>
-                        ) : line.settled ? (
-                          <Badge variant="success" className="mt-1">
-                            {line.paidAt ? `Liquidado el ${day(line.paidAt)}` : "Liquidado"}
-                          </Badge>
-                        ) : null}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "hidden py-2 text-right align-top text-muted-foreground tabular-nums sm:table-cell",
-                          line.voidedAfterPaid && "line-through",
-                        )}
-                      >
-                        {money(line.baseCents)}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "py-2 pr-0 text-right align-top font-medium tabular-nums",
-                          line.voidedAfterPaid && "text-muted-foreground line-through",
-                        )}
-                      >
-                        {money(line.commissionCents)}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-            {lines.length > RECEIPT_ROWS ? (
-              <div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="-ml-3"
-                  aria-expanded={showAll}
-                  onClick={() => setShowAll((value) => !value)}
-                >
-                  {showAll ? "Ver menos" : showAllLabel(lines)}
-                </Button>
-              </div>
-            ) : null}
-          </>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col" className="hidden h-9 w-16 pl-0 sm:table-cell">
+                  Fecha
+                </TableHead>
+                <TableHead scope="col" className="h-9 pl-0 sm:pl-2">
+                  Paciente y servicio
+                </TableHead>
+                <TableHead scope="col" className="hidden h-9 text-right sm:table-cell">
+                  Cobrado
+                </TableHead>
+                <TableHead scope="col" className="h-9 pr-0 text-right">
+                  Comisión
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lines.map((line) => {
+                const facts = [
+                  specialRule(line, view.rateBps, locale, view.currency, decided),
+                  sessionWords(line),
+                  line.promotionName,
+                ].filter(Boolean)
+                return (
+                  <TableRow key={lineKey(line)}>
+                    <TableCell className="hidden py-2 pl-0 align-top text-muted-foreground sm:table-cell">
+                      {shortDay(line.occurredAt, locale, zone)}
+                    </TableCell>
+                    <TableCell className="py-2 pl-0 whitespace-normal sm:pl-2">
+                      <span className="font-medium">{line.patientName || "Paciente"}</span>
+                      <span className="text-muted-foreground"> · {line.description}</span>
+                      {facts.length > 0 ? (
+                        <span className="block text-xs text-muted-foreground">{facts.join(" · ")}</span>
+                      ) : null}
+                      {/* En el teléfono la fecha y lo cobrado van debajo: no caben columnas. */}
+                      <span className="block text-xs text-muted-foreground sm:hidden">
+                        {shortDay(line.occurredAt, locale, zone)} · cobrado {money(line.baseCents)}
+                      </span>
+                      {line.voidedAfterPaid ? (
+                        <Badge variant="destructive" className="mt-1">
+                          Anulado después de pagado
+                        </Badge>
+                      ) : line.settled ? (
+                        <Badge variant="success" className="mt-1">
+                          {line.paidAt ? `Liquidado el ${day(line.paidAt)}` : "Liquidado"}
+                        </Badge>
+                      ) : null}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "hidden py-2 text-right align-top text-muted-foreground tabular-nums sm:table-cell",
+                        line.voidedAfterPaid && "line-through",
+                      )}
+                    >
+                      {money(line.baseCents)}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "py-2 pr-0 text-right align-top font-medium tabular-nums",
+                        line.voidedAfterPaid && "text-muted-foreground line-through",
+                      )}
+                    >
+                      {money(line.commissionCents)}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
         )}
       </section>
 
@@ -1840,8 +1828,10 @@ export function MyCommissionsPanel({
   for (const view of [mine, ...others]) for (const line of view.lines) currencyOf.set(lineKey(line), view.currency)
   const lineAmount = (cents: number, line: CommissionLine): string =>
     formatMoney(cents, currencyOf.get(lineKey(line)) ?? mine.currency, format)
-  // En orden de fecha, como los da el servidor y como sale en la liquidación.
-  const sorted = [...mine.lines, ...others.flatMap((view) => view.lines)]
+  // Por fecha, lo más reciente primero: la vista previa muestra lo último que se cobró, en cualquier moneda.
+  const sorted = [...mine.lines, ...others.flatMap((view) => view.lines)].sort(
+    (a, b) => b.occurredAt.localeCompare(a.occurredAt) || lineKey(a).localeCompare(lineKey(b)),
+  )
   const visible = showAll ? sorted : sorted.slice(0, PREVIEW_ROWS)
   const counted = countedLines(mine)
   // Lo ya pagado conserva su porcentaje: solo se dice uno si todos los cobros comparten el mismo.

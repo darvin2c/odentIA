@@ -19,18 +19,20 @@ import { usePermission } from "../../lib/crm"
 import { useOrgFinanceProfile } from "../../lib/finance-collect"
 
 export const Route = createFileRoute("/_org/settings/commissions")({
-  validateSearch: (search: Record<string, unknown>): { profesional?: string } =>
-    typeof search.profesional === "string" && search.profesional ? { profesional: search.profesional } : {},
+  validateSearch: (search: Record<string, unknown>): { profesional?: string; editar?: "porcentaje" } => ({
+    ...(typeof search.profesional === "string" && search.profesional ? { profesional: search.profesional } : {}),
+    ...(search.editar === "porcentaje" ? { editar: "porcentaje" as const } : {}),
+  }),
   pendingComponent: CommissionsSettingsPageSkeleton,
   component: CommissionsSettingsPage,
 })
 
-const COMMISSIONS_SETTINGS_SUBTITLE =
-  "Lo que se lleva cada profesional de lo cobrado por lo que atiende. Un cambio vale para lo que se atienda desde ese día: lo ya atendido conserva lo que tenía."
+const COMMISSIONS_SETTINGS_SUBTITLE = "Lo que se lleva cada profesional de lo cobrado por lo que atiende."
 
 function CommissionsSettingsPage() {
   const allowed = usePermission("commissions.write")
   const canFinance = usePermission("finance.read")
+  const canTeam = usePermission("settings.read")
   const search = Route.useSearch()
   const navigate = useNavigate()
   const profile = useOrgFinanceProfile()
@@ -77,11 +79,14 @@ function CommissionsSettingsPage() {
         <SkeletonRegion message="Cargando las comisiones…">
           <CommissionAgreementsSkeleton />
         </SkeletonRegion>
-      ) : agreementsQuery.isError ? (
+      ) : agreementsQuery.isError || profile.isError ? (
         <ErrorState
           title="No pudimos cargar las comisiones"
           message="Comprueba tu conexión y vuelve a intentarlo."
-          onRetry={() => void agreementsQuery.refetch()}
+          onRetry={() => {
+            if (agreementsQuery.isError) void agreementsQuery.refetch()
+            if (profile.isError) void profile.refetch()
+          }}
         />
       ) : !region ? (
         <EmptyState
@@ -93,16 +98,34 @@ function CommissionsSettingsPage() {
         />
       ) : (
         <>
+          <p className="text-sm text-muted-foreground">
+            Aparece cada persona del equipo que puede atender.{" "}
+            {canTeam ? (
+              <>
+                ¿Falta alguien?{" "}
+                <Link
+                  to="/settings/team"
+                  className="font-medium text-primary-soft-foreground underline-offset-2 hover:underline"
+                >
+                  Agrégalo en Equipo
+                </Link>
+                .
+              </>
+            ) : null}
+          </p>
           <CommissionAgreementsList
             agreements={agreementsQuery.data.data}
             locale={region.locale}
             timeZone={region.timezone}
             currency={region.currency}
             focusId={search.profesional ?? null}
+            openRate={search.editar === "porcentaje"}
+            // Se vino desde su fila en Finanzas: volver deja el mes y la liquidación como estaban.
+            onSaved={search.editar === "porcentaje" ? () => window.history.back() : undefined}
           />
           <p className="text-sm text-muted-foreground">
-            Aparece cada persona del equipo que puede atender. Si además tiene un sueldo fijo, se registra en Finanzas ›
-            Gastos como gasto que se repite. Cada profesional ve su comisión en «Mis honorarios».
+            Si además tiene un sueldo fijo, se registra en Finanzas › Gastos como gasto que se repite. Cada profesional
+            ve su comisión en «Mis honorarios».
           </p>
         </>
       )}

@@ -1111,7 +1111,7 @@ export function CommissionsSettingsPageSkeleton() {
   return (
     <SettingsPage
       title="Comisiones por profesional"
-      subtitle="Lo que se lleva cada profesional de lo cobrado por lo que atiende. Un cambio vale para lo que se atienda desde ese día: lo ya atendido conserva lo que tenía."
+      subtitle="Lo que se lleva cada profesional de lo cobrado por lo que atiende."
       message="Cargando las comisiones…"
       className="flex flex-col gap-4"
     >

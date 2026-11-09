@@ -244,6 +244,11 @@ export function calculationGroups(
   lines: ReadonlyArray<CommissionLine>,
   locale: string,
   currency: string,
+  /**
+   * Ya tiene su comisión decidida: lo que queda sin regla es un monto fijo que quedó en otra moneda que
+   * su servicio (no vale hasta escribirlo de nuevo), no algo por decidir.
+   */
+  decided = false,
 ): CalculationGroup[] {
   const groups = new Map<string, CalculationGroup & { order: number }>()
   for (const line of lines) {
@@ -252,7 +257,9 @@ export function calculationGroups(
     const rate = line.rateBps ?? 0
     // El orden: lo general (de mayor a menor), lo de cada servicio y al final lo que no comisiona.
     const [key, label, order] = line.unruled
-      ? ["sin-decidir", "Sin comisión decidida", 3]
+      ? decided
+        ? ["sin-decidir", "Sin comisión: un monto fijo quedó en otra moneda", 3]
+        : ["sin-decidir", "Sin comisión decidida", 3]
       : fixed
         ? [
             `monto:${line.description}:${line.fixedCents}`,
@@ -578,6 +585,8 @@ export function fetchCommissionRates(): Promise<{ data: CommissionRate[] }> {
 export interface CommissionAgreement {
   professionalUserId: string
   professionalName: string
+  /** Puede atender: solo a él se le pone una comisión; a quien ya no atiende, solo se le deja en 0. */
+  attends: boolean
   /** Porcentaje general de hoy; 0 si no tiene o si no cobra. */
   rateBps: number
   /** Ya tiene un porcentaje general, aunque sea 0: cambiarlo vale desde hoy. Sin él, el primero vale también para lo cobrado sin pagar. */
