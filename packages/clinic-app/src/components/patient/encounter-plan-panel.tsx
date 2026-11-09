@@ -369,8 +369,8 @@ export function EncounterPlanPanel({
                         >
                           {planDecisionLabel(item.decisionStatus)}
                         </Badge>
-                        {/* Lo que no eligió o no aceptó no se hará: «Pendiente» al lado confundía (QA del 8 nov). */}
-                        {isLeftOut(item.decisionStatus) ? null : (
+                        {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
+                        {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
                           <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
                         )}
                         {rowActions(item)}
@@ -994,6 +994,8 @@ function IndicationForm({
   const findings = vigentes.filter((entry) => tooth != null && entry.toothNumber === tooth)
 
   const blocked = disabled || pending
+  /** Elegir la pieza en el dibujo; con una ya puesta, se ofrece «Cambiar». */
+  const [pickingPlace, setPickingPlace] = useState(() => initial.teeth.length === 0)
   // El «dónde» del producto (odentIA: la pieza y sus caras).
   const site = productUi().site
   const validSurfaces = tooth != null ? (site?.partsOf(tooth) ?? []).map(String) : []
@@ -1027,17 +1029,36 @@ function IndicationForm({
           >
             {(field) => (
               <field.Control id={`${uid}-place`} label={site.placeLabel}>
-                {(control) => (
-                  <site.PlacesPicker
-                    id={control.id}
-                    invalid={control.invalid}
-                    aria-describedby={control.describedBy}
-                    onBlur={control.onBlur}
-                    value={field.state.value.slice(0, 1)}
-                    onChange={(next) => field.handleChange(next.slice(0, 1))}
-                    disabled={blocked}
-                  />
-                )}
+                {(control) =>
+                  // Con la pieza ya puesta (la del último hallazgo, o la del renglón al cambiarlo), se dice
+                  // en una línea: un segundo odontograma entero confundía (segunda mesa del 9 nov).
+                  !pickingPlace && field.state.value.length > 0 ? (
+                    <span className="flex flex-wrap items-center gap-2 text-sm">
+                      <span id={control.id} className="font-medium">
+                        {site.placeLabel} {field.state.value[0]}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={blocked}
+                        onClick={() => setPickingPlace(true)}
+                      >
+                        Cambiar
+                      </Button>
+                    </span>
+                  ) : (
+                    <site.PlacesPicker
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      value={field.state.value.slice(0, 1)}
+                      onChange={(next) => field.handleChange(next.slice(0, 1))}
+                      disabled={blocked}
+                    />
+                  )
+                }
               </field.Control>
             )}
           </form.AppField>

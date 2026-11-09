@@ -2163,10 +2163,6 @@ export function EncounterEditor({
                     field?.setSelectionRange(field.value.length, field.value.length)
                   })
                 }}
-                onRegisterSession={(itemId) => {
-                  setSessionPrefill(itemId)
-                  goTo(`${uid}-realizado`)
-                }}
                 disabled={locked}
                 beforeWrite={flush}
                 onChanged={handleChildChanged}

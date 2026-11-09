@@ -58,7 +58,6 @@ export function EncounterVisitStrip({
   onUseReason,
   reasonEmpty,
   onUrgency,
-  onRegisterSession,
   disabled,
   beforeWrite,
   onChanged,
@@ -74,8 +73,6 @@ export function EncounterVisitStrip({
   reasonEmpty: boolean
   /** «Es una urgencia»: deja el motivo listo para escribir. */
   onUrgency: () => void
-  /** «Registrar la sesión»: abre el registro con ese tratamiento puesto. */
-  onRegisterSession: (planItemId: string) => void
   disabled: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -148,7 +145,7 @@ export function EncounterVisitStrip({
                     {item.registered
                       ? "Sesión de hoy registrada en «Realizado hoy»"
                       : item.linked
-                        ? "Está en «Realizado hoy»: registra la sesión cuando la hagas"
+                        ? "Está en «Realizado hoy»: ahí registras su sesión cuando la hagas"
                         : item.started
                           ? "En curso"
                           : "Aceptado, sin empezar"}
@@ -156,15 +153,6 @@ export function EncounterVisitStrip({
                 </span>
                 {item.registered ? null : item.linked ? (
                   <span className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={disabled}
-                      aria-label={`Registrar la sesión de ${words}`}
-                      onClick={() => onRegisterSession(item.planItemId)}
-                    >
-                      Registrar la sesión
-                    </Button>
                     {fromAppointment ? null : (
                       <Button
                         type="button"
@@ -262,8 +250,7 @@ export function EncounterVisitStrip({
       )}
       {!nothing ? (
         <p className="text-xs text-muted-foreground">
-          Elegir no da nada por hecho: pone el motivo y el diagnóstico que sigue si faltan, la
-          sesión cuenta al registrarla y el control se cumple al firmar.
+          Elegir no lo da por hecho: la sesión cuenta cuando la registras y el control, al firmar.
         </p>
       ) : null}
       {error ? (
