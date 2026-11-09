@@ -603,6 +603,7 @@ function FinanceWorkspace() {
               <ExpensesTab
                 key={ws.branchId}
                 branchId={ws.branchId}
+                branchName={ws.branchName}
                 locale={ws.locale}
                 orgTimeZone={ws.orgTimeZone}
                 currency={ws.currency}

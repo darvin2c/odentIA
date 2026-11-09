@@ -200,6 +200,20 @@ No tiene camino en el código.
 
 **Fuentes:** SUSALUD (reglamento del libro de reclamaciones en salud; verificar el número vigente).
 
+## P-COM-20 Lo que paga la clínica y su comprobante
+
+**Dónde:** Finanzas › Gastos (`packages/clinic-app/src/components/finance/`), Inventario › pagar una compra (`components/inventory/purchase-payment-drawer.tsx`) y Reportes › Finanzas. Las tablas `expense`, `expense_recurring` y `supplier`.
+
+- [ ] Cada pago dice con qué se pagó y su n.º de operación, igual al registrar un gasto, al pagar lo que se repite y al pagar una compra.
+- [ ] El comprobante es el del país (tabla 10 de SUNAT en el Perú), con su número. El RUC del proveedor se revisa y se dice si no cuadra.
+- [ ] Un comprobante propuesto no se guarda como real: lo que falta (número o RUC) se ve en la lista.
+- [ ] El contador puede llevarse la lista del mes con tipo, número, RUC, total, medio y operación.
+- [ ] Corregir deja el rastro de todo lo que cambió, incluido el comprobante.
+- [ ] El pago a un especialista que no está en planilla (recibo por honorarios) dice a quién y su RUC, y no se suma dos veces con su comisión.
+- [ ] Gastos y Reportes dicen la misma cifra por tipo y por sede.
+
+**Fuentes:** ADR 0061, 0150, 0151 y 0167. SUNAT: tabla 10 de comprobantes, RUC de 11 dígitos con verificador y el registro de compras (verificar los artículos antes de citarlos).
+
 ---
 
 ## Casos
@@ -218,3 +232,4 @@ No tiene camino en el código.
 | CC10 | Durante la anestesia, el paciente se desmaya. | 11 | El evento queda en la atención y lo que se hizo; no se pierde. |
 | CC11 | El paciente rechaza la exodoncia indicada y se va con la pieza infectada. | 13, 14 | Constancia del rechazo con los riesgos explicados; aviso si no vuelve. |
 | CC12 | La familia avisa que el paciente falleció. | 16 | Se marca; no salen más mensajes; la historia queda. |
+| CC13 | Fin de mes en una clínica de dos sedes: se paga la luz por otro importe, la factura del laboratorio y los honorarios del endodoncista visitante; se corrige un RUC mal escrito y se le entrega la lista al contador. | 20 | Todo con su comprobante y RUC; la corrección dice qué cambió; la lista se descarga; Gastos y Reportes cuadran. |

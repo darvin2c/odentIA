@@ -1,5 +1,5 @@
 {
-  "id": "aac5e1df-d461-4f1c-8cfd-a7fcd6a8a11d",
+  "id": "12e7d4f2-0061-453d-98e3-f48da08d76e0",
   "prevId": "6618cb27-5901-49fb-8946-407a3f57a615",
   "version": "7",
   "dialect": "postgresql",
@@ -955,7 +955,7 @@
       "checkConstraints": {
         "saas_demo_product_check": {
           "name": "saas_demo_product_check",
-          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical')"
         },
         "saas_demo_size_check": {
           "name": "saas_demo_size_check",
@@ -23466,7 +23466,7 @@
       "checkConstraints": {
         "treatment_template_product_check": {
           "name": "treatment_template_product_check",
-          "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical')"
         },
         "treatment_template_usual_sessions_check": {
           "name": "treatment_template_usual_sessions_check",
@@ -30239,6 +30239,60 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payment_method_id": {
+          "name": "payment_method_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method_name": {
+          "name": "method_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method_type_code": {
+          "name": "method_type_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_reference": {
+          "name": "payment_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "receipt_type": {
+          "name": "receipt_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_id": {
+          "name": "supplier_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_name": {
+          "name": "supplier_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_tax_id": {
+          "name": "supplier_tax_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "replaces_expense_id": {
+          "name": "replaces_expense_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -30297,6 +30351,49 @@
           ],
           "isUnique": true,
           "where": "\"expense\".\"request_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_org_id_uidx": {
+          "name": "expense_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_replaces_uidx": {
+          "name": "expense_replaces_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "replaces_expense_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"expense\".\"replaces_expense_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -30447,6 +30544,51 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "expense_payment_method_org_fk": {
+          "name": "expense_payment_method_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "organization_payment_method",
+          "columnsFrom": [
+            "organization_id",
+            "payment_method_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_supplier_org_fk": {
+          "name": "expense_supplier_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "supplier",
+          "columnsFrom": [
+            "organization_id",
+            "supplier_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_replaces_org_fk": {
+          "name": "expense_replaces_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "expense",
+          "columnsFrom": [
+            "organization_id",
+            "replaces_expense_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "expense_recurring_id_org_fk": {
           "name": "expense_recurring_id_org_fk",
           "tableFrom": "expense",
@@ -30482,6 +30624,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "expense_method_check": {
+          "name": "expense_method_check",
+          "value": "(\"expense\".\"payment_method_id\" IS NULL OR \"expense\".\"method_name\" IS NOT NULL) AND (\"expense\".\"method_type_code\" IS NULL OR \"expense\".\"method_type_code\" IN ('10','48','30','68','20','1'))"
+        },
         "expense_recurring_link_check": {
           "name": "expense_recurring_link_check",
           "value": "(\"expense\".\"recurring_id\" IS NULL) = (\"expense\".\"recurring_month\" IS NULL) AND (\"expense\".\"recurring_month\" IS NULL OR \"expense\".\"recurring_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')"
@@ -30709,6 +30855,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payment_method_id": {
+          "name": "payment_method_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -30868,6 +31020,21 @@
             "created_by"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_payment_method_org_fk": {
+          "name": "expense_recurring_payment_method_org_fk",
+          "tableFrom": "expense_recurring",
+          "tableTo": "organization_payment_method",
+          "columnsFrom": [
+            "organization_id",
+            "payment_method_id"
+          ],
+          "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",
@@ -31692,7 +31859,7 @@
         },
         "org_profile_product_check": {
           "name": "org_profile_product_check",
-          "value": "\"org_profile\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"org_profile\".\"product\" IN ('dental','medical')"
         },
         "org_profile_sheet_size_check": {
           "name": "org_profile_sheet_size_check",
@@ -40434,7 +40601,7 @@
       "checkConstraints": {
         "saas_plan_product_check": {
           "name": "saas_plan_product_check",
-          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical')"
         },
         "saas_plan_founders_check": {
           "name": "saas_plan_founders_check",
@@ -40785,13 +40952,6 @@
           "notNull": true,
           "default": "'invitacion'"
         },
-        "optical_mode": {
-          "name": "optical_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'invitacion'"
-        },
         "updated_by": {
           "name": "updated_by",
           "type": "text",
@@ -40845,10 +41005,6 @@
         "saas_signup_policy_medical_mode_check": {
           "name": "saas_signup_policy_medical_mode_check",
           "value": "\"admin\".\"saas_signup_policy\".\"medical_mode\" IN ('invitacion','abierta')"
-        },
-        "saas_signup_policy_optical_mode_check": {
-          "name": "saas_signup_policy_optical_mode_check",
-          "value": "\"admin\".\"saas_signup_policy\".\"optical_mode\" IN ('invitacion','abierta')"
         }
       },
       "isRLSEnabled": false
@@ -41439,7 +41595,7 @@
         },
         "saas_waitlist_request_product_check": {
           "name": "saas_waitlist_request_product_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical')"
         },
         "saas_waitlist_request_text_check": {
           "name": "saas_waitlist_request_text_check",

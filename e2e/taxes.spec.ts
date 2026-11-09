@@ -77,8 +77,10 @@ test("impuestos (ADR 0083): viene el IGV del país, el ticket lo separa, Reporte
   await expense.getByText("IGV de tus cobros").click()
   await expense.getByLabel("En qué se gastó").fill("IGV del mes")
   await expense.getByLabel("Importe", { exact: true }).fill("36")
+  // Con qué se pagó (ADR 0167): por transferencia, no sale de la caja.
+  await expense.getByRole("button", { name: "Transferencia", exact: true }).click()
   await observe(page, "gasto-igv")
-  await expense.getByRole("button", { name: "Registrar gasto", exact: true }).click()
+  await expense.getByRole("button", { name: /^Registrar S\// }).click()
   await expect(expense).toBeHidden()
   const after = await call<{ totals: { current: { leavesCents: number } }; cascade: { salesTaxPaidCents: number } }>(
     page,

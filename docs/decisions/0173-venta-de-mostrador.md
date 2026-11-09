@@ -28,4 +28,4 @@ Todo cobro exigía una ficha: el ticket, el pago y el cargo apuntaban a un pacie
 
 ## Referencias
 
-`packages/db/src/schema/clinical.ts`, `packages/db/drizzle/0079_venta_de_mostrador.sql`, `packages/services/src/counter-sale.ts`, `packages/services/src/ticket-party.ts`, `packages/services/src/payments.ts` (`productSaleOf`, `collectMethodsOf`, `recordTicketCash`, `voidTicket`, `returnFromTicket`), `apps/api/src/routes/finance.ts` (`/counter-sales`), `packages/clinic-app/src/components/finance/counter-sale-drawer.tsx`.
+`packages/db/src/schema/clinical.ts`, `packages/db/drizzle/0081_venta_de_mostrador.sql`, `packages/services/src/counter-sale.ts`, `packages/services/src/ticket-party.ts`, `packages/services/src/payments.ts` (`productSaleOf`, `collectMethodsOf`, `recordTicketCash`, `voidTicket`, `returnFromTicket`), `apps/api/src/routes/finance.ts` (`/counter-sales`), `packages/clinic-app/src/components/finance/counter-sale-drawer.tsx`.
