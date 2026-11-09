@@ -3327,9 +3327,12 @@ export async function getEncounterConsentNeeds(
     const mine = sources.filter((source) => linked.has(source.serviceId))
     const published = templates.find((t) => t.key === key && t.status === "publicado") ?? null
     const latest = templates.find((t) => t.key === key) ?? null
+    // El de algo que dejó fuera no cubre a otro tratamiento con la misma plantilla
+    // (la 38 que se cambió por la 48): ese pide el suyo.
     const ownDocs = documents.filter(
       (doc) =>
         doc.key === key &&
+        !(doc.planItemId && leftOut.has(doc.planItemId)) &&
         (doc.encounterId === encounterId || (doc.planItemId && mine.some((s) => s.planItemId === doc.planItemId))),
     )
     const signed = ownDocs.find((doc) => doc.status === "firmado")

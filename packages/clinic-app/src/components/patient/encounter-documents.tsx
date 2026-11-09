@@ -87,6 +87,29 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * formularios, imágenes y archivos. Una sola lectura para el bloque, su
  * resumen y el cierre: React Query comparte las consultas.
  */
+/**
+ * Lo que falta firmar lo dice el servidor (lo que la atención pide): uno preparado
+ * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) ya no se
+ * pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su enlace sigue su
+ * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide».
+ */
+export function consentsStillAsked<T extends { id: string; linkSentAt?: string | null; personSignedAt?: string | null }>(
+  pending: readonly T[],
+  needs: { data?: { data: ReadonlyArray<{ documentId: string | null }> }; isFetching: boolean },
+): { pendingSignatures: T[]; notAsked: T[]; toSign: T[] } {
+  const asked = needs.data && !needs.isFetching ? new Set(needs.data.data.map((need) => need.documentId)) : null
+  const notAsked = asked
+    ? pending.filter((doc) => !asked.has(doc.id) && !doc.linkSentAt && !doc.personSignedAt)
+    : []
+  const pendingSignatures = pending.filter((doc) => !notAsked.includes(doc))
+  return {
+    pendingSignatures,
+    notAsked,
+    // Lo firmado en su enlace solo falta confirmarlo; lo enviado de algo que ya no se pide, no se ofrece aquí.
+    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!asked || asked.has(doc.id))),
+  }
+}
+
 export function useEncounterDocuments(
   patientId: string,
   encounterId: string,
@@ -149,15 +172,10 @@ export function useEncounterDocuments(
     (leave) => leave.encounterId === encounterId && leave.status === "emitido",
   )
   const needList = needs.data?.data ?? []
-  // Lo que falta firmar lo dice el servidor: uno preparado para lo que la persona
-  // dejó fuera (no lo aceptó o eligió otro camino) ya no se pide. Queda a la vista,
-  // sin «Firmar ahora». Lo que ya va por su enlace sigue su curso.
-  const asked = needs.data ? new Set(needList.map((need) => need.documentId)) : null
-  const pending = ownConsents.filter((doc) => doc.status === "pendiente")
-  const notAsked = asked
-    ? pending.filter((doc) => !asked.has(doc.id) && !doc.linkSentAt && !doc.personSignedAt)
-    : []
-  const pendingSignatures = pending.filter((doc) => !notAsked.includes(doc))
+  const { pendingSignatures, notAsked, toSign } = consentsStillAsked(
+    ownConsents.filter((doc) => doc.status === "pendiente"),
+    needs,
+  )
   return {
     needs: needList,
     /** Preparado para lo que dejó fuera: ya no hace falta firmarlo. */
@@ -167,7 +185,7 @@ export function useEncounterDocuments(
     consents: ownConsents,
     pendingSignatures,
     /** Lo que aún no firmó; lo firmado en su enlace solo falta confirmarlo. */
-    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt),
+    toSign,
     orders: ownOrders,
     prescriptions: ownPrescriptions,
     forms: ownForms,

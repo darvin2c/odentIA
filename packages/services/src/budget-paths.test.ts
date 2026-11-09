@@ -34,8 +34,9 @@ import {
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, getEncounterClosing, getEncounterDetail } from "./encounters.js"
 import { getTreatmentCoordination } from "./treatment-coordination.js"
+import { getPatientSummary } from "./patient-history.js"
 import { getPatientAccount } from "./payments.js"
-import { addPlanItem, listPlanItems } from "./plan.js"
+import { addPlanItem, listPlanItems, revisePlanItem } from "./plan.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { withOrgContext } from "@odentia/db"
 setupTestDb()
@@ -350,8 +351,10 @@ it("lo del camino que no eligió no pide consentimiento ni cuenta por ejecutar, 
   // Eligió conservar: la exodoncia quedó «No elegida» y su estado sigue pendiente.
   const plan = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
   expect(plan.find((item) => item.id === exodoncia.id)).toMatchObject({ decisionStatus: "no_elegida", status: "pendiente" })
-  // El de la exodoncia ya preparado queda en Documentos, pero no se pide.
+  // El de la exodoncia ya preparado queda en Documentos, pero no se pide, ni en el Resumen.
   expect(await needed()).toEqual(["Endodoncia"])
+  const summary = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
+  expect(summary.pendingConsents.map((row) => row.title)).toEqual(["Endodoncia"])
   expect(await toExecute()).toBe(4)
   // El cierre tampoco la pide.
   const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
@@ -396,4 +399,25 @@ it("lo que no aceptó no pide consentimiento; si lo acepta en la revisión, vuel
   )
   expect(await needed()).toEqual(["Exodoncia"])
   expect(await toExecute()).toBe(5)
+})
+
+it("el consentimiento preparado para lo que se reemplazó no cubre al que lo reemplaza: ese pide el suyo", async () => {
+  const { f, exodoncia } = await ana()
+  await consents(f, { Exodoncia: exodoncia.serviceId! })
+  const needs = () => f.run((tx) => getEncounterConsentNeeds(tx, "org_a", f.patient.id, f.encounter.id))
+  const prepared = await f.run((tx) => prepareEncounterConsents(tx, ...f.args, f.encounter.id))
+  expect(prepared.created).toHaveLength(1)
+  // Era la 47, no la 46: se corrige en la misma atención.
+  await f.run((tx) =>
+    revisePlanItem(tx, ...f.args, exodoncia.id, {
+      encounterId: f.encounter.id,
+      reason: "Era la 47",
+      serviceId: exodoncia.serviceId!,
+      toothNumber: 47,
+    }),
+  )
+  const [need, ...rest] = await needs()
+  expect(rest).toEqual([])
+  expect(need).toMatchObject({ title: "Exodoncia", status: "sin_preparar", documentId: null })
+  expect(need!.procedureRef).toContain("47")
 })
