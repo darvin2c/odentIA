@@ -939,6 +939,11 @@ async function waitingUnsentBudgets(
       where l.organization_id = b.organization_id and l.budget_id = b.id) armado
     where b.organization_id = ${orgId} and b.status = 'borrador' and b.supersedes_budget_id is null
       and armado.at < ${dayStart}
+      -- Lo que lleva algo de una atención aún en borrador se arma al firmarla (la regla de unsentBudgetOf).
+      and not exists (select 1 from treatment_budget_item l
+        join treatment_plan_item i on i.organization_id = l.organization_id and i.id = l.plan_item_id
+        join encounter e on e.organization_id = i.organization_id and e.id = i.source_encounter_id
+        where l.organization_id = b.organization_id and l.budget_id = b.id and e.status = 'borrador')
     order by armado.at, b.id limit ${WAITING_LIMITS.unsentBudgets}`)
   return {
     items: rows.map(({ total: _total, totals, ...row }) => {

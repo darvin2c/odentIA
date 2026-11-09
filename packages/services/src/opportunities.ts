@@ -95,6 +95,8 @@ export type MoveCause =
   | "respondio"
   /** Se reabrió sola: le presentaron otra versión del presupuesto (ADR 0144). */
   | "nueva_version"
+  /** Se reabrió sola: se anuló, con su atención, el presupuesto que había aceptado. */
+  | "presupuesto_anulado"
 
 /** Quién hace algo con la oportunidad: una persona, el agente o el sistema por algo que pasó. */
 export interface OpportunityActor {
@@ -409,6 +411,7 @@ function whyOf(
 function reopenedWords(cause: string | null): string | null {
   if (cause === "respondio") return "Se reabrió sola: respondió después de darse por perdida"
   if (cause === "nueva_version") return "Se reabrió sola: le presentaron otra versión del presupuesto"
+  if (cause === "presupuesto_anulado") return "Se reabrió sola: se anuló el presupuesto que había aceptado"
   return null
 }
 
@@ -2488,6 +2491,29 @@ export async function releaseCancelledBudget(
     }
   }
   return linked.map((row) => row.id)
+}
+
+/**
+ * Se anula un presupuesto que la persona había aceptado (al anular la atención
+ * de la que salió): la oportunidad que se ganó con él no fue una venta. Se
+ * reabre, diciendo por qué, y `releaseCancelledBudget` decide como con
+ * cualquier presupuesto anulado: perdida si nació de él y nadie la trabajó, o
+ * abierta y suelta si no. Devuelve las que reabrió.
+ */
+export async function revokeWonBudget(
+  tx: Db,
+  orgId: string,
+  input: { budgetId: string; userId: string | null },
+): Promise<string[]> {
+  const won = await tx
+    .select({ id: opportunity.id })
+    .from(opportunity)
+    .where(and(eq(opportunity.organizationId, orgId), eq(opportunity.budgetId, input.budgetId), eq(opportunity.status, "won")))
+    .for("update")
+  for (const { id } of won) {
+    await reopenOpportunity(tx, orgId, id, { userId: input.userId, origin: "automatico", cause: "presupuesto_anulado" })
+  }
+  return won.map((row) => row.id)
 }
 
 /** Días después del fin de su vigencia en que la oportunidad de un presupuesto sin respuesta se da por perdida. */
