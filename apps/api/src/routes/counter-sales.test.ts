@@ -113,8 +113,11 @@ it("solo quien cobra vende en el mostrador, con el cuerpo exacto", async () => {
 })
 
 it("el ticket sin ficha se abre, se imprime, se devuelve y se anula por su id", async () => {
+  // Caja solo ve a los pacientes: quien no lo es no se elige como quien compra (se le escribe el nombre).
+  const unseen = await call("cashier", "POST", "/counter-sales", body({ contactId: PERSON }))
+  expect(unseen).toMatchObject({ status: 404, body: { error: { code: "NOT_FOUND" } } })
   const request = body({ contactId: PERSON })
-  const sold = await call("cashier", "POST", "/counter-sales", request)
+  const sold = await call("owner", "POST", "/counter-sales", request)
   expect(sold.status).toBe(201)
   const ticket = sold.body.data.ticket
   expect(ticket).toMatchObject({ patientId: null, buyerContactId: PERSON, totalCents: 9000, changeCents: 1000 })

@@ -16,11 +16,14 @@ import { useStore } from "@tanstack/react-form"
 import { useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import * as React from "react"
+import { ApiError } from "../../lib/api"
+import { usePermission } from "../../lib/crm"
 import {
   CASH_TYPE_CODE,
   type CollectTicketRow,
   COUNTER_SALE_LABEL,
   counterSaleApi,
+  fetchSaleProducts,
   type PaymentMethodOption,
   usePaymentMethodsOptions,
 } from "../../lib/finance-collect"
@@ -103,12 +106,16 @@ export function CounterSaleDrawer({
   currency: string
   locale: string
   onClose: () => void
-  /** Vendido: el ticket, para abrirlo al lado. */
-  onSold: (ticket: CollectTicketRow) => void
+  /** Vendido: el ticket, para abrirlo al lado; `already`, si ya estaba registrada (un reintento). */
+  onSold: (ticket: CollectTicketRow, already: boolean) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
-  // La misma clave mientras el cajón siga abierto; al vender, otra: es otra venta.
+  // La misma clave mientras sea la misma venta: si no llegó la respuesta, cobrar otra vez
+  // devuelve el ticket que ya se registró. Al vender, o si el servidor dice que con esta
+  // clave se cobró otra cosa, otra: es otra venta.
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID())
+  // Caja solo ve a los pacientes: elige entre ellos o escribe el nombre.
+  const seesEveryone = usePermission("crm.read")
   const money = (cents: number) => formatMoney(cents, currency, locale)
   const centsOf = (raw: string): number | null => {
     if (!raw.trim()) return null
@@ -196,24 +203,61 @@ export function CounterSaleDrawer({
       const lines = value.lines.flatMap((line) =>
         line.product ? [{ productId: line.product.productId, quantity: quantityOf(line.quantity) as number }] : [],
       )
-      const { data } = await counterSaleApi({
-        branchId,
-        requestId,
-        lines,
-        ...(value.buyerMode === "persona" && value.person ? { contactId: value.person.id } : {}),
-        ...(value.buyerMode === "nombre" && value.buyerName.trim() ? { buyerName: value.buyerName.trim() } : {}),
-        payments: value.payments.map((row, index) => ({ paymentMethodId: row.methodId, amountCents: paid[index] ?? 0 })),
-        ...(received !== null ? { cashReceivedCents: received } : {}),
-      })
+      let data: Awaited<ReturnType<typeof counterSaleApi>>["data"]
+      try {
+        ;({ data } = await counterSaleApi({
+          branchId,
+          requestId,
+          lines,
+          ...(value.buyerMode === "persona" && value.person ? { contactId: value.person.id } : {}),
+          ...(value.buyerMode === "nombre" && value.buyerName.trim() ? { buyerName: value.buyerName.trim() } : {}),
+          payments: value.payments.map((row, index) => ({ paymentMethodId: row.methodId, amountCents: paid[index] ?? 0 })),
+          ...(received !== null ? { cashReceivedCents: received } : {}),
+        }))
+      } catch (error) {
+        const code = error instanceof ApiError ? error.shape.code : undefined
+        // Con esta clave ya se cobró otra cosa: el mensaje dice cuál, y cobrar de nuevo es otra venta.
+        if (code === "REQUEST_ID_CONFLICT") setRequestId(crypto.randomUUID())
+        if (code === "COUNTER_SALE_SHORT" || code === "COUNTER_SALE_OVER") {
+          const changed = await refreshPrices().catch(() => [])
+          if (changed.length > 0)
+            throw new ApiError(409, {
+              code: "COUNTER_SALE_PRICE_CHANGED",
+              message: `Cambió el precio de ${changed.join(", ")}: revisa el total y vuelve a cobrar.`,
+            })
+        }
+        throw error
+      }
       // Lo vendido salió de la sede: la búsqueda y el inventario dicen lo que queda.
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
       void queryClient.invalidateQueries({ queryKey: ["sale-products"] })
       form.reset()
       setRequestId(crypto.randomUUID())
-      onSold(data.ticket)
+      onSold(data.ticket, data.duplicate)
     },
   })
   const surface = useFormSurface(form, { fieldMap: serverField })
+
+  /**
+   * Si el precio de un producto cambió mientras se vendía, el total de la pantalla
+   * ya no es el del servidor: se traen los de ahora a cada fila y se dice cuáles.
+   */
+  async function refreshPrices(): Promise<string[]> {
+    const current = form.getFieldValue("lines")
+    const changed: string[] = []
+    await Promise.all(
+      current.map(async (line, index) => {
+        const chosen = line.product
+        if (!chosen) return
+        const list = await fetchSaleProducts({ branchId, q: chosen.barcode ?? chosen.name, limit: 20 })
+        const fresh = list.data.items.find((item) => item.productId === chosen.productId)
+        if (!fresh || (fresh.salePriceCents === chosen.salePriceCents && fresh.currency === chosen.currency)) return
+        form.setFieldValue(`lines[${index}].product`, { ...chosen, salePriceCents: fresh.salePriceCents, currency: fresh.currency })
+        changed.push(chosen.name)
+      }),
+    )
+    return changed
+  }
 
   const lines = useStore(form.store, (state) => state.values.lines)
   const buyerMode = useStore(form.store, (state) => state.values.buyerMode)
@@ -410,7 +454,9 @@ export function CounterSaleDrawer({
                 description={
                   person?.patientId
                     ? "Es paciente: esta venta no entra en su cuenta ni en su historia. Si debe ir a su cuenta, cóbrala con «Cobrar»."
-                    : "Cualquier persona que ya está, sea o no paciente."
+                    : seesEveryone
+                      ? "Cualquier persona que ya está, sea o no paciente."
+                      : "Uno de los pacientes. Si no es paciente, elige «Solo su nombre»."
                 }
               >
                 {(control) => (

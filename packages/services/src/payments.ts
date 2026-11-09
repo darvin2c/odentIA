@@ -1584,7 +1584,7 @@ export async function collectCharge(
   // Misma clave de idempotencia = misma transacción lógica: se serializa antes
   // de leer (sin catch de carrera: el lock transaccional ordena los reintentos).
   await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtext('collect:' || ${orgId} || ':' || ${input.requestId}))`,
+    sql`select pg_advisory_xact_lock(hashtext('collect:' || ${orgId} || ':' || ${String(input.requestId).toLowerCase()}))`,
   )
   const money = await lockOrgMoney(tx, orgId)
   // Sin respaldo de un país: la moneda sale del perfil o no hay cobro.
@@ -3839,20 +3839,6 @@ export async function getTicketReceipt(
     /** Devoluciones de este ticket (ADR 0068). */
     returns: await returnsOfTickets(tx, orgId, [ticket.id]),
   }
-}
-
-/**
- * El paciente de un ticket, para la guarda de su historia bloqueada (404 si no
- * existe). Nulo en una venta de mostrador: no tiene historia que guardar.
- */
-export async function ticketPatientId(tx: Db, orgId: string, ticketId: string): Promise<string | null> {
-  const [row] = await tx
-    .select({ patientId: paymentTicket.patientId })
-    .from(paymentTicket)
-    .where(and(eq(paymentTicket.id, ticketId), eq(paymentTicket.organizationId, orgId)))
-    .limit(1)
-  if (!row) throw notFound("Ticket")
-  return row.patientId
 }
 
 /**

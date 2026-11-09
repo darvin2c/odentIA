@@ -53,7 +53,7 @@ export async function seedCounterSales(tx: Db, input: CounterSalesSeedInput): Pr
     lines: [{ productId: first.id }],
     payments: [{ paymentMethodId: cash.id, amountCents: first.priceCents }],
     cashReceivedCents: Math.ceil((first.priceCents + 1) / bill) * bill,
-  })
+  }, () => true)
   const second = priced[1] ?? first
   await sellAtCounter(tx, orgId, ownerUserId, {
     branchId,
@@ -61,6 +61,6 @@ export async function seedCounterSales(tx: Db, input: CounterSalesSeedInput): Pr
     lines: [{ productId: second.id, quantity: 2 }],
     buyer: { name: input.buyerName ?? "Carlos Mendoza" },
     payments: [{ paymentMethodId: other.id, amountCents: second.priceCents * 2 }],
-  })
+  }, () => true)
   return 2
 }

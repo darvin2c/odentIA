@@ -20,7 +20,8 @@ ALTER TABLE "payment_ticket" ADD CONSTRAINT "payment_ticket_buyer_name_check" CH
 -- nombre o a nadie. Los checks de arriba dicen lo que cada fila sin paciente puede
 -- ser; esto dice con qué se une: lo que no tiene ficha solo se une a lo que tampoco
 -- la tiene, para que una venta de mostrador nunca pague ni reciba la cuenta de un
--- paciente (ni su saldo a favor). Solo al insertar: lo que ya existe no cambia.
+-- paciente (ni su saldo a favor), y lo que se aplica o se devuelve queda en su propio
+-- ticket: el pago de una venta no paga ni devuelve lo de otra.
 CREATE FUNCTION public.counter_sale_same_party() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -43,9 +44,35 @@ BEGIN
       SELECT (t.patient_id IS NULL) = (NEW.patient_id IS NULL) INTO ok
         FROM payment_ticket t WHERE t.organization_id = NEW.organization_id AND t.id = NEW.ticket_id;
     END IF;
+    -- Sin ficha, el pago, lo aplicado y el concepto son de un mismo ticket.
+    IF ok AND NEW.patient_id IS NULL THEN
+      SELECT p.ticket_id = NEW.ticket_id INTO ok
+        FROM patient_payment p WHERE p.organization_id = NEW.organization_id AND p.id = NEW.payment_id;
+      IF ok AND EXISTS (
+        SELECT 1 FROM patient_payment_application a
+         WHERE a.organization_id = NEW.organization_id AND a.charge_id = NEW.charge_id AND a.ticket_id <> NEW.ticket_id
+      ) THEN
+        ok := false;
+      END IF;
+      IF ok IS NOT TRUE THEN
+        RAISE EXCEPTION 'Lo de una venta de mostrador queda en su propio ticket (%)', TG_TABLE_NAME
+          USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
   ELSIF TG_TABLE_NAME = 'patient_payment_refund' THEN
     SELECT (p.patient_id IS NULL) = (NEW.patient_id IS NULL) INTO ok
       FROM patient_payment p WHERE p.organization_id = NEW.organization_id AND p.id = NEW.payment_id;
+    -- Sin ficha, se devuelve el pago del mismo ticket que se devuelve.
+    IF ok AND NEW.patient_id IS NULL THEN
+      SELECT p.ticket_id = r.ticket_id INTO ok
+        FROM patient_payment p, payment_return r
+       WHERE p.organization_id = NEW.organization_id AND p.id = NEW.payment_id
+         AND r.organization_id = NEW.organization_id AND r.id = NEW.return_id;
+      IF ok IS NOT TRUE THEN
+        RAISE EXCEPTION 'Lo de una venta de mostrador queda en su propio ticket (%)', TG_TABLE_NAME
+          USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
   ELSIF TG_TABLE_NAME = 'payment_return' THEN
     SELECT (t.patient_id IS NULL) = (NEW.patient_id IS NULL) INTO ok
       FROM payment_ticket t WHERE t.organization_id = NEW.organization_id AND t.id = NEW.ticket_id;
@@ -61,6 +88,26 @@ CREATE TRIGGER patient_payment_counter_sale BEFORE INSERT ON public.patient_paym
 CREATE TRIGGER patient_payment_application_counter_sale BEFORE INSERT ON public.patient_payment_application FOR EACH ROW EXECUTE FUNCTION public.counter_sale_same_party();--> statement-breakpoint
 CREATE TRIGGER patient_payment_refund_counter_sale BEFORE INSERT ON public.patient_payment_refund FOR EACH ROW EXECUTE FUNCTION public.counter_sale_same_party();--> statement-breakpoint
 CREATE TRIGGER payment_return_counter_sale BEFORE INSERT ON public.payment_return FOR EACH ROW EXECUTE FUNCTION public.counter_sale_same_party();--> statement-breakpoint
+
+-- Después tampoco cambia de cuenta: lo del mostrador no pasa a una ficha ni lo de una
+-- ficha queda sin ella. Pasar de una ficha a otra sigue como estaba.
+CREATE FUNCTION public.counter_sale_stays() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF (OLD.patient_id IS NULL) <> (NEW.patient_id IS NULL) THEN
+    RAISE EXCEPTION 'Una venta de mostrador no cambia de cuenta (%)', TG_TABLE_NAME
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER patient_charge_counter_stays BEFORE UPDATE OF patient_id ON public.patient_charge FOR EACH ROW EXECUTE FUNCTION public.counter_sale_stays();--> statement-breakpoint
+CREATE TRIGGER patient_payment_counter_stays BEFORE UPDATE OF patient_id ON public.patient_payment FOR EACH ROW EXECUTE FUNCTION public.counter_sale_stays();--> statement-breakpoint
+CREATE TRIGGER patient_payment_application_counter_stays BEFORE UPDATE OF patient_id ON public.patient_payment_application FOR EACH ROW EXECUTE FUNCTION public.counter_sale_stays();--> statement-breakpoint
+CREATE TRIGGER patient_payment_refund_counter_stays BEFORE UPDATE OF patient_id ON public.patient_payment_refund FOR EACH ROW EXECUTE FUNCTION public.counter_sale_stays();--> statement-breakpoint
+CREATE TRIGGER payment_return_counter_stays BEFORE UPDATE OF patient_id ON public.payment_return FOR EACH ROW EXECUTE FUNCTION public.counter_sale_stays();--> statement-breakpoint
+CREATE TRIGGER payment_ticket_counter_stays BEFORE UPDATE OF patient_id ON public.payment_ticket FOR EACH ROW EXECUTE FUNCTION public.counter_sale_stays();--> statement-breakpoint
 
 -- Argos ve la venta de mostrador como lo demás que se cobró: sus vistas de dinero ya
 -- no la pierden al unirse con la ficha. Sin ficha, «paciente» dice «Venta de

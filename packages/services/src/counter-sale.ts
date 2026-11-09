@@ -26,6 +26,7 @@ import { chargeTaxOf, orgTaxes, splitTaxAcrossPayments, ticketTaxesOf } from "./
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { lockOrgMoney, requireBranch } from "./finance.js"
 import { buildTicketSnapshot, renderReturnPdf, renderTicketPdf } from "./financial-document-pdf.js"
+import { assertPersonVisible, type PersonCan } from "./people.js"
 import { findOrgLocale, formatOrgMoney, orgProfileRequired } from "./locale.js"
 import {
   assertPositiveCents,
@@ -118,8 +119,10 @@ function buyerOf(input: CounterSaleBuyer | undefined): { contactId: string } | {
  * de la sede al venderse), el ticket numerado con lo que congela, un pago por
  * medio aplicado a esos conceptos y la caja de la sede. Todo o nada.
  * Idempotente por `requestId`, en el mismo orden que un cobro con esa clave.
+ * `can` es lo que puede quien vende: quien solo ve pacientes (Caja) solo elige
+ * a un paciente como quien compra, igual que en «Personas».
  */
-export async function sellAtCounter(tx: Db, orgId: string, actorUserId: string, input: CounterSaleInput) {
+export async function sellAtCounter(tx: Db, orgId: string, actorUserId: string, input: CounterSaleInput, can: PersonCan) {
   if (typeof input.requestId !== "string" || !UUID.test(input.requestId))
     throw invalidField("requestId", "No se pudo identificar esta venta: cierra la venta y vuelve a abrirla")
   const requestId = input.requestId.toLowerCase()
@@ -153,11 +156,12 @@ export async function sellAtCounter(tx: Db, orgId: string, actorUserId: string, 
     .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.requestId, requestId)))
   if (replay) {
     // El mismo formulario otra vez (un corte de red, un doble clic): el mismo ticket, sin registrar nada.
+    // Dice cuál es: quizá se cobró y no llegó la respuesta. Lo que sigue (revisarlo o cobrar otra) lo decide quien cobra.
     if (replay.patientId !== null || (replay.snapshot as TicketFrozen | null)?.request !== fingerprint)
       throw new ServiceError(
         "REQUEST_ID_CONFLICT",
         409,
-        "Esta venta ya se cobró con otros datos. Cierra la venta y vuelve a abrirla para cobrar otra.",
+        `Esta venta ya se cobró con otros datos, en el ticket ${String(replay.ticketNumber).padStart(6, "0")}. Revísalo en Cobros; si es otra venta, vuelve a cobrarla.`,
       )
     const payments = await tx
       .select()
@@ -204,9 +208,11 @@ export async function sellAtCounter(tx: Db, orgId: string, actorUserId: string, 
       .from(contact)
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, buyer.contactId)))
       .limit(1)
-    // Una persona archivada (o con su historia bloqueada) no se elige: para la venta, no existe.
+    // Una persona archivada no se elige: para la venta, no existe. La historia bloqueada
+    // siempre está archivada (`contact_record_lock_check`), así que tampoco.
     if (!person || !person.isActive)
       throw new ServiceError("NOT_FOUND", 404, "Contacto no encontrado", { contactId: "Contacto no encontrado" })
+    await assertPersonVisible(tx, orgId, person.id, can)
     buyerFrozen = { contactId: person.id, displayName: person.displayName }
   } else if (buyer) buyerFrozen = { contactId: null, displayName: buyer.name }
 

@@ -45,7 +45,6 @@ import {
   getTicketReceiptById,
   getTicketReturnable,
   returnFromTicket,
-  ticketPatientId,
   type TicketFrozen,
   voidTicket,
 } from "./payments.js"
@@ -54,6 +53,9 @@ import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
 const run = <T>(orgId: string, fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
+
+/** Quien ve a todas las personas (recepción, administración). */
+const SEES_EVERYONE = () => true
 
 /** Una sede con su caja, dos medios y dos productos que se venden, con lo que hay en su almacén. */
 async function counter(orgId = "org_a") {
@@ -128,7 +130,7 @@ describe("venta de mostrador", () => {
           { paymentMethodId: c.yape.id, amountCents: 10000, reference: "OP-77" },
         ],
         cashReceivedCents: 10000,
-      }),
+      }, SEES_EVERYONE),
     )
     expect(sale.duplicate).toBe(false)
     expect(sale.ticket).toMatchObject({
@@ -222,7 +224,7 @@ describe("venta de mostrador", () => {
         lines: [{ productId: c.drops.id }],
         buyer: { contactId: person!.id },
         payments: [{ paymentMethodId: c.yape.id, amountCents: 1500 }],
-      }),
+      }, SEES_EVERYONE),
     )
     const toName = await run(c.orgId, (tx) =>
       sellAtCounter(tx, c.orgId, c.actor, {
@@ -231,7 +233,7 @@ describe("venta de mostrador", () => {
         lines: [{ productId: c.sunglasses.id }],
         buyer: { name: `  Turista   de paso ${c.word} ` },
         payments: [{ paymentMethodId: c.cash.id, amountCents: 12000 }],
-      }),
+      }, SEES_EVERYONE),
     )
     const nobody = await run(c.orgId, (tx) =>
       sellAtCounter(tx, c.orgId, c.actor, {
@@ -240,7 +242,7 @@ describe("venta de mostrador", () => {
         lines: [{ productId: c.drops.id, quantity: 3 }],
         buyer: { name: "   " },
         payments: [{ paymentMethodId: c.cash.id, amountCents: 4500 }],
-      }),
+      }, SEES_EVERYONE),
     )
     expect(toContact.ticket).toMatchObject({ buyerContactId: person!.id, buyerName: null })
     expect(frozenOf(toContact.ticket).buyer).toEqual({ contactId: person!.id, displayName: person!.displayName })
@@ -289,7 +291,7 @@ describe("venta de mostrador", () => {
     expect(byName.personal).toBe(true)
 
     // El ticket se abre por su id, sin ficha: la guarda de la historia bloqueada no tiene a quién mirar.
-    expect(await run(c.orgId, (tx) => ticketPatientId(tx, c.orgId, toName.ticket.id))).toBeNull()
+    expect(toName.ticket.patientId).toBeNull()
     const receipt = await run(c.orgId, (tx) => getTicketReceiptById(tx, c.orgId, toName.ticket.id))
     expect(receipt.patientId).toBeNull()
     expect(receipt.payments).toHaveLength(1)
@@ -305,7 +307,7 @@ describe("venta de mostrador", () => {
           lines: [{ productId: c.drops.id }],
           buyer: { contactId: person!.id },
           payments: [{ paymentMethodId: c.cash.id, amountCents: 1500 }],
-        }),
+        }, SEES_EVERYONE),
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND", fields: { contactId: "Contacto no encontrado" } })
   })
@@ -319,8 +321,8 @@ describe("venta de mostrador", () => {
       payments: [{ paymentMethodId: c.cash.id, amountCents: 3000 }],
       cashReceivedCents: 5000,
     }
-    const first = await run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, body))
-    const again = await run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, body))
+    const first = await run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, body, SEES_EVERYONE))
+    const again = await run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, body, SEES_EVERYONE))
     expect(again.duplicate).toBe(true)
     expect(again.ticket.id).toBe(first.ticket.id)
     expect(again.payments.map((p) => p.id)).toEqual(first.payments.map((p) => p.id))
@@ -329,7 +331,7 @@ describe("venta de mostrador", () => {
     const tickets = await ownerDb.select().from(paymentTicket).where(eq(paymentTicket.requestId, body.requestId))
     expect(tickets).toHaveLength(1)
     await expect(
-      run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, { ...body, cashReceivedCents: 10000 })),
+      run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, { ...body, cashReceivedCents: 10000 }, SEES_EVERYONE)),
     ).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT", status: 409, message: expect.stringContaining("ya se cobró con otros datos") })
     // La clave de un cobro de una ficha no sirve para una venta de mostrador.
     const f = await clinicalFixture()
@@ -342,7 +344,7 @@ describe("venta de mostrador", () => {
       }),
     )
     await expect(
-      run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, { ...body, requestId: collected.ticket.requestId! })),
+      run(c.orgId, (tx) => sellAtCounter(tx, c.orgId, c.actor, { ...body, requestId: collected.ticket.requestId! }, SEES_EVERYONE)),
     ).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
   })
 
@@ -356,7 +358,7 @@ describe("venta de mostrador", () => {
           lines: [{ productId: c.sunglasses.id }],
           payments,
           ...extra,
-        }),
+        }, SEES_EVERYONE),
       )
     await expect(sell([{ paymentMethodId: c.cash.id, amountCents: 10000 }])).rejects.toMatchObject({
       code: "COUNTER_SALE_SHORT",
@@ -377,7 +379,7 @@ describe("venta de mostrador", () => {
           requestId: randomUUID(),
           lines: [{ productId: c.drops.id }, { productId: c.drops.id }],
           payments: [{ paymentMethodId: c.cash.id, amountCents: 3000 }],
-        }),
+        }, SEES_EVERYONE),
       ),
     ).rejects.toMatchObject({ fields: { "lines[1].productId": expect.stringContaining("ya está en la venta") } })
     // Nada salió del almacén con los rechazos.
@@ -456,6 +458,75 @@ describe("venta de mostrador", () => {
         }),
       ),
     ).toContain("no se mezcla con la cuenta de un paciente")
+
+    // Lo de una venta de mostrador queda en su ticket: su pago no paga lo de otra venta.
+    const other = await sell([{ paymentMethodId: c.cash.id, amountCents: 12000 }])
+    const [otherApp] = await ownerDb
+      .select()
+      .from(patientPaymentApplication)
+      .where(eq(patientPaymentApplication.ticketId, other.ticket.id))
+    expect(
+      await refused(
+        ownerDb.insert(patientPaymentApplication).values({
+          organizationId: "org_a",
+          patientId: null,
+          paymentId: counterPayment!.id,
+          chargeId: otherApp!.chargeId,
+          ticketId: sold.ticket.id,
+          amountCents: 100,
+        }),
+      ),
+    ).toContain("queda en su propio ticket")
+    // Y nada pasa después a la cuenta de un paciente, ni sale de ella.
+    expect(
+      await refused(ownerDb.update(patientCharge).set({ patientId: f.patient.id }).where(eq(patientCharge.id, otherApp!.chargeId))),
+    ).toContain("no cambia de cuenta")
+    expect(
+      await refused(ownerDb.update(patientCharge).set({ patientId: null }).where(eq(patientCharge.id, patientCharges.id))),
+    ).toContain("no cambia de cuenta")
+  })
+
+  it("quien compra: archivada o con su historia bloqueada no se elige, y Caja solo elige a un paciente", async () => {
+    const c = await counter()
+    const f = await clinicalFixture()
+    const sale = (contactId: string, can: (permission: string) => boolean) =>
+      run(c.orgId, (tx) =>
+        sellAtCounter(
+          tx,
+          c.orgId,
+          c.actor,
+          {
+            branchId: c.branchId,
+            requestId: randomUUID(),
+            lines: [{ productId: c.drops.id }],
+            buyer: { contactId },
+            payments: [{ paymentMethodId: c.cash.id, amountCents: 1500 }],
+          },
+          can,
+        ),
+      )
+    const [stranger] = await ownerDb
+      .insert(contact)
+      .values({ organizationId: c.orgId, displayName: `Sin ficha ${c.tag}` })
+      .returning()
+    const [locked] = await ownerDb
+      .insert(contact)
+      .values({
+        organizationId: c.orgId,
+        displayName: `Bloqueada ${c.tag}`,
+        isActive: false,
+        recordLockedAt: new Date(),
+        recordLockedBy: c.actor,
+      })
+      .returning()
+    await expect(sale(locked!.id, SEES_EVERYONE)).rejects.toMatchObject({ status: 404 })
+    // Caja no ve a quien no es paciente: para ella no existe.
+    const cashier = (permission: string) => permission !== "crm.read"
+    await expect(sale(stranger!.id, cashier)).rejects.toMatchObject({ status: 404 })
+    expect((await sale(f.patient.personId, cashier)).ticket.buyerContactId).toBe(f.patient.personId)
+    // Recepción sí: cualquier persona, sea o no paciente.
+    expect((await sale(stranger!.id, SEES_EVERYONE)).ticket.buyerContactId).toBe(stranger!.id)
+    expect(await c.onHand(c.drops)).toBe(8)
   })
 
   it("anular devuelve el producto a la sede y saca el dinero de la caja", async () => {
@@ -470,7 +541,7 @@ describe("venta de mostrador", () => {
           { paymentMethodId: c.yape.id, amountCents: 8000 },
         ],
         cashReceivedCents: 10000,
-      }),
+      }, SEES_EVERYONE),
     )
     expect(await c.onHand(c.sunglasses)).toBe(2)
     expect(await c.onHand(c.drops)).toBe(6)
@@ -514,7 +585,7 @@ describe("venta de mostrador", () => {
         lines: [{ productId: c.drops.id, quantity: 4 }],
         buyer: { name: `Turista ${c.word}` },
         payments: [{ paymentMethodId: c.cash.id, amountCents: 6000 }],
-      }),
+      }, SEES_EVERYONE),
     )
     const [charge] = (await run(c.orgId, (tx) => getTicketReturnable(tx, c.orgId, null, sale.ticket.id))).lines
     // Sin ficha no hay cuenta donde dejarlo a favor.
@@ -574,7 +645,7 @@ describe("venta de mostrador", () => {
           lines: [{ productId: c.drops.id }],
           ...(buyer ? { buyer } : {}),
           payments: [{ paymentMethodId: c.cash.id, amountCents: 1500 }],
-        }),
+        }, SEES_EVERYONE),
       )
     const nobody = await sell()
     const named = await sell({ name: "Ana Torres" })
@@ -626,7 +697,7 @@ describe("Argos lee la venta de mostrador como lo demás", () => {
           { paymentMethodId: c.cash.id, amountCents: 5000 },
           { paymentMethodId: c.yape.id, amountCents: 10000 },
         ],
-      }),
+      }, SEES_EVERYONE),
     )
     const undone = await run(orgId, (tx) =>
       sellAtCounter(tx, orgId, c.actor, {
@@ -634,7 +705,7 @@ describe("Argos lee la venta de mostrador como lo demás", () => {
         requestId: randomUUID(),
         lines: [{ productId: c.drops.id }],
         payments: [{ paymentMethodId: c.cash.id, amountCents: 1500 }],
-      }),
+      }, SEES_EVERYONE),
     )
     await run(orgId, (tx) => voidTicket(tx, orgId, c.actor, null, undone.ticket.id, { reason: "Error", allowPostClose: false }))
     const [drops] = (await run(orgId, (tx) => getTicketReturnable(tx, orgId, null, kept.ticket.id))).lines.filter(

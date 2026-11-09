@@ -647,10 +647,12 @@ function FinanceWorkspace() {
             currency={ws.currency}
             locale={ws.locale}
             onClose={() => closePanel("mostrador")}
-            onSold={(sold) => {
+            onSold={(sold, already) => {
               closePanel("mostrador")
               invalidateFinance(queryClient)
-              toast.success(`Venta registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}`)
+              // Un reintento sin respuesta: lo que se ve es el ticket que ya estaba, no otra venta.
+              if (already) toast.info(`Esta venta ya estaba registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}: no se cobró otra vez.`)
+              else toast.success(`Venta registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}`)
               // El ticket se abre al lado, el mismo de Cobros: imprimir, devolver o anular.
               openTicket(sold.id)
             }}

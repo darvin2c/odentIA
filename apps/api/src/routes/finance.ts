@@ -370,7 +370,11 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       ] as never)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        sellAtCounter(tx, orgId, userId, {
+        sellAtCounter(
+          tx,
+          orgId,
+          userId,
+          {
           branchId: body.branchId,
           requestId: body.requestId,
           lines: body.lines.map((line) => ({ productId: line.productId, ...(line.quantity ? { quantity: line.quantity } : {}) })),
@@ -384,7 +388,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
           tenderCurrency: body.tenderCurrency ?? undefined,
           exchangeRate: body.exchangeRate ?? undefined,
           changeCurrency: body.changeCurrency ?? undefined,
-        }),
+          },
+          // Quien solo ve pacientes elige solo a un paciente como quien compra.
+          (permission) => canAccess(memberRole, permission as Parameters<typeof canAccess>[1]),
+        ),
       ),
     )
   })
