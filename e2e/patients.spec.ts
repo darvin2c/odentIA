@@ -780,7 +780,8 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await gotoHydrated(page, tenant(slug, `/contacts/${own?.contactId}`))
   await expect(page).toHaveURL(tenantPattern(slug, `/people/${own?.contactId}`))
   await expect(page.getByRole("heading", { level: 1, name: "Lucía Quispe" })).toBeVisible()
-  await expect(page.getByText("Habla por ella:")).toBeVisible()
+  // Sin sexo registrado no se supone ninguno.
+  await expect(page.getByText("Habla en su nombre:")).toBeVisible()
 
   // La identidad se edita con el formulario de la ficha y llega a las dos.
   await page.getByRole("button", { name: "Más acciones" }).click()
