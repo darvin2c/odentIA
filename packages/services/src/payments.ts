@@ -2266,7 +2266,7 @@ export async function voidTicket(
       .where(
         and(
           eq(patientCharge.organizationId, orgId),
-          eq(patientCharge.patientId, patientId),
+          ofPatient(patientCharge.patientId, patientId),
           inArray(patientCharge.id, soldHere),
           isNull(patientCharge.voidedAt),
           like(patientCharge.requestKey, `${ADVANCE_KEY}%`),
