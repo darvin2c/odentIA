@@ -509,7 +509,8 @@ export function signConsent(
     paperDocumentId?: string | null
   },
 ) {
-  return post<ConsentDocument>(`${BASE}/consents/${id}/sign`, body)
+  // `signerDocNotice`: el documento escrito del representante no quedó en su ficha (por qué).
+  return post<ConsentDocument & { signerDocNotice?: string }>(`${BASE}/consents/${id}/sign`, body)
 }
 
 export function revokeConsent(

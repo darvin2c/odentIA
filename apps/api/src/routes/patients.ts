@@ -1,14 +1,15 @@
+import type { PlatformLlm } from "@odentia/agent"
 import {
-  SEX_CODES,
   BLOOD_GROUPS,
-  DOC_TYPES,
   DICOM_DOCUMENT_MAX_BYTES,
+  DOC_TYPES,
   DOCUMENT_FORMATS,
   demographicsSchema,
   documentMaxBytes,
   REPORT_STATUSES,
   registrationAnswersSchema,
   registrationContactInputSchema,
+  SEX_CODES,
   sniffDocumentMime,
 } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
@@ -17,91 +18,91 @@ import {
   addEncounterAddendum,
   addEncounterDiagnosis,
   addEncounterProcedure,
-  findEarlierTreatment,
   addPatientAllergy,
   addPlanItem,
   addPlanItemsBatch,
+  assembleEncounterBudget,
+  bringTreatmentToEncounter,
   type ClinicalAccessResource,
+  chooseVisitControl,
   codePatientAllergy,
   correctEncounterMaterial,
   createEncounter,
   createTreatmentPlan,
+  documentPortalState,
+  ENCOUNTER_TEXT_FIELDS,
   finalizeEncounter,
-  keepIssuedPaper,
+  findEarlierTreatment,
   findPatientDuplicates,
   getAnamnesisVersion,
   getEncounterClosing,
   getEncounterDetail,
   getEncounterMaterials,
+  getEncounterVoidPreview,
   getLatestAnamnesis,
   getOpenEncounterRef,
   getPatient,
-  getPatientMissingData,
   getPatientDocument,
   getPatientHealth,
   getPatientSummary,
-  getTimeline,
   getPlanNextStep,
   getPlanNextSteps,
+  getStaffMissingData,
+  getTimeline,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
+  keepIssuedPaper,
+  leaveTreatmentFromEncounter,
   listAnamnesisVersions,
   listClinicalAccess,
   listClinicalNotes,
   listDataConsents,
   listEncounters,
   listPatientDiagnoses,
-  listPatientVitals,
   listPatientDocuments,
   listPatients,
+  listPatientVitals,
   listPlanItems,
   listTreatmentPlans,
+  makeImageThumbnail,
   markAllergiesReviewed,
   markHealthDenied,
+  operationBodySchema,
+  operationBodyShape,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
+  recordLockState,
   registerPatient,
-  makeImageThumbnail,
   registerPatientDocument,
-  retirePatientDocument,
-  setDocumentPortalVisibility,
-  documentPortalState,
-  setDocumentReportStatus,
+  removeIndicatedFromEncounter,
   removePatientAllergy,
+  removePatientAvatar,
   removePatientContact,
+  reopenPlanItemForSession,
   requirePatient,
   restorePatientAllergy,
+  retirePatientDocument,
   revokeDataConsent,
   ServiceError,
   savePatientHealth,
   scheduleFollowUpFromCoordination,
   setDiagnosisStatus,
-  removePatientAvatar,
+  setDocumentPortalVisibility,
+  setDocumentReportStatus,
   setPatientAvatar,
   setPatientContact,
   setPlanItemStatus,
   TIMELINE_TYPES,
   takeOverEncounter,
-  operationBodySchema,
-  operationBodyShape,
-  ENCOUNTER_TEXT_FIELDS,
   type UpdateEncounterDraftPatch,
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
-  reopenPlanItemForSession,
   updatePlanItemPlanning,
-  getEncounterVoidPreview,
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
-  recordLockState,
-  bringTreatmentToEncounter,
-  chooseVisitControl,
-  leaveTreatmentFromEncounter,
-  removeIndicatedFromEncounter,
-  assembleEncounterBudget,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -109,20 +110,19 @@ import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { canonicalUuid, personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
-import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
-import { createPatientBudgetsRoute } from "./patient-budgets.js"
-import { createImagingStudiesRoute } from "./imaging-studies.js"
-import { createPatientDocumentContextRoute } from "./patient-document-context.js"
-import type { PlatformLlm } from "@odentia/agent"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"
-import { patientProductRoutes } from "./products.js"
-import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
-import { createPatientPaymentsRoute } from "./patient-payments.js"
-import { createPatientMedicalLeavesRoute } from "./patient-medical-leaves.js"
-import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
+import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
+import { createImagingStudiesRoute } from "./imaging-studies.js"
+import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createPatientDataRequestsRoute } from "./patient-data-requests.js"
+import { createPatientDocumentContextRoute } from "./patient-document-context.js"
+import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
+import { createPatientMedicalLeavesRoute } from "./patient-medical-leaves.js"
+import { createPatientPaymentsRoute } from "./patient-payments.js"
+import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
 import { createPatientTreatmentsRoute } from "./patient-treatments.js"
+import { patientProductRoutes } from "./products.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -829,7 +829,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         const base = await getPatient(tx, orgId, c.req.param("id"))
         const full = {
           ...base,
-          missingData: canEdit ? await getPatientMissingData(tx, orgId, c.req.param("id")) : null,
+          missingData: canEdit ? await getStaffMissingData(tx, orgId, c.req.param("id")) : null,
         }
         // Con lo clínico va también si se le preguntó por alergias: la atención lo dice (revisión del 9 nov).
         if (clinical)
