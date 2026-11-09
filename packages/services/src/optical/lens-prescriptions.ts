@@ -267,6 +267,26 @@ export async function listLensPrescriptions(tx: Db, orgId: string, patientId: st
   return rows.map((row) => toView(row, today))
 }
 
+/** Las recetas en «Tus documentos» del portal: la vencida dice «Vencida» y la anulada, «Anulada». */
+export async function portalLensPrescriptions(tx: Db, orgId: string, patientId: string) {
+  const today = await clinicToday(tx, orgId)
+  const rows = await tx
+    .select()
+    .from(lensPrescription)
+    .where(and(eq(lensPrescription.organizationId, orgId), eq(lensPrescription.patientId, patientId)))
+    .orderBy(desc(lensPrescription.issuedOn), desc(lensPrescription.createdAt))
+  return rows.map((row) => {
+    const kind = PRESCRIPTION_KINDS.find((item) => item.key === row.kind)?.label.toLowerCase() ?? row.kind
+    return {
+      id: row.id,
+      type: "Receta de lentes",
+      title: `Receta de ${kind}`,
+      at: row.createdAt,
+      stateWord: row.voidedAt ? "Anulada" : row.validUntil < today ? "Vencida" : null,
+    }
+  })
+}
+
 /** Las recetas en la copia de la historia: una línea por ojo de cada una, las anuladas con su motivo. */
 export async function prescriptionRecordLines(tx: Db, orgId: string, patientId: string): Promise<string[]> {
   const rows = await tx

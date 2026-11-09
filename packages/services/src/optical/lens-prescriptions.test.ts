@@ -16,6 +16,7 @@ import {
   voidLensPrescription,
 } from "./lens-prescriptions.js"
 import { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
+import { collectPortalPapers } from "../portal-papers.js"
 
 setupTestDb()
 
@@ -159,6 +160,15 @@ describe("la receta de lentes de vistIA (entrega 3)", () => {
     await f.run((tx) => voidLensPrescription(tx, ...f.args, external.id, { reason: "Duplicada" }))
     const voided = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, external.id))
     expect(voided.bytes.length).toBeGreaterThan(1000)
+  })
+
+  it("el cliente ve su receta en «Tus documentos» del portal", async () => {
+    const f = await examined()
+    const issued = await f.run((tx) => issueLensPrescription(tx, ...f.args, { encounterId: f.encounter.id, kind: "anteojos" }))
+    const papers = await f.run((tx) => collectPortalPapers(tx, OPTICA, f.patient.id, { account: false }))
+    expect(papers.filter((paper) => paper.kind === "producto")).toEqual([
+      expect.objectContaining({ id: issued.id, type: "Receta de lentes", title: "Receta de anteojos", stateWord: null, image: false }),
+    ])
   })
 
   it("en una clínica de otro producto no hay recetas de lentes", async () => {

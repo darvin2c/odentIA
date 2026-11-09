@@ -8,7 +8,8 @@ import {
 import { NO_PRODUCT_HOOKS, type ProductHooks } from "../product-hooks.js"
 import { opticalCatalog } from "./catalog.js"
 import { opticalExamination } from "./examination.js"
-import { prescriptionRecordLines } from "./lens-prescriptions.js"
+import { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
+import { portalLensPrescriptions, prescriptionRecordLines } from "./lens-prescriptions.js"
 
 /**
  * Lo que vistIA hace en los momentos de lo común (ADR 0079). Sin «dónde» (el ojo
@@ -38,6 +39,8 @@ export const opticalHooks: ProductHooks = {
   consentSuggestions: OPTICAL_CONSENT_TEMPLATES,
   examination: opticalExamination,
   vitals: [],
+  // El cliente ve sus recetas de lentes en su portal y las descarga (entrega 3).
+  portalPapers: { list: portalLensPrescriptions, pdf: renderLensPrescriptionPdf },
   async recordSections(tx, { orgId, patientId }) {
     return [
       {
