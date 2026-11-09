@@ -19,9 +19,9 @@ import { useEffect, useRef, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import {
-  endRecurringApi,
   EXPENSE_CATEGORIES,
-  EXPENSE_CATEGORY_HINTS,
+  endRecurringApi,
+  expenseCategoryHint,
   expenseCategoryLabel,
   fetchRecurringMonth,
   fetchRecurringPeople,
@@ -527,7 +527,7 @@ function NoteRecurringDrawer({
         </form.AppField>
         <form.AppField name="category">
           {(field) => (
-            <field.Group legend="Tipo" description={field.state.value ? EXPENSE_CATEGORY_HINTS[field.state.value] : undefined}>
+            <field.Group legend="Tipo" description={field.state.value ? expenseCategoryHint(field.state.value) : undefined}>
               {(control) => (
                 <ChoiceChips
                   id={control.id}
