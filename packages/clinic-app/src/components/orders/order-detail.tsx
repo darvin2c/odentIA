@@ -300,7 +300,7 @@ function OrderActions({ order, onOpen }: { order: OrderDetail; onOpen: (id: stri
     <div className="flex flex-wrap items-center justify-end gap-2">
       {/* En el teléfono ya está arriba, en «Falta pagar»: aquí solo en pantalla ancha. */}
       {due ? (
-        <span className="hidden text-sm font-medium tabular-nums sm:inline">
+        <span className="hidden text-sm font-medium tabular-nums sm:inline" role="status">
           {due.label} {due.amount}
         </span>
       ) : null}
