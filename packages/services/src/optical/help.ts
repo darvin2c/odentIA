@@ -70,12 +70,17 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         a: faq.a
           .replace("por ejemplo una corona en dos", "por ejemplo una terapia visual de diez")
           .replace("(por ejemplo, la endodoncia de la 46 en su sesión 2 de 2)", "(por ejemplo, la terapia visual en su sesión 2 de 10)")
-          .replace(" Si lo indicas desde la pieza del odontograma, el panel también pide «Sesiones previstas» con las habituales del servicio.", "")
+          .replace(
+            " Si lo indicas desde la pieza del odontograma, el panel también pide «Sesiones previstas» con las habituales del servicio, y «Cambiar» un tratamiento indicado hoy por otro también las pide, con las habituales del nuevo, y lo pasa a la fase que le toca (una exodoncia cambiada por una endodoncia deja la cirugía).",
+            " «Cambiar» un tratamiento indicado hoy por otro también pide sus sesiones, con las habituales del nuevo.",
+          )
           // Resolver el diagnóstico de la pieza al firmar es de odentIA.
           .replace(
-            " Si su tratamiento resuelve un diagnóstico de esa pieza (la pulpitis de la 46 con su endodoncia), el cierre lo propone marcado como resuelto: desmárcalo si sigue activo.",
+            " Si su tratamiento resuelve un diagnóstico de esa pieza (la pulpitis de la 46 con su endodoncia), el cierre lo propone marcado como resuelto: desmárcalo si sigue activo. Una periodontitis apical o un absceso periapical vienen sin marcar: sanan en su control con radiografía, que queda indicado al año al terminar la endodoncia.",
             "",
           )
+          .replace(" (la de una endodoncia busca hora desde una semana después, para que actúe la medicación)", "")
+          .replace(" («Corona · sesión 1 de 2: mar 10 nov, 9:00 · la sesión 2 se reserva en esa cita»)", "")
           .replace("en curso en esa pieza,", "en curso,"),
       },
       "endodoncia en dos sesiones",
