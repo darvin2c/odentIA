@@ -8,6 +8,7 @@ import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm"
 import { clinicToday } from "../inventory-stock.js"
 import { advanceJobOrder, createJobOrderSale, JOB_ORDER_STEPS, type JobOrderStep } from "../job-orders.js"
+import { ServiceError } from "../errors.js"
 import { collectCharge } from "../payments.js"
 
 /**
@@ -54,17 +55,17 @@ async function staff(tx: Db, orgId: string) {
   return { desk: first("sales", "reception", "owner"), workshop: first("workshop", "sales", "reception", "owner") }
 }
 
-export async function seedDemoJobOrders(tx: Db, orgId: string): Promise<void> {
+export async function seedDemoJobOrders(tx: Db, orgId: string, now = new Date()): Promise<void> {
   const [existing] = await tx.select({ id: jobOrder.id }).from(jobOrder).where(eq(jobOrder.organizationId, orgId)).limit(1)
   const { desk, workshop } = await staff(tx, orgId)
   if (!desk || !workshop) return
-  if (existing) return advanceDemoJobOrders(tx, orgId, workshop)
+  if (existing) return advanceDemoJobOrders(tx, orgId, workshop, now)
 
   const [site] = await tx.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId)).orderBy(asc(branch.createdAt)).limit(1)
   const [cash] = await tx
     .select({ id: paymentMethod.id })
     .from(paymentMethod)
-    .where(and(eq(paymentMethod.organizationId, orgId), eq(paymentMethod.typeCode, "10")))
+    .where(and(eq(paymentMethod.organizationId, orgId), eq(paymentMethod.typeCode, "10"), eq(paymentMethod.isActive, true)))
     .limit(1)
   const items = await tx
     .select({ id: product.id, sku: product.sku, priceCents: product.salePriceCents })
@@ -132,18 +133,20 @@ export async function seedDemoJobOrders(tx: Db, orgId: string): Promise<void> {
 }
 
 /** Cada noche, el taller pasa al siguiente paso lo que ya lleva su tiempo en el suyo. */
-async function advanceDemoJobOrders(tx: Db, orgId: string, workshop: string): Promise<void> {
+async function advanceDemoJobOrders(tx: Db, orgId: string, workshop: string, now: Date): Promise<void> {
   const rows = await tx
     .select({ id: jobOrder.id, status: jobOrder.status, last: sql<Date>`max(${jobOrderEvent.at})` })
     .from(jobOrder)
     .innerJoin(jobOrderEvent, and(eq(jobOrderEvent.organizationId, jobOrder.organizationId), eq(jobOrderEvent.jobOrderId, jobOrder.id)))
     .where(and(eq(jobOrder.organizationId, orgId), inArray(jobOrder.status, Object.keys(DAYS_IN_STEP))))
     .groupBy(jobOrder.id, jobOrder.status)
-  const now = Date.now()
   for (const row of rows) {
     const rule = DAYS_IN_STEP[row.status as JobOrderStep]
     if (!rule) continue
-    if (now - new Date(row.last).getTime() < rule.days * 86_400_000) continue
-    await advanceJobOrder(tx, orgId, workshop, row.id, { status: rule.next })
+    if (now.getTime() - new Date(row.last).getTime() < rule.days * 86_400_000) continue
+    // Lo reemplazado por un rehecho no avanza: sigue en el nuevo.
+    await advanceJobOrder(tx, orgId, workshop, row.id, { status: rule.next }, { at: now }).catch((error: unknown) => {
+      if (!(error instanceof ServiceError && error.code === "JOB_ORDER_REMADE")) throw error
+    })
   }
 }

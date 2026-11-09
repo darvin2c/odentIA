@@ -436,7 +436,7 @@ export interface ProductHooks {
    * receta de anteojos de cada examen de la vista firmado). Corre al armarla y cada
    * noche, después de cerrar las visitas del día: debe poder repetirse. Sin él, nada.
    */
-  demoBuilt?(tx: Db, orgId: string): Promise<void>
+  demoBuilt?(tx: Db, orgId: string, now?: Date): Promise<void>
   /**
    * Lo que el producto copia en el pedido de una venta (ADR 0168; vistIA: la receta
    * de lentes vigente). `current`, lo que se ofrece al vender; `snapshot`, la copia

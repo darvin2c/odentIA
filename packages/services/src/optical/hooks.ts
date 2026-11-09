@@ -50,9 +50,9 @@ export const opticalHooks: ProductHooks = {
   vitals: [],
   // Una demo trae la receta de anteojos de cada examen firmado y, la primera vez,
   // sus pedidos de lentes en cada paso; cada noche los pedidos avanzan.
-  async demoBuilt(tx, orgId) {
+  async demoBuilt(tx, orgId, now) {
     await seedDemoLensPrescriptions(tx, orgId)
-    await seedDemoJobOrders(tx, orgId)
+    await seedDemoJobOrders(tx, orgId, now)
   },
   // El cliente ve sus recetas de lentes en su portal y las descarga (entrega 3).
   portalPapers: { list: portalLensPrescriptions, pdf: renderLensPrescriptionPdf },

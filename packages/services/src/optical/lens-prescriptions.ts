@@ -402,29 +402,22 @@ export async function lensPrescriptionSnapshot(
   patientId: string,
   id: string,
 ): Promise<Record<string, unknown> | null> {
-  const [row] = await tx
-    .select()
-    .from(lensPrescription)
-    .where(
-      and(
-        eq(lensPrescription.organizationId, orgId),
-        eq(lensPrescription.patientId, patientId),
-        eq(lensPrescription.id, id),
-        isNull(lensPrescription.voidedAt),
-      ),
-    )
-  if (!row) return null
+  // Solo la vigente de su tipo: una anterior no se usa para hacer lentes nuevos.
+  const current = Object.values(await currentLensPrescriptions(tx, orgId, patientId)).find((item) => item?.id === id)
+  if (!current) return null
   return {
-    id: row.id,
-    kind: row.kind,
-    source: row.source,
-    lenses: row.lenses,
-    pupillaryDistance: row.pupillaryDistance,
-    issuedOn: row.issuedOn,
-    validUntil: row.validUntil,
-    prescriberName: row.prescriberName,
-    prescriberRegistration: row.prescriberRegistration,
-    verified: row.verifiedAt !== null,
+    id: current.id,
+    kind: current.kind,
+    source: current.source,
+    lenses: current.lenses,
+    pupillaryDistance: current.pupillaryDistance,
+    issuedOn: current.issuedOn,
+    validUntil: current.validUntil,
+    prescriberName: current.prescriberName,
+    prescriberRegistration: current.prescriberRegistration,
+    verified: current.verifiedAt !== null,
+    // Lo que se vio al vender (vencida o sin verificar): el taller lo sabe.
+    notices: current.notices,
   }
 }
 
