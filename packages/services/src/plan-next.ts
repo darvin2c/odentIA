@@ -503,9 +503,13 @@ interface PlanFacts {
 const NOTHING: PlanNextStep = { kind: "ninguno", text: "Nada pendiente en el plan", detail: null, action: null }
 
 
-/** El control de un tratamiento (el de una endodoncia): decide si funcionó y va primero. */
+/**
+ * El control de un tratamiento (el de una endodoncia): decide si funcionó y va primero. Es el
+ * que lleva su tratamiento; el que se indica al firmar guarda el procedimiento de la visita
+ * aunque sea de mantenimiento (`encounters.ts`), así que eso no basta.
+ */
 function isTreatmentControl(control: FollowUpRow): boolean {
-  return control.planItemId !== null || control.encounterProcedureId !== null
+  return control.planItemId !== null || control.kind === "tratamiento"
 }
 
 /**
@@ -809,7 +813,10 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       ...(can("appointments.write") ? { alsoToSchedule: p.toStart.map((item) => item.id) } : {}),
     }
   // Sin esa fila a la vista, el presupuesto no esconde la sesión que falta reservar.
+  // Lo aceptado sin empezar que no es la primera fila conserva su «Reservar cita» en el presupuesto del Plan.
+  const alsoToSchedule =
+    first.kind !== "agendar" && p.toStart.length > 0 && can("appointments.write") ? { alsoToSchedule: p.toStart.map((item) => item.id) } : {}
   if ((first.kind === "enviar" || first.kind === "respuesta") && p.startedFirst)
-    return { ...first, detail: `${first.detail} · también falta la cita de la próxima sesión de ${p.startedFirst.title}` }
-  return first
+    return { ...first, detail: `${first.detail} · también falta la cita de la próxima sesión de ${p.startedFirst.title}`, ...alsoToSchedule }
+  return { ...first, ...alsoToSchedule }
 }

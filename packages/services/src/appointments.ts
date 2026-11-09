@@ -1227,7 +1227,7 @@ export async function createAppointment(
           await scheduleFollowUp(tx, orgId, actorUserId, input.patientId, followUpId, { appointmentId: created.id })
         } catch (error) {
           // Otro lo reservó o lo canceló entre tanto: se dice junto a la casilla y no se reserva nada.
-          if (error instanceof ServiceError && (error.status === 404 || error.status === 409))
+          if (error instanceof ServiceError && (error.status === 404 || error.code === "FOLLOW_UP_STATUS"))
             throw new ServiceError(error.code, error.status, `El control ya no está por reservar: ${error.message}`, {
               followUpIds: "Ese control ya no está por reservar: quítalo de esta cita.",
             })

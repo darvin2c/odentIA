@@ -158,7 +158,10 @@ export function ClinicalAlertsCard({
   const asa = asaLabel(health?.asaClass)
   // Lo que no es una alerta, en una línea: «niega» solo si se le preguntó, si no, «no preguntado»
   // (ADR 0035). Antes de atender se veían solo las alergias (QA del 8 nov, entrega 3).
-  const quiet = [
+  // Sin los antecedentes cargados no se afirma nada: «no preguntado» sería falso mientras cargan.
+  const quiet = !health
+    ? []
+    : [
     conditions.length === 0 ? `Enfermedades: ${groupWord(health?.reviewStatus.conditions, "niega", "sin enfermedades activas")}` : null,
     medications.length === 0 ? `Medicación: ${groupWord(health?.reviewStatus.medications, "ninguna", "sin medicación vigente")}` : null,
     // ASA en odentIA siempre; en latidIA solo si alguien la clasificó.

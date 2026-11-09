@@ -300,7 +300,7 @@ export async function getPersonPage(
     isMinor: await birthDateIsMinor(tx, orgId, row.birthDate),
     sex: row.sex,
     phone: row.phone,
-    phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id),
+    phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id, { withOtherNumber: readsConversations || can("crm.read") }),
     email: row.email,
     archived,
     recordLocked: row.recordLockedAt !== null,

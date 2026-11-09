@@ -198,7 +198,8 @@ it("el control de un tratamiento va primero; reservar lo aceptado con el control
     ["control", endo.id],
     ["agendar", cleaning.id],
   ])
-  expect(step).toEqual(steps[0])
+  // La frase única es esa primera fila; lo aceptado conserva su «Reservar cita» en el presupuesto del Plan.
+  expect(step).toEqual({ ...steps[0], alsoToSchedule: [item.id] })
 
   // «Reservar lo aceptado y el control»: una cita con los dos, en una sola operación.
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: "Sede una cita", timezone: "America/Lima" }).returning()

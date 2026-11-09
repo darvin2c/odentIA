@@ -222,8 +222,16 @@ export function PhoneInput({
     if (!digits) return
     // «44 7700 900878» escrito con otro país y luego Reino Unido: el prefijo no se repite.
     const withCode = readInternational(`+${digits}`)
-    if (international || (withCode && getCountryCallingCode(withCode.country) === getCountryCallingCode(next) && !phoneMeta(display, country).isValid))
-      digits = withCode ? phoneDigits(nationalText(withCode.e164)) : digits
+    const stripped = withCode ? phoneDigits(nationalText(withCode.e164)) : null
+    // Solo si sin el prefijo es un número posible del país elegido: si no, los dígitos son suyos.
+    if (
+      stripped &&
+      withCode &&
+      getCountryCallingCode(withCode.country) === getCountryCallingCode(next) &&
+      (international || !phoneMeta(display, country).isValid) &&
+      phoneMeta(stripped, next).isPossible
+    )
+      digits = stripped
     const nextDisplay = maskNationalDigits(digits, next)
     setDisplay(nextDisplay)
     emit(nextDisplay, next)

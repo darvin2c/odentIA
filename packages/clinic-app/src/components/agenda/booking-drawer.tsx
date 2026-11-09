@@ -490,8 +490,12 @@ export function BookingDrawer({
       ids: checked ? [...controlIds.filter((other) => other !== id), id] : controlIds.filter((other) => other !== id),
     })
   /** Los controles marcados que siguen a la vista (otro pudo reservarlo entre tanto). */
-  const chosenControlsFor = (patientId: string): string[] | undefined =>
-    patientId === values.patientId ? controlIds.filter((id) => controls.some((row) => row.id === id)) : undefined
+  // Sin la lista (aún carga o falló), los que pidió «Qué sigue»: el servidor los rechaza si ya no están por reservar.
+  const chosenControlsFor = (patientId: string): string[] | undefined => {
+    if (coordinationQuery.data && patientId === values.patientId)
+      return controlIds.filter((id) => controls.some((row) => row.id === id))
+    return seed.followUpIds?.length && patientId === seed.patient?.id ? seed.followUpIds : undefined
+  }
   const controlDay = (iso: string) =>
     new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", timeZone }).replace(".", "")
 

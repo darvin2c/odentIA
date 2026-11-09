@@ -1043,7 +1043,16 @@ export interface PhoneWhatsApp {
   otherNumber: string | null
 }
 
-export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: string): Promise<PhoneWhatsApp> {
+/**
+ * `withOtherNumber`: su WhatsApp si es otro número; solo para quien ve sus canales
+ * (lee conversaciones o el CRM). Para los demás, nulo: ocultarlo en la pantalla no basta.
+ */
+export async function phoneWhatsAppState(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  opts: { withOtherNumber?: boolean } = {},
+): Promise<PhoneWhatsApp> {
   const [person] = await tx
     .select({ phone: contact.phone })
     .from(contact)
@@ -1062,7 +1071,7 @@ export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: strin
     .limit(1)
   const phone = person?.phone ?? null
   const digits = phone?.replace(/\D/g, "") ?? ""
-  const whatsapp = await whatsappNumberOf(tx, orgId, contactId)
+  const whatsapp = opts.withOtherNumber ? await whatsappNumberOf(tx, orgId, contactId) : null
   const otherNumber = whatsapp && whatsapp.replace(/\D/g, "") !== digits ? whatsapp : null
   if (!digits) return { state: "sin_telefono", phone, canUse: !!connected, otherNumber }
   const [identity] = await tx
