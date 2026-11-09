@@ -49,6 +49,7 @@ import {
   getAgentConfig,
   getAgentPatientBudgets,
   getAgentPatientSummary,
+  listAgentPatientOrders,
   getClinicInfoSnapshot,
   getContact,
   getOpportunity,
@@ -146,6 +147,7 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   buscar_huecos: { kind: "agenda", label: "Agenda: horarios disponibles" },
   ver_contexto_paciente: { kind: "persona", label: "Vínculo con el paciente" },
   ver_resumen_paciente: { kind: "persona", label: "Citas, presupuestos y saldo del paciente" },
+  ver_pedidos: { kind: "persona", label: "Pedidos del paciente" },
   leer_contexto_comercial: { kind: "comercial", label: "Ficha del contacto" },
   ver_otros_canales: { kind: "otros_canales", label: "Conversaciones en otros canales" },
   listar_oportunidades: { kind: "comercial", label: "Oportunidades del contacto" },
@@ -168,6 +170,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   buscar_huecos: "Buscó huecos reales en la agenda.",
   ver_contexto_paciente: "Verificó para quién es la atención.",
   ver_resumen_paciente: "Consultó las citas y el estado de cuenta del paciente.",
+  ver_pedidos: "Consultó los pedidos del paciente.",
   proponer_cita: "Propuso reservar una cita o, si a la clínica le faltaban datos del paciente, le dio su enlace con esa hora.",
   reprogramar_cita: "Propuso mover una cita.",
   cancelar_cita: "Propuso cancelar una cita.",
@@ -1529,6 +1532,38 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  // Los pedidos de la persona (ADR 0169): solo en el producto que trabaja con pedidos.
+  const ordersView = texts.orders
+    ? tool(
+        async ({ patientId }: { patientId: string }) => {
+          const result = await inOrg((tx) => listAgentPatientOrders(tx, ctx.orgId, ctx.contactId, patientId))
+          const zone = await orgZone()
+          const day = (iso: string) =>
+            new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${iso}T12:00:00Z`))
+          const lines = [`Pedidos de ${result.context.displayName} (vínculo ${result.context.relationship}).`]
+          if (!result.orders.length) lines.push("Sin pedidos abiertos ni entregados hace poco.")
+          for (const order of result.orders) {
+            const when = order.statusLabel === "Entregado" ? "" : `, prometido para el ${day(order.promisedOn)}${order.overdue ? " (ya pasó esa fecha)" : ""}`
+            const due =
+              order.dueCents === null
+                ? ""
+                : order.dueCents > 0
+                  ? ` Falta pagar ${formatOrgMoneyToday(order.dueCents, order.currency ?? zone.currency, zone)}.`
+                  : " Está pagado."
+            lines.push(`- Pedido N.º ${order.orderNumber}, «${order.title}»: ${order.statusLabel}${when}.${due}`)
+          }
+          if (!result.withMoney) lines.push("Sin facultad para ver saldos: no menciones cuánto falta pagar ni lo pidas.")
+          lines.push("«Listo» es que puede recogerlo; «Por revisar», que llegó y lo están revisando. No prometas otra fecha.")
+          return lines.join("\n")
+        },
+        {
+          name: "ver_pedidos",
+          description: `Los pedidos del paciente verificado (${texts.orders.noun}): en qué paso está cada uno y la fecha que se le prometió; lo que falta pagar solo si el interlocutor tiene facultad económica. Nunca la receta ni la historia clínica.`,
+          schema: z.object({ patientId: z.string().uuid() }),
+        },
+      )
+    : null
+
   const availability = tool(
     async (input: {
       branchId: string
@@ -2733,6 +2768,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     knowledgeSearch,
     patientContext,
     patientSummary,
+    ...(ordersView ? [ordersView] : []),
     availability,
     bookingLink,
     portalReentry,

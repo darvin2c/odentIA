@@ -75,6 +75,7 @@ import { contactStanding, patientAge, requireDecisionContact, requireLinkedActiv
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
+import { listJobOrders } from "./job-orders.js"
 import { getAccountSummary } from "./payments.js"
 import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
 import { handoffOpenSql } from "./handoff-state.js"
@@ -380,6 +381,63 @@ export const AGENT_SUMMARY_BUDGETS_SHOWN = 5
  * decide (`decides`); saldo solo para self, representante legal o responsable
  * económico vigente. Siempre del paciente verificado, nunca de otro.
  */
+/** Si quien escribe puede oír lo que se debe: la persona, su representante legal o quien paga por ella. */
+async function maySeeMoneyOf(
+  tx: Db,
+  orgId: string,
+  context: AgentPatientContext,
+  patientId: string,
+  contactId: string,
+): Promise<boolean> {
+  return (
+    context.authorization === "self" ||
+    context.authorization === "representante_legal" ||
+    (await hasEconomicRole(tx, orgId, patientId, contactId))
+  )
+}
+
+/** Lo que Sofi dice de un pedido (ADR 0169): qué es, cómo va, para cuándo y, a quien puede oírlo, cuánto falta. */
+export interface AgentPatientOrder {
+  orderNumber: number
+  title: string
+  statusLabel: string
+  promisedOn: string
+  overdue: boolean
+  /** null: quien escribe no puede oír lo que se debe. */
+  dueCents: number | null
+  currency: string | null
+}
+
+/** Cuántos pedidos entregados se dicen: los más recientes, para «ya los recogí, ¿cuánto debo?». */
+const AGENT_DELIVERED_ORDERS_SHOWN = 2
+
+/**
+ * Los pedidos de la persona para Sofi (ADR 0169): los que se trabajan, del que
+ * vence antes al que vence después, y los últimos entregados. Lo que falta pagar
+ * solo a quien puede oírlo, con la misma regla que el saldo de su resumen.
+ */
+export async function listAgentPatientOrders(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string,
+): Promise<{ context: AgentPatientContext; orders: AgentPatientOrder[]; withMoney: boolean }> {
+  const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
+  const withMoney = await maySeeMoneyOf(tx, orgId, context, patientId, contactId)
+  const open = await listJobOrders(tx, orgId, { status: "abiertos", patientId, withMoney })
+  const delivered = (await listJobOrders(tx, orgId, { status: "entregado", patientId, withMoney })).slice(0, AGENT_DELIVERED_ORDERS_SHOWN)
+  const orders = [...open, ...delivered].map((row) => ({
+    orderNumber: row.orderNumber,
+    title: row.title,
+    statusLabel: row.statusLabel,
+    promisedOn: row.promisedOn,
+    overdue: row.overdue,
+    dueCents: row.dueCents,
+    currency: row.currency,
+  }))
+  return { context, orders, withMoney }
+}
+
 export async function getAgentPatientSummary(
   tx: Db,
   orgId: string,
@@ -451,10 +509,7 @@ export async function getAgentPatientSummary(
     return row?.total ?? 0
   })
   let balance: AgentPatientSummary["balance"] = null
-  const maySeeBalance =
-    context.authorization === "self" ||
-    context.authorization === "representante_legal" ||
-    (await hasEconomicRole(tx, orgId, patientId, contactId))
+  const maySeeBalance = await maySeeMoneyOf(tx, orgId, context, patientId, contactId)
   if (maySeeBalance) {
     // La misma cuenta que ve caja: una sola operación para pantalla, portal y
     // agente. Lo que dice es el saldo, ya descontado lo que tiene a favor

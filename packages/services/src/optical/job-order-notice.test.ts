@@ -11,6 +11,7 @@ import { setMessageChoice } from "../automation.js"
 import { listClinicMessages } from "../clinic-messages.js"
 import { createConnection } from "../connections.js"
 import { sendOrderReadyNotice } from "../job-order-notice.js"
+import { listAgentPatientOrders } from "../agent-operations.js"
 import { advanceJobOrder, createJobOrderSale, getJobOrder } from "../job-orders.js"
 import { nextPatientNumber } from "../patients.js"
 import { secretsKeyFromEnv } from "../secrets.js"
@@ -151,4 +152,19 @@ describe("«Tus lentes están listos» (entrega 5)", () => {
     expect(await keys(optical)).toContain("pedido_listo")
     expect(await keys(dental)).not.toContain("pedido_listo")
   })
+
+  it("Sofi lee los pedidos de quien escribe: el paso, la fecha prometida y lo que falta pagar", async () => {
+    const c = await optica()
+    const p = await client(c, "Nora Díaz")
+    const ready = await readyOrder(c, p.patientId)
+    const result = await run(c, (tx) => listAgentPatientOrders(tx, c.orgId, p.contactId, p.patientId))
+    expect(result.withMoney).toBe(true)
+    expect(result.orders).toEqual([
+      expect.objectContaining({ orderNumber: ready.orderNumber, title: "Anteojos monofocales", statusLabel: "Listo", dueCents: 12_000, currency: "PEN" }),
+    ])
+    // A otra persona sin vínculo con ella no le dice nada.
+    const other = await client(c, "Otra Persona")
+    await expect(run(c, (tx) => listAgentPatientOrders(tx, c.orgId, other.contactId, p.patientId))).rejects.toThrow()
+  })
 })
+

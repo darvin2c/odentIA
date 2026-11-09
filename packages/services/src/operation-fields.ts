@@ -676,6 +676,8 @@ export const READ_TOOLS: readonly string[] = [
   "consultar_conocimiento",
   "ver_contexto_paciente",
   "ver_resumen_paciente",
+  // Los pedidos de la persona (ADR 0169): solo lee.
+  "ver_pedidos",
   "ver_presupuesto",
   "buscar_huecos",
   "leer_contexto_comercial",

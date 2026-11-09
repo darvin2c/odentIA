@@ -60,6 +60,12 @@ export interface ProductAgentTexts {
   site: string
   /** Reglas de Sofi que son del producto (odentIA: la tomografía llega en CD, USB o ZIP). */
   receptionRules: readonly string[]
+  /**
+   * Si el producto trabaja con pedidos (ADR 0169), cómo se dice lo que se
+   * encargó (vistIA: «sus lentes»): Sofi tiene `ver_pedidos`. Sin ello no la tiene,
+   * y lo que lee el modelo en los demás productos no cambia.
+   */
+  orders?: { noun: string }
   /** Ejemplo de etiqueta para el contacto (odentIA: «interesado-ortodoncia»). */
   tagExample: string
   /** Ejemplos de lo que pide una persona con sus palabras (odentIA: «dientes amarillos»…). */
