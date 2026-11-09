@@ -1840,6 +1840,8 @@ export function EncounterEditor({
 
   const examenBody = (
     <div className="grid gap-3 sm:grid-cols-2">
+      {/* Sin signos vitales en el producto (vistIA), sin su apartado. */}
+      {exam.vitals.length > 0 ? (
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0 sm:col-span-2">
         <legend className="mb-1 text-sm font-medium">Signos vitales</legend>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1877,6 +1879,7 @@ export function EncounterEditor({
         </p>
         <exam.VitalsNote patientId={patientId} encounterId={encounterId} vitals={parsedVitals} />
       </fieldset>
+      ) : null}
       <exam.Fields
         idPrefix={uid}
         draft={examination}

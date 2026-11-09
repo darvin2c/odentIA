@@ -2,6 +2,7 @@ import type { DemoCountry, DemoKindRecipe } from "../demo-recipes.js"
 import { birthDateForAge } from "../demo-recipes.js"
 import type { Random, ReportsSeedNote, ReportsSeedPerson } from "../seed-reports.js"
 import { ageOn } from "../seed-reports.js"
+import type { EyeExam } from "@odentia/optical"
 
 /**
  * Los tipos de demo de vistIA: la óptica de barrio, que examina la vista y
@@ -360,6 +361,59 @@ const REFRACTION_TEXT: Record<Refraction, { exam: string; control: string; child
   },
 }
 
+/** Una dioptría de la demo: en pasos de 0,25, como se fabrica. */
+const quarter = (value: number) => Math.round(value * 4) / 4
+
+/**
+ * El examen de la vista de cada persona (entrega 3), coherente con su medida: la
+ * refracción de cada ojo según su miopía, hipermetropía o astigmatismo, la adición
+ * desde los 42 y su distancia pupilar. Es el mismo en todas sus visitas.
+ */
+function eyeExamOf(person: ReportsSeedPerson | null, age: number): EyeExam {
+  const refraction = refractionOf(person)
+  const strength = traitOf(person, "graduacion")
+  const axis = traitOf(person, "eje") < 0.6 ? 180 : 90
+  const sphere =
+    refraction === "miopia"
+      ? -quarter(0.75 + strength * 3.25)
+      : refraction === "hipermetropia"
+        ? quarter(0.75 + strength * 1.75)
+        : refraction === "astigmatismo"
+          ? -quarter(strength * 1.25)
+          : 0
+  const cylinder = refraction === "astigmatismo" ? -quarter(0.75 + strength * 1.25) : undefined
+  const add = age >= 42 ? quarter(Math.min(2.5, 1 + (age - 42) * 0.0833)) : undefined
+  const eye = (offset: number) => ({
+    ...(refraction !== "ninguna" || add !== undefined ? { esfera: quarter(sphere + offset) } : {}),
+    ...(cylinder !== undefined ? { cilindro: cylinder, eje: axis } : {}),
+    ...(add !== undefined ? { adicion: add } : {}),
+  })
+  const blurred = refraction === "ninguna" ? "20/20" : refraction === "miopia" ? (strength > 0.5 ? "20/200" : "20/80") : "20/40"
+  const half = 30 + Math.round(traitOf(person, "dp") * 6) / 2
+  const refractionPart = refraction === "ninguna" && add === undefined ? {} : { refraccion: { od: eye(0), oi: eye(sphere < 0 ? -0.25 : 0) } }
+  return {
+    antecedentes: { usaLentes: refraction === "ninguna" ? "no" : "anteojos" },
+    agudeza: {
+      od: { scLejos: blurred, ccLejos: "20/20" },
+      oi: { scLejos: blurred, ccLejos: "20/20" },
+    },
+    ...refractionPart,
+    dp: { od: half, oi: half },
+    salud: {
+      externo: { estado: "sin_alteraciones" },
+      pupilas: { estado: "sin_alteraciones" },
+      fondo: { estado: "no_realizado", nota: "Sin dilatar" },
+    },
+  }
+}
+
+/** Un menor viene con quien lo trae: queda en su examen (entrega 3). */
+function withCompanion(exam: EyeExam, person: ReportsSeedPerson | null): EyeExam {
+  if (!person?.guardian) return exam
+  const { givenNames, familyName, kinship } = person.guardian
+  return { ...exam, acompanante: { nombre: `${givenNames} ${familyName}`, parentesco: kinship === "MTH" ? "madre" : "padre" } }
+}
+
 /** Lo que se puede encontrar en una atención: solo a esas edades el día de la visita. */
 type Finding = { code: string; weight: number; evolution: string; minAge?: number; maxAge?: number }
 
@@ -372,6 +426,10 @@ function found(findings: readonly Finding[], random: Random, age: number): Repor
 
 /** El examen o el control de un adulto: su medida y, desde los 42, la presbicia; a veces, algo más. */
 function adultExamNote(control: boolean, random: Random, person: ReportsSeedPerson | null, age: number): ReportsSeedNote {
+  return { ...adultFinding(control, random, person, age), examination: { ...withCompanion(eyeExamOf(person, age), person) } }
+}
+
+function adultFinding(control: boolean, random: Random, person: ReportsSeedPerson | null, age: number): ReportsSeedNote {
   const refraction = refractionOf(person)
   return found(
     [
@@ -423,6 +481,10 @@ function adultExamNote(control: boolean, random: Random, person: ReportsSeedPers
 
 /** El examen o el control de un niño: su medida y, a veces, un ojo que ve menos que el otro. */
 function childExamNote(control: boolean, random: Random, person: ReportsSeedPerson | null, age: number): ReportsSeedNote {
+  return { ...childFinding(control, random, person, age), examination: { ...withCompanion(eyeExamOf(person, age), person) } }
+}
+
+function childFinding(control: boolean, random: Random, person: ReportsSeedPerson | null, age: number): ReportsSeedNote {
   const refraction = refractionOf(person)
   const title = control ? "Control de la vista" : "Examen de la vista para niños"
   return found(

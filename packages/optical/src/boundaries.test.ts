@@ -43,6 +43,9 @@ const OPTICAL_INSIDE = [
   "packages/services/src/products.ts",
   "packages/db/src/optical/",
   "packages/db/src/products.ts",
+  // Las rutas de vistIA en la API, y donde la API une las de cada producto.
+  "apps/api/src/routes/optical/",
+  "apps/api/src/routes/products.ts",
 ]
 
 function filesUnder(dir: string): string[] {

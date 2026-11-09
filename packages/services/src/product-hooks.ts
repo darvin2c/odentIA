@@ -417,6 +417,24 @@ export interface ProductHooks {
   /** El nombre de una fase en el papel; sin nombre (una sola fase), el presupuesto no habla de etapas. */
   phaseWords?(phase: string): string | null
   /**
+   * Lo que el producto agrega a una demo para presentar ya armada (vistIA: la
+   * receta de anteojos de cada examen de la vista firmado). Corre al armarla y cada
+   * noche, después de cerrar las visitas del día: debe poder repetirse. Sin él, nada.
+   */
+  demoBuilt?(tx: Db, orgId: string): Promise<void>
+  /**
+   * Los papeles que solo existen en este producto y van a «Tus documentos» del
+   * portal (vistIA: la receta de lentes), con su PDF. Sin él, ninguno.
+   */
+  portalPapers?: {
+    list(
+      tx: Db,
+      orgId: string,
+      patientId: string,
+    ): Promise<Array<{ id: string; type: string; title: string; at: Date; stateWord: string | null }>>
+    pdf(tx: Db, orgId: string, patientId: string, id: string): Promise<{ bytes: Uint8Array; filename: string }>
+  }
+  /**
    * Lo que un documento que solo existe en este producto dice al comprobarlo con su
    * QR (odentIA: el odontograma firmado). Sin él, ese documento no se comprueba.
    */

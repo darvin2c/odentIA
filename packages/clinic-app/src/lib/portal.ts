@@ -159,7 +159,7 @@ export interface PortalCurrencyTotal {
   totalCents: number | null
 }
 
-export type PortalPaperKind = "receta" | "orden" | "descanso" | "hoja" | "consentimiento" | "comprobante" | "archivo"
+export type PortalPaperKind = "receta" | "orden" | "descanso" | "hoja" | "consentimiento" | "comprobante" | "archivo" | "producto"
 
 /** Un papel de «Tus documentos», dicho con palabras por el servidor. */
 export interface PortalPaper {

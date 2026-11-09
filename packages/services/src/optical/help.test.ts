@@ -44,7 +44,22 @@ function codeText(): string {
  * Lo que solo la guía de vistIA cita. Lo demás ya lo cita la de odentIA, que
  * `help-guide.test.ts` compara con las pantallas.
  */
-const OWN_QUOTED = ["Control anual de la vista", "En 1 año", "Preparar presupuesto"]
+const OWN_QUOTED = [
+  "Control anual de la vista",
+  "En 1 año",
+  "Preparar presupuesto",
+  // El examen de la vista y la receta de lentes (entrega 3).
+  "Examen de la vista",
+  "Receta de lentes",
+  "Recetas de lentes",
+  "Emitir receta de anteojos",
+  "Emitir receta de lentes de contacto",
+  "Transcribir receta externa",
+  "Sin verificar",
+  "La revisé: verificar",
+  "Anteriores",
+  "Emitir otra desde su examen",
+]
 
 /** La Ayuda de vistIA: las mismas pantallas, con lo que tiene una óptica. */
 describe("la guía de vistIA", () => {
@@ -68,7 +83,8 @@ describe("la guía de vistIA", () => {
       /descanso/i,
       /signos vitales|examen físico/i,
       /\bASA\b|anest/i,
-      /receta de lentes|pedido de lentes/i,
+      // El pedido de los lentes al taller llega en la entrega 4.
+      /pedido de lentes/i,
     ]) {
       expect(text).not.toMatch(word)
     }

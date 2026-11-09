@@ -20,6 +20,7 @@
     "./lib/new-version": "./src/lib/new-version.ts",
     "./lib/clinical-journey": "./src/lib/clinical-journey.ts",
     "./lib/crm": "./src/lib/crm.ts",
+    "./lib/encounter-documents": "./src/lib/encounter-documents.ts",
     "./lib/encounters": "./src/lib/encounters.ts",
     "./lib/locale": "./src/lib/locale.ts",
     "./lib/org": "./src/lib/org.ts",

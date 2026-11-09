@@ -720,6 +720,8 @@ export async function buildDemo(
   // Con su historia armada, el WhatsApp de la demo queda desconectado: no tiene un número
   // de verdad, así que no dice «Conectado» ni intenta enviar (la Bandeja lo dice al escribir).
   await setConnectionStatus(tx, orgId, connection.id, "disabled")
+  // Lo propio del producto sobre la historia ya armada (vistIA: las recetas de lentes).
+  await (await productHooks(tx, orgId)).demoBuilt?.(tx, orgId)
   await step(DEMO_BUILD_STEPS, "listo")
   return { organizationId: orgId, historyThrough: through, slug }
 }
@@ -1619,6 +1621,8 @@ export async function advanceDemo(
   const at = now.toISOString()
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
+  // Lo que el producto agrega a lo cerrado anoche (vistIA: la receta de cada examen firmado).
+  await (await productHooks(tx, demo.organizationId)).demoBuilt?.(tx, demo.organizationId)
   // Lo cobrado de ayer ya está en su caja: recepción la cierra.
   await closeDemoCash(tx, ctx, today)
   const through = addDays(today, HORIZON_DAYS)

@@ -777,6 +777,40 @@ describe(`una demo de óptica pequeña (vistIA, semilla ${OPTICA})`, () => {
     expect(names.every((row) => row.name.startsWith("Lic. "))).toBe(true)
   })
 
+  it("cada examen de la vista firmado deja su receta de anteojos, con la refracción del examen", async () => {
+    const orgId = demo.organizationId
+    const examined = await count(sql`select count(*)::int as n from encounter
+      where organization_id = ${orgId} and status = 'finalizada' and jsonb_typeof(examination->'refraccion') = 'object'`)
+    expect(examined).toBeGreaterThan(0)
+    expect(
+      await count(sql`select count(*)::int as n from optical.lens_prescription where organization_id = ${orgId} and kind = 'anteojos'`),
+    ).toBe(examined)
+    expect(
+      await count(sql`select count(*)::int as n from optical.lens_prescription l
+        join encounter e on e.id = l.encounter_id
+        where l.organization_id = ${orgId} and l.lenses <> e.examination->'refraccion'`),
+    ).toBe(0)
+  })
+
+  it("las noches siguientes, cada examen firmado al cerrar el día también deja su receta", async () => {
+    const orgId = demo.organizationId
+    const [row] = await ownerDb.select().from(saasDemo).where(eq(saasDemo.id, demo.id))
+    if (!row) throw new Error("falta la demo")
+    let historyThrough = row.historyThrough
+    const start = Date.now()
+    for (let night = 1; night <= 3; night += 1) {
+      const done = await ownerDb.transaction((tx) =>
+        advanceDemo(tx, { ...row, product: demo.product, size: demo.size, organizationId: orgId, historyThrough }, new Date(start + night * DAY)),
+      )
+      historyThrough = done.historyThrough
+    }
+    const examined = await count(sql`select count(*)::int as n from encounter
+      where organization_id = ${orgId} and status = 'finalizada' and jsonb_typeof(examination->'refraccion') = 'object'`)
+    expect(
+      await count(sql`select count(*)::int as n from optical.lens_prescription where organization_id = ${orgId} and kind = 'anteojos'`),
+    ).toBe(examined)
+  }, 120_000)
+
   it("la óptica atiende con su biblioteca y cuenta su examen anual", async () => {
     const orgId = demo.organizationId
     expect(

@@ -237,6 +237,38 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   ],
 }
 
+/**
+ * El examen de la vista y la receta de lentes (entrega 3 del plan): cómo se anotan,
+ * se emiten, se imprimen y se transcriben, con los nombres de sus botones.
+ */
+const EYE_FAQS: Faq[] = [
+  {
+    q: "¿Cómo anoto el examen de la vista?",
+    a: "En la atención, en «Examen de la vista»: quién acompaña si es menor, si ya usa lentes, la agudeza visual de cada ojo sin y con corrección, de lejos y de cerca (20/20, 20/25+1, 0,8, CD 1 m y, de cerca, también J1, N5 o 0,5M), la refracción (esfera, cilindro, eje, adición y prisma; si el prisma es compuesto, el segundo va en el otro eje), la distancia pupilar de cada ojo y, si la mides, la binocular de lejos y de cerca, y la salud del ojo, con la presión si la mides. Si algo conviene que lo vea un oftalmólogo, como la presión alta o una vista que no mejora con lentes, te lo dice ahí mismo; tú decides si lo derivas con una orden de interconsulta.",
+    forms: ["como anoto la medida de la vista", "donde pongo la graduacion", "como registro la refraccion", "donde va la agudeza visual"],
+  },
+  {
+    q: "¿Cómo emito la receta de lentes?",
+    a: "Con la refracción del examen guardada, en «Receta de lentes» de la atención: «Emitir receta de anteojos», o «Emitir receta de lentes de contacto», que trae la graduación llevada al ojo (desde 4 dioptrías cambia: un −8,00 de anteojos es un −7,25 de contacto) y sin prisma, para que la revises, y pide la curva base, el diámetro y la marca de cada ojo. La firmas tú, con tu colegiatura del perfil profesional. Queda en «Recetas de lentes» de su ficha: ahí se imprime con «Imprimir», con su código QR para comprobarla, y el cliente la ve en su portal.",
+    forms: ["como hago la receta de lentes", "como imprimo la receta de lentes", "como le doy la medida al cliente", "receta de anteojos"],
+  },
+  {
+    q: "¿Qué hago con la receta que trae de su oftalmólogo?",
+    a: "En «Recetas de lentes» de su ficha, «Transcribir receta externa»: la graduación de cada ojo (con el prisma, si es de anteojos), la distancia pupilar si la dice, la fecha, quién la firmó y la foto de la receta, que queda entre sus documentos. Queda «Sin verificar» hasta que un optómetra la revise con «La revisé: verificar», y recién entonces el cliente la ve en su portal.",
+    forms: ["receta externa", "trae receta del oftalmologo", "como registro una receta de afuera"],
+  },
+  {
+    q: "¿Me equivoqué en una receta ya emitida, cómo la corrijo?",
+    a: "Una receta emitida no se edita: en «Recetas de lentes» de su ficha, «Anular» con el motivo. Si era de un examen, quien la firmó tiene en «Anteriores» «Emitir otra desde su examen», con la graduación escrita para corregirla, aunque la atención ya esté firmada.",
+    forms: ["corregir receta de lentes", "me equivoque en la receta", "como cambio una receta emitida"],
+  },
+  {
+    q: "¿Qué pasa si su receta venció?",
+    a: "La receta avisa en su ficha que venció y que conviene un examen nuevo, y no impide nada: tú decides si lo examinas otra vez. Lo mismo una externa sin verificar.",
+    forms: ["receta vencida", "cuanto dura una receta de lentes"],
+  },
+]
+
 /** Lo que en una óptica es otra cosa, por tema: sus palabras de búsqueda y sus preguntas. */
 const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
   // El adelanto de una óptica es para su terapia visual, no para una corona.
@@ -259,8 +291,16 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
   }),
   pacientes: (topic) => ({
     ...topic,
-    terms: [...topic.terms.filter((term) => term !== "odontograma"), "pruebas del ojo"],
-    faqs: (topic.faqs ?? []).flatMap((faq) => PATIENT_FAQS[faq.q]?.(faq) ?? [faq]),
+    terms: [
+      ...topic.terms.filter((term) => term !== "odontograma"),
+      "pruebas del ojo",
+      "examen de la vista",
+      "medida de la vista",
+      "graduación",
+      "receta de anteojos",
+      "receta externa",
+    ],
+    faqs: [...(topic.faqs ?? []).flatMap((faq) => PATIENT_FAQS[faq.q]?.(faq) ?? [faq]), ...EYE_FAQS],
   }),
   // Clío no dicta en una óptica: la mesa del plan quitó dictar la refracción.
   agente: (topic) => ({
