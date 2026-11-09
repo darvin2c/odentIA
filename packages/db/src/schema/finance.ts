@@ -33,8 +33,9 @@ import {
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
 import { patient, patientCharge, patientPayment, patientPaymentApplication, serviceCatalog } from "./clinical.js"
-import { purchaseOrder } from "./inventory.js"
+import { purchaseOrder, supplier } from "./inventory.js"
 import { branch } from "./org.js"
+import { organizationPaymentMethod } from "./org-payments.js"
 
 /** Turno de caja de una sucursal. Solo un turno abierto por sucursal+moneda. */
 export const cashShift = pgTable(
@@ -195,6 +196,11 @@ export const expenseRecurring = pgTable(
     dueNextMonth: boolean("due_next_month").notNull().default(false),
     /** La clave del formulario que la anotó: reintentar no anota otra (ADR 0018). */
     requestId: uuid("request_id"),
+    /**
+     * Con qué suele pagarse (un medio de la clínica, ADR 0167): lo que se propone al pagar. Nulo en
+     * lo anotado antes, que se propone por `from_cash`.
+     */
+    paymentMethodId: uuid("payment_method_id"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
@@ -203,6 +209,11 @@ export const expenseRecurring = pgTable(
     uniqueIndex("expense_recurring_org_request_uidx")
       .on(table.organizationId, table.requestId)
       .where(sql`${table.requestId} IS NOT NULL`),
+    foreignKey({
+      name: "expense_recurring_payment_method_org_fk",
+      columns: [table.organizationId, table.paymentMethodId],
+      foreignColumns: [organizationPaymentMethod.organizationId, organizationPaymentMethod.id],
+    }),
     index("expense_recurring_org_branch_idx").on(table.organizationId, table.branchId),
     index("expense_recurring_org_member_idx")
       .on(table.organizationId, table.memberUserId)
@@ -305,6 +316,33 @@ export const expense = pgTable(
      * reintentar después de un corte devuelve el mismo gasto, sin otro gasto ni otra salida de caja.
      */
     requestId: uuid("request_id"),
+    /**
+     * Con qué se pagó (ADR 0167): el medio de la clínica, con su nombre y su tipo UN/CEFACT 4461
+     * congelados como en un cobro, y el n.º de operación. Solo el efectivo (10) sale de la caja.
+     * Nulos en lo registrado antes: ahí solo se sabe si salió de la caja (`shift_id`).
+     */
+    paymentMethodId: uuid("payment_method_id"),
+    methodName: text("method_name"),
+    methodTypeCode: text("method_type_code"),
+    paymentReference: text("payment_reference"),
+    /**
+     * El tipo de comprobante del país (en el Perú, la tabla 10 de SUNAT: 01 factura, 02 recibo por
+     * honorarios, 03 boleta, 12 ticket, 14 recibo de servicios públicos). `receipt_kind` sigue
+     * siendo su nombre, el que se lee y se busca; nulo en lo registrado antes, que era texto libre.
+     */
+    receiptType: text("receipt_type"),
+    /**
+     * A quién se pagó: un proveedor de Inventario (`supplier_id`) o uno escrito, con su nombre y su
+     * documento congelados (el RUC, para el crédito fiscal del contador).
+     */
+    supplierId: uuid("supplier_id"),
+    supplierName: text("supplier_name"),
+    supplierTaxId: text("supplier_tax_id"),
+    /**
+     * «Corregir»: el gasto que este reemplaza, anulado en la misma operación (ADR 0167). La lista
+     * muestra el nuevo y el detalle dice lo de antes.
+     */
+    replacesExpenseId: uuid("replaces_expense_id"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -315,6 +353,30 @@ export const expense = pgTable(
     uniqueIndex("expense_org_request_uidx")
       .on(table.organizationId, table.requestId)
       .where(sql`${table.requestId} IS NOT NULL`),
+    // Con qué se pagó y a quién, de la misma clínica; un gasto se corrige una sola vez (ADR 0167).
+    uniqueIndex("expense_org_id_uidx").on(table.organizationId, table.id),
+    foreignKey({
+      name: "expense_payment_method_org_fk",
+      columns: [table.organizationId, table.paymentMethodId],
+      foreignColumns: [organizationPaymentMethod.organizationId, organizationPaymentMethod.id],
+    }),
+    foreignKey({
+      name: "expense_supplier_org_fk",
+      columns: [table.organizationId, table.supplierId],
+      foreignColumns: [supplier.organizationId, supplier.id],
+    }),
+    foreignKey({
+      name: "expense_replaces_org_fk",
+      columns: [table.organizationId, table.replacesExpenseId],
+      foreignColumns: [table.organizationId, table.id],
+    }),
+    uniqueIndex("expense_replaces_uidx")
+      .on(table.organizationId, table.replacesExpenseId)
+      .where(sql`${table.replacesExpenseId} IS NOT NULL`),
+    check(
+      "expense_method_check",
+      sql`(${table.paymentMethodId} IS NULL OR ${table.methodName} IS NOT NULL) AND (${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1'))`,
+    ),
     uniqueIndex("expense_recurring_month_uidx")
       .on(table.organizationId, table.recurringId, table.recurringMonth)
       .where(sql`${table.recurringId} IS NOT NULL AND ${table.voidedAt} IS NULL`),

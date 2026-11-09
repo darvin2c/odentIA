@@ -530,8 +530,22 @@
     {
       "idx": 75,
       "version": "7",
-      "when": 1794246200057,
-      "tag": "0075_vistia_opticas",
+      "when": 1794245962224,
+      "tag": "0075_gasto_con_medio_y_comprobante",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794245964950,
+      "tag": "0076_gasto_con_medio_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794248187830,
+      "tag": "0077_vistia_opticas",
       "breakpoints": true
     }
   ]
