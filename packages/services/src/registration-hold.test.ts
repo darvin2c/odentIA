@@ -28,6 +28,13 @@ describe("«¿Es la misma persona?»", () => {
     expect(rows.find((row) => row.key === "insurance")?.declared).toBe("Privado · Rímac")
   })
 
+  it("el nombre se compara entero, también con el que solo se guardó como nombre visible", () => {
+    const [changed] = registrationHoldRows(answers({ displayName: "Ana Ríos", givenNames: "Ana", familyName: "Ríos" }), { displayName: "Contacto Previo" }, { profile, today })
+    expect(changed).toMatchObject({ key: "names", state: "changed", saved: "Contacto Previo", checked: false })
+    const [same] = registrationHoldRows(answers({ displayName: "Ana Ríos", givenNames: "Ana", familyName: "Ríos" }), { displayName: "ana ríos" }, { profile, today })
+    expect(same).toMatchObject({ key: "names", state: "same" })
+  })
+
   it("una fecha que la vuelve menor de edad no se guarda desde aquí", () => {
     const [birth] = registrationHoldRows(answers({ displayName: "Ana", birthDate: "2015-05-01" }), { birthDate: "1990-05-01" }, { profile, today })
     expect(birth).toMatchObject({ key: "birthDate", state: "changed", checked: false })

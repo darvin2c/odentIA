@@ -102,13 +102,14 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
         body: JSON.stringify(isSame ? { same: true, apply: apply.map((row) => row.key), revision: data?.revision } : { same: false, revision: data?.revision }),
       }),
     onSuccess: (result, isSame) => {
-      const name = data?.ownerName ?? "la persona"
+      // Si se guardó su nombre, se la nombra con el nuevo.
+      const name = (apply.some((row) => row.key === "names") ? data?.declaredName : data?.ownerName) ?? "la persona"
       const count = apply.length
       const replaced = apply.some((row) => row.state === "changed")
       const message = !isSame
         ? "Listo: se registró como una persona nueva."
         : !data?.ownerPatientId
-          ? `Listo: ${name} ya es paciente${count ? `, con ${plural(count, "dato nuevo", "datos nuevos")}` : ""}.`
+          ? `Listo: ${name} ya es paciente${count ? `, con ${plural(count, "cambio", "cambios")}` : ""}.`
           : count
             ? `Listo: se guardaron ${plural(count, "cambio", "cambios")} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
             : `Listo: la ficha de ${name} queda como estaba.`

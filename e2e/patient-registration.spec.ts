@@ -321,6 +321,26 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   ])
   const stillUntouched = await call<{ patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
   expect(stillUntouched.patients).toEqual([])
+
+  // Recepción lo revisa en Inicio: cada dato distinto con lo de antes; quién es viene sin marcar.
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const waiting = page.getByRole("region", { name: "Te espera" })
+  await expect(waiting.getByText(/Se registró en línea: ¿es la misma persona\? · \d+ datos? distintos?/)).toBeVisible()
+  await expect(waiting.getByText(/Mismo celular/)).toBeVisible()
+  await waiting.getByRole("button", { name: "Revisar" }).first().click()
+  const review = page.getByRole("dialog", { name: "¿Es la misma persona?" })
+  await expect(review.getByText(/márcalos solo si comprobaste que es la misma persona/)).toBeVisible()
+  const names = review.getByRole("checkbox", { name: /^Nombres y apellidos/ })
+  await expect(names).not.toBeChecked()
+  await expect(review.getByText("Antes: Contacto Previo")).toBeVisible()
+  await expect(review.getByRole("button", { name: "Sí, sin cambios" })).toBeVisible()
+  await names.click()
+  await review.getByRole("button", { name: "Sí, guardar 1 cambio" }).click()
+  await expect(page.getByText(`Listo: ${heldName} ya es paciente, con 1 cambio.`)).toBeVisible()
+  await expect(review).toBeHidden()
+  const joined = await call<{ displayName: string; patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
+  expect(joined.patients).toHaveLength(1)
+  expect(joined.displayName).toBe(heldName)
 })
 
 test("registro público QR en móvil: flujo completo en 390px sin cuenta", async ({

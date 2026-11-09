@@ -178,11 +178,16 @@ export function registrationHoldRows(
     const fields = GROUP_FIELDS[group]
     const said = fields.filter((field) => text(declared[field]) !== null)
     if (said.length === 0) continue
-    const had = fields.some((field) => text(saved[field]) !== null)
-    const same = said.every((field) => {
-      const before = text(saved[field])
-      return before !== null && sameValue(field, text(declared[field])!, before, profile.country)
-    })
+    // El nombre se compara entero, también con el que solo se guardó como nombre visible.
+    const savedName = group === "names" ? groupText("names", saved, profile, text(saved.displayName)) : null
+    const had = group === "names" ? savedName !== null : fields.some((field) => text(saved[field]) !== null)
+    const same =
+      group === "names"
+        ? savedName !== null && sameValue("names", groupText("names", declared, profile) ?? "", savedName, profile.country)
+        : said.every((field) => {
+            const before = text(saved[field])
+            return before !== null && sameValue(field, text(declared[field])!, before, profile.country)
+          })
     const state = same ? "same" : had ? "changed" : "new"
     const birth = text(declared.birthDate)
     const blocked =
