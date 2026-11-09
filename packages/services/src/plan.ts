@@ -13,7 +13,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm"
-import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { diagnosisTitlesOf, namedDiagnosis, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
@@ -105,6 +105,8 @@ export interface PlanItemPath {
 
 /** Ítem listado con su progreso: sesiones hechas = procedimientos no anulados. */
 export type PlanItemWithProgress = PlanItemWithDecision & {
+  /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»); null sin diagnóstico. */
+  diagnosisName: string | null
   sessionsDone: number
   path: PlanItemPath | null
   /**
@@ -527,8 +529,14 @@ async function withDecisions(
     items.filter((item) => item.status === "realizado").map((item) => item.id),
   )
   const agreed = await agreedPricesOf(tx, orgId, items)
+  // El diagnóstico con su nombre, como en la Historia: «Pulpitis (CIE-11 DA09.0)», no solo el código.
+  const titles = await diagnosisTitlesOf(
+    tx,
+    items.map((item) => ({ system: item.diagnosisSystem, code: item.diagnosisCode })),
+  )
   return items.map((item) => ({
     ...item,
+    diagnosisName: item.diagnosisCode ? namedDiagnosis(titles, item.diagnosisSystem, item.diagnosisCode) : null,
     decision: item.decisionStatus as PlanItemDecision,
     sessionsDone: sessions.get(item.id) ?? 0,
     path: paths.get(item.id) ?? null,

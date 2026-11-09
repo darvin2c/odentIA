@@ -878,7 +878,12 @@ async function loadBornForEncounters(
         .from(treatmentBudgetItem)
         .where(and(eq(treatmentBudgetItem.organizationId, orgId), inArray(treatmentBudgetItem.budgetId, budgetIds))),
       tx
-        .select({ id: treatmentBudgetOption.id, budgetId: treatmentBudgetOption.budgetId, decision: treatmentBudgetOption.decision })
+        .select({
+          id: treatmentBudgetOption.id,
+          budgetId: treatmentBudgetOption.budgetId,
+          decision: treatmentBudgetOption.decision,
+          position: treatmentBudgetOption.position,
+        })
         .from(treatmentBudgetOption)
         .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.budgetId, budgetIds))),
     ])
@@ -1354,7 +1359,7 @@ export async function getTimeline(
           ),
         )
       const options = await tx
-        .select({ id: treatmentBudgetOption.id, decision: treatmentBudgetOption.decision })
+        .select({ id: treatmentBudgetOption.id, decision: treatmentBudgetOption.decision, position: treatmentBudgetOption.position })
         .from(treatmentBudgetOption)
         .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, row.id)))
       // Un tratamiento cuenta una vez aunque esté en varias opciones.

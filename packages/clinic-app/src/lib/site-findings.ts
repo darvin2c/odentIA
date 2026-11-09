@@ -1,10 +1,10 @@
 import type { SiteFinding } from "./patients"
 
 /** Un hallazgo como lo dice el clínico: una caries de dos caras es uno, con sus caras. */
-export interface FindingGroup {
+export interface FindingGroup<T extends SiteFinding = SiteFinding> {
   /** Las filas que lo forman, una por cara; la primera es la que se vincula (como el panel de la pieza). */
   ids: string[]
-  first: SiteFinding
+  first: T
   /** Las caras, en el orden en que se guardaron; vacío si es de la pieza entera. */
   surfaces: string[]
 }
@@ -16,8 +16,8 @@ export interface FindingGroup {
  * guardaron (la misma transacción): eso las une. Hallazgos distintos de la
  * misma pieza, registrados en otro momento, siguen aparte.
  */
-export function groupFindings(entries: readonly SiteFinding[]): FindingGroup[] {
-  const groups = new Map<string, FindingGroup>()
+export function groupFindings<T extends SiteFinding>(entries: readonly T[]): FindingGroup<T>[] {
+  const groups = new Map<string, FindingGroup<T>>()
   for (const entry of entries) {
     const at = entry.createdAt ? new Date(entry.createdAt).getTime() : ""
     const key = [

@@ -178,7 +178,7 @@ function useBudgetWrites(
   }
 }
 
-/** Ítems que pueden entrar a un presupuesto nuevo: sin presupuesto vigente, o que no se aceptaron. */
+/** Ítems que pueden entrar a un presupuesto nuevo: sin presupuesto vigente, o que dijo que no (no la opción que no eligió). */
 export function quotableItems(
   items: PlanItem[],
   budgetsById: Map<string, BudgetWithTotals>,
@@ -189,7 +189,10 @@ export function quotableItems(
     // Aceptado al hacerlo y aún en curso (una endodoncia en dos sesiones): ya está decidido.
     if (!item.budgetId && item.decision === "aceptado" && item.status === "en_curso") return false
     if (!item.budgetId) return true
-    if (item.decision === "rechazado" || item.decision === "no_elegida") return true
+    // La opción que no eligió no es algo pendiente: eligió otro camino (repaso de la ficha del 9
+    // nov: «Preparar presupuesto con lo pendiente» armaba la exodoncia de una 46 ya endodonciada).
+    // Lo que dijo que no, sí puede volver a ofrecerse.
+    if (item.decision === "rechazado") return true
     return budgetsById.get(item.budgetId)?.status === "cancelado"
   })
 }

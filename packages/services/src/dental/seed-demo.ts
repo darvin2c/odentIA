@@ -4265,7 +4265,8 @@ const agendaSeed: Array<{
     day: 1,
     start: "09:00",
     end: "10:00",
-    service: "ENDODONCIA",
+    // La 46 es un molar: su endodoncia es la posterior, como su tratamiento (QA del 9 nov).
+    service: "ENDODONCIA_POSTERIOR",
     status: "programada",
     planItemIds: [endo46.id],
   },
@@ -4276,7 +4277,8 @@ const agendaSeed: Array<{
     day: 8,
     start: "09:00",
     end: "10:00",
-    service: "ENDODONCIA",
+    // La 46 es un molar: su endodoncia es la posterior, como su tratamiento (QA del 9 nov).
+    service: "ENDODONCIA_POSTERIOR",
     status: "programada",
     planItemIds: [endo46.id],
   },

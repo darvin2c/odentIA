@@ -1,6 +1,7 @@
 import {
   diagnosisCodeLabel,
   formatMoney,
+  isLeftOut,
 } from "@odentia/clinical"
 import {
   surfaceLabel as clinicalSurfaceLabel,
@@ -27,8 +28,9 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "@odentia/clinic-app/lib/api"
+import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
+import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
 import { useOrgProfile } from "@odentia/clinic-app/lib/org"
 import { DIAGNOSIS_TYPE_LABELS, type PatientDocument, type PlanItem, planStatusLabel, toothTypeLabel } from "@odentia/clinic-app/lib/patients"
@@ -100,6 +102,8 @@ interface FindingDraft {
   /** Tratamiento: va al plan abierto de la persona, que nace con el primero (ADR 0034). */
   treatService: ServiceCatalogItem | null
   treatDetail: string
+  /** Sesiones previstas del tratamiento: nacen con las habituales del servicio, como al indicarlo en el plan. */
+  treatSessions: string
 }
 
 /** Lo que depende del hallazgo elegido: se vacía al cambiarlo. */
@@ -127,6 +131,7 @@ const EMPTY_DRAFT: FindingDraft = {
   diagnosisType: "",
   treatService: null,
   treatDetail: "",
+  treatSessions: "",
 }
 
 /** Qué pide el hallazgo elegido: la misma regla decide qué campos se ven y en cuál se dice cada error. */
@@ -261,6 +266,8 @@ const SERVER_FIELDS: Record<string, string> = {
   "diagnosis.diagnosisType": "diagnosisType",
   "treatment.serviceId": "treatService",
   "treatment.detail": "treatDetail",
+  "treatment.plannedSessions": "treatSessions",
+  plannedSessions: "treatSessions",
 }
 
 const voidSchema = z.object({
@@ -401,7 +408,7 @@ export function ToothDrawer({
   const [choosingFinding, setChoosingFinding] = useState(true)
   const [savedMessage, setSavedMessage] = useState("")
   const [freehand, setFreehand] = useState(false)
-  const [voiding, setVoiding] = useState<{ id: string; label: string } | null>(null)
+  const [voiding, setVoiding] = useState<{ ids: string[]; label: string } | null>(null)
 
   /**
    * La misma regla del país que aplica el servidor, antes de enviar: cada
@@ -421,6 +428,9 @@ export function ToothDrawer({
       fields.diagnosisType = "Elige el tipo del diagnóstico: presuntivo o definitivo."
     if (value.treatService && !TOOTH_SCOPES.includes(value.treatService.scope ?? ""))
       fields.treatService = `«${value.treatService.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles».`
+    const sessions = value.treatSessions.trim()
+    if (value.treatService && sessions !== "" && !(/^\d{1,2}$/.test(sessions) && Number(sessions) >= 1 && Number(sessions) <= 60))
+      fields.treatSessions = "Escribe un número de sesiones entre 1 y 60."
     const own = new Set(Object.keys(fields))
     const general = new Set<string>()
     const details = draftDetailsOf(value, layout, teeth)
@@ -468,7 +478,11 @@ export function ToothDrawer({
               ? { diagnosisCode: code, diagnosisSystem: value.diagnosisSystem, diagnosisType: value.diagnosisType }
               : null,
             treatment: value.treatService
-              ? { serviceId: value.treatService.id, detail: value.treatDetail.trim() || null }
+              ? {
+                  serviceId: value.treatService.id,
+                  detail: value.treatDetail.trim() || null,
+                  ...(value.treatSessions.trim() === "" ? {} : { plannedSessions: Number(value.treatSessions.trim()) }),
+                }
               : null,
           }),
         })
@@ -511,10 +525,24 @@ export function ToothDrawer({
       onPendingChange?.(true)
       try {
         await beforeWrite?.()
-        await apiFetch(`/api/patients/${patientId}/odontogram/entries/${voiding.id}/void`, {
-          method: "POST",
-          body: JSON.stringify({ reason: value.reason.trim() }),
-        })
+        // Una caries de dos caras se anula entera: cada cara es su fila. Una cara ya anulada
+        // (un intento anterior que se cortó a medias) se salta, y el odontograma se vuelve a
+        // pedir aunque una falle: así se ve lo que quedó y se reintenta lo que falta.
+        try {
+          for (const id of voiding.ids) {
+            try {
+              await apiFetch(`/api/patients/${patientId}/odontogram/entries/${id}/void`, {
+                method: "POST",
+                body: JSON.stringify({ reason: value.reason.trim() }),
+              })
+            } catch (error) {
+              if (!(error instanceof ApiError && error.shape.code === "ALREADY_VOIDED")) throw error
+            }
+          }
+        } catch (error) {
+          await onChanged()
+          throw error
+        }
         setVoiding(null)
         voidForm.reset(EMPTY_VOID)
         await onChanged()
@@ -765,9 +793,9 @@ export function ToothDrawer({
           canMutate={canMutate && !disabled && !busy}
           voidPending={voidSurface.isSubmitting}
           defaultOpen
-          onVoid={(id, label) => {
+          onVoid={(ids, label) => {
             voidForm.reset(EMPTY_VOID)
-            setVoiding({ id, label })
+            setVoiding({ ids, label })
           }}
         />
       ))}
@@ -839,7 +867,8 @@ export function ToothDrawer({
                   }))}
                   placeholder="Elige…"
                   disabled={fieldDisabled}
-                  triggerClassName="min-h-11"
+                  // La profundidad elegida se lee entera («…de la dentina / compromiso de la pulpa»).
+                  triggerClassName="h-auto min-h-11 whitespace-normal text-left *:data-[slot=select-value]:line-clamp-3"
                 />
               )}
             </form.AppField>
@@ -1123,7 +1152,12 @@ export function ToothDrawer({
                       aria-describedby={control.describedBy}
                       onBlur={control.onBlur}
                       value={field.state.value?.id ?? ""}
-                      onChange={(service) => field.handleChange(service)}
+                      onChange={(service) => {
+                        field.handleChange(service)
+                        // Nace con las sesiones habituales del servicio, como en «Indicar un tratamiento»:
+                        // una endodoncia de dos no se da por terminada en la primera firma (QA del 9 nov).
+                        form.setFieldValue("treatSessions", String(service?.usualSessions ?? 1))
+                      }}
                       disabled={fieldDisabled}
                     />
                   )}
@@ -1147,6 +1181,7 @@ export function ToothDrawer({
                   onClick={() => {
                     form.setFieldValue("treatService", null)
                     form.setFieldValue("treatDetail", "")
+                    form.setFieldValue("treatSessions", "")
                   }}
                 >
                   Quitar
@@ -1160,6 +1195,23 @@ export function ToothDrawer({
                   : "Abre su plan con este tratamiento"
                 : "Opcional: lo que propones hacer va al plan, aparte de lo observado"}
             </p>
+            {draft.treatService ? (
+              <form.AppField name="treatSessions">
+                {(field) => (
+                  <field.TextField
+                    id={`${uid}-treat-sessions`}
+                    label="Sesiones previstas"
+                    description="Las que suele llevar este servicio; cámbialas si este paciente necesita otras."
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={60}
+                    inputClassName="w-28"
+                    disabled={fieldDisabled}
+                  />
+                )}
+              </form.AppField>
+            ) : null}
             {draft.treatService ? (
               <form.AppField name="treatDetail">
                 {(field) => (
@@ -1300,13 +1352,14 @@ function ToothContext({
   canMutate: boolean
   voidPending: boolean
   defaultOpen: boolean
-  onVoid: (id: string, label: string) => void
+  onVoid: (ids: string[], label: string) => void
 }): React.JSX.Element {
   const official = useOdontogramNotation()
   const needsReview = entries.filter((e) => e.needsReview)
 
   const toothPlan = (planQuery.data?.data ?? []).filter((item) => item.toothNumber === toothNumber)
-  const openPlan = toothPlan.filter((item) => OPEN_PLAN_STATUSES.includes(item.status))
+  // La opción que no eligió no es un tratamiento activo de la pieza (QA del 9 nov): sigue en su presupuesto.
+  const openPlan = toothPlan.filter((item) => OPEN_PLAN_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus))
   const donePlan = toothPlan.filter((item) => !OPEN_PLAN_STATUSES.includes(item.status))
 
   const toothDocs = (docsQuery.data?.data ?? []).filter((d) => d.toothNumbers.includes(toothNumber))
@@ -1336,18 +1389,19 @@ function ToothContext({
             <p className="text-sm text-muted-foreground">Sin hallazgos vigentes en esta pieza.</p>
           ) : (
             <ul className="flex flex-col gap-1.5">
-              {entries.map((entry) => {
+              {/* Una caries de dos caras es un hallazgo: una fila con sus caras (QA del 9 nov). */}
+              {groupFindings(entries).map(({ first: entry, ids, surfaces }) => {
                 const words = findingWords(official, entry)
                 // Solo lo registrado en la atención en curso se corrige aquí.
                 const ownedHere = canMutate && !!encounterId && entry.encounterId === encounterId
                 return (
                   <li
-                    key={entry.id}
+                    key={ids.join(",")}
                     className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
                   >
                     <span className="min-w-0 flex-1">
                       {words}
-                      {entry.surface ? ` · ${clinicalSurfaceLabel(entry.surface)}` : ""}
+                      {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
                       {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                     </span>
                     {entry.needsReview ? <Badge variant="outline">Requiere revisión</Badge> : null}
@@ -1361,7 +1415,7 @@ function ToothContext({
                         variant="ghost"
                         size="xs"
                         disabled={voidPending}
-                        onClick={() => onVoid(entry.id, `pieza ${toothNumber} (${findingWords(official, entry)})`)}
+                        onClick={() => onVoid(ids, `pieza ${toothNumber} (${findingWords(official, entry)})`)}
                       >
                         Anular
                       </Button>

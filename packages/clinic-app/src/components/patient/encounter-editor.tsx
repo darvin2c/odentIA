@@ -56,6 +56,7 @@ import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
+  type ClosingResolvable,
   type ClosingSession,
   type FinalizedControls,
   type FinalizedMaterials,
@@ -116,6 +117,7 @@ import {
   healthGapWords,
   type SessionAnswers,
   needsNextControlDay,
+  resolvingOnSign,
   SignatureRegistrationFields,
   useClosingForm,
 } from "./encounter-closing"
@@ -129,6 +131,7 @@ import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { EncounterVisitStrip } from "./encounter-visit"
+import { CollectButton } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { PatientClinicalStrip } from "./patient-header"
 import { BudgetSendButton } from "./plan/budget-send"
@@ -426,6 +429,22 @@ function skippedReasonLabel(reason: string | null): string {
 }
 
 /**
+ * Los diagnósticos que el cierre mostró marcados para resolver (los de lo que termina,
+ * sin lo desmarcado): solo esos se resuelven al firmar.
+ */
+function resolveDiagnosesBody(
+  resolvable: ClosingResolvable[] | undefined,
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] } | undefined,
+  answers: SessionAnswers,
+  keep: ReadonlySet<string>,
+): { resolveDiagnosisIds?: string[] } {
+  const ids = resolvingOnSign(resolvable ?? [], sessions, answers)
+    .filter((found) => !found.diagnosisIds.some((id) => keep.has(id)))
+    .flatMap((found) => found.diagnosisIds)
+  return ids.length ? { resolveDiagnosisIds: ids } : {}
+}
+
+/**
  * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`: solo «Falta otra
  * sesión», de lo que el cierre pregunta hoy (lo que ya no está, porque se anuló
  * su sesión, no se manda). Lo demás que llega a sus previstas lo termina el
@@ -464,6 +483,8 @@ export function EncounterEditor({
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canReadFinance,
   })
+  /** Lo que debe en total, por moneda, para «Atención finalizada» (solo quien ve la caja). */
+  const finalizedOwed = (accountQuery.data?.data.byCurrency ?? []).filter((row) => row.saldo > 0)
 
   // El examen y los signos vitales son los del producto (issue 229).
   const exam = productUi().encounter.examination
@@ -561,6 +582,17 @@ export function EncounterEditor({
   const [sessionPrefill, setSessionPrefill] = useState<string | null>(null)
   /** «¿Terminaste?» del cierre: lo que se cambió de cada tratamiento de hoy (sin cambiar, se termina). */
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswers>({})
+  /** Los diagnósticos que el cierre proponía resolver y quien firma desmarcó. */
+  const [keepDiagnoses, setKeepDiagnoses] = useState<ReadonlySet<string>>(() => new Set())
+  const keepDiagnosis = (diagnosisIds: string[], keep: boolean) =>
+    setKeepDiagnoses((current) => {
+      const next = new Set(current)
+      for (const id of diagnosisIds) {
+        if (keep) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
   // Sede de la atención: se guarda al elegirla; si no, el error va en su campo.
   const [branchError, setBranchError] = useState<string | null>(null)
   const registrationNumberRef = useRef<HTMLInputElement>(null)
@@ -643,7 +675,11 @@ export function EncounterEditor({
   /** «Resina… · 36»: el tratamiento de «¿Terminaste?» con su pieza, si la tiene. */
   const sessionLabelOf = (session: ClosingSession) => {
     const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
-    return tooth != null ? `${session.title} · ${tooth}` : session.title
+    if (tooth != null) return `${session.title} · ${tooth}`
+    // Lo aceptado sin empezar no está en la atención: su sitio lo dice el cierre («Corona · pieza 46»).
+    const place =
+      session.place ?? closingQuery.data?.data.sessions?.accepted?.find((row) => row.planItemId === session.planItemId)?.place
+    return place ? `${session.title} · ${place}` : session.title
   }
   const answerSession = (planItemId: string, answer: "terminar" | "otra") =>
     setSessionAnswers((current) => ({ ...current, [planItemId]: answer }))
@@ -1092,6 +1128,12 @@ export function EncounterEditor({
     }
   }
 
+  // Si debe lo mismo que acaba de quedar por cobrar, no se dice dos veces: el mismo importe
+  // repetido se leía como que debía el doble (segunda mesa del 9 nov).
+  const owedSameAsToday =
+    finalizedOwed.length === 1 &&
+    finalizedBilling?.currency === finalizedOwed[0]?.currency &&
+    finalizedBilling?.chargedCents === finalizedOwed[0]?.saldo
   const chargedLines = finalizedBilling?.lines.filter((line) => line.status === "charged") ?? []
   const skippedLines = finalizedBilling?.lines.filter((line) => line.status !== "charged") ?? []
   const closeFinalized = () => {
@@ -1191,6 +1233,8 @@ export function EncounterEditor({
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
           // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
           ...sessionAnswerBody(sessionAnswers, askedSessions),
+          // Lo que lo de hoy resuelve y la pantalla mostró marcado queda resuelto; lo demás, no.
+          ...resolveDiagnosesBody(closingQuery.data?.data.resolvable, askedSessions, sessionAnswers, keepDiagnoses),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
           ...closingControlsBody(
             value,
@@ -1203,6 +1247,7 @@ export function EncounterEditor({
       onSigned?.()
       setConfirmOpen(false)
       setSessionAnswers({})
+      setKeepDiagnoses(new Set())
       closingForm.reset()
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
@@ -1211,6 +1256,8 @@ export function EncounterEditor({
       setFinalizedKeptOpen(result.data.keptOpen ?? [])
       setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedBilling(result.data.billing)
+      // «Debe en total» cuenta lo que este cierre acaba de cargar.
+      if (canReadFinance) void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
         void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
@@ -1493,8 +1540,14 @@ export function EncounterEditor({
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
+  // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
+  // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
+  const signsOdontogram = Boolean(closingQuery.data?.data.odontogram)
   const unrecorded = closingSections
-    .filter((section) => section.empty && !(section.key === "plan" && closingControls))
+    .filter(
+      (section) =>
+        section.empty && !(section.key === "plan" && closingControls) && !(section.key === "odontograma" && signsOdontogram),
+    )
     .map((section) => section.title.toLowerCase())
   // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice
   // aparte, junto a los materiales, y no se repite aquí. La ASA solo cuenta con anestesia.
@@ -2641,6 +2694,8 @@ export function EncounterEditor({
         sessionLabel={sessionLabelOf}
         sessionAnswers={sessionAnswers}
         onSessionAnswer={answerSession}
+        keepDiagnoses={keepDiagnoses}
+        onKeepDiagnosis={keepDiagnosis}
         nextVisit={
           <ClosingNextVisit
             form={closingForm}
@@ -2698,6 +2753,9 @@ export function EncounterEditor({
             answers={sessionAnswers}
             onAnswer={answerSession}
             disabled={finalizing}
+            resolvable={closingQuery.data.data.resolvable}
+            keepDiagnoses={keepDiagnoses}
+            onKeepDiagnosis={keepDiagnosis}
           />
         ) : null}
       </DictationSignDialog>
@@ -2713,9 +2771,10 @@ export function EncounterEditor({
           <DialogHeader>
             <DialogTitle>Atención finalizada</DialogTitle>
             <DialogDescription>
+              {/* «No dejó nada que cobrar» se leía como que no debía nada (QA del 9 nov). */}
               {chargedLines.length > 0
                 ? "Caja ya lo ve en su lista de por cobrar."
-                : "Esta atención no dejó nada que cobrar."}
+                : "Esta atención no dejó cargos nuevos."}
             </DialogDescription>
           </DialogHeader>
           {finalizedNext.length > 0 ? (
@@ -2742,6 +2801,9 @@ export function EncounterEditor({
                 professionalUserId: encounter.professionalUserId,
                 professionalLabel: memberName(encounter.professionalUserId),
                 keepProfessional: true,
+                // La sesión que sigue no es hoy: el buscador empieza mañana (QA del 9 nov
+                // proponía «Reservar hoy a las 11:30»); hoy queda a una flecha.
+                date: addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
               }}
               onClose={() => setBookingNext(null)}
               onSaved={(appointment) => {
@@ -2801,6 +2863,26 @@ export function EncounterEditor({
                 </p>
               ) : null}
             </section>
+          ) : null}
+          {/* Lo que debe en total, con lo de antes (la sesión 1 de la endodoncia), y «Cobrar» a
+              quien cobra: solo quien ve la caja (QA del 9 nov; el odontólogo no la ve). */}
+          {canReadFinance && !accountQuery.isFetching && finalizedOwed.length > 0 && orgLocale ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+              <span>
+                {owedSameAsToday ? (
+                  "Caja puede cobrarlo ahora."
+                ) : (
+                  <>
+                    Debe en total{" "}
+                    <span className="font-semibold tabular-nums">
+                      {finalizedOwed.map((row) => formatMoney(row.saldo, row.currency, orgLocale)).join(" y ")}
+                    </span>
+                  </>
+                )}
+              </span>
+              {/* Secundario: la acción de quien atiende es reservar lo que sigue. */}
+              <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" variant="outline" />
+            </div>
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>

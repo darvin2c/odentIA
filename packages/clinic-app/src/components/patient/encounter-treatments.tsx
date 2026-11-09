@@ -112,15 +112,27 @@ export function EncounterTreatments({
             const session = showsSession(today, planned)
               ? ` · ${sessionWords(today, planned)}${hasSession ? "" : " · por registrar"}`
               : ""
+            // Lo que se hizo en esta atención, aún sin firmar: «Aceptado · Realizado ·
+            // Completado el…» lo daba por cerrado antes de la firma (QA del 9 nov).
+            const doneToday = item.status === "realizado" && hasSession
             return (
               <li key={item.id} className="flex flex-col gap-2 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{item.title}</span>
-                  <Badge variant={decisionBadge(item.decisionStatus)}>
-                    {planDecisionLabel(item.decisionStatus)}
-                  </Badge>
-                  <Badge variant="secondary">{planStatusLabel(item.status)}</Badge>
-                  <span className="text-sm text-muted-foreground">
+                  {doneToday ? (
+                    <>
+                      <Badge variant="secondary">Se hace hoy</Badge>
+                      <span className="text-sm text-muted-foreground">Queda realizado al firmar</span>
+                    </>
+                  ) : (
+                    <>
+                      <Badge variant={decisionBadge(item.decisionStatus)}>
+                        {planDecisionLabel(item.decisionStatus)}
+                      </Badge>
+                      <Badge variant="secondary">{planStatusLabel(item.status)}</Badge>
+                    </>
+                  )}
+                  <span className="text-sm text-muted-foreground" hidden={doneToday}>
                     {item.completedAt
                       ? `Completado el ${formatDate(item.completedAt)}`
                       : item.startedAt

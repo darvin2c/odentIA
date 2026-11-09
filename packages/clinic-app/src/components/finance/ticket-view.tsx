@@ -13,6 +13,7 @@ import {
   currencyWord,
   documentText,
   formatMoney,
+  ticketCreditSummary,
   ticketFooterLines,
   ticketTenderTitle,
   ticketUntaxedNote,
@@ -225,6 +226,12 @@ export function TicketView({
   const lines = snapshot.lines ?? []
   const conceptLines = lines.filter((line) => line.chargeId !== null)
   const advance = lines.find((line) => line.chargeId === null) ?? null
+  const creditSummary = ticketCreditSummary({
+    lineCents: conceptLines.map((line) => line.appliedCents ?? line.amountCents),
+    advanceCents: advance?.amountCents ?? null,
+    creditAppliedCents: ticket.creditAppliedCents,
+    totalCents: ticket.totalCents,
+  })
   const methods = snapshot.methods ?? []
   const appliedToConcepts = conceptLines.reduce(
     (sum, line) => sum + (line.appliedCents ?? line.amountCents),
@@ -470,6 +477,15 @@ export function TicketView({
             </li>
           ) : null}
         </ul>
+        {/* Con saldo a favor: la suma de las líneas, lo que se restó y lo pagado hoy (QA del 9 nov:
+            las líneas sumaban 470 y el TOTAL decía 370, con el saldo a favor debajo como otro medio). */}
+        {creditSummary ? (
+          <div className="flex flex-col gap-1">
+            {/* Con una sola línea, la suma es esa línea: no se repite. */}
+            {conceptLines.length + (advance ? 1 : 0) > 1 ? <Row label="Suma" value={plain(creditSummary.sumCents)} /> : null}
+            <Row label="Saldo a favor usado" value={`−${plain(creditSummary.creditCents)}`} />
+          </div>
+        ) : null}
         {snapshot.taxes ? (
           // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa (ADR 0083).
           <div className="flex flex-col gap-1">
@@ -488,7 +504,7 @@ export function TicketView({
             ) : null}
           </div>
         ) : null}
-        <Row label="TOTAL" value={money(ticket.totalCents)} strong />
+        <Row label={creditSummary ? "PAGADO HOY" : "TOTAL"} value={money(ticket.totalCents)} strong />
         <div className="flex flex-col gap-1">
           {crossed ? (
             <p className="border-t pt-2 font-semibold">{ticketTenderTitle(crossed, format)}</p>
@@ -501,9 +517,6 @@ export function TicketView({
               ) : null}
             </div>
           ))}
-          {ticket.creditAppliedCents > 0 ? (
-            <Row label="Saldo a favor usado" value={plain(ticket.creditAppliedCents)} />
-          ) : null}
           {ticket.cashReceivedCents != null ? (
             <Row label="Recibido" value={entered(ticket.cashReceivedCents)} />
           ) : null}
