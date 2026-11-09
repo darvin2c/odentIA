@@ -339,9 +339,9 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   await review.getByRole("button", { name: "Sí, registrarla con 1 cambio" }).click()
   await expect(page.getByText(`Listo: ${heldName} ya es paciente, con 1 cambio.`)).toBeVisible()
   await expect(review).toBeHidden()
-  const joined = await call<{ displayName: string; patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
+  const joined = await call<{ contact: { displayName: string }; patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
   expect(joined.patients).toHaveLength(1)
-  expect(joined.displayName).toBe(heldName)
+  expect(joined.contact.displayName).toBe(heldName)
 })
 
 test("registro público QR en móvil: flujo completo en 390px sin cuenta", async ({
