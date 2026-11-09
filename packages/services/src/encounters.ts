@@ -1904,6 +1904,12 @@ export interface FinalizeEncounterBase {
    */
   bookedAfter: BookedAfter[]
   /**
+   * Lo aceptado de la misma pieza que va después de lo que sigue en curso y aún no tiene cita (la
+   * corona mientras la endodoncia pide la sesión 2): «Atención finalizada» lo dice para que no se
+   * pierda, sin ofrecer reservarlo todavía (pendiente de la entrega 8).
+   */
+  waitingAfter: Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>
+  /**
    * Lo trabajado hoy que sigue en curso, con su próxima sesión: la cita que ya la
    * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
    */
@@ -3185,6 +3191,17 @@ export async function finalizeEncounter(
     },
     keptOpen,
     bookedAfter,
+    waitingAfter:
+      continuingNext.length > 0
+        ? closing.sessions.accepted
+            .filter((session) => !session.booked && !bookedAfter.some((row) => row.planItemId === session.planItemId))
+            .map((session) => ({
+              planItemId: session.planItemId,
+              title: session.title,
+              ...(session.place ? { place: session.place } : {}),
+              beforeTitle: continuingNext[0]!.title,
+            }))
+        : [],
     nextSessions,
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,
