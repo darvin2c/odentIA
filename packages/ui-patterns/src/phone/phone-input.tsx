@@ -118,13 +118,14 @@ export function PhoneInput({
    * marca inválido por sí solo. El mensaje lo pone la pantalla (`FieldError`);
    * aquí solo se enciende `aria-invalid`, que es lo que pinta el error. Un
    * número posible pero raro para su país (un celular al que le falta un
-   * dígito) también se pinta, pero es un aviso y no un error (`data-advisory`):
-   * se guarda igual y el foco del envío va a lo que de verdad falta.
+   * dígito) es un aviso y no un error (`data-advisory`): no se pinta en rojo
+   * (QA del 9 nov: el borde rojo hacía creer que no se guardaba), lo dice el
+   * texto de ayuda, se guarda igual y el foco del envío va a lo que de verdad falta.
    */
   const current = React.useMemo(() => phoneMeta(display, country), [country, display])
   const doubtful = touched && current.digits.length > 0 && !current.isValid
-  const invalid = invalidProp || doubtful
   const advisory = !invalidProp && doubtful && current.e164 !== null
+  const invalid = invalidProp || (doubtful && !advisory)
 
   React.useEffect(() => {
     if (value === emitted.current) return

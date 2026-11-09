@@ -131,7 +131,19 @@ export function EncounterVisitStrip({
                 size="sm"
                 disabled={disabled}
                 aria-label={`Usar «${offeredReason}» como motivo`}
-                onClick={onUseReason}
+                onClick={() => {
+                  onUseReason()
+                  // Lo que su cita continúa (la sesión 2 de la endodoncia) trae también su
+                  // diagnóstico, como «Continuar hoy» sin cita: la misma operación por los dos
+                  // caminos (QA del 9 nov). El motivo escrito se guarda antes y no se pisa.
+                  const continuing = treatments.find(
+                    (item) => item.linked && item.broughtByAppointment && item.started && !item.registered,
+                  )
+                  if (continuing)
+                    void run(continuing.planItemId, () =>
+                      bringTreatmentApi(patientId, encounterId, continuing.planItemId),
+                    )
+                }}
               >
                 Usar como motivo
               </Button>

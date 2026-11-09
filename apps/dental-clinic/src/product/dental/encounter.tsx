@@ -173,7 +173,10 @@ function DentalClosing({
             </span>
             {findingsLine(odontogram) ? (
               <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
-            ) : null}
+            ) : (
+              // Sin hallazgos nuevos se firma por lo que hoy queda tratado: dicho, no «sin registrar».
+              <span className="text-xs text-muted-foreground">Con lo que hoy queda tratado; sin hallazgos nuevos.</span>
+            )}
           </div>
         </div>
       ) : null}

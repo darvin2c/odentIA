@@ -337,6 +337,17 @@ describe("números de otro país", () => {
     expect(lastValue(onChange)).toBe("+447700900878")
   })
 
+  // QA del 9 nov: un número posible pero raro para su país (el +44 7700 900xxx de ficción)
+  // quedaba con borde rojo como si no se guardara. Es un aviso: sin `aria-invalid`.
+  it("un número posible pero dudoso avisa sin pintarse como error", async () => {
+    const user = userEvent.setup()
+    const { input } = renderField({ defaultCountry: "PE" })
+    await user.type(input, "+447700900601")
+    await user.tab()
+    expect(input.getAttribute("aria-invalid")).toBeNull()
+    expect(input.getAttribute("data-advisory")).toBe("true")
+  })
+
   it("el buscador de países encuentra por prefijo, con el país principal primero", async () => {
     const user = userEvent.setup()
     renderField({ defaultCountry: "PE" })

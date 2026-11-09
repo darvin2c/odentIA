@@ -291,7 +291,9 @@ function StudioBody({
   const showInlinePanel = detailMode === "panel" && wide && selection.length > 0 && drawerOpen
   // Sin nada elegido y sin historia, «Evolución» no tiene qué mostrar: no se muestra. En la
   // ficha, en el celular, va debajo de la lista de hallazgos: plegada encima la tapaba (QA del 9 nov).
-  const evolutionEmpty = selection.length === 0 && visibleHistory.length === 0
+  // En la atención, en el celular, sin pieza elegida tampoco: quedaba un «Odontograma ·
+  // Evolución» plegado y vacío encima de los hallazgos de hoy (QA del 9 nov, 390 px).
+  const evolutionEmpty = selection.length === 0 && (visibleHistory.length === 0 || (compact && !wide))
   const evolutionBelow = !wide && !compact && selection.length === 0
   const evolution = evolutionEmpty ? null : (
             <details

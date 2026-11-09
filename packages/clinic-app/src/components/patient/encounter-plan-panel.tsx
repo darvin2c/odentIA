@@ -216,7 +216,8 @@ export function EncounterPlanPanel({
   const today = new Set(indicatedItems.map((item) => item.id))
   // El plan en corto: lo abierto de los planes vigentes, con lo de hoy primero.
   const brief = (itemsQuery.data?.data ?? [])
-    .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status))
+    // La opción que no eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
+    .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
@@ -425,6 +426,12 @@ export function EncounterPlanPanel({
             ))}
           </>
         )}
+        {/* La línea del presupuesto, antes del formulario: abierto, la empujaba fuera de la vista (QA del 9 nov). */}
+        <EncounterBudgetSend
+          patientId={patientId}
+          patientName={patientName}
+          beforeWrite={beforeWrite}
+        />
         {canWrite ? (
           <Collapsible
             open={indicating}
@@ -462,12 +469,6 @@ export function EncounterPlanPanel({
           </Collapsible>
         ) : null}
       </BlockPart>
-
-      <EncounterBudgetSend
-        patientId={patientId}
-        patientName={patientName}
-        beforeWrite={beforeWrite}
-      />
 
       {showControls ? (
         <ControlesPanel
@@ -1033,9 +1034,16 @@ function IndicationForm({
           <form.AppField
             name="teeth"
             listeners={{
-              onChange: () => {
+              onChange: ({ value }) => {
                 form.setFieldValue("surfaces", [])
                 form.setFieldValue("odontogramEntryId", "")
+                // El diagnóstico es de su pieza: otra pieza no se lleva la pulpitis de la 36
+                // (QA del 9 nov). Vuelve si se vuelve a la pieza con que empezó.
+                // Solo el que venía puesto: uno elegido a mano para esta pieza se queda.
+                const current = form.getFieldValue("diagnosisCode")
+                if (current !== "" && current !== initial.diagnosisCode) return
+                const same = value.length > 0 && value.length === initial.teeth.length && value.every((tooth, index) => tooth === initial.teeth[index])
+                form.setFieldValue("diagnosisCode", same ? initial.diagnosisCode : "")
               },
             }}
           >

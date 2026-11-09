@@ -503,7 +503,17 @@ export function EncounterProcedures({
               type="button"
               variant="outline"
               disabled={!canOpen}
-              onClick={() => setOpen(true)}
+              onClick={() => {
+                // Viene puesto lo aceptado o en curso que trajo esta atención (su cita, «Continuar
+                // hoy») y aún no tiene su sesión de hoy, si es uno solo; si no, lo aceptado sin
+                // sesión de hoy, si es uno solo. El catálogo sigue a un toque (QA del 9 nov).
+                const doneToday = new Set(detail.procedures.filter((procedure) => !procedure.voidedAt).map((procedure) => procedure.planItemId))
+                const open = openItems.filter((item) => item.decision === "aceptado" && !doneToday.has(item.id))
+                const brought = open.filter((item) => detail.plannedItems.some((planned) => planned.id === item.id))
+                const only = brought.length === 1 ? brought[0] : brought.length === 0 && open.length === 1 ? open[0] : undefined
+                if (only && !values.planItemId && !values.service && !values.freeMode) onPlanChange(only.id)
+                setOpen(true)
+              }}
             >
               Registrar lo de hoy
             </Button>

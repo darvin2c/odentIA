@@ -523,6 +523,8 @@ export interface PlanItem {
   /** Sin nada aceptado, el que le ofrece su presupuesto: no es lo que se cobra. */
   offeredPriceCents?: number | null
   offeredCurrency?: string | null
+  /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»), como lo dice el servidor. */
+  diagnosisName?: string | null
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
@@ -607,6 +609,8 @@ export interface EncounterDetail {
   teeth: number[]
   plannedItems: PlanItem[]
   indicatedItems: PlanItem[]
+  /** Los presupuestos de lo indicado en ella, con su estado dicho («Eligió la opción A», «Anulado»). */
+  budgets?: Array<{ id: string; budgetNumber: number; status: string; stateText: string; voidedWith?: boolean }>
   /** Lo que la atención deja por ejecutar, sin lo que la persona dejó fuera: lo cuenta el servidor. */
   pendingTreatments: number
   procedures: ProcedureItem[]
