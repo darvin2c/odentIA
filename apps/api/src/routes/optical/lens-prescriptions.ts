@@ -1,6 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import {
   currentLensPrescriptions,
+  renderLensPrescriptionPdf,
   issueLensPrescription,
   listLensPrescriptions,
   transcribeLensPrescription,
@@ -10,7 +11,7 @@ import {
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../../lib/context.js"
-import { type CrmDeps, runService, validationError } from "../helpers.js"
+import { type CrmDeps, runService, serviceErrorResponse, validationError } from "../helpers.js"
 
 /**
  * Las recetas de lentes de vistIA (entrega 3 del plan). Lo valida el servicio
@@ -95,6 +96,29 @@ export function createPatientLensPrescriptionsRoute(deps: Pick<CrmDeps, "db">) {
         voidLensPrescription(tx, orgId, userId, params.data.id, params.data.prescriptionId, parsed.data),
       ),
     )
+  })
+  // La receta impresa, para entregarla: se abre en el navegador y se imprime o se guarda.
+  app.get("/:id/lens-prescriptions/:prescriptionId/pdf", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const params = itemParams.safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    try {
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        renderLensPrescriptionPdf(tx, orgId, params.data.id, params.data.prescriptionId),
+      )
+      return new Response(Buffer.from(pdf.bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${pdf.filename}"`,
+          "Cache-Control": "no-store",
+        },
+      })
+    } catch (error) {
+      const response = serviceErrorResponse(c, error)
+      if (response) return response
+      throw error
+    }
   })
   return app
 }

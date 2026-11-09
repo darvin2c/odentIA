@@ -1,4 +1,4 @@
-import { apiFetch } from "@odentia/clinic-app/lib/api"
+import { apiFetch, apiFetchBytes } from "@odentia/clinic-app/lib/api"
 import { usePermission } from "@odentia/clinic-app/lib/crm"
 import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import type { RecordSectionProps } from "@odentia/clinic-app/product/product-ui"
@@ -51,6 +51,22 @@ interface Prescriptions {
   current: Partial<Record<PrescriptionKind, LensPrescription>>
 }
 
+/** Abre el PDF en otra pestaña, abierta en el mismo clic para que el navegador no la bloquee. */
+async function openPdf(path: string): Promise<void> {
+  const tab = window.open("", "_blank")
+  if (tab) tab.opener = null
+  try {
+    const bytes = await apiFetchBytes(path)
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+    if (tab && !tab.closed) tab.location.href = url
+    else window.open(url, "_blank", "noopener")
+    window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000)
+  } catch (cause) {
+    if (tab && !tab.closed) tab.close()
+    throw cause
+  }
+}
+
 const KIND_LABEL = Object.fromEntries(PRESCRIPTION_KINDS.map((kind) => [kind.key, kind.label])) as Record<PrescriptionKind, string>
 
 function queryKey(patientId: string) {
@@ -84,12 +100,14 @@ function Lenses({ prescription }: { prescription: LensPrescription }) {
 }
 
 function PrescriptionCard({
+  patientId,
   prescription,
   canWrite,
   onVerify,
   onVoid,
   verifying,
 }: {
+  patientId: string
   prescription: LensPrescription
   canWrite: boolean
   onVerify: () => void
@@ -123,18 +141,30 @@ function PrescriptionCard({
           </AlertDescription>
         </Alert>
       ) : null}
-      {canWrite ? (
-        <div className="flex flex-wrap gap-2">
-          {external && !prescription.verifiedAt ? (
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void openPdf(`/api/patients/${patientId}/lens-prescriptions/${prescription.id}/pdf`).catch((cause: unknown) =>
+              toast.error(submitErrorMessage(cause)),
+            )
+          }
+        >
+          Imprimir
+        </Button>
+        {canWrite && external && !prescription.verifiedAt ? (
             <Button type="button" size="sm" disabled={verifying} onClick={onVerify}>
-              {verifying ? "Verificando…" : "La revisé: verificar"}
-            </Button>
-          ) : null}
+            {verifying ? "Verificando…" : "La revisé: verificar"}
+          </Button>
+        ) : null}
+        {canWrite ? (
           <Button type="button" size="sm" variant="ghost" onClick={onVoid}>
             Anular
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </article>
   )
 }
@@ -385,6 +415,7 @@ export function PrescriptionsSection({ patientId }: RecordSectionProps) {
           {current.map((prescription) => (
             <PrescriptionCard
               key={prescription.id}
+              patientId={patientId}
               prescription={prescription}
               canWrite={canWrite}
               verifying={verify.isPending && verify.variables === prescription.id}

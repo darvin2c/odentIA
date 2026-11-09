@@ -8,6 +8,7 @@ import "../products.js"
 
 export { OPTICAL_AGENT_TEXTS } from "./agent-texts.js"
 export { opticalHooks } from "./hooks.js"
+export { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
 export {
   currentLensPrescriptions,
   issueLensPrescription,

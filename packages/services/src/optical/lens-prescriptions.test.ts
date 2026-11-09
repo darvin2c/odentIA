@@ -15,6 +15,7 @@ import {
   verifyLensPrescription,
   voidLensPrescription,
 } from "./lens-prescriptions.js"
+import { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
 
 setupTestDb()
 
@@ -139,6 +140,25 @@ describe("la receta de lentes de vistIA (entrega 3)", () => {
       f.run((tx) => tx.update(lensPrescription).set({ lenses: { od: { esfera: 5 } } }).where(eq(lensPrescription.id, issued.id))),
     ).rejects.toThrow()
     await expect(f.run((tx) => tx.delete(lensPrescription).where(eq(lensPrescription.id, issued.id)))).rejects.toThrow()
+  })
+
+  it("la receta se imprime en PDF, la de la óptica y la externa", async () => {
+    const f = await examined()
+    const issued = await f.run((tx) => issueLensPrescription(tx, ...f.args, { encounterId: f.encounter.id, kind: "anteojos" }))
+    const pdf = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, issued.id))
+    expect(Buffer.from(pdf.bytes.slice(0, 5)).toString()).toBe("%PDF-")
+    expect(pdf.filename).toMatch(/^Receta-de-anteojos-\d{4}-\d{2}-\d{2}\.pdf$/)
+    const external = await f.run((tx) =>
+      transcribeLensPrescription(tx, ...f.args, {
+        kind: "contacto",
+        lenses: { od: { esfera: -3, curvaBase: 8.4, diametro: 14, marca: "Biofinity" } },
+        issuedOn: "2026-02-01",
+        prescriberName: "Dr. Luis Paz",
+      }),
+    )
+    await f.run((tx) => voidLensPrescription(tx, ...f.args, external.id, { reason: "Duplicada" }))
+    const voided = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, external.id))
+    expect(voided.bytes.length).toBeGreaterThan(1000)
   })
 
   it("en una clínica de otro producto no hay recetas de lentes", async () => {
