@@ -1,4 +1,4 @@
-# 0167 · Lo común decide con mapas completos por producto
+# 0168 · Lo común decide con mapas completos por producto
 
 Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0079](0079-un-nucleo-para-varios-productos.md), que pedía revisar al aparecer un tercer producto. Entrega 1 del plan «vistIA: plan para ópticas».
 

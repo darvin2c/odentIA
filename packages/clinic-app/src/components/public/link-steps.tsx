@@ -1,4 +1,4 @@
-import { Checkbox } from "@odentia/ui"
+import { Button, Checkbox } from "@odentia/ui"
 import {
   ErrorState,
   FormChoiceField,
@@ -10,44 +10,77 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { CircleCheck } from "lucide-react"
+import type { ReactElement } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
-import { fetchLinkConsent, fetchLinkQuestionnaire, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
+import { fetchLinkConsent, fetchLinkQuestionnaire, type LinkConsent, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
+import { appWords } from "../../lib/product-words"
 import { ConsentSheet } from "../patient/consent-sheet"
 import { FirmaPad } from "../patient/firma-pad"
 import { AnswerAppField, isFieldVisible, missingRequired } from "../patient/form-fields"
-import { appWords } from "../../lib/product-words"
+import { longDay, timeLabel } from "./week-slots"
 
 function problemOf(error: unknown, fallback: string): string {
   return error instanceof ApiError ? (error.shape.message ?? fallback) : `${fallback} Revisa tu conexión y vuelve a intentarlo.`
 }
 
-function Done({ title, text, onBack }: { title: string; text: string; onBack: () => void }) {
-  return (
-    <div role="status" className="flex flex-col items-center gap-2 rounded-2xl bg-success-soft p-6 text-center">
-      <CircleCheck className="size-8 text-success" aria-hidden />
-      <p className="text-lg font-semibold">{title}</p>
-      <p className="text-sm">{text}</p>
-      <SubmitButton type="button" variant="outline" className="mt-2 min-h-11" pending={false} onClick={onBack}>
-        Volver a lo pendiente
-      </SubmitButton>
-    </div>
-  )
+/**
+ * Por qué no se firma desde el teléfono, dicho a quien abre y por su consecuencia
+ * (entrega 2, acta 3): al tutor, «Este lo firmas tú en la cita de Mateo»; al propio
+ * menor, que lo firma su madre, padre o tutor; a la persona, «Este lo firmas en tu cita».
+ */
+export function unsignableWords(consent: Pick<LinkConsent, "why" | "speaksTo" | "patientFirstName">): { notice: string; inPlace: string } {
+  // Sin documento en su ficha: lo pone en «Tus datos» y después firma aquí (decidido el 8 nov).
+  if (consent.why === "sin-documento") {
+    return { notice: "Para firmar desde aquí, primero completa tus datos.", inPlace: "Firmas aquí cuando completes tus datos" }
+  }
+  if (consent.speaksTo === "representante") {
+    const name = consent.patientFirstName || "tu familiar"
+    return { notice: `Este lo firmas tú en la cita de ${name}, antes de empezar.`, inPlace: `Este lo firmas tú en la cita de ${name}` }
+  }
+  if (consent.why === "menor") {
+    return { notice: "Este lo firma tu madre, padre o tutor en tu cita, antes de empezar.", inPlace: "Lo firma tu madre, padre o tutor en tu cita" }
+  }
+  return { notice: "Este lo firmas en tu cita, antes de empezar.", inPlace: "Lo firmas en tu cita" }
+}
+
+/**
+ * «jueves, 13 de noviembre, 10:00 a. m.»: la cita para la que es, en la zona de su sede.
+ * En minúscula: se lee seguido de «Para la cita del». El PDF no lleva esta línea.
+ */
+export function appointmentWords(appointment: { startsAt: string; timeZone: string } | null): string | null {
+  return appointment ? `${longDay(appointment.startsAt, appointment.timeZone).toLowerCase()}, ${timeLabel(appointment.startsAt, appointment.timeZone)}` : null
 }
 
 /**
  * «Tu consentimiento» (tablero 2, «Antes de llegar»): lo lee, escribe su
  * documento, confirma que entendió y firma. Queda firmado por la persona y
  * pendiente de que el profesional lo confirme en la clínica: no se presenta
- * como firma certificada.
+ * como firma certificada. Si no se puede firmar desde el teléfono (`signable`),
+ * el aviso va arriba, antes de leer, la hoja se lee entera y donde iba la firma
+ * dice «Lo firmas en tu cita»: es la misma hoja, nunca otra dibujada aparte.
+ * Al firmar avisa a la página (`onSigned`), que dice «Listo» y lo que sigue.
  */
-export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: string; token: string; consentId: string; onBack: () => void }) {
+export function LinkConsentStep({
+  slug,
+  token,
+  consentId,
+  onSigned,
+  completeData,
+}: {
+  slug: string
+  token: string
+  consentId: string
+  onSigned: () => void
+  /** El enlace a «Tus datos», para quien no puede firmar porque a su ficha le falta el documento. */
+  completeData?: ReactElement
+}) {
   const query = useQuery({ queryKey: ["link-consent", slug, token, consentId], queryFn: () => fetchLinkConsent(slug, token, consentId), retry: false })
   const sign = useMutation({
     retry: false,
     mutationFn: (input: { docNumber: string; comprehensionConfirmed: boolean; signatureData: { strokes: number[][][] } }) =>
       signLinkConsent(slug, token, consentId, input),
+    onSuccess: () => onSigned(),
   })
   const docLabel = query.data?.data.signer.documentLabel ?? "documento"
   const form = useAppForm({
@@ -71,10 +104,63 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
   const submit = useFormSubmit(form)
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
-  if (sign.isSuccess) return <Done title="Firmado, gracias" text={`Tu ${appWords().clinician.one} lo revisa contigo antes de empezar.`} onBack={onBack} />
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el consentimiento…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el consentimiento" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const consent = query.data.data
+  const when = appointmentWords(consent.appointment)
+  // U6: la hoja dice lo que se consiente (`procedureRef`) y para qué cita es.
+  const facts = [
+    { label: "Paciente", value: consent.patient.name, strong: true },
+    { label: "Historia clínica", value: consent.patient.chartNumber },
+    ...(when ? [{ label: "Para la cita del", value: when }] : []),
+  ]
+  const clinician = appWords().clinician.one
+  if (!consent.signable) {
+    const words = unsignableWords(consent)
+    return (
+      <div className="flex flex-col gap-4">
+        {/* No es un error: se dice antes de leer, como texto, para que no lo descubra al final. */}
+        <div className="flex flex-col gap-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3">
+          <p className="font-semibold">{words.notice}</p>
+          <p className="text-sm">
+            {consent.why === "sin-documento"
+              ? "Te pedimos tu documento una vez en «Tus datos»; al firmar lo vuelves a escribir para comprobar que eres tú."
+              : `Puedes leerlo ahora con calma.${consent.why === "sin-fecha" ? " Los datos que nos faltan los completamos contigo en la clínica." : ""}`}
+          </p>
+          {consent.why === "sin-documento" && completeData ? (
+            <Button className="mt-2 min-h-11 self-start" render={completeData}>
+              Completar mis datos
+            </Button>
+          ) : null}
+        </div>
+        <ConsentSheet
+          className="-mx-2 sm:mx-0"
+          clinic={consent.clinic}
+          title={consent.title}
+          procedureRef={consent.procedureRef}
+          facts={facts}
+          diagnosis={consent.diagnosis}
+          sections={consent.sections}
+          body={consent.body}
+          declaration={consent.declaration}
+          minor={consent.minor}
+          signer={{
+            heading: consent.signer.asRepresentative ? "Representante legal" : "Paciente",
+            name: consent.signer.name,
+            // Donde iba la firma: la línea vacía y cuándo se firma. Sin documento ni botón.
+            children: (
+              <p className="flex min-h-24 items-center justify-center rounded-md border border-dashed border-foreground/40 px-3 text-center text-base text-muted-foreground">
+                {words.inPlace}
+              </p>
+            ),
+          }}
+          professional={{ note: `Lo revisa contigo tu ${clinician} en la cita.` }}
+          signatureWords={consent.signatureWords}
+          signatureNote={consent.signatureNote}
+        />
+      </div>
+    )
+  }
   return (
     // La hoja es la del papel que recibe: se lee entera en la página, sin otra barra que la de siempre.
     <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
@@ -83,10 +169,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         clinic={consent.clinic}
         title={consent.title}
         procedureRef={consent.procedureRef}
-        facts={[
-          { label: "Paciente", value: consent.patient.name, strong: true },
-          { label: "Historia clínica", value: consent.patient.chartNumber },
-        ]}
+        facts={facts}
         diagnosis={consent.diagnosis}
         sections={consent.sections}
         body={consent.body}
@@ -141,13 +224,13 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
                     {(control) => (
                       // En el teléfono el recuadro toma también el margen de la hoja: más alto para el dedo.
                       <div className="-mx-3 sm:mx-0">
-                      <FirmaPad
-                        label="Tu firma"
-                        id={control.id}
-                        invalid={control.invalid}
-                        describedBy={control.describedBy}
-                        onChange={(strokes) => field.handleChange(strokes)}
-                      />
+                        <FirmaPad
+                          label="Tu firma"
+                          id={control.id}
+                          invalid={control.invalid}
+                          describedBy={control.describedBy}
+                          onChange={(strokes) => field.handleChange(strokes)}
+                        />
                       </div>
                     )}
                   </field.Group>
@@ -156,7 +239,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
             </>
           ),
         }}
-        professional={{ note: `Falta su confirmación: lo confirma tu ${appWords().clinician.one} en la clínica.` }}
+        professional={{ note: `Falta su confirmación: lo confirma tu ${clinician} en la clínica.` }}
         signatureWords={consent.signatureWords}
         signatureNote={consent.signatureNote}
       />
@@ -172,12 +255,13 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
   )
 }
 
-/** «Antes de tu cita»: el cuestionario de la clínica, en una sola página. */
-export function LinkQuestionnaireStep({ slug, token, onBack }: { slug: string; token: string; onBack: () => void }) {
+/** «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la página (`onSent`). */
+export function LinkQuestionnaireStep({ slug, token, onSent }: { slug: string; token: string; onSent: () => void }) {
   const query = useQuery({ queryKey: ["link-questionnaire", slug, token], queryFn: () => fetchLinkQuestionnaire(slug, token), retry: false })
   const send = useMutation({
     retry: false,
     mutationFn: (answers: Record<string, unknown>) => submitLinkQuestionnaire(slug, token, answers),
+    onSuccess: () => onSent(),
   })
   const schema = query.data?.data.schema ?? null
   const form = useAppForm({
@@ -198,7 +282,6 @@ export function LinkQuestionnaireStep({ slug, token, onBack }: { slug: string; t
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
   const answers = useStore(form.store, (state) => state.values.answers)
-  if (send.isSuccess) return <Done title="Gracias, recibimos tus respuestas" text={`Tu ${appWords().clinician.one} las revisa contigo en la cita.`} onBack={onBack} />
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el cuestionario…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const questionnaire = query.data.data

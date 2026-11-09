@@ -519,6 +519,13 @@
       "when": 1794239372108,
       "tag": "0073_sumar_a_su_cita",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794244030795,
+      "tag": "0074_confirmado_en_la_atencion",
+      "breakpoints": true
     }
   ]
 }
