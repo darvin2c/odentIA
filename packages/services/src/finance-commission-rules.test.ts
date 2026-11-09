@@ -297,7 +297,12 @@ it("sin porcentaje general, la primera comisión de un servicio vale también pa
   // así que vale también para la corona ya cobrada (un tercio de 300: 50).
   await f.run((tx) => setCommissionException(tx, "org_a", f.actor, { professionalUserId: f.actor, serviceId: f.service.id, fixedCents: 15000 }))
   expect((await view()).lines.map((line) => [line.fixedCents, line.forService, line.commissionCents])).toEqual([[15000, true, 5000]])
-  expect(await agreementOf()).toMatchObject({ hasRate: false, exceptions: [{ serviceId: f.service.id, fixedCents: 15000 }] })
+  // Comisionar solo por servicio decide lo demás: un porcentaje general de 0, desde siempre.
+  expect(await agreementOf()).toMatchObject({ hasRate: true, rateBps: 0, exceptions: [{ serviceId: f.service.id, fixedCents: 15000 }] })
+  // Un porcentaje que se ponga después ya no es el primero: vale desde ese día, no reabre lo de antes.
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3000 }))
+  expect((await view()).lines.map((line) => line.commissionCents)).toEqual([5000])
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 0 }))
 
   // Cambiarla después ya no es la primera: vale para lo que se atienda desde ahora.
   await f.run((tx) => setCommissionException(tx, "org_a", f.actor, { professionalUserId: f.actor, serviceId: f.service.id, rateBps: 4500 }))

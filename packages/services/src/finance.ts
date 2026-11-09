@@ -2293,6 +2293,21 @@ export async function setCommissionException(
     currentCurrency === fixedCurrency
   // Quitar lo que no había, o repetir lo mismo, no agrega una versión.
   if (same || (!current && rateBps === null && fixedCents === null)) return current
+  // Comisionar solo por servicio es decidir que lo demás no comisiona: sin un porcentaje general, se
+  // guarda uno de 0 desde siempre. Así lo demás se paga en 0 (y se congela al pagar) en vez de quedar
+  // sin decidir, y un porcentaje que se ponga después vale desde ese día sin reabrir meses pagados.
+  if (rateBps !== null || fixedCents !== null) {
+    const general = await latestRate(tx, orgId, input.professionalUserId, null)
+    if (!general)
+      await tx.insert(commissionRate).values({
+        organizationId: orgId,
+        professionalUserId: input.professionalUserId,
+        serviceId: null,
+        effectiveFrom: sql`'-infinity'::timestamptz`,
+        rateBps: 0,
+        createdBy: actorUserId,
+      })
+  }
   const [row] = await tx
     .insert(commissionRate)
     .values({
@@ -2342,7 +2357,8 @@ export async function listCommissionRates(
  *
  * - Sin ningún porcentaje ni servicio: aún no se decidió (lo cobrado de lo que atiende da 0 hasta fijarla).
  * - Porcentaje 0 sin servicios: no cobra comisión (por ejemplo, solo tiene sueldo).
- * - Porcentaje 0 o ninguno, con servicios: comisiona solo por esos servicios.
+ * - Porcentaje 0 con servicios: comisiona solo por esos servicios (la primera comisión de un
+ *   servicio, sin porcentaje general, guarda también el 0 general).
  */
 export async function listCommissionAgreements(tx: Db, orgId: string) {
   const team = await tx
@@ -2350,15 +2366,30 @@ export async function listCommissionAgreements(tx: Db, orgId: string) {
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
     .where(eq(member.organizationId, orgId))
-  const attending = team
-    .filter((row) => canAttend(row.role))
+  // Quien dejó de atender (cambió de rol) sigue si tiene una comisión: el mes lo lista y desde aquí se
+  // deja en «no cobra comisión». Una comisión nueva solo se le pone a quien atiende.
+  const withRules = new Set(
+    (
+      await tx
+        .selectDistinct({ userId: commissionRate.professionalUserId })
+        .from(commissionRate)
+        .where(eq(commissionRate.organizationId, orgId))
+    ).map((row) => row.userId),
+  )
+  const people = team
+    .filter((row) => canAttend(row.role) || withRules.has(row.userId))
     .sort((a, b) => a.name.localeCompare(b.name, "es"))
   const out = []
-  for (const person of attending) {
+  for (const person of people) {
     const rules = await commissionRulesOf(tx, orgId, person.userId)
+    const attends = canAttend(person.role)
+    // Quien ya no atiende y ya no cobra nada no tiene nada que decidir: no se lista.
+    if (!attends && rules.rateBps === 0 && rules.exceptions.length === 0) continue
     out.push({
       professionalUserId: person.userId,
       professionalName: person.name,
+      /** Puede atender: solo a él se le pone una comisión; a quien ya no, solo se le deja en 0. */
+      attends,
       rateBps: rules.rateBps,
       hasRate: rules.hasRate,
       rateSince: rules.since,
