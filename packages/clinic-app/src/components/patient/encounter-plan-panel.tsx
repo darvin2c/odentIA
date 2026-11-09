@@ -43,7 +43,7 @@ import {
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
-import { type PlanItem, planStatusLabel } from "../../lib/patients"
+import { agreedPriceOf, type PlanItem, planStatusLabel } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
@@ -355,8 +355,9 @@ export function EncounterPlanPanel({
                         <span className="text-xs text-muted-foreground">
                           {[
                             treatmentSiteLabel(item),
-                            item.priceCents != null && orgLocale
-                              ? formatMoney(item.priceCents, item.currency, orgLocale)
+                            // El de su presupuesto, el que se cobra: no el de lista (QA de la ficha del 8 nov).
+                            agreedPriceOf(item).priceCents != null && orgLocale
+                              ? formatMoney(agreedPriceOf(item).priceCents ?? 0, agreedPriceOf(item).currency, orgLocale)
                               : "",
                           ]
                             .filter(Boolean)
@@ -687,9 +688,9 @@ function PathsBox({
                             ) : null}
                           </span>
                           <span className="tabular-nums">
-                            {item.priceCents != null && locale
-                              ? formatMoney(item.priceCents, item.currency, locale)
-                              : item.priceCents == null
+                            {agreedPriceOf(item).priceCents != null && locale
+                              ? formatMoney(agreedPriceOf(item).priceCents ?? 0, agreedPriceOf(item).currency, locale)
+                              : agreedPriceOf(item).priceCents == null
                                 ? "Sin precio"
                                 : "…"}
                           </span>

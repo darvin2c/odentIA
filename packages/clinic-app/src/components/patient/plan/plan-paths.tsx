@@ -8,7 +8,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../../../lib/api"
 import { PLAN_QUERY_KEYS } from "../../../lib/budgets"
-import type { PlanItem } from "../../../lib/patients"
+import { agreedPriceOf, type PlanItem } from "../../../lib/patients"
 import { treatmentSiteLabel } from "./budget-parts"
 
 /** Un camino: su posición (1 = el primero), su nombre si lo tiene y sus tratamientos. */
@@ -100,12 +100,14 @@ export function groupPlanPaths(items: PlanItem[]): PlanPathGroup[] {
 /** La suma de un camino, solo si todos tienen precio y en una sola moneda; si no, nula. */
 export function pathTotal(items: PlanItem[]): { cents: number; currency: string } | null {
   if (items.length === 0) return null
-  const currency = items[0]?.currency
+  // Con el precio de su presupuesto, el que se cobra.
+  const prices = items.map(agreedPriceOf)
+  const currency = prices[0]?.currency
   if (!currency) return null
   let cents = 0
-  for (const item of items) {
-    if (item.priceCents == null || item.currency !== currency) return null
-    cents += item.priceCents
+  for (const price of prices) {
+    if (price.priceCents == null || price.currency !== currency) return null
+    cents += price.priceCents
   }
   return { cents, currency }
 }

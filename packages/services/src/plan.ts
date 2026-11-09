@@ -23,6 +23,7 @@ import { productHooks } from "./products.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
 import { assertAttending } from "./encounter-attending.js"
+import { acceptedBudgetLines } from "./agreed-lines.js"
 import {
   type ProductHooks,
   type ProductParts,
@@ -117,6 +118,14 @@ export type PlanItemWithProgress = PlanItemWithDecision & {
    * ofrece «Falta otra sesión» solo entonces (`reopenPlanItemForSession`).
    */
   canAddSession: boolean
+  /**
+   * El precio de su presupuesto: el acordado si lo aceptó (la misma línea que se
+   * cobra, `acceptedBudgetLines`) o, mientras decide, el de la línea que le
+   * ofrece su presupuesto vigente. Nulo sin presupuesto: vale `priceCents` (QA
+   * de la ficha del 8 nov: la atención decía S/ 120 de lista con S/ 90 acordado).
+   */
+  agreedPriceCents: number | null
+  agreedCurrency: string | null
 }
 
 /**
@@ -510,6 +519,7 @@ async function withDecisions(
     orgId,
     items.filter((item) => item.status === "realizado").map((item) => item.id),
   )
+  const agreed = await agreedPricesOf(tx, orgId, items)
   return items.map((item) => ({
     ...item,
     decision: item.decisionStatus as PlanItemDecision,
@@ -517,7 +527,66 @@ async function withDecisions(
     path: paths.get(item.id) ?? null,
     newTermsPending: newTerms.has(item.id),
     canAddSession: anotherSessionAllowed(item, another.get(item.id)),
+    agreedPriceCents: agreed.get(item.id)?.priceCents ?? null,
+    agreedCurrency: agreed.get(item.id)?.currency ?? null,
   }))
+}
+
+/**
+ * El precio de presupuesto de cada tratamiento: el aceptado (lo que se cobra)
+ * o, sin aceptar, el de la línea vigente de su presupuesto no cancelado (la
+ * opción elegida o, mientras decide, la recomendada; como `currentLine`).
+ */
+async function agreedPricesOf(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<{ id: string; patientId: string; budgetId: string | null }>,
+): Promise<Map<string, { priceCents: number | null; currency: string }>> {
+  const out = new Map<string, { priceCents: number | null; currency: string }>()
+  const withBudget = items.filter((item) => item.budgetId)
+  if (withBudget.length === 0) return out
+  for (const patientId of new Set(withBudget.map((item) => item.patientId)))
+    for (const [id, line] of await acceptedBudgetLines(
+      tx,
+      orgId,
+      patientId,
+      withBudget.filter((item) => item.patientId === patientId).map((item) => item.id),
+    ))
+      out.set(id, { priceCents: line.priceCents, currency: line.currency })
+  const rest = withBudget.filter((item) => !out.has(item.id))
+  if (rest.length === 0) return out
+  const lines = await tx
+    .select({ planItemId: treatmentBudgetItem.planItemId, priceCents: treatmentBudgetItem.priceCents, currency: treatmentBudgetItem.currency })
+    .from(treatmentBudgetItem)
+    .innerJoin(
+      treatmentBudgetOption,
+      and(
+        eq(treatmentBudgetOption.id, treatmentBudgetItem.optionId),
+        eq(treatmentBudgetOption.organizationId, treatmentBudgetItem.organizationId),
+      ),
+    )
+    .innerJoin(
+      treatmentBudget,
+      and(eq(treatmentBudget.id, treatmentBudgetItem.budgetId), eq(treatmentBudget.organizationId, treatmentBudgetItem.organizationId)),
+    )
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        inArray(
+          treatmentBudgetItem.planItemId,
+          rest.map((item) => item.id),
+        ),
+        sql`${treatmentBudgetItem.budgetId} = (select own.budget_id from treatment_plan_item own where own.id = ${treatmentBudgetItem.planItemId} and own.organization_id = ${treatmentBudgetItem.organizationId})`,
+        ne(treatmentBudget.status, "cancelado"),
+      ),
+    )
+    .orderBy(
+      sql`${treatmentBudgetOption.decision} = 'elegida' desc`,
+      sql`${treatmentBudgetOption.isRecommended} desc`,
+      asc(treatmentBudgetOption.position),
+    )
+  for (const line of lines) if (!out.has(line.planItemId)) out.set(line.planItemId, { priceCents: line.priceCents, currency: line.currency })
+  return out
 }
 
 /** El camino de cada tratamiento según las opciones de su presupuesto vigente. */

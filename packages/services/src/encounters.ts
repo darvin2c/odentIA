@@ -39,6 +39,7 @@ import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { appointmentSessionsOf, markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { type HealthGap, healthGapsOf, listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import { acceptedBudgetLines } from "./agreed-lines.js"
 import { assertAttending } from "./encounter-attending.js"
 import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
@@ -1809,6 +1810,7 @@ async function notifyClose(tx: Db, orgId: string, kind: string): Promise<void> {
 /**
  * Línea aceptada vigente de un tratamiento (presupuesto aceptado/parcial con
  * decisión aceptada): trae precio final acordado y modo de cobro congelados.
+ * La regla es una sola, la que también dice el precio en pantalla (`agreed-lines.ts`).
  */
 async function acceptedBudgetLine(
   tx: Db,
@@ -1816,47 +1818,7 @@ async function acceptedBudgetLine(
   patientId: string,
   planItemId: string,
 ): Promise<typeof treatmentBudgetItem.$inferSelect | null> {
-  const [found] = await tx
-    .select({ line: treatmentBudgetItem })
-    .from(treatmentBudgetItem)
-    .innerJoin(treatmentBudget, eq(treatmentBudget.id, treatmentBudgetItem.budgetId))
-    .where(
-      and(
-        eq(treatmentBudgetItem.organizationId, orgId),
-        eq(treatmentBudgetItem.patientId, patientId),
-        eq(treatmentBudgetItem.planItemId, planItemId),
-        eq(treatmentBudgetItem.decision, "aceptado"),
-        sql`${treatmentBudget.status} IN ('aceptado','parcial')`,
-      ),
-    )
-    .orderBy(desc(treatmentBudget.decidedAt), desc(treatmentBudget.createdAt))
-    .limit(1)
-  if (found) return found.line
-  // Mientras una revisión ya entregada espera respuesta, lo último aceptado
-  // sigue valiendo: lo que se atienda en ese intervalo se cobra a lo acordado,
-  // no a tarifa. Deja de valer cuando la revisión se decide.
-  const [previous] = await tx
-    .select({ line: treatmentBudgetItem })
-    .from(treatmentBudgetItem)
-    .innerJoin(treatmentBudget, eq(treatmentBudget.id, treatmentBudgetItem.budgetId))
-    .where(
-      and(
-        eq(treatmentBudgetItem.organizationId, orgId),
-        eq(treatmentBudgetItem.patientId, patientId),
-        eq(treatmentBudgetItem.planItemId, planItemId),
-        eq(treatmentBudgetItem.decision, "aceptado"),
-        eq(treatmentBudget.status, "sustituido"),
-        sql`exists (
-          select 1 from "treatment_budget" next
-          where next."supersedes_budget_id" = ${treatmentBudget.id}
-            and next."organization_id" = ${orgId}
-            and next."status" in ('presentado','pospuesto')
-        )`,
-      ),
-    )
-    .orderBy(desc(treatmentBudget.decidedAt), desc(treatmentBudget.createdAt))
-    .limit(1)
-  return previous?.line ?? null
+  return (await acceptedBudgetLines(tx, orgId, patientId, [planItemId])).get(planItemId) ?? null
 }
 
 /** Lo que falta para cerrar una atención, en el orden de la historia clínica. */

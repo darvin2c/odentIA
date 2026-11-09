@@ -517,6 +517,23 @@ export interface PlanItem {
   newTermsPending?: boolean
   /** Realizado al que le puede faltar otra sesión: el Plan ofrece «Falta otra sesión…». */
   canAddSession?: boolean
+  /** El precio de su presupuesto (el acordado, o el que le ofrece mientras decide); nulo sin presupuesto. */
+  agreedPriceCents?: number | null
+  agreedCurrency?: string | null
+}
+
+/**
+ * El precio que se dice de un tratamiento: el de su presupuesto si lo tiene (lo
+ * que se cobra), si no el de la indicación (QA de la ficha del 8 nov: la atención
+ * decía S/ 120 de lista con S/ 90 acordado).
+ */
+export function agreedPriceOf(item: Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency">): {
+  priceCents: number | null
+  currency: string
+} {
+  return item.agreedCurrency != null
+    ? { priceCents: item.agreedPriceCents ?? null, currency: item.agreedCurrency }
+    : { priceCents: item.priceCents, currency: item.currency }
 }
 
 export interface PlanItemPath {
