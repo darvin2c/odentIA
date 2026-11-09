@@ -18,7 +18,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment } from "./appointments.js"
 import { previewBudgetSend, sendBudget } from "./budget-send.js"
@@ -405,9 +405,17 @@ it("«Te espera»: el presupuesto armado que nadie envió sale al día siguiente
     .update(treatmentBudgetItem)
     .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
     .where(eq(treatmentBudgetItem.budgetId, draft.id))
+  // Mientras su atención sigue en borrador, se está preparando: nadie lo envía todavía.
+  expect(await unsent(sender)).toEqual([])
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true))).kind).not.toBe("enviar")
+  // Quien la lleva sí lo ve: lo muestra o lo envía en plena consulta.
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true, { viewerUserId: f.actor }))).kind).toBe("enviar")
+  // Firmada la atención, queda armado.
+  await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`)
   expect(await unsent(sender)).toEqual([
     expect.objectContaining({ id: draft.id, patientId: f.patient.id, itemCount: 2, totalCents: 240000, options: 1 }),
   ])
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true))).kind).toBe("enviar")
   // Solo a quien envía presupuestos.
   expect(await unsent({ ...sender, sendsBudgets: false })).toEqual([])
   // Enviado (o entregado en mano), se va solo.

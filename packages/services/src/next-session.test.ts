@@ -92,6 +92,11 @@ it("X5: «Qué sigue» pone lo empezado sin cita antes de lo aceptado sin empeza
   const later = await attention(f)
   const extra = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: later }))
   await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [extra.id] }))
+  // Mientras esa atención sigue en borrador, su presupuesto se está preparando: no se pide enviarlo.
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).kind).not.toBe("enviar")
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${later}`,
+  )
   const sending = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
   expect(sending.kind).toBe("enviar")
   expect(sending.detail).toContain("también falta la cita de la próxima sesión de Tratamiento propio")
