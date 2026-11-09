@@ -1326,16 +1326,19 @@ it("a quien aún no es paciente le da su enlace con la hora que eligió para dej
   expect(opened.canBook).toBe(true)
 })
 
-it("no dice que la cita quedó reservada si en la conversación no se reservó ninguna (auditoría del 8 nov)", async () => {
+it("no dice que la cita quedó reservada mientras la propuesta espera su sí (auditoría del 8 nov)", async () => {
   const { conversationId } = await ingestText("tg:reservada-sin-cita", "evt-reservada-sin-cita", "Sí, ya te confirmé")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const ctx = publicCtx(conversationId, conv!.contactId)
   const reply = () => makeAgentTools(ctx).find((t) => t.name === "send_reply")!.invoke({ text: "Entiendo, disculpa la repetición. Ya quedó reservada tu cita." }).then(String)
-  expect(await reply()).toContain("No enviado: dices que la cita quedó reservada")
-  expect(await agentMessages(conversationId)).toEqual([])
-  // Con la cita reservada en esta corrida, se dice.
-  ctx.claimNudged = false
+  // Sin nada que espere su sí (reservó en su enlace, o recepción), decirla reservada es cierto.
+  ctx.dryRun = true
+  expect(await reply()).not.toContain("No enviado")
+  ctx.awaitingYes = true
+  expect(await reply()).toContain("No enviado: dices que la cita quedó reservada y la que le propusiste todavía espera su sí")
+  // Con la cita reservada en esta corrida al confirmar su sí, se dice.
+  ctx.bookedNudged = false
   ctx.bookedNow = true
   expect(await reply()).not.toContain("No enviado")
 })

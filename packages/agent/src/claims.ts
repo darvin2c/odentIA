@@ -79,12 +79,12 @@ const ASKS_OR_IF = /\?\s*$|^\W*(?:si|if|whether|in case)\b/
  * «Ya quedó reservada», «te reservé la cita», «your appointment is booked». Lo que depende de
  * algo no la da por hecha: «al confirmar tus datos queda reservada», «cuando elijas, queda agendada».
  */
-const BOOKED_PARTICIPLE = String.raw`(?:reservad|agendad|separad)[oa]s?`
+const BOOKED_PARTICIPLE = String.raw`(?:reservad|agendad|separad|confirmad)[oa]s?`
 const BOOKED_ES = new RegExp(
   [
     String.raw`${NOT_AFTER}\b(?:quedo|queda|quedaron|esta|ha quedado|ya esta)(?: ya)? ${BOOKED_PARTICIPLE}\b`,
     String.raw`${NOT_AFTER}\b(?:te|le|les) (?:reserve|agende|separe|he reservado|hemos reservado|reservamos|agendamos)\b`,
-    String.raw`${NOT_AFTER}\b(?:reserve|agende|separe) (?:tu|su) cita\b`,
+    String.raw`${NOT_AFTER}\b(?:reserve|agende|separe|he reservado|hemos reservado) (?:tu|su|la) cita\b`,
   ].join("|"),
 )
 const BOOKED_EN = /\b(?:is|are|has been|have been|you're|you are) (?:now |all )?booked\b|\bi(?:'ve| have)? booked\b/

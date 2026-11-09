@@ -986,8 +986,8 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     toolCtx.formulas = progress.formulas
     toolCtx.pickLinks = progress.pickLinks
     toolCtx.pickLinkUrls = progress.pickLinkUrls
-    // Lo reservado o movido en esta atención respalda decir que quedó reservada (`send_reply`).
-    toolCtx.bookedInAttention = progress.done !== null
+    // Con una cita que espera su sí, decir que quedó reservada es falso (`send_reply`).
+    toolCtx.awaitingYes = progress.pending !== null
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
       .filter(Boolean)
       .join("\n\n")

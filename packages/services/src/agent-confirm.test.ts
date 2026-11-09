@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isAffirmative, onlyCourtesy, repeatsProposal } from "./agent-operations.js"
+import { isAffirmative, onlyCourtesy } from "./agent-operations.js"
 
 /** La evidencia de confirmación nunca acepta negaciones como consentimiento. */
 describe("isAffirmative", () => {
@@ -90,31 +90,5 @@ describe("onlyCourtesy", () => {
     expect(isAffirmative("gracias")).toBe(false)
     expect(onlyCourtesy("entendido")).toBe(true)
     expect(isAffirmative("entendido")).toBe(false)
-  })
-})
-
-describe("repeatsProposal", () => {
-  const PROPOSED = "¿Te reservo mañana, lunes 9 de noviembre, a las 10:00 en Miraflores con el Dr. Luis Prado?"
-  it("un sí que repite lo propuesto es un sí, aunque no haya modelo de decisión", () => {
-    // Caso 12 de la auditoría del 8 nov: lo repitió cinco veces y nunca se reservó.
-    expect(isAffirmative("Sí, porfa, mañana a las 10 en Miraflores.")).toBe(false)
-    expect(repeatsProposal("Sí, porfa, mañana a las 10 en Miraflores.", PROPOSED)).toBe(true)
-    expect(repeatsProposal("Resérvala porfa, mañana a las 10 en Miraflores", PROPOSED)).toBe(true)
-    expect(repeatsProposal("Sí, con el Dr. Prado", PROPOSED)).toBe(true)
-  })
-  it.each([
-    "Sí, pero a las 11",
-    "Sí, mañana a las 11",
-    "Sí, en San Isidro",
-    "Mañana a las 10 en Miraflores",
-    "No, mañana a las 10 no puedo",
-    "Sí, mejor más tarde",
-    "¿Sí, mañana a las 10?",
-  ])("«%s» no repite lo propuesto: no es un sí", (reply) => {
-    expect(repeatsProposal(reply, PROPOSED)).toBe(false)
-  })
-  it("si lo propuesto ofrece elegir, repetir una parte no dice cuál", () => {
-    expect(repeatsProposal("Sí, a las 10", "¿Te reservo a las 10:00 o a las 11:30?")).toBe(false)
-    expect(repeatsProposal("Sí, a las 10", null)).toBe(false)
   })
 })

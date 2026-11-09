@@ -95,6 +95,8 @@ describe("decir que la cita quedó reservada", () => {
       "Listo, te reservé la cita del lunes.",
       "Tu cita está agendada para el martes.",
       "Your appointment is booked for Monday.",
+      "¡Listo! Tu cita quedó confirmada para el martes.",
+      "He reservado la cita del martes.",
     ]) {
       expect(claimsOf(text).booked, text).toBe(true)
     }

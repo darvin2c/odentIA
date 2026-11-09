@@ -200,7 +200,7 @@ const MAX_UNSUPPORTED_REPLIES = 2
 
 /** El profesional no es una referencia de buscar_huecos: el agente nunca escribe ids de usuario. */
 /** Un servicio inventado (un identificador vacío como 00000000-…) hacía caer el enlace con la hora a una propuesta por el chat, y al reservar fallaba. */
-/** Lo que reserva o mueve una cita: con eso, «quedó reservada» es cierto. */
+/** Lo que reserva o mueve una cita: con eso, la propuesta ya no espera y «quedó reservada» es cierto. */
 const APPOINTMENT_BOOKINGS: ReadonlySet<string> = new Set(["reservar_cita", "reprogramar_cita"])
 
 const UNKNOWN_SERVICE =
@@ -365,10 +365,14 @@ export interface AgentToolCtx {
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
   claimNudged?: boolean
-  /** En esta atención ya se reservó o movió una cita (`attentionProgress().done`): decir «quedó reservada» tiene respaldo. */
-  bookedInAttention?: boolean
+  /** Hay una cita propuesta que espera su sí (`attentionProgress().pending`): todavía no está reservada. */
+  awaitingYes?: boolean
+  /** En esta corrida se propuso una cita que quedó esperando su sí. */
+  proposedNow?: boolean
   /** En esta corrida se reservó o movió una cita al confirmar su sí. */
   bookedNow?: boolean
+  /** Ya se le pidió una vez en esta corrida que no la diga reservada mientras espera su sí. */
+  bookedNudged?: boolean
   /**
    * En el chat web consta dónde avisarle (`claimsOf`): lo guardó guardar_contacto en esta
    * corrida, ya había por dónde (`webchatReplyRoutes`) o la clínica ya la conoce.
@@ -1036,10 +1040,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const unbackedClaim = (text: string): string | null => {
     if (ctx.claimNudged) return null
     const claims = claimsOf(text)
-    // Caso 12 de la auditoría del 8 nov: tras cinco «no es un sí», dijo «ya quedó reservada» sin ninguna cita.
-    if (claims.booked && !ctx.bookedNow && !ctx.bookedInAttention) {
-      ctx.claimNudged = true
-      return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: dices que la cita quedó reservada y en esta conversación no se reservó ninguna. Si aceptó una cita que le propusiste, confírmala antes con confirmar_propuesta; si no se pudo, dile lo que pasa sin decir que quedó reservada.`
+    // Caso 12 de la auditoría del 8 nov: tras cinco «no es un sí», dijo «ya quedó reservada» con la
+    // propuesta todavía esperando. Solo frena ese caso: una cita reservada en su enlace, por recepción
+    // o en otra atención no espera nada, y decirla reservada es cierto.
+    if (claims.booked && (ctx.awaitingYes || ctx.proposedNow) && !ctx.bookedNow && !ctx.bookedNudged) {
+      ctx.bookedNudged = true
+      return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: dices que la cita quedó reservada y la que le propusiste todavía espera su sí. Si ya te dijo que sí, confírmala con confirmar_propuesta antes de decirlo; si no se pudo, dile lo que pasa, sin decir que quedó reservada.`
     }
     if (!claims.team && !claims.note) return null
     const used = new Set(ctx.toolsUsed)
@@ -1863,6 +1869,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       // Si ya pidió reservar esa misma hora, su sí está dado: no se le vuelve a pedir (ADR 0097).
       if (created?.status === "propuesta") {
+        ctx.proposedNow = true
         const id = created.id
         const before = await inOrg((tx) => chosenBeforeProposalOf(tx, ctx.orgId, ctx.contactId, id)).catch(() => null)
         if (before && (await choseThisSlot(ctx.decision, { proposed: before.proposed, said: before.said }))) {
