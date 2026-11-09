@@ -11,7 +11,7 @@ import { branch } from "@odentia/db/schema/org"
 import { and, eq, isNull } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { getRecurringMonth, noteRecurringExpense, payRecurringOccurrence } from "./expense-recurring.js"
+import { endRecurringExpense, getRecurringMonth, noteRecurringExpense, payRecurringOccurrence } from "./expense-recurring.js"
 import { addCashMovement, correctExpense, createExpense, getMonthExpenses } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -268,4 +268,53 @@ it("corregir un pago del IGV a otro tipo deja de ser el impuesto de lo cobrado",
     }),
   )
   expect(fixed).toMatchObject({ category: "Otros", salesTax: false })
+})
+
+it("dejar de repetir una deuda anotada hoy no la borra; lo anotado por error y sin vencer, sí (G3)", async () => {
+  const { f, branchId } = await setup()
+  const current = thisMonth()
+  const previous = current.month === 1 ? `${current.year - 1}-12` : `${current.year}-${String(current.month - 1).padStart(2, "0")}`
+  // Se anota hoy el alquiler del mes pasado, que no se pagó: es una deuda.
+  const debt = await f.run((tx) =>
+    noteRecurringExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Alquiler",
+      concept: "Alquiler adeudado",
+      amountCents: 200_000,
+      currency: "PEN",
+      everyMonths: 1,
+      day: 1,
+      firstMonth: previous,
+    }),
+  )
+  const ended = await f.run((tx) => endRecurringExpense(tx, "org_a", f.actor, debt.id))
+  expect(ended.stillDue).toContain(previous)
+})
+
+it("lo de antes de un sueldo corregido a otro tipo no se le dice a caja (ADR 0166)", async () => {
+  const { f, branchId, yape } = await setup()
+  const admin = { seesPeople: true }
+  const salary = await f.run((tx) =>
+    createExpense(
+      tx,
+      "org_a",
+      f.actor,
+      { branchId, category: "Personal", concept: "Sueldo de la asistente", amountCents: 2_000, currency: "PEN", paymentMethodId: yape.id },
+      {},
+      admin,
+    ),
+  )
+  await f.run((tx) =>
+    correctExpense(
+      tx,
+      "org_a",
+      f.actor,
+      salary.id,
+      { branchId, category: "Otros", concept: "Taxi", amountCents: 2_000, currency: "PEN", paymentMethodId: yape.id },
+      admin,
+    ),
+  )
+  const cashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...thisMonth(), branchId }))
+  expect(cashier.expenses.find((row) => row.concept === "Taxi")?.replaced).toBeNull()
+  expect(JSON.stringify(cashier)).not.toContain("asistente")
 })

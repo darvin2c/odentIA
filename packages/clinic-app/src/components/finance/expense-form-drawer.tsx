@@ -444,6 +444,14 @@ export function ExpenseFormDrawer({
     if (correcting?.fromCash || (paying && paying.fromCash && !paying.paymentMethodId))
       form.setFieldValue("method", cashMethod.id, { dontUpdateMeta: true })
   }, [open, methods.data, allMethods, cashMethod, form, correcting, paying])
+  // Después de «Ingresar», si ya alcanza, el rojo de la caja se va solo (QA de Gastos, G7).
+  const methodErrors = useStore(form.store, (s) => (s.fieldMeta.method?.errors.length ?? 0) > 0)
+  useEffect(() => {
+    if (!methodErrors) return
+    const { after: nowAfter, method: nowMethod } = derive(form.state.values)
+    if (nowMethod && (nowAfter === null || nowAfter >= 0))
+      form.setFieldMeta("method", (meta) => ({ ...meta, errorMap: {}, errorSourceMap: {} }))
+  })
   // El cambio de hoy puede llegar después de abrir: llega puesto, sin pisar lo escrito.
   useEffect(() => {
     if (open && todayRate && form.getFieldValue("rate") === "")
@@ -861,7 +869,7 @@ export function ExpenseFormDrawer({
                       <span>
                         {after >= 0
                           ? `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0) - back, paid.payIn, locale)}${back > 0 ? ` y vuelven ${formatMoney(back, paid.payIn, locale)} de lo anotado antes` : ""}: queda ${formatMoney(after, paid.payIn, locale)}.`
-                          : `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0) - back, paid.payIn, locale)}: faltan ${formatMoney(-after, paid.payIn, locale)}.`}
+                          : `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0) - back, paid.payIn, locale)}${back > 0 ? ` y vuelven ${formatMoney(back, paid.payIn, locale)} de lo anotado antes` : ""}: faltan ${formatMoney(-after, paid.payIn, locale)}.`}
                       </span>
                       {after < 0 && canWrite ? (
                         <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>

@@ -1883,7 +1883,8 @@ export async function getMonthExpenses(
       /** De quién es el sueldo pagado (solo para quien administra comisiones). */
       personName: row.recurringId ? (persons.get(row.recurringId) ?? null) : null,
       /** Lo que era antes de corregirlo: el importe, el tipo, la fecha y cómo se pagó. */
-      replaced: was
+      // Lo de antes de un sueldo no se le dice a quien no administra comisiones (ADR 0166).
+      replaced: was && (viewer.seesCommissions || was.category !== STAFF_PAY_CATEGORY)
         ? {
             amountCents: was.amountCents,
             currency: was.currency,

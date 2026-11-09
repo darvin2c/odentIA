@@ -82,6 +82,8 @@ function receiptText(row: ExpenseRow): string | null {
 
 /** Con qué se pagó: el medio que se dijo, o lo único que se sabía antes (si salió de la caja). */
 function methodText(row: ExpenseRow, cashWord: string): string {
+  // La fila junta de sueldos o de comisiones suma pagos hechos de varias formas: no dice uno.
+  if (row.salary || (row.commission && row.id.includes(":"))) return "Varios"
   if (row.methodName) return row.paymentReference ? `${row.methodName} · op. ${row.paymentReference}` : row.methodName
   return row.fromCash ? cashWord : "Otro medio"
 }
@@ -150,7 +152,7 @@ export function ExpensesTab({
   const askAdmin = useMutation({
     mutationFn: (input: { expense: ExpenseRow; reason: string }) =>
       requestExpenseVoidApi({
-        title: `Anular o corregir el gasto «${input.expense.concept}» del ${formatDayMonth(input.expense.spentAt, locale, orgTimeZone)} (${formatMoney(input.expense.amountCents, input.expense.currency, locale)}): ${input.reason}`,
+        title: `Anular o corregir el gasto «${input.expense.concept}» de ${branchName}, del ${formatDayMonth(input.expense.spentAt, locale, orgTimeZone)} (${formatMoney(input.expense.amountCents, input.expense.currency, locale)}): ${input.reason}`,
       }),
     onSuccess: () => {
       toast.success("Se lo pediste a administración: le llegó como tarea. El gasto sigue hasta que lo anule.")
@@ -246,7 +248,12 @@ export function ExpensesTab({
         id: "comprobante",
         header: "Comprobante",
         meta: { view: { primary: true } },
-        cell: ({ row }) => <span className="[overflow-wrap:anywhere]">{receiptText(row.original) ?? <span className="text-muted-foreground">Sin comprobante</span>}</span>,
+        cell: ({ row }) =>
+          row.original.salary ? (
+            <span className="text-muted-foreground">Varios</span>
+          ) : (
+            <span className="[overflow-wrap:anywhere]">{receiptText(row.original) ?? <span className="text-muted-foreground">Sin comprobante</span>}</span>
+          ),
       },
       {
         id: "salio",
@@ -574,7 +581,7 @@ export function ExpensesTab({
 
       <VoidDrawer
         open={voiding !== null}
-        title="Anular gasto"
+        title={adminVoids ? "Pedírselo a administración" : "Anular gasto"}
         // Lo que pasa de verdad, dicho antes de escribir el motivo (QA de Gastos, G15). Si lo anula
         // administración, el motivo se le pide como tarea: el gasto sigue hasta que lo anule.
         submitLabel={adminVoids ? "Pedírselo a administración" : "Anular"}

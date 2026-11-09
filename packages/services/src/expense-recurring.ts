@@ -568,8 +568,12 @@ export async function endRecurringExpense(
     })
   ).filter((item) => !item.paid && !item.skipped)
   const resolved = await lastResolvedMonth(tx, orgId, id)
-  // Anotado este mes (en la zona de la clínica) y nunca resuelto: un error o algo que ya no va.
-  const justNoted = resolved === null && reportDayOf(zone.timezone, current.createdAt).slice(0, 7) === currentKey
+  // Anotado este mes (en la zona de la clínica), nunca resuelto y sin nada vencido: un error o algo
+  // que ya no va. Lo vencido, aunque se haya anotado hoy (una deuda), sigue por pagar.
+  const justNoted =
+    resolved === null &&
+    reportDayOf(zone.timezone, current.createdAt).slice(0, 7) === currentKey &&
+    pending.every((item) => item.dueOn >= today)
   // Lo por pagar hasta este mes: lo vencido y lo de este mes, aunque aún no venza (el sueldo de
   // quien se va a fin de mes). Lo de meses que no llegan no se debe.
   const owed = justNoted
