@@ -131,10 +131,11 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
       },
       contacto: {
         title: "Contacto",
-        description: "Cómo ubicarla y dónde vive. El contacto de emergencia se marca en Familia y responsables.",
+        description: "Cómo contactar a la persona y dónde vive. El contacto de emergencia se marca en Familia y responsables.",
         fields: [
           { key: "phone", label: "Teléfono", type: { kind: "phone" } },
-          { key: "email", label: "Correo", type: { kind: "text", max: 200 } },
+          // A lo ancho: en media columna el correo se cortaba (QA de la ficha del 9 nov).
+          { key: "email", label: "Correo", type: { kind: "text", max: 200, wide: true } },
           ...addressFields,
         ],
       },

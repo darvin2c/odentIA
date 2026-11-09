@@ -238,6 +238,18 @@ describe("buscar sin tildes y con su dueño", () => {
   })
 })
 
+it("a igual coincidencia, el paciente va antes que un homónimo que aún no lo es: Enter abre el primero (QA del 9 nov)", async () => {
+  // El contacto se crea primero: sin la regla, el orden lo decidía su id.
+  for (let i = 0; i < 3; i++) {
+    await ownerDb.insert(contact).values({ organizationId: ORG, displayName: `Rosa Aguilar${i ? ` ${"Z".repeat(i)}` : ""}` })
+  }
+  await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Rosa Aguilar", patientNumber: 90 })
+  const result = await as("reception", "rosa aguilar")
+  const people = result.owners.filter((o) => o.kind === "persona")
+  expect(people[0]).toMatchObject({ title: "Rosa Aguilar", badge: "Paciente" })
+  expect(people.some((o) => o.badge === "Aún no es paciente")).toBe(true)
+})
+
 describe("cada rol ve lo de su pantalla", () => {
   it("la historia clínica solo para quien la ve, y queda anotado lo que se mostró", async () => {
     const professional = await as("clinician", "bruxismo")

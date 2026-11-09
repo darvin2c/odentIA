@@ -115,9 +115,23 @@ export function EncounterVisitStrip({
           </Button>
         ) : null}
       </div>
+      {visit?.booked ? (
+        // Sin cita hoy, pero ya tiene una reservada: se dice, para no reservarle otra sin saberlo (QA del 9 nov).
+        <p className="text-sm text-muted-foreground">
+          {`Hoy vino sin cita. Ya tiene una reservada: ${new Date(visit.booked.startsAt)
+            .toLocaleDateString(activeOrgLocale(), { weekday: "short", day: "numeric", month: "short", timeZone: activeOrgTimeZone() })
+            .replace(/[.,]/g, "")}, ${new Date(visit.booked.startsAt).toLocaleTimeString(activeOrgLocale(), {
+            hour: "numeric",
+            minute: "2-digit",
+            timeZone: activeOrgTimeZone(),
+          })}${visit.booked.serviceName ? ` · ${visit.booked.serviceName}` : ""}.`}
+        </p>
+      ) : null}
       {nothing ? (
         <p className="text-sm text-muted-foreground">
-          Sin cita, tratamiento por hacer ni control por cumplir. Escribe el motivo abajo.
+          {visit?.booked
+            ? "Sin tratamiento por hacer ni control por cumplir. Escribe el motivo abajo."
+            : "Sin cita, tratamiento por hacer ni control por cumplir. Escribe el motivo abajo."}
         </p>
       ) : (
         <ul className="flex flex-col divide-y text-sm">

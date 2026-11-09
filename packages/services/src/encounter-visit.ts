@@ -76,6 +76,11 @@ export interface EncounterVisit {
   /** Cuántos tratamientos aceptados más tiene por hacer, fuera de los que se muestran. */
   moreTreatments: number
   controls: VisitControl[]
+  /**
+   * Sin cita hoy: su próxima cita ya reservada, para no reservarle otra ni hacer hoy lo que esa
+   * viene a hacer sin saberlo (QA del 9 nov). Nula con cita o sin ninguna por venir.
+   */
+  booked: { startsAt: Date; serviceName: string | null } | null
 }
 
 /** Los tratamientos que se muestran: con más, se dice cuántos quedan en el Plan. */
@@ -182,7 +187,15 @@ export async function encounterVisitOf(
       )
     : new Map<string, string>()
   const now = Date.now()
+  const [booked] = row.appointmentId
+    ? []
+    : await tx.execute<{ startsAt: Date; serviceName: string | null }>(sql`
+      select starts_at as "startsAt", service_name as "serviceName" from appointment
+      where organization_id = ${orgId} and patient_id = ${row.patientId} and status in ('programada', 'confirmada')
+        and starts_at > now() and not is_test
+      order by starts_at limit 1`)
   return {
+    booked: booked ? { startsAt: new Date(booked.startsAt), serviceName: booked.serviceName } : null,
     treatments,
     moreTreatments: Math.max(0, rows.length - treatments.length),
     controls: due.map((control) => ({

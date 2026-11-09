@@ -335,6 +335,21 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   expect((await get("reception", "/next-step")).status).toBe(200)
   expect((await get("cashier", "/next-step")).status).toBe(200)
   expect((await get("member", "/next-step")).status).toBe(403)
+  // «No contesta»: lo anota quien anota la respuesta (recepción y caja), no quien solo tiene tareas.
+  const noAnswer = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/budgets/00000000-0000-4000-8000-000000000000/no-answer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callAgainAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    })
+  expect((await noAnswer("reception")).status).toBe(404)
+  expect((await noAnswer("cashier")).status).toBe(404)
+  expect((await noAnswer("member")).status).toBe(403)
+  // «Armarlo ahora» en la atención: de quien atiende y arma presupuestos.
+  const assemble = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/encounters/00000000-0000-4000-8000-000000000000/budget`, { method: "POST" })
+  expect((await assemble("reception")).status).toBe(403)
+  expect((await assemble("cashier")).status).toBe(403)
   // La lista del Resumen, con el mismo permiso.
   expect((await get("reception", "/next-steps")).status).toBe(200)
   expect((await get("cashier", "/next-steps")).status).toBe(200)

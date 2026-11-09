@@ -763,6 +763,6 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja en una p
   expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: "1992-07-19", identityNeedsReview: false })
   await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
   await expect(page.getByText("Carla Núñez Prado").first()).toBeVisible()
-  await expect(page.getByText("Faltan datos para atenderla")).toHaveCount(0)
+  await expect(page.getByText(/Faltan datos para/)).toHaveCount(0)
   await info.attach("reserva-ficha-completa", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })

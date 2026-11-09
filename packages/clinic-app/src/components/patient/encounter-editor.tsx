@@ -1427,6 +1427,8 @@ export function EncounterEditor({
   const sessionItemIds = new Set(
     detail.procedures.flatMap((proc) => (!proc.voidedAt && proc.planItemId ? [proc.planItemId] : [])),
   )
+  // Lo indicado hoy que sigue en pie (lo quitado queda cancelado y no cuenta).
+  const liveIndicated = detail.indicatedItems.filter((item) => item.status !== "cancelado")
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1486,14 +1488,15 @@ export function EncounterEditor({
         "El plan en corto, lo hecho hoy y el próximo control. Indicar no ejecuta ni cobra.",
       summary:
         [
-          detail.indicatedItems.length > 0 ? `${counted(detail.indicatedItems.length, "indicado", "indicados")} hoy` : "",
+          // Sin lo quitado: el contador dice lo que sigue indicado (QA del 9 nov).
+          liveIndicated.length > 0 ? `${counted(liveIndicated.length, "indicado", "indicados")} hoy` : "",
           pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
           followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]
           .filter(Boolean)
           .join(" · ") || "Sin indicaciones ni controles",
       empty:
-        detail.indicatedItems.length === 0 &&
+        liveIndicated.length === 0 &&
         detail.plannedItems.length === 0 &&
         followUps.length === 0,
     },
@@ -1965,13 +1968,20 @@ export function EncounterEditor({
         .reverse()
         .find((group) => group.first.toothNumber === lastDiagnosis.toothNumber)?.first
     : undefined
+  // Su diagnóstico ya lleva su tratamiento hoy (la pulpitis, su endodoncia): lo que se indique
+  // después en esa pieza (la corona) no lo hereda; lo elige quien indica (QA del 9 nov).
+  const diagnosisUsed =
+    !!lastDiagnosis &&
+    liveIndicated.some(
+      (item) => item.toothNumber === lastDiagnosis.toothNumber && item.diagnosisCode === lastDiagnosis.diagnosisCode,
+    )
   const indicationDefaults =
     lastDiagnosis?.toothNumber != null
       ? {
           scope: "tooth",
           teeth: [lastDiagnosis.toothNumber],
           odontogramEntryId: lastFinding?.id ?? "",
-          diagnosisCode: lastDiagnosis.diagnosisCode,
+          diagnosisCode: diagnosisUsed ? "" : lastDiagnosis.diagnosisCode,
         }
       : undefined
   const removableIds = new Set(
