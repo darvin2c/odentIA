@@ -317,8 +317,49 @@ export function fetchEncounterClosing(patientId: string, encounterId: string, ad
   return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing${query}`)
 }
 
-export function voidEncounterApi(patientId: string, encounterId: string, reason: string) {
-  return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason })
+/** Lo que no se deshace al anular la atención (`EncounterVoidBlock` del servicio). */
+export type EncounterVoidBlock =
+  | { kind: "cobro"; treatments: string[] }
+  | { kind: "hecho"; treatments: string[] }
+  | { kind: "firma"; signedAt: string; signerName: string | null }
+  | { kind: "otros"; others: number }
+  | { kind: "ajeno"; others: number }
+  | { kind: "revision" }
+
+/** Un presupuesto que anular la atención anula, deja sin lo de ella o frena. */
+export interface EncounterVoidBudget {
+  id: string
+  budgetNumber: number
+  status: string
+  delivered: boolean
+  presentedAt: string | null
+  decidedAt: string | null
+  effect: "anula" | "quita" | "frena"
+  treatments: string[]
+  others: number
+  blocks: EncounterVoidBlock[]
+  appointments: Array<{ id: string; startsAt: string }>
+}
+
+export interface EncounterVoidPreview {
+  budgets: EncounterVoidBudget[]
+  blocked: boolean
+  /** Lo entregado que se anula con ella: va tal cual al anular. */
+  confirm: Array<{ id: string; status: string }>
+}
+
+/** Qué se lleva anular la atención, antes de confirmar (la misma regla del servidor al anular). */
+export function fetchEncounterVoidPreview(patientId: string, encounterId: string) {
+  return apiFetch<{ data: EncounterVoidPreview }>(`${base(patientId)}/encounters/${encounterId}/void-preview`)
+}
+
+export function voidEncounterApi(
+  patientId: string,
+  encounterId: string,
+  reason: string,
+  budgets: ReadonlyArray<{ id: string; status: string }> = [],
+) {
+  return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason, budgets })
 }
 
 export function takeOverEncounterApi(patientId: string, encounterId: string) {
