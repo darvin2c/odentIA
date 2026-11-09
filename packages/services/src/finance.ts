@@ -50,6 +50,7 @@ import {
   commissionSettlementLine,
   expense,
   expenseGapDismissal,
+  expenseRecurring,
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
@@ -79,7 +80,7 @@ import {
   paymentValueSql,
 } from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
-import { salaryOfMonth } from "./expense-recurring-occurrences.js"
+import { salaryOfMonth, userNamesOf } from "./expense-recurring-occurrences.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
@@ -1849,6 +1850,22 @@ export async function getMonthExpenses(
         ).map((row) => [row.id, row] as const)
       : [],
   )
+  // De quién es cada sueldo pagado de lo que se repite: solo para quien administra comisiones (ADR 0166).
+  const persons = new Map<string, string>()
+  if (viewer.seesCommissions) {
+    const ids = [...new Set(rows.map((row) => row.recurringId).filter((id): id is string => id !== null))]
+    if (ids.length > 0) {
+      const owners = await tx
+        .select({ id: expenseRecurring.id, memberUserId: expenseRecurring.memberUserId })
+        .from(expenseRecurring)
+        .where(and(eq(expenseRecurring.organizationId, orgId), inArray(expenseRecurring.id, ids)))
+      const names = await userNamesOf(tx, owners.map((owner) => owner.memberUserId))
+      for (const owner of owners) {
+        const name = owner.memberUserId ? names.get(owner.memberUserId) : undefined
+        if (name) persons.set(owner.id, name)
+      }
+    }
+  }
   const detailed = rows.filter((row) => !replacedIds.has(row.id)).map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
@@ -1863,6 +1880,8 @@ export async function getMonthExpenses(
       purchaseOrderNumber: order?.orderNumber ?? null,
       // El proveedor de la compra, o el que se dijo en el gasto.
       supplierName: order?.supplierName ?? row.supplierName ?? null,
+      /** De quién es el sueldo pagado (solo para quien administra comisiones). */
+      personName: row.recurringId ? (persons.get(row.recurringId) ?? null) : null,
       /** Lo que era antes de corregirlo: el importe, el tipo, la fecha y cómo se pagó. */
       replaced: was
         ? {
@@ -1968,6 +1987,12 @@ export async function correctExpense(
     original.concept !== input.concept.trim() ? `«${original.concept}» → «${input.concept.trim()}»` : null,
     original.category !== category ? `${original.category} → ${category}` : null,
     was !== now ? `${was} → ${now}` : null,
+    (input.receiptType ?? null) !== (original.receiptType ?? null) || (input.receiptNumber ?? null) !== (original.receiptNumber ?? null)
+      ? `comprobante ${[original.receiptKind === "ninguno" ? "sin" : original.receiptKind, original.receiptNumber].filter(Boolean).join(" ")} → ${input.receiptType ? (expenseReceiptType((await getOrgLocale(tx, orgId)).countryCode, input.receiptType)?.label ?? "sin") : "sin"}${input.receiptNumber ? ` ${input.receiptNumber}` : ""}`
+      : null,
+    (input.supplierTaxId ?? null) !== (original.supplierTaxId ?? null) && (input.supplierTaxId || original.supplierTaxId)
+      ? `RUC ${original.supplierTaxId ?? "sin"} → ${input.supplierTaxId ?? "sin"}`
+      : null,
   ].filter((text): text is string => text !== null)
   const reason = `Corregido${changes.length > 0 ? `: ${changes.join("; ")}` : " (comprobante, proveedor o fecha)"}`.slice(0, 2000)
   await voidExpense(tx, orgId, actorUserId, original.id, { reason }, { allowPostClose: opts.allowPostClose, seesPeople: viewer.seesPeople })
@@ -2272,6 +2297,8 @@ export interface PayPurchaseOrderInput {
   /** Con qué se pagó (ADR 0167): manda sobre `fromCash`, como en un gasto. */
   paymentMethodId?: string | null
   paymentReference?: string | null
+  /** El tipo de comprobante del país; el proveedor (y su RUC) es el de la compra. */
+  receiptType?: string | null
 }
 
 /**
@@ -2363,6 +2390,9 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
         fromCash: input.fromCash ?? false,
         paymentMethodId: input.paymentMethodId,
         paymentReference: input.paymentReference,
+        receiptType: input.receiptType,
+        // A quién se pagó es el proveedor de la compra, con su RUC si lo tiene (ADR 0167).
+        supplierId: order.supplierId,
         requestId,
       },
       {

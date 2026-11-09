@@ -575,6 +575,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         // Con qué se pagó (ADR 0167): manda sobre `fromCash`.
         paymentMethodId: z.uuid().nullish(),
         paymentReference: z.string().max(60).nullish(),
+        receiptType: z.string().max(20).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))

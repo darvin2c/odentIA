@@ -9,7 +9,7 @@
  * se dice el cambio, y en la otra, lo que salió (el cambio se calcula solo). Lo que
  * cancela es siempre lo de la compra. Sin ella no aparece nada de esto.
  */
-import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, expenseReceiptTypes, formatMoney, formatMoneyInput, NO_RECEIPT_TYPE } from "@odentia/clinical"
 import { FieldLegend, FieldSet, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -184,7 +184,7 @@ export function PurchasePaymentDrawer({
             message: `En la caja solo hay ${second ? formatMoney(state.cashOnHandCents, payIn, locale) : money(state.cashOnHandCents)}: no alcanza para pagar con el efectivo. Elige otro medio o ingresa lo que falta en Finanzas › Caja.`,
           })
         if (value.day > today) ctx.addIssue({ code: "custom", path: ["day"], message: "La fecha del pago no puede ser futura." })
-        if (value.receiptKind.trim().length > 60) ctx.addIssue({ code: "custom", path: ["receiptKind"], message: "Escribe como mucho 60 caracteres." })
+
         if (value.receiptNumber.trim().length > 60) ctx.addIssue({ code: "custom", path: ["receiptNumber"], message: "Escribe como mucho 60 caracteres." })
       }),
     [state, today, credit, suggested, order.currency, locale, payIn, business, methods.data],
@@ -200,7 +200,7 @@ export function PurchasePaymentDrawer({
         fromCash: methodOf(value.method)?.typeCode === CASH_TYPE_CODE,
         ...(value.method ? { paymentMethodId: value.method } : {}),
         ...(value.day === today ? {} : { spentAt: noonOf(value.day, timeZone) }),
-        ...(value.receiptKind.trim() ? { receiptKind: value.receiptKind.trim() } : {}),
+        ...(value.receiptKind ? { receiptType: value.receiptKind } : {}),
         ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
         expectedDueCents: seen.current.due,
         expectedPaidCents: seen.current.paid,
@@ -431,7 +431,18 @@ export function PurchasePaymentDrawer({
         </form.AppField>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
           <form.AppField name="receiptKind">
-            {(field) => <field.TextField id={`${uid}-comprobante`} label="Comprobante" maxLength={60} placeholder="Factura, recibo…" />}
+            {(field) => (
+              // El comprobante del país (SUNAT en el Perú), como al registrar un gasto (ADR 0167).
+              <field.SelectField
+                id={`${uid}-comprobante`}
+                label="Comprobante"
+                placeholder="Elige el comprobante"
+                options={[
+                  ...expenseReceiptTypes(profile?.countryCode ?? "PE").map((type) => ({ value: type.code, label: type.label })),
+                  { value: NO_RECEIPT_TYPE, label: "Sin comprobante" },
+                ]}
+              />
+            )}
           </form.AppField>
           <form.AppField name="receiptNumber">
             {(field) => <field.TextField id={`${uid}-numero`} label="Número" maxLength={60} autoComplete="off" />}

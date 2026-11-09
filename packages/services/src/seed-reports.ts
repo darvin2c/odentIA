@@ -1120,14 +1120,19 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     .where(and(eq(organizationPaymentMethod.organizationId, input.orgId), eq(organizationPaymentMethod.isActive, true)))
   const methodOf = (typeCode: string) => orgMethods.find((method) => method.typeCode === typeCode) ?? null
   const { countryCode } = await getOrgLocale(tx, input.orgId)
+  let paperCount = 0
   const paperOf = (category: string) => {
     const method = category === "Servicios" ? (methodOf("68") ?? methodOf("30")) : methodOf("30")
     const code = category === "Servicios" ? "14" : category === "Personal" ? NO_RECEIPT_TYPE : category === "Materiales" ? "03" : "01"
     const type = expenseReceiptType(countryCode, code)
+    // Un comprobante con su número, como llega: la serie de cada tipo y un correlativo.
+    paperCount += 1
+    const series = code === "01" ? "F001" : code === "03" ? "B001" : code === "14" ? "S001" : null
     return {
       ...(method ? { paymentMethodId: method.id, methodName: method.name, methodTypeCode: method.typeCode } : {}),
       receiptType: code === NO_RECEIPT_TYPE ? NO_RECEIPT_TYPE : (type?.code ?? null),
       receiptKind: type?.label ?? "ninguno",
+      ...(series && type ? { receiptNumber: `${series}-${String(1000 + paperCount).padStart(6, "0")}` } : {}),
     }
   }
   // El alquiler, la planilla y los servicios se anotan como gastos que se repiten, con su historia
@@ -1204,7 +1209,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
             firstMonth: month,
             fromCash: false,
             memberUserId: item.memberUserId ?? null,
-            paymentMethodId: paperOf(item.category).paymentMethodId ?? null,
+            paymentMethodId: (item.category === "Servicios" ? (methodOf("68") ?? methodOf("30")) : methodOf("30"))?.id ?? null,
             createdBy: input.ownerUserId,
           }
           // Se propone el último importe pagado.

@@ -62,21 +62,32 @@ export function expenseReceiptType(countryCode: string, code: string | null | un
 }
 
 /**
- * El que se propone según el tipo de gasto: la luz y el agua llegan con recibo de servicios
- * públicos; el laboratorio y el alquiler, con factura; lo de la farmacia o la tienda, con boleta; y
- * un sueldo, sin papel. Es solo una propuesta: la persona lo cambia.
+ * El que se propone según el tipo de gasto, solo donde casi no hay duda: la luz y el agua llegan con
+ * recibo de servicios públicos, y un sueldo no lleva papel. En lo demás no se propone nada: un
+ * comprobante propuesto que nadie mira se guardaría como si existiera (QA antes de entregar).
  */
 export function suggestedReceiptType(countryCode: string, category: string): string {
   const peru = countryCode.toUpperCase() === "PE"
   switch (category) {
     case "Servicios":
       return peru ? "14" : "recibo"
-    case "Laboratorio":
-    case "Alquiler":
-      return peru ? "01" : "factura"
     case "Personal":
       return NO_RECEIPT_TYPE
     default:
-      return peru ? "03" : "boleta"
+      return ""
   }
+}
+
+/**
+ * ¿Cuadra este RUC? Once números, con un prefijo de contribuyente (10, 15, 16, 17 o 20) y el último
+ * que lo comprueba (módulo 11, como lo calcula SUNAT). Sirve para avisar, no para frenar.
+ */
+export function rucLooksValid(value: string): boolean {
+  const ruc = value.replace(/\s+/g, "")
+  if (!/^(10|15|16|17|20)\d{9}$/.test(ruc)) return false
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+  const sum = weights.reduce((total, weight, index) => total + weight * Number(ruc[index]), 0)
+  const rest = 11 - (sum % 11)
+  const check = rest === 10 ? 0 : rest === 11 ? 1 : rest
+  return check === Number(ruc[10])
 }

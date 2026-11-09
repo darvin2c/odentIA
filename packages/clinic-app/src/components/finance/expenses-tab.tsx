@@ -206,6 +206,7 @@ export function ExpensesTab({
                 {expense.concept}
               </button>
               <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                {expense.personName ? <span>{expense.personName}</span> : null}
                 {expense.supplierName ? <span className="[overflow-wrap:anywhere]">{expense.supplierName}</span> : null}
                 {expense.purchaseOrderId && expense.purchaseOrderNumber !== null ? (
                   canInventory ? (

@@ -20,6 +20,7 @@ import {
   formatMoneyInput,
   isTaxDocument,
   NO_RECEIPT_TYPE,
+  rucLooksValid,
   suggestedReceiptType,
 } from "@odentia/clinical"
 import { Button, cn, FieldDescription, FieldError, FieldLabel, Input, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
@@ -342,7 +343,7 @@ export function ExpenseFormDrawer({
             expectedDueCents: seen?.due ?? chosen.dueCents,
             expectedPaidCents: seen?.paid ?? chosen.paidCents,
             requestId: requestId.current,
-            ...(type ? { receiptKind: type.label } : {}),
+            ...(value.receiptType ? { receiptType: value.receiptType } : {}),
             ...(paper.receiptNumber ? { receiptNumber: paper.receiptNumber } : {}),
             ...spentAt,
           },
@@ -616,7 +617,9 @@ export function ExpenseFormDrawer({
       title={title}
       description={
         paying
-          ? `${expenseCategoryLabel(paying.category)} de ${place.branchName}.`
+          ? paying.memberName
+            ? `Sueldo de ${paying.memberName}, de ${place.branchName}.`
+            : `${expenseCategoryLabel(paying.category)} de ${place.branchName}.`
           : chosen
             ? `Pago de una compra de ${chosen.branchName}.`
             : place.branchName
@@ -949,7 +952,20 @@ export function ExpenseFormDrawer({
             </form.AppField>
             {pickedType?.asksTaxId ? (
               <form.AppField name="supplierTaxId">
-                {(field) => <field.TextField label="RUC (opcional)" inputMode="numeric" maxLength={20} autoComplete="off" />}
+                {(field) => (
+                  <field.TextField
+                    label="RUC (opcional)"
+                    inputMode="numeric"
+                    maxLength={20}
+                    autoComplete="off"
+                    // Se avisa, no se frena: el contador lo revisa con la factura en la mano.
+                    description={
+                      country === "PE" && field.state.value.trim() && !rucLooksValid(field.state.value)
+                        ? "Ese RUC no cuadra: tiene 11 números y el último lo comprueba. Revísalo con la factura."
+                        : undefined
+                    }
+                  />
+                )}
               </form.AppField>
             ) : null}
           </div>

@@ -825,6 +825,8 @@ export interface ExpenseRow {
   methodTypeCode?: string | null
   paymentReference?: string | null
   supplierTaxId?: string | null
+  /** De quién es el sueldo pagado (solo para quien administra comisiones). */
+  personName?: string | null
   /** Corrige a otro gasto: lo que era antes. */
   replacesExpenseId?: string | null
   replaced?: {
@@ -1115,6 +1117,8 @@ export function payPurchaseApi(
     /** Con qué se pagó: manda sobre `fromCash`. */
     paymentMethodId?: string
     paymentReference?: string
+    /** El tipo de comprobante del país. */
+    receiptType?: string
   },
 ): Promise<{ data: { balance: PurchaseBalance } }> {
   return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })
