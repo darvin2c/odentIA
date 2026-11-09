@@ -384,6 +384,71 @@ export async function sessionCountsOf(tx: Db, orgId: string, itemIds: readonly s
   return new Map(rows.map((row) => [row.id, { done: Number(row.done), booked: Number(row.booked) }]))
 }
 
+/**
+ * En qué sesión quedó un tratamiento con una atención ya hecha: `n` cuenta las
+ * atenciones no anuladas con un procedimiento vigente del tratamiento hasta
+ * esta (por su inicio, y por su id si empezaron a la vez), con la regla de
+ * `sessionsDoneSql`; `m`, las previstas; `finished`, que esta fue la que lo
+ * terminó (realizado, y ninguna hecha después).
+ */
+export interface EncounterSession {
+  encounterId: string
+  planItemId: string
+  n: number
+  m: number
+  finished: boolean
+}
+
+/** La clave de `encounterSessionsOf`: la atención y el tratamiento. */
+export const encounterSessionKey = (encounterId: string, planItemId: string) => `${encounterId}:${planItemId}`
+
+/**
+ * La sesión de cada tratamiento hecho en esas atenciones, en una sola consulta.
+ * Lo usan la Historia (la tarjeta de la atención) y la historia de la pieza,
+ * para decir «sesión 1 de 2» y no «Realizado» con el tratamiento en curso
+ * (tercer repaso del 9 nov, E8 y E12). Las anuladas no tienen sesión.
+ */
+export async function encounterSessionsOf(
+  tx: Db,
+  orgId: string,
+  encounterIds: readonly string[],
+): Promise<Map<string, EncounterSession>> {
+  const ids = [...new Set(encounterIds)]
+  if (ids.length === 0) return new Map()
+  const item = { id: sql`session_item.id`, organizationId: sql`session_item.organization_id` }
+  const rows = await tx.execute<{ encounter_id: string; plan_item_id: string; status: string; m: number; n: number; done: number }>(sql`
+    select distinct here.encounter_id, session_item.id as plan_item_id, session_item.status,
+      session_item.planned_sessions as m,
+      (select count(distinct earlier_procedure.encounter_id)::int from encounter_procedure earlier_procedure
+        join encounter earlier on earlier.organization_id = earlier_procedure.organization_id
+          and earlier.id = earlier_procedure.encounter_id
+        where earlier_procedure.organization_id = session_item.organization_id
+          and earlier_procedure.plan_item_id = session_item.id
+          and earlier_procedure.voided_at is null and earlier.status <> 'anulada'
+          and (earlier.started_at, earlier.id) <= (this_encounter.started_at, this_encounter.id)) as n,
+      ${sessionsDoneSql(item)} as done
+    from encounter_procedure here
+    join encounter this_encounter on this_encounter.organization_id = here.organization_id
+      and this_encounter.id = here.encounter_id
+    join treatment_plan_item session_item on session_item.organization_id = here.organization_id
+      and session_item.id = here.plan_item_id
+    where here.organization_id = ${orgId} and here.encounter_id in (${list(ids)})
+      and here.voided_at is null and this_encounter.status <> 'anulada'`)
+  return new Map(
+    rows.map((row) => {
+      const n = Number(row.n)
+      const session: EncounterSession = {
+        encounterId: row.encounter_id,
+        planItemId: row.plan_item_id,
+        n,
+        m: Number(row.m),
+        finished: row.status === "realizado" && n >= Number(row.done),
+      }
+      return [encounterSessionKey(row.encounter_id, row.plan_item_id), session]
+    }),
+  )
+}
+
 /** La persona no tiene ninguna cita por venir. */
 export function noUpcomingAppointmentSql(
   patient: { id: SQLWrapper; organizationId: SQLWrapper },

@@ -232,6 +232,16 @@ export function EncounterPlanPanel({
     // La opción que no eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
     .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
+  // Lo que va después de otro de la misma pieza (la corona tras la endodoncia en curso) baja a
+  // continuación de él, aunque se indicara hoy: la regla de «Qué sigue» (QA del 9 nov, repaso 3).
+  for (const item of [...brief]) {
+    const blocker = item.waitsFor ? brief.findIndex((other) => other.id === item.waitsFor?.id) : -1
+    const at = brief.findIndex((other) => other.id === item.id)
+    if (blocker > at) {
+      brief.splice(at, 1)
+      brief.splice(blocker, 0, item)
+    }
+  }
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
   const [changing, setChanging] = useState<string | null>(null)
@@ -482,6 +492,7 @@ export function EncounterPlanPanel({
                         <span className="text-xs text-muted-foreground">
                           {[
                             treatmentSiteLabel(item),
+                            item.waitsFor ? `va después de ${item.waitsFor.title}` : "",
                             // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
                             quotedPriceOf(item).priceCents != null && orgLocale
                               ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
@@ -1236,6 +1247,17 @@ function IndicationForm({
   const vigentes = productUi().useFindings(patientId, canRead)
   // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
   const findings = vigentes.filter((entry) => tooth != null && entry.toothNumber === tooth)
+  /**
+   * Las caras del hallazgo que motiva, para un servicio por caras: la resina de una caries M-O
+   * nace con mesial y oclusal marcadas (QA del 9 nov, repaso 3). Solo si aún no se marcó ninguna.
+   */
+  const fillSurfacesFrom = (entryId: string, nextScope: string) => {
+    if (nextScope !== "surfaces" || !entryId || form.getFieldValue("surfaces").length > 0) return
+    const group = groupFindings(findings).find((candidate) => candidate.ids.includes(entryId))
+    const valid = form.getFieldValue("teeth")[0] != null ? (site?.partsOf(form.getFieldValue("teeth")[0]!) ?? []).map(String) : []
+    const surfaces = (group?.surfaces ?? []).map(String).filter((surface) => valid.includes(surface))
+    if (surfaces.length > 0) form.setFieldValue("surfaces", surfaces)
+  }
 
   const blocked = disabled || pending
   /** Elegir la pieza en el dibujo; con una ya puesta, se ofrece «Cambiar». */
@@ -1315,7 +1337,17 @@ function IndicationForm({
           </form.AppField>
         )}
         {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && !editing && (
-          <form.AppField name="odontogramEntryId">
+          <form.AppField
+            name="odontogramEntryId"
+            listeners={{
+              onChange: ({ value }) => {
+                // Otro hallazgo, otras caras: las que trae ese.
+                if (form.getFieldValue("scope") !== "surfaces") return
+                form.setFieldValue("surfaces", [])
+                fillSurfacesFrom(value, "surfaces")
+              },
+            }}
+          >
             {(field) => (
               <field.SelectField
                 id={`${uid}-finding`}
@@ -1416,6 +1448,7 @@ function IndicationForm({
                 onChange={(next) => {
                   field.handleChange(next)
                   if (next.scope) form.setFieldValue("scope", next.scope)
+                  fillSurfacesFrom(form.getFieldValue("odontogramEntryId"), next.scope ?? form.getFieldValue("scope"))
                   // Nace con las sesiones habituales del servicio; aquí se cambian si este paciente necesita otras.
                   form.setFieldValue("sessions", String(next.usualSessions ?? 1))
                 }}

@@ -1,4 +1,5 @@
 import type { ReplyButton } from "@odentia/channels"
+import { isFictionalPhone, whatsappNumberProblem } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
@@ -7,7 +8,7 @@ import { clinicalFollowUp, patient, patientContact, treatmentBudget } from "@ode
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm"
 import {
   type AutomationMessage,
   type MessageSpec,
@@ -21,7 +22,7 @@ import { isDirectThread } from "./contacts.js"
 import { startContactConversation } from "./conversations.js"
 import { ServiceError } from "./errors.js"
 import { openEmailThread } from "./financial-documents.js"
-import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { acceptsPromotions } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -277,7 +278,7 @@ async function routeFacts(
   spec: RouteSpec | null,
 ) {
   const [person] = await tx
-    .select({ email: contact.email })
+    .select({ email: contact.email, phone: contact.phone })
     .from(contact)
     .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
     .limit(1)
@@ -349,9 +350,35 @@ async function routeFacts(
     }
   }
   const email = person?.email?.trim().toLowerCase()
+  // Con un teléfono en su ficha, sin WhatsApp ni correo, se dice por qué ese
+  // teléfono no sirve; solo se averigua cuando no hay por dónde escribirle.
+  const phoneDigits = person?.phone?.replace(/\D/g, "") ?? ""
+  let phoneWithoutWhatsApp: PhoneWithoutWhatsApp | null = null
+  if (phoneDigits && identities.length === 0 && !email) {
+    const [otherOwner] = await tx
+      .select({ id: contactIdentity.id })
+      .from(contactIdentity)
+      .where(
+        and(
+          eq(contactIdentity.organizationId, orgId),
+          eq(contactIdentity.channel, "whatsapp"),
+          // Las identidades de WhatsApp se guardan como `wa:<dígitos>` (`normalizeChannelIdentity`).
+          eq(contactIdentity.externalUserId, `wa:${phoneDigits}`),
+          ne(contactIdentity.contactId, contactId),
+        ),
+      )
+      .limit(1)
+    phoneWithoutWhatsApp = phoneWithoutWhatsAppReason({
+      clinicWhatsApp: !!whatsapp,
+      testNumber: isFictionalPhone(`+${phoneDigits}`),
+      numberProblem: !!whatsappNumberProblem(`+${phoneDigits}`, await findOrgCountry(tx, orgId)),
+      ownedByOther: !!otherOwner,
+    })
+  }
   return {
     identity: identity ?? null,
     noWhatsapp,
+    phoneWithoutWhatsApp,
     whatsapp: whatsapp ?? null,
     mailbox: mailbox ?? null,
     windowThreadId,
@@ -360,6 +387,44 @@ async function routeFacts(
     email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
     rawEmail: email ?? null,
   }
+}
+
+/**
+ * Por qué el teléfono de su ficha no es una vía cuando no tiene WhatsApp ni
+ * correo: con un celular a la vista, «no tiene WhatsApp» no es verdad (QA del
+ * 9 nov). El teléfono declarado solo pasa a ser su WhatsApp por decisión del
+ * equipo (ADR 0027); antes de eso puede que la clínica no tenga WhatsApp, que
+ * sea un número de prueba (`isFictionalPhone`, como dice su campo), que no
+ * tenga la forma de un celular de su país o que ya sea el WhatsApp de otra
+ * persona (nunca se mueve solo, ni se confunde con ella).
+ */
+export type PhoneWithoutWhatsApp =
+  | "clinica_sin_whatsapp"
+  | "numero_de_prueba"
+  | "no_parece_celular"
+  | "de_otra_persona"
+  | "aun_no"
+
+export const PHONE_WITHOUT_WHATSAPP_DETAIL: Record<PhoneWithoutWhatsApp, string> = {
+  clinica_sin_whatsapp: "La clínica no tiene WhatsApp conectado y la persona no tiene correo registrado",
+  numero_de_prueba: "Su número es de prueba (a ese número no le llega ningún mensaje) y no tiene correo registrado",
+  no_parece_celular: "Su número no parece un celular al que se le pueda escribir y no tiene correo registrado",
+  de_otra_persona: "Su teléfono es el WhatsApp de otra persona de la clínica y no tiene correo registrado",
+  aun_no: "Su teléfono aún no es su WhatsApp (se marca en sus Datos) y no tiene correo registrado",
+}
+
+/** El motivo que manda, en ese orden: lo de la clínica, lo del número y de quién es. */
+export function phoneWithoutWhatsAppReason(facts: {
+  clinicWhatsApp: boolean
+  testNumber: boolean
+  numberProblem: boolean
+  ownedByOther: boolean
+}): PhoneWithoutWhatsApp {
+  if (!facts.clinicWhatsApp) return "clinica_sin_whatsapp"
+  if (facts.testNumber) return "numero_de_prueba"
+  if (facts.numberProblem) return "no_parece_celular"
+  if (facts.ownedByOther) return "de_otra_persona"
+  return "aun_no"
 }
 
 /** Por qué no se le puede escribir, con las palabras para el equipo. */
@@ -372,7 +437,12 @@ function noRoute(
     return { cause: "no_entregado", detail: "Su número no tiene WhatsApp y no tiene correo registrado" }
   }
   if (!identity && !facts.rawEmail) {
-    return { cause: "sin_destino", detail: "La persona no tiene WhatsApp ni correo registrados" }
+    return {
+      cause: "sin_destino",
+      detail: facts.phoneWithoutWhatsApp
+        ? PHONE_WITHOUT_WHATSAPP_DETAIL[facts.phoneWithoutWhatsApp]
+        : "La persona no tiene WhatsApp ni correo registrados",
+    }
   }
   if (identity && whatsapp && facts.promotion) {
     return {

@@ -58,7 +58,6 @@ import { createContactNote } from "./crm-workspace.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import {
   fieldsError,
-  invalidField,
   issueFields,
   notFound,
   ServiceError,
@@ -732,7 +731,7 @@ export type RegistrationContext =
        * `essentials`: el equipo registra con lo mínimo, al reservar, a la
        * persona de una conversación (`contactId` y `conversationId`, ficha
        * unida a ella como propia) o a alguien nuevo desde la Agenda (sin
-       * vínculos ni conversación, con su teléfono). La misma regla que el
+       * vínculos ni conversación, con su teléfono si lo tiene). La misma regla que el
        * enlace de reserva: lo que la clínica exige y no se pidió queda anotado
        * (en el caso o en las notas de su persona).
        * Ningún otro alta interna lo usa.
@@ -870,10 +869,13 @@ export async function registerPatient(
   const hasToken = publicToken !== undefined
   const essentials = (publicContext ?? internalContext)?.scope === "essentials"
   if (essentials && publicContext && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
-  // El equipo registra con lo mínimo (nombres, apellidos y cómo ubicarla): a
-  // alguien nuevo (sin vínculos: su persona nace con la ficha y el teléfono es
-  // como ubicarla), a una persona que ya existe como su propia ficha o a
-  // alguien a su cargo; desde una conversación, la Agenda o Pacientes.
+  // El equipo registra con lo mínimo (nombres, apellidos y, si lo tiene, su
+  // teléfono): a alguien nuevo (sin vínculos: su persona nace con la ficha), a
+  // una persona que ya existe como su propia ficha o a alguien a su cargo;
+  // desde una conversación, la Agenda o Pacientes. Sin teléfono también se
+  // registra (una urgencia, un turista, un adulto mayor sin celular): no le
+  // llegan avisos hasta que se agregue, y «Faltan datos» lo dice. La identidad
+  // nunca se decide por el teléfono, así que no tenerlo no crea otra ficha.
   const fromPerson =
     !!internalContext?.contactId &&
     !!input.contacts?.some((link) => link.contactId === internalContext.contactId)
@@ -883,7 +885,6 @@ export async function registerPatient(
     if (!fromPerson && !newPerson) {
       throw validation("Lo mínimo se acepta para alguien nuevo o para una persona que ya existe")
     }
-    if (newPerson && !input.answers?.demographics?.phone) throw invalidField("answers.demographics.phone", "Indica el teléfono")
   }
   const entryPoint: RegistrationEntryPoint = publicContext
     ? (hasToken ? "conversation" : publicContext.entryPoint)

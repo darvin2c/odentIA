@@ -116,6 +116,8 @@ export interface FollowUp {
   planItemId: string | null
   encounterProcedureId: string | null
   originEncounterId: string | null
+  /** Quien lo indicó: la reserva lo propone primero. */
+  originProfessionalUserId?: string | null
   kind: string
   title: string
   instructions: string | null
@@ -234,7 +236,18 @@ export function scheduleFollowUpApi(
 /** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
 export type SchedulableControl = Pick<
   FollowUp,
-  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom" | "overdue" | "servedBy"
+  | "id"
+  | "patientId"
+  | "title"
+  | "dueAt"
+  | "status"
+  | "appointment"
+  | "legacyScheduledAt"
+  | "branchId"
+  | "windowFrom"
+  | "overdue"
+  | "servedBy"
+  | "originProfessionalUserId"
 >
 
 /**

@@ -106,7 +106,10 @@ export const serviceToothAnatomy = sql<ServiceToothAnatomy | null>`(
         and other."id" <> ${serviceCatalog.id}
         -- La misma familia, o la que hace lo mismo en la otra dentición (la pulpectomía de una temporal).
         and (kin."family" = own_rule."family"
-          or (own_rule."family" || '>' || kin."family") = any(${COUNTERPART_PAIRS}::text[]))
+          or (own_rule."family" || '>' || kin."family") in (${sql.join(
+            COUNTERPART_PAIRS.map((pair) => sql`${pair}`),
+            sql`, `,
+          )}))
     ), '[]'::jsonb))
   from ${dentalTemplateRule} own_rule
   where own_rule."template_id" = ${serviceCatalog.templateId} and own_rule."family" is not null

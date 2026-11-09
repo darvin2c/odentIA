@@ -123,7 +123,7 @@ export function PersonalLinkActions({
     <span className="flex flex-col gap-2">
       <span className="text-sm text-muted-foreground">
         {data?.canShow
-          ? `No se le puede enviar ahora: ${blocked.replace(/\.$/, "")}. Cópialo para pegarlo cuando escriba, o muéstrale su código.`
+          ? `No se le puede enviar ahora: ${blocked.charAt(0).toLowerCase()}${blocked.slice(1).replace(/\.$/, "")}. Cópialo para pegarlo cuando escriba, o muéstrale su código.`
           : blocked}
       </span>
       {row}

@@ -1,9 +1,9 @@
 import { label } from "../../lib/glossary"
-import { diagnosisCodeLabel, formatVitals } from "@odentia/clinical"
+import { diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
-import { planDecisionLabel } from "../../lib/budgets"
+import { fetchPrescriptions } from "../../lib/clinical-journey"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
   DIAGNOSIS_TYPE_LABELS,
@@ -146,8 +146,18 @@ export function EncounterDetailView({
   showDocuments?: boolean
 }) {
   const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const memberName = useMemberName()
   const { encounter, teeth, procedures, notes, documents, addenda } = detail
+  // La misma consulta (y caché) que el bloque «Documentos» de la atención: sus recetas.
+  const prescriptions = useQuery({
+    queryKey: ["prescriptions", patientId],
+    queryFn: () => fetchPrescriptions(patientId),
+    enabled: canRead,
+  })
+  const issuedPrescription = (prescriptions.data?.data ?? []).some(
+    (row) => row.encounterId === encounter.id && row.status !== "anulada",
+  )
   const planTitle = (planItemId: string | null | undefined): string | null =>
     [...detail.plannedItems, ...detail.indicatedItems].find((item) => item.id === planItemId)
       ?.title ?? null
@@ -164,15 +174,19 @@ export function EncounterDetailView({
   const voidedBudgets = (detail.budgets ?? []).filter((budget) => budget.voidedWith)
   // Lo que se indicó aquí y no se hizo hoy (la corona, la opción B): la firmada lo nombra con su presupuesto.
   const doneHere = new Set(detail.plannedItems.map((item) => item.id))
-  const indicatedOnly = detail.indicatedItems.filter((item) => !doneHere.has(item.id))
+  // Con la misma etiqueta que la tarjeta plegada de la Historia, y lo quitado aparte en
+  // «Ya no vigente», como ella: no «Cancelado» plegada y «Por decidir» abierta (tercer repaso del 9 nov, E9).
+  const indicatedOnly = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && !isRetiredPlanStatus(item.status))
+  const indicatedRetired = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && isRetiredPlanStatus(item.status))
   const liveBudgets = (detail.budgets ?? []).filter((budget) => budget.status !== "cancelado")
   // Lo que no se registró, en una sola línea: así nadie cree que está escondido.
+  // Una receta emitida en ella es una indicación y un documento registrados (E9).
   const unrecorded = [
     diagnoses.length === 0 ? "diagnóstico" : "",
     procedures.length === 0 ? "procedimientos" : "",
     encounter.evolution ? "" : "evolución",
-    encounter.indications ? "" : "indicaciones",
-    showDocuments && documents.length === 0 ? "documentos" : "",
+    encounter.indications || issuedPrescription ? "" : "indicaciones",
+    showDocuments && documents.length === 0 && !issuedPrescription ? "documentos" : "",
   ].filter(Boolean)
 
   return (
@@ -377,13 +391,26 @@ export function EncounterDetailView({
             <li key={item.id}>
               <span className="font-medium">{item.title}</span>
               <span className="text-muted-foreground">
-                {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""} · {planDecisionLabel(item.decisionStatus)}
+                {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""} · {planItemStateText(item.status, item.decisionStatus)}
               </span>
             </li>
           ))}
           {liveBudgets.map((budget) => (
             <li key={budget.id} className="text-muted-foreground">
               Presupuesto N.º {budget.budgetNumber} · {budget.stateText}
+            </li>
+          ))}
+        </ul>
+      </section>
+      ) : null}
+      {encounter.status === "finalizada" && indicatedRetired.length > 0 ? (
+      <section aria-label="Ya no vigente">
+        <h4 className="mb-2 text-sm font-medium text-muted-foreground">Ya no vigente</h4>
+        <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+          {indicatedRetired.map((item) => (
+            <li key={item.id}>
+              {item.title}
+              {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""} · {planItemStateText(item.status, item.decisionStatus)}
             </li>
           ))}
         </ul>

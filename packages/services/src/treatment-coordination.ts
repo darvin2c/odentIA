@@ -48,6 +48,8 @@ export interface CoordinationFollowUp {
   overdue: boolean
   /** Su próxima cita, si le sirve sin ser la suya: el Plan lo dice como «Qué sigue» (M6). */
   servedBy: { id: string; startsAt: Date } | null
+  /** Quien lo indicó: la reserva lo propone primero. */
+  originProfessionalUserId: string | null
 }
 
 /**
@@ -119,6 +121,7 @@ function toCoordinationFollowUp(
     windowFrom: row.windowFrom,
     overdue: "overdue" in row ? Boolean(row.overdue) : false,
     servedBy: "servedBy" in row ? row.servedBy : null,
+    originProfessionalUserId: row.originProfessionalUserId ?? null,
   }
 }
 

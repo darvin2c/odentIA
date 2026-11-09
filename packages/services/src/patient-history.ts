@@ -1,4 +1,12 @@
-import { budgetAnswerText, budgetStateText, diagnosisCodeLabel, LEFT_OUT_DECISIONS, sumByCurrency } from "@odentia/clinical"
+import {
+  budgetStateText,
+  diagnosisCodeLabel,
+  doneSessionWords,
+  isRetiredPlanStatus,
+  LEFT_OUT_DECISIONS,
+  planItemStateText,
+  sumByCurrency,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -38,6 +46,7 @@ import { productHooks } from "./products.js"
 const looseValue = (site: ProductSite, row: Pick<SiteColumns, "siteSystem" | "siteCode">): number | null =>
   row.siteSystem === site.system ? site.value(row.siteCode) : null
 import { listTreatmentJourneys } from "./treatment-journey.js"
+import { encounterSessionKey, encounterSessionsOf } from "./to-schedule.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
 const RETIRED_BUDGETS = ["cancelado"] as const
@@ -719,37 +728,12 @@ export interface EncounterBorn {
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
 
-/** Los estados de un tratamiento o un control, en palabras (nunca «en_curso»). */
-const PLAN_STATE_WORDS: Record<string, string> = {
-  pendiente: "Pendiente",
-  programado: "Con cita",
-  en_curso: "En curso",
-  suspendido: "Suspendido",
-  realizado: "Realizado",
-  cancelado: "Cancelado",
-  reemplazado: "Reemplazado",
-}
-
-/**
- * Una sola etiqueta por tratamiento (U8 de la QA de la ficha): mientras no
- * empieza, su decisión («Aceptado», «Lo está pensando»); después, su estado.
- */
-export function planItemStateText(status: string, decision: string | null): string {
-  if ((status === "pendiente" || status === "programado") && decision && decision !== "aceptado")
-    return budgetAnswerText(decision)
-  if (status === "pendiente" && decision === "aceptado") return "Aceptado"
-  return PLAN_STATE_WORDS[status] ?? status
-}
-
 const FOLLOW_UP_STATE_WORDS: Record<string, string> = {
   pendiente: "Por reservar",
   programado: "Con cita",
   realizado: "Hecho",
   cancelado: "Cancelado",
 }
-
-/** Lo que ya no es trabajo vigente: se pliega, no se tacha. */
-const RETIRED_PLAN = new Set(["cancelado", "reemplazado"])
 
 /**
  * Lo nacido en cada atención, de una vez para todas (sin una consulta por
@@ -837,7 +821,7 @@ async function loadBornForEncounters(
       title: item.title,
       where: site.words(item, "full"),
       stateText: planItemStateText(item.status, item.decisionStatus),
-      retired: RETIRED_PLAN.has(item.status),
+      retired: isRetiredPlanStatus(item.status),
       budgetId: item.budgetId,
     })
   }
@@ -1141,6 +1125,7 @@ export async function getTimeline(
           encounterId: encounterDiagnosis.encounterId,
           diagnosisCode: encounterDiagnosis.diagnosisCode,
           diagnosisSystem: encounterDiagnosis.diagnosisSystem,
+          status: encounterDiagnosis.status,
         })
         .from(encounterDiagnosis)
         .where(
@@ -1152,7 +1137,7 @@ export async function getTimeline(
         ),
     ])
     const people = [...new Set(records.flatMap((row) => [row.professionalUserId, row.voidedBy].filter((id): id is string => !!id)))]
-    const [planned, docs, productParts, born, titles, names] = await Promise.all([
+    const [planned, docs, productParts, born, titles, names, sessions] = await Promise.all([
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
       hooks.encounterParts(tx, orgId, encounters),
@@ -1162,6 +1147,7 @@ export async function getTimeline(
         ...notes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),
       ]),
       people.length ? tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, people)) : Promise.resolve([]),
+      encounterSessionsOf(tx, orgId, encounters),
     ])
     const nameOf = new Map(names.map((row) => [row.id, row.name]))
     for (const row of records) {
@@ -1169,6 +1155,10 @@ export async function getTimeline(
       const rowNotes = notes.filter((n) => n.encounterId === row.id)
       const related = docs.get(row.id) ?? []
       // Con su nombre: «Pulpitis (CIE-11 DA09.0)», no solo el código (QA de la ficha del 8 nov).
+      // Resuelto, lo dice sin abrir la tarjeta, con la palabra del detalle (tercer repaso del 9 nov, E8).
+      const resolved = new Set(
+        rowNotes.filter((n) => n.status === "resuelto").map((n) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)),
+      )
       const diagnoses = [
         ...new Set(
           [
@@ -1176,7 +1166,9 @@ export async function getTimeline(
             ...rowNotes.map((n) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)),
           ].filter((code): code is string => !!code),
         ),
-      ].sort()
+      ]
+        .sort()
+        .map((name) => (resolved.has(name) ? `${name} · resuelto` : name))
       hydrated.set(row.id, {
         id: row.id,
         refId: row.id,
@@ -1210,7 +1202,13 @@ export async function getTimeline(
         authorId: row.professionalUserId,
         status: row.status,
         // Con su pieza: un procedimiento sin el diente tratado no se lee (segunda mesa del 9 nov).
-        procedures: rowProcedures.map((p) => [p.description, site.words(p, "full")].filter(Boolean).join(" · ")),
+        // Y con su sesión: «sesión 2 de 2 · tratamiento terminado» sin abrir la tarjeta (E8).
+        procedures: rowProcedures.map((p) => {
+          const session = p.planItemId ? sessions.get(encounterSessionKey(row.id, p.planItemId)) : undefined
+          return [p.description, site.words(p, "full"), session ? doneSessionWords(session.n, session.m, session.finished) : null]
+            .filter(Boolean)
+            .join(" · ")
+        }),
         documentsCount: related.length,
         documents: related,
         diagnoses,

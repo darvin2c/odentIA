@@ -139,6 +139,30 @@ export function amountHelpText(input: {
   return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
 }
 
+/**
+ * Con un pago parcial de varios conceptos, a cuál va el dinero: el servidor paga lo más antiguo
+ * primero (QA del 9 nov, repaso 3: solo se veía en el ticket). `items` en ese orden. Nulo si paga
+ * todo, nada o un solo concepto.
+ */
+export function partialSplitWords(
+  items: ReadonlyArray<{ description: string; saldoCents: number }>,
+  cents: number | null,
+  currency: string,
+  locale: string,
+): string | null {
+  const total = items.reduce((sum, item) => sum + item.saldoCents, 0)
+  if (items.length < 2 || cents === null || cents <= 0 || cents >= total) return null
+  let rest = cents
+  const parts: string[] = []
+  for (const item of items) {
+    if (rest <= 0) break
+    const take = Math.min(rest, item.saldoCents)
+    parts.push(`${item.description} ${formatMoney(take, currency, locale)}`)
+    rest -= take
+  }
+  return `Va primero a lo más antiguo: ${parts.join(" · ")}.`
+}
+
 /** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */
 export function sentence(text: string): string {
   return /[.!?]$/.test(text.trimEnd()) ? text : `${text}.`

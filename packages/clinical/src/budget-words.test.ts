@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { budgetAnswerText, budgetOptionLabel, budgetStateText } from "./budget-words.js"
+import { budgetAnswerText, budgetOptionLabel, budgetStateText, isRetiredPlanStatus, planItemStateText } from "./budget-words.js"
 
 describe("un solo nombre para cada estado del presupuesto", () => {
   it("dice cada estado con las palabras del tablero 3", () => {
@@ -51,5 +51,26 @@ describe("un solo nombre para cada estado del presupuesto", () => {
     expect(budgetAnswerText("no_elegida")).toBe("No elegida")
     expect(budgetAnswerText(null)).toBe("Por responder")
     expect([1, 2, 3].map(budgetOptionLabel)).toEqual(["Opción A", "Opción B", "Opción C"])
+  })
+})
+
+// Tercer repaso del 9 nov (E9): la tarjeta plegada decía «Cancelado» y la abierta «Por decidir».
+describe("una sola etiqueta por tratamiento, plegado y abierto", () => {
+  it("lo que no empezó dice su decisión; lo empezado o quitado, su estado", () => {
+    expect(planItemStateText("pendiente", "pendiente")).toBe("Por responder")
+    expect(planItemStateText("pendiente", "pospuesto")).toBe("Lo está pensando")
+    expect(planItemStateText("pendiente", "aceptado")).toBe("Aceptado")
+    expect(planItemStateText("programado", "aceptado")).toBe("Con cita")
+    expect(planItemStateText("en_curso", "aceptado")).toBe("En curso")
+    // Quitado, aunque nadie respondiera: «Cancelado», no «Por responder».
+    expect(planItemStateText("cancelado", "pendiente")).toBe("Cancelado")
+    expect(planItemStateText("reemplazado", null)).toBe("Reemplazado")
+  })
+
+  it("lo cancelado o reemplazado ya no es trabajo vigente", () => {
+    expect(isRetiredPlanStatus("cancelado")).toBe(true)
+    expect(isRetiredPlanStatus("reemplazado")).toBe(true)
+    expect(isRetiredPlanStatus("realizado")).toBe(false)
+    expect(isRetiredPlanStatus("en_curso")).toBe(false)
   })
 })

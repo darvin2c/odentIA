@@ -79,6 +79,7 @@ import {
   type AccountPendingItem,
   acceptedTotalsKey,
   amountHelpText,
+  partialSplitWords,
   CASH_TYPE_CODE,
   type CollectInput,
   type CollectResultBody,
@@ -1307,6 +1308,16 @@ export function CollectDrawer({
     locale,
     owesOther: owedByCurrency.some((row) => row.code !== debt),
   })
+  // Un pago parcial de varios conceptos dice a cuál va, antes de cobrar.
+  const splitHelp =
+    values.advance || pay !== debt
+      ? null
+      : partialSplitWords(
+          pending.filter((item) => values.chargeIds.includes(item.chargeId)),
+          figures.cancels,
+          debt,
+          locale,
+        )
   const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
   const rateHelp = !second
     ? ""
@@ -1981,7 +1992,11 @@ export function CollectDrawer({
                 ) : null}
                 <form.AppField name="amount">
                   {(field) => (
-                    <field.Control label="Importe" id={`${uid}-importe`} description={amountHelp}>
+                    <field.Control
+                      label="Importe"
+                      id={`${uid}-importe`}
+                      description={splitHelp ? `${amountHelp} ${splitHelp}` : amountHelp}
+                    >
                       {(control) => (
                         <MoneyInput
                           id={control.id}

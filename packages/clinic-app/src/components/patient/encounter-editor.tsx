@@ -1462,6 +1462,11 @@ export function EncounterEditor({
   )
   // Lo indicado hoy que sigue en pie (lo quitado queda cancelado y no cuenta).
   const liveIndicated = detail.indicatedItems.filter((item) => item.status !== "cancelado")
+  // Lo indicado que sigue por hacer: lo que se indicó y se terminó hoy (la consulta, la profilaxis)
+  // ya cuenta en «Realizado hoy» y no es «indicado» (QA del 9 nov, repaso 3).
+  const openIndicated = liveIndicated.filter(
+    (item) => !(item.status === "realizado" && detail.procedures.some((procedure) => procedure.planItemId === item.id)),
+  )
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1522,7 +1527,7 @@ export function EncounterEditor({
       summary:
         [
           // Sin lo quitado: el contador dice lo que sigue indicado (QA del 9 nov).
-          liveIndicated.length > 0 ? `${counted(liveIndicated.length, "indicado", "indicados")} hoy` : "",
+          openIndicated.length > 0 ? `${counted(openIndicated.length, "indicado", "indicados")} hoy` : "",
           pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
           followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]

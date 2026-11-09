@@ -7,7 +7,9 @@
  */
 
 import { randomUUID } from "node:crypto"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
@@ -344,4 +346,50 @@ it("«Hacerla hoy» de lo que aún no empezó no arrastra el diagnóstico de otr
   const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
   expect(detail.encounter.reason).toBeNull()
   expect(detail.diagnoses).toEqual([])
+})
+
+it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cuál se cumple (QA del 9 nov, repaso 3)", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" }).returning()
+  const startsAt = new Date()
+  const [visitAt] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      reason: "Limpieza y control",
+    })
+    .returning()
+  // El control lo indicó la atención de antes y quedó reservado en la cita de hoy.
+  const [control] = await ownerDb
+    .insert(clinicalFollowUp)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      kind: "mantenimiento",
+      title: "Limpieza y control",
+      dueAt: new Date(Date.now() - 30 * 86_400_000),
+      status: "programado",
+      appointmentId: visitAt!.id,
+      originEncounterId: f.encounter.id,
+    })
+    .returning()
+  const today = await secondVisit(f)
+  await ownerDb.update(encounter).set({ appointmentId: visitAt!.id }).where(eq(encounter.id, today))
+  const visit = (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))).visit
+  expect(visit?.controls).toEqual([
+    expect.objectContaining({ id: control!.id, chosen: true, byAppointment: true }),
+  ])
+  const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, today))
+  expect(closing.controls.byAppointment).toEqual([
+    expect.objectContaining({ id: control!.id, title: "Limpieza y control" }),
+  ])
 })

@@ -1161,8 +1161,16 @@ it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con l
     withOrgContext(appDb, "org_a", (tx) =>
       registerPatient(tx, "org_a", { kind: "internal", userId: ACTOR, scope: "essentials" }, { submissionId: randomUUID(), ...input }),
     )
-  // Sin teléfono no hay cómo ubicarlo; con vínculos ya no es «alguien nuevo».
-  await expect(register({ answers: answers() })).rejects.toMatchObject({ status: 400, message: "Indica el teléfono" })
+  // Sin teléfono también se registra (una urgencia sin celular): una sola ficha, y lo que
+  // falta, también el teléfono o correo, queda en sus notas. Con vínculos ya no es «alguien nuevo».
+  const withoutPhone = await register({ answers: { ...answers(), demographics: { displayName: "Elsa Mori", givenNames: "Elsa", familyName: "Mori" } } })
+  const elsa = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", withoutPhone.id))
+  const elsaSelf = elsa.contacts.find((link) => link.relationship === "self")!
+  expect(elsa.contacts.filter((link) => link.relationship === "self")).toHaveLength(1)
+  expect(withoutPhone.whatsapp).toBeUndefined()
+  expect((await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", elsaSelf.contactId))).map((note) => note.body)).toContain(
+    "El equipo registró a esta persona con lo mínimo. Faltan datos para la atención: confirmar apellidos y nombres, fecha de nacimiento, teléfono o correo.",
+  )
   const { person } = await makeContactWithConversation("org_a", "Otra Persona")
   await expect(
     register({ answers: answers("+51987111222"), contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }] }),

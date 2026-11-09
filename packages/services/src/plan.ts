@@ -151,11 +151,15 @@ async function sessionsForAnother(
   tx: Db,
   orgId: string,
   ids: string[],
-): Promise<Map<string, { signed: number; frozen: number }>> {
-  const out = new Map<string, { signed: number; frozen: number }>()
+): Promise<Map<string, { signed: number; frozen: number; oneOff?: boolean }>> {
+  const out = new Map<string, { signed: number; frozen: number; oneOff?: boolean }>()
   if (ids.length === 0) return out
-  const rows = await tx.execute<{ id: string; signed: number; frozen: number }>(sql`
+  const rows = await tx.execute<{ id: string; signed: number; frozen: number; one_off: boolean | null }>(sql`
     select item.id,
+      -- Una consulta, una evaluación o una radiografía se hacen de una vez: no piden otra sesión
+      -- (QA del 9 nov, repaso 3: la consulta de una urgencia ofrecía «Falta otra sesión»).
+      (select tpl.specialty = 'diagnostico' from service_catalog svc join treatment_template tpl on tpl.id = svc.template_id
+        where svc.organization_id = item.organization_id and svc.id = item.service_id) as one_off,
       (select count(distinct e.id)::int from encounter_procedure ep
         join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
         where ep.organization_id = item.organization_id and ep.plan_item_id = item.id and ep.voided_at is null
@@ -164,16 +168,22 @@ async function sessionsForAnother(
         where c.organization_id = item.organization_id and c.plan_item_id = item.id and c.voided_at is null) as frozen
     from treatment_plan_item item
     where item.organization_id = ${orgId} and item.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
-  for (const row of rows) out.set(row.id, { signed: Number(row.signed), frozen: Number(row.frozen) })
+  for (const row of rows) out.set(row.id, { signed: Number(row.signed), frozen: Number(row.frozen), oneOff: row.one_off === true })
   return out
 }
 
 /** Si un realizado puede volver a en curso: lo firmado llega a sus previstas y a lo que repartió su comisión. */
 function anotherSessionAllowed(
   item: { status: string; plannedSessions: number },
-  money: { signed: number; frozen: number } | undefined,
+  money: { signed: number; frozen: number; oneOff?: boolean } | undefined,
 ): boolean {
-  return item.status === "realizado" && !!money && money.signed > 0 && money.signed >= Math.max(item.plannedSessions, money.frozen)
+  return (
+    item.status === "realizado" &&
+    !!money &&
+    !money.oneOff &&
+    money.signed > 0 &&
+    money.signed >= Math.max(item.plannedSessions, money.frozen)
+  )
 }
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
@@ -1524,6 +1534,8 @@ export async function reopenPlanItemForSession(
       "ITEM_SESSION_UNSIGNED",
       "Su última sesión está en una atención sin firmar: fírmala y vuelve a intentarlo",
     )
+  if (money.oneOff)
+    throw conflict("ITEM_ONE_OFF", "Una consulta, una evaluación o una radiografía se hace de una vez: no le falta otra sesión")
   if (!anotherSessionAllowed(item, money)) {
     const planned = Math.max(item.plannedSessions, money.frozen)
     throw conflict(

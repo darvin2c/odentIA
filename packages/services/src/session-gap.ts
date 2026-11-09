@@ -35,7 +35,7 @@ export async function nextSessionFromOf(tx: Db, orgId: string, itemIds: readonly
   const hooks = await productHooks(tx, orgId)
   if (!hooks.sessionGapDays) return new Map()
   const rows = await tx.execute<{ id: string; kind: string | null; last_done: Date | string | null }>(sql`
-    select item.id, template.kind,
+    select item.id, template.specialty as kind,
       (select max(coalesce(done_encounter.finalized_at, done_procedure.created_at)) from encounter_procedure done_procedure
         join encounter done_encounter on done_encounter.organization_id = done_procedure.organization_id
           and done_encounter.id = done_procedure.encounter_id
