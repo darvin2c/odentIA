@@ -629,10 +629,13 @@ export function FinalizedNextSessions({
   listRef,
   canBook,
   onBook,
+  nameOf,
 }: {
   sessions: NextSession[]
   /** «Endodoncia · 46». */
   labelOf: (session: NextSession) => string
+  /** El nombre de quien atiende la cita: lo reservado dice con quién. */
+  nameOf: (userId: string) => string | null | undefined
   /** Recibe el foco al reservar: el botón que abrió la reserva ya no está. */
   listRef?: React.Ref<HTMLUListElement>
   canBook: boolean
@@ -652,7 +655,8 @@ export function FinalizedNextSessions({
             <li key={session.planItemId} className="flex items-baseline gap-1.5">
               <Check aria-hidden className="size-4 shrink-0 self-center text-success" />
               <span>
-                Vuelve {visitWhenSaid(session.booked.startsAt)} para{" "}
+                Vuelve {visitWhenSaid(session.booked.startsAt)}
+                {nameOf(session.booked.professionalUserId) ? ` con ${nameOf(session.booked.professionalUserId)}` : ""} para{" "}
                 {sessionLine(labelOf(session), session.booked.n, session.booked.m)}.
               </span>
             </li>

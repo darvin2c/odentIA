@@ -67,6 +67,8 @@ export interface ClosingSession {
 export interface BookedSession {
   appointmentId: string
   startsAt: string
+  /** Con quién es la cita. */
+  professionalUserId: string
   n: number
   m: number
 }

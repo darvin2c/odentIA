@@ -80,6 +80,15 @@ export interface WhenInput {
   serviceId?: string
 }
 
+/**
+ * Por qué quien se pidió al abrir no es como los demás (QA del 8 nov): no tiene
+ * horario en la sede, o el servicio lo atiende otra especialidad. Viene igual,
+ * marcado, y se dice en una línea; la persona decide.
+ */
+export type SeedNote =
+  | { kind: "noSchedule"; label: string }
+  | { kind: "otherSpecialty"; label: string; specialtyName: string; attending: ScheduleColumn[] }
+
 /** Una excepción de la agenda: fuera del horario, sobre algo ocupado o las dos. */
 export interface AgendaException {
   outside: boolean
@@ -108,6 +117,8 @@ export interface WhenState {
   nextFree: { startsAt: string; endsAt: string } | null
   /** Si el servicio tiene quien lo atienda en la sede: la agenda solo ofrece a esas personas. */
   attending: { specialtyName: string } | null
+  /** Quien se pidió al abrir, si no tiene horario aquí o no atiende el servicio. */
+  seedNote: SeedNote | null
   /** «09:00 a 13:00» por cada turno de quien se eligió ese día. */
   hoursThatDay: string[]
   loading: boolean
@@ -146,30 +157,36 @@ export function useWhen(input: WhenInput): WhenState {
   const to = minutesToInstant(addDays(week[6] ?? date, 1), 0, timeZone)
   const ignore = moving?.id
   const serviceId = input.serviceId
+  const seedProfessional = input.professionalUserId
+  const seedLabel = input.professionalLabel
+  // Con servicio, quien se pidió viene aunque la regla no lo ofrezca (ADR 0039: decide qué se ofrece, no qué se guarda).
+  const asked = serviceId && seedProfessional ? seedProfessional : null
   const availabilityQuery = useQuery({
-    queryKey: ["agenda-availability", branchId, from, to, ignore ?? null, serviceId ?? null],
+    queryKey: ["agenda-availability", branchId, from, to, ignore ?? null, serviceId ?? null, asked],
     queryFn: () =>
       apiFetch<{ data: AgendaAvailability }>(
-        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${ignore ? `&ignoreAppointmentId=${ignore}` : ""}${serviceId ? `&serviceId=${serviceId}` : ""}`,
+        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${ignore ? `&ignoreAppointmentId=${ignore}` : ""}${serviceId ? `&serviceId=${serviceId}` : ""}${asked ? `&professionalUserId=${encodeURIComponent(asked)}` : ""}`,
       ),
     enabled: input.enabled ?? true,
     placeholderData: (previous) => previous,
   })
   const availability = availabilityQuery.data?.data
-  const seedProfessional = input.professionalUserId
-  const seedLabel = input.professionalLabel
   const team = React.useMemo((): ScheduleColumn[] => {
     const listed: ScheduleColumn[] = (availability?.professionals ?? []).map((item) => ({
       id: item.id,
       label: item.label,
       tone: toneOf(item.id),
     }))
-    // Con servicio elegido manda quién lo atiende: no se vuelve a sumar a quien no lo hace (ADR 0039).
-    return !serviceId && seedProfessional && seedLabel && !listed.some((item) => item.id === seedProfessional)
+    // Quien se pidió sin horario en la sede se suma igual: se le reserva fuera de su horario, con su aviso.
+    return seedProfessional && seedLabel && !listed.some((item) => item.id === seedProfessional)
       ? [...listed, { id: seedProfessional, label: seedLabel, tone: toneOf(seedProfessional) }]
       : listed
-  }, [availability, toneOf, seedProfessional, seedLabel, serviceId])
-  // Si quien se miraba no atiende el servicio elegido, se ve a quienes sí lo atienden.
+  }, [availability, toneOf, seedProfessional, seedLabel])
+  const seedNote = React.useMemo(
+    () => seedNoteOf(availability, team, seedProfessional ?? null, seedLabel ?? null),
+    [availability, team, seedProfessional, seedLabel],
+  )
+  // Si quien se elegía en las fichas no atiende el servicio elegido, se ve a quienes sí lo atienden.
   const lanes = React.useMemo(
     () =>
       professionalFilter && team.some((item) => item.id === professionalFilter)
@@ -333,6 +350,7 @@ export function useWhen(input: WhenInput): WhenState {
     nextFree:
       availability?.professionals.find((item) => item.id === shown?.columnId)?.nextFree ?? null,
     attending: availability?.attending ? { specialtyName: availability.attending.specialtyName } : null,
+    seedNote,
     hoursThatDay: shown
       ? open
           .filter((item) => item.columnId === shown.columnId)
@@ -361,6 +379,30 @@ export function useWhen(input: WhenInput): WhenState {
       choose({ ...value, end: new Date(Date.parse(value.start) + minutes * 60000).toISOString() })
     },
     refetch: () => void availabilityQuery.refetch(),
+  }
+}
+
+/**
+ * Lo que se dice de quien se pidió al abrir: nada si la agenda lo ofrece como a
+ * los demás; si no tiene horario en la sede o el servicio es de otra
+ * especialidad, por qué, con quienes sí lo atienden.
+ */
+export function seedNoteOf(
+  availability: Pick<AgendaAvailability, "professionals" | "attending"> | undefined,
+  team: ScheduleColumn[],
+  seed: string | null,
+  seedLabel: string | null,
+): SeedNote | null {
+  if (!availability || !seed) return null
+  const listed = availability.professionals.find((item) => item.id === seed)
+  if (!listed) return seedLabel ? { kind: "noSchedule", label: seedLabel } : null
+  if (!listed.outsideService || !availability.attending) return null
+  const ids = new Set(availability.attending.professionalUserIds)
+  return {
+    kind: "otherSpecialty",
+    label: listed.label,
+    specialtyName: availability.attending.specialtyName,
+    attending: team.filter((item) => ids.has(item.id)),
   }
 }
 
@@ -488,7 +530,46 @@ function WhenProfessional({ when }: { when: WhenState }) {
         allLabel="Cualquiera"
         onChange={when.pickProfessional}
       />
+      <SeedNoteLine when={when} />
       {error}
+    </div>
+  )
+}
+
+/**
+ * Por qué quien se pidió (la sesión siguiente, con quien atendió) no es como los
+ * demás, mientras sigue elegido: una línea con la salida, sin frenar.
+ */
+function SeedNoteLine({ when }: { when: WhenState }) {
+  const note = when.seedNote
+  if (!note || when.professionalFilter !== when.input.professionalUserId) return null
+  if (note.kind === "noSchedule") {
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        {`${note.label} no tiene horario en esta sede. Toca una hora y se le reserva fuera de su horario, o elige a otra persona.`}
+      </p>
+    )
+  }
+  const [only] = note.attending
+  const names = note.attending.map((item) => item.label)
+  const who = names.length > 1 ? `la atienden ${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}` : `la atiende ${names[0] ?? ""}`
+  return (
+    <div role="status" className="grid gap-1 text-sm text-muted-foreground">
+      <p>
+        {`${note.label} no está en ${note.specialtyName} en esta sede: se le reserva igual.`}
+        {names.length > 0 ? ` En esta sede, ${note.specialtyName} ${who}.` : ""}
+      </p>
+      {only && note.attending.length === 1 ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-2.5 justify-self-start text-primary"
+          onClick={() => when.pickProfessional(only.id)}
+        >
+          {`Elegir a ${shortName(only.label)}`}
+        </Button>
+      ) : null}
     </div>
   )
 }

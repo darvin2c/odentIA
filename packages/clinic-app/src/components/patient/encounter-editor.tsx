@@ -130,6 +130,12 @@ export interface EncounterEditorProps {
   patient: PatientFull
   /** Refresca el query del encounter (lo implementa la ruta). */
   onChanged: () => Promise<void>
+  /**
+   * Se firmó aquí: «Atención finalizada» se abre en este editor, así que la ruta
+   * lo mantiene montado hasta cerrarlo (`onFinalized`), aunque la atención ya
+   * se relea firmada.
+   */
+  onSigned?: () => void
   /** Invalida resumen/plan/timeline y navega (cuenta si hubo cargos, historia si no). */
   onFinalized: (hasCharges: boolean) => Promise<void>
 }
@@ -435,6 +441,7 @@ export function EncounterEditor({
   detail,
   patient,
   onChanged,
+  onSigned,
   onFinalized,
 }: EncounterEditorProps): React.JSX.Element {
   const encounter = detail.encounter
@@ -1187,6 +1194,7 @@ export function EncounterEditor({
           ),
         }),
       })
+      onSigned?.()
       setConfirmOpen(false)
       setSessionAnswers({})
       closingForm.reset()
@@ -2757,6 +2765,7 @@ export function EncounterEditor({
               listRef={nextSessionsRef}
               canBook={canBook}
               onBook={(ids) => setBookingNext(ids)}
+              nameOf={memberName}
             />
           ) : null}
           {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Reservar la sesión 2». */}
@@ -2783,7 +2792,13 @@ export function EncounterEditor({
                     return booked
                       ? {
                           ...session,
-                          booked: { appointmentId: appointment.id, startsAt: appointment.startsAt, n: booked.n, m: booked.m },
+                          booked: {
+                            appointmentId: appointment.id,
+                            startsAt: appointment.startsAt,
+                            professionalUserId: appointment.professionalUserId,
+                            n: booked.n,
+                            m: booked.m,
+                          },
                           toBook: null,
                         }
                       : session

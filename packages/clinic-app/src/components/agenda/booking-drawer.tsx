@@ -802,7 +802,8 @@ export function BookingDrawer({
               </field.Control>
             )}
           </form.AppField>
-          {when.attending ? (
+          {/* Con quien se pidió fuera de la especialidad, lo dice su línea bajo «Profesional». */}
+          {when.attending && when.seedNote?.kind !== "otherSpecialty" ? (
             <p role="status" className="-mt-2 text-xs text-muted-foreground">
               {`Solo se ofrecen las horas de quien atiende ${when.attending.specialtyName}.`}
             </p>
