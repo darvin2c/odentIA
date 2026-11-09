@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { encounter } from "@odentia/db/schema/clinical"
-import { product } from "@odentia/db/schema/inventory"
+import { encounter, patientCharge, patientPaymentApplication } from "@odentia/db/schema/clinical"
+import { product, stockMovement } from "@odentia/db/schema/inventory"
 import { jobOrder, jobOrderEvent } from "@odentia/db/schema/orders"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { advanceJobOrder, createJobOrderSale, getJobOrder, listJobOrders, remakeJobOrder, saleReferencesOf, voidJobOrder } from "./job-orders.js"
@@ -177,6 +177,45 @@ describe("el pedido de lentes (entrega 4)", () => {
     await expect(s.f.run((tx) => advanceJobOrder(tx, OPTICA, s.f.actor, order.id, { status: "listo" }))).rejects.toMatchObject({
       code: "JOB_ORDER_VOIDED",
     })
+  })
+
+  it("anular anula en la caja lo que no se cobró, devuelve la montura al inventario y deja lo cobrado en su cuenta", async () => {
+    const s = await store()
+    // 300 de adelanto: la caja lo aplica a un cargo (el más antiguo); el otro queda sin cobrar.
+    const { order } = await sell(s)
+    const voided = await s.f.run((tx) => voidJobOrder(tx, OPTICA, s.f.actor, order.id, { reason: "Cambió de idea" }))
+    const charges = await ownerDb
+      .select({ id: patientCharge.id, amountCents: patientCharge.amountCents, voidedAt: patientCharge.voidedAt, voidReason: patientCharge.voidReason })
+      .from(patientCharge)
+      .where(inArray(patientCharge.id, order.lines.map((line) => line.chargeId!)))
+    const paid = new Set(
+      (
+        await ownerDb
+          .select({ chargeId: patientPaymentApplication.chargeId })
+          .from(patientPaymentApplication)
+          .where(inArray(patientPaymentApplication.chargeId, charges.map((charge) => charge.id)))
+      ).map((row) => row.chargeId),
+    )
+    expect(paid.size).toBe(1)
+    for (const charge of charges) {
+      if (paid.has(charge.id)) {
+        // Lo que tiene algo cobrado queda en su cuenta, y la clínica decide.
+        expect(charge.voidedAt).toBeNull()
+        expect(voided.dueCents).toBe(charge.amountCents - 30_000)
+      } else {
+        expect(charge.voidedAt).not.toBeNull()
+        expect(charge.voidReason).toMatch(/^Pedido N\.º \d+ anulado: Cambió de idea$/)
+      }
+    }
+    // Sin nada cobrado, la montura vuelve al inventario con su devolución.
+    const t = await store()
+    const unpaid = await sell(t, { payments: [], cashReceivedCents: undefined })
+    await t.f.run((tx) => voidJobOrder(tx, OPTICA, t.f.actor, unpaid.order.id, { reason: "Duplicado" }))
+    const returned = await ownerDb
+      .select({ kind: stockMovement.kind })
+      .from(stockMovement)
+      .where(and(eq(stockMovement.organizationId, OPTICA), eq(stockMovement.productId, t.frameId)))
+    expect(returned.map((row) => row.kind).sort()).toEqual(["devolucion", "venta"])
   })
 
   it("la lista dice los atrasados, y lo que falta pagar solo a quien ve la caja", async () => {

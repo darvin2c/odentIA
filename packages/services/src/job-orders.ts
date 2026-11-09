@@ -8,7 +8,7 @@ import { invalidField, notFound, ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
-import { type CollectMethodInput, collectCharge, createCharge } from "./payments.js"
+import { type CollectMethodInput, collectCharge, createCharge, voidCharge } from "./payments.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -292,12 +292,30 @@ export async function advanceJobOrder(
   return getJobOrder(tx, orgId, id)
 }
 
-/** Anula un pedido que no se entregó, con su motivo. Sus cargos se anulan aparte, en la caja. */
+/**
+ * Anula un pedido que no se entregó, con su motivo. Lo que no se cobró se anula
+ * con él en la caja, con la anulación de siempre (`voidCharge`: la montura vuelve
+ * al inventario); lo que ya tiene algo cobrado queda en su cuenta, para que la
+ * clínica decida si lo devuelve o lo usa: no se devuelve dinero solo.
+ */
 export async function voidJobOrder(tx: Db, orgId: string, actorUserId: string, id: string, input: { reason: unknown }) {
   const reason = text(input.reason, "reason", "el motivo", NOTES_MAX)
   const row = await lockOrder(tx, orgId, id)
   if (row.status === "anulado") throw new ServiceError("JOB_ORDER_VOIDED", 409, "El pedido ya está anulado")
   if (row.status === "entregado") throw new ServiceError("JOB_ORDER_DELIVERED", 409, "El pedido ya se entregó: si algo salió mal, rehazlo")
+  const charges = await tx
+    .select({ id: patientCharge.id, voidedAt: patientCharge.voidedAt, paid: sql<boolean>`exists (
+      select 1 from ${patientPaymentApplication}
+      where ${patientPaymentApplication.organizationId} = ${patientCharge.organizationId}
+        and ${patientPaymentApplication.chargeId} = ${patientCharge.id}
+        and ${patientPaymentApplication.voidedAt} is null)` })
+    .from(jobOrderLine)
+    .innerJoin(patientCharge, and(eq(patientCharge.organizationId, jobOrderLine.organizationId), eq(patientCharge.id, jobOrderLine.chargeId)))
+    .where(and(eq(jobOrderLine.organizationId, orgId), eq(jobOrderLine.jobOrderId, id)))
+  for (const charge of charges) {
+    if (charge.voidedAt || charge.paid) continue
+    await voidCharge(tx, orgId, actorUserId, row.patientId, charge.id, { reason: `Pedido N.º ${row.orderNumber} anulado: ${reason}`.slice(0, 2000) })
+  }
   const now = new Date()
   await tx.update(jobOrder).set({ status: "anulado", voidedAt: now, voidReason: reason, updatedAt: now }).where(eq(jobOrder.id, id))
   await tx.insert(jobOrderEvent).values({ organizationId: orgId, jobOrderId: id, status: "anulado", note: reason, actorUserId, at: now })
