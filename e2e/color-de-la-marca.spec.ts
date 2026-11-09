@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { tenant } from "./env"
-import { api, call, expect, test } from "./fixtures"
+import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestHtmlFor } from "./mailpit"
 
@@ -151,15 +151,15 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
 
   // La invitación al equipo es de la clínica: el botón va en su naranja; la cabecera, en odentIA.
   const invitee = `equipo-${org.slug}@test.dev`
-  const invited = await api(page, "POST", "/api/auth/organization/invite-member", org.slug, {
-    email: invitee,
-    role: "clinician",
-    organizationId: org.id,
-  })
-  expect(invited.status).toBe(200)
+  await gotoHydrated(page, tenant(org.slug, "/settings/team"))
+  await page.getByRole("button", { name: "Invitar al equipo" }).click()
+  await page.getByLabel("Invitar por correo").fill(invitee)
+  await page.getByRole("button", { name: "Invitar", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Invitaciones pendientes" }).getByText(invitee)).toBeVisible()
   const invitation = await latestHtmlFor(invitee, "Te invitaron a")
   expect(invitation).toContain("background-color:#cc4d0a;")
   expect(invitation).toContain("cid:logotipo-claro@odentia")
+  await gotoHydrated(page, tenant(org.slug, "/settings"))
 
   // Sacar el color de una foto del letrero: se lee en el navegador y nada se guarda hasta elegir.
   const photo = await page.evaluate(() => {
