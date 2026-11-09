@@ -34,7 +34,10 @@ export {
 export { fieldErrorMessages } from "./field-errors.js"
 export {
   type CheckboxFieldProps,
+  DOUBTFUL_PHONE,
+  FICTIONAL_PHONE,
   INCOMPLETE_PHONE,
+  isFictionalPhone,
   type PasswordFieldProps,
   type PhoneFieldProps,
   type RadioGroupFieldProps,

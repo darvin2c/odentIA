@@ -9,6 +9,7 @@ import {
   isSelectableDiagnosisSystem,
   normalizeDiagnosisCode,
   normalizeSearchText,
+  pulpDiagnosisChoices,
 } from "./diagnoses.js"
 import { hl7DocumentTypeCode, maritalStatusToHl7 } from "./identity.js"
 import { validateDemographics } from "./patient-registration.js"
@@ -36,6 +37,33 @@ describe("listas de diagnósticos", () => {
     expect(isSelectableDiagnosisSystem("ICD-10-PE")).toBe(true)
     expect(findingDiagnosisCode("ICD-10-PE", "caries", "dentin")).toBe("K02.1")
     expect(findingDiagnosisCodes("ICD-10-PE")).toEqual(findingDiagnosisCodes("ICD-10"))
+  })
+
+  it("la caries propone su código por profundidad y, con la pulpa comprometida, sigue siendo caries (segundo repaso del 9 nov)", () => {
+    // MB y CE → K02.0, CD → K02.1, CDP → K02.5 en la CIE-10 del MINSA; en la CIE-11, todas DA08.0.
+    expect(
+      ["white_spot", "enamel", "dentin", "pulpal_involvement"].map((depth) =>
+        findingDiagnosisCode("ICD-10-PE", "caries", depth),
+      ),
+    ).toEqual(["K02.0", "K02.0", "K02.1", "K02.5"])
+    expect(findingDiagnosisCode("ICD-11", "caries", "pulpal_involvement")).toBe("DA08.0")
+    // Lo pulpar queda a un toque, codificable y sin la categoría que pide subcódigo.
+    expect(pulpDiagnosisChoices("ICD-10-PE").map((choice) => choice.code)).toEqual([
+      "K04.0",
+      "K04.1",
+      "K04.4",
+      "K04.5",
+    ])
+    expect(pulpDiagnosisChoices("ICD-11").map((choice) => choice.code)).toEqual([
+      "DA09.0",
+      "DA09.1",
+      "DA09.70",
+      "DA09.71",
+    ])
+    for (const system of ["ICD-10", "ICD-10-PE", "ICD-11"] as const)
+      for (const choice of pulpDiagnosisChoices(system))
+        expect(isDiagnosisCodeFormat(system, choice.code)).toBe(true)
+    expect(pulpDiagnosisChoices("ICD-10-ES")).toEqual([])
   })
 
   it("el hallazgo del odontograma propone su código en cada lista, sin convertir de una a otra", () => {

@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest"
 import type { ClosingControls } from "../../lib/encounters"
 import { setOrgLocale } from "../../lib/locale"
-import { type ClosingValues, closingControlsBody, continuingAfterSign, needsNextControlDay } from "./encounter-closing"
+import {
+  type ClosingValues,
+  closingControlsBody,
+  continuingAfterSign,
+  controlBesideAccepted,
+  needsNextControlDay,
+} from "./encounter-closing"
 
 const values = (over: Partial<ClosingValues> = {}): ClosingValues => ({
   endTime: "",
@@ -50,5 +56,43 @@ describe("«¿Cuándo vuelve?» mientras un tratamiento sigue en curso (QA del 8
       followUpIds: [],
       nextControl: { dueAt: "2026-11-15" },
     })
+  })
+})
+
+describe("el control que se pide junto a la corona ya ofrecida (QA del 9 nov)", () => {
+  const crown = { planItemId: "corona", title: "Corona metal-cerámica", n: 0, m: 2 }
+  const lastEndo = { planItemId: "endo", title: "Endodoncia", n: 2, m: 2 }
+
+  it("terminada la endodoncia, vuelve para la corona y el control lleva el nombre de lo que termina", () => {
+    const visits = continuingAfterSign(
+      { finishing: [lastEndo], continuing: [], accepted: [crown] },
+      {},
+    )
+    expect(visits).toEqual([
+      {
+        planItemId: "corona",
+        label: "Corona metal-cerámica",
+        n: 1,
+        m: 2,
+        accepted: true,
+        after: "Endodoncia",
+      },
+    ])
+    // Sin plazo no dice «No indicaste cuándo vuelve»: la corona ya está.
+    expect(controlBesideAccepted(visits, "")).toEqual({
+      title: "Control de endodoncia",
+      line: "Sin plazo, el control no queda anotado: solo «Corona metal-cerámica».",
+    })
+    const withDay = controlBesideAccepted(visits, "2026-12-09")
+    expect(withDay?.title).toBe("Control de endodoncia")
+    expect(withDay?.line).toMatch(
+      /^Control hacia el 9 dic(?: 2026)? · recepción lo verá para reservarlo$/,
+    )
+  })
+
+  it("sin la corona ofrecida, nada cambia: queda el texto de siempre", () => {
+    expect(controlBesideAccepted([], "")).toBeNull()
+    const going = continuingAfterSign({ finishing: [], continuing: [endo] }, {})
+    expect(controlBesideAccepted(going, "")).toBeNull()
   })
 })
