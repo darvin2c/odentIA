@@ -3427,6 +3427,8 @@ const marco = await createPatient(db, ORG_A, ANA_ID, {
   phone: "+51987650600",
   registeredBranchId: miraflores.id,
 })
+// Con su nombre, para su cita de la Agenda (abajo).
+patientIdByName.set("Marco Torres", marco.id)
 const marcoEval = await createEncounter(db, ORG_A, ANA_ID, marco.id, {
   reason: "Evaluación de ortodoncia",
   branchId: miraflores.id,
@@ -4278,7 +4280,21 @@ const agendaSeed: Array<{
     status: "programada",
     planItemIds: [endo46.id],
   },
-  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino».
+  // Marco vino a su control de ortodoncia hace 9 días y la cita quedó «atendida», pero nadie
+  // registró el control: su «Qué sigue» lo avisa al reservar (QA de la ficha del 8 nov).
+  {
+    patient: "Marco Torres",
+    professional: ANA_ID,
+    room: 1,
+    day: -9,
+    start: "16:00",
+    end: "16:30",
+    service: "ORTODONCIA_CTRL",
+    status: "atendida",
+    planItemIds: [marcoCtrl.id],
+  },
+  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino»,
+  // y su ficha, en «Qué sigue», con «¿Vino?».
   {
     patient: "Elena Huamán",
     professional: ANA_ID,

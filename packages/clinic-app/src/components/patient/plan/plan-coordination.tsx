@@ -75,8 +75,11 @@ export function CoordinationControls({
   scheduleFollowUpId,
   pendingOnly = false,
   branchId,
+  reservedInNext,
 }: {
   patientId: string
+  /** Los controles que ya ofrece «Qué sigue» arriba (el Plan): se reservan ahí. */
+  reservedInNext?: ReadonlySet<string>
   /** «Reservar» desde «Qué sigue»: abre la reserva de ese control. */
   scheduleFollowUpId?: string | null
   /**
@@ -142,6 +145,8 @@ export function CoordinationControls({
                   >
                     Ver la cita
                   </Button>
+                ) : control.status === "pendiente" && reservedInNext?.has(control.id) ? (
+                  <span className="text-sm text-muted-foreground">Se reserva arriba, en «Qué sigue»</span>
                 ) : canBook && control.status === "pendiente" ? (
                   <Button size="sm" onClick={() => setScheduling(control)}>
                     Reservar cita

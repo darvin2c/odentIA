@@ -199,8 +199,6 @@ export function PlanBudgets({
   planItems,
   focusBudgetId,
   respondBudgetId,
-  scheduleItemIds,
-  onSchedule,
 }: {
   patientId: string
   /** Tratamientos del plan (solo para quien lee la clínica): los que pueden entrar al borrador. */
@@ -209,9 +207,6 @@ export function PlanBudgets({
   focusBudgetId?: string
   /** Abre «¿Qué respondió?» de este presupuesto. */
   respondBudgetId?: string
-  /** Lo aceptado sin cita (de «Qué sigue»): la tarjeta ofrece «Agendar». */
-  scheduleItemIds: string[]
-  onSchedule: (planItemIds: string[], serviceId?: string | null) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("budgets.write")
@@ -306,10 +301,6 @@ export function PlanBudgets({
             addable={budget === draft ? quotableForDraft(budget, planItems ?? [], quotable) : []}
             defaultOpen={budget.id === focusBudgetId || budget.id === respondBudgetId}
             respond={budget.id === respondBudgetId}
-            scheduleItemIds={scheduleItemIds.filter((id) =>
-              budget.items.some((line) => line.planItemId === id),
-            )}
-            onSchedule={onSchedule}
             runWrite={runWrite}
           />
         ))
@@ -363,8 +354,6 @@ export function PlanBudgets({
                 addable={[]}
                 defaultOpen={budget.id === focusBudgetId}
                 respond={false}
-                scheduleItemIds={[]}
-                onSchedule={onSchedule}
                 runWrite={runWrite}
               />
             ))}
@@ -415,8 +404,6 @@ function BudgetCard({
   addable,
   defaultOpen,
   respond,
-  scheduleItemIds,
-  onSchedule,
   runWrite,
 }: {
   patientId: string
@@ -435,8 +422,6 @@ function BudgetCard({
   addable: PlanItem[]
   defaultOpen: boolean
   respond: boolean
-  scheduleItemIds: string[]
-  onSchedule: (planItemIds: string[], serviceId?: string | null) => void
   runWrite: <T>(operation: () => Promise<T>) => Promise<T>
 }): React.JSX.Element {
   const money = moneyForLines(baseMoney, budget.items)
@@ -570,21 +555,8 @@ function BudgetCard({
     >
       ¿Qué respondió?
     </Button>
-  ) : scheduleItemIds.length > 0 ? (
-    <Button
-      type="button"
-      size="sm"
-      onClick={() =>
-        onSchedule(
-          scheduleItemIds,
-          budget.items.find((line) => scheduleItemIds.includes(line.planItemId) && line.serviceId)
-            ?.serviceId ?? null,
-        )
-      }
-    >
-      Reservar cita
-    </Button>
-  ) : null
+  ) : // Lo aceptado se reserva desde «Qué sigue», arriba: un solo botón por cosa (QA de la ficha del 8 nov).
+  null
 
   return (
     <section
@@ -1297,14 +1269,3 @@ function ReviseBudgetDrawer({
   )
 }
 
-/** Abre «Nueva cita» al lado, con la persona, el servicio y lo aceptado ya puestos: nadie sale de la ficha. */
-export function useScheduleAccepted(patient: { id: string; name: string }) {
-  return (planItemIds: string[], serviceId?: string | null) => {
-    openBookingAnywhere({
-      patient,
-      lockedPatient: true,
-      planItemIds,
-      ...(serviceId ? { serviceId } : {}),
-    })
-  }
-}

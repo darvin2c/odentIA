@@ -241,6 +241,8 @@ test("ficha: la cuenta dice lo devuelto y recepción ve su Resumen y su Plan", a
   await expect(page.getByRole("region", { name: "Resumen" })).toContainText("Teléfono")
   await views("recepcion-resumen")
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=plan`))
-  await expect(page.getByText("Profilaxis semestral")).toBeVisible()
+  // En «Qué sigue» con su botón; abajo, en Controles, sin repetirlo (QA de la ficha del 8 nov).
+  await expect(page.getByRole("region", { name: "Qué sigue" }).getByRole("button", { name: "Reservar el control" })).toBeVisible()
+  await expect(page.getByText("Se reserva arriba, en «Qué sigue»")).toBeVisible()
   await views("recepcion-plan")
 })

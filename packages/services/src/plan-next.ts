@@ -63,7 +63,12 @@ import {
   TO_SCHEDULE_STATUSES,
 } from "./to-schedule.js"
 
-export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
+/**
+ * `cerrar`: una cita de un día que ya pasó y que nadie cerró (sin llegada ni atención): solo en la
+ * lista de la ficha (`getPlanNextSteps`), con «¿Vino?», que abre la cita para registrar la atención
+ * o decir que no vino. La frase única y la fila de Pacientes no la dicen.
+ */
+export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "cerrar" | "ninguno"
 
 export interface PlanNextAction {
   /** «Enviar», «Reservar cita» o «¿Qué respondió?». */
@@ -273,6 +278,28 @@ async function planFactsOf(
     .orderBy(asc(appointment.startsAt))
     .limit(1)
   const today = (await todayLiveAppointments(tx, orgId, [patientId], context.timezone)).get(patientId) ?? null
+  // Sus citas de días que ya pasaron sin que nadie dijera si vino (la regla de «Te espera» y de la
+  // Agenda, «Ya pasaron · sin cerrar»), y lo aceptado cuya cita se atendió sin registrar lo hecho.
+  const unclosed = await tx.execute<{ id: string; startsAt: Date; serviceName: string | null; professionalName: string | null }>(sql`
+    select a.id, a.starts_at as "startsAt", a.service_name as "serviceName", u.name as "professionalName"
+    from appointment a
+    left join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
+    left join "user" u on u.id = a.professional_user_id
+    where a.organization_id = ${orgId} and a.patient_id = ${patientId}::uuid and not a.is_test
+      and a.status in ('programada', 'confirmada') and a.arrived_at is null
+      and (a.starts_at at time zone coalesce(b.timezone, ${context.timezone}))::date < (now() at time zone coalesce(b.timezone, ${context.timezone}))::date
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
+    order by a.starts_at desc, a.id limit 3`)
+  const attended = await tx.execute<{ planItemId: string; startsAt: Date; professionalName: string | null }>(sql`
+    select distinct on (link.plan_item_id) link.plan_item_id as "planItemId", a.starts_at as "startsAt", u.name as "professionalName"
+    from appointment_plan_item link
+    join appointment a on a.organization_id = link.organization_id and a.id = link.appointment_id
+    join treatment_plan_item item on item.organization_id = link.organization_id and item.id = link.plan_item_id
+    left join "user" u on u.id = a.professional_user_id
+    where link.organization_id = ${orgId} and link.patient_id = ${patientId}::uuid
+      and a.status = 'atendida' and a.starts_at < now()
+      and item.status in ('pendiente', 'programado') and item.decision_status = 'aceptado'
+    order by link.plan_item_id, a.starts_at desc`)
   // Quién indicó cada control y cuándo: el profesional y el día de la atención donde nació
   // (no quien lo creó: el que se repite lo crea quien cerró el anterior).
   const originIds = [...new Set(controls.map((row) => row.originEncounterId).filter((id): id is string => !!id))]
@@ -302,6 +329,8 @@ async function planFactsOf(
       nextAppointmentAt: next?.startsAt ?? null,
       nextAppointmentId: next?.id ?? null,
       today,
+      unclosed: unclosed.map((row) => ({ ...row, startsAt: new Date(row.startsAt) })),
+      unrecorded: new Map(attended.map((row) => [row.planItemId, { startsAt: new Date(row.startsAt), professionalName: row.professionalName }])),
       controlOrigins: new Map(
         controls.flatMap((row) => {
           const origin = row.originEncounterId ? originOf.get(row.originEncounterId) : undefined
@@ -495,6 +524,13 @@ interface PlanFacts {
   nextAppointmentId?: string | null
   /** Su primera cita viva de hoy (por venir, en la sala o en atención). */
   today?: { id: string; startsAt: Date } | null
+  /** Sus citas de días pasados que nadie cerró, la más reciente primero. Solo de una persona. */
+  unclosed?: Array<{ id: string; startsAt: Date; serviceName: string | null; professionalName: string | null }>
+  /**
+   * Lo aceptado sin empezar cuya cita ya se atendió sin registrar lo que se hizo: sigue
+   * por agendar (la regla es una, `to-schedule.ts`), pero la fila lo avisa. Solo de una persona.
+   */
+  unrecorded?: ReadonlyMap<string, { startsAt: Date; professionalName: string | null }>
   /** La atención donde se indicó cada control: quién, cuándo y su motivo. Solo de una persona. */
   controlOrigins?: ReadonlyMap<string, { professionalName: string | null; at: Date; reason: string | null }>
 }
@@ -646,12 +682,27 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     // Qué falta, con sus nombres (QA del 8 nov: «Aceptó todo: falta su cita» no decía qué).
     const titles = toStart.map((item) => item.title)
     const named = titles.length > 3 ? `${titles.slice(0, 3).join(", ")} y ${titles.length - 3} más` : titles.join(", ")
+    // Su cita ya se atendió y nadie registró que se hiciera: se avisa donde se decide reservar, sin
+    // frenarlo (mesa del 9 nov: pudo posponerse a propósito). Quien atendió sabe si se hizo.
+    const notRecorded = toStart.flatMap((item) => {
+      const seen = facts.unrecorded?.get(item.id)
+      return seen ? [{ item, ...seen }] : []
+    })
+    // Solo a quien ve la agenda: a caja no le toca reservar ni preguntar por la cita.
+    const recordedWarning = notRecorded.length && seesAgenda
+      ? (() => {
+          const last = notRecorded.reduce((a, b) => (a.startsAt > b.startsAt ? a : b))
+          const what = notRecorded.map((row) => row.item.title.charAt(0).toLowerCase() + row.item.title.slice(1)).join(", ")
+          const who = last.professionalName ? `; pregúntale a ${last.professionalName} antes de reservar` : ""
+          return `Su cita del ${day(last.startsAt)} se atendió sin registrar ${what}${who}`
+        })()
+      : null
     const label = context.budgetRequired ? "Reservar lo aceptado" : "Reservar lo indicado"
     return {
       kind: "agendar",
       text,
       detail:
-        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null]
+        [named || null, decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null, control ? controlWords(control) : null, recordedWarning]
           .filter(Boolean)
           .join(" · ") || null,
       // Dice qué reserva: «Reservar cita» a secas es el de la cabecera (segunda mesa del 8 nov).
@@ -773,7 +824,22 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
  * 7. El próximo control que queda (con cita, por venir o se cumple hoy).
  */
 function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep[] {
-  return stepsOf(planPieces(facts, context, can))
+  const steps = stepsOf(planPieces(facts, context, can))
+  // Una cita que ya pasó y que nadie cerró va primero en la lista de la ficha: decir si vino
+  // registra lo que se hizo o devuelve lo que llevaba a «por reservar» (QA de la ficha del 8 nov).
+  // Solo a quien ve la agenda; la frase única no la dice (es de la ficha, no del plan).
+  if (!(can("appointments.read") || can("clinical.read")) || !facts.unclosed?.length) return steps
+  const { locale, timezone } = context
+  const closing = facts.unclosed.map((row): PlanNextStep => {
+    const day = dayWords(row.startsAt, locale, timezone)
+    return {
+      kind: "cerrar",
+      text: `Su cita del ${day} quedó sin cerrar`,
+      detail: [row.serviceName, row.professionalName ? `con ${row.professionalName}` : null, "nadie dijo si vino"].filter(Boolean).join(" · "),
+      action: can("appointments.read") ? { label: "¿Vino?", appointmentId: row.id } : null,
+    }
+  })
+  return [...closing, ...steps]
 }
 
 function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {

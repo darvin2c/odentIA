@@ -38,6 +38,7 @@ const SHORTCUT_OF_PLAN: Record<PlanNextKind, PeopleShortcut | null> = {
   continuar: null,
   respuesta: "presupuesto_sin_respuesta",
   control: null,
+  cerrar: null,
   ninguno: null,
 }
 
