@@ -9,6 +9,9 @@ describe("la tarjeta de hoy mientras carga Inicio", () => {
     reception: { card: "agenda", cashLine: false },
     clinician: { card: "patients", cashLine: false },
     cashier: { card: "cash", cashLine: false },
+    // Ventas (vistIA) lleva la agenda y la caja.
+    sales: { card: "agenda", cashLine: true },
+    workshop: { card: null, cashLine: false },
     member: { card: null, cashLine: false },
   } as const
 
@@ -25,6 +28,9 @@ describe("el subtítulo de Finanzas en la pestaña de comisiones", () => {
     clinician: "Mis honorarios",
     // Caja no ve comisiones ni tiene honorarios: junto a «Sin acceso a comisiones» no se nombran.
     cashier: null,
+    // Ventas y Taller (vistIA) no ven comisiones ni tienen honorarios.
+    sales: null,
+    workshop: null,
     member: null,
   } as const
 

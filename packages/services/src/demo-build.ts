@@ -86,6 +86,14 @@ const CLINICIAN_HONORIFIC: Record<ClinicalProduct, Record<"F" | "M", string>> = 
   optical: { F: "Lic.", M: "Lic." },
 }
 
+/**
+ * Quien atiende el mostrador de la demo: recepción; en una óptica, Ventas, que
+ * también vende y cobra (ADR 0171). Su usuario es el mismo (`…recepcion`).
+ */
+const DEMO_DESK_ROLE: Record<ClinicalProduct, "reception" | "sales"> = { dental: "reception", medical: "reception", optical: "sales" }
+/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0171). */
+const DEMO_HAS_WORKSHOP: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
+
 /** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */
 const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio", optical: "Sala de examen" }
 
@@ -364,7 +372,7 @@ export async function buildDemo(
   const terms = { termsVersion: LEGAL.terms.version, termsAcceptedAt: now }
   const people: Array<{
     id: string
-    role: "clinician" | "reception" | "cashier"
+    role: "clinician" | "reception" | "cashier" | "sales" | "workshop"
     sex: "F" | "M"
     given: string
     family: string
@@ -381,11 +389,19 @@ export async function buildDemo(
   }
   people.push({
     id: `${prefix}recepcion`,
-    role: "reception",
+    role: DEMO_DESK_ROLE[demo.product],
     sex: "F",
     given: random.pick(country.given.F),
     family: random.pick(country.surnames),
   })
+  if (DEMO_HAS_WORKSHOP[demo.product])
+    people.push({
+      id: `${prefix}taller`,
+      role: "workshop",
+      sex: "M",
+      given: random.pick(country.given.M),
+      family: random.pick(country.surnames),
+    })
   if (demo.size !== "pequeno")
     people.push({
       id: `${prefix}caja`,
@@ -1622,7 +1638,7 @@ export async function advanceDemo(
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
   // Lo que el producto agrega a lo cerrado anoche (vistIA: la receta de cada examen firmado).
-  await (await productHooks(tx, demo.organizationId)).demoBuilt?.(tx, demo.organizationId)
+  await (await productHooks(tx, demo.organizationId)).demoBuilt?.(tx, demo.organizationId, now)
   // Lo cobrado de ayer ya está en su caja: recepción la cierra.
   await closeDemoCash(tx, ctx, today)
   const through = addDays(today, HORIZON_DAYS)

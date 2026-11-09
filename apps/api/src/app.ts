@@ -91,6 +91,7 @@ import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createHelpRoute } from "./routes/help.js"
 import { runService, validationError } from "./routes/helpers.js"
 import { createInventoryRoute } from "./routes/inventory.js"
+import { createOrdersRoute } from "./routes/orders.js"
 import { createLegalRoute } from "./routes/legal.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
@@ -1129,6 +1130,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/legal", createLegalRoute(crmDeps))
   guarded.route("/reports", createReportsRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
+  guarded.route("/orders", createOrdersRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route(
     "/help",

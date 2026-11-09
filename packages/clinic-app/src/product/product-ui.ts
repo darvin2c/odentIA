@@ -16,6 +16,7 @@ import type {
   DictationSuggestion,
 } from "../components/patient/dictation-session"
 import type { ClosingCheck } from "../lib/encounters"
+import type { PatientAreaId } from "../lib/patient-areas"
 import type { EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "../lib/patients"
 
 /**
@@ -71,6 +72,35 @@ export interface ProductUi {
   summary: ProductSummaryUi
   /** La receta: su lista y lo que revisa además de las alergias. */
   prescribing: ProductPrescribingUi
+  /**
+   * Los pedidos al taller o al laboratorio (ADR 0171; vistIA: los lentes). Sin
+   * ellos, la clínica no vende con pedido: «Pedidos» no está en el menú.
+   */
+  orders?: ProductOrdersUi
+}
+
+/** Lo que puede llevar un pedido: los mismos tipos que el servidor (`JOB_ORDER_LINE_KINDS`). */
+export type OrderLineKind = "montura" | "lunas" | "contacto" | "otro"
+
+/** Cómo vende el producto con pedido: sus palabras, lo que lleva y lo que se mide. */
+export interface ProductOrdersUi {
+  /** La acción de vender (vistIA: «Vender lentes»): el botón de la página y el título del cajón. */
+  sellLabel: string
+  /**
+   * Lo que se agrega a una venta, en el orden en que se ofrece. `fromInventory`:
+   * se busca entre lo que se vende y toma su nombre y su precio; si no, se
+   * escribe qué es y su precio.
+   */
+  lineKinds: ReadonlyArray<{ kind: OrderLineKind; label: string; fromInventory: boolean }>
+  /** Las medidas para montar (vistIA: la altura de cada ojo), opcionales, cada una en su unidad. */
+  fitting: ReadonlyArray<{ key: string; label: string; unit: string }>
+  /** Un ejemplo de qué es el pedido y de quién lo hace, para sus campos. */
+  titlePlaceholder: string
+  makerPlaceholder: string
+  /** Cómo se llama lo que se copia en el pedido (vistIA: «Receta»). */
+  referenceLabel: string
+  /** La copia guardada en el pedido, en líneas para leerla (vistIA: un ojo por línea); sin él, no se muestra. */
+  prescriptionLines?(snapshot: Record<string, unknown>): string[]
 }
 
 /**
@@ -394,10 +424,17 @@ export interface ProductDictationUi {
   corrections: { change: string; remove: string }
 }
 
-/** Una sección de Clínica que aporta el producto (odentIA: Odontograma y Periodontograma). */
+/** Una sección de la página que aporta el producto (odentIA: Odontograma y Periodontograma). */
 export interface ProductRecordSection {
   id: string
   label: string
+  /**
+   * La pestaña donde va y quién la ve. Sin ellos es clínica: en Clínica, después
+   * de Antecedentes, para quien lee la historia. Otra pestaña (vistIA: sus
+   * pedidos, en Cobros) la pone al final de las suyas.
+   */
+  area?: PatientAreaId
+  permission?: string | readonly string[]
   /** Va debajo de otra sección del producto: no suma una pestaña, se elige dentro de ella. */
   parent?: string
   /** Necesita la ficha cargada: la página la pide antes de mostrarla. */

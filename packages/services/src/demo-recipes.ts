@@ -55,6 +55,8 @@ export interface DemoProductRecipe {
   onlySale?: boolean
   /** Ya no se usa: queda desactivado, con su compra de antes. */
   retired?: boolean
+  /** Lo de su etiqueta, si la tiene (una montura: su código de barras, marca, modelo, color y medidas). */
+  label?: { barcode?: string; brand?: string; model?: string; color?: string; size?: string }
 }
 
 /** Lo que una demo tiene en Inventario y lo que gasta cada servicio. */

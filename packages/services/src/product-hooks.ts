@@ -25,6 +25,21 @@ import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
  * Un producto que no hace nada en un momento usa `NO_PRODUCT_HOOKS`.
  */
 
+/**
+ * Lo que una venta copia en su pedido (ADR 0171; vistIA: la receta de lentes
+ * vigente): lo que se muestra al elegirla y la copia que va al taller, que así no
+ * abre la historia.
+ */
+export interface SaleReference {
+  id: string
+  /** «Receta de anteojos · 12/03/2026». */
+  label: string
+  /** Una línea por ojo, como en la receta. */
+  lines: string[]
+  /** Vencida o sin verificar: se informa, no impide vender. */
+  notices: string[]
+}
+
 /** Lo que un producto agrega a una respuesta común, con su nombre (`odontogram`, `periodontal`…). */
 export type ProductParts = Record<string, unknown>
 
@@ -421,7 +436,16 @@ export interface ProductHooks {
    * receta de anteojos de cada examen de la vista firmado). Corre al armarla y cada
    * noche, después de cerrar las visitas del día: debe poder repetirse. Sin él, nada.
    */
-  demoBuilt?(tx: Db, orgId: string): Promise<void>
+  demoBuilt?(tx: Db, orgId: string, now?: Date): Promise<void>
+  /**
+   * Lo que el producto copia en el pedido de una venta (ADR 0171; vistIA: la receta
+   * de lentes vigente). `current`, lo que se ofrece al vender; `snapshot`, la copia
+   * de una, o null si no es de esa persona o está anulada. Sin él, la venta va sin.
+   */
+  saleReference?: {
+    current(tx: Db, orgId: string, patientId: string): Promise<SaleReference[]>
+    snapshot(tx: Db, orgId: string, patientId: string, id: string): Promise<Record<string, unknown> | null>
+  }
   /**
    * Los papeles que solo existen en este producto y van a «Tus documentos» del
    * portal (vistIA: la receta de lentes), con su PDF. Sin él, ninguno.

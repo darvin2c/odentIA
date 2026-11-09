@@ -35,6 +35,7 @@ import {
   ROOT,
   latidiaBuildEnv,
   stackEnv,
+  vistiaBuildEnv,
   type HarnessRuntime,
 } from "./harness-env"
 import { initRuntimeMeta, runtimeMetaPath, updateRuntimeMeta } from "./runtime-meta"
@@ -90,7 +91,15 @@ interface RunState {
   fixtureClose: (() => Promise<void>) | null
   proxyStarted: boolean
   proxyPid: number | null
-  outDirs: { panel: string; platform: string; admin: string; latidiaPanel?: string; latidia?: string }
+  outDirs: {
+    panel: string
+    platform: string
+    admin: string
+    latidiaPanel?: string
+    latidia?: string
+    vistiaPanel?: string
+    vistia?: string
+  }
   timings: Array<{ label: string; ms: number }>
   closePromise: Promise<string[]> | null
 }
@@ -565,11 +574,11 @@ function resolveViteCli(appDir: string): string {
 
 async function runBuild(
   state: RunState,
-  app: "panel" | "dental-clinic" | "medical-clinic" | "admin",
+  app: "panel" | "dental-clinic" | "medical-clinic" | "optical-clinic" | "admin",
   viteCli: string,
   outDir: string,
   env: Record<string, string>,
-  /** Otro nombre para el log cuando la misma app se compila dos veces (el panel de latidIA). */
+  /** Otro nombre para el log cuando la misma app se compila otra vez (el panel de latidIA o de vistIA). */
   label: string = app,
 ): Promise<void> {
   state.log.log(`Compilando ${label} → ${outDir}…`)
@@ -743,6 +752,8 @@ interface ReadinessTargets {
   storageUrl: string
   /** latidIA, cuando corre: su panel y la misma API en su dominio. */
   latidia?: { panelOrigin: string; apiOrigin: string }
+  /** vistIA, cuando corre, igual que latidIA. */
+  vistia?: { panelOrigin: string; apiOrigin: string }
 }
 
 /** Todas las sondas funcionales en paralelo; si alguna falla se recogen sus diagnósticos. */
@@ -829,6 +840,20 @@ async function probeAll(targets: ReadinessTargets, dispatcher: Agent): Promise<v
             const login = await fetchVia(`${latidia.panelOrigin}/login`, dispatcher, "panel de latidIA /login")
             if (login.status !== 200 || !login.text.includes('data-brand="latidia"')) {
               throw new Error(`el panel de latidIA /login devolvió ${login.status} sin su marca`)
+            }
+          })(),
+        ]
+      : []),
+    ...(targets.vistia
+      ? [
+          (async () => {
+            const vistia = targets.vistia
+            if (!vistia) return
+            const health = await fetchVia(`${vistia.apiOrigin}/health`, dispatcher, "API de vistIA /health")
+            if (health.status !== 200) throw new Error(`API de vistIA /health devolvió ${health.status}`)
+            const login = await fetchVia(`${vistia.panelOrigin}/login`, dispatcher, "panel de vistIA /login")
+            if (login.status !== 200 || !login.text.includes('data-brand="vistia"')) {
+              throw new Error(`el panel de vistIA /login devolvió ${login.status} sin su marca`)
             }
           })(),
         ]
@@ -1056,6 +1081,8 @@ export async function main(args: string[]): Promise<number> {
   // así que se levantan solo con la suite completa o con un recorrido suyo.
   const specs = args.filter((arg) => !arg.startsWith("-"))
   const medicalDomain = specs.length === 0 || specs.some((spec) => /latidia/i.test(spec)) ? `latidia.${tld}` : undefined
+  // vistIA en el suyo (ADR 0169), con la misma regla.
+  const opticalDomain = specs.length === 0 || specs.some((spec) => /vistia/i.test(spec)) ? `vistia.${tld}` : undefined
   const stateDir = await mkdtemp(join(tmpdir(), "odentia-e2e-"))
   const portlessDir = join(stateDir, "portless")
   const metaPath = runtimeMetaPath(runId)
@@ -1067,6 +1094,12 @@ export async function main(args: string[]): Promise<number> {
       ? {
           latidiaPanel: join(ROOT, "apps", "panel", ".cache", "e2e", `${runId}-latidia`),
           latidia: join(ROOT, "apps", "medical-clinic", ".cache", "e2e", runId),
+        }
+      : {}),
+    ...(opticalDomain
+      ? {
+          vistiaPanel: join(ROOT, "apps", "panel", ".cache", "e2e", `${runId}-vistia`),
+          vistia: join(ROOT, "apps", "optical-clinic", ".cache", "e2e", runId),
         }
       : {}),
   }
@@ -1128,6 +1161,13 @@ export async function main(args: string[]): Promise<number> {
     if (medicalDomain && (!latidiaPanelLease || !latidiaLease)) {
       throw new Error("No se pudieron reservar los 2 puertos de latidIA.")
     }
+    // Los de vistIA aparte: los de latidIA siguen en su lugar, corra o no vistIA.
+    const vistiaLeases = opticalDomain ? await reservePorts(2) : []
+    leases.push(...vistiaLeases)
+    const [vistiaPanelLease, vistiaLease] = vistiaLeases
+    if (opticalDomain && (!vistiaPanelLease || !vistiaLease)) {
+      throw new Error("No se pudieron reservar los 2 puertos de vistIA.")
+    }
     state.proxyPort = proxyLease.port
     const appPorts = {
       api: apiLease.port,
@@ -1135,6 +1175,7 @@ export async function main(args: string[]): Promise<number> {
       platform: platformLease.port,
       admin: adminLease.port,
       ...(latidiaPanelLease && latidiaLease ? { latidiaPanel: latidiaPanelLease.port, latidia: latidiaLease.port } : {}),
+      ...(vistiaPanelLease && vistiaLease ? { vistiaPanel: vistiaPanelLease.port, vistia: vistiaLease.port } : {}),
     }
     initRuntimeMeta(metaPath, {
       runId,
@@ -1153,6 +1194,7 @@ export async function main(args: string[]): Promise<number> {
       proxyPort: state.proxyPort,
       appPorts,
       ...(medicalDomain ? { medicalDomain } : {}),
+      ...(opticalDomain ? { opticalDomain } : {}),
     }
     let stack: HarnessStack
     try {
@@ -1186,6 +1228,8 @@ export async function main(args: string[]): Promise<number> {
     const viteAdmin = resolveViteCli(join(ROOT, "apps", "admin"))
     const viteLatidia = medicalDomain ? resolveViteCli(join(ROOT, "apps", "medical-clinic")) : null
     const latidiaEnv = medicalDomain ? { ...childEnv, ...latidiaBuildEnv(runtime) } : null
+    const viteVistia = opticalDomain ? resolveViteCli(join(ROOT, "apps", "optical-clinic")) : null
+    const vistiaEnv = opticalDomain ? { ...childEnv, ...vistiaBuildEnv(runtime) } : null
     const builds = await Promise.allSettled([
       runBuild(state, "panel", vitePanel, outDirs.panel, childEnv),
       runBuild(state, "dental-clinic", vitePlatform, outDirs.platform, childEnv),
@@ -1194,6 +1238,12 @@ export async function main(args: string[]): Promise<number> {
         ? [
             runBuild(state, "panel", vitePanel, outDirs.latidiaPanel, latidiaEnv, "panel-latidia"),
             runBuild(state, "medical-clinic", viteLatidia, outDirs.latidia, latidiaEnv),
+          ]
+        : []),
+      ...(viteVistia && vistiaEnv && outDirs.vistiaPanel && outDirs.vistia
+        ? [
+            runBuild(state, "panel", vitePanel, outDirs.vistiaPanel, vistiaEnv, "panel-vistia"),
+            runBuild(state, "optical-clinic", viteVistia, outDirs.vistia, vistiaEnv),
           ]
         : []),
     ])
@@ -1291,21 +1341,21 @@ export async function main(args: string[]): Promise<number> {
       join(ROOT, "apps", "admin"),
       { ...childEnv, NODE_ENV: "production" },
     )
+    /** `vite preview` de un build, como el resto de las apps del run (latidIA y vistIA). */
+    const preview = (viteCli: string, outDir: string, port: number) => [
+      "--import",
+      bootstrapUrl,
+      viteCli,
+      "preview",
+      "--outDir",
+      outDir,
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--strictPort",
+    ]
     if (viteLatidia && latidiaPanelLease && latidiaLease && appPorts.latidiaPanel && appPorts.latidia && outDirs.latidiaPanel && outDirs.latidia) {
-      /** `vite preview` de un build, como el resto de las apps del run. */
-      const preview = (viteCli: string, outDir: string, port: number) => [
-        "--import",
-        bootstrapUrl,
-        viteCli,
-        "preview",
-        "--outDir",
-        outDir,
-        "--host",
-        "127.0.0.1",
-        "--port",
-        String(port),
-        "--strictPort",
-      ]
       await spawnListening(
         "panel-latidia",
         latidiaPanelLease,
@@ -1323,6 +1373,24 @@ export async function main(args: string[]): Promise<number> {
         { ...childEnv, NODE_ENV: "production" },
       )
     }
+    if (viteVistia && vistiaPanelLease && vistiaLease && appPorts.vistiaPanel && appPorts.vistia && outDirs.vistiaPanel && outDirs.vistia) {
+      await spawnListening(
+        "panel-vistia",
+        vistiaPanelLease,
+        appPorts.vistiaPanel,
+        preview(vitePanel, outDirs.vistiaPanel, appPorts.vistiaPanel),
+        join(ROOT, "apps", "panel"),
+        { ...childEnv, NODE_ENV: "production" },
+      )
+      await spawnListening(
+        "vistia",
+        vistiaLease,
+        appPorts.vistia,
+        preview(viteVistia, outDirs.vistia, appPorts.vistia),
+        join(ROOT, "apps", "optical-clinic"),
+        { ...childEnv, NODE_ENV: "production" },
+      )
+    }
     await registerAlias(state, "api.odentia", appPorts.api)
     await registerAlias(state, "app.odentia", appPorts.panel)
     await registerAlias(state, "admin.odentia", appPorts.admin)
@@ -1332,6 +1400,12 @@ export async function main(args: string[]): Promise<number> {
       await registerAlias(state, "api.latidia", appPorts.api)
       await registerAlias(state, "app.latidia", appPorts.latidiaPanel)
       await registerAlias(state, "latidia", appPorts.latidia)
+    }
+    if (appPorts.vistiaPanel && appPorts.vistia) {
+      // vistIA: la misma API en su dominio, su panel y sus ópticas.
+      await registerAlias(state, "api.vistia", appPorts.api)
+      await registerAlias(state, "app.vistia", appPorts.vistiaPanel)
+      await registerAlias(state, "vistia", appPorts.vistia)
     }
     mark("Apps y rutas del proxy", tApps)
 
@@ -1363,6 +1437,14 @@ export async function main(args: string[]): Promise<number> {
             latidia: {
               panelOrigin: `https://app.${medicalDomain}:${state.proxyPort}`,
               apiOrigin: `https://api.${medicalDomain}:${state.proxyPort}`,
+            },
+          }
+        : {}),
+      ...(opticalDomain
+        ? {
+            vistia: {
+              panelOrigin: `https://app.${opticalDomain}:${state.proxyPort}`,
+              apiOrigin: `https://api.${opticalDomain}:${state.proxyPort}`,
             },
           }
         : {}),

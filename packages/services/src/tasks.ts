@@ -30,6 +30,8 @@ export function taskAreasOfRole(role: string): TaskArea[] {
   if (role === "owner" || role === "admin") return ["administracion"]
   if (role === "reception") return ["recepcion"]
   if (role === "cashier") return ["caja"]
+  // Ventas (vistIA) hace lo de recepción y lo de caja.
+  if (role === "sales") return ["recepcion", "caja"]
   if (role === "clinician") return ["clinico"]
   return []
 }

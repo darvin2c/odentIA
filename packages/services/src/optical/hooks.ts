@@ -8,12 +8,15 @@ import {
 } from "@odentia/optical"
 import { NO_PRODUCT_HOOKS, type ProductHooks } from "../product-hooks.js"
 import { opticalCatalog } from "./catalog.js"
+import { seedDemoJobOrders } from "./demo-orders.js"
 import { opticalExamination } from "./examination.js"
 import { renderLensPrescriptionPdf } from "./lens-prescription-pdf.js"
 import {
   lensPrescriptionCheck,
+  lensPrescriptionSnapshot,
   portalLensPrescriptions,
   prescriptionRecordLines,
+  saleLensPrescriptions,
   seedDemoLensPrescriptions,
 } from "./lens-prescriptions.js"
 
@@ -45,10 +48,16 @@ export const opticalHooks: ProductHooks = {
   consentSuggestions: OPTICAL_CONSENT_TEMPLATES,
   examination: opticalExamination,
   vitals: [],
-  // Una demo trae la receta de anteojos de cada examen firmado.
-  demoBuilt: seedDemoLensPrescriptions,
+  // Una demo trae la receta de anteojos de cada examen firmado y, la primera vez,
+  // sus pedidos de lentes en cada paso; cada noche los pedidos avanzan.
+  async demoBuilt(tx, orgId, now) {
+    await seedDemoLensPrescriptions(tx, orgId)
+    await seedDemoJobOrders(tx, orgId, now)
+  },
   // El cliente ve sus recetas de lentes en su portal y las descarga (entrega 3).
   portalPapers: { list: portalLensPrescriptions, pdf: renderLensPrescriptionPdf },
+  // La venta de lentes copia en el pedido la receta vigente (entrega 4, ADR 0171).
+  saleReference: { current: saleLensPrescriptions, snapshot: lensPrescriptionSnapshot },
   // El QR de la receta de lentes dice si está vigente, vencida o anulada.
   documentCheck: (tx, orgId, type, id) => (type === "lens_prescription" ? lensPrescriptionCheck(tx, orgId, id) : Promise.resolve(null)),
   async recordSections(tx, { orgId, patientId }) {

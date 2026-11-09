@@ -119,6 +119,7 @@ export * from "./inbox.js"
 export * from "./inbox-person.js"
 export * from "./inventory.js"
 export * from "./inventory-stock.js"
+export * from "./job-orders.js"
 export * from "./knowledge.js"
 export {
   acceptClinicAgreement,

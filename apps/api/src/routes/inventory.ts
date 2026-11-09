@@ -133,6 +133,11 @@ const productInput = z.object(
       .optional(),
     minimums: minimumsInput.optional(),
     salePriceCents: cents("El precio de venta").nullish(),
+    barcode: words("El código de barras", 64).nullish(),
+    brand: words("La marca", 80).nullish(),
+    model: words("El modelo", 80).nullish(),
+    color: words("El color", 60).nullish(),
+    size: words("Las medidas", 60).nullish(),
     /** La clave del formulario abierto: reintentar el alta no repite el producto. */
     idempotencyKey: formKey.optional(),
   },
