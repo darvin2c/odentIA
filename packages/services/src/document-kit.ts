@@ -51,6 +51,12 @@ export interface DocumentClinic {
   branchName: string | null
   logo: DocumentLogo | null
   /**
+   * El logo ya dice el nombre (el logotipo de odentIA o latidIA en su carta de
+   * bienvenida): el membrete no lo repite al lado, el logotipo sale más ancho y
+   * la razón social con su documento pasa a la derecha.
+   */
+  wordmark?: boolean
+  /**
    * El color de la marca en el papel (ADR 0162), ya legible sobre blanco: solo la línea
    * bajo el membrete y el cuadro de iniciales. Sin él, tinta, como siempre.
    */
@@ -1175,7 +1181,7 @@ export class DocumentKit {
 
   /** Un recuadro con cuerpo escrito: la declaración, las señales de alarma. */
   /** Lo que ocupará `panel`: para no dejarlo separado de lo que debe ir con él. */
-  panelHeight(input: { title?: string; body: string; size?: number }): number {
+  panelHeight(input: { title?: Inline | Inline[]; body: string; size?: number }): number {
     const size = input.size ?? SIZE.table
     const inner = this.width - 28
     const title = input.title
@@ -1185,7 +1191,8 @@ export class DocumentKit {
     return [...title, ...body].reduce((sum, line) => sum + line.height, 0) + 22
   }
 
-  panel(input: { title?: string; body: string; thickness?: number; size?: number }): void {
+  /** Recuadro con título (en negrita, salvo las partes que digan su letra) y texto. */
+  panel(input: { title?: Inline | Inline[]; body: string; thickness?: number; size?: number }): void {
     const size = input.size ?? SIZE.table
     const padX = 14
     const padY = 11
@@ -1196,7 +1203,8 @@ export class DocumentKit {
     const body = this.lay(input.body, inner, { size, leading: 1.45 })
     const height = this.panelHeight(input)
     if (height > this.pageRoom) {
-      if (input.title) this.subheading(input.title)
+      if (typeof input.title === "string") this.subheading(input.title)
+      else if (input.title) this.text(input.title, { face: "sansBold", size, leading: 1.35 })
       this.text(input.body, { size })
       return
     }
@@ -1607,9 +1615,13 @@ export class DocumentKit {
       return
     }
     const clinic = this.clinic
-    const rightItems = [clinic.branchName, clinic.address, clinic.phone].filter(
-      (item): item is string => !!item,
-    )
+    const wordmark = !!(clinic.wordmark && this.logoImage)
+    const rightItems = [
+      wordmark ? this.fiscalLine() : null,
+      clinic.branchName,
+      clinic.address,
+      clinic.phone,
+    ].filter((item): item is string => !!item)
     const rightMax = this.width * 0.42
     const rightLines = rightItems.flatMap((item) =>
       this.lay(item, rightMax, { size: SIZE.second, tone: "gray", leading: 1.4, align: "right" }),
@@ -1619,15 +1631,13 @@ export class DocumentKit {
     let markWidth = 39
     if (this.logoImage) {
       const ratio = this.logoImage.width / this.logoImage.height
-      markWidth = Math.min(72, 39 * ratio)
+      markWidth = wordmark ? Math.min(this.width * 0.4, 30 * ratio) : Math.min(72, 39 * ratio)
     }
     const nameWidth = Math.max(this.width - rightWidth - 18 - markWidth - 10.5, this.width * 0.25)
-    const nameLines = this.lay(clinic.tradeName, nameWidth, {
-      face: "serif",
-      size: 16.5,
-      leading: 1.2,
-    })
-    const fiscal = this.fiscalLine()
+    const nameLines = wordmark
+      ? []
+      : this.lay(clinic.tradeName, nameWidth, { face: "serif", size: 16.5, leading: 1.2 })
+    const fiscal = wordmark ? "" : this.fiscalLine()
     const fiscalLines = fiscal
       ? this.lay(fiscal, nameWidth, { size: SIZE.second, tone: "gray", leading: 1.35 })
       : []
@@ -1702,6 +1712,10 @@ export class DocumentKit {
 
   /** Desde la página 2: el nombre de la clínica y el título del documento. */
   private shortHeader(): void {
+    if (this.clinic.wordmark && this.logoImage) {
+      this.wordmarkShortHeader(this.logoImage)
+      return
+    }
     const name = this.lay(this.clinic.tradeName, this.width * 0.55, {
       face: "serif",
       size: 12.75,
@@ -1719,6 +1733,32 @@ export class DocumentKit {
     if (title) this.drawLineAt(title, this.left, top - (height - title.height), this.width)
     this.y = top - height - 7.5
     this.rule({ tone: "ink", thickness: 1.5 })
+    this.y -= 13
+  }
+
+  /**
+   * Desde la página 2, con logotipo (`wordmark`): el logotipo chico y la línea en
+   * el color de la marca, para que la hoja suelta se reconozca como la misma.
+   */
+  private wordmarkShortHeader(logo: PDFImage): void {
+    const height = 16
+    const width = Math.min(this.width * 0.3, height * (logo.width / logo.height))
+    const title = this.lay(this.options.title, this.width * 0.42, {
+      size: SIZE.second,
+      tone: "gray",
+      leading: 1.3,
+      align: "right",
+    })[0]
+    const top = this.y
+    this.page.drawImage(logo, { x: this.left, y: top - height, width, height: width / (logo.width / logo.height) })
+    if (title) this.drawLineAt(title, this.left, top - (height - title.height), this.width)
+    this.y = top - height - 7.5
+    this.page.drawLine({
+      start: { x: this.left, y: this.y },
+      end: { x: this.right, y: this.y },
+      thickness: 1.5,
+      color: this.brandInk,
+    })
     this.y -= 13
   }
 
