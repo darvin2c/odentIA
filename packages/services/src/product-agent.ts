@@ -29,12 +29,13 @@ export interface ProductAgentTexts {
   /**
    * Lo que cambia en las fichas de los agentes en otro producto (latidIA: Clío
    * para el médico, Sofi sin piezas ni odontograma); sin ello, las de odentIA.
-   * No lo lee el modelo: son las páginas de los agentes.
+   * `available: false` dice que el agente no existe en el producto (vistIA: Clío
+   * no dicta). No lo lee el modelo: son las páginas de los agentes.
    */
   roles?: Partial<
     Record<
       "recepcion" | "asistente_clinico",
-      Partial<Pick<AgentRole, "nameReason" | "audience" | "role" | "functions" | "sees" | "notSees" | "never" | "confirms" | "behaves" | "learningOwner" | "later" | "learnsLater">>
+      Partial<Pick<AgentRole, "available" | "nameReason" | "audience" | "role" | "functions" | "sees" | "notSees" | "never" | "confirms" | "behaves" | "learningOwner" | "later" | "learnsLater">>
     >
   >
   /**

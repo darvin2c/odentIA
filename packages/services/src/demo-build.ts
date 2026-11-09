@@ -49,7 +49,7 @@ import { getOrgLocale } from "./locale.js"
 import { initialOrgRegion } from "./organization-profile.js"
 import { ensureDefaultPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { demoKindsFor, productHooks } from "./products.js"
+import { demoKindsFor, dictationFor, productHooks } from "./products.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { addDays, dayStart, reportDayOf } from "./report-periods.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
@@ -74,6 +74,16 @@ import { seedRepliesRuns, seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
+
+/**
+ * Cómo se nombra a quien atiende en cada producto: el odontólogo y el médico, «Dr.»
+ * o «Dra.»; el optómetra, tecnólogo médico con licenciatura, «Lic.».
+ */
+const CLINICIAN_HONORIFIC: Record<ClinicalProduct, Record<"F" | "M", string>> = {
+  dental: { F: "Dra.", M: "Dr." },
+  medical: { F: "Dra.", M: "Dr." },
+  optical: { F: "Lic.", M: "Lic." },
+}
 
 /** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */
 const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio", optical: "Sala de examen" }
@@ -385,7 +395,7 @@ export async function buildDemo(
     })
   await tx.insert(user).values(
     people.map((person, index) => {
-      const honorific = person.role === "clinician" ? (person.sex === "F" ? "Dra. " : "Dr. ") : ""
+      const honorific = person.role === "clinician" ? `${CLINICIAN_HONORIFIC[demo.product][person.sex]} ` : ""
       return {
         id: person.id,
         name: `${honorific}${person.given} ${person.family}`,
@@ -448,7 +458,7 @@ export async function buildDemo(
     }
     team.push({
       userId: person.id,
-      name: `${person.sex === "F" ? "Dra." : "Dr."} ${signerName}`,
+      name: `${CLINICIAN_HONORIFIC[demo.product][person.sex]} ${signerName}`,
       signerName,
       registration,
       title,
@@ -476,7 +486,8 @@ export async function buildDemo(
     orgId,
     {
       enabled: true,
-      clinicalAssistantEnabled: true,
+      // Clío, donde su producto dicta (en vistIA no dicta).
+      clinicalAssistantEnabled: dictationFor(demo.product) !== null,
       personaName: "Sofi",
       treatment: "usted",
       tone: "cercano",
@@ -637,13 +648,14 @@ export async function buildDemo(
     orgId,
     planCode: plan.code,
     months: demo.months,
-    dictating: team
-      .slice(0, 3)
-      .map((item, index) => ({
-        userId: item.userId,
-        fromMonthsAgo: Math.max(1, Math.min(demo.months, [10, 6, 3][index] ?? 3)),
-        share: [0.25, 0.6] as [number, number],
-      })),
+    // Clío solo dicta donde su producto dicta: una óptica de vistIA no tiene consultas dictadas.
+    dictating: dictationFor(demo.product)
+      ? team.slice(0, 3).map((item, index) => ({
+          userId: item.userId,
+          fromMonthsAgo: Math.max(1, Math.min(demo.months, [10, 6, 3][index] ?? 3)),
+          share: [0.25, 0.6] as [number, number],
+        }))
+      : [],
   })
   // Lo que cobra el plan cuenta el mes desde el alta; la demo nunca se factura.
   await tx

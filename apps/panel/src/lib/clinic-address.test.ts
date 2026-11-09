@@ -11,6 +11,8 @@ describe("addressFromName", () => {
     expect(addressFromName("Clínica Dental Sonrisa")).toBe("sonrisa")
     expect(addressFromName("Centro Odontológico San Juan")).toBe("san-juan")
     expect(addressFromName("Consultorio Dental de la Dra. Ruiz")).toBe("dra-ruiz")
+    expect(addressFromName("Óptica Clara")).toBe("clara")
+    expect(addressFromName("Centro Óptico Visión Total")).toBe("vision-total")
   })
 
   it("no deja la dirección vacía", () => {

@@ -370,7 +370,7 @@ function OrganizationsPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Clínicas"
-        subtitle="Las de odentIA y las de latidIA, con suscripción, uso, miembros y actividad."
+        subtitle="Las de odentIA, latidIA y vistIA, con suscripción, uso, miembros y actividad."
         primary={{ label: "Alta asistida", icon: <Plus aria-hidden />, onClick: () => setAssistedOpen(true) }}
         // Crear demos es de la administración (decisión 11): soporte no lo ve.
         {...(isAdmin ? { secondary: { label: "Crear demo", icon: <Presentation aria-hidden />, onClick: () => setDemoOpen(true) } } : {})}

@@ -30,7 +30,7 @@ export function OrganizationsPageSkeleton() {
   return (
     <PageLoading
       title="Clínicas"
-      subtitle="Las de odentIA y las de latidIA, con suscripción, uso, miembros y actividad."
+      subtitle="Las de odentIA, latidIA y vistIA, con suscripción, uso, miembros y actividad."
       primary={{ label: "Alta asistida", icon: <Plus aria-hidden />, disabled: true }}
       // «Crear demo» y el filtro «Precio» son de la administración, como en la pantalla.
       secondary={isAdmin ? { label: "Crear demo", icon: <Presentation aria-hidden />, disabled: true } : undefined}

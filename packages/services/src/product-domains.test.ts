@@ -25,8 +25,11 @@ describe("los dos dominios de una instalación (decisión 9 del issue 229)", () 
   })
 
   it("reconoce el producto de cada host", () => {
-    const domains = { dental: "odentia32.com", medical: "latidia72.com" }
+    const domains = { dental: "odentia32.com", medical: "latidia72.com", optical: "vistia20.com" }
     expect(productOfHost("api.latidia72.com", domains)).toBe("medical")
+    expect(productOfHost("claridad.vistia20.com", domains)).toBe("optical")
+    expect(productOfHost("app.vistia20.com", domains)).toBe("optical")
+    expect(productOfHost("vistia20.com.evil.test", domains)).toBeNull()
     expect(productOfHost("sonrie.odentia32.com:443", domains)).toBe("dental")
     expect(productOfHost("latidia72.com", domains)).toBe("medical")
     expect(productOfHost("latidia72.com.evil.test", domains)).toBeNull()

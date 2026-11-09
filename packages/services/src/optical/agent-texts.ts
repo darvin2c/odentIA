@@ -21,6 +21,8 @@ export const OPTICAL_AGENT_TEXTS: ProductAgentTexts = {
       notSees:
         "Historia clínica (diagnósticos, notas ni la medida de la vista) ni caja. Lo que lleva un presupuesto que tu óptica aún prepara.",
     },
+    // Clío no dicta en una óptica: la página del agente lo dice «Aún no disponible».
+    asistente_clinico: { available: false },
   },
   // Las urgencias de la vista que no están entre las comunes: dejar de ver de golpe,
   // la cortina o sombra que tapa la vista, los destellos con manchas (la retina que

@@ -39,13 +39,13 @@ beforeAll(async () => {
   })
 })
 
-async function newClinic() {
+async function newClinic(product: "dental" | "medical" | "optical" = "dental") {
   const orgId = randomUUID()
   const ownerId = `owner-${orgId}`
   await insertOrg(ownerDb, orgId, `nueva-${orgId}`)
   await ownerDb
     .update(orgProfile)
-    .set({ legalName: "Sonríe S.A.C.", tradeName: "Clínica Sonríe", fiscalDocNumber: "20123456789" })
+    .set({ legalName: "Sonríe S.A.C.", tradeName: "Clínica Sonríe", fiscalDocNumber: "20123456789", product })
     .where(eq(orgProfile.organizationId, orgId))
   await ownerDb.insert(user).values({ id: ownerId, name: "Dueña", email: `${ownerId}@nueva.test`, emailVerified: true })
   await ownerDb.insert(member).values({ id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() })
@@ -54,6 +54,13 @@ async function newClinic() {
 }
 
 describe("una clínica nueva nace con todo encendido (ADR 0141)", () => {
+  it("una óptica de vistIA nace con Sofi y Argos, y Clío apagado: en una óptica no dicta (ADR 0166)", async () => {
+    const c = await newClinic("optical")
+    await c.run((tx) => setUpNewClinic(tx, c.orgId, c.ownerId))
+    const [agent] = await ownerDb.select().from(agentConfig).where(eq(agentConfig.organizationId, c.orgId))
+    expect(agent).toMatchObject({ enabled: true, clinicalAssistantEnabled: false, advisor: { enabled: true } })
+  })
+
   it("Sofi, Clío, Argos y sus líneas, el registro, el portal y el resumen del lunes, a nombre de quien la crea", async () => {
     const c = await newClinic()
     await c.run((tx) => setUpNewClinic(tx, c.orgId, c.ownerId))

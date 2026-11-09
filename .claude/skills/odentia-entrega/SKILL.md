@@ -70,7 +70,7 @@ Quitar una columna o tabla que el código lee no cabe en un solo despliegue: `mi
 
 Rama nueva desde `origin/main`, con `git fetch` antes. Commits en español: `feat(scope): descripción`.
 
-Toda corrección y función vale para los dos productos. Averiguar si la lógica vive en lo común (`packages/services`, `clinical`, `clinic-app`, `channels`) o tiene variante (`src/dental/`, `src/medical/`, `apps/dental-clinic`, `apps/medical-clinic`, `products.ts`), cubrir ambas y decir en el PR cómo quedó cada una. Si de verdad es de un solo producto, decir por qué.
+Toda corrección y función vale para todos los productos (odentIA, latidIA y vistIA). Averiguar si la lógica vive en lo común (`packages/services`, `clinical`, `clinic-app`, `channels`) o tiene variante (`src/dental/`, `src/medical/`, `src/optical/`, `apps/dental-clinic`, `apps/medical-clinic`, `apps/optical-clinic`, `products.ts`), cubrir cada una y decir en el PR cómo quedó. Si de verdad es de un solo producto, decir por qué.
 
 Lo que va en el mismo cambio:
 

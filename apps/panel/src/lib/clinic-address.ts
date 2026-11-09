@@ -21,6 +21,11 @@ const GENERIC_WORDS = new Set([
   "odontologia",
   "dental",
   "dentales",
+  // Las ópticas de vistIA: «Óptica Clara» propone `clara`.
+  "optica",
+  "opticas",
+  "optico",
+  "opticos",
 ])
 /** Lo que queda suelto al quitar lo genérico: «Consultorio *de la* Dra. Ruiz». */
 const CONNECTORS = new Set(["de", "del", "la", "las", "el", "los", "y"])
