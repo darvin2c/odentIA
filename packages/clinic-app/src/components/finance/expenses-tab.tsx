@@ -188,7 +188,8 @@ export function ExpensesTab({
           const expense = row.original
           const voided = expense.voidedAt !== null
           return (
-            <div className="flex min-w-0 flex-col gap-1">
+            // Un ancho mínimo: partir solo una palabra larga no debe angostar la columna a una letra.
+            <div className="flex min-w-0 flex-col gap-1 sm:min-w-44">
               {/* Solo el texto libre parte una palabra larga; el monto y «Anular» no se salen de la tabla (QA del 8 nov, G28). */}
               <span className={cn("font-medium [overflow-wrap:anywhere]", voided && "text-muted-foreground line-through")}>
                 {expense.concept}

@@ -46,8 +46,8 @@ export function expenseReceiptType(countryCode: string, code: string | null | un
 
 /**
  * El que se propone según el tipo de gasto: la luz y el agua llegan con recibo de servicios
- * públicos, lo de un profesional suelto con recibo por honorarios, y un sueldo o «Otros» sin papel.
- * Es solo una propuesta: la persona lo cambia.
+ * públicos; el laboratorio y el alquiler, con factura; lo de la farmacia o la tienda, con boleta; y
+ * un sueldo, sin papel. Es solo una propuesta: la persona lo cambia.
  */
 export function suggestedReceiptType(countryCode: string, category: string): string {
   const peru = countryCode.toUpperCase() === "PE"
@@ -55,7 +55,6 @@ export function suggestedReceiptType(countryCode: string, category: string): str
     case "Servicios":
       return peru ? "14" : "recibo"
     case "Laboratorio":
-    case "Materiales":
     case "Alquiler":
       return peru ? "01" : "factura"
     case "Personal":
