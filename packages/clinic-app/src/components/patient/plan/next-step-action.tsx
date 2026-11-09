@@ -22,10 +22,14 @@ import {
   type SchedulableControl,
 } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
+import { type AgendaAppointment, invalidateAppointmentQueries } from "../../../lib/agenda"
+import { apiFetch } from "../../../lib/api"
 import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
+import { errorMessage } from "../../agenda/shared"
 import { FollowUpScheduler } from "../follow-up-scheduler"
 import { useBudgetFormat } from "./budget-parts"
+import { BudgetNoAnswer } from "./budget-no-answer"
 import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
 
@@ -42,7 +46,10 @@ export function NextStepButton({
   size?: ComponentProps<typeof Button>["size"]
   variant?: ComponentProps<typeof Button>["variant"]
 }): React.JSX.Element | null {
-  const [open, setOpen] = useState<"respuesta" | "control" | null>(null)
+  const [open, setOpen] = useState<"respuesta" | "control" | "nocontesta" | null>(null)
+  const canTask = usePermission("tasks.write")
+  const [joining, setJoining] = useState(false)
+  const queryClient = useQueryClient()
   const archived = usePersonArchived()
   const action = step.action
   if (!action || archived) return null
@@ -57,15 +64,73 @@ export function NextStepButton({
         reviewable
       />
     )
+  const refresh = async () => {
+    await Promise.all([
+      ...PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patient.id] })),
+      queryClient.invalidateQueries({ queryKey: ["people"] }),
+      queryClient.invalidateQueries({ queryKey: ["treatment-coordination", patient.id] }),
+      invalidateAppointmentQueries(queryClient),
+    ])
+  }
+  /** Lo que lleva esa cita: suma o quita, con la versión que tiene ahora. */
+  const changeAppointment = async (appointmentId: string, change: { add?: string[]; remove?: string[] }) => {
+    const current = await apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointmentId}`)
+    return apiFetch<{ data: AgendaAppointment & { usualMinutes: number | null; added: string[] } }>(
+      `/api/appointments/${appointmentId}/plan-items`,
+      { method: "POST", body: JSON.stringify({ expectedVersion: current.data.version, ...change }) },
+    )
+  }
+  /**
+   * «Sumar a su cita del 10 nov»: lo aceptado va en la cita que ya tiene, sin otra visita, con
+   * «Deshacer». La cita no se alarga sola: si lo que lleva suele durar más, el aviso lo dice.
+   */
+  const joinAppointment = async (join: { appointmentId: string; label: string }, ids: string[]) => {
+    setJoining(true)
+    try {
+      const result = await changeAppointment(join.appointmentId, { add: ids })
+      await refresh()
+      const appointment = result.data
+      const usual = appointment.usualMinutes
+      const minutes = Math.round((new Date(appointment.endsAt).getTime() - new Date(appointment.startsAt).getTime()) / 60_000)
+      const tooShort = !!usual && usual > minutes
+      toast.success(`${join.label.replace(/^Sumar/, "Sumado")} con ${appointment.professionalName}`, {
+        // La cita no se alarga sola: si lo que lleva suele durar más, se dice y el aviso se queda
+        // hasta cerrarlo (segunda mesa del 9 nov: se iba solo y no se entendía «105»).
+        description: tooShort
+          ? `Su cita está reservada por ${minutes} minutos y con esto suele necesitar unos ${usual}. Si no alcanza, alárgala en la Agenda.`
+          : undefined,
+        ...(tooShort ? { duration: Number.POSITIVE_INFINITY, closeButton: true } : {}),
+        action: {
+          label: "Deshacer",
+          onClick: () =>
+            void changeAppointment(join.appointmentId, { remove: appointment.added })
+              .then(async () => {
+                await refresh()
+                toast.success("Se quitó de su cita")
+              })
+              .catch((cause: unknown) => toast.error(errorMessage(cause))),
+        },
+      })
+    } catch (cause) {
+      toast.error(errorMessage(cause))
+      await refresh()
+    } finally {
+      setJoining(false)
+    }
+  }
   const onClick = () => {
     if ((step.kind === "agendar" || step.kind === "continuar") && action.planItemIds?.length) {
+      const followUpIds = action.followUpIds ?? (action.followUpId ? [action.followUpId] : [])
       openBookingAnywhere({
         patient,
         lockedPatient: true,
         planItemIds: action.planItemIds,
         ...(action.serviceId ? { serviceId: action.serviceId } : {}),
         // «Reservar lo aceptado y el control»: el control viene marcado en la misma cita.
-        ...(action.followUpId ? { followUpIds: [action.followUpId] } : {}),
+        ...(followUpIds.length ? { followUpIds } : {}),
+        // Lo que va después de otro tratamiento, o el control que aún no se puede hacer: desde ese día.
+        ...(action.date ? { date: action.date } : {}),
+        ...(action.note ? { note: action.note, notBefore: action.date } : {}),
       })
     } else if (step.kind === "respuesta" && action.budgetId) {
       setOpen("respuesta")
@@ -76,9 +141,29 @@ export function NextStepButton({
       setOpen("control")
     }
   }
+  const join = action.join
+  // «No contesta»: su propio botón en la fila, al lado de «¿Qué respondió?» (QA del 9 nov: dentro de
+  // ese cajón había dos «Guardar» y no se sabía cuál). Anota cuándo volver a llamar, no una respuesta.
+  const noAnswer = step.kind === "respuesta" && action.budgetId && canTask
   return (
     <>
-      <Button type="button" size={size} variant={variant} onClick={onClick}>
+      {noAnswer ? (
+        <Button type="button" size={size} variant="outline" onClick={() => setOpen("nocontesta")}>
+          No contesta
+        </Button>
+      ) : null}
+      {join && action.planItemIds?.length ? (
+        <Button
+          type="button"
+          size={size}
+          variant={variant}
+          disabled={joining}
+          onClick={() => void joinAppointment(join, action.planItemIds ?? [])}
+        >
+          {join.label}
+        </Button>
+      ) : null}
+      <Button type="button" size={size} variant={join ? "outline" : variant} onClick={onClick}>
         {action.label}
       </Button>
       {open === "respuesta" && action.budgetId ? (
@@ -87,6 +172,21 @@ export function NextStepButton({
           budgetId={action.budgetId}
           onClose={() => setOpen(null)}
         />
+      ) : null}
+      {open === "nocontesta" && action.budgetId ? (
+        <DetailDrawer
+          open
+          title="No contesta"
+          description={`Su presupuesto sigue esperando respuesta. Queda una tarea para volver a llamar por el presupuesto de ${patient.name}.`}
+          onClose={() => setOpen(null)}
+        >
+          <BudgetNoAnswer
+            patientId={patient.id}
+            budgetId={action.budgetId}
+            onSaved={() => setOpen(null)}
+            onCancel={() => setOpen(null)}
+          />
+        </DetailDrawer>
       ) : null}
       {open === "control" && action.followUpId ? (
         <ScheduleControl

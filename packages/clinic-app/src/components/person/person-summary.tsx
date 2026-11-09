@@ -42,7 +42,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 /**
  * Resumen de la persona (tablero 2): lo que hace falta para atenderla de un
  * vistazo —teléfono, alergias, próxima cita, saldo, conversación y
- * oportunidad—, «Falta registrarla como paciente» si aún no lo es, sus
+ * oportunidad—, «Falta su registro como paciente» si aún no lo es, sus
  * pendientes, sus notas y lo que recuerda el agente. Cada dato se pide con su
  * permiso.
  *
@@ -196,6 +196,10 @@ export function PersonSummary({
               <span className="block text-xs font-normal text-muted-foreground">
                 Su WhatsApp es otro: {internationalText(whatsappElsewhere)}
               </span>
+            ) : phoneText && person.phoneWhatsApp.state === "aun_no" && person.channels.includes("whatsapp") ? (
+              // Escribe por WhatsApp desde una cuenta que no muestra su número: este teléfono no es ese
+              // WhatsApp todavía, como dice Datos (QA de la ficha del 9 nov: «Canales: WhatsApp» parecía él).
+              <span className="block text-xs font-normal text-muted-foreground">Aún no es su WhatsApp</span>
             ) : null}
           </Fact>
           {(canChats || canCrm) && person.channels.length > 0 ? (
@@ -217,10 +221,10 @@ export function PersonSummary({
 
       {person.kind === "por_registrar" && !person.archived ? (
         <Alert>
-          <AlertTitle>Falta registrarla como paciente</AlertTitle>
+          <AlertTitle>Falta su registro como paciente</AlertTitle>
           <AlertDescription>
             <span className="block">
-              Se necesita antes de su primera atención. Puede hacerlo ella con «Su enlace», donde también elige su cita, o tú ahora.
+              Se necesita antes de su primera atención. Puede hacerlo por su cuenta con «Su enlace», donde también elige su cita, o tú ahora.
             </span>
             {canSendLink || canRegister ? (
               <span className="mt-2 flex flex-wrap gap-2">
@@ -294,8 +298,9 @@ export function PersonSummary({
           )}
         </SummaryCard>
       ) : null}
-      <PersonNotes personId={person.id} />
-      <PersonAgentMemory personId={person.id} />
+      <PersonNotes personId={person.id}>
+        <PersonAgentMemory personId={person.id} inline />
+      </PersonNotes>
 
       <NewPatientDrawer
         open={registering}

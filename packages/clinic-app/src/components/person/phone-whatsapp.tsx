@@ -29,7 +29,7 @@ export function PhoneWhatsAppNote({ contactId, value }: { contactId: string; val
         </Badge>
         <span className="text-xs text-muted-foreground">
           WhatsApp no pudo entregarle un mensaje. Los recordatorios le llegan por correo; sin correo, «Te espera» pide
-          llamarla.
+          llamar.
         </span>
       </span>
     )

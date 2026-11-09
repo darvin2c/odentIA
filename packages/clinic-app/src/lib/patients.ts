@@ -660,6 +660,8 @@ export interface EncounterVisit {
   treatments: VisitTreatment[]
   moreTreatments: number
   controls: VisitControl[]
+  /** Sin cita hoy: su próxima cita ya reservada. */
+  booked?: { startsAt: string; serviceName: string | null } | null
 }
 
 export type TimelineType =

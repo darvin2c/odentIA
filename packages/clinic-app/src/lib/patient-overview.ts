@@ -6,16 +6,17 @@ export function sexLabel(sex: string | null | undefined): string {
 }
 
 /**
- * «atenderlo» o «atenderla» según la persona; sin sexo registrado, «atenderla»
- * (la persona). Lo mismo para cualquier verbo con el pronombre al final.
+ * «atenderlo» o «atenderla» según su sexo registrado; sin él, «la atención», sin suponer
+ * ninguno (QA de la ficha del 9 nov: el registro no pide el sexo y todo paciente nuevo salía
+ * en femenino).
  */
-export function attendWord(sex: string | null | undefined, verb = "atender"): string {
-  return `${verb}${sex === "M" ? "lo" : "la"}`
+export function attendWord(sex: string | null | undefined): string {
+  return sex === "M" ? "atenderlo" : sex === "F" ? "atenderla" : "la atención"
 }
 
-/** «Habla por él» o «Habla por ella» según la persona; sin sexo registrado, «ella» (la persona). */
+/** «Habla por él» o «Habla por ella» según su sexo registrado; sin él, «Habla en su nombre». */
 export function speaksForWords(sex: string | null | undefined): string {
-  return sex === "M" ? "Habla por él" : "Habla por ella"
+  return sex === "M" ? "Habla por él" : sex === "F" ? "Habla por ella" : "Habla en su nombre"
 }
 
 export function documentCategoryLabel(category: string): string {

@@ -137,12 +137,12 @@ it("lo aceptado y el control vencido, en una fila y una cita; quién indicó el 
   await book(f, new Date(Date.now() + 7 * DAY))
   const forCashier = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, cashier))
   expect(forCashier.steps.map((row) => row.kind)).toEqual(["agendar"])
-  expect(forCashier.steps[0]).toMatchObject({ text: "Aceptó todo: su próxima cita no lo lleva", action: null })
+  expect(forCashier.steps[0]).toMatchObject({ text: "Aceptó todo: aún no va en su próxima cita", action: null })
   // Sin botón, se le dice a quién le toca (QA del 9 nov): no es una fila muerta.
   expect(forCashier.steps[0]?.detail).toMatch(/la cita la reserva recepción$/)
   expect(steps[0]?.detail ?? "").not.toContain("la reserva recepción")
   expect((await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))).steps[0]?.text).toMatch(
-    /^Aceptó todo: su cita del \d{1,2} \S+ no lo lleva$/,
+    /^Aceptó todo: aún no va en su cita del \d{1,2} \S+$/,
   )
 })
 

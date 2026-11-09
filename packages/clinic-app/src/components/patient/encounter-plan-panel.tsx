@@ -18,6 +18,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   FieldLabel,
+  toast,
 } from "@odentia/ui"
 import {
   LoadingState,
@@ -38,6 +39,7 @@ import {
   commonPlanItemIds,
   fetchBudgetDetail,
   fetchTreatmentPlans,
+  PLAN_QUERY_KEYS,
   planDecisionLabel,
   totalsOf,
 } from "../../lib/budgets"
@@ -429,8 +431,13 @@ export function EncounterPlanPanel({
         {/* La línea del presupuesto, antes del formulario: abierto, la empujaba fuera de la vista (QA del 9 nov). */}
         <EncounterBudgetSend
           patientId={patientId}
+          encounterId={encounterId}
           patientName={patientName}
           beforeWrite={beforeWrite}
+          // Lo indicado hoy que aún no está en ningún presupuesto: entra al firmar.
+          unquoted={indicatedItems.filter(
+            (item) => !item.budgetId && item.status === "pendiente" && item.decisionStatus === "pendiente" && item.priceCents != null,
+          )}
         />
         {canWrite ? (
           <Collapsible
@@ -754,14 +761,22 @@ function PathsBox({
  */
 export function EncounterBudgetSend({
   patientId,
+  encounterId,
   patientName,
   beforeWrite,
+  unquoted = [],
 }: {
   patientId: string
+  encounterId?: string
   patientName: string
   beforeWrite: () => Promise<void>
+  /** Lo indicado hoy fuera de todo presupuesto: se dice y se puede armar ya. */
+  unquoted?: PlanItem[]
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
+  const canQuote = usePermission("budgets.write")
+  const queryClient = useQueryClient()
+  const [assembling, setAssembling] = useState(false)
   const step = usePlanNextStep(patientId, canSend).data?.data ?? null
   // El presupuesto que se ofreció en esta atención: si se envía o se anota su respuesta, la
   // línea no desaparece sin rastro, queda qué eligió (QA del 8 nov). Se recuerda por paciente
@@ -773,8 +788,60 @@ export function EncounterBudgetSend({
     OFFERED_BUDGET.set(patientId, offeredNow)
     setOffered(offeredNow)
   }, [offeredNow, patientId])
-  if (canSend && !offeredNow && offered) return <EncounterBudgetAfter patientId={patientId} budgetId={offered} />
-  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return null
+  // Lo indicado hoy que aún no entra en un presupuesto (una indicación sola, después de otro
+  // presupuesto ya ofrecido): se dice y se arma ya, sin esperar a firmar (QA del 9 nov).
+  const pendingLine =
+    canSend && canQuote && encounterId && !offeredNow && unquoted.length > 0 ? (
+      <section
+        aria-label="Presupuesto por armar"
+        className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-dashed bg-background px-3 py-2"
+      >
+        <p className="min-w-0 flex-1 basis-60 text-sm">
+          <span className="font-medium">Presupuesto</span>
+          <span className="text-muted-foreground">
+            {" "}
+            · {unquoted.map((item) => item.title).join(", ")}: entra al firmar
+          </span>
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="min-h-11 sm:min-h-8"
+          disabled={assembling}
+          onClick={async () => {
+            setAssembling(true)
+            try {
+              await beforeWrite()
+              const assembled = await apiFetch<{ data: { id: string } | null }>(
+                `/api/patients/${patientId}/encounters/${encounterId}/budget`,
+                { method: "POST", body: "{}" },
+              )
+              // Nada se pudo presupuestar (sin precio o sin código): se dice, en vez de no hacer nada.
+              if (!assembled.data)
+                toast.warning("No se pudo armar: a lo indicado le falta el precio o el código. Revísalo en el plan.")
+              await Promise.all(
+                [...PLAN_QUERY_KEYS, "plan-items", "next-steps"].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+              )
+            } catch (cause) {
+              toast.error(submitErrorMessage(cause))
+            } finally {
+              setAssembling(false)
+            }
+          }}
+        >
+          Armarlo ahora
+        </Button>
+      </section>
+    ) : null
+  if (canSend && !offeredNow && offered)
+    return (
+      <>
+        <EncounterBudgetAfter patientId={patientId} budgetId={offered} />
+        {pendingLine}
+      </>
+    )
+  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return pendingLine
   const budgetId = step.action.budgetId
   return (
     <section

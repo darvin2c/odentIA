@@ -153,6 +153,8 @@ type Step = { kind: "sign"; index: number } | { kind: "confirm" }
 
 interface SigningValues {
   signerContactId: string
+  /** El documento de su representante, si su ficha no lo tiene: la firma lo exige (se registró sin él). */
+  signerDoc: string
   /** Por documento, en el orden de la pasada: la casilla y el trazo. */
   docs: { understood: boolean; strokes: number[][][] }[]
 }
@@ -187,6 +189,7 @@ function SigningFlow({
   const current = step.kind === "sign" && !choosing ? documents[step.index] : undefined
   const defaultValues: SigningValues = {
     signerContactId: "",
+    signerDoc: "",
     docs: documents.map(() => ({ understood: false, strokes: [] })),
   }
 
@@ -201,6 +204,7 @@ function SigningFlow({
           signerKind: signer.kind,
           signerContactId: signer.contactId,
           representativeRelation: signer.kind === "representante" ? "Representante legal" : null,
+          ...(signer.kind === "representante" && !signer.doc ? { signerDoc: value.signerDoc.trim() } : {}),
           signatureData: { strokes: value.docs[position]?.strokes ?? [] },
           comprehensionConfirmed: true,
           method: "clinica",
@@ -249,6 +253,8 @@ function SigningFlow({
         const doc = value.docs[step.index]
         const fields: Record<string, string> = {}
         if (!doc?.understood) fields[`docs[${step.index}].understood`] = "Marca la casilla para seguir"
+        if (signer?.kind === "representante" && !signer.doc && !value.signerDoc.trim())
+          fields.signerDoc = `Falta el documento de ${firstName(signer.name)} para firmar como su representante`
         if (!doc?.strokes.length)
           fields[`docs[${step.index}].strokes`] = `Falta la firma de ${firstName(signer?.name ?? "la persona")}`
         return Object.keys(fields).length > 0 ? { fields } : undefined
@@ -299,7 +305,9 @@ function SigningFlow({
           : key === "comprehensionConfirmed"
             ? `docs[${rejected.index}].understood`
             : key === "signerDoc"
-              ? "signerContactId"
+              ? signer?.kind === "representante" && !signer.doc
+                ? "signerDoc"
+                : "signerContactId"
               : undefined,
       formMessage: (failure) => {
         const message = submitErrorOf(failure).form
@@ -438,6 +446,19 @@ function SigningFlow({
                       ? documentText(patient.docType, patient.docNumber)
                       : null,
                 children: (
+                  <>
+                  {/* Se registró sin su documento: la firma lo pide aquí mismo (QA de la ficha del 9 nov). */}
+                  {signer.kind === "representante" && !signer.doc ? (
+                    <form.AppField name="signerDoc">
+                      {(field) => (
+                        <field.TextField
+                          label={`Documento de ${signer.name} (DNI u otro)`}
+                          description="Su ficha no lo tiene: escríbelo para firmar como su representante."
+                          maxLength={40}
+                        />
+                      )}
+                    </form.AppField>
+                  ) : null}
                   <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
                     {(field) => (
                       <field.Group legend="Firma aquí con el dedo">
@@ -457,6 +478,7 @@ function SigningFlow({
                       </field.Group>
                     )}
                   </form.AppField>
+                  </>
                 ),
               }}
               professional={{
@@ -566,12 +588,15 @@ function diagnosisOf(document: ConsentDocument): string | null {
 
 interface PaperSignValues {
   signerContactId: string
+  /** Su documento, si su ficha no lo tiene (se pide solo entonces). */
+  signerDoc: string
   file: File | null
   informed: boolean
 }
 
 const paperSignSchema = z.object({
   signerContactId: z.string().min(1, "Elige quién firmó la hoja"),
+  signerDoc: z.string().max(40, "Escribe el documento en 40 caracteres o menos."),
   file: z.custom<File | null>().refine((file) => file !== null, "Sube la foto de la hoja firmada"),
   informed: z.boolean().refine((value) => value, "Confirma que informaste y resolviste sus dudas"),
 })
@@ -601,7 +626,7 @@ export function PaperSignDrawer({
   // La foto ya subida no se sube otra vez si lo que falla es la firma.
   const uploaded = useRef<{ file: File; id: string } | null>(null)
   const firstChoice = choices[0]?.contactId ?? ""
-  const defaultValues: PaperSignValues = { signerContactId: "", file: null, informed: false }
+  const defaultValues: PaperSignValues = { signerContactId: "", signerDoc: "", file: null, informed: false }
   const form = useAppForm({
     defaultValues,
     validators: { onSubmit: paperSignSchema },
@@ -622,6 +647,7 @@ export function PaperSignDrawer({
         signerKind: signer?.kind ?? "paciente",
         signerContactId: value.signerContactId,
         representativeRelation: signer?.kind === "representante" ? "Representante legal" : null,
+        ...(signer?.kind === "representante" && !signer.doc ? { signerDoc: value.signerDoc.trim() || null } : {}),
         comprehensionConfirmed: true,
         method: "papel",
         paperDocumentId,
@@ -639,7 +665,7 @@ export function PaperSignDrawer({
     },
   })
   const surface = useFormSurface(form, {
-    fieldMap: { paperDocumentId: "file", comprehensionConfirmed: "informed", signerDoc: "signerContactId" },
+    fieldMap: { paperDocumentId: "file", comprehensionConfirmed: "informed", signerDoc: "signerDoc" },
   })
   const signerContactId = useStore(form.store, (state) => state.values.signerContactId)
   const signer = choices.find((c) => c.contactId === signerContactId) ?? choices[0] ?? null
@@ -685,6 +711,17 @@ export function PaperSignDrawer({
               />
             )}
           </form.AppField>
+          {signer?.kind === "representante" && !signer.doc ? (
+            <form.AppField name="signerDoc">
+              {(field) => (
+                <field.TextField
+                  label={`Documento de ${signer.name} (DNI u otro)`}
+                  description="Su ficha no lo tiene: escríbelo para firmar como su representante."
+                  maxLength={40}
+                />
+              )}
+            </form.AppField>
+          ) : null}
           <form.AppField name="file">
             {(field) => (
               <field.Control label="Foto de la hoja firmada" description="Queda en Documentos como consentimiento.">
