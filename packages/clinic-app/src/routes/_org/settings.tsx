@@ -47,6 +47,7 @@ const grupos: SectionNavGroup[] = [
     label: "Ventas y cobros",
     items: [
       { label: "Medios de pago y ticket", to: "/settings/payment-methods" },
+      { label: "Comisiones por profesional", to: "/settings/commissions" },
       { label: "Etapas de venta", to: "/settings/pipelines" },
     ],
   },
