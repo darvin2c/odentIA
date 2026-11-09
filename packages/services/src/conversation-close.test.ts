@@ -5,7 +5,8 @@ import { agentActionLog, agentCaseMemory, agentHandoff, agentProposal, agentRunL
 import { member, user } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
-import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { appointment, appointmentBookingLink, scheduleRoom } from "@odentia/db/schema/agenda"
+import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq } from "drizzle-orm"
@@ -308,6 +309,51 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
     expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta", closedByUserId: null })
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Hugo, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
+  })
+
+  it("X5: el consentimiento enviado por su enlace, que salió y espera su firma, cuenta el silencio desde ese envío; nunca deja de cerrar", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Hugo Díaz", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "¿Me mandan el consentimiento?", IN)
+    await c.say(conv.id, "out", "Claro, en un momento te llega. ¿Algo más?", OUT)
+    // A las 6 horas el equipo se lo envía por su enlace, y salió (no solo quedó encolado).
+    const SENT = new Date("2026-10-12T20:00:00Z")
+    await c.say(conv.id, "out", `Leer y firmar: https://clinica.test/pendientes?abre=firma&token={{su-enlace:${randomUUID()}}}`, SENT, "user")
+    await ownerDb.update(conversation).set({ lastMessageAt: SENT, lastOutboundAt: SENT, nudgedAt: OUT }).where(eq(conversation.id, conv.id))
+    const [patient] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: "Hugo Díaz", patientNumber: 1 })
+    const [template] = await ownerDb
+      .insert(consentTemplate)
+      .values({ organizationId: c.orgId, key: `t-${randomUUID().slice(0, 8)}`, title: "Exodoncia", body: "Texto", status: "publicado" })
+      .returning({ id: consentTemplate.id })
+    const [consent] = await ownerDb
+      .insert(consentDocument)
+      .values({
+        organizationId: c.orgId, templateId: template!.id, templateVersion: 1, bodySnapshot: "Texto", titleSnapshot: "Exodoncia",
+        patientId: patient!.id, signerName: "Hugo Díaz", linkSentAt: SENT,
+      })
+      .returning({ id: consentDocument.id })
+    await ownerDb.insert(appointmentBookingLink).values({
+      organizationId: c.orgId, contactId: conv.contactId, patientId: patient!.id, conversationId: conv.id,
+      tokenHash: randomUUID().replace(/-/g, "").padEnd(64, "0"), expiresAt: new Date(Date.now() + 7 * 86_400_000),
+    })
+    // Sin el envío habría cerrado el lunes a las 19:59 de Lima (22 horas de su último mensaje, adelantadas): ahora espera.
+    expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 0 })
+    // 22 horas después del envío (martes 13:00 de Lima) cierra igual: esperar respuesta no es «no cerrar».
+    expect(await tick(c, new Date("2026-10-13T18:05:00Z"))).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
+
+    // Ya firmado, el envío no aplaza nada: se cuenta desde lo que escribió.
+    const other = await c.thread("Ana Paz", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(other.id, "in", "¿Me mandan el consentimiento?", IN)
+    await c.say(other.id, "out", "Claro, en un momento te llega. ¿Algo más?", OUT)
+    await c.say(other.id, "out", `Leer y firmar: https://clinica.test/pendientes?abre=firma&token={{su-enlace:${randomUUID()}}}`, SENT, "user")
+    await ownerDb.update(conversation).set({ lastMessageAt: SENT, lastOutboundAt: SENT, nudgedAt: OUT }).where(eq(conversation.id, other.id))
+    await ownerDb.insert(appointmentBookingLink).values({
+      organizationId: c.orgId, contactId: other.contactId, patientId: patient!.id, conversationId: other.id,
+      tokenHash: randomUUID().replace(/-/g, "").padEnd(64, "1"), expiresAt: new Date(Date.now() + 7 * 86_400_000),
+    })
+    await ownerDb.update(consentDocument).set({ personSignedAt: new Date(), signatureMethod: "enlace" }).where(eq(consentDocument.id, consent!.id))
+    expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
   })
 
   it("si en la atención quedó una cita, a la hora sin mensajes la da por resuelta, sin despedida: le escribe su recordatorio (ADR 0113)", async () => {

@@ -73,6 +73,7 @@ import {
   type ProductAgentTexts,
   personalLinkAddress,
   personalLinkRef,
+  carriesPersonalLink,
   planBudgetAnswer,
   proposalConfirmButtons,
   proposalReplyOf,
@@ -949,8 +950,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     const sought = ctx.gapsSought
     const publicUrl = ctx.publicUrl
     if (!sought || !publicUrl || ctx.dryRun || ctx.casePending || ctx.route?.path === "cambio_cita") return text
-    // Ya lleva su enlace (el de reserva, o el que trae la hora elegida: `/reserva?sede=…&token=…`): no va otro.
-    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?") || timesIn(text) < 2) return text
+    // Ya lleva su enlace (el de reserva, el que trae la hora elegida: `/reserva?sede=…&token=…`, o el de una cosa: `/pendientes?…`): no va otro.
+    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || carriesPersonalLink(text) || timesIn(text) < 2) return text
     return appendLinkLine(text, publicUrl, async (tx, origin) => {
       const link = await issueAgendaLink(
         tx,
@@ -996,10 +997,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const withChangeLink = async (text: string): Promise<string> => {
     const publicUrl = ctx.publicUrl
     if (ctx.route?.path !== "cambio_cita" || !publicUrl || ctx.dryRun || ctx.casePending) return text
-    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?")) return text
+    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || carriesPersonalLink(text)) return text
     return appendLinkLine(text, publicUrl, async (tx, origin) => {
       const link = await issueChangeLink(tx, ctx.orgId, { conversationId: ctx.conversationId }, { secretsKey: ctx.secretsKey })
-      return link ? changePhrase(personalLinkAddress(origin, personalLinkRef(link.linkId)), link.forName, ctx.personLanguage) : null
+      // Abre directo su cita (`/pendientes?abre=cita`), donde la cambia o la cancela.
+      return link ? changePhrase(personalLinkAddress(origin, personalLinkRef(link.linkId), "cita"), link.forName, ctx.personLanguage) : null
     })
   }
 
@@ -1640,6 +1642,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         if (error instanceof ServiceError && error.code === "BOOKING_PATIENT_AMBIGUOUS") {
           return "La persona tiene varios pacientes vinculados: pregunta para quién es la cita y vuelve a llamar con su patientId (de ver_contexto_paciente)."
         }
+        if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") {
+          return "Quien escribe no está autorizado a ver ni manejar las citas de ese paciente: no le envíes su enlace ni le des datos de su cita. Dile con amabilidad que eso lo ve el paciente o quien decide por él, o pasa el caso a una persona."
+        }
         if (error instanceof ServiceError) return `No se pudo crear el enlace: ${error.message}. Propón horarios por aquí. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace.`
         throw error
       }
@@ -1647,7 +1652,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "enviar_enlace_cita",
       description:
-        "Envía «Su enlace»: la página personal de la persona, para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat; ahí también ve lo que tiene pendiente (su cita, sus datos por completar, su presupuesto). Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando la persona diga que su enlace ya no sirve: le das uno nuevo. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
+        "Envía «Elige tu cita»: su página para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Es solo para reservar. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando diga que su enlace para reservar ya no sirve: le das uno nuevo. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
       schema: z.object({
         patientId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
@@ -2133,7 +2138,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "enviar_comprobante",
       description:
-        "Envía aquí el comprobante (el ticket) del último pago de un paciente, cuando la persona lo pide en el chat. Solo de un paciente que el interlocutor puede ver (de ver_contexto_paciente) y de los últimos 30 días. Al cobrar ya le llegó por correo y está en su enlace, en «Tus papeles».",
+        "Envía aquí el comprobante (el ticket) del último pago de un paciente, cuando la persona lo pide en el chat. Solo de un paciente que el interlocutor puede ver (de ver_contexto_paciente) y de los últimos 30 días. Al cobrar ya le llegó en PDF por su chat o su correo, y está en su portal.",
       schema: z.object({ patientId: z.string().uuid() }),
     },
   )

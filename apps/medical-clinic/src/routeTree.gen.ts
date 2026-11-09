@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './../../../packages/clinic-app/src/routes/public/index'
 import { Route as DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport } from './../../../packages/clinic-app/src/routes/_org'
 import { Route as AvisoRouteImport } from './../../../packages/clinic-app/src/routes/public/aviso'
+import { Route as PendientesRouteImport } from './../../../packages/clinic-app/src/routes/public/pendientes'
 import { Route as PortalRouteImport } from './../../../packages/clinic-app/src/routes/public/portal'
 import { Route as RegistroRouteImport } from './../../../packages/clinic-app/src/routes/public/registro'
 import { Route as ReservaRouteImport } from './../../../packages/clinic-app/src/routes/public/reserva'
@@ -98,6 +99,11 @@ const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute =
 const AvisoRoute = AvisoRouteImport.update({
   id: '/aviso',
   path: '/aviso',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PendientesRoute = PendientesRouteImport.update({
+  id: '/pendientes',
+  path: '/pendientes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PortalRoute = PortalRouteImport.update({
@@ -514,6 +520,7 @@ const PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/aviso': typeof AvisoRoute
+  '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
@@ -590,6 +597,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/aviso': typeof AvisoRoute
+  '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
@@ -666,6 +674,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_org': typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
   '/aviso': typeof AvisoRoute
+  '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
@@ -744,6 +753,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/aviso'
+    | '/pendientes'
     | '/portal'
     | '/registro'
     | '/reserva'
@@ -820,6 +830,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/aviso'
+    | '/pendientes'
     | '/portal'
     | '/registro'
     | '/reserva'
@@ -895,6 +906,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_org'
     | '/aviso'
+    | '/pendientes'
     | '/portal'
     | '/registro'
     | '/reserva'
@@ -973,6 +985,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
   AvisoRoute: typeof AvisoRoute
+  PendientesRoute: typeof PendientesRoute
   PortalRoute: typeof PortalRoute
   RegistroRoute: typeof RegistroRoute
   ReservaRoute: typeof ReservaRoute
@@ -1006,6 +1019,13 @@ declare module '@tanstack/react-router' {
       path: '/aviso'
       fullPath: '/aviso'
       preLoaderRoute: typeof AvisoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pendientes': {
+      id: '/pendientes'
+      path: '/pendientes'
+      fullPath: '/pendientes'
+      preLoaderRoute: typeof PendientesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/portal': {
@@ -1692,6 +1712,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute:
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren,
   AvisoRoute: AvisoRoute,
+  PendientesRoute: PendientesRoute,
   PortalRoute: PortalRoute,
   RegistroRoute: RegistroRoute,
   ReservaRoute: ReservaRoute,

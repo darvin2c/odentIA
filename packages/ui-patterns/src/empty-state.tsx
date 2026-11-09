@@ -8,6 +8,7 @@ import {
   EmptyTitle,
 } from "@odentia/ui"
 import { ArrowUpRight, Inbox, type LucideIcon } from "lucide-react"
+import type { ReactNode } from "react"
 import { common } from "./common.js"
 
 export interface EmptyStateProps {
@@ -21,6 +22,11 @@ export interface EmptyStateProps {
   learnMoreLabel?: string
   learnMoreHref?: string
   className?: string
+  /**
+   * Lo que la acción necesita además de un botón (uno que se deshabilita mientras
+   * envía y dice cómo salió): va donde irían las acciones, que entonces se omiten.
+   */
+  children?: ReactNode
 }
 
 /**
@@ -39,6 +45,7 @@ export function EmptyState({
   learnMoreLabel,
   learnMoreHref,
   className,
+  children,
 }: EmptyStateProps) {
   const hasPrimary = Boolean(actionLabel && onAction)
   const hasSecondary = Boolean(secondaryActionLabel && onSecondaryAction)
@@ -57,9 +64,10 @@ export function EmptyState({
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
-      {hasPrimary || hasSecondary || hasLearnMore ? (
+      {hasPrimary || hasSecondary || hasLearnMore || children ? (
         <EmptyContent>
-          {hasPrimary || hasSecondary ? (
+          {children}
+          {!children && (hasPrimary || hasSecondary) ? (
             <div className="flex flex-wrap items-center justify-center gap-2">
               {hasPrimary ? (
                 <Button type="button" variant="default" onClick={onAction}>

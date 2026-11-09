@@ -131,6 +131,8 @@ export async function composeJobMessage(
   spec: AutomationMessage,
   jobs: JobRow[],
   now: Date,
+  /** Datos que no salen de los trabajos: cuántas cosas tiene por hacer antes de su cita (`pendientes`). */
+  extra: Partial<Record<MessageVariable, string>> = {},
 ): Promise<ComposedMessage | null> {
   const lead = jobs[0]
   if (!lead?.contactId) return null
@@ -150,6 +152,7 @@ export async function composeJobMessage(
   const upcoming =
     spec.key === "recordatorio_cita" ||
     spec.key === "recordatorio_cita_datos" ||
+    spec.key === "recordatorio_cita_pendientes" ||
     spec.key === "recordatorio_cita_confirmada" ||
     spec.key === "cita_sin_llegar" ||
     spec.key === "aviso_cita_reservada" ||
@@ -229,7 +232,7 @@ export async function composeJobMessage(
     values.oportunidad = opp.title
   }
 
-  const { params, text } = renderMessage(spec, values)
+  const { params, text } = renderMessage(spec, { ...values, ...extra })
   return {
     spec,
     params,

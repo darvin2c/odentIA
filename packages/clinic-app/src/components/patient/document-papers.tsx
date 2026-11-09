@@ -72,6 +72,7 @@ function useRefreshPapers(patientId: string, onChanged?: () => void | Promise<vo
         ["medical-leaves", patientId],
         ["clinical-orders", patientId],
         ["consents", patientId],
+        ["consents-to-confirm", patientId],
         ["treatment-journey", patientId],
         ["timeline", patientId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
@@ -528,7 +529,15 @@ export function ConsentPaper({
   page,
   onClose,
   onChanged,
-}: PaperSurface & { document: ConsentDocument }) {
+  confirmIn = null,
+  signedSummary = null,
+}: PaperSurface & {
+  document: ConsentDocument
+  /** Abierto desde la atención en curso: ahí se confirma lo firmado por enlace. */
+  confirmIn?: string | null
+  /** Quién firmó, con qué documento (abreviado en el servidor), cuándo y qué (`linkSignedSummary`). */
+  signedSummary?: string | null
+}) {
   const canWrite = usePermission("clinical.write")
   const refresh = useRefreshPapers(document.patientId, onChanged)
   const [sending, setSending] = useState(false)
@@ -624,17 +633,26 @@ export function ConsentPaper({
       notice={
         canWrite && pending ? (
           <div className="flex flex-col gap-2 rounded-md border p-3">
-            <p>
-              {consentLinkWords(document) ??
-                `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
-            </p>
+            {confirmIn && document.personSignedAt ? (
+              <>
+                {signedSummary ? <p className="font-medium">Firmó {signedSummary}</p> : null}
+                <p className="text-muted-foreground">
+                  Revisa con la persona lo que firmó antes de empezar. Al confirmar queda firmado y anotado en esta atención.
+                </p>
+              </>
+            ) : (
+              <p>
+                {consentLinkWords(document) ??
+                  `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {document.personSignedAt ? null : (
                 <Button type="button" size="sm" onClick={() => setSigning(true)}>
                   Firmar ahora
                 </Button>
               )}
-              <ConsentLinkActions document={document} onChanged={refresh} />
+              <ConsentLinkActions document={document} onChanged={refresh} encounterId={confirmIn} />
             </div>
           </div>
         ) : signatureWords ? (
