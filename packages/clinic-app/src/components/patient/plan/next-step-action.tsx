@@ -125,8 +125,9 @@ export function BudgetAnswerDrawer({
   const runWrite = async <T,>(operation: () => Promise<T>): Promise<T> => {
     const result = await operation()
     // Se cierra sin esperar la lectura nueva: el cajón no alcanza a decir que ya respondió.
+    // En la atención, lo que no eligió deja de pedir consentimiento y de contar por ejecutar.
     void Promise.all([
-      ...PLAN_QUERY_KEYS.map((key) =>
+      ...[...PLAN_QUERY_KEYS, "encounter", "consent-needs", "encounter-closing"].map((key) =>
         queryClient.invalidateQueries({ queryKey: [key, patientId] }),
       ),
       queryClient.invalidateQueries({ queryKey: ["people"] }),

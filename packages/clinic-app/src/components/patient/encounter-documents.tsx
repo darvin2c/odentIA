@@ -149,9 +149,19 @@ export function useEncounterDocuments(
     (leave) => leave.encounterId === encounterId && leave.status === "emitido",
   )
   const needList = needs.data?.data ?? []
-  const pendingSignatures = ownConsents.filter((doc) => doc.status === "pendiente")
+  // Lo que falta firmar lo dice el servidor: uno preparado para lo que la persona
+  // dejó fuera (no lo aceptó o eligió otro camino) ya no se pide. Queda a la vista,
+  // sin «Firmar ahora». Lo que ya va por su enlace sigue su curso.
+  const asked = needs.data ? new Set(needList.map((need) => need.documentId)) : null
+  const pending = ownConsents.filter((doc) => doc.status === "pendiente")
+  const notAsked = asked
+    ? pending.filter((doc) => !asked.has(doc.id) && !doc.linkSentAt && !doc.personSignedAt)
+    : []
+  const pendingSignatures = pending.filter((doc) => !notAsked.includes(doc))
   return {
     needs: needList,
+    /** Preparado para lo que dejó fuera: ya no hace falta firmarlo. */
+    notAsked,
     toPrepare: needList.filter((need) => need.status === "sin_preparar"),
     unpublished: needList.filter((need) => need.status === "sin_publicar"),
     consents: ownConsents,
@@ -509,6 +519,25 @@ export function EncounterDocumentsBlock({
               </div>
             </li>
           ))}
+        {docs.notAsked.map((doc) => (
+          <li key={`fuera-${doc.id}`} className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
+              <span className="text-xs text-muted-foreground">
+                Ya no se pide: no lo aceptó o eligió otro camino
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label={`Ver ${doc.titleSnapshot}`}
+              onClick={() => setViewing({ kind: "consent", document: doc })}
+            >
+              Ver
+            </Button>
+          </li>
+        ))}
         {docs.consents
           .filter((doc) => doc.status === "firmado")
           .map((doc) => (

@@ -1,4 +1,4 @@
-import { isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
+import { isLeftOut, isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
 import {
   type AssembledBudget,
   assembleEncounterBudget,
@@ -206,6 +206,12 @@ export interface EncounterDetailBase {
   /** Ítems indicados en esta atención (origen), con su decisión derivada. */
   indicatedItems: EncounterPlannedItemRow[]
   /**
+   * Tratamientos que esta atención deja por ejecutar: los vinculados y los
+   * indicados aquí, sin repetir, que siguen abiertos y la persona no dejó fuera
+   * (no aceptó o eligió otro camino). La pantalla lo dice, no lo calcula.
+   */
+  pendingTreatments: number
+  /**
    * El motivo que se escribió al reservar su cita, si lo hay. Es una sugerencia: no
    * cuenta como motivo de consulta hasta que quien atiende lo confirma.
    */
@@ -213,6 +219,8 @@ export interface EncounterDetailBase {
 }
 
 const PAGE_DEFAULT = 30
+/** Lo que sigue por hacer de un tratamiento: ni hecho, ni suspendido, ni cerrado. */
+const TO_EXECUTE_STATUSES = ["pendiente", "programado", "en_curso"]
 export const ENCOUNTER_STATUSES = ["borrador", "finalizada", "anulada"] as const
 
 const TEXT_LIMITS = {
@@ -903,6 +911,14 @@ export async function getEncounterDetail(
     // Solo un borrador tiene un motivo por confirmar: una atención firmada o anulada ya no.
     row.status === "borrador" ? bookedReasonOf(tx, orgId, row.appointmentId) : Promise.resolve(null),
   ])
+  // No basta lo vinculado: el vínculo nace cuando la sesión arranca, así que una
+  // indicación recién propuesta solo está entre lo indicado.
+  const attention = new Map(
+    [...plannedItems.map((link) => link.item), ...indicatedItems].map((item) => [item.id, item] as const),
+  )
+  const pendingTreatments = [...attention.values()].filter(
+    (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),
+  ).length
   return {
     encounter: row,
     teeth: teethRows.map((r) => site.value(r.siteCode)).filter((tooth): tooth is number => tooth != null),
@@ -915,6 +931,7 @@ export async function getEncounterDetail(
     addenda: addenda.map((row) => withSite(site, row)),
     plannedItems: plannedItems.map((link) => withSite(site, link.item)),
     indicatedItems: indicatedItems.map((row) => withSite(site, row)),
+    pendingTreatments,
     bookedReason,
   }
 }

@@ -24,8 +24,16 @@ import {
   listBudgets,
   reviseBudget,
 } from "./budgets.js"
+import {
+  createConsentTemplate,
+  getEncounterConsentNeeds,
+  prepareEncounterConsents,
+  publishConsentTemplate,
+  setConsentTemplateServices,
+} from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { addEncounterProcedure } from "./encounters.js"
+import { addEncounterProcedure, getEncounterClosing, getEncounterDetail } from "./encounters.js"
+import { getTreatmentCoordination } from "./treatment-coordination.js"
 import { getPatientAccount } from "./payments.js"
 import { addPlanItem, listPlanItems } from "./plan.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -291,4 +299,101 @@ it("el odontólogo lee el presupuesto de su colega, pero no lo envía", async ()
   expect(own[0]!.canChange).toBe(true)
   const preview = await withOrgContext(appDb, "org_a", (tx) => previewBudgetSend(tx, "org_a", f.patient.id, draft.id, asColleague))
   expect(preview.blocked).toMatch(/lo envía quien lo preparó/)
+})
+
+/** El consentimiento de cada servicio, publicado: «Endodoncia» y «Exodoncia». */
+async function consents(f: Awaited<ReturnType<typeof clinicalFixture>>, byService: Record<string, string>) {
+  for (const [title, serviceId] of Object.entries(byService)) {
+    const created = await f.run((tx) =>
+      createConsentTemplate(tx, "org_a", f.actor, {
+        key: `t-${randomUUID().slice(0, 8)}`,
+        title,
+        sections: {
+          procedure: `${title} de la pieza con anestesia local.`,
+          benefits: ["Quitar el dolor"],
+          risks: ["Dolor los primeros días"],
+          alternatives: ["Otro tratamiento"],
+          consequences: "La infección puede avanzar.",
+        },
+      }),
+    )
+    await f.run((tx) => publishConsentTemplate(tx, "org_a", f.actor, created.id))
+    await f.run((tx) => setConsentTemplateServices(tx, "org_a", f.actor, created.id, [serviceId]))
+  }
+}
+
+it("lo del camino que no eligió no pide consentimiento ni cuenta por ejecutar, y recepción no lo ve abierto", async () => {
+  const { f, resina, profilaxis, endodoncia, corona, exodoncia } = await ana()
+  await consents(f, { Endodoncia: endodoncia.serviceId!, Exodoncia: exodoncia.serviceId! })
+  const needed = async () =>
+    (await f.run((tx) => getEncounterConsentNeeds(tx, "org_a", f.patient.id, f.encounter.id))).map((need) => need.title).sort()
+  const toExecute = async () =>
+    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))).pendingTreatments
+  // Mientras decide, los dos caminos piden lo suyo, y se preparan los dos.
+  expect(await needed()).toEqual(["Endodoncia", "Exodoncia"])
+  expect(await toExecute()).toBe(5)
+  const prepared = await f.run((tx) => prepareEncounterConsents(tx, ...f.args, f.encounter.id))
+  expect(prepared.created).toHaveLength(2)
+  const draft = await f.run((tx) =>
+    placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }),
+  )
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      optionId: draft.options[0]!.id,
+      decisions: [resina, profilaxis, endodoncia, corona].map((item) => ({
+        planItemId: item.id,
+        decision: "aceptado" as const,
+      })),
+    }),
+  )
+  // Eligió conservar: la exodoncia quedó «No elegida» y su estado sigue pendiente.
+  const plan = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
+  expect(plan.find((item) => item.id === exodoncia.id)).toMatchObject({ decisionStatus: "no_elegida", status: "pendiente" })
+  // El de la exodoncia ya preparado queda en Documentos, pero no se pide.
+  expect(await needed()).toEqual(["Endodoncia"])
+  expect(await toExecute()).toBe(4)
+  // El cierre tampoco la pide.
+  const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  expect(closing.consents.map((need) => need.title)).toEqual(["Endodoncia"])
+  // Recepción no la ve como un tratamiento abierto.
+  const coordination = await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))
+  expect(JSON.stringify(coordination)).not.toContain(exodoncia.id)
+})
+
+it("lo que no aceptó no pide consentimiento; si lo acepta en la revisión, vuelve a pedirlo", async () => {
+  const { f, resina, exodoncia } = await ana()
+  await consents(f, { Exodoncia: exodoncia.serviceId! })
+  const needed = async () =>
+    (await f.run((tx) => getEncounterConsentNeeds(tx, "org_a", f.patient.id, f.encounter.id))).map((need) => need.title)
+  const toExecute = async () =>
+    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))).pendingTreatments
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [resina.id, exodoncia.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      decisions: [
+        { planItemId: resina.id, decision: "aceptado" },
+        { planItemId: exodoncia.id, decision: "rechazado" },
+      ],
+    }),
+  )
+  expect(await needed()).toEqual([])
+  // Quedan la resina y lo indicado sin presupuestar (profilaxis, endodoncia y corona).
+  expect(await toExecute()).toBe(4)
+  // Lo piensa mejor: la revisión la vuelve a ofrecer y la acepta.
+  const revision = await f.run((tx) =>
+    reviseBudget(tx, ...f.args, draft.id, { itemIds: [resina.id, exodoncia.id], reason: "Lo pensó mejor" }),
+  )
+  await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, revision.id, {
+      decisions: [
+        { planItemId: resina.id, decision: "aceptado" },
+        { planItemId: exodoncia.id, decision: "aceptado" },
+      ],
+    }),
+  )
+  expect(await needed()).toEqual(["Exodoncia"])
+  expect(await toExecute()).toBe(5)
 })
