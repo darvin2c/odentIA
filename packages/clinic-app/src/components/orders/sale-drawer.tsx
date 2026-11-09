@@ -9,7 +9,7 @@
  * sigue abierto, así un reintento tras un corte no vende dos veces.
  */
 import { formatMoney, parseMoney } from "@odentia/clinical"
-import { Alert, AlertDescription, Button, toast } from "@odentia/ui"
+import { Alert, AlertDescription, Button } from "@odentia/ui"
 import {
   InputGroup,
   InputGroupAddon,
@@ -39,7 +39,7 @@ import {
   type PaymentMethodOption,
   usePaymentMethodsOptions,
 } from "../../lib/finance-collect"
-import { fetchProducts, inventoryKeys, productLabelLine, unitsText } from "../../lib/inventory"
+import { inventoryKeys, productLabelLine } from "../../lib/inventory"
 import {
   fetchSaleReferences,
   invalidateOrders,
@@ -50,6 +50,7 @@ import {
 import { useOrgProfile } from "../../lib/org"
 import type { PatientFull } from "../../lib/patients"
 import type { OrderLineKind, ProductOrdersUi } from "../../product/product-ui"
+import { BranchSwitcher } from "../branch-switcher"
 import { ChoiceButtons } from "../choice-buttons"
 import { MoneyInput } from "../inventory/fields"
 import { PersonPicker, type PickedPerson } from "../person-picker"
@@ -165,7 +166,8 @@ export function SaleDrawer({
   /** La receta que trae el enlace (`?receta=`): se elige si es de esa persona y está vigente. */
   presetReferenceId?: string
   onClose: () => void
-  onSold: (orderId: string) => void
+  /** Vendido: el pedido nuevo y, si dejó adelanto, su ticket. */
+  onSold: (order: { id: string; orderNumber: number }, ticketId: string | null) => void
 }) {
   const queryClient = useQueryClient()
   // La misma clave mientras el cajón siga abierto: un reintento devuelve la misma venta.
@@ -311,10 +313,7 @@ export function SaleDrawer({
       // Lo del inventario salió de la sede al vender.
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
       void queryClient.invalidateQueries({ queryKey: ["sale-products"] })
-      toast.success(
-        `Pedido N.º ${order.orderNumber} registrado${ticketId ? ", con su adelanto" : ""}.`,
-      )
-      onSold(order.id)
+      onSold(order, ticketId)
     },
   })
   const surface = useFormSurface(form, { fieldMap: serverField })
@@ -356,7 +355,6 @@ export function SaleDrawer({
     queryKey: orderKeys.references(patientId ?? ""),
     queryFn: () => fetchSaleReferences(patientId as string),
     enabled: Boolean(patientId) && seesReferences,
-    retry: (count, error) => !(error instanceof ApiError && error.status === 403) && count < 2,
   })
   const denied = references.error instanceof ApiError && references.error.status === 403
   const offered = seesReferences && !denied && Boolean(patientId)
@@ -420,8 +418,19 @@ export function SaleDrawer({
       open
       onClose={onClose}
       title={orders.sellLabel}
-      description={
-        sede.branches.length > 1 && branchName ? `Se vende en ${branchName}.` : undefined
+      // Con varias sedes se elige aquí mismo: el cobro y lo del inventario son de ella.
+      headerContent={
+        sede.branches.length > 1 && branchId ? (
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            Se vende en
+            <BranchSwitcher
+              branches={sede.branches}
+              value={branchId}
+              fallbackName={branchName}
+              onChange={(id) => sede.choose(id)}
+            />
+          </p>
+        ) : undefined
       }
       isLoading={profile.isPending}
       submitLabel="Vender"
@@ -532,6 +541,11 @@ export function SaleDrawer({
                 )}
               </form.AppField>
             )
+          ) : patientId ? (
+            // Sin ver la receta no se ofrece copiarla: se dice, para que nadie la busque.
+            <p className="text-sm text-muted-foreground">
+              {orders.referenceLabel}: la agrega quien la ve. El pedido va sin ella.
+            </p>
           ) : null}
 
           <form.AppField name="lines" mode="array">
@@ -649,9 +663,7 @@ export function SaleDrawer({
                       ))}
                     </div>
                     {lines.length > 0 ? (
-                      <p className="text-sm font-semibold tabular-nums" role="status">
-                        Total {money(total)}
-                      </p>
+                      <p className="text-sm font-semibold tabular-nums">Total {money(total)}</p>
                     ) : null}
                   </div>
                 )}
@@ -879,7 +891,7 @@ export function SaleDrawer({
                   </field.Control>
                 )}
               </form.AppField>
-              <div className="flex min-h-9 flex-col justify-center" role="status">
+              <div className="flex min-h-9 flex-col justify-center">
                 <span className="text-sm text-muted-foreground">
                   {change !== null && change < 0 ? "Falta" : "Vuelto"}
                 </span>
@@ -890,7 +902,7 @@ export function SaleDrawer({
             </div>
           ) : null}
           {lines.length > 0 ? (
-            <p className="text-sm tabular-nums" role="status">
+            <p className="text-sm tabular-nums">
               {deposit > 0
                 ? `Adelanto ${money(deposit)}: quedan ${money(Math.max(0, total - deposit))} por pagar.`
                 : `Quedan ${money(total)} por pagar.`}
@@ -915,10 +927,10 @@ function itemDetail(item: SaleItem, money: (cents: number) => string, branchName
 const scanCode = (text: string) => text.replace(/\s+/g, "")
 
 /**
- * Buscar entre lo que se vende en la sede. Quien ve el inventario busca también
- * por marca, modelo y el código de barras exacto: el lector escribe el código y
- * pulsa Enter, y si un solo producto lo tiene queda elegido. Quien solo cobra
- * busca como en «Agregar producto» de Cobros, por nombre y código.
+ * Buscar entre lo que se vende en la sede, con la búsqueda de «Agregar producto»
+ * de Cobros (todo el que vende cobra): por nombre, código, marca, modelo y el
+ * código de barras exacto. El lector escribe el código y pulsa Enter: si un solo
+ * producto lo tiene, queda elegido.
  */
 function ProductSearch({
   id,
@@ -941,33 +953,24 @@ function ProductSearch({
   value: SaleItem | null
   onChange: (product: SaleItem | null) => void
 }) {
-  const fromInventory = usePermission("inventory.read")
   const [query, setQuery] = React.useState("")
   const search = React.useDeferredValue(query.trim())
   const products = useQuery({
-    queryKey: ["sale-products", fromInventory ? "inventario" : "caja", branchId, search],
+    // Su propia clave: guarda la búsqueda junto a lo que trajo (el escáner la compara).
+    queryKey: ["sale-products", "pedido", branchId, search],
     queryFn: async (): Promise<{ q: string; items: SaleItem[] }> => {
-      if (fromInventory) {
-        const list = await fetchProducts(branchId, search || undefined)
-        const items = list.items
-          .filter((item) => item.forSale && item.isActive)
-          .slice(0, 20)
-          .map((item) => ({
-            productId: item.id,
-            name: item.name,
-            salePriceCents:
-              item.salePriceCents && item.salePriceCents > 0 ? item.salePriceCents : null,
-            onHandText: item.onHand > 0 ? unitsText(item.onHand, item.unit) : null,
-            barcode: item.barcode,
-            label: productLabelLine(item),
-          }))
-        return { q: search, items }
-      }
       const list = await fetchSaleProducts({ branchId, q: search || undefined, limit: 20 })
       return {
         q: search,
-        // La caja también escanea: su búsqueda dice el código de barras y la etiqueta.
-        items: list.data.items.map((item) => ({ ...item, barcode: item.barcode ?? null, label: productLabelLine(item) })),
+        // Su búsqueda dice el código de barras y la etiqueta.
+        items: list.data.items.map((item) => ({
+          productId: item.productId,
+          name: item.name,
+          salePriceCents: item.salePriceCents,
+          onHandText: item.onHandText,
+          barcode: item.barcode ?? null,
+          label: productLabelLine(item),
+        })),
       }
     },
     enabled: Boolean(branchId),
@@ -1007,7 +1010,6 @@ function ProductSearch({
         if (event.key !== "Enter" || !query.trim()) return
         // Enter en el buscador no vende: busca el código que acaba de leer el escáner.
         event.preventDefault()
-        if (!fromInventory) return
         scanning.current = scanCode(query)
         settleScan()
       }}

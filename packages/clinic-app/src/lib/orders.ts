@@ -4,9 +4,11 @@
  * lo que se puede hacer y lo que falta pagar lo decide el servidor, aquí solo
  * se dice.
  */
+import { formatMoney } from "@odentia/clinical"
 import type { QueryClient } from "@tanstack/react-query"
 import type { OrderLineKind } from "../product/product-ui"
 import { apiFetch } from "./api"
+import { activeOrgLocale } from "./locale"
 
 export type OrderStep = "por_enviar" | "en_laboratorio" | "por_revisar" | "listo" | "entregado"
 export type OrderStatus = OrderStep | "anulado"
@@ -110,6 +112,7 @@ export const orderKeys = {
   list: (status: string) => ["orders", "list", status] as const,
   detail: (id: string) => ["orders", "detail", id] as const,
   references: (patientId: string) => ["orders", "references", patientId] as const,
+  ofPerson: (patientId: string) => ["orders", "person", patientId] as const,
 }
 
 export function fetchOrders(status: string): Promise<OrderRow[]> {
@@ -216,4 +219,33 @@ export function orderNumberWords(link: OrderLink): string {
 /** Lo que cambia con un pedido: las listas y los detalles. */
 export function invalidateOrders(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: orderKeys.all })
+}
+
+/** Un importe en la moneda que entrega el servidor, con el formato de la clínica; null sin moneda. */
+export function orderMoney(cents: number, currency: string | null): string | null {
+  return currency ? formatMoney(cents, currency, activeOrgLocale() ?? "es") : null
+}
+
+/**
+ * Lo que queda por pagar de un pedido: «Falta pagar» y el importe. Anulado, lo
+ * que ya tenía algo cobrado no se anula con él y lo que falta se sigue debiendo.
+ * Rehecho, lo que falta lo dice el pedido que lo rehízo, que comparte sus cargos.
+ */
+export function dueOf(order: {
+  status: string
+  dueCents: number | null
+  currency: string | null
+  remadeAs: unknown
+}): { label: "Falta pagar" | "Sigue debiendo"; amount: string } | null {
+  if (order.remadeAs || !order.dueCents || order.dueCents <= 0) return null
+  const amount = orderMoney(order.dueCents, order.currency)
+  if (!amount) return null
+  return { label: order.status === "anulado" ? "Sigue debiendo" : "Falta pagar", amount }
+}
+
+/** Los pedidos de una persona (su página), de lo último que cambió a lo más antiguo. */
+export function fetchPersonOrders(patientId: string): Promise<OrderRow[]> {
+  return apiFetch<{ data: OrderRow[] }>(
+    `/api/orders?patientId=${encodeURIComponent(patientId)}`,
+  ).then((body) => body.data)
 }
