@@ -20,7 +20,7 @@ import {
   reserveBooking,
 } from "../../lib/booking-link"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { type BookingDataDraft, BookingDataForm, checkYou, emptyBookingDataDraft, PromotionsQuestion, useYouForm, YouReview, youFieldsOf, youInput, youPromotionsId } from "../booking-data-form"
+import { type BookingDataDraft, BookingDataForm, checkYou, emptyBookingDataDraft, PromotionsQuestion, remindersWords, useYouForm, YouReview, youFieldsOf, youInput, youPromotionsId } from "../booking-data-form"
 import { capital, hourOf, longDay, timeLabel, type WeekSlot } from "./week-slots"
 
 /**
@@ -30,12 +30,13 @@ import { capital, hourOf, longDay, timeLabel, type WeekSlot } from "./week-slots
  * único formulario: a quien aún no es paciente le pide ahí lo que la clínica
  * necesita (con lo que ya sabemos escrito) y a quien ya lo es, lo que le falta;
  * a los dos, lo que aún no aceptó o respondió. Todo se guarda con la cita.
- * Sirve para reservar (el enlace del agente), cambiar su cita y agendar lo que
- * aceptó de su presupuesto. Solo muestra lo que el servidor entrega libre:
+ * Sirve para reservar (el enlace del agente), cambiar su cita, agendar lo que
+ * aceptó de su presupuesto y «Reservar otra» desde «Tu cita», con su tope. Solo muestra lo que el servidor entrega libre:
  * quién atiende, su próximo horario y las horas de cada día; nunca calcula
  * disponibilidad.
  */
-type Mode = "reservar" | "cambiar" | "tratamiento"
+export type ChooseMode = "reservar" | "cambiar" | "tratamiento" | "otra"
+type Mode = ChooseMode
 type Step = "sede" | "cuando" | "revisa"
 
 /** Sin preferencia: cada hora con quien la tenga libre. */
@@ -161,6 +162,8 @@ export function ChooseAppointment({
 }) {
   const queryClient = useQueryClient()
   const changing = mode === "cambiar"
+  // Las horas se piden con las reglas de lo que se hace: cambiar su cita u otra cita con su tope.
+  const slotsMode = changing ? "cambiar" : mode === "otra" ? "otra" : null
   const fixedBranchId = changing ? (current?.branchId ?? null) : mode === "reservar" ? (view.booking?.branchId ?? null) : null
   const branchStep = fixedBranchId === null && view.branches.length > 1
   const steps: Step[] = branchStep ? ["sede", "cuando", "revisa"] : ["cuando", "revisa"]
@@ -205,7 +208,7 @@ export function ChooseAppointment({
   const professionalsKey = (id: string) => ["booking-professionals", slug, token, mode, id] as const
   const professionals = useQuery({
     queryKey: professionalsKey(branchId ?? ""),
-    queryFn: async () => (await fetchBookingProfessionals(slug, token, branchId ?? "", changing)).data,
+    queryFn: async () => (await fetchBookingProfessionals(slug, token, branchId ?? "", slotsMode)).data,
     enabled: branchId !== null && step !== "sede",
     retry: false,
   })
@@ -229,7 +232,7 @@ export function ChooseAppointment({
   const range = effectiveStart ? windowRange(effectiveStart, timeZone, now) : null
   const slots = useQuery({
     queryKey: ["booking-slots", slug, token, mode, branchId, range?.from ?? null, range?.to ?? null],
-    queryFn: async () => (await fetchBookingSlots(slug, token, { branchId: branchId ?? "", from: range?.from ?? "", to: range?.to ?? "", changing })).data,
+    queryFn: async () => (await fetchBookingSlots(slug, token, { branchId: branchId ?? "", from: range?.from ?? "", to: range?.to ?? "", mode: slotsMode })).data,
     enabled: branchId !== null && range !== null && step !== "sede",
     retry: false,
   })
@@ -286,7 +289,7 @@ export function ChooseAppointment({
         : (view.booking?.service?.name ?? "Consulta")
   const minutes = changing ? (current?.durationMin ?? null) : mode === "reservar" ? (view.booking?.service?.durationMin ?? branch?.defaultMinutes ?? null) : (branch?.defaultMinutes ?? null)
   const chosenPerson = effectiveWho === ANYONE ? null : (people.find((person) => person.id === effectiveWho) ?? null)
-  const title = changing ? "Cambia tu cita" : mode === "tratamiento" ? "Agenda tu tratamiento" : "Reserva tu cita"
+  const title = changing ? "Cambia tu cita" : mode === "tratamiento" ? "Agenda tu tratamiento" : mode === "otra" ? "Reserva otra cita" : "Reserva tu cita"
   const stepName: Record<Step, string> = { sede: "Sede", cuando: "Con quién y cuándo", revisa: changing ? "Revisa el cambio" : "Revisa y reserva" }
   const stepIndex = steps.indexOf(step)
 
@@ -323,6 +326,7 @@ export function ChooseAppointment({
         branchId: branchId ?? "",
         ...where,
         ...(mode === "tratamiento" && planItems ? { planItemIds: planItems.map((item) => item.planItemId) } : {}),
+        ...(mode === "otra" ? { another: true as const } : {}),
         ...(you ? { you } : {}),
       })
     },
@@ -490,7 +494,7 @@ export function ChooseAppointment({
             branches={view.branches}
             chosen={branchId}
             onChoose={chooseBranch}
-            load={(id) => ({ queryKey: professionalsKey(id), queryFn: async () => (await fetchBookingProfessionals(slug, token, id, changing)).data })}
+            load={(id) => ({ queryKey: professionalsKey(id), queryFn: async () => (await fetchBookingProfessionals(slug, token, id, slotsMode)).data })}
           />
           <p className="text-sm text-muted-foreground">Cada sede dice su primer horario libre. «Cómo llegar» está antes de reservar.</p>
         </section>
@@ -599,7 +603,7 @@ export function ChooseAppointment({
             </div>
           ) : null}
           <ChosenCard
-            label={changing ? "Ahora" : mode === "tratamiento" ? "Tu tratamiento" : "Tu cita"}
+            label={changing ? "Ahora" : mode === "tratamiento" ? "Tu tratamiento" : mode === "otra" ? "Tu otra cita" : "Tu cita"}
             when={`${longDay(slot.startsAt, timeZone)}, ${timeLabel(slot.startsAt, timeZone)}`}
             what={[serviceName, minutes ? `${minutes} minutos` : null, slot.professionalName].filter(Boolean).join(" · ")}
             forWhom={view.patientFirstName}
@@ -640,15 +644,18 @@ export function ChooseAppointment({
               countryCode={view.countryCode}
               clinicName={view.clinicName}
               slug={slug}
+              remindersVia={view.remindersVia}
             />
           ) : (
             <>
               <p className="text-sm text-muted-foreground">
                 {changing
-                  ? "Es la misma cita en otro horario: no se crea otra. Te escribiremos por WhatsApp sobre tu cita."
+                  ? `Es la misma cita en otro horario: no se crea otra.${remindersWords(view.remindersVia, "tu cita")}`
                   : mode === "tratamiento"
                     ? "Es lo que aceptaste de tu presupuesto. Ya tenemos tus datos: no te pedimos nada más. Podrás cambiarla o cancelarla desde este mismo enlace."
-                    : "Ya tenemos tus datos: no te pedimos nada más. Te escribiremos por WhatsApp sobre esta cita: la confirmación, los recordatorios y los cambios."}
+                    : mode === "otra"
+                      ? `Es una cita más: la que ya tienes sigue igual. Ya tenemos tus datos: no te pedimos nada más.${remindersWords(view.remindersVia, "esta cita")}`
+                      : `Ya tenemos tus datos: no te pedimos nada más.${remindersWords(view.remindersVia, "esta cita: la confirmación, los recordatorios y los cambios")}`}
               </p>
               {asksPromotions ? (
                 <youForm.AppField name="promotions">{() => <PromotionsQuestion id={youPromotionsId} clinicName={view.clinicName} />}</youForm.AppField>
