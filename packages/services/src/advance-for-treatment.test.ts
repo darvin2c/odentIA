@@ -4,7 +4,7 @@ import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createPaymentMethod } from "./payment-methods.js"
-import { acceptedTreatmentTotals, collectCharge, getAccountSummary } from "./payments.js"
+import { acceptedTreatmentTotals, collectCharge, getAccountSummary, returnFromTicket, voidTicket } from "./payments.js"
 import { addPlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
@@ -104,4 +104,38 @@ it("lo que tiene a favor no paga el adelanto de un tratamiento, y no se adelanta
   // El rechazo no dejó nada a medias: ni cargo ni cobro.
   const [still] = await f.run((tx) => acceptedTreatmentTotals(tx, "org_a", f.patient.id))
   expect(still).toMatchObject({ paidCents: 20000, remainingCents: 100000 })
+})
+
+it("anular el ticket del adelanto lo deshace entero, y no se devuelve por partes (revisión del 9 nov)", async () => {
+  const { f, cash, branchId, line } = await acceptedTreatment()
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      advanceCents: 30000,
+      advanceForBudgetItemId: line.id,
+      payments: [{ paymentMethodId: cash.id, amountCents: 30000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const chargeId = (paid.ticket.snapshot as { lines: Array<{ chargeId: string }> }).lines[0]!.chargeId
+  // Devolver una parte dejaría lo devuelto como cobrado del tratamiento: al firmar se cobraría de menos.
+  await expect(
+    f.run((tx) =>
+      returnFromTicket(tx, ...f.args, paid.ticket.id, {
+        branchId,
+        lines: [{ chargeId, amountCents: 10000 }],
+        paymentMethodId: cash.id,
+        reason: "Pidió una parte",
+        requestId: randomUUID(),
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "ADVANCE_RETURNED_WHOLE" })
+  // Anular el ticket: ni deuda «Adelanto: …» por cobrar, ni nada pagado del tratamiento.
+  await f.run((tx) => voidTicket(tx, ...f.args, paid.ticket.id, { reason: "Se equivocó de paciente", allowPostClose: false }))
+  const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.pendiente).toHaveLength(0)
+  expect(account.byCurrency.every((row) => row.porCobrar === 0 && row.aFavor === 0)).toBe(true)
+  const [totals] = await f.run((tx) => acceptedTreatmentTotals(tx, "org_a", f.patient.id))
+  expect(totals).toMatchObject({ paidCents: 0, remainingCents: 120000, owingCents: 0 })
+  expect(totals?.lines[0]?.toChargeCents).toBe(120000)
 })

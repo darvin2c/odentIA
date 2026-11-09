@@ -758,6 +758,8 @@ export interface AcceptedTreatmentTotal {
   agreedCents: number
   paidCents: number
   remainingCents: number
+  /** De lo que falta, lo ya cargado y sin pagar: está en Pendiente. */
+  owingCents: number
   discountCents: number
   returnedCents: number
   lines: Array<{

@@ -1510,7 +1510,8 @@ export function CollectDrawer({
                               onChange={(id) => {
                                 form.setFieldValue("advanceFor", id)
                                 const target = advanceTargets.find((row) => row.budgetItemId === id)
-                                // Se paga en la moneda del tratamiento.
+                                // Se paga en la moneda del tratamiento; lo escrito en otra no se relee en esta.
+                                if (target && (target.currency !== debt || target.currency !== pay)) resetWritten()
                                 if (target) {
                                   form.setFieldValue("debtCurrency", target.currency)
                                   form.setFieldValue("payCurrency", target.currency)
@@ -1520,7 +1521,7 @@ export function CollectDrawer({
                           ) : null}
                           <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
                             {chosenTarget
-                              ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)}. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro.`
+                              ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
                               : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
                           </p>
                           {second !== null && !values.advanceFor ? (

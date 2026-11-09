@@ -609,6 +609,16 @@ export function AccountTab({
                       </div>
                     ))}
                   </dl>
+                  {/* «Falta» junta lo ya hecho sin pagar (en Pendiente) y lo que aún no se hace (segunda mesa). */}
+                  {group.remainingCents > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {group.owingCents > 0
+                        ? group.owingCents >= group.remainingCents
+                          ? `Todo lo que falta ya se puede cobrar: está en Pendiente.`
+                          : `De lo que falta, ${money(group.owingCents, group.currency)} ya se puede cobrar (está en Pendiente) y ${money(group.remainingCents - group.owingCents, group.currency)} se cobra al hacerlo.`
+                        : "Lo que falta se cobra al hacerlo."}
+                    </p>
+                  ) : null}
                   {group.discountCents > 0 || group.returnedCents > 0 || free > 0 ? (
                     <p className="text-sm text-muted-foreground">
                       {[

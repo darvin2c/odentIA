@@ -37,6 +37,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  like,
   or,
   type SQL,
   type SQLWrapper,
@@ -903,6 +904,9 @@ export async function updateCharge(
 
 // --- Cobro atómico -----------------------------------------------------------------------
 
+/** La clave del cargo de un adelanto para un tratamiento (`advanceForBudgetItemId`), con la del cobro. */
+const ADVANCE_KEY = "adelanto:"
+
 /** Medio efectivo que acepta la clínica (catálogo de Configuración, congelado al cobrar). */
 const CASH_TYPE_CODE = "10"
 
@@ -1365,9 +1369,10 @@ export async function collectCharge(
       )
       // Se dice qué es en la cuenta y en el ticket: «Adelanto: Corona». Al firmar, el
       // resto se carga con su nombre de siempre.
+      // `adelanto:` marca el cargo: anular su ticket lo deshace entero y no se devuelve por partes.
       const [charge] = await tx
         .update(patientCharge)
-        .set({ description: `Adelanto: ${created.description}`.slice(0, 500) })
+        .set({ description: `Adelanto: ${created.description}`.slice(0, 500), requestKey: `${ADVANCE_KEY}${requestId}` })
         .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.id, created.id)))
         .returning()
       unit = charge.currency
@@ -1997,6 +2002,48 @@ export async function voidTicket(
         description: charge.description,
         quantity: charge.productQuantity ?? 1,
         branchId: charge.branchId,
+      })
+    }
+  }
+  // El adelanto para un tratamiento que pagó este ticket: sin el pago, no se debe. Se anula el
+  // cargo (no queda «Adelanto: Corona» por cobrar de algo que no se hizo).
+  if (soldHere.length) {
+    const advances = await tx
+      .select()
+      .from(patientCharge)
+      .where(
+        and(
+          eq(patientCharge.organizationId, orgId),
+          eq(patientCharge.patientId, patientId),
+          inArray(patientCharge.id, soldHere),
+          isNull(patientCharge.voidedAt),
+          like(patientCharge.requestKey, `${ADVANCE_KEY}%`),
+        ),
+      )
+    for (const charge of advances) {
+      const [stillPaid] = await tx
+        .select({ id: patientPaymentApplication.id })
+        .from(patientPaymentApplication)
+        .where(
+          and(
+            eq(patientPaymentApplication.organizationId, orgId),
+            eq(patientPaymentApplication.chargeId, charge.id),
+            isNull(patientPaymentApplication.voidedAt),
+          ),
+        )
+        .limit(1)
+      if (stillPaid) continue
+      const reasonText = `Ticket ${String(ticket.ticketNumber).padStart(6, "0")} anulado: ${voidReason}`
+      await tx
+        .update(patientCharge)
+        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reasonText, updatedAt: new Date() })
+        .where(eq(patientCharge.id, charge.id))
+      await audit(tx, orgId, actorUserId, "patient_charge", charge.id, "charge.voided", {
+        patientId,
+        description: charge.description,
+        amountCents: charge.amountCents,
+        currency: charge.currency,
+        reason: reasonText,
       })
     }
   }
@@ -2767,6 +2814,27 @@ export async function returnFromTicket(
     }
     return { line: found, quantity: null, amountCents, backToStock: null }
   })
+  // Un adelanto para un tratamiento se devuelve entero: devolver una parte dejaría lo devuelto
+  // como cobrado del tratamiento (ADR 0068) y al firmar se cobraría de menos (revisión del 9 nov).
+  const advanceRows = await tx
+    .select({ id: patientCharge.id, requestKey: patientCharge.requestKey })
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        inArray(
+          patientCharge.id,
+          plan.map((item) => item.line.chargeId),
+        ),
+      ),
+    )
+  for (const [index, item] of plan.entries()) {
+    const isAdvance = advanceRows.some((row) => row.id === item.line.chargeId && row.requestKey?.startsWith(ADVANCE_KEY))
+    if (isAdvance && item.amountCents !== item.line.paidCents) {
+      const message = "Un adelanto para un tratamiento se devuelve entero, o se anula su ticket"
+      throw new ServiceError("ADVANCE_RETURNED_WHOLE", 409, message, { [`lines[${index}].amountCents`]: message })
+    }
+  }
   const total = sum(plan.map((item) => ({ amountCents: item.amountCents })))
   const paymentMethodId = input.paymentMethodId
   const method = paymentMethodId
@@ -3520,7 +3588,8 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     planCurrency: planCurrencies.length === 1 ? (planCurrencies[0]?.currency ?? null) : null,
     /** Visitas atendidas por tratamiento (actos con cargo vivo): base de «ya realizado» en cobro por sesión. */
     visitasPorTratamiento,
-    conCargo: coveredPlanItems(liveCharges),
+    // Un adelanto para un tratamiento no lo da por cargado: al firmar se carga lo que falta.
+    conCargo: coveredPlanItems(liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY))),
   }
 }
 
@@ -3623,6 +3692,8 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     agreedCents: number
     paidCents: number
     remainingCents: number
+    /** De lo que falta, lo ya cargado y sin pagar: está en Pendiente y ya se puede cobrar. */
+    owingCents: number
     discountCents: number
     returnedCents: number
     lines: Array<{
@@ -3649,6 +3720,7 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
         agreedCents: 0,
         paidCents: 0,
         remainingCents: 0,
+        owingCents: 0,
         discountCents: 0,
         returnedCents: 0,
         lines: [],
@@ -3663,6 +3735,7 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     group.agreedCents += agreed
     group.paidCents += paid
     group.remainingCents += toCharge + owing
+    group.owingCents += owing
     group.discountCents += own.reduce((total, c) => total + c.discountCents, 0)
     group.returnedCents += own.reduce((total, c) => total + c.returnedCents, 0)
     group.lines.push({
