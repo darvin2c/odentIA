@@ -1,8 +1,12 @@
 ---
 // Título, descripción y preguntas en src/lib/pages-data.ts (PAGES.caja). Cada producto tiene su página:
-// la de latidIA (components/latidia/billing) y la de odentIA (components/billing).
+// la de odentIA (components/billing), la de latidIA (components/latidia/billing) y la de vistIA, con su
+// inventario y sus sedes (components/vistia).
 import DentalBillingPage from "../components/billing/BillingPage.astro"
 import BillingPage from "../components/latidia/billing/BillingPage.astro"
-import { MEDICAL } from "../lib/product"
+import VistiaPage from "../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../lib/product"
+
+const Page = ofProduct({ dental: DentalBillingPage, medical: BillingPage, optical: VistiaPage })
 ---
-{MEDICAL ? <BillingPage /> : <DentalBillingPage />}
+<Page />

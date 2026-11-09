@@ -13,17 +13,25 @@ import { defineConfig } from "astro/config"
 // buscadores (llevan noindex).
 const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
 
-// La web de latidIA la publica el mismo servidor con VITE_PRODUCT=medical: su dominio y solo sus
-// páginas en el mapa del sitio (`src/lib/latidia-pages.json`); las propias de latidIA no van en el de odentIA.
+// Cada producto con web la publica el mismo servidor con su VITE_PRODUCT: su dominio y solo sus
+// páginas en el mapa del sitio (`src/lib/product-pages.json`, las mismas que sirve `servesPage` en
+// src/lib/product.ts); las propias de cada una no van en el de odentIA, el producto base.
 // Los productos que tienen web y su dominio en local. Otro detiene el armado en vez de publicar en
 // silencio la web de odentIA en su dominio (ADR 0164).
-const LOCAL_DOMAINS = { dental: "odentia.localhost", medical: "latidia.localhost" }
-const product = process.env.VITE_PRODUCT || "dental"
+const BASE_PRODUCT = "dental"
+const LOCAL_DOMAINS = { dental: "odentia.localhost", medical: "latidia.localhost", optical: "vistia.localhost" }
+const product = process.env.VITE_PRODUCT || BASE_PRODUCT
 if (!Object.hasOwn(LOCAL_DOMAINS, product))
   throw new Error(`VITE_PRODUCT=${product}: esta web todavía no tiene las páginas de ese producto`)
-const medical = product === "medical"
 const domain = process.env.VITE_BASE_DOMAIN || LOCAL_DOMAINS[product]
-const latidiaPages = JSON.parse(readFileSync(new URL("./src/lib/latidia-pages.json", import.meta.url), "utf8"))
+const productPages = JSON.parse(readFileSync(new URL("./src/lib/product-pages.json", import.meta.url), "utf8"))
+// Cada producto que no es el base dice sus páginas: sin ellas, el armado se detiene.
+for (const known of Object.keys(LOCAL_DOMAINS))
+  if (known !== BASE_PRODUCT && !Object.hasOwn(productPages, known))
+    throw new Error(`src/lib/product-pages.json: faltan las páginas de ${known}`)
+const ownOfOthers = Object.values(productPages).flatMap((pages) => pages.own)
+/** ¿Es una página de esta web? La base, todas menos las propias de las demás; las otras, solo las suyas. */
+const ours = (path) => (product === BASE_PRODUCT ? !ownOfOthers.includes(path) : productPages[product].serves.includes(path))
 const port = process.env.VITE_BASE_PORT ? `:${process.env.VITE_BASE_PORT}` : ""
 // En producción la web ocupa el dominio raíz (ADR 0046); en local la raíz es de la plataforma
 // y la web va en www. No usar WEB_URL: es la dirección del panel (app.).
@@ -40,10 +48,10 @@ function pageFiles(dir) {
 }
 const pages = pageFiles(pagesDir)
   .map((file) => `/${relative(pagesDir, file).replaceAll("\\", "/").replace(/\.astro$/, "").replace(/(^|\/)index$/, "")}`)
-  .filter((path) => (medical ? latidiaPages.serves.includes(path) : !latidiaPages.own.includes(path)))
+  .filter(ours)
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
 
-// Las dos webs se publican en Cloudflare Workers (ADR 0136) con `WEB_TARGET=cloudflare`; sin él,
+// Las webs se publican en Cloudflare Workers (ADR 0136) con `WEB_TARGET=cloudflare`; sin él,
 // el servidor de Node, solo para `pnpm dev`: así la web local llega a la API de portless.
 const workers = process.env.WEB_TARGET === "cloudflare"
 
@@ -71,8 +79,7 @@ export default defineConfig({
         const path = page.replace(/\/$/, "")
         // Cada web, solo sus páginas: las demás responden 404 en su dominio.
         const clean = new URL(page).pathname.replace(/\/$/, "") || "/"
-        const ours = medical ? latidiaPages.serves.includes(clean) : !latidiaPages.own.includes(clean)
-        return ours && !FUERA_DEL_MAPA.test(path)
+        return ours(clean) && !FUERA_DEL_MAPA.test(path)
       },
     }),
   ],

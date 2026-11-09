@@ -3,7 +3,7 @@
 // cuándo, sin decir cuántos lugares quedan) o la del plan de lista (su cuota vuelve como crédito).
 // Va al lado de «Calcula tu mes». Lienzo «Precios: por lo que hizo».
 import { businessDays, days, money, shownPlan } from "../../lib/pricing"
-import { MEDICAL, WORDS } from "../../lib/product"
+import { ofProduct, WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -15,7 +15,7 @@ const discount = founder?.discountPercent ?? null
 const months = founder?.guaranteeMonths ?? null
 const gift = plan && plan.trialCredit > 0 ? money(plan.trialCredit, plan.currency) : null
 const notice = pricing.terms.guaranteeNoticeDays
-const firsts = MEDICAL ? "Los primeros consultorios" : "Las primeras clínicas"
+const firsts = ofProduct({ dental: "Las primeras clínicas", medical: "Los primeros consultorios", optical: "Las primeras ópticas" })
 const share = discount === 50 ? "la mitad" : `${discount} % menos`
 ---
 {plan ? (

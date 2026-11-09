@@ -124,6 +124,16 @@ describe("los números de un consultorio de latidIA", () => {
     for (const size of value.CLINIC_SIZES) expect(value.sizeOf(size.input)).toBe(size.id)
   })
 
+  it("vistIA todavía no tiene números de una óptica: no muestra la calculadora ni cobra consultas de Clío", async () => {
+    vi.stubEnv("VITE_PRODUCT", "optical")
+    vi.resetModules()
+    const { MIX } = await import("./pricing")
+    const value = await import("./value")
+    expect(value.SHOWS_VALUE).toBe(false)
+    expect(value.CLINIC_SIZES).toEqual([])
+    expect(MIX).toMatchObject({ simple: 0, estandar: 0, completa: 0 })
+  })
+
   it("odentIA no cambia: la Clínica Sonrisa del estudio", async () => {
     const value = await import("./value")
     expect(value.DEFAULT_VALUE_INPUT).toMatchObject({ writers: 300, consultations: 300, appointmentValue: 40 })

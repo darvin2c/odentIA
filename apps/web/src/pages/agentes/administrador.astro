@@ -11,13 +11,16 @@ import CtaBand from "../../components/CtaBand.astro"
 import Faq from "../../components/Faq.astro"
 import Base from "../../layouts/Base.astro"
 import AdminPage from "../../components/latidia/agents/admin/AdminPage.astro"
-import { MEDICAL } from "../../lib/product"
+import VistiaPage from "../../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../../lib/product"
 import { ARGOS_NO_SHOWS, ARGOS_OWED, ARGOS_TOP_SALES } from "../../lib/argos-demo"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
 import { days } from "../../lib/pricing"
 import { AGENT_COLORS, ctaOf } from "../../lib/site"
 
+// latidIA y vistIA tienen la suya; odentIA la arma aquí.
+const Own = ofProduct({ dental: null, medical: AdminPage, optical: VistiaPage })
 const page = PAGES.administrador
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
@@ -39,7 +42,7 @@ const faq: FaqItem[] = [
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
-{MEDICAL ? <AdminPage /> : (
+{Own ? <Own /> : (
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
   <SplitHero
     tag="Tu agente administrador"

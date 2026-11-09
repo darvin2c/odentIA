@@ -34,8 +34,10 @@ export type ValueInput = {
  * - latidIA: un consultorio de 4 médicos con unas 8 consultas al día cada uno en 22 días (~700); la
  *   consulta particular a USD 25 (unos S/ 90) y faltan 1 de cada 10. Son supuestos hasta medir los
  *   consultorios piloto; escribe más gente que en una clínica dental porque atiende a más pacientes.
+ * - vistIA: ninguno todavía. Sin los números de una óptica no se inventan: su web no muestra la
+ *   calculadora (`SHOWS_VALUE`).
  */
-const MEDIAN_BY_PRODUCT: Record<WebProduct, ValueInput> = {
+const MEDIAN_BY_PRODUCT: Record<WebProduct, ValueInput | null> = {
   dental: {
     writers: 300,
     unansweredPct: 40,
@@ -58,9 +60,25 @@ const MEDIAN_BY_PRODUCT: Record<WebProduct, ValueInput> = {
     teamHours: 80,
     hourCost: 4,
   },
+  optical: null,
 }
 
-export const DEFAULT_VALUE_INPUT: ValueInput = MEDIAN_BY_PRODUCT[PRODUCT]
+const MEDIAN = MEDIAN_BY_PRODUCT[PRODUCT]
+/** ¿La web de este producto muestra «Lo que pagas y lo que recuperas»? */
+export const SHOWS_VALUE = MEDIAN !== null
+/** Sin números de ejemplo la calculadora no se dibuja; estos ceros solo completan el tipo. */
+const NO_NUMBERS: ValueInput = {
+  writers: 0,
+  unansweredPct: 0,
+  leavePct: 0,
+  noShows: 0,
+  returnPct: 0,
+  consultations: 0,
+  appointmentValue: 0,
+  teamHours: 0,
+  hourCost: 0,
+}
+export const DEFAULT_VALUE_INPUT: ValueInput = MEDIAN ?? NO_NUMBERS
 
 /** La cuenta con los precios vigentes: la cuota más lo que pasa del crédito. */
 export function computeValue(i: ValueInput, prices: ValuePrices) {
@@ -117,7 +135,7 @@ export function computeValue(i: ValueInput, prices: ValuePrices) {
 export type ClinicSize = "pequena" | "mediana" | "grande"
 
 /** Lo que cambia de la mediana en los tamaños pequeño y grande de cada producto. */
-const SIZE_CHANGES: Record<WebProduct, Record<"pequena" | "grande", Partial<ValueInput>>> = {
+const SIZE_CHANGES: Record<WebProduct, Record<"pequena" | "grande", Partial<ValueInput>> | null> = {
   dental: {
     pequena: { writers: 120, noShows: 25, consultations: 120, teamHours: 25 },
     grande: { writers: 800, noShows: 160, consultations: 800, teamHours: 160 },
@@ -127,30 +145,37 @@ const SIZE_CHANGES: Record<WebProduct, Record<"pequena" | "grande", Partial<Valu
     pequena: { writers: 200, noShows: 25, consultations: 250, teamHours: 30 },
     grande: { writers: 1300, noShows: 180, consultations: 1800, teamHours: 200 },
   },
+  // vistIA, sin números de ejemplo: sin tamaños.
+  optical: null,
 }
 
 /** «Tu consultorio es Pequeño»: el tamaño concuerda con la palabra del producto. */
 const SIZE_LABELS: Record<WebProduct, Record<ClinicSize, string>> = {
   dental: { pequena: "Pequeña", mediana: "Mediana", grande: "Grande" },
   medical: { pequena: "Pequeño", mediana: "Mediano", grande: "Grande" },
+  optical: { pequena: "Pequeña", mediana: "Mediana", grande: "Grande" },
 }
 
-/** Tamaños de ejemplo para empezar sin escribir números; después se ajustan a mano. */
-export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input: ValueInput }[] = [
-  {
-    id: "pequena",
-    label: SIZE_LABELS[PRODUCT].pequena,
-    hint: `1 o 2 ${WORDS.clinicians}`,
-    input: { ...DEFAULT_VALUE_INPUT, ...SIZE_CHANGES[PRODUCT].pequena },
-  },
-  { id: "mediana", label: SIZE_LABELS[PRODUCT].mediana, hint: `3 a 6 ${WORDS.clinicians}`, input: DEFAULT_VALUE_INPUT },
-  {
-    id: "grande",
-    label: SIZE_LABELS[PRODUCT].grande,
-    hint: "7 o más, o varias sedes",
-    input: { ...DEFAULT_VALUE_INPUT, ...SIZE_CHANGES[PRODUCT].grande },
-  },
-]
+const SIZES = SIZE_CHANGES[PRODUCT]
+
+/** Tamaños de ejemplo para empezar sin escribir números; después se ajustan a mano. Sin números, ninguno. */
+export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input: ValueInput }[] = SIZES
+  ? [
+      {
+        id: "pequena",
+        label: SIZE_LABELS[PRODUCT].pequena,
+        hint: `1 o 2 ${WORDS.clinicians}`,
+        input: { ...DEFAULT_VALUE_INPUT, ...SIZES.pequena },
+      },
+      { id: "mediana", label: SIZE_LABELS[PRODUCT].mediana, hint: `3 a 6 ${WORDS.clinicians}`, input: DEFAULT_VALUE_INPUT },
+      {
+        id: "grande",
+        label: SIZE_LABELS[PRODUCT].grande,
+        hint: "7 o más, o varias sedes",
+        input: { ...DEFAULT_VALUE_INPUT, ...SIZES.grande },
+      },
+    ]
+  : []
 
 /** El tamaño cuyos números coinciden con los de la calculadora; si se tocaron, ninguno. */
 export function sizeOf(i: ValueInput): ClinicSize | null {

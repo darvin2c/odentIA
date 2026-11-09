@@ -5,9 +5,11 @@ import { LINKS } from "../../lib/pages-data"
 interface Props {
   hrefs: string[]
   white?: boolean
+  /** Lo que dice cada enlace; sin decirlo, los de `LINKS` (vistIA trae los suyos). */
+  links?: Record<string, { label: string; text: string }>
 }
-const { hrefs, white = false } = Astro.props
-const items = hrefs.flatMap((href) => (LINKS[href] ? [{ href, ...LINKS[href] }] : []))
+const { hrefs, white = false, links = LINKS } = Astro.props
+const items = hrefs.flatMap((href) => (links[href] ? [{ href, ...links[href] }] : []))
 ---
 <section class:list={["section", "rel", { "section-white": white }]} aria-labelledby="rel-t">
   <div class="wrap">

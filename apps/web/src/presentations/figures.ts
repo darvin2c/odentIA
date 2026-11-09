@@ -106,7 +106,7 @@ export function withoutGuide(html: string): string {
  * precio y el cierre. `after` también quedan aparte, pero justo después de la clínica: en latidIA, lo que un
  * médico pregunta enseguida (qué pasa con una urgencia y con la receta) y habla de agentes ya presentados.
  */
-const CLINIC_PARTS: Record<WebProduct, { inside: string[]; after: string[] }> = {
+const CLINIC_PARTS: Record<WebProduct, { inside: string[]; after: string[] } | null> = {
   dental: {
     inside: [
       "Mensajes fuera de horario",
@@ -132,6 +132,8 @@ const CLINIC_PARTS: Record<WebProduct, { inside: string[]; after: string[] }> = 
     ],
     after: ["Señales de alarma", "Receta y descanso médico"],
   },
+  // vistIA todavía no tiene presentación.
+  optical: null,
 }
 
 /**
@@ -149,7 +151,9 @@ export function withClinic(deck: string, slide: string, product: WebProduct): st
     if (!found) throw new Error(`presentación: no está la parte «${name}»`)
     return { part: found[0], rest: from.replace(found[0], "") }
   }
-  const { inside, after } = CLINIC_PARTS[product]
+  const parts = CLINIC_PARTS[product]
+  if (!parts) throw new Error(`presentación: ${product} todavía no tiene la suya`)
+  const { inside, after } = parts
   let out = deck
   const moved: string[] = []
   for (const name of after) {

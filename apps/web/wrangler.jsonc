@@ -1,5 +1,5 @@
-// Las dos webs de marketing en Cloudflare Workers (ADR 0136): la de odentIA y, con
-// `CLOUDFLARE_ENV=latidia` al compilar, la de latidIA. El build de Astro arma desde aquí el
+// Las webs de marketing en Cloudflare Workers (ADR 0136): la de odentIA y, con
+// `CLOUDFLARE_ENV=latidia` o `CLOUDFLARE_ENV=vistia` al compilar, la de latidIA o la de vistIA. El build de Astro arma desde aquí el
 // `dist/server/wrangler.json` que publica `wrangler deploy`. Sin `routes`: las rutas de cada dominio
 // viven en el panel de Cloudflare (docs/deployment.md), porque wrangler no sabe ponerles Fail open y
 // publicar sin `routes` no las toca.
@@ -17,6 +17,12 @@
   "env": {
     "latidia": {
       "name": "latidia-web",
+      "workers_dev": false,
+      "preview_urls": false,
+      "observability": { "enabled": true }
+    },
+    "vistia": {
+      "name": "vistia-web",
       "workers_dev": false,
       "preview_urls": false,
       "observability": { "enabled": true }

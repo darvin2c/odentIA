@@ -1,5 +1,10 @@
 ---
 // «Lo que nunca se cobra» (ADR 0047, 0054 y 0085): lo que no es trabajo de un agente dice USD 0.
+// Sin Clío (vistIA) no hay borrador que descartar.
+import { HAS_CLIO, ofProduct, WORDS } from "../../lib/product"
+
+/** Para quién no son los mensajes: odentIA y latidIA dicen «la clínica» desde siempre. */
+const notFor = ofProduct({ dental: "la clínica", medical: "la clínica", optical: "la óptica" })
 ---
 <section class="section never">
   <div class="wrap in">
@@ -9,11 +14,11 @@
       <p class="lead">Así no hay sorpresas: si el agente no hizo nada útil, la fila dice USD 0.</p>
     </div>
     <ul class="list">
-      <li><b>El spam</b> y los mensajes que no son para la clínica.</li>
+      <li><b>El spam</b> y los mensajes que no son para {notFor}.</li>
       <li><b>Los recordatorios</b> y los avisos de cita.</li>
-      <li><b>El borrador que descartas</b>: si Clío no te sirvió, no cuenta.</li>
+      {HAS_CLIO ? <li><b>El borrador que descartas</b>: si Clío no te sirvió, no cuenta.</li> : null}
       <li><b>Lo que responde tu equipo</b> y los avisos a tu equipo.</li>
-      <li><b>La cita recuperada</b> si el paciente no vino.</li>
+      <li><b>La cita recuperada</b> si el {WORDS.patient} no vino.</li>
       <li><b>Las preguntas</b> que Argos no pudo responder.</li>
     </ul>
   </div>

@@ -145,7 +145,7 @@ los Workers `latidia-panel` y `latidia-clinicas`, armados con `VITE_BASE_DOMAIN=
 
 La web de `latidia72.com` es la misma `apps/web` con ese build (el Worker `latidia-web`):
 solo inicio, precios, pedir invitación y las páginas legales
-(`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. La lista de espera guarda el
+(`apps/web/src/lib/product-pages.json`); lo demás responde 404. La lista de espera guarda el
 producto del dominio desde el que se pide (decisión 17).
 
 ### vistIA en su dominio
@@ -179,10 +179,14 @@ El panel de `app.vistia20.com` y la app de sus ópticas (`apps/optical-clinic`) 
 `apps/web` con `VITE_PRODUCT=optical` (job `deploy-web`). Todos los armados conocen
 `VITE_OPTICAL_DOMAIN=vistia20.com`.
 
+La web de `vistia20.com` sirve sus 22 páginas (`apps/web/src/lib/product-pages.json`); lo demás
+responde 404, como la de latidIA, y su lista de espera guarda `optical`. Muestra los planes de
+vistIA marcados «Mostrar en la web».
+
 ## Las webs en Cloudflare Workers
 
-Las dos webs de marketing (ADR 0136) se publican como dos Workers del plan gratuito,
-`odentia-web` y `latidia-web` (`apps/web/wrangler.jsonc`), fuera de OpenShip. El job
+Las webs de marketing (ADR 0136) se publican como Workers del plan gratuito,
+`odentia-web`, `latidia-web` y `vistia-web` (`apps/web/wrangler.jsonc`), fuera de OpenShip. El job
 `deploy-web` del CI las arma con `WEB_TARGET=cloudflare` y su dominio y las publica al
 pasar las pruebas de main; en un PR solo comprueba que se arman. Leen los precios de
 `https://api.<dominio>` y cada página armada se guarda 30 segundos en la caché de
