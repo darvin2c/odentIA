@@ -270,7 +270,7 @@ async function inspectVolumes(client: ContainerRuntimeClient, id: string): Promi
 /**
  * Buckets del run como en producción (`infra/dev/storage-init.sh`): avatares
  * públicos solo bajo `/avatars/*` y con versiones, adjuntos privados con la
- * regla CORS de R2 para los dominios del run (odentIA y, si corre, latidIA). RustFS no da CORS por defecto y
+ * regla CORS de R2 para los dominios del run (odentIA y, si corren, latidIA y vistIA). RustFS no da CORS por defecto y
  * sin ella el navegador no sube ni lee adjuntos firmados.
  */
 async function prepareBuckets(endpoint: string, origins: string[]): Promise<void> {
@@ -547,6 +547,7 @@ export async function startStack(runtime: HarnessRuntime): Promise<HarnessStack>
       [
         `https://*.${runtime.baseDomain}:${runtime.proxyPort}`,
         ...(runtime.medicalDomain ? [`https://*.${runtime.medicalDomain}:${runtime.proxyPort}`] : []),
+        ...(runtime.opticalDomain ? [`https://*.${runtime.opticalDomain}:${runtime.proxyPort}`] : []),
       ],
     )
   } catch (error) {

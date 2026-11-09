@@ -16,6 +16,7 @@ import type {
   DictationSuggestion,
 } from "../components/patient/dictation-session"
 import type { ClosingCheck } from "../lib/encounters"
+import type { PatientAreaId } from "../lib/patient-areas"
 import type { EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "../lib/patients"
 
 /**
@@ -423,10 +424,17 @@ export interface ProductDictationUi {
   corrections: { change: string; remove: string }
 }
 
-/** Una sección de Clínica que aporta el producto (odentIA: Odontograma y Periodontograma). */
+/** Una sección de la página que aporta el producto (odentIA: Odontograma y Periodontograma). */
 export interface ProductRecordSection {
   id: string
   label: string
+  /**
+   * La pestaña donde va y quién la ve. Sin ellos es clínica: en Clínica, después
+   * de Antecedentes, para quien lee la historia. Otra pestaña (vistIA: sus
+   * pedidos, en Cobros) la pone al final de las suyas.
+   */
+  area?: PatientAreaId
+  permission?: string | readonly string[]
   /** Va debajo de otra sección del producto: no suma una pestaña, se elige dentro de ella. */
   parent?: string
   /** Necesita la ficha cargada: la página la pide antes de mostrarla. */

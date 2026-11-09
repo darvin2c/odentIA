@@ -8,6 +8,7 @@ import {
 } from "@odentia/optical"
 import { opticalExamination } from "./examination"
 import { opticalOrders } from "./orders"
+import { OrdersSection } from "./orders-section"
 import { usePrescriptionBlocks } from "./prescription-block"
 import { PrescriptionsSection } from "./prescriptions-section"
 
@@ -21,8 +22,8 @@ const bare = bareProduct("optical")
  * repetirse, como el control anual de la vista. Una óptica no anestesia: la ASA
  * no se pide. Sus imágenes son las pruebas del ojo; la OCT es una imagen con su
  * informe, no un estudio en cortes. La atención trae el examen de la vista y la
- * receta de lentes que sale de él; la ficha, sus recetas. Vende los lentes con
- * su pedido al laboratorio (`orders`).
+ * receta de lentes que sale de él; la ficha, sus recetas y, en Cobros, sus
+ * pedidos. Vende los lentes con su pedido al laboratorio (`orders`).
  */
 export const opticalUi: ProductUi = {
   ...bare,
@@ -32,6 +33,14 @@ export const opticalUi: ProductUi = {
         id: "recetas-de-lentes",
         label: "Recetas de lentes",
         render: (props) => <PrescriptionsSection {...props} />,
+      },
+      {
+        // «¿Ya están mis lentes?»: lo ve quien ve los pedidos, junto a lo que paga.
+        id: "pedidos-de-lentes",
+        label: "Pedidos",
+        area: "cobros",
+        permission: "orders.read",
+        render: (props) => <OrdersSection {...props} />,
       },
     ],
   },

@@ -1,44 +1,74 @@
-import { Tabs, TabsTrigger } from "@odentia/ui"
+import { Tabs, TabsTrigger, toast } from "@odentia/ui"
 import {
+  common,
   DataTable,
+  DraftKeptInPage,
   EmptyState,
+  FilterBar,
+  normalizeSearchText,
   PageHeader,
   PageShell,
   ScrollingTabsList,
   SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { PackageCheck } from "lucide-react"
-import { useMemo } from "react"
-import { dueOf, OrderDetailDrawer } from "../../components/orders/order-detail"
+import { lazy, Suspense, useMemo } from "react"
+import { OrderDetailDrawer } from "../../components/orders/order-detail"
 import { SaleDrawer } from "../../components/orders/sale-drawer"
 import { PersonLink } from "../../components/person-link"
 import { OrdersPageSkeleton, OrdersSkeleton } from "../../components/skeletons/orders"
 import { formatDate } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
+import { invalidateFinance } from "../../lib/finance-cash"
 import {
+  dueOf,
   fetchOrders,
+  invalidateOrders,
   ORDER_VIEWS,
   type OrderRow,
   type OrderView,
   orderKeys,
   orderViewOf,
 } from "../../lib/orders"
+import { useOrgProfile } from "../../lib/org"
 import { QueryErrorState } from "../../lib/query-error"
 import { canSellOrders, ordersPrimary } from "../../lib/screen-rules"
 import { productUi } from "../../product/product-ui"
 
+// El ticket del adelanto se abre al lado, el mismo de Cobros; pesa, así que llega al pedirlo.
+const TicketPanel = lazy(() =>
+  import("../../components/finance/ticket-panel").then((m) => ({ default: m.TicketPanel })),
+)
+
 interface OrdersSearch {
   vista?: string
+  /** Buscar en la lista: número, persona, qué es o quién lo hace. */
+  q?: string
   /** El pedido abierto al lado. */
   pedido?: string
+  /** El ticket del adelanto abierto al lado, recién vendido. */
+  ticket?: string
   /** «Vender» abierto (`1`), con la persona y la receta que trae el enlace. */
   vender?: 1
   persona?: string
   receta?: string
+}
+
+/** El tope de la lista del servidor (`listJobOrders`): con tantos, puede haber más. */
+const LIST_LIMIT = 500
+
+/** Lo que encuentra el buscador en una fila: su número, la persona, qué es y quién lo hace. */
+function rowMatches(row: OrderRow, words: string[]): boolean {
+  const haystack = normalizeSearchText(
+    [`${row.orderNumber}`, `n.º ${row.orderNumber}`, row.patientName, row.title, row.maker].join(
+      " ",
+    ),
+  )
+  return words.every((word) => haystack.includes(word))
 }
 
 const text = (value: unknown) => (typeof value === "string" && value ? value : undefined)
@@ -63,7 +93,9 @@ export const Route = createFileRoute("/_org/orders")({
   validateSearch: (search: Record<string, unknown>): OrdersSearch => ({
     ...search,
     vista: text(search.vista),
+    q: text(search.q),
     pedido: text(search.pedido),
+    ticket: text(search.ticket),
     vender: search.vender === 1 || search.vender === "1" ? 1 : undefined,
     persona: text(search.persona),
     receta: text(search.receta),
@@ -75,9 +107,10 @@ export const Route = createFileRoute("/_org/orders")({
 /**
  * Pedidos (ADR 0168): lo que la clínica encargó al taller o al laboratorio, del
  * más próximo a vencer al más lejano, con sus vistas en la dirección
- * (`?vista=abiertos|atrasados|listos|entregados|anulados`). Toda la fila abre el
- * pedido al lado (`?pedido=`). Es común, pero solo la usa el producto que vende
- * con pedido (`productUi().orders`): en otro dice que no hay.
+ * (`?vista=abiertos|atrasados|listos|entregados|anulados`) y el buscador sobre lo
+ * que llegó (`?q=`). Toda la fila abre el pedido al lado (`?pedido=`); el ticket
+ * de un adelanto recién cobrado, también (`?ticket=`). Es común, pero solo la usa
+ * el producto que vende con pedido (`productUi().orders`): en otro dice que no hay.
  */
 function OrdersPage() {
   const orders = productUi().orders
@@ -102,9 +135,13 @@ function OrdersWorkspace() {
   const canSell = canSellOrders(can)
   const seesMoney = usePermission("finance.read")
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const profile = useOrgProfile().data
   const listSearch = useListSearch()
   const view = orderViewOf(listSearch.get("vista"))
+  const q = listSearch.get("q") ?? ""
   const openId = listSearch.get("pedido") ?? null
+  const ticketId = listSearch.get("ticket") ?? null
   const selling = canSell && listSearch.get("vender") === "1"
 
   const list = useQuery({
@@ -129,9 +166,11 @@ function OrdersWorkspace() {
         receta: undefined,
       }),
     } as never)
+  // Cerrar la venta no es un paso más del historial: «Atrás» no la vuelve a abrir.
   const closeSale = (orderId?: string) =>
     void navigate({
       to: ".",
+      replace: true,
       search: (prev: Record<string, unknown>) => ({
         ...prev,
         vender: undefined,
@@ -140,8 +179,24 @@ function OrdersWorkspace() {
         pedido: orderId ?? prev.pedido,
       }),
     } as never)
+  const onSold = (order: { id: string; orderNumber: number }, soldTicketId: string | null) => {
+    closeSale(order.id)
+    toast.success(
+      `Pedido N.º ${order.orderNumber} registrado${soldTicketId ? ", con su adelanto" : ""}.`,
+      soldTicketId
+        ? {
+            action: {
+              label: "Ver el ticket",
+              onClick: () => listSearch.setParam("ticket", soldTicketId),
+            },
+          }
+        : undefined,
+    )
+  }
 
-  const rows = list.data ?? []
+  const loaded = list.data ?? []
+  const words = normalizeSearchText(q.trim()).split(/\s+/).filter(Boolean)
+  const rows = words.length > 0 ? loaded.filter((row) => rowMatches(row, words)) : loaded
   const columns = useMemo<ColumnDef<OrderRow>[]>(
     () => [
       {
@@ -197,7 +252,7 @@ function OrdersWorkspace() {
               header: "Por pagar",
               meta: { view: { primary: true } },
               cell: ({ row }) => {
-                // «Falta S/ 120.00»; anulado, lo cobrado que quedó en su cuenta.
+                // «Falta S/ 120.00»; anulado, lo que se sigue debiendo.
                 const due = dueOf(row.original)
                 return due ? (
                   <span className="tabular-nums">
@@ -214,73 +269,117 @@ function OrdersWorkspace() {
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
 
   const emptyView = EMPTY[view.value]
+  const filtered = words.length > 0
 
   return (
-    <PageShell className="flex flex-col gap-6">
-      <PageHeader title="Pedidos" primary={ordersPrimary(can, openSale)} />
-      <Tabs
-        value={view.value}
-        onValueChange={(next) =>
-          listSearch.setParams(
-            { vista: String(next) === ORDER_VIEWS[0].value ? undefined : String(next) },
-            { replace: true },
+    // Lo que se escribe en la venta sigue montado al cambiar de vista, buscar o abrir un pedido.
+    <DraftKeptInPage>
+      <PageShell className="flex flex-col gap-6">
+        <PageHeader title="Pedidos" primary={ordersPrimary(can, openSale)} />
+        <Tabs
+          value={view.value}
+          onValueChange={(next) =>
+            listSearch.setParams(
+              { vista: String(next) === ORDER_VIEWS[0].value ? undefined : String(next) },
+              { replace: true },
+            )
+          }
+        >
+          <ScrollingTabsList aria-label="Qué pedidos ver">
+            {ORDER_VIEWS.map((item) => (
+              <TabsTrigger
+                key={item.value}
+                value={item.value}
+                className="shrink-0 min-h-11 px-3 sm:min-h-9"
+              >
+                {item.label}
+                {item.value === "atrasados" && overdueCount !== undefined ? (
+                  <span className="tabular-nums opacity-80"> {overdueCount}</span>
+                ) : null}
+              </TabsTrigger>
+            ))}
+          </ScrollingTabsList>
+        </Tabs>
+        <FilterBar
+          filters={[]}
+          sortOptions={[]}
+          searchPlaceholder="Número, persona, qué es o quién lo hace"
+          searchLabel="Buscar en pedidos"
+          resetKeys={["q"]}
+        />
+        {list.isPending ? (
+          <SkeletonRegion message="Cargando los pedidos…">
+            <OrdersSkeleton />
+          </SkeletonRegion>
+        ) : list.isError && rows.length === 0 ? (
+          <QueryErrorState error={list.error} onRetry={() => void list.refetch()} />
+        ) : rows.length === 0 ? (
+          filtered ? (
+            <EmptyState
+              title={common.filters.noResults}
+              description="Ningún pedido de esta vista coincide con lo que buscas."
+            />
+          ) : (
+            <EmptyState
+              icon={PackageCheck}
+              title={emptyView.title}
+              description={emptyView.description}
+              {...(canSell && orders && view.value === "abiertos"
+                ? { actionLabel: orders.sellLabel, onAction: openSale }
+                : {})}
+            />
           )
-        }
-      >
-        <ScrollingTabsList aria-label="Qué pedidos ver">
-          {ORDER_VIEWS.map((item) => (
-            <TabsTrigger
-              key={item.value}
-              value={item.value}
-              className="shrink-0 min-h-11 px-3 sm:min-h-9"
-            >
-              {item.label}
-              {item.value === "atrasados" && overdueCount !== undefined ? (
-                <span className="tabular-nums opacity-80"> {overdueCount}</span>
-              ) : null}
-            </TabsTrigger>
-          ))}
-        </ScrollingTabsList>
-      </Tabs>
-      {list.isPending ? (
-        <SkeletonRegion message="Cargando los pedidos…">
-          <OrdersSkeleton />
-        </SkeletonRegion>
-      ) : list.isError && rows.length === 0 ? (
-        <QueryErrorState error={list.error} onRetry={() => void list.refetch()} />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={PackageCheck}
-          title={emptyView.title}
-          description={emptyView.description}
-          {...(canSell && orders && view.value === "abiertos"
-            ? { actionLabel: orders.sellLabel, onAction: openSale }
-            : {})}
+        ) : (
+          <div className="flex flex-col gap-2">
+            <DataTable
+              className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]"
+              table={table}
+              isFetching={list.isFetching}
+              onRowClick={(row: OrderRow) => listSearch.setParam("pedido", row.id)}
+              isRowActive={(row: OrderRow) => row.id === openId}
+            />
+            {loaded.length >= LIST_LIMIT ? (
+              // El servidor entrega hasta 500: lo que se trabaja, por el día prometido; lo cerrado, lo último.
+              <p className="text-sm text-muted-foreground">
+                {view.value === "entregados" || view.value === "anulados"
+                  ? `Se muestran los ${LIST_LIMIT} más recientes.`
+                  : `Se muestran los ${LIST_LIMIT} más próximos a vencer.`}
+              </p>
+            ) : null}
+          </div>
+        )}
+        <OrderDetailDrawer
+          orderId={openId}
+          onClose={() => listSearch.setParam("pedido", undefined)}
+          onOpen={(id) => listSearch.setParam("pedido", id)}
         />
-      ) : (
-        <DataTable
-          className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]"
-          table={table}
-          isFetching={list.isFetching}
-          onRowClick={(row: OrderRow) => listSearch.setParam("pedido", row.id)}
-          isRowActive={(row: OrderRow) => row.id === openId}
-        />
-      )}
-      <OrderDetailDrawer
-        orderId={openId}
-        onClose={() => listSearch.setParam("pedido", undefined)}
-        onOpen={(id) => listSearch.setParam("pedido", id)}
-      />
-      {selling && orders ? (
-        <SaleDrawer
-          key={`${listSearch.get("persona") ?? ""}:${listSearch.get("receta") ?? ""}`}
-          orders={orders}
-          presetPatientId={listSearch.get("persona")}
-          presetReferenceId={listSearch.get("receta")}
-          onClose={() => closeSale()}
-          onSold={(orderId) => closeSale(orderId)}
-        />
-      ) : null}
-    </PageShell>
+        {selling && orders ? (
+          <SaleDrawer
+            key={`${listSearch.get("persona") ?? ""}:${listSearch.get("receta") ?? ""}`}
+            orders={orders}
+            presetPatientId={listSearch.get("persona")}
+            presetReferenceId={listSearch.get("receta")}
+            onClose={() => closeSale()}
+            onSold={onSold}
+          />
+        ) : null}
+        {ticketId && profile ? (
+          <Suspense fallback={null}>
+            <TicketPanel
+              ticketId={ticketId}
+              locale={profile.locale}
+              timeZone={profile.timezone}
+              ticketFooter={profile.ticketFooter}
+              onOpen={(id) => listSearch.setParam("ticket", id)}
+              onClose={() => listSearch.setParam("ticket", undefined)}
+              onChanged={() => {
+                invalidateFinance(queryClient)
+                invalidateOrders(queryClient)
+              }}
+            />
+          </Suspense>
+        ) : null}
+      </PageShell>
+    </DraftKeptInPage>
   )
 }

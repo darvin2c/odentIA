@@ -89,12 +89,17 @@ const productShape = z.object({
 
 /** Lo de la etiqueta, como lo nombra el servidor y la pantalla: todo opcional. */
 const LABEL_FIELDS = [
-  { key: "barcode", label: "Código de barras", max: 64, placeholder: undefined },
-  { key: "brand", label: "Marca", max: 80, placeholder: undefined },
-  { key: "model", label: "Modelo", max: 80, placeholder: undefined },
-  { key: "color", label: "Color", max: 60, placeholder: undefined },
-  { key: "size", label: "Medidas", max: 60, placeholder: "51□21 140" },
+  { key: "barcode", label: "Código de barras", max: 64 },
+  { key: "brand", label: "Marca", max: 80 },
+  { key: "model", label: "Modelo", max: 80 },
+  { key: "color", label: "Color", max: 60 },
+  { key: "size", label: "Medidas", max: 60 },
 ] as const
+
+/** El lector de códigos escribe el código y pulsa Enter: en su campo no guarda el producto. */
+function keepScanInField(event: React.KeyboardEvent<HTMLInputElement>) {
+  if (event.key === "Enter") event.preventDefault()
+}
 
 /** Lo que se envía de la etiqueta: al editar, solo lo que cambió (vacío lo borra). */
 function labelBody(value: ProductValues, product: ProductDetail | null): Partial<ProductInputBody> {
@@ -520,9 +525,9 @@ export function ProductFormDrawer({
                         {item.label} <Optional />
                       </>
                     }
-                    placeholder={item.placeholder}
                     maxLength={item.max}
                     autoComplete="off"
+                    onKeyDown={item.key === "barcode" ? keepScanInField : undefined}
                   />
                 )}
               </form.AppField>

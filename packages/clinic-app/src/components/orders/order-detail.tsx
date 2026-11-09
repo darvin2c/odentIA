@@ -6,9 +6,9 @@
  * «Revisado: está listo», «Entregar») y en «…» saltar a listo; rehacer y anular
  * son además de quien lleva la caja (deciden sobre lo cobrado).
  * Entregar no exige pagar: si falta, se dice y se ofrece «Cobrar» con el cajón
- * de Cobros.
+ * de Cobros. Lo que se cambia aquí vuelve a pedir el pedido y las listas, salga
+ * bien o no: un 409 de un cambio de otra persona deja la pantalla al día.
  */
-import { formatMoney } from "@odentia/clinical"
 import {
   Alert,
   AlertDescription,
@@ -45,6 +45,7 @@ import {
   advanceOrder,
   canSkipToReady,
   canVoid,
+  dueOf,
   fetchOrder,
   invalidateOrders,
   nextStepOf,
@@ -52,35 +53,21 @@ import {
   type OrderLink,
   type OrderStep,
   orderKeys,
+  orderMoney,
   orderNumberWords,
   remakeOrder,
   voidOrder,
 } from "../../lib/orders"
 import { QueryErrorState } from "../../lib/query-error"
 import { productUi } from "../../product/product-ui"
-import { CollectButton } from "../patient/collect-flow"
+import { useCollectFlow } from "../patient/collect-flow"
 import { PersonLink } from "../person-link"
 
-/** Un importe en la moneda que entrega el servidor, con el formato de la clínica; null sin moneda. */
-export function orderMoney(cents: number, currency: string | null): string | null {
-  return currency ? formatMoney(cents, currency, activeOrgLocale() ?? "es") : null
-}
-
-/**
- * Lo que queda por pagar de un pedido: «Falta pagar» y el importe. Anulado, lo que
- * ya tenía algo cobrado no se anula con él: queda en su cuenta, no «falta pagar».
- * Rehecho, lo que falta lo dice el pedido que lo rehízo, que comparte sus cargos.
- */
-export function dueOf(order: {
-  status: string
-  dueCents: number | null
-  currency: string | null
-  remadeAs: unknown
-}): { label: "Falta pagar" | "Queda en su cuenta"; amount: string } | null {
-  if (order.remadeAs || !order.dueCents || order.dueCents <= 0) return null
-  const amount = orderMoney(order.dueCents, order.currency)
-  if (!amount) return null
-  return { label: order.status === "anulado" ? "Queda en su cuenta" : "Falta pagar", amount }
+/** Una medida en el formato de la clínica («19,5»); un texto, tal cual. */
+function measureText(value: unknown): string {
+  return typeof value === "number"
+    ? new Intl.NumberFormat(activeOrgLocale() ?? "es", { maximumFractionDigits: 2 }).format(value)
+    : String(value)
 }
 
 /** Los avisos de la copia (vistIA: vencida o sin verificar), si los trae: se informan, no impiden. */
@@ -138,9 +125,11 @@ function OrderBody({ order, onOpen }: { order: OrderDetail; onOpen: (id: string)
     order.prescription && orders?.prescriptionLines
       ? orders.prescriptionLines(order.prescription)
       : []
-  const fitting = Object.entries(order.fitting ?? {}).filter(
-    ([, value]) => value !== null && value !== "",
-  )
+  // Solo las medidas que el producto nombra: una clave interna no es un nombre.
+  const fitting = (orders?.fitting ?? []).flatMap((field) => {
+    const value = order.fitting?.[field.key]
+    return value === null || value === undefined || value === "" ? [] : [{ field, value }]
+  })
   return (
     <div className="flex flex-col gap-6">
       <DetailList>
@@ -221,17 +210,14 @@ function OrderBody({ order, onOpen }: { order: OrderDetail; onOpen: (id: string)
       {fitting.length > 0 ? (
         <DetailSection title="Medidas para montar">
           <DetailList>
-            {fitting.map(([key, value]) => {
-              const field = orders?.fitting.find((item) => item.key === key)
-              return (
-                <DetailField key={key} label={field?.label ?? key}>
-                  <span className="tabular-nums">
-                    {String(value).replace(".", ",")}
-                    {field?.unit && typeof value === "number" ? ` ${field.unit}` : ""}
-                  </span>
-                </DetailField>
-              )
-            })}
+            {fitting.map(({ field, value }) => (
+              <DetailField key={field.key} label={field.label}>
+                <span className="tabular-nums">
+                  {measureText(value)}
+                  {typeof value === "number" ? ` ${field.unit}` : ""}
+                </span>
+              </DetailField>
+            ))}
           </DetailList>
         </DetailSection>
       ) : null}
@@ -274,18 +260,26 @@ function OrderActions({ order, onOpen }: { order: OrderDetail; onOpen: (id: stri
     mutationFn: (status: OrderStep) => advanceOrder(order.id, status),
     onSuccess: (updated) => {
       queryClient.setQueryData(orderKeys.detail(updated.id), updated)
-      invalidateOrders(queryClient)
       toast.success(`Pedido N.º ${updated.orderNumber}: ${updated.statusLabel.toLowerCase()}`)
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
+    // Bien o mal (otra persona lo cambió: 409), el pedido y las listas vuelven a pedirse.
+    onSettled: () => invalidateOrders(queryClient),
   })
-  if (!canWrite) return null
+  // Entregar no exige pagar: lo que falta se dice al lado, con «Cobrar». El cajón y el
+  // ticket viven aquí y siguen a la vista cuando ya no falta nada y el botón se va.
+  const due = order.status === "listo" && !order.remadeAs ? dueOf(order) : null
+  const collect = useCollectFlow({
+    patientId: order.patientId,
+    patientName: order.patientName,
+    enabled: due !== null,
+    onChanged: () => invalidateOrders(queryClient),
+  })
+  if (!canWrite) return collect.surfaces
   // Rehecho: sigue en el otro pedido; este ya no avanza, no se anula ni se cobra.
   if (order.remadeAs)
     return <RemadeLine prefix="Se rehízo en el" target={order.remadeAs} onOpen={onOpen} />
   const next = nextStepOf(order.status)
-  // Entregar no exige pagar: lo que falta se dice al lado, con «Cobrar».
-  const due = order.status === "listo" ? dueOf(order) : null
   const menu = [
     ...(canSkipToReady(order.status)
       ? [
@@ -304,19 +298,14 @@ function OrderActions({ order, onOpen }: { order: OrderDetail; onOpen: (id: stri
   const voidable = canCollect && canVoid(order.status)
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      {/* En el teléfono ya está arriba, en «Falta pagar»: aquí solo en pantalla ancha. */}
       {due ? (
-        <span className="text-sm font-medium tabular-nums" role="status">
+        <span className="hidden text-sm font-medium tabular-nums sm:inline">
           {due.label} {due.amount}
         </span>
       ) : null}
-      {due && canCollect ? (
-        <CollectButton
-          patientId={order.patientId}
-          patientName={order.patientName}
-          variant="outline"
-          onChanged={() => invalidateOrders(queryClient)}
-        />
-      ) : null}
+      {due && canCollect ? collect.button({ variant: "outline" }) : null}
+      {collect.surfaces}
       {next ? (
         <Button
           type="button"
@@ -430,9 +419,8 @@ function RemakeDrawer({
         reason: value.reason.trim(),
         promisedOn: value.promisedOn,
         requestId,
-      })
+      }).finally(() => invalidateOrders(queryClient))
       queryClient.setQueryData(orderKeys.detail(created.id), created)
-      invalidateOrders(queryClient)
       toast.success(
         `Pedido N.º ${order.orderNumber}: se rehace como el N.º ${created.orderNumber}, sin cobrar otra vez.`,
       )
@@ -496,9 +484,10 @@ function VoidDrawer({ order, onClose }: { order: OrderDetail; onClose: () => voi
     defaultValues: { reason: "" },
     validators: { onSubmit: voidSchema },
     onSubmit: async ({ value }) => {
-      const updated = await voidOrder(order.id, value.reason.trim())
+      const updated = await voidOrder(order.id, value.reason.trim()).finally(() =>
+        invalidateOrders(queryClient),
+      )
       queryClient.setQueryData(orderKeys.detail(updated.id), updated)
-      invalidateOrders(queryClient)
       // Sus cargos sin pagar se anulan y lo del inventario vuelve a la sede.
       invalidatePatientAccount(queryClient, order.patientId)
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })

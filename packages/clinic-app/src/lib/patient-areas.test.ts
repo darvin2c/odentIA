@@ -1,5 +1,5 @@
 import { canAccess } from "@odentia/auth/permissions"
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { bareProduct, declareProduct, type ProductUi } from "../product/product-ui"
 import {
   areaNav,
@@ -50,12 +50,13 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(datos("clinician")).not.toContain("pedidos")
     expect(datos("cashier")).not.toContain("pedidos")
     // Solo con ficha: quien aún no es paciente no tiene historia que pedir.
-    expect(areaNav("datos", as("owner"), false).map((entry) => entry.value)).not.toContain("pedidos")
-    const owner = areaNav("datos", as("owner"))
-    expect(owner.filter((entry) => entry.group === "Sus datos y la ley").map((entry) => entry.value)).toEqual([
-      "accesos",
+    expect(areaNav("datos", as("owner"), false).map((entry) => entry.value)).not.toContain(
       "pedidos",
-    ])
+    )
+    const owner = areaNav("datos", as("owner"))
+    expect(
+      owner.filter((entry) => entry.group === "Sus datos y la ley").map((entry) => entry.value),
+    ).toEqual(["accesos", "pedidos"])
   })
 
   it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
@@ -138,14 +139,19 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
       "Documentos",
     ])
     // Lo que va debajo de otra sección no suma una pestaña: se elige dentro de ella.
-    expect(subsectionNav("detalle", as("clinician")).map((entry) => entry.label)).toEqual(["Estudio", "Detalle"])
+    expect(subsectionNav("detalle", as("clinician")).map((entry) => entry.label)).toEqual([
+      "Estudio",
+      "Detalle",
+    ])
     expect(subsectionNav("estudio", as("clinician"))).toHaveLength(2)
     expect(subsectionNav("historia", as("clinician"))).toEqual([])
     expect(navSectionOf("detalle")).toBe("estudio")
     expect(visibleSections(as("clinician"))).toHaveLength(12)
     expect(visibleSections(as("owner"))).toHaveLength(17)
     // Recepción y caja no cambian.
-    expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
+    expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain(
+      "antecedentes",
+    )
     expect(visibleSections(as("cashier")).map((section) => section.area)).not.toContain("clinica")
   })
 
@@ -180,5 +186,36 @@ describe("el nombre de un área en el enlace", () => {
     expect(sectionFromSearch("datos")).toBe("filiacion")
     expect(sectionFromSearch("cobros")).toBe("cuenta")
     expect(sectionFromSearch("clinica")).toBe("antecedentes")
+  })
+})
+
+describe("una sección del producto en otra pestaña (vistIA: sus pedidos, en Cobros)", () => {
+  const WITH_ORDERS: ProductUi = {
+    ...PRODUCT,
+    record: {
+      sections: [
+        ...PRODUCT.record.sections,
+        {
+          id: "encargos",
+          label: "Encargos",
+          area: "cobros",
+          permission: "orders.read",
+          render: () => null,
+        },
+      ],
+    },
+  }
+  beforeAll(() => declareProduct(WITH_ORDERS))
+  afterAll(() => declareProduct(PRODUCT))
+  const ids = (role: string) => visibleSections(as(role)).map((section) => section.id)
+
+  it("va al final de su pestaña, con su permiso, y no entra en Clínica", () => {
+    const owner = ids("owner")
+    expect(owner.indexOf("encargos")).toBe(owner.indexOf("cuenta") + 1)
+    expect(resolveSection("encargos", as("owner"))).toBe("encargos")
+    // Recepción ve los pedidos sin ver la caja: la pestaña Cobros solo trae esa sección.
+    expect(ids("reception")).toContain("encargos")
+    expect(ids("reception")).not.toContain("cuenta")
+    expect(visibleAreas(as("reception")).map((area) => area.id)).toContain("cobros")
   })
 })

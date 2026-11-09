@@ -1,10 +1,10 @@
 /**
  * Esqueleto de Pedidos: desde `md` la tabla con sus columnas; en el teléfono, las
- * filas de la vista lista. Las vistas se pintan reales; el número de atrasados es
- * un dato que aún no llega y no se dibuja.
+ * filas de la vista lista. Las vistas y el buscador se pintan reales; el número de
+ * atrasados es un dato que aún no llega y no se dibuja.
  */
 import { Skeleton, TabsTrigger } from "@odentia/ui"
-import { ScrollingTabsList, useListSearch } from "@odentia/ui-patterns"
+import { FilterBar, ScrollingTabsList, useListSearch } from "@odentia/ui-patterns"
 import { useCan, usePermission } from "../../lib/crm"
 import { ORDER_VIEWS, orderViewOf } from "../../lib/orders"
 import { ordersPrimary } from "../../lib/screen-rules"
@@ -73,6 +73,14 @@ export function OrdersPageSkeleton() {
             ))}
           </ScrollingTabsList>
         </ParamTabs>
+        {/* Los mismos textos que el buscador de `routes/_org/orders.tsx`. */}
+        <FilterBar
+          filters={[]}
+          sortOptions={[]}
+          searchPlaceholder="Número, persona, qué es o quién lo hace"
+          searchLabel="Buscar en pedidos"
+          resetKeys={["q"]}
+        />
         <OrdersSkeleton />
       </div>
     </PageLoading>

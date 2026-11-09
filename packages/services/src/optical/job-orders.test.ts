@@ -273,8 +273,8 @@ describe("el pedido de lentes (entrega 4)", () => {
 
   it("anular anula en la caja lo que no se cobró, devuelve la montura al inventario y deja lo cobrado en su cuenta", async () => {
     const s = await store()
-    // 300 de adelanto: la caja lo aplica a un cargo (el más antiguo); el otro queda sin cobrar.
-    const { order } = await sell(s)
+    // 100 de adelanto, menos que cualquiera de las dos: la caja lo aplica a un cargo (el más antiguo) y el otro queda sin cobrar.
+    const { order } = await sell(s, { payments: [{ paymentMethodId: s.cashId, amountCents: 10_000 }], cashReceivedCents: 10_000 })
     const voided = await s.f.run((tx) => voidJobOrder(tx, OPTICA, s.f.actor, order.id, { reason: "Cambió de idea" }))
     const charges = await ownerDb
       .select({ id: patientCharge.id, amountCents: patientCharge.amountCents, voidedAt: patientCharge.voidedAt, voidReason: patientCharge.voidReason })
@@ -293,7 +293,7 @@ describe("el pedido de lentes (entrega 4)", () => {
       if (paid.has(charge.id)) {
         // Lo que tiene algo cobrado queda en su cuenta, y la clínica decide.
         expect(charge.voidedAt).toBeNull()
-        expect(voided.dueCents).toBe(charge.amountCents - 30_000)
+        expect(voided.dueCents).toBe(charge.amountCents - 10_000)
       } else {
         expect(charge.voidedAt).not.toBeNull()
         expect(charge.voidReason).toMatch(/^Pedido N\.º \d+ anulado: Cambió de idea$/)
