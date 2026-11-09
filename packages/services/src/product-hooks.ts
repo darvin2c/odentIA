@@ -429,6 +429,12 @@ export interface ProductHooks {
   planPhases: readonly string[]
   /** La fase que propone un tipo de tratamiento de la biblioteca. */
   phaseFor(kind: string | null): string
+  /**
+   * Cuántos días, como mínimo, entre una sesión y la siguiente de un tipo de tratamiento de la
+   * biblioteca (odentIA: la endodoncia con medicación intraconducto, una semana). Sin él, o sin
+   * nada que decir, la siguiente se propone desde mañana.
+   */
+  sessionGapDays?(kind: string | null): number | null
   /** El nombre de una fase en el papel; sin nombre (una sola fase), el presupuesto no habla de etapas. */
   phaseWords?(phase: string): string | null
   /**

@@ -125,6 +125,7 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { nextSessionFromOf } from "./session-gap.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
@@ -2056,8 +2057,11 @@ export interface NextSession {
   /** Con qué servicio se abre «Nueva cita». */
   serviceId: string | null
   booked: BookedSession | null
-  /** La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no le falta. */
-  toBook: { n: number; m: number } | null
+  /**
+   * La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no
+   * le falta. `from`: desde qué día conviene (`nextSessionFromOf`), si no es mañana.
+   */
+  toBook: { n: number; m: number; from?: string } | null
 }
 
 /** Lo aceptado que va después de otro tratamiento sin terminar y ya tiene su cita. */
@@ -2190,6 +2194,7 @@ export async function nextSessionsOf(
       firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt, professionalUserId: row.professionalUserId })
   }
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
+  const fromOf = await nextSessionFromOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
   const out: NextSession[] = []
   for (const item of items) {
     const id = item.id
@@ -2197,7 +2202,11 @@ export async function nextSessionsOf(
     const first = firstOf.get(id)
     const session = first ? sessionsOf.get(first.appointmentId)?.find((row) => row.planItemId === id) : undefined
     const booked = first ? { ...first, n: session?.n ?? count.done + 1, m: session?.m ?? item.plannedSessions } : null
-    const toBook = !booked && canBookAnother(item, count) ? { n: count.done + count.booked + 1, m: item.plannedSessions } : null
+    const from = fromOf.get(id)
+    const toBook =
+      !booked && canBookAnother(item, count)
+        ? { n: count.done + count.booked + 1, m: item.plannedSessions, ...(from ? { from } : {}) }
+        : null
     if (booked || toBook) out.push({ planItemId: id, title: item.title, serviceId: item.serviceId, booked, toBook })
   }
   return out

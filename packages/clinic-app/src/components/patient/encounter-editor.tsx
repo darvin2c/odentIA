@@ -573,6 +573,13 @@ export function EncounterEditor({
   const [finalizedNext, setFinalizedNext] = useState<NextSession[]>([])
   /** Los tratamientos con que se abrió «Nueva cita» desde «Atención finalizada». */
   const [bookingNext, setBookingNext] = useState<string[] | null>(null)
+  /** Desde qué día conviene la sesión que se reserva desde el cierre (la endodoncia, una semana). */
+  const gapFrom =
+    bookingNext
+      ?.map((id) => finalizedNext.find((session) => session.planItemId === id)?.toBook?.from)
+      .filter((day): day is string => !!day)
+      .sort()
+      .at(-1) ?? null
   /** Lo reservado ahí mismo: recibe el foco para que el lector y el teclado lo sepan. */
   const nextSessionsRef = useRef<HTMLUListElement>(null)
   /** «Después» del presupuesto con una sesión por reservar: solo pliega el presupuesto. */
@@ -2863,10 +2870,16 @@ export function EncounterEditor({
                 // proponía «Reservar hoy a las 11:30»); hoy queda a una flecha. Con el control de lo
                 // que terminó hoy en la misma cita (la corona y el control de su endodoncia, como en
                 // «Qué sigue»), desde que ese control se puede hacer (repaso del 9 nov, N6).
+                // Y no antes de lo que su tratamiento deja entre sesiones: la endodoncia con medicación,
+                // una semana (QA del 9 nov, repaso 3).
                 date: [
                   addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
                   finalizedControls?.next?.joinsNext?.from ?? "",
-                ].sort()[1]!,
+                  gapFrom ?? "",
+                ].sort().at(-1)!,
+                ...(gapFrom && !finalizedControls?.next?.joinsNext
+                  ? { note: "Entre sesiones se deja actuar la medicación: se busca hora desde una semana después de hoy." }
+                  : {}),
                 ...(finalizedControls?.next?.joinsNext
                   ? {
                       followUpIds: [finalizedControls.next.id],

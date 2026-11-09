@@ -117,7 +117,8 @@ export interface NextSession {
   title: string
   serviceId: string | null
   booked: BookedSession | null
-  toBook: { n: number; m: number } | null
+  /** `from`: desde qué día conviene (la endodoncia, una semana después), si no es mañana. */
+  toBook: { n: number; m: number; from?: string } | null
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */

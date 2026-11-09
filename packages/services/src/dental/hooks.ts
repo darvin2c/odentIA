@@ -7,7 +7,13 @@ import {
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { encounterPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import {
+  clinicalFollowUp,
+  encounterPlanItem,
+  serviceCatalog,
+  treatmentPlanItem,
+  treatmentTemplate,
+} from "@odentia/db/schema/clinical"
 import {
   dentalTemplateRule,
   odontogramAssessment,
@@ -276,6 +282,7 @@ export const dentalHooks: ProductHooks = {
       encounterId,
       await withPlanItemDental(tx, orgId, row),
     )
+    await yearlyRadiographicControl(tx, { orgId, actorUserId, patientId, encounterId, item: row })
   },
 
   async treatmentUndone(
@@ -283,6 +290,28 @@ export const dentalHooks: ProductHooks = {
     { orgId, actorUserId, patientId, encounterId, planItemId, reason, at },
   ) {
     await voidLeftFindings(tx, orgId, actorUserId, patientId, encounterId, planItemId, reason, at)
+    // Sin endodoncia terminada no hay cicatrización que controlar: el control del año se cancela.
+    const cancelled = await tx
+      .update(clinicalFollowUp)
+      .set({ status: "cancelado", cancelledReason: reason.slice(0, 2000), cancelledAt: at, updatedAt: at })
+      .where(
+        and(
+          eq(clinicalFollowUp.organizationId, orgId),
+          eq(clinicalFollowUp.planItemId, planItemId),
+          eq(clinicalFollowUp.title, radiographicControlTitle()),
+          eq(clinicalFollowUp.status, "pendiente"),
+        ),
+      )
+      .returning({ id: clinicalFollowUp.id })
+    for (const control of cancelled)
+      await tx.insert(auditEvent).values({
+        organizationId: orgId,
+        actorUserId,
+        action: "follow_up.cancelled",
+        entity: "clinical_follow_up",
+        entityId: control.id,
+        metadata: { patientId, planItemId, reason },
+      })
   },
 
   async summaryParts(tx, { orgId, patientId }) {
@@ -332,6 +361,11 @@ export const dentalHooks: ProductHooks = {
 
   planPhases: TREATMENT_PHASES,
   phaseFor: (kind) => phaseForKind(kind),
+  // Entre sesiones de una endodoncia se deja la medicación intraconducto (hidróxido de calcio) al
+  // menos una semana: con 7 días el conducto quedó sin bacterias y con 10 minutos no (Sjögren y
+  // col., Int Endod J 1991;24:119-125). La AAE y la ESE no fijan un plazo; es un mínimo que se
+  // propone, no que se exige: la reserva deja elegir antes si hace falta (QA del 9 nov, repaso 3).
+  sessionGapDays: (kind) => (kind === "endodoncia" ? 7 : null),
   phaseWords: (phase) =>
     TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
 
@@ -536,4 +570,68 @@ export const dentalHooks: ProductHooks = {
     const briefs = await periodontalBriefsByEncounter(tx, orgId, encounterIds)
     return new Map(encounterIds.map((id) => [id, { periodontal: briefs.get(id) ?? null }]))
   },
+}
+
+/** El título del control de cicatrización de la endodoncia: el mismo al crearlo y al cancelarlo. */
+function radiographicControlTitle(): string {
+  return "Control radiográfico de la endodoncia"
+}
+
+/**
+ * Al terminar una endodoncia (o una pulpectomía) queda, además del control corto que se indique,
+ * su control clínico y radiográfico al año: la lesión periapical se da por sanada recién ahí
+ * (ESE, Quality guidelines for endodontic treatment, Int Endod J 2006;39:921-930; QA del 9 nov,
+ * repaso 3, M2). Uno solo por tratamiento; quien atienda ese control decide si hacen falta más.
+ */
+async function yearlyRadiographicControl(
+  tx: Db,
+  scope: { orgId: string; actorUserId: string; patientId: string; encounterId: string; item: typeof treatmentPlanItem.$inferSelect },
+): Promise<void> {
+  const { orgId, actorUserId, patientId, encounterId, item } = scope
+  if (!item.serviceId) return
+  const [service] = await tx
+    .select({ kind: treatmentTemplate.kind })
+    .from(serviceCatalog)
+    .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, item.serviceId)))
+    .limit(1)
+  if (service?.kind !== "endodoncia") return
+  const title = radiographicControlTitle()
+  const [already] = await tx
+    .select({ id: clinicalFollowUp.id })
+    .from(clinicalFollowUp)
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.planItemId, item.id),
+        eq(clinicalFollowUp.title, title),
+        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+      ),
+    )
+    .limit(1)
+  if (already) return
+  const dueAt = new Date()
+  dueAt.setUTCFullYear(dueAt.getUTCFullYear() + 1)
+  const [row] = await tx
+    .insert(clinicalFollowUp)
+    .values({
+      organizationId: orgId,
+      patientId,
+      kind: "tratamiento",
+      title,
+      dueAt,
+      planItemId: item.id,
+      originEncounterId: encounterId,
+      createdBy: actorUserId,
+    })
+    .returning({ id: clinicalFollowUp.id })
+  if (row)
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "follow_up.created",
+      entity: "clinical_follow_up",
+      entityId: row.id,
+      metadata: { patientId, planItemId: item.id, by: "endodoncia_terminada" },
+    })
 }

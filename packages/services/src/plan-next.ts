@@ -54,6 +54,7 @@ import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
+import { nextSessionFromOf, SESSION_GAP_NOTE } from "./session-gap.js"
 import {
   appointmentServesControl,
   canBookAnother,
@@ -368,6 +369,7 @@ async function planFactsOf(
       sessions,
       controls,
       carriedAt: await carriedAtOf(tx, orgId, [patientId]),
+      sessionFrom: await nextSessionFromOf(tx, orgId, items.filter((item) => item.status === "en_curso").map((item) => item.id)),
       callbacks: new Map(
         callbacks.map((row) => [
           row.key.slice(BUDGET_CALLBACK_KEY.length),
@@ -519,6 +521,11 @@ async function planFactsMany(
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   const openEncounters = await openEncountersOf(tx, orgId, ids)
   const carriedAt = await carriedAtOf(tx, orgId, ids)
+  const sessionFrom = await nextSessionFromOf(
+    tx,
+    orgId,
+    [...itemsOf.values()].flat().filter((item) => item.status === "en_curso").map((item) => item.id),
+  )
   // «No contesta · volver a llamar» de cada uno: la fila de Pacientes dice lo mismo que la ficha.
   const callbackRows = await tx.execute<{ patientId: string; key: string; dueAt: Date | null; reason: string | null }>(sql`
     select patient_id as "patientId", idempotency_key as key, due_at as "dueAt", reason from task
@@ -542,6 +549,7 @@ async function planFactsMany(
       withAppointment,
       sessions,
       carriedAt,
+      sessionFrom,
       callbacks: callbacksOf.get(person.id),
       controls: controlsOf.get(person.id) ?? [],
       nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
@@ -636,6 +644,8 @@ interface PlanFacts {
   controlOrigins?: ReadonlyMap<string, { professionalName: string | null; at: Date; reason: string | null }>
   /** La próxima cita por venir que lleva cada tratamiento: cuándo es la sesión de lo que va antes. */
   carriedAt?: ReadonlyMap<string, Date>
+  /** Desde qué día conviene la próxima sesión de lo empezado (`nextSessionFromOf`): la endodoncia, una semana. */
+  sessionFrom?: ReadonlyMap<string, string>
   /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
 }
@@ -790,7 +800,15 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
         : {}),
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
-        ? { label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión", planItemIds: [item.id], serviceId: item.serviceId }
+        ? {
+            label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión",
+            planItemIds: [item.id],
+            serviceId: item.serviceId,
+            // No mañana: lo que su tratamiento deja entre sesiones (QA del 9 nov, repaso 3).
+            ...(facts.sessionFrom?.get(item.id)
+              ? { date: facts.sessionFrom.get(item.id)!, note: SESSION_GAP_NOTE }
+              : {}),
+          }
         : null,
     }
   }
@@ -837,6 +855,11 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     return titles.length > 3 ? `${titles.slice(0, 3).join(" · ")} · y ${titles.length - 3} más` : titles.join(" · ")
   }
   const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+  /** El día siguiente a `YYYY-MM-DD`. */
+  const nextDayOf = (key: string) => {
+    const [y, m, d] = key.split("-").map(Number)
+    return new Date(Date.UTC(y!, m! - 1, d! + 1)).toISOString().slice(0, 10)
+  }
   /** El día siguiente a `date`, en la zona de la clínica (`YYYY-MM-DD`). */
   const dayAfter = (date: Date) => {
     const [y, m, d] = dayKey(date).split("-").map(Number)
@@ -879,6 +902,9 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       const blocker = blockerOf(listWaiting[0]!)!
       const at = facts.carriedAt?.get(blocker.id)
       const before = beforeWords(blocker)
+      // Sin cita lo de antes, al menos después de cuando conviene su próxima sesión: no hoy
+      // (pendiente de la entrega 8: reservar desde la ficha proponía hoy).
+      const blockerFrom = facts.sessionFrom?.get(blocker.id)
       return {
         kind: "agendar",
         text: `${namesOf(listWaiting)}: va después de terminar ${blocker.title}`,
@@ -888,7 +914,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
               label,
               planItemIds: listWaiting.map((item) => item.id),
               serviceId: listWaiting[0]?.serviceId ?? null,
-              ...(at ? { date: dayAfter(at) } : {}),
+              ...(at ? { date: dayAfter(at) } : blockerFrom ? { date: nextDayOf(blockerFrom) } : {}),
               note: `Va después de terminar ${blocker.title} (${before}).`,
             }
           : null,
