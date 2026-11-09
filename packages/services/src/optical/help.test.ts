@@ -58,7 +58,6 @@ const OWN_QUOTED = [
   "Sin verificar",
   "La revisé: verificar",
   "Anteriores",
-  "Anular",
   // El pedido de lentes (entrega 4).
   "Vender lentes",
   "Vender con esta receta",

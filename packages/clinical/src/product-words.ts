@@ -56,6 +56,8 @@ export interface ProductWords {
   followUpKinds: { tratamiento: string; mantenimiento: string }
   /** Cómo se cobra un servicio: una vez por todo o en cada sesión. */
   billingModes: { treatment: string; session: string }
+  /** La ayuda de dos tipos de gasto: lo que se encarga a un laboratorio y los insumos de la atención. */
+  expenseHints: { lab: string; supplies: string }
   /** Cómo se llaman las partes de la hoja del presupuesto. */
   budgetPaper: {
     title: string
@@ -74,6 +76,10 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
   dental: {
     followUpKinds: { tratamiento: "Seguimiento del tratamiento", mantenimiento: "Mantenimiento" },
     billingModes: { treatment: "Por tratamiento", session: "Por sesión" },
+    expenseHints: {
+      lab: "Coronas, prótesis y trabajos de laboratorio.",
+      supplies: "Insumos y materiales: algodón, guantes, resinas.",
+    },
     name: "odentIA",
     brand: "odentia",
     place: { one: "clínica", indefinite: "una clínica" },
@@ -111,6 +117,10 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
   medical: {
     followUpKinds: { tratamiento: "Seguimiento del tratamiento", mantenimiento: "Control periódico" },
     billingModes: { treatment: "Por todo el tratamiento", session: "Por sesión" },
+    expenseHints: {
+      lab: "Análisis y estudios que se encargan a un laboratorio.",
+      supplies: "Insumos y materiales: algodón, guantes, jeringas.",
+    },
     name: "latidIA",
     brand: "latidia",
     place: { one: "consultorio", indefinite: "un consultorio" },
@@ -148,6 +158,10 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
   optical: {
     followUpKinds: { tratamiento: "Control de adaptación", mantenimiento: "Control anual de la vista" },
     billingModes: { treatment: "Por todo el tratamiento", session: "Por sesión" },
+    expenseHints: {
+      lab: "Lunas, lentes de contacto y trabajos del laboratorio óptico.",
+      supplies: "Insumos y materiales: paños, estuches, líquidos de limpieza.",
+    },
     name: "vistIA",
     brand: "vistia",
     place: { one: "óptica", indefinite: "una óptica" },
