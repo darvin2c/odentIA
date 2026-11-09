@@ -6,9 +6,12 @@ import {
 } from "@odentia/db/schema/automation"
 import { channelTemplate, clinicMessage, clinicMessageVersion } from "@odentia/db/schema/crm"
 import { and, eq, isNull } from "drizzle-orm"
+import { orgProduct } from "./locale.js"
+import { worksWithOrders } from "./products.js"
 import {
   AUTOMATION_MESSAGE_LANGUAGE,
   CATALOG_MESSAGE_KEYS,
+  ORDER_MESSAGE_KEYS,
   type CatalogMessageKey,
   catalogMessageOf,
   positionalBody,
@@ -75,9 +78,15 @@ export async function seedChannelTemplates(
     enlace_recibido: { status: "aprobada", since: lastWeek },
     // Aprobado: una receta o un comprobante enviados pasadas las 24 horas salen con su PDF (ADR 0156).
     documento_listo: { status: "aprobada", since: lastWeek },
+    // Aprobado: «Tus lentes están listos» sale al marcar «Listo» (solo en una óptica, ADR 0169).
+    pedido_listo: { status: "aprobada", since: lastWeek },
   }
+  const product = await orgProduct(tx, orgId)
   for (const key of CATALOG_MESSAGE_KEYS) {
-    const spec = catalogMessageOf(key)
+    // Lo del pedido, solo en el producto que trabaja con pedidos y con su texto.
+    const forOrders = ORDER_MESSAGE_KEYS.includes(key)
+    if (forOrders && !worksWithOrders(product)) continue
+    const spec = forOrders ? catalogMessageOf(key, product) : catalogMessageOf(key)
     if (!spec) continue
     await upsert({
       name: spec.template,

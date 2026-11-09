@@ -10,6 +10,7 @@ import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { type CollectMethodInput, collectCharge, createCharge, voidCharge } from "./payments.js"
+import { orderNoticeOf, sendOrderReadyNotice } from "./job-order-notice.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -344,6 +345,8 @@ export async function advanceJobOrder(
     at: now,
   })
   await audit(tx, orgId, actorUserId, "job_order.advanced", id, { from: row.status, to: next })
+  // Listo: le avisa a la persona que puede recogerlo (ADR 0169). Si no sale, el pedido lo dice.
+  if (next === "listo") await sendOrderReadyNotice(tx, orgId, actorUserId, id)
   return getJobOrder(tx, orgId, id)
 }
 
@@ -647,6 +650,8 @@ export async function getJobOrder(
     })),
     dueCents: withMoney ? (due.get(id) ?? 0) : null,
     currency: await orgCurrency(tx, orgId),
+    /** «Pedido listo»: si salió, si llegó, si falló o si no se sabe (ADR 0169). */
+    readyNotice: order.status === "listo" || order.status === "entregado" ? await orderNoticeOf(tx, orgId, order) : null,
   }
 }
 

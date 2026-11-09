@@ -512,6 +512,13 @@
       "when": 1794190307688,
       "tag": "0072_pedidos",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794191602824,
+      "tag": "0073_pedido_listo",
+      "breakpoints": true
     }
   ]
 }

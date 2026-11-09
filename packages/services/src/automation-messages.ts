@@ -531,8 +531,41 @@ export const DOCUMENT_READY_MESSAGE: MessageSpec = {
 }
 
 /**
+ * «Pedido listo» (entrega 5 del plan de vistIA, ADR 0169): sale al marcar
+ * «Listo» un pedido, a quien recibe los avisos de la persona. Cada producto que
+ * trabaja con pedidos dice lo suyo (vistIA: «Tus lentes ya están listos»). Es un
+ * aviso de lo que pasó: solo lo frena «No quiero ningún mensaje». No dice cuánto
+ * falta pagar: eso lo responde Sofi o el equipo si la persona pregunta.
+ */
+export const ORDER_READY_MESSAGE_KEY = "pedido_listo"
+export const ORDER_READY_MESSAGE: MessageSpec = {
+  key: ORDER_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_pedido_listo_v1",
+  body: "Hola, {{1}}. Tu pedido ya está listo para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
+  variables: ["persona", "clinica"],
+  buttons: [],
+}
+/** Asunto cuando «Pedido listo» sale por correo. */
+export const ORDER_READY_SUBJECT = "Tu pedido está listo"
+
+/** «Pedido listo» en cada producto que trabaja con pedidos: su texto y su plantilla, que Meta aprueba aparte. */
+const ORDER_READY_BY_PRODUCT: Record<ClinicalProduct, Pick<MessageSpec, "template" | "body"> | null> = {
+  dental: null,
+  medical: null,
+  optical: {
+    template: "vistia_lentes_listos_v1",
+    body: "Hola, {{1}}. Tus lentes ya están listos para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
+  },
+}
+
+/** Los mensajes que solo tiene el producto que trabaja con pedidos (ADR 0168): los demás no los piden ni los listan. */
+export const ORDER_MESSAGE_KEYS: readonly string[] = [ORDER_READY_MESSAGE_KEY]
+
+/**
  * El tipo de los avisos que no son de una línea: «Presupuesto listo», «Su
- * enlace», «Retomar la conversación» y los papeles («Documento listo»).
+ * enlace», «Retomar la conversación», los papeles («Documento listo») y
+ * «Pedido listo».
  * Salen siempre y solo los frena «No quiero ningún mensaje» (ADR 0040).
  */
 export const NOTICE_PURPOSE = "avisos" satisfies ConsentPurpose
@@ -546,6 +579,7 @@ export const CATALOG_MESSAGE_KEYS = [
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
   DOCUMENT_READY_MESSAGE_KEY,
+  ORDER_READY_MESSAGE_KEY,
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
@@ -556,11 +590,17 @@ export function catalogMessageOf(key: string, product: ClinicalProduct = "dental
   if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
   if (key === LINK_RECEIVED_MESSAGE_KEY) return LINK_RECEIVED_MESSAGE
   if (key === DOCUMENT_READY_MESSAGE_KEY) return DOCUMENT_READY_MESSAGE
+  if (key === ORDER_READY_MESSAGE_KEY) return { ...ORDER_READY_MESSAGE, ...ORDER_READY_BY_PRODUCT[product] }
   return automationMessageOf(key, product)
 }
 
 /** Las plantillas de un mensaje del catálogo en todos los productos. */
 export function catalogTemplatesOf(key: string): string[] {
+  if (key === ORDER_READY_MESSAGE_KEY)
+    return [
+      ORDER_READY_MESSAGE.template,
+      ...Object.values(ORDER_READY_BY_PRODUCT).flatMap((own) => (own ? [own.template] : [])),
+    ]
   return (AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(key)
     ? productTemplatesOf(key as AutomationMessageKey)
     : [catalogMessageOf(key)?.template ?? ""]
