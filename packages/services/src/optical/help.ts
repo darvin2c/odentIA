@@ -242,11 +242,20 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
   // El adelanto de una óptica es para su terapia visual, no para una corona.
   finanzas: (topic) => ({
     ...topic,
-    faqs: (topic.faqs ?? []).map((faq) =>
-      faq.q === "¿Cómo cobro un adelanto para un tratamiento?" && faq.forms
-        ? { ...faq, forms: faq.forms.map((form) => (form === "adelanto para la corona" ? "adelanto para la terapia visual" : form)) }
-        : faq,
-    ),
+    faqs: (topic.faqs ?? []).map((faq) => {
+      if (faq.q === "¿Cómo cobro un adelanto para un tratamiento?" && faq.forms)
+        return { ...faq, forms: faq.forms.map((form) => (form === "adelanto para la corona" ? "adelanto para la terapia visual" : form)) }
+      // Lo que una óptica encarga al laboratorio y sus insumos (`expenseHints` de sus palabras).
+      if (faq.q === "¿En qué tipo va cada gasto?")
+        return {
+          ...faq,
+          a: faq.a.replace(
+            "«Laboratorio», coronas, prótesis y trabajos de laboratorio; «Materiales», insumos como algodón, guantes o resinas;",
+            "«Laboratorio», lunas, lentes de contacto y trabajos del laboratorio óptico; «Materiales», insumos como paños, estuches o líquidos de limpieza;",
+          ),
+        }
+      return faq
+    }),
   }),
   pacientes: (topic) => ({
     ...topic,

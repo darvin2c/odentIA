@@ -35,12 +35,12 @@ import {
   correctExpenseApi,
   createExpenseApi,
   dayKeyOf,
-  errorCode,
   EXPENSE_CATEGORIES,
-  EXPENSE_CATEGORY_HINTS,
   type ExpenseCategory,
-  expenseCategoryLabel,
   type ExpenseRow,
+  errorCode,
+  expenseCategoryHint,
+  expenseCategoryLabel,
   fetchExpenseSuppliers,
   fetchPurchasesToPay,
   financeKeys,
@@ -697,7 +697,7 @@ export function ExpenseFormDrawer({
                 legend="Tipo"
                 description={
                   field.state.value
-                    ? EXPENSE_CATEGORY_HINTS[field.state.value]
+                    ? expenseCategoryHint(field.state.value)
                     : canStaffPay
                       ? undefined
                       : "Los sueldos y lo que se le paga al personal los anota administración."
