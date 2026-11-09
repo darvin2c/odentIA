@@ -18,6 +18,7 @@ import {
   boolean,
   char,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -32,7 +33,7 @@ import {
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
-import { patient, patientCharge, patientPayment, patientPaymentApplication, serviceCatalog } from "./clinical.js"
+import { patient, patientCharge, patientPayment, patientPaymentApplication, serviceCatalog, treatmentPlanItem } from "./clinical.js"
 import { purchaseOrder, supplier } from "./inventory.js"
 import { branch } from "./org.js"
 import { organizationPaymentMethod } from "./org-payments.js"
@@ -262,6 +263,83 @@ export const expenseRecurringSkip = pgTable(
   ],
 )
 
+/**
+ * Factura por pagar (ADR 0168): llega hoy y se paga después, en una vez o en partes, como la
+ * corona que factura el laboratorio a fin de mes. Es el papel, no el dinero: anotarla no saca nada de
+ * la caja ni suma en «Gastado». Cada pago es un gasto enlazado (`expense.payable_id`), como el pago de
+ * una compra (ADR 0061); lo pagado es la suma de sus gastos vigentes, sin otro registro. Puede decir
+ * de qué paciente y de qué tratamiento es, para ver su costo junto a lo cobrado. No se borra: se anula
+ * con su motivo, y solo si no tiene pagos vigentes.
+ */
+export const expensePayable = pgTable(
+  "expense_payable",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branch.id),
+    /** Un tipo de `EXPENSE_CATEGORIES`, salvo «Personal» (lo valida el servicio). */
+    category: text("category").notNull().default("Laboratorio"),
+    concept: text("concept").notNull(),
+    /** A quién se le debe: un proveedor de Inventario o uno escrito, con su documento congelado. */
+    supplierId: uuid("supplier_id"),
+    supplierName: text("supplier_name").notNull(),
+    supplierTaxId: text("supplier_tax_id"),
+    /** El tipo de comprobante del país (SUNAT tabla 10 en el Perú) y su número. */
+    receiptType: text("receipt_type"),
+    receiptNumber: text("receipt_number"),
+    /** El día de emisión del comprobante y el día en que vence, en el calendario de la clínica. */
+    issuedOn: date("issued_on").notNull(),
+    dueOn: date("due_on"),
+    currency: char("currency", { length: 3 }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    /** De qué paciente y de qué tratamiento es (opcional): su costo se ve junto a lo cobrado. */
+    patientId: uuid("patient_id"),
+    planItemId: uuid("plan_item_id"),
+    notes: text("notes"),
+    /** La clave del formulario (ADR 0018): reintentar devuelve la misma factura. */
+    requestId: uuid("request_id"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    uniqueIndex("expense_payable_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("expense_payable_org_request_uidx")
+      .on(table.organizationId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
+    index("expense_payable_org_branch_open_idx")
+      .on(table.organizationId, table.branchId)
+      .where(sql`${table.voidedAt} IS NULL`),
+    index("expense_payable_org_patient_idx")
+      .on(table.organizationId, table.patientId)
+      .where(sql`${table.patientId} IS NOT NULL`),
+    foreignKey({
+      name: "expense_payable_supplier_org_fk",
+      columns: [table.organizationId, table.supplierId],
+      foreignColumns: [supplier.organizationId, supplier.id],
+    }),
+    foreignKey({
+      name: "expense_payable_patient_org_fk",
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    // El tratamiento es de esa paciente y de esa clínica.
+    foreignKey({
+      name: "expense_payable_plan_item_org_fk",
+      columns: [table.organizationId, table.patientId, table.planItemId],
+      foreignColumns: [treatmentPlanItem.organizationId, treatmentPlanItem.patientId, treatmentPlanItem.id],
+    }),
+    check("expense_payable_amount_check", sql`${table.amountCents} > 0`),
+    check("expense_payable_due_check", sql`${table.dueOn} IS NULL OR ${table.dueOn} >= ${table.issuedOn}`),
+    check("expense_payable_plan_item_check", sql`${table.planItemId} IS NULL OR ${table.patientId} IS NOT NULL`),
+    check("expense_payable_category_check", sql`${table.category} <> 'Personal'`),
+  ],
+)
+
 /** Gasto de la organización; enlazado a caja chica cuando pasa por un turno. */
 export const expense = pgTable(
   "expense",
@@ -298,6 +376,8 @@ export const expense = pgTable(
      * vigentes; no hay otro registro del pago (ADR 0061).
      */
     purchaseOrderId: uuid("purchase_order_id"),
+    /** El pago (o una parte) de una factura por pagar (ADR 0168). */
+    payableId: uuid("payable_id"),
     /**
      * El pago del impuesto de lo cobrado (el IGV que la clínica entrega a la
      * autoridad, ADR 0083): un gasto de «Impuestos» que no resta de lo que deja,
@@ -397,6 +477,16 @@ export const expense = pgTable(
     index("expense_org_purchase_idx")
       .on(table.organizationId, table.purchaseOrderId)
       .where(sql`${table.purchaseOrderId} IS NOT NULL`),
+    index("expense_org_payable_idx")
+      .on(table.organizationId, table.payableId)
+      .where(sql`${table.payableId} IS NOT NULL`),
+    foreignKey({
+      name: "expense_payable_org_fk",
+      columns: [table.organizationId, table.payableId],
+      foreignColumns: [expensePayable.organizationId, expensePayable.id],
+    }),
+    // Un pago es de una compra o de una factura, no de las dos.
+    check("expense_payable_or_purchase_check", sql`${table.payableId} IS NULL OR ${table.purchaseOrderId} IS NULL`),
     foreignKey({
       columns: [table.organizationId, table.purchaseOrderId],
       foreignColumns: [purchaseOrder.organizationId, purchaseOrder.id],
