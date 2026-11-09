@@ -384,6 +384,9 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // Regla específica antes de la genérica: la auditoría vive bajo Configuración
   // pero la consulta quien tiene `audit.read`.
   { prefix: "/settings/audit", permissions: ["audit.read"] },
+  // Regla específica antes de la genérica: la comisión de cada profesional la
+  // fija quien administra las comisiones, no quien configura la clínica.
+  { prefix: "/settings/commissions", permissions: ["commissions.write"] },
   // Regla específica antes de la genérica: las aprobaciones operativas las
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/pendientes", permissions: ["agent.read", "agent.decide"] },

@@ -525,6 +525,8 @@ export interface PlanItem {
   offeredCurrency?: string | null
   /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»), como lo dice el servidor. */
   diagnosisName?: string | null
+  /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia): lo dice el servidor. */
+  waitsFor?: { id: string; title: string } | null
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
@@ -644,6 +646,8 @@ export interface VisitTreatment {
   registered: boolean
   /** Lo trae la cita de esta atención: no se saca desde aquí. */
   broughtByAppointment: boolean
+  /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia); `today`: ese se hace hoy. */
+  after?: { title: string; today: boolean } | null
 }
 
 /** Un control con su ventana abierta: esta visita lo cumple si se marca. */
@@ -1100,6 +1104,11 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   return apiFetch<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
+}
+
+/** De lo que falta, lo suyo: lo que pide su enlace (el documento de su representante no lo completa ella). */
+export function ownGaps<T extends { key: string }>(gaps: readonly T[]): T[] {
+  return gaps.filter((gap) => gap.key !== "representativeDoc")
 }
 
 /**

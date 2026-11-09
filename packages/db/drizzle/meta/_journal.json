@@ -579,15 +579,29 @@
     {
       "idx": 82,
       "version": "7",
-      "when": 1794255747909,
-      "tag": "0082_factura_por_pagar",
+      "when": 1794253982873,
+      "tag": "0082_anatomia_de_la_biblioteca",
       "breakpoints": true
     },
     {
       "idx": 83,
       "version": "7",
-      "when": 1794255759431,
-      "tag": "0083_factura_por_pagar_reglas",
+      "when": 1794253986044,
+      "tag": "0083_argos_espera_a_otro",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794262432828,
+      "tag": "0084_factura_por_pagar",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794262445836,
+      "tag": "0085_factura_por_pagar_reglas",
       "breakpoints": true
     }
   ]

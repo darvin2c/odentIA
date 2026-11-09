@@ -42,6 +42,9 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   "¿Cómo se firma el odontograma?": () => [],
   "¿Cómo dicto una atención?": () => [],
   "¿Para qué es «Guardar en tu atención de hoy» en la tomografía?": () => [],
+  // Las piezas son de odentIA: ni el aviso del tratamiento para otras piezas ni «va después» en la misma pieza.
+  "¿Por qué me avisa que el tratamiento es para otras piezas?": () => [],
+  "¿Por qué la corona dice «va después de terminar» la endodoncia?": () => [],
   // Lo indicado ya queda aceptado: lo que falta es su cita.
   "¿Dónde veo sus alergias, qué le toca y su última atención?": (faq) => [
     {

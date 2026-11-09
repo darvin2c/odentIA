@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { useAppForm, useFormSurface } from "./app-form.js"
-import { INCOMPLETE_PHONE } from "./fields.js"
+import { DOUBTFUL_PHONE, FICTIONAL_PHONE, INCOMPLETE_PHONE, isFictionalPhone } from "./fields.js"
 import { FormPanel } from "./form-panel.js"
 import { setSubmitErrors } from "./server-errors.js"
 import { SUBMIT_ERROR_WORDS } from "./submit-error.js"
@@ -54,6 +54,20 @@ class FakeApiError extends Error {
 interface Branch {
   name: string
   phone: string | null
+}
+
+/** Un teléfono de otro país, con su país ya elegido. */
+function PhoneForm({ country }: { country: "GB" | "PE" }) {
+  const form = useAppForm({ defaultValues: { phone: null as string | null } })
+  return (
+    <form>
+      <form.AppField name="phone">
+        {(field) => (
+          <field.PhoneField label="Teléfono" defaultCountry={country} showCountrySelect={false} />
+        )}
+      </form.AppField>
+    </form>
+  )
 }
 
 function BranchForm({ save }: { save: (value: Branch) => Promise<void> }) {
@@ -300,6 +314,23 @@ describe("useAppForm", () => {
 
     expect(await screen.findByText(INCOMPLETE_PHONE)).toBeTruthy()
     expect(save).not.toHaveBeenCalled()
+  })
+
+  it("el rango de ficción de Ofcom (+44 7700 900000 a 900999) se dice como número de prueba, no como uno por revisar", async () => {
+    expect(isFictionalPhone("+447700900881")).toBe(true)
+    expect(isFictionalPhone("+447700900000")).toBe(true)
+    expect(isFictionalPhone("+447700900999")).toBe(true)
+    expect(isFictionalPhone("+447700901000")).toBe(false)
+    expect(isFictionalPhone("+447700123456")).toBe(false)
+    expect(isFictionalPhone("+51987654321")).toBe(false)
+    expect(isFictionalPhone(null)).toBe(false)
+
+    const user = userEvent.setup()
+    render(<PhoneForm country="GB" />)
+    await user.type(screen.getByLabelText("Teléfono"), "7700900881")
+    expect(await screen.findByText(FICTIONAL_PHONE)).toBeTruthy()
+    expect(screen.queryByText(DOUBTFUL_PHONE)).toBeNull()
+    expect(screen.getByLabelText("Teléfono").getAttribute("aria-invalid")).toBeNull()
   })
 
   it("sin respuesta del servidor no promete nada: lo dice y conserva lo escrito", async () => {

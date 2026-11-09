@@ -13,6 +13,8 @@
  * «Ortodoncia y Ortopedia Maxilar»; lo que no está se le devuelve al modelo
  * con los nombres que sí hay, en vez de una cifra en cero.
  */
+
+import { ATTENDING_ROLES } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
@@ -20,7 +22,6 @@ import { professionalSchedule } from "@odentia/db/schema/availability"
 import { orgSpecialty } from "@odentia/db/schema/clinical"
 import { product } from "@odentia/db/schema/inventory"
 import { promotion } from "@odentia/db/schema/promotions"
-import { ATTENDING_ROLES } from "@odentia/auth/permissions"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { listAgentServices } from "./agent-clinic-info.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
@@ -487,8 +488,9 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   {
     key: "lo_que_viene_sin_cita",
     name: "Lo aceptado sin cita",
-    describes: "De lo aceptado que falta hacer, lo que ninguna cita por venir lleva, aunque el paciente tenga otra cita, hoy.",
-    how: "Lo aceptado que todavía no se hizo (por empezar, programado o en curso) y que ninguna cita por venir lleva, aunque el paciente tenga otra cita; de pacientes activos. Es la regla de Pacientes › «Por agendar».{al_cambio_de_hoy}",
+    describes:
+      "De lo aceptado que falta hacer, lo que ninguna cita por venir lleva, aunque el paciente tenga otra cita, hoy.",
+    how: "Lo aceptado que todavía no se hizo (por empezar, programado o en curso) y que ninguna cita por venir lleva, aunque el paciente tenga otra cita; de pacientes activos. Lo que va después de otro tratamiento del mismo sitio que ya tiene su cita no cuenta mientras esa cita esté por venir. Es la regla de Pacientes › «Por agendar».{al_cambio_de_hoy}",
     unit: "dinero",
     column: "sin_cita_dinero",
     time: "a_hoy",
@@ -497,7 +499,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["lineas_presupuesto", "pacientes"],
-        rows: "select l.importe as v, l.tratamiento as servicio from lineas_presupuesto l join pacientes p on p.paciente_id = l.paciente_id where l.decision = 'aceptado' and l.estado_presupuesto in ('aceptado', 'parcial') and l.estado_tratamiento in ('pendiente', 'programado', 'en_curso') and not l.cita_lo_lleva and not p.archivado",
+        rows: "select l.importe as v, l.tratamiento as servicio from lineas_presupuesto l join pacientes p on p.paciente_id = l.paciente_id where l.decision = 'aceptado' and l.estado_presupuesto in ('aceptado', 'parcial') and l.estado_tratamiento in ('pendiente', 'programado', 'en_curso') and not l.cita_lo_lleva and not l.espera_a_otro_con_cita and not p.archivado",
         cuts: ["servicio"],
       },
     ],

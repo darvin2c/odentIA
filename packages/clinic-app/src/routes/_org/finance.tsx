@@ -511,19 +511,32 @@ function FinanceWorkspace() {
               {canCommissions ? <TabsTrigger value="comisiones" className="shrink-0">Comisiones</TabsTrigger> : null}
             </TabsList>
             {isMobile && monthPicker ? <div className="ml-auto">{monthPicker}</div> : null}
-            {canReports ? (
-              <Link
-                to="/reports"
-                search={{
-                  tab: "finanzas",
-                  ...(view !== "comisiones" ? { branch: ws.branchId } : {}),
-                  // Desde Gastos, el reporte del mismo mes que se mira (QA de Gastos, G13).
-                  ...(view === "gastos" && period ? { period: `${period.year}-${String(period.month).padStart(2, "0")}` } : {}),
-                }}
-                className="ml-auto inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
-              >
-                Ver el reporte
-              </Link>
+            {(view === "comisiones" && canCommissionsWrite) || canReports ? (
+              <div className="ml-auto flex flex-wrap items-center gap-x-4">
+                {view === "comisiones" && canCommissionsWrite ? (
+                  // Lo que se lleva cada profesional se fija en Configuración: aquí se liquida el mes.
+                  <Link
+                    to="/settings/commissions"
+                    className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
+                  >
+                    Configurar comisiones
+                  </Link>
+                ) : null}
+                {canReports ? (
+                  <Link
+                    to="/reports"
+                    search={{
+                      tab: "finanzas",
+                      ...(view !== "comisiones" ? { branch: ws.branchId } : {}),
+                      // Desde Gastos, el reporte del mismo mes que se mira (QA de Gastos, G13).
+                      ...(view === "gastos" && period ? { period: `${period.year}-${String(period.month).padStart(2, "0")}` } : {}),
+                    }}
+                    className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
+                  >
+                    Ver el reporte
+                  </Link>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <TabsContent value={strip}>

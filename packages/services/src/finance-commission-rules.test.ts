@@ -17,6 +17,8 @@ import { addEncounterProcedure, createEncounter, finalizeEncounter } from "./enc
 import {
   commissionRulesOf,
   getMonthlyCommissions,
+  listCommissionAgreements,
+  listMonthCommissions,
   payMonthCommission,
   setCommissionException,
   setCommissionRate,
@@ -265,4 +267,76 @@ it("un mes ya cerrado dice las reglas con que terminó, no las de hoy", async ()
   const current = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...now }))
   expect(past.rateBps).toBe(1000)
   expect(current.rateBps).toBe(2000)
+})
+
+it("sin porcentaje general, la primera comisión de un servicio vale también para lo ya cobrado sin pagar", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 30000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 10000 }], requestId: randomUUID() }),
+  )
+  const view = () => f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
+  const agreementOf = async () =>
+    (await f.run((tx) => listCommissionAgreements(tx, "org_a"))).find((row) => row.professionalUserId === f.actor)
+
+  // Sin ninguna comisión decidida: el cobro no comisiona todavía, y la persona aparece para fijarla.
+  expect((await view()).lines.map((line) => [line.commissionCents, line.unruled])).toEqual([[0, true]])
+  expect(await agreementOf()).toMatchObject({ hasRate: false, rateBps: 0, exceptions: [] })
+
+  // Solo por servicio: 150 por cada corona. Es la primera para ese servicio sin porcentaje general,
+  // así que vale también para la corona ya cobrada (un tercio de 300: 50).
+  await f.run((tx) => setCommissionException(tx, "org_a", f.actor, { professionalUserId: f.actor, serviceId: f.service.id, fixedCents: 15000 }))
+  expect((await view()).lines.map((line) => [line.fixedCents, line.forService, line.commissionCents])).toEqual([[15000, true, 5000]])
+  // Comisionar solo por servicio decide lo demás: un porcentaje general de 0, desde siempre.
+  expect(await agreementOf()).toMatchObject({ hasRate: true, rateBps: 0, exceptions: [{ serviceId: f.service.id, fixedCents: 15000 }] })
+  // Un porcentaje que se ponga después ya no es el primero: vale desde ese día, no reabre lo de antes.
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3000 }))
+  expect((await view()).lines.map((line) => line.commissionCents)).toEqual([5000])
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 0 }))
+
+  // Cambiarla después ya no es la primera: vale para lo que se atienda desde ahora.
+  await f.run((tx) => setCommissionException(tx, "org_a", f.actor, { professionalUserId: f.actor, serviceId: f.service.id, rateBps: 4500 }))
+  expect((await view()).lines.map((line) => line.commissionCents)).toEqual([5000])
+})
+
+it("quien no cobra comisión no aparece en el mes; quien aún no la tiene decidida, sí", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 30000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 30000 }], requestId: randomUUID() }),
+  )
+  const row = async () =>
+    (await f.run((tx) => listMonthCommissions(tx, "org_a", currentPeriod()))).find((item) => item.professionalUserId === f.actor)
+
+  // Atendió y nadie decidió su comisión: su fila lo dice, para ponerla.
+  expect(await row()).toMatchObject({ hasRate: false, exceptionCount: 0, commissionCents: 0, baseCents: 30000 })
+
+  // «No cobra comisión»: un porcentaje de 0, decidido. No tiene nada que pagar en el mes y no se lista.
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 0 }))
+  expect(await row()).toBeUndefined()
+  expect((await f.run((tx) => listCommissionAgreements(tx, "org_a"))).find((item) => item.professionalUserId === f.actor)).toMatchObject({
+    hasRate: true,
+    rateBps: 0,
+    exceptions: [],
+  })
 })

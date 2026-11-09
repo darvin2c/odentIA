@@ -13,17 +13,18 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm"
-import { diagnosisTitlesOf, namedDiagnosis, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { acceptedBudgetLines } from "./agreed-lines.js"
+import { readBillingModes } from "./budgets.js"
+import {
+  diagnosisTitlesOf,
+  namedDiagnosis,
+  resolveOptionalDiagnosisCode,
+} from "./diagnosis-codes.js"
+import { assertAttending } from "./encounter-attending.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
-import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
-import { serviceKindOf } from "./specialties.js"
-import { productHooks } from "./products.js"
-import { orgClinicalProfile } from "./locale.js"
-import { readBillingModes } from "./budgets.js"
-import { assertAttending } from "./encounter-attending.js"
-import { acceptedBudgetLines } from "./agreed-lines.js"
 import {
   type ProductHooks,
   type ProductParts,
@@ -33,6 +34,10 @@ import {
   siteInputOf,
   withSite,
 } from "./product-hooks.js"
+import { productHooks } from "./products.js"
+import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
+import { serviceKindOf } from "./specialties.js"
+import { waitingFor } from "./to-schedule.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -936,7 +941,7 @@ export async function listPlanItems(
   patientId: string,
   planId?: string,
   opts: { withoutVoided?: boolean } = {},
-): Promise<PlanItemWithProgress[]> {
+): Promise<Array<PlanItemWithProgress & { waitsFor: { id: string; title: string } | null }>> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
     eq(treatmentPlanItem.patientId, patientId),
@@ -959,7 +964,17 @@ export async function listPlanItems(
       asc(treatmentPlanItem.createdAt),
       asc(treatmentPlanItem.id),
     )
-  return withDecisions(tx, orgId, items)
+  const withProgress = await withDecisions(tx, orgId, items)
+  // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia), con
+  // la regla de «Qué sigue» (`waitingFor`): «Registrar lo de hoy» no lo propone por omisión.
+  const phases = (await hooksOf(tx, orgId)).planPhases
+  // Lo indicado y aún por decidir cuenta como si se aceptara: la endodoncia y la corona indicadas en
+  // la misma consulta ya tienen su orden antes de responder el presupuesto (QA antes de entregar).
+  const asDecided = withProgress.map((item) => (item.decisionStatus === "pendiente" ? { ...item, decisionStatus: "aceptado" } : item))
+  return withProgress.map((item, index) => {
+    const before = waitingFor(asDecided[index]!, asDecided, phases)
+    return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null }
+  })
 }
 
 export async function addPlanItem(

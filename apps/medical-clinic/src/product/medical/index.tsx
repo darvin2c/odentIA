@@ -42,7 +42,11 @@ export const medicalUi: ProductUi = {
     professional: medicalProfessionalFor,
   },
   // Los tipos de su biblioteca, para filtrarla; nada queda dibujado al completar un servicio.
-  services: { kinds: MEDICAL_SERVICE_KINDS.map((kind) => ({ key: kind.key, name: kind.name })), leaves: null },
+  services: {
+    kinds: MEDICAL_SERVICE_KINDS.map((kind) => ({ key: kind.key, name: kind.name })),
+    leaves: null,
+    toothFit: null,
+  },
   // Lo indicado queda aceptado al indicarlo: el presupuesto es opcional (decisión
   // 15); los controles pueden repetirse (decisión 16).
   plan: { ...bare.plan, budgetRequired: false, repeatingControls: true },

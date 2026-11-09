@@ -1,61 +1,89 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto"
 import {
   clinicalProfileFor,
   DEFAULT_REGISTRATION_CONFIG,
-  demographicsSchema,
   DOC_TYPES,
+  demographicsSchema,
   documentIssuerCountry,
-  identityDocumentError,
   documentText,
+  identityDocumentError,
   isMinor,
   isRealDate,
   kinshipFromWords,
-  missingPersonData,
   type MissingPersonDatum,
+  missingPersonData,
   normalizePhone,
   pendingRegistrationFields,
-  registrationAnswersSchema,
-  registrationConfigSchema,
-  validateRegistrationAnswers,
+  REPRESENTATIVE_DOC_GAP,
   type RegistrationAnswers,
   type RegistrationConfig,
   type RegistrationContactInput,
   type RegistrationEntryPoint,
+  registrationAnswersSchema,
+  registrationConfigSchema,
+  validateRegistrationAnswers,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { appointmentBookingLink } from "@odentia/db/schema/agenda"
 import {
   patient,
   patientContact,
   patientDataConsent,
   patientRegistration,
   patientRegistrationLink,
+  patientResponsibility,
 } from "@odentia/db/schema/clinical"
-import { contact, conversation, contactIdentity, channelConnection, crmTask, registrationHold } from "@odentia/db/schema/crm"
+import {
+  channelConnection,
+  contact,
+  contactIdentity,
+  conversation,
+  crmTask,
+  registrationHold,
+} from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
-import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { appointmentBookingLink } from "@odentia/db/schema/agenda"
-import { and, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
-import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCountry, orgProduct } from "./locale.js"
+import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
+import {
+  claimWhatsAppNumber,
+  hasWhatsappNumber,
+  isDirectThread,
+  lockRegistrationContacts,
+  whatsappNumberOf,
+  whatsappNumbersOf,
+} from "./contacts.js"
 import { createContactNote } from "./crm-workspace.js"
+import { applyMessagePermissions } from "./data-consents.js"
+import {
+  fieldsError,
+  invalidField,
+  issueFields,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
+import { findOrgCountry, orgProduct } from "./locale.js"
+import { consentStatusOf } from "./message-permission.js"
+import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import {
   createPatient,
+  type PatientRow,
   patientOrganizationToday,
   REGISTRATION_NOT_COMPLETED_TEXT,
   RegistrationHeld,
   type RegistrationHold,
   requirePatient,
-  type PatientRow,
   updatePatient,
 } from "./patients.js"
-import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
-import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
-import { applyMessagePermissions } from "./data-consents.js"
-import { consentStatusOf } from "./message-permission.js"
-import { createPerson, findPersonByDocument, setPersonArchived, updatePersonIdentity } from "./people.js"
-import { grantResponsibility } from "./responsibilities.js"
-import { claimWhatsAppNumber, hasWhatsappNumber, isDirectThread, lockRegistrationContacts, whatsappNumberOf, whatsappNumbersOf } from "./contacts.js"
+import {
+  createPerson,
+  findPersonByDocument,
+  setPersonArchived,
+  updatePersonIdentity,
+} from "./people.js"
+import { grantResponsibility, isMinorOn } from "./responsibilities.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
@@ -282,6 +310,68 @@ export async function getPatientMissingData(
 }
 
 /**
+ * De esos pacientes, los menores de edad cuyo representante legal vigente no
+ * tiene documento: se registró sin él (PR 558) y la firma del consentimiento lo
+ * pide ahí mismo. Si tiene varios representantes, basta que uno lo tenga.
+ */
+export async function representativeDocumentGaps(
+  tx: Db,
+  orgId: string,
+  rows: ReadonlyArray<{ id: string; birthDate: string | Date | null }>,
+): Promise<Set<string>> {
+  if (rows.length === 0) return new Set()
+  const today = await patientOrganizationToday(tx, orgId)
+  const minors = rows.filter((row) => isMinorOn(row.birthDate, today)).map((row) => row.id)
+  if (minors.length === 0) return new Set()
+  const representatives = await tx
+    .select({ patientId: patientResponsibility.patientId, docNumber: contact.docNumber })
+    .from(patientResponsibility)
+    .innerJoin(
+      contact,
+      and(
+        eq(contact.organizationId, patientResponsibility.organizationId),
+        eq(contact.id, patientResponsibility.contactId),
+      ),
+    )
+    .where(
+      and(
+        eq(patientResponsibility.organizationId, orgId),
+        inArray(patientResponsibility.patientId, minors),
+        eq(patientResponsibility.kind, "representante_legal"),
+        sql`${patientResponsibility.revokedAt} is null`,
+        sql`${patientResponsibility.startsAt} <= ${today}`,
+        sql`(${patientResponsibility.endsAt} is null or ${patientResponsibility.endsAt} >= ${today})`,
+        eq(contact.isActive, true),
+      ),
+    )
+  const withDocument = new Set(
+    representatives.filter((row) => row.docNumber?.trim()).map((row) => row.patientId),
+  )
+  return new Set(
+    representatives.filter((row) => !withDocument.has(row.patientId)).map((row) => row.patientId),
+  )
+}
+
+/**
+ * «Faltan datos» como lo ve el equipo en su página y en la Agenda: lo de
+ * `getPatientMissingData` y, si es menor, el documento de su representante
+ * cuando falta (`representativeDocumentGaps`). Su enlace y el agente siguen con
+ * `getPatientMissingData`: ese dato no es suyo y no lo completa ella.
+ */
+export async function getStaffMissingData(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<MissingPersonDatum[]> {
+  const missing = await getPatientMissingData(tx, orgId, patientId)
+  const row = await requirePatient(tx, orgId, patientId)
+  const gaps = await representativeDocumentGaps(tx, orgId, [
+    { id: patientId, birthDate: row.birthDate },
+  ])
+  return gaps.has(patientId) ? [...missing, REPRESENTATIVE_DOC_GAP] : missing
+}
+
+/**
  * Lo mismo que `getPatientMissingData` para muchos pacientes a la vez, con la
  * misma regla (`missingPersonData`): cinco consultas en total, no cinco por
  * paciente. Sin `patientIds`, todos los activos (el atajo «Faltan datos»).
@@ -328,7 +418,13 @@ export async function patientsMissingData(tx: Db, orgId: string, patientIds?: st
     )
   const represented = new Set(spokespeople.map((row) => row.patientId))
   const emergencyOf = new Map(emergencies.map((row) => [row.patientId, row]))
-  const numbers = await whatsappNumbersOf(tx, orgId, rows.filter((row) => row.phone === null).map((row) => row.personId))
+  // Lo que ve el equipo: también el documento del representante de un menor (`getStaffMissingData`).
+  const representativeGaps = await representativeDocumentGaps(tx, orgId, rows)
+  const numbers = await whatsappNumbersOf(
+    tx,
+    orgId,
+    rows.filter((row) => row.phone === null).map((row) => row.personId),
+  )
   const out = new Set<string>()
   for (const row of rows) {
     const emergency = emergencyOf.get(row.id)
@@ -342,7 +438,7 @@ export async function patientsMissingData(tx: Db, orgId: string, patientIds?: st
       },
       { representativeContact: represented.has(row.id) },
     )
-    if (missing.length > 0) out.add(row.id)
+    if (missing.length > 0 || representativeGaps.has(row.id)) out.add(row.id)
   }
   return out
 }
