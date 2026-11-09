@@ -167,7 +167,7 @@ Pendiente fuera del código, como con latidIA:
    y `app.`, como en latidIA).
 2. Google OAuth: la dirección de vuelta `https://api.vistia20.com/api/auth/callback/google`.
 3. Meta: el dominio `https://app.vistia20.com/` en la app de «Conectar con Facebook», y la
-   plantilla `vistia_invitar_a_volver_v1` cuando una óptica conecte su WhatsApp.
+   plantillas `vistia_invitar_a_volver_v1` y `vistia_lentes_listos_v1` («Tus lentes están listos», ADR 0169) cuando una óptica conecte su WhatsApp.
 4. R2: `https://*.vistia20.com` en el CORS del bucket de adjuntos.
 5. Correo: `hola@` y `privacidad@vistia20.com` (Email Routing) y el remitente.
 6. Administración: «Plan vistIA» y «Fundadores vistIA», empezando con los precios de los de
