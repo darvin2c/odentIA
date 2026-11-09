@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assertTaxRate, includedTaxCents, resolveOrgTaxes, taxProfileFor } from "./taxes.js"
+import { assertTaxRate, includedTaxCents, resolveOrgTaxes, taxProfileFor, ticketCreditSummary } from "./taxes.js"
 
 describe("el impuesto de lo que cobra la clínica", () => {
   it("separa el impuesto incluido en el precio, redondeado por línea", () => {
@@ -50,5 +50,25 @@ describe("el impuesto de lo que cobra la clínica", () => {
     expect(() => assertTaxRate({ category: "E", rateBps: 1800 })).toThrow()
     expect(assertTaxRate({ category: "O", rateBps: 0 })).toEqual({ category: "O", rateBps: 0 })
     expect(taxProfileFor("pe")?.name).toBe("IGV")
+  })
+})
+
+// QA del 9 nov: líneas por 470, «TOTAL 370» y debajo «Tarjeta 370 · Saldo a favor usado 100».
+describe("el ticket con saldo a favor, dicho para que cuadre", () => {
+  it("la suma de las líneas menos el saldo a favor es lo pagado hoy, que suman los medios", () => {
+    const methods = [37_000]
+    const summary = ticketCreditSummary({ lineCents: [25_000, 22_000], creditAppliedCents: 10_000, totalCents: 37_000 })
+    expect(summary).toEqual({ sumCents: 47_000, creditCents: 10_000, paidTodayCents: 37_000 })
+    expect(summary!.sumCents - summary!.creditCents).toBe(summary!.paidTodayCents)
+    expect(methods.reduce((sum, cents) => sum + cents, 0)).toBe(summary!.paidTodayCents)
+  })
+
+  it("lo que queda como adelanto también suma: entró hoy", () => {
+    const summary = ticketCreditSummary({ lineCents: [5_000], advanceCents: 2_000, creditAppliedCents: 3_000, totalCents: 4_000 })
+    expect(summary!.sumCents - summary!.creditCents).toBe(summary!.paidTodayCents)
+  })
+
+  it("sin saldo a favor el ticket se lee como siempre", () => {
+    expect(ticketCreditSummary({ lineCents: [25_000], creditAppliedCents: 0, totalCents: 25_000 })).toBeNull()
   })
 })

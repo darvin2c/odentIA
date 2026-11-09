@@ -256,7 +256,10 @@ export type PhoneFieldProps = FieldText &
 export function PhoneField({ label, description, hideLabel, id, className, ...phone }: PhoneFieldProps) {
   const field = useFieldContext<string | null>()
   // Posible pero no válido para su país (un dígito de más, un rango reservado): se guarda y se avisa.
-  const [doubtful, setDoubtful] = useState(false)
+  // Vale para el número con que se calculó: si el valor cambia desde fuera (elegir a una persona
+  // ya registrada), no queda el aviso del número anterior (segunda mesa del 9 nov).
+  const [doubtfulFor, setDoubtfulFor] = useState<string | null>(null)
+  const doubtful = doubtfulFor !== null && doubtfulFor === (field.state.value ?? null)
   const hint = doubtful ? "Revisa el número: no parece de un celular de ese país. Se guarda tal como está." : description
   return (
     <FormField label={label} description={hint} hideLabel={hideLabel} id={id} className={className}>
@@ -271,7 +274,7 @@ export function PhoneField({ label, description, hideLabel, id, className, ...ph
           onBlur={control.onBlur}
           onChange={(next, meta) => {
             field.handleChange(next)
-            setDoubtful(meta.e164 !== null && !meta.isValid)
+            setDoubtfulFor(meta.e164 !== null && !meta.isValid ? meta.e164 : null)
             // Solo se toca el aviso propio: el de un validador de la pantalla se respeta.
             if (meta.digits.length > 0 && !meta.e164) field.setErrorMap({ onChange: INCOMPLETE_PHONE })
             else if (field.state.meta.errorMap.onChange === INCOMPLETE_PHONE) field.setErrorMap({ onChange: undefined })

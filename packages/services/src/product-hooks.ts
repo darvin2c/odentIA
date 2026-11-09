@@ -26,7 +26,7 @@ import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
  */
 
 /**
- * Lo que una venta copia en su pedido (ADR 0168; vistIA: la receta de lentes
+ * Lo que una venta copia en su pedido (ADR 0170; vistIA: la receta de lentes
  * vigente): lo que se muestra al elegirla y la copia que va al taller, que así no
  * abre la historia.
  */
@@ -438,7 +438,7 @@ export interface ProductHooks {
    */
   demoBuilt?(tx: Db, orgId: string, now?: Date): Promise<void>
   /**
-   * Lo que el producto copia en el pedido de una venta (ADR 0168; vistIA: la receta
+   * Lo que el producto copia en el pedido de una venta (ADR 0170; vistIA: la receta
    * de lentes vigente). `current`, lo que se ofrece al vender; `snapshot`, la copia
    * de una, o null si no es de esa persona o está anulada. Sin él, la venta va sin.
    */

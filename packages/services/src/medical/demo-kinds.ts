@@ -13,16 +13,20 @@ import type { Random, ReportsSeedNote, ReportsSeedPerson } from "../seed-reports
 const GENERAL_EXPENSES: DemoKindRecipe["expenses"] = [
   {
     category: "Personal",
-    concept: "Planilla del mes",
+    concept: "Planilla del resto del equipo",
     cents: 2_400_00,
-    // El sueldo base de cada médico, con su nombre (va junto a su comisión).
+    // El sueldo base de cada médico: la persona va en la plantilla, no en el concepto (S1 de la QA
+    // de Gastos), y se ve junto a su comisión.
     perStaffCents: 800_00,
     day: 28,
   },
   { category: "Alquiler", concept: "Alquiler del local", rent: true, day: 1 },
   { category: "Laboratorio", concept: "Análisis derivados", revenueShare: 0.05, day: 20 },
   { category: "Materiales", concept: "Insumos médicos", revenueShare: 0.04, day: 12 },
-  { category: "Servicios", concept: "Luz, agua e internet", cents: 520_00, day: 18 },
+  // Tres recibos, de tres empresas y en tres fechas, como llegan (DM1 de la QA de Gastos).
+  { category: "Servicios", concept: "Luz", cents: 220_00, day: 18 },
+  { category: "Servicios", concept: "Agua", cents: 90_00, day: 10 },
+  { category: "Servicios", concept: "Internet y teléfono", cents: 210_00, day: 5 },
 ]
 
 /**

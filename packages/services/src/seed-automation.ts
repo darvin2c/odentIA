@@ -78,7 +78,7 @@ export async function seedChannelTemplates(
     enlace_recibido: { status: "aprobada", since: lastWeek },
     // Aprobado: una receta o un comprobante enviados pasadas las 24 horas salen con su PDF (ADR 0156).
     documento_listo: { status: "aprobada", since: lastWeek },
-    // Aprobado: «Tus lentes están listos» sale al marcar «Listo» (solo en una óptica, ADR 0169).
+    // Aprobado: «Tus lentes están listos» sale al marcar «Listo» (solo en una óptica, ADR 0171).
     pedido_listo: { status: "aprobada", since: lastWeek },
   }
   const product = await orgProduct(tx, orgId)

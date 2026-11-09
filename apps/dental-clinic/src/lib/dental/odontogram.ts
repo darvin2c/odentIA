@@ -24,6 +24,8 @@ export interface OdontogramEntry extends SiteFinding {
   diagnosisCode?: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
+  /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»), del servidor. */
+  diagnosisName?: string | null
   note?: string | null
   encounterId?: string | null
   createdAt?: string

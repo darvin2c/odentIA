@@ -507,17 +507,19 @@ it("timeline documentCategory=radiografia excluye foto_clinica", async () => {
   expect(photoPage.data[0]!.id).toBe(photoId)
 })
 
-it("timeline solo incluye encuentros finalizados", async () => {
+it("timeline: la atención en curso es su tarjeta, marcada en borrador, y al firmarla queda la misma", async () => {
   const app = buildApp("admin")
   const patientId = await createFixturePatient(app, "Timeline borrador")
   const encounterId = await createEncounter(app, patientId, "control borrador", [36])
 
+  // Antes no salía: lo nacido en ella quedaba suelto (QA del 9 nov).
   const draft = await app.request(`/patients/${patientId}/timeline?types=encounter`, {
     method: "GET",
   })
   expect(draft.status).toBe(200)
   const draftPage = (await draft.json()) as TimelinePage
-  expect(draftPage.data).toHaveLength(0)
+  expect(draftPage.data).toHaveLength(1)
+  expect(draftPage.data[0]).toMatchObject({ id: encounterId, status: "borrador" })
   expect(draftPage.nextCursor).toBeNull()
 
   await finalizeEncounter(app, patientId, encounterId)

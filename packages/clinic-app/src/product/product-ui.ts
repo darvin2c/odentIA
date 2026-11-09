@@ -73,7 +73,7 @@ export interface ProductUi {
   /** La receta: su lista y lo que revisa además de las alergias. */
   prescribing: ProductPrescribingUi
   /**
-   * Los pedidos al taller o al laboratorio (ADR 0168; vistIA: los lentes). Sin
+   * Los pedidos al taller o al laboratorio (ADR 0170; vistIA: los lentes). Sin
    * ellos, la clínica no vende con pedido: «Pedidos» no está en el menú.
    */
   orders?: ProductOrdersUi

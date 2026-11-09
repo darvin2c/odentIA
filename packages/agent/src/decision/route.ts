@@ -177,7 +177,7 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
 export function routeToolsFor(path: RoutePath, available: ReadonlySet<string>): readonly string[] | undefined {
   const base = ROUTE_TOOLS[path]
   if (!base) return undefined
-  // «¿Ya están mis lentes?»: donde la clínica trabaja con pedidos, el turno los tiene (ADR 0169).
+  // «¿Ya están mis lentes?»: donde la clínica trabaja con pedidos, el turno los tiene (ADR 0171).
   const orders = available.has("ver_pedidos") && ORDER_PATHS.has(path) ? ["ver_pedidos"] : []
   if (path === "informacion" && !available.has("ver_presupuesto") && available.has("create_task")) return [...base, "create_task", ...orders]
   return orders.length ? [...base, ...orders] : base

@@ -58,6 +58,10 @@ describe("importes en unidad menor ISO 4217", () => {
     expect(parseMoney("1\u202f234,56", "EUR", "fr-FR")).toBe(123456)
     expect(parseMoney("12,34,567.89", "INR", "en-IN")).toBe(123456789)
     expect(() => parseMoney("120,50", "PEN", "es-PE")).toThrow()
+    // «0,001» no son mil céntimos ni S/ 1.00: un número agrupado no empieza en cero (QA del 8 nov, G29).
+    expect(() => parseMoney("0,001", "PEN", "es-PE")).toThrow()
+    expect(() => parseMoney("01,000", "PEN", "es-PE")).toThrow()
+    expect(parseMoney("1,000", "PEN", "es-PE")).toBe(100000)
     expect(() => parseMoney("120.50", "EUR", "es-ES")).toThrow()
     expect(() => parseMoney("12,34.56", "USD", "en-US")).toThrow()
   })
@@ -220,6 +224,12 @@ describe("convertir y cuadrar", () => {
     expect(currencyWord("PEN", "es-PE")).toBe("soles")
     expect(currencyWord("USD", "es-PE")).toBe("dólares")
     expect(currencyWord("CLP", "es-CL")).toBe("pesos")
+  })
+
+  it("la moneda en palabras no tumba la pantalla si llega vacía o desconocida", () => {
+    // El cajón que se cierra pierde su fila y pedía la palabra de "": era un RangeError (QA del 8 nov, G1).
+    expect(currencyWord("", "es-PE")).toBe("")
+    expect(currencyWord("XX", "es-PE")).toBe("XX")
   })
 
   it("el valor congelado: exacto en moneda del negocio", () => {

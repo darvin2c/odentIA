@@ -829,11 +829,11 @@ async function seedOpportunitiesOf(ctx: Context): Promise<number> {
         },
         { userId: ownerUserId, createdBy: "user" },
       )
-    } else if (index === 1) {
+    } else if (index === 1 || index === 2) {
+      // Nunca a «Presupuesto enviado» a mano: sin un presupuesto entregado, su cajón decía «Sin
+      // presupuesto» (QA del 8 nov, Rosa). Ahí llegan solas las de los presupuestos que la
+      // historia entrega (`linkPresentedBudget`).
       const next = stage("evaluacion_agendada")
-      if (next) await moveOpportunity(tx, orgId, opportunity.id, next.id, actor)
-    } else if (index === 2) {
-      const next = stage(ctx.budgets ? "presupuesto_enviado" : "evaluacion_agendada")
       if (next) await moveOpportunity(tx, orgId, opportunity.id, next.id, actor)
     } else if (index === 3) {
       await closeOpportunity(tx, orgId, opportunity.id, { outcome: "won", reason: "acepto" }, actor)

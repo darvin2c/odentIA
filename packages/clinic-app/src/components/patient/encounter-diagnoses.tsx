@@ -199,6 +199,7 @@ export function EncounterDiagnoses({
   onChanged,
   onPendingChange,
   autoOpen = false,
+  openSignal = 0,
   prefill = null,
   onPrefillUsed,
 }: {
@@ -210,6 +211,8 @@ export function EncounterDiagnoses({
   onPendingChange: (pending: boolean) => void
   /** Recién agregado el bloque: el formulario de agregar ya viene abierto. */
   autoOpen?: boolean
+  /** Cada vez que cambia, abre «Registrar diagnóstico» (desde lo que falta para firmar), sin perder lo escrito. */
+  openSignal?: number
   /** Una propuesta que se usó desde la tarjeta sin tipo: el formulario se abre con ella. */
   prefill?: ProposedDiagnosis | null
   onPrefillUsed?: () => void
@@ -218,6 +221,9 @@ export function EncounterDiagnoses({
   const queryClient = useQueryClient()
   const typeGroupId = useId()
   const [open, setOpen] = useState(autoOpen && !disabled)
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true)
+  }, [openSignal])
   const [voiding, setVoiding] = useState<EncounterDiagnosis | null>(null)
 
   const encounter = detail.encounter

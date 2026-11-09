@@ -1532,7 +1532,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
-  // Los pedidos de la persona (ADR 0169): solo en el producto que trabaja con pedidos.
+  // Los pedidos de la persona (ADR 0171): solo en el producto que trabaja con pedidos.
   const ordersView = texts.orders
     ? tool(
         async ({ patientId }: { patientId: string }) => {

@@ -159,7 +159,7 @@ export async function upsertAgentConfig(
   input: UpsertAgentConfigInput,
   opts: UpsertAgentConfigOpts = {},
 ): Promise<AgentConfig> {
-  // Clío se enciende solo donde su producto dicta (en vistIA no dicta, ADR 0166).
+  // Clío se enciende solo donde su producto dicta (en vistIA no dicta, ADR 0168).
   if (input.clinicalAssistantEnabled === true && (await productDictation(tx, orgId)) === null)
     throw invalidField("clinicalAssistantEnabled", "Clío todavía no dicta en este producto")
   if (

@@ -235,7 +235,6 @@ function ScheduleForm({
       title="Programar control"
       description={`${control.title} · ${resources.branchName}`}
       isSubmitting={schedule.isPending}
-      isDirty
       submitLabel={target ? `Reservar ${whenSaid(target.start, timeZone, today)}` : "Reservar cita"}
       onClose={() => {
         if (!schedule.isPending) onClose()

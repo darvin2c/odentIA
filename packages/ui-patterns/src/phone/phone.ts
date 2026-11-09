@@ -6,6 +6,7 @@ import {
   isValidPhoneNumber,
   parsePhoneNumberFromString,
 } from "libphonenumber-js"
+import metadata from "libphonenumber-js/min/metadata"
 import { formatCountry, formatLocale } from "../locale.js"
 import { detectedTimeZone, zonesForCountry } from "../time-zone/time-zone.js"
 
@@ -146,9 +147,24 @@ export function toE164(display: string, country?: CountryCode): string | null {
   return phoneMeta(display, country).e164
 }
 
-/** País de un E.164 ya persistido, si el número lo declara. */
+/**
+ * El país principal de un prefijo internacional (`44` → `GB`, `1` → `US`), el
+ * primero que da el estándar para ese código. `undefined` si no es un prefijo.
+ */
+export function mainCountryOfCallingCode(callingCode: string): CountryCode | undefined {
+  const countries = (metadata as { country_calling_codes: Record<string, string[]> }).country_calling_codes[callingCode]
+  return normalizeCountry(countries?.[0])
+}
+
+/**
+ * País de un E.164 ya persistido. Si el número no es «válido» para su país (un
+ * rango reservado, uno nuevo que la librería aún no conoce), el del prefijo:
+ * un +44 guardado se abre como Reino Unido y no como el país de la clínica,
+ * que lo reescribiría con otro prefijo al guardar (QA del 8 nov, M10).
+ */
 export function countryOf(value: string): CountryCode | undefined {
-  return parsePhoneNumberFromString(value)?.country
+  const parsed = parsePhoneNumberFromString(value)
+  return parsed?.country ?? (parsed ? mainCountryOfCallingCode(parsed.countryCallingCode) : undefined)
 }
 
 /**
@@ -180,7 +196,8 @@ export function readInternational(
   const value = text.trim()
   if (!value.startsWith("+")) return undefined
   const parsed = parsePhoneNumberFromString(value)
-  return parsed?.country ? { country: parsed.country, e164: parsed.number } : undefined
+  const country = parsed ? countryOf(parsed.number) : undefined
+  return parsed && country ? { country, e164: parsed.number } : undefined
 }
 
 /** Valida un E.164 ya persistido (para `refine` de Zod o guardas de pantalla). */

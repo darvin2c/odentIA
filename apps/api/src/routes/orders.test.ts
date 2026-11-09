@@ -12,7 +12,7 @@ import { z } from "zod"
 import type { CrmDeps } from "./helpers.js"
 import { createOrdersRoute } from "./orders.js"
 
-// El pedido por la API real con PostgreSQL efímero (ADR 0168): Ventas vende con
+// El pedido por la API real con PostgreSQL efímero (ADR 0170): Ventas vende con
 // la receta vigente; el taller ve la copia de la receta y marca cómo va, sin
 // anular ni rehacer, que mueven la caja; recepción ve cómo va, sin la receta ni
 // el dinero; leer la copia queda en «Consultas a la historia».

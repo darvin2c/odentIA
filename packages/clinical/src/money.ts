@@ -100,7 +100,8 @@ function readDecimal(
     const primary = widths.at(-1) ?? 0
     const secondary = widths.at(-2) ?? primary
     if (
-      !groups[0] || groups[0].length > secondary ||
+      // «0,001» no es mil: un número agrupado no empieza en cero.
+      !groups[0] || groups[0].length > secondary || groups[0].startsWith("0") ||
       groups.at(-1)?.length !== primary ||
       groups.slice(1, -1).some((value) => value.length !== secondary)
     ) throw new Error("Agrupación de miles inválida para el formato de la clínica")
@@ -347,14 +348,20 @@ export function exchangeRateWords(
 
 /** «soles», «dólares», «pesos»: la moneda como se nombra al hablar, en el idioma de la clínica. */
 export function currencyWord(currency: string, locale: string): string {
-  const key = `name|${locale}|${currency}`
-  let format = FORMATS.get(key)
-  if (!format) {
-    format = new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay: "name" })
-    FORMATS.set(key, format)
+  // Es una etiqueta: con una moneda vacía o desconocida (un cajón que se cierra y ya no tiene su fila)
+  // devuelve el código tal cual, como currencySymbol. Un RangeError aquí tumbaba toda Finanzas.
+  try {
+    const key = `name|${locale}|${currency}`
+    let format = FORMATS.get(key)
+    if (!format) {
+      format = new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay: "name" })
+      FORMATS.set(key, format)
+    }
+    const name = format.formatToParts(2).find((part) => part.type === "currency")?.value
+    return name?.split(" ")[0]?.toLocaleLowerCase(locale) || currency
+  } catch {
+    return currency
   }
-  const name = format.formatToParts(2).find((part) => part.type === "currency")?.value
-  return name?.split(" ")[0]?.toLocaleLowerCase(locale) || currency
 }
 
 /** Lo que una clínica todavía tiene en su otra moneda. */
