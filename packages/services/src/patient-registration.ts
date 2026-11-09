@@ -965,6 +965,22 @@ export async function registerPatient(
     answers,
     privacyNotice: config.privacyNotice || null,
   }
+  const docType = demographics.docType || null
+  const documentOf = {
+    docType,
+    docNumber: demographics.docNumber || null,
+    docCountry: documentIssuerCountry(clinicalProfileFor(countryCode), docType, demographics.docCountry),
+  }
+  // Desde fuera, el documento manda sobre el celular: es lo que identifica a
+  // una persona. Si ya es de alguien, recepción decide con esa persona a la vista.
+  if (publicContext && !hasToken && documentOf.docNumber) {
+    const owner = await findRealPersonByDocument(tx, orgId, documentOf)
+    if (owner) {
+      const held = await heldByDocument(tx, orgId, owner, demographics)
+      held.hold.answers = answers
+      throw held
+    }
+  }
   // El registro en línea sin enlace (el código QR general): si es para sí misma
   // y escribió el celular de alguien que ya está, no se crea a nadie: queda
   // para que recepción decida si es la misma persona (nunca por el nombre).
@@ -994,17 +1010,14 @@ export async function registerPatient(
       ? await tx.transaction((inner) => createPatient(inner, orgId, actorUserId, patientInput, provenance))
       : await createPatient(tx, orgId, actorUserId, patientInput, provenance)
   } catch (e) {
-    if (isPublic && e instanceof ServiceError && (e.code === "DUPLICATE_DOCUMENT" || e.code === "ALREADY_PATIENT")) {
-      // Chocó con alguien que ya está (lo guardaron a la vez): nunca se pierde
-      // en silencio, queda para recepción como cualquier coincidencia.
-      const docType = demographics.docType || null
-      const docCountry = documentIssuerCountry(clinicalProfileFor(countryCode), docType, demographics.docCountry)
-      const owner =
-        (await findRealPersonByDocument(tx, orgId, { docType, docNumber: demographics.docNumber || null, docCountry })) ??
-        (link && answers.respondent === "patient" ? link.contactId : null)
+    if (isPublic && e instanceof ServiceError && e.code === "DUPLICATE_DOCUMENT") {
+      // Chocó con el documento de alguien (lo guardaron a la vez): nunca se
+      // pierde en silencio, queda para recepción como cualquier coincidencia.
+      const owner = await findRealPersonByDocument(tx, orgId, documentOf)
       if (!owner) throw notCompleted()
       e = await heldByDocument(tx, orgId, owner, demographics)
     }
+    if (isPublic && e instanceof ServiceError && e.code === "ALREADY_PATIENT") throw notCompleted()
     // Con sus respuestas, para que recepción decida con ellas.
     if (e instanceof RegistrationHeld && isPublic) e.hold.answers = answers
     throw e
@@ -1371,6 +1384,8 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
       ),
     )
     .limit(1)
+    // Si recepción la está decidiendo, se espera: lo nuevo no queda colgado de una tarea ya cerrada.
+    .for("update")
   const [usedToday] = open
     ? []
     : await tx
@@ -1482,12 +1497,23 @@ async function ownerNow(tx: Db, orgId: string, ownerId: string): Promise<{ value
   if (own) {
     const values = { ...((await requirePatient(tx, orgId, own.id)) as unknown as Record<string, unknown>) }
     const [emergency] = await tx
-      .select({ name: contact.displayName, phone: contact.phone, kinship: patientContact.kinship })
+      .select({
+        name: contact.displayName,
+        phone: contact.phone,
+        kinship: patientContact.kinship,
+        isPatient: sql<boolean>`exists (select 1 from patient p where p.organization_id = ${contact.organizationId} and p.person_id = ${contact.id})`,
+      })
       .from(patientContact)
       .innerJoin(contact, and(eq(contact.organizationId, patientContact.organizationId), eq(contact.id, patientContact.contactId)))
       .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, own.id), eq(patientContact.isEmergency, true)))
       .limit(1)
-    if (emergency) Object.assign(values, { emergencyContactName: emergency.name, emergencyContactPhone: emergency.phone, emergencyContactRelationship: emergency.kinship })
+    if (emergency)
+      Object.assign(values, {
+        emergencyContactName: emergency.name,
+        emergencyContactPhone: emergency.phone,
+        emergencyContactRelationship: emergency.kinship,
+        emergencyContactIsPatient: emergency.isPatient,
+      })
     return { values, patientId: own.id }
   }
   const [person] = await tx.select().from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId))).limit(1)
@@ -1554,6 +1580,8 @@ export async function resolveRegistrationHold(
 ): Promise<{ patientId: string; personId: string; applied: number }> {
   const { task, hold, answers, ownerId } = await lockedHold(tx, orgId, taskId)
   const declared = answers.demographics as Record<string, unknown>
+  // La persona no cambia entre lo que se compara y lo que se guarda.
+  await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId))).for("update")
   const { owner, rows } = await holdRowsOf(tx, orgId, ownerId, answers)
   if (input.revision !== registrationHoldRevision(hold.id, rows))
     throw conflict("HOLD_CHANGED", "Algo cambió mientras lo revisabas: míralo de nuevo antes de guardar")
@@ -1563,6 +1591,8 @@ export async function resolveRegistrationHold(
   let patientId: string
   if (input.same) {
     const patch = registrationHoldPatch(answers, apply)
+    // Es ella y estaba archivada: vuelve, como quien escribe estando archivada.
+    if (owner.values.isActive === false) await setPersonArchived(tx, orgId, { userId: actorUserId }, ownerId, false)
     if (owner.patientId) {
       if (apply.length > 0) await updatePatient(tx, orgId, actorUserId, owner.patientId, patch)
       patientId = owner.patientId
@@ -1587,9 +1617,18 @@ export async function resolveRegistrationHold(
     const before = replacedWords(rows, apply)
     if (before) await createContactNote(tx, orgId, ownerId, { body: `Guardado desde su registro en línea: ${before}.` }, { userId: actorUserId })
   } else {
-    // Otra persona: se registra con lo que escribió; el documento era de la otra, no se guarda.
+    // Otra persona: se registra con lo que escribió. Un documento que ya es de
+    // alguien (la de esta revisión u otra) no se guarda: nunca adopta a un tercero.
     const own = { ...declared }
-    if (hold.match === "documento") {
+    const docType = text(declared.docType)
+    const documentOwner = text(declared.docNumber)
+      ? await findRealPersonByDocument(tx, orgId, {
+          docType,
+          docNumber: text(declared.docNumber),
+          docCountry: documentIssuerCountry(clinicalProfileFor(await findOrgCountry(tx, orgId)), docType, text(declared.docCountry)),
+        })
+      : null
+    if (hold.match === "documento" || documentOwner) {
       delete own.docType
       delete own.docNumber
       delete own.docCountry
@@ -1614,13 +1653,14 @@ export async function resolveRegistrationHold(
       allergies.map((item) => ({ substance: item.substance, reaction: item.reaction ?? null })),
       { entity: "registration_hold", entityId: hold.id },
     )
-    const said = declaredHealthWords({ ...answers.health, allergies: undefined })
-    if (said) {
+    // Lo demás de su salud no va con detalle a las notas de su persona: las lee
+    // quien no ve la historia clínica. Queda dicho que hay algo que preguntarle.
+    if (declaredHealthWords({ ...answers.health, allergies: undefined })) {
       await createContactNote(
         tx,
         orgId,
         personId,
-        { body: `Declaró en su registro en línea: ${said}. Su salud ya estaba en su ficha: revísalo en sus antecedentes.` },
+        { body: "Declaró en su registro en línea otros datos de su salud (enfermedades, medicamentos u otros): que el profesional se los pregunte en su próxima atención y actualice sus antecedentes." },
         { userId: actorUserId },
       )
     }

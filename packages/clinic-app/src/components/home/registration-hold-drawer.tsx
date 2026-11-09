@@ -1,8 +1,8 @@
 import { Button, Checkbox, toast } from "@odentia/ui"
-import { DetailDrawer, internationalText, submitErrorMessage } from "@odentia/ui-patterns"
+import { DetailDrawer, internationalText, PageNotice, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
@@ -70,25 +70,44 @@ function listWords(labels: string[]): string {
 export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | null; onClose: () => void }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const legendId = useId()
+  const hintId = useId()
   const hold = useQuery({
     queryKey: ["registration-hold", taskId],
     queryFn: () => apiFetch<{ data: HoldView }>(`/api/tasks/${taskId}/registration`),
     enabled: !!taskId,
     retry: false,
+    // Volver de otra pestaña no cambia lo que se está revisando: solo se vuelve a pedir si guardar lo rechaza.
+    refetchOnWindowFocus: false,
   })
   const data = hold.data?.data
-  // Lo marcado nace de lo que dice el servidor y vuelve a nacer si lo que se ve cambió.
+  // Lo marcado nace de lo que propone el servidor. Si lo que se ve cambia, lo que
+  // recepción ya eligió se conserva en las filas que siguen iguales y se avisa.
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set())
+  const [changed, setChanged] = useState(false)
+  const seen = useRef<{ revision: string; rows: HoldRow[]; marked: ReadonlySet<string> } | null>(null)
   useEffect(() => {
-    if (data) setMarked(new Set(data.rows.filter((row) => row.checked).map((row) => row.key)))
+    if (!data) return
+    const before = seen.current
+    const next = new Set<string>()
+    for (const row of data.rows) {
+      const old = before?.rows.find((item) => item.key === row.key)
+      const kept = old && old.declared === row.declared && old.saved === row.saved && old.blocked === row.blocked
+      if (kept ? before?.marked.has(row.key) : row.checked) next.add(row.key)
+    }
+    setChanged(!!before && before.revision !== data.revision)
+    setMarked(next)
   }, [data?.revision])
+  useEffect(() => {
+    if (data) seen.current = { revision: data.revision, rows: data.rows, marked }
+  }, [data, marked])
 
-  const savable = data?.rows.filter((row) => row.key !== "document" && row.state !== "same" && !row.blocked) ?? []
-  const blocked = data?.rows.filter((row) => row.state !== "same" && (row.blocked || row.key === "document")) ?? []
+  const differing = data?.rows.filter((row) => row.state !== "same") ?? []
+  const isSavable = (row: HoldRow) => row.key !== "document" && !row.blocked
+  const savable = differing.filter(isSavable)
   const same = data?.rows.filter((row) => row.state === "same") ?? []
   const apply = savable.filter((row) => marked.has(row.key))
   const careful = savable.some((row) => !row.checked)
+  const already = !!data?.ownerPatientId
 
   const done = () => {
     void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
@@ -114,6 +133,7 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
             ? `Listo: se guardaron ${plural(count, "cambio", "cambios")} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
             : `Listo: la ficha de ${name} queda como estaba.`
       toast.success(message, { action: openPerson(result.data.personId) })
+      seen.current = null
       done()
     },
     onError: (error) => {
@@ -171,7 +191,13 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
               Es otra persona
             </Button>
             <Button type="button" disabled={busy} onClick={() => decide.mutate(true)}>
-              {apply.length ? `Sí, guardar ${plural(apply.length, "cambio", "cambios")}` : "Sí, sin cambios"}
+              {already
+                ? apply.length
+                  ? `Sí, guardar ${plural(apply.length, "cambio", "cambios")}`
+                  : "Sí, sin cambios"
+                : apply.length
+                  ? `Sí, registrarla con ${plural(apply.length, "cambio", "cambios")}`
+                  : "Sí, registrarla sin cambios"}
             </Button>
           </>
         ) : null
@@ -179,57 +205,57 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
     >
       {data ? (
         <div className="flex flex-col gap-5">
-          {savable.length ? (
-            <fieldset aria-labelledby={legendId} className="flex flex-col gap-2">
-              <legend id={legendId} className="text-sm font-medium">
-                {plural(savable.length, "dato distinto", "datos distintos")}
+          {changed ? (
+            <PageNotice tone="alarma" label="Cambió">
+              Algo cambió mientras lo revisabas: mira de nuevo lo marcado antes de guardar.
+            </PageNotice>
+          ) : null}
+          {differing.length ? (
+            <fieldset aria-describedby={careful ? hintId : undefined} className="flex flex-col gap-2">
+              <legend className="text-sm font-medium">
+                {plural(differing.length, "dato distinto", "datos distintos")}
+                {savable.length ? ": marca lo que quieres guardar en su ficha" : ""}
               </legend>
               {careful ? (
-                <p className="text-sm text-muted-foreground">
+                <p id={hintId} className="text-sm text-muted-foreground">
                   Quién es y por dónde se le escribe vienen sin marcar: márcalos solo si comprobaste que es la misma persona.
                 </p>
               ) : null}
               <ul className="divide-y rounded-2xl border bg-card">
-                {savable.map((row) => (
-                  <li key={row.key}>
-                    <label className="flex min-h-11 cursor-pointer items-start gap-3 px-4 py-3 text-sm">
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={marked.has(row.key)}
-                        disabled={busy}
-                        onCheckedChange={() => toggle(row.key)}
-                      />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="text-muted-foreground">
-                          {row.label}
-                          {row.state === "new" ? " · nuevo" : ""}
-                        </span>
-                        <span className="break-words font-medium">{shown(row, row.declared)}</span>
-                        {row.state === "changed" ? (
-                          <span className="break-words text-muted-foreground">Antes: {shown(row, row.saved)}</span>
-                        ) : null}
+                {differing.map((row) => {
+                  const lines = (
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="text-muted-foreground">
+                        {row.label}
+                        {row.state === "new" ? " · nuevo" : ""}
                       </span>
-                    </label>
-                  </li>
-                ))}
+                      <span className="break-words font-medium">{shown(row, row.declared)}</span>
+                      {row.state === "changed" ? (
+                        <span className="break-words text-muted-foreground">Antes: {shown(row, row.saved)}</span>
+                      ) : null}
+                      {!isSavable(row) ? (
+                        <span className="text-muted-foreground">{row.blocked ?? "No se cambia desde aquí."}</span>
+                      ) : null}
+                    </span>
+                  )
+                  return (
+                    <li key={row.key}>
+                      {isSavable(row) ? (
+                        <label className="flex min-h-11 cursor-pointer items-start gap-3 px-4 py-3 text-sm">
+                          <Checkbox className="mt-0.5" checked={marked.has(row.key)} disabled={busy} onCheckedChange={() => toggle(row.key)} />
+                          {lines}
+                        </label>
+                      ) : (
+                        <div className="flex items-start gap-3 py-3 pr-4 pl-11 text-sm">{lines}</div>
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             </fieldset>
           ) : (
-            <p className="text-sm">Escribió lo mismo que ya tiene su ficha.</p>
+            <p className="text-sm">Escribió lo mismo que ya tiene{already ? " su ficha" : " guardado"}.</p>
           )}
-
-          {blocked.length ? (
-            <ul className="flex flex-col gap-3 text-sm">
-              {blocked.map((row) => (
-                <li key={row.key} className="flex flex-col gap-0.5">
-                  <span className="text-muted-foreground">{row.label}</span>
-                  <span className="break-words font-medium">{shown(row, row.declared)}</span>
-                  {row.saved ? <span className="break-words text-muted-foreground">Ya tiene: {shown(row, row.saved)}</span> : null}
-                  {row.blocked ? <span className="text-muted-foreground">{row.blocked}</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
 
           {same.length ? (
             <details className="text-sm text-muted-foreground">

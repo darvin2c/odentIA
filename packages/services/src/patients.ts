@@ -515,7 +515,24 @@ export async function declareEmergencyContact(
     .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isEmergency, true)))
   const same = name ? marked.find((row) => row.displayName.trim().toLowerCase() === name.toLowerCase()) : undefined
-  if (same) return same.contactId
+  if (same) {
+    // La misma persona con otro teléfono o parentesco: se actualiza lo que dijo.
+    // Su teléfono solo si no es paciente (el suyo propio lo cambia ella o la clínica en su página).
+    if (kinship)
+      await tx
+        .update(patientContact)
+        .set({ kinship, updatedAt: new Date() })
+        .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, same.contactId)))
+    if (phone) {
+      const [ownRecord] = await tx
+        .select({ id: patient.id })
+        .from(patient)
+        .where(and(eq(patient.organizationId, orgId), eq(patient.personId, same.contactId)))
+        .limit(1)
+      if (!ownRecord) await tx.update(contact).set({ phone }).where(and(eq(contact.organizationId, orgId), eq(contact.id, same.contactId)))
+    }
+    return same.contactId
+  }
   const created = await createPerson(tx, orgId, { userId: actorUserId }, { displayName: name ?? phone, phone })
   await tx
     .update(patientContact)

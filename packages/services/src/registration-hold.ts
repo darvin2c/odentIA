@@ -190,10 +190,19 @@ export function registrationHoldRows(
           })
     const state = same ? "same" : had ? "changed" : "new"
     const birth = text(declared.birthDate)
+    // Su contacto de emergencia también es paciente: el teléfono de esa persona es suyo y no se cambia desde aquí.
+    const emergencyPhoneOfPatient =
+      group === "emergency" &&
+      saved.emergencyContactIsPatient === true &&
+      sameValue("emergencyContactName", text(declared.emergencyContactName) ?? "", text(saved.emergencyContactName) ?? "", profile.country) &&
+      text(declared.emergencyContactPhone) !== null &&
+      !sameValue("emergencyContactPhone", text(declared.emergencyContactPhone)!, text(saved.emergencyContactPhone) ?? "", profile.country)
     const blocked =
       group === "birthDate" && state !== "same" && birth && isRealDate(birth) && isMinor(birth, today)
         ? "Con esa fecha es menor de edad: cámbiala en sus datos, junto con su representante."
-        : null
+        : emergencyPhoneOfPatient
+          ? "Su contacto de emergencia también es paciente: su teléfono se cambia en su propia página."
+          : null
     rows.push({
       key: group,
       label: GROUP_LABELS[group],
