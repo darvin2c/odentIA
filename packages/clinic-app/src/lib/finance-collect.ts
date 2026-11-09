@@ -254,6 +254,9 @@ export interface CollectSnapshot {
   tender?: TicketTender | null
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
+  /** La cuenta en esta moneda al terminar el cobro: lo que le falta y lo que le queda a favor. */
+  accountDueCents?: number
+  accountCreditCents?: number
   /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
   pending?: Array<{ chargeId: string; description: string; amountCents: number; remainingCents: number }>
   /** El impuesto de lo cobrado hoy (`TicketFrozen.taxes`, ADR 0083); nulo si nada lo lleva. */

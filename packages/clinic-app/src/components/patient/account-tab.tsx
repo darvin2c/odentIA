@@ -486,8 +486,9 @@ export function AccountTab({
                   [
                     ["Debe", balance.porCobrar],
                     ["A favor", balance.aFavor],
-                    ["Saldo", balance.saldo],
-                  ] as const
+                    // «Saldo» no decía de quién (QA del 9 nov, repaso 3): lo que falta, o lo que le queda.
+                    balance.saldo < 0 ? ["Le queda a favor", -balance.saldo] : ["Falta pagar", balance.saldo],
+                  ] satisfies Array<readonly [string, number]>
                 ).map(([label, cents]) => (
                   <div key={label} className="min-w-0">
                     <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -497,6 +498,11 @@ export function AccountTab({
                   </div>
                 ))}
               </dl>
+              {balance.porCobrar > 0 && balance.aFavor > 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Lo que tiene a favor paga primero su próximo cobro; también puedes usarlo ya en lo que debe.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -721,7 +727,12 @@ export function AccountTab({
                     <p className="break-words text-sm text-muted-foreground">
                       {row.status === "anulado"
                         ? `Motivo: ${row.voidReason ?? "sin motivo registrado"}`
-                        : [paidWith || (row.creditAppliedCents > 0 ? "Saldo a favor" : ""), concepts]
+                        : [
+                            paidWith,
+                            // Lo usado de su saldo a favor no es dinero que entró (QA del 9 nov, repaso 3).
+                            row.creditAppliedCents > 0 ? `${paidWith ? "usó" : "Usó"} ${money(row.creditAppliedCents, row.currency)} a favor` : "",
+                            concepts,
+                          ]
                             .filter(Boolean)
                             .join(" · ")}
                     </p>
@@ -737,7 +748,7 @@ export function AccountTab({
                       row.status === "anulado" && "text-muted-foreground line-through",
                     )}
                   >
-                    {money(row.totalCents > 0 ? row.totalCents : row.creditAppliedCents, row.currency)}
+                    {money(row.totalCents, row.currency)}
                   </span>
                   <Button variant="outline" size="sm" onClick={() => setViewTicket(row)}>
                     Ver ticket

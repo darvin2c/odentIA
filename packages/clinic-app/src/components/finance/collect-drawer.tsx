@@ -864,6 +864,8 @@ export function CollectDrawer({
       }),
     [data, orgCurrencies],
   )
+  /** Lo que debe en la moneda del adelanto: sin «Para», ese dinero no lo pagaría. */
+  const owedInDebt = owedByCurrency.find((row) => row.code === debt) ?? null
   const otherCurrencyCount = useMemo(
     () =>
       (data?.pendiente ?? []).filter(
@@ -1554,11 +1556,43 @@ export function CollectDrawer({
                               }}
                             />
                           ) : null}
-                          <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                            {chosenTarget
-                              ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
-                              : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
-                          </p>
+                          {!chosenTarget && owedInDebt ? (
+                            // Con deuda, un adelanto suelto la dejaba igual y la ficha mostraba tres cifras
+                            // (QA del 9 nov, repaso 3): se avisa y se ofrece pagar lo que debe, sin frenar.
+                            <div role="status" className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+                              <p>
+                                Debe {formatMoney(owedInDebt.cents, owedInDebt.code, locale)}. Este adelanto no
+                                paga esa deuda: queda a favor, aparte, hasta su próximo cobro.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="self-start"
+                                disabled={busy}
+                                onClick={() => {
+                                  // Lo escrito va a lo que debe, empezando por lo más antiguo; lo que sobre queda a favor.
+                                  const written = form.state.values.amount.trim()
+                                  form.setFieldValue("advance", false)
+                                  form.setFieldValue("advanceFor", "")
+                                  form.setFieldValue("chargeIds", owedInDebt.ids)
+                                  setPendingDraft(null)
+                                  setAdvanceDraft(null)
+                                  if (written) {
+                                    form.setFieldValue("amount", written)
+                                    setAmountTouched(true)
+                                  } else setAmountTouched(false)
+                                }}
+                              >
+                                Mejor, a lo que debe
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                              {chosenTarget
+                                ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
+                                : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
+                            </p>
+                          )}
                           {second !== null && !values.advanceFor ? (
                             <div className="flex flex-col gap-1.5">
                               <span id={`${uid}-a-cuenta`} className="text-sm font-medium">
