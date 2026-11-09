@@ -346,7 +346,8 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
 
   // Completar el tratamiento ocurre aquí, con la atención abierta.
   await realizado.getByRole("button", { name: "Completar", exact: true }).click()
-  await expect(page.getByText(/Completado el/).first()).toBeVisible()
+  // Antes de firmar dice que queda realizado al firmar, no «Completado» (QA del 9 nov).
+  await expect(realizado.getByText("Queda realizado al firmar").first()).toBeVisible()
   // Sin evolución, «Finalizar y firmar» lleva a su campo, en la misma página, y lo marca.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")

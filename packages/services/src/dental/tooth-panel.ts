@@ -31,7 +31,7 @@ export interface RegisterToothFindingInput {
   /** Diagnóstico con su tipo: cuenta como diagnóstico de la atención. */
   diagnosis?: { diagnosisCode: string; diagnosisSystem?: string | null; diagnosisType: string } | null
   /** Tratamiento por pieza o por superficies que se agrega al plan abierto. */
-  treatment?: { serviceId: string; detail?: string | null } | null
+  treatment?: { serviceId: string; detail?: string | null; plannedSessions?: number } | null
 }
 
 /**
@@ -109,6 +109,8 @@ export async function registerToothFinding(
           diagnosisCode: input.diagnosis?.diagnosisCode ?? null,
           diagnosisSystem: input.diagnosis?.diagnosisSystem ?? null,
           detail: input.treatment?.detail ?? null,
+          // Las que se dijeron en el panel; sin ellas, las habituales del servicio (`addPlanItem`).
+          ...(input.treatment?.plannedSessions !== undefined ? { plannedSessions: input.treatment.plannedSessions } : {}),
         }),
       )
     }

@@ -78,7 +78,12 @@ const toothFindingInput = z
       .strict()
       .nullish(),
     treatment: z
-      .object({ serviceId: z.uuid(), detail: z.string().max(4000).nullish() })
+      .object({
+        serviceId: z.uuid(),
+        detail: z.string().max(4000).nullish(),
+        // Como al indicar en el plan: sin ellas, las habituales del servicio (ADR 0164).
+        plannedSessions: z.number().int().optional(),
+      })
       .strict()
       .nullish(),
   })

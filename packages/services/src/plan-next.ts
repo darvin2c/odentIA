@@ -687,9 +687,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
         ? `${what.charAt(0).toUpperCase()}${what.slice(1)} y ${controlNoun} no van en ${yourAppointment(nextAppointmentAt)}`
         : `Falta su cita: ${what} y ${controlNoun}`
       : decided
-        ? decided.status === "aceptado"
-          ? `Aceptó todo: ${missing}`
-          : `${decided.stateText}: ${missing}`
+        ? // «Aceptó todo» o, con varias opciones, «Eligió la opción A»: el mismo nombre que el Plan.
+          `${decided.stateText}: ${missing}`
         : context.budgetRequired
           ? nextAppointmentAt
             ? `Tiene tratamientos aceptados que ${yourAppointment(nextAppointmentAt)} no lleva`
