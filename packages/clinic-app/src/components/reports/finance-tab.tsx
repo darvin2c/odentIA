@@ -830,7 +830,7 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
           </p>
         ) : null}
         <p className="text-[13px] text-muted-foreground">
-          La barra de cada profesional mide lo que se cobró más lo que atendió sin cobrar, a la misma escala. «Se cobró» incluye lo cobrado en el periodo de atenciones anteriores. Los porcentajes se cambian en Finanzas › Comisiones, y pagar también se hace allí: el pago queda como gasto de comisiones, separado de los sueldos.
+          La barra de cada profesional mide lo que se cobró más lo que atendió sin cobrar, a la misma escala. «Se cobró» incluye lo cobrado en el periodo de atenciones anteriores. La comisión de cada profesional se fija en Configuración › Comisiones por profesional y se paga en Finanzas › Comisiones: el pago queda como gasto de comisiones, separado de los sueldos.
         </p>
       </>
     )
