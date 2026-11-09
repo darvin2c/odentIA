@@ -24,6 +24,7 @@ import {
   errorCode,
   fetchPurchaseLookalikes,
   formatDayKey,
+  formatDayMonth,
   invalidateFinance,
   noonOf,
   parseAmount,
@@ -48,6 +49,14 @@ interface PaymentValues {
   day: string
   receiptKind: string
   receiptNumber: string
+}
+
+/** El mes de un momento en la zona de la clínica, para abrir Gastos en ese mes. */
+function monthOfDay(at: string, timeZone: string): { year: number; month: number } {
+  const [year, month] = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit" })
+    .format(new Date(at))
+    .split("-")
+  return { year: Number(year), month: Number(month) }
 }
 
 /** El servidor nombra los datos como el cuerpo; el formulario, como la pantalla. */
@@ -112,6 +121,8 @@ export function PurchasePaymentDrawer({
   // enviado dos veces), el servidor lo dice en vez de pagar sobre otra cifra.
   const paid = balance?.paidCents ?? 0
   const seen = useRef({ due, paid })
+  // Una clave por cajón abierto (ADR 0018): reintentar tras un corte devuelve el mismo pago.
+  const requestId = useRef<string>(crypto.randomUUID())
   // Tras «la compra cambió», lo nuevo que llega es lo que se ve: el reintento paga sobre eso.
   const stale = useRef(false)
   useEffect(() => {
@@ -183,6 +194,7 @@ export function PurchasePaymentDrawer({
         ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
         expectedDueCents: seen.current.due,
         expectedPaidCents: seen.current.paid,
+        requestId: requestId.current,
       })
     },
   })
@@ -267,11 +279,11 @@ export function PurchasePaymentDrawer({
         {twin ? (
           <p role="status" className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm">
             Ya hay un gasto de Materiales de {formatMoney(twin.amountCents, twin.currency, locale)} del{" "}
-            {new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone }).format(new Date(twin.spentAt))} en
-            esta sede, sin compra: «{twin.concept}». Si es este mismo pago, anúlalo en{" "}
+            {formatDayMonth(twin.spentAt, locale, timeZone)} en esta sede, sin compra: «{twin.concept}». Si es este mismo
+            pago, anúlalo en{" "}
             <Link
               to="/finance"
-              search={{ tab: "gastos", tipo: "Materiales" }}
+              search={{ tab: "gastos", tipo: "Materiales", ...monthOfDay(twin.spentAt, timeZone) }}
               className="font-semibold underline underline-offset-2"
             >
               Gastos

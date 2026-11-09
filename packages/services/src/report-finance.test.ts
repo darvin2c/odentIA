@@ -241,8 +241,15 @@ it("pagar una compra avisa del gasto suelto de Materiales que puede ser el mismo
   )
   const twins = await c.run((tx) => purchaseLookalikes(tx, c.orgId, order.id))
   expect(twins.map((row) => row.id)).toEqual([loose.id])
-  // Ya pagada la compra, lo que se pagó de ella no es un gasto suelto.
-  await c.pay(order.id, 21_000)
+  // Ya pagada la compra, lo que se pagó de ella no es un gasto suelto. El reintento del mismo
+  // cajón tras un corte devuelve el mismo pago, no otro (ADR 0018).
+  const key = randomUUID()
+  const paid = await c.run((tx) => payPurchaseOrder(tx, c.orgId, c.actor, { orderId: order.id, amountCents: 21_000, requestId: key }))
+  const retried = await c.run((tx) =>
+    payPurchaseOrder(tx, c.orgId, c.actor, { orderId: order.id, amountCents: 21_000, requestId: key, expectedPaidCents: 0 }),
+  )
+  expect(retried.expense?.id).toBe(paid.expense?.id)
+  expect(await c.balance(order.id)).toMatchObject({ paidCents: 21_000, dueCents: 0 })
   expect((await c.run((tx) => purchaseLookalikes(tx, c.orgId, order.id))).map((row) => row.id)).toEqual([loose.id])
 })
 

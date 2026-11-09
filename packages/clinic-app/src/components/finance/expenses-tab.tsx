@@ -51,6 +51,7 @@ import {
   isForbidden,
   type MonthRef,
   NO_RECEIPT,
+  requestExpenseVoidApi,
   todayIn,
   voidExpenseApi,
 } from "../../lib/finance-cash"
@@ -119,6 +120,19 @@ export function ExpensesTab({
     onSuccess: () => {
       invalidateFinance(queryClient)
       toast.success("Gasto anulado")
+      setVoiding(null)
+    },
+  })
+
+  // Un gasto en efectivo de una caja ya cerrada lo anula administración: caja se lo pide como tarea.
+  const adminVoids = Boolean(voiding?.fromCash && voiding.shiftClosed && !canAdmin)
+  const askAdmin = useMutation({
+    mutationFn: (input: { expense: ExpenseRow; reason: string }) =>
+      requestExpenseVoidApi({
+        title: `Anular el gasto «${input.expense.concept}» del ${formatDayMonth(input.expense.spentAt, locale, orgTimeZone)} (${formatMoney(input.expense.amountCents, input.expense.currency, locale)}): ${input.reason}`,
+      }),
+    onSuccess: () => {
+      toast.success("Se lo pediste a administración: le llegó como tarea. El gasto sigue hasta que lo anule.")
       setVoiding(null)
     },
   })
@@ -382,6 +396,7 @@ export function ExpensesTab({
         <p className="px-1 text-sm text-muted-foreground" role="status">
           Se ven {plural(data.shown.count, "gasto", "gastos")} ·{" "}
           <span className="font-semibold text-foreground">{formatMoney(data.shown.totalCents, data.currency, locale)}</span>
+          {data.shown.notCounted ? ` · y ${plural(data.shown.notCounted, "pago", "pagos")} del impuesto de lo cobrado, que no suma` : ""}
         </p>
       ) : null}
 
@@ -424,30 +439,34 @@ export function ExpensesTab({
       <VoidDrawer
         open={voiding !== null}
         title="Anular gasto"
-        // Lo que pasa de verdad, dicho antes de escribir el motivo (QA de Gastos, G15).
-        blocked={
-          voiding?.fromCash && voiding.shiftClosed && !canAdmin
-            ? "La caja de ese día ya se cerró: este gasto lo anula administración, y el efectivo vuelve a la caja de hoy."
-            : null
-        }
+        // Lo que pasa de verdad, dicho antes de escribir el motivo (QA de Gastos, G15). Si lo anula
+        // administración, el motivo se le pide como tarea: el gasto sigue hasta que lo anule.
+        submitLabel={adminVoids ? "Pedírselo a administración" : "Anular"}
         description={[
-          voiding?.fromCash
+          adminVoids
+            ? "La caja de ese día ya se cerró: este gasto lo anula administración, y el efectivo vuelve a la caja de hoy. Escribe el motivo y se lo pides: le llega como tarea."
+            : "",
+          adminVoids
+            ? ""
+            : voiding?.fromCash
             ? voiding.shiftClosed
               ? "Queda en el historial con su motivo y deja de sumar en el mes. Su caja ya se cerró: el efectivo vuelve a la caja de hoy como «Compensación por anulación»."
               : "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja."
             : "Queda en el historial con su motivo y deja de sumar en el mes.",
           // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
-          voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
-          // Es el pago de una compra: la compra vuelve a deber lo que este pago cubría (ADR 0061).
-          voiding?.purchaseOrderNumber != null
-            ? `La compra ${purchaseOrderLabel(voiding.purchaseOrderNumber)} vuelve a quedar por pagar ${formatMoney(voiding.amountCents, voiding.currency, locale)}.`
+          !adminVoids && voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
+          // Es el pago de una compra: la compra vuelve a deber lo que este pago cubría de lo recibido (ADR 0061).
+          !adminVoids && voiding?.purchaseOrderNumber != null
+            ? `La compra ${purchaseOrderLabel(voiding.purchaseOrderNumber)} vuelve a deber lo que este pago cubría de lo recibido.`
             : "",
         ]
           .filter(Boolean)
           .join(" ")}
         onClose={() => setVoiding(null)}
         onConfirm={async (reason) => {
-          if (voiding) await voidMutation.mutateAsync({ id: voiding.id, reason })
+          if (!voiding) return
+          if (adminVoids) await askAdmin.mutateAsync({ expense: voiding, reason })
+          else await voidMutation.mutateAsync({ id: voiding.id, reason })
         }}
       />
     </div>

@@ -249,3 +249,30 @@ it("el pago del impuesto de lo cobrado está en la lista y no suma en «Gastado�
   expect(month.byCategory).toEqual([{ category: "Impuestos", cents: 20_000 }])
   expect(month.expenses.map((row) => row.concept).sort()).toEqual(["Arbitrios", "IGV de octubre"])
 })
+
+it("el mismo formulario de «Se repite» enviado con otra cosa no se da por anotado (G2)", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const current = thisMonth()
+  const requestId = randomUUID()
+  const body = {
+    branchId,
+    category: "Servicios",
+    concept: "Internet",
+    amountCents: 12_000,
+    currency: "PEN",
+    fromCash: false,
+    requestId,
+    repeat: { everyMonths: 1 as const, day: 28, month: current.key, paid: false },
+  }
+  const first = await f.run((tx) => registerRecurringExpense(tx, "org_a", f.actor, body))
+  const again = await f.run((tx) => registerRecurringExpense(tx, "org_a", f.actor, body))
+  expect(again.recurring.id).toBe(first.recurring.id)
+  // Primero «Todavía no» y después «Sí, ahora»: no se responde como si se hubiera pagado.
+  await expect(
+    f.run((tx) => registerRecurringExpense(tx, "org_a", f.actor, { ...body, repeat: { ...body.repeat, paid: true } })),
+  ).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
+  await expect(
+    f.run((tx) => registerRecurringExpense(tx, "org_a", f.actor, { ...body, amountCents: 13_000 })),
+  ).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
+})

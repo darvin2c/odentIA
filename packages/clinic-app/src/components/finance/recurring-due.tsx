@@ -210,7 +210,9 @@ export function RecurringDueSection({
   if (!data) return null
   const current = `${data.year}-${String(data.month).padStart(2, "0")}`
   const inMain = data.due.filter((row) => row.currency === data.currency)
-  const total = inMain.reduce((sum, row) => sum + row.amountCents, 0)
+  // Los sueldos juntos (de quien no los paga) van aparte del total: no son lo que le toca pagar.
+  const total = inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0)
+  const salaries = inMain.filter((row) => row.group !== null).reduce((sum, row) => sum + row.amountCents, 0)
   const otherCurrency = inMain.length < data.due.length
   const earlier = data.due.some((row) => row.month !== current)
 
@@ -224,6 +226,12 @@ export function RecurringDueSection({
               {earlier ? "Por pagar" : `Por pagar en ${MONTHS[data.month - 1]}`} ·{" "}
               <span className="tabular-nums">{formatMoney(total, data.currency, locale)}</span>
               {otherCurrency ? <span className="font-normal text-muted-foreground"> y lo de otra moneda</span> : null}
+              {salaries > 0 ? (
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  · y {formatMoney(salaries, data.currency, locale)} de sueldos, que paga administración
+                </span>
+              ) : null}
             </h2>
           </div>
           <ul className="flex min-w-0 flex-col divide-y">

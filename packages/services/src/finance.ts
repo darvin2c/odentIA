@@ -482,7 +482,7 @@ function methodTotals(movements: CashMove[]): MethodTotal[] {
  * llama «Pago de comisiones» y el de un sueldo, «Pago de sueldo», como su fila en Gastos. Lo nuevo
  * ya se guarda así; esto cubre lo guardado antes con el nombre.
  */
-async function withoutCommissionPayees<T extends { expenseId: string | null; concept: string }>(
+async function withoutCommissionPayees<T extends { expenseId: string | null; concept: string; direction: string }>(
   tx: Db,
   orgId: string,
   movements: T[],
@@ -495,12 +495,15 @@ async function withoutCommissionPayees<T extends { expenseId: string | null; con
     .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, ids)))
   const paid = new Set(rows.map((row) => row.expenseId))
   const salaries = await salaryPaymentsOf(tx, orgId, ids)
+  // Solo la salida: la «Compensación por anulación» de un pago anulado dice lo que es.
   return movements.map((m) =>
-    m.expenseId && paid.has(m.expenseId)
-      ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT }
-      : m.expenseId && salaries.has(m.expenseId)
-        ? { ...m, concept: SALARY_PAYMENT_CONCEPT }
-        : m,
+    m.direction !== "egreso"
+      ? m
+      : m.expenseId && paid.has(m.expenseId)
+        ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT }
+        : m.expenseId && salaries.has(m.expenseId)
+          ? { ...m, concept: SALARY_PAYMENT_CONCEPT }
+          : m,
   )
 }
 
@@ -575,7 +578,7 @@ export interface AddMovementInput {
 }
 
 /** Una clave de pedido (`requestId`) es un UUID que genera la pantalla al abrir el formulario. */
-function requestKey(value: string | null | undefined): string | null {
+export function requestKey(value: string | null | undefined): string | null {
   if (!value) return null
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
     throw invalidField("requestId", "La clave del pedido debe ser un UUID")
@@ -583,11 +586,11 @@ function requestKey(value: string | null | undefined): string | null {
 }
 
 /** Dos envíos con la misma clave se esperan en fila: el segundo ve lo que dejó el primero. */
-async function lockRequest(tx: Db, kind: string, orgId: string, requestId: string): Promise<void> {
+export async function lockRequest(tx: Db, kind: string, orgId: string, requestId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${kind} || ':' || ${orgId} || ':' || ${requestId}))`)
 }
 
-function requestReused(): ServiceError {
+export function requestReused(): ServiceError {
   return conflict(
     "REQUEST_ID_CONFLICT",
     "Este formulario ya registró algo antes de cortarse la conexión: ciérralo y revisa la lista antes de anotarlo otra vez",
@@ -1327,7 +1330,7 @@ function frozenExpense(
 export async function replayedExpense(
   tx: Db,
   orgId: string,
-  input: Pick<CreateExpenseInput, "requestId" | "branchId" | "amountCents" | "concept">,
+  input: Pick<CreateExpenseInput, "requestId" | "branchId" | "amountCents" | "concept" | "currency" | "category" | "fromCash" | "salesTax">,
   link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string } = {},
 ) {
   const requestId = requestKey(input.requestId)
@@ -1339,9 +1342,14 @@ export async function replayedExpense(
     .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
   if (!row) return null
   if (
+    row.voidedAt !== null ||
     row.branchId !== input.branchId ||
     row.amountCents !== input.amountCents ||
     row.concept !== input.concept.trim() ||
+    (input.currency !== undefined && row.currency !== input.currency) ||
+    (input.category !== undefined && row.category !== (input.category.trim() || "Otros")) ||
+    (input.fromCash !== undefined && (row.shiftId !== null) !== input.fromCash) ||
+    (input.salesTax !== undefined && row.salesTax !== input.salesTax) ||
     row.purchaseOrderId !== (link.purchaseOrderId ?? null) ||
     row.recurringId !== (link.recurringId ?? null) ||
     row.recurringMonth !== (link.recurringMonth ?? null)
@@ -1374,6 +1382,11 @@ export async function createExpense(
     /** Cómo se llama su movimiento de caja si no es el concepto: «Pago de sueldo», sin a quién. */
     cashConcept?: string
   } = {},
+  /**
+   * Quien registra: lo que se le paga al personal (el tipo «Personal») lo anota quien administra
+   * comisiones (ADR 0166). Sin decirlo, no: es lo más protector.
+   */
+  viewer: { seesPeople: boolean } = { seesPeople: false },
 ) {
   if (Boolean(link.recurringId) !== Boolean(link.recurringMonth))
     throw validation("El pago de un gasto que se repite lleva su plantilla y su mes")
@@ -1386,6 +1399,8 @@ export async function createExpense(
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw invalidField("category", "Tipo de gasto inválido")
+  if (category === STAFF_PAY_CATEGORY && !viewer.seesPeople)
+    throw new ServiceError("FORBIDDEN", 403, "Lo que se le paga al personal lo anotan quienes administran las comisiones")
   if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
     throw invalidField("category", "El pago de una compra es un gasto de Materiales")
   const salesTax = input.salesTax === true
@@ -1543,6 +1558,9 @@ function withoutCommissionNames<
     voidedAt: Date | null
     recurringId: string | null
     recurringMonth: string | null
+    receiptKind: string
+    shiftId: string | null
+    requestId: string | null
     commission: boolean
     /** El pago del sueldo de una persona: se junta igual, como «Pago de sueldos» (S1). */
     salary: boolean
@@ -1574,6 +1592,12 @@ function withoutCommissionNames<
         createdBy: null,
         recurringId: null,
         recurringMonth: null,
+        // Junta pagos hechos de varias formas: no dice de qué caja ni con qué papel salió cada uno.
+        receiptKind: "ninguno",
+        shiftId: null,
+        requestId: null,
+        ...("fromCash" in row ? { fromCash: false } : {}),
+        ...("shiftClosed" in row ? { shiftClosed: false } : {}),
       }
       merged.set(key, first)
       out.push(first)
@@ -1680,6 +1704,7 @@ export async function getMonthExpenses(
     .filter((row) => !query.category || row.category === query.category)
     .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
   const shownLive = expenses.filter((row) => !row.voidedAt && !row.salesTax && valueOf(row) !== null)
+  const shownTax = expenses.filter((row) => !row.voidedAt && row.salesTax).length
   return {
     year: query.year,
     month: query.month,
@@ -1693,6 +1718,8 @@ export async function getMonthExpenses(
       .sort((a, b) => b.cents - a.cents),
     /** Lo que queda a la vista con la búsqueda y el tipo: cuántos y cuánto suman. */
     shown: {
+      /** Lo que no suma (el pago del impuesto de lo cobrado) también se ve: se cuenta aparte. */
+      notCounted: shownTax,
       count: shownLive.length,
       totalCents: roundMoneyValue(sumMoneyValues(shownLive.map(valueOf))),
     },
@@ -1949,11 +1976,14 @@ export interface PayPurchaseOrderInput {
   expectedDueCents?: number
   /**
    * Lo pagado que mostró la pantalla. Si cambió, alguien pagó mientras tanto o
-   * este mismo pago ya entró (un envío repetido): no se registra otra vez. No
-   * es una clave de idempotencia (el gasto no tiene dónde guardarla): el
-   * reintento recibe un aviso, no el pago que ya se hizo.
+   * este mismo pago ya entró (un envío repetido): no se registra otra vez.
    */
   expectedPaidCents?: number
+  /**
+   * La clave del cajón de pago (ADR 0018): el reintento de un pago con dinero que ya entró
+   * devuelve ese pago en vez del aviso de «la compra cambió».
+   */
+  requestId?: string | null
 }
 
 /**
@@ -1983,6 +2013,19 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
     throw invalidField("tenderCents", "Escribe lo que salió")
   if (input.tenderCents !== undefined && amountCents === 0)
     throw invalidField("amountCents", "Escribe lo que cancelas")
+  const requestId = requestKey(input.requestId)
+  if (requestId && amountCents > 0) {
+    await lockRequest(tx, "expense", orgId, requestId)
+    const [replay] = await tx
+      .select()
+      .from(expense)
+      .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
+    if (replay) {
+      if (replay.purchaseOrderId !== order.id || replay.amountCents !== amountCents || replay.voidedAt !== null) throw requestReused()
+      const [now] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+      return { expense: replay, creditUse: null, balance: now as PurchaseBalance }
+    }
+  }
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
   if (!before) throw purchaseOrderNotFound()
   if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
@@ -2030,6 +2073,7 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
         receiptNumber: input.receiptNumber,
         notes: input.notes,
         fromCash: input.fromCash ?? false,
+        requestId,
       },
       {
         purchaseOrderId: order.id,

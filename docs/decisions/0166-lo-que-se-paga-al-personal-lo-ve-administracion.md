@@ -21,7 +21,8 @@ El ADR 0150 dejó que caja viera cada sueldo con el nombre de la persona «porqu
 ## Consecuencias
 
 - Caja ya no paga sueldos: lo hace propietaria o administración, aunque salga del efectivo de la caja.
-- Una clínica con un solo sueldo deja ver ese importe en el total. Si una clínica real lo pide, se revisa junto con las comisiones.
+- Una clínica con un solo sueldo deja ver ese importe en el total. Además, como con el pago de una comisión, caja sigue viendo el importe de cada pago sin a quién: en Caja («Pago de sueldo», si salió del efectivo) y en lo que Argos le responde (`argos.gastos`). Si una clínica real lo pide, se revisa junto con las comisiones.
+- La búsqueda global no le muestra a caja ningún gasto «Personal».
 
 ## Referencias
 

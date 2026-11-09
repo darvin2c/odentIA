@@ -15,9 +15,10 @@
  * - Lo que se le paga al personal (el tipo «Personal», con persona o sin ella: el nombre
  *   también puede ir en el concepto) lo ve, lo anota, lo paga y lo cambia solo quien
  *   administra comisiones (`commissions.write`), como lo que se le paga de comisión
- *   (PR 486). Los demás ven «Sueldos» en una sola fila, sin nombres ni importe por
- *   persona: los ingresos son un dato sensible (Ley 29733, art. 2, num. 5; QA de
- *   Gastos del 8 nov, S1; ADR 0166, que cambia lo que decía el ADR 0150).
+ *   (PR 486). Los demás ven «Sueldos» en una sola fila, sin a quién: los ingresos son
+ *   un dato sensible (Ley 29733, art. 2, num. 5; QA de Gastos del 8 nov, S1; ADR 0166,
+ *   que cambia lo que decía el ADR 0150). Como con una comisión, el importe de cada pago
+ *   sigue en Caja y en Argos, sin a quién.
  */
 import { type MoneyFraction, roundMoneyValue, sumMoneyValues } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -46,7 +47,10 @@ import {
   type CreateExpenseInput,
   EXPENSE_CATEGORIES,
   lockOrgUnit,
+  lockRequest,
   replayedExpense,
+  requestKey,
+  requestReused,
   requireBranch,
   SALARY_PAYMENT_CONCEPT,
 } from "./finance.js"
@@ -189,10 +193,11 @@ export async function registerRecurringExpense(
   viewer: PayViewer = HIDDEN,
 ) {
   const { repeat, ...expenseInput } = input
-  // El mismo formulario enviado dos veces (un corte) devuelve lo que ya anotó (ADR 0018, G2).
-  const requestId = expenseInput.requestId?.trim().toLowerCase() || null
+  // El mismo formulario enviado dos veces (un corte) devuelve lo que ya anotó (ADR 0018, G2); el
+  // mismo formulario con otra cosa es un error, no lo anotado antes como si fuera esto.
+  const requestId = requestKey(expenseInput.requestId)
   if (requestId) {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('expense:' || ${orgId} || ':' || ${requestId}))`)
+    await lockRequest(tx, "expense", orgId, requestId)
     const [replay] = await tx
       .select()
       .from(expenseRecurring)
@@ -203,6 +208,18 @@ export async function registerRecurringExpense(
         .select()
         .from(expense)
         .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
+      const same =
+        replay.branchId === expenseInput.branchId &&
+        replay.category === (expenseInput.category?.trim() || "Otros") &&
+        replay.concept === expenseInput.concept.trim() &&
+        replay.amountCents === expenseInput.amountCents &&
+        replay.everyMonths === repeat.everyMonths &&
+        replay.day === repeat.day &&
+        replay.memberUserId === (repeat.memberUserId?.trim() || null) &&
+        replay.dueNextMonth === (repeat.dueNextMonth === true) &&
+        (repeat.month == null || replay.firstMonth === repeat.month) &&
+        (paidRow !== undefined && paidRow.voidedAt === null) === (repeat.paid !== false)
+      if (!same) throw requestReused()
       return paidRow ? { ...paidRow, expense: paidRow, recurring: replay } : { expense: null, recurring: replay }
     }
   }
@@ -268,11 +285,18 @@ export async function registerRecurringExpense(
   })
   // Aún no se paga: queda anotado y por pagar desde ese mes, sin ningún gasto.
   if (!paid) return { expense: null, recurring: template }
-  const row = await createExpense(tx, orgId, actorUserId, { ...expenseInput, category }, {
-    recurringId: template.id,
-    recurringMonth: firstMonth,
-    ...(category === SALARY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
-  })
+  const row = await createExpense(
+    tx,
+    orgId,
+    actorUserId,
+    { ...expenseInput, category },
+    {
+      recurringId: template.id,
+      recurringMonth: firstMonth,
+      ...(category === SALARY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
+    },
+    viewer,
+  )
   return { ...row, expense: row, recurring: template }
 }
 
@@ -400,7 +424,8 @@ export async function endRecurringExpense(
     })
   ).filter((item) => !item.paid && !item.skipped)
   const resolved = await lastResolvedMonth(tx, orgId, id)
-  const justNoted = resolved === null && current.firstMonth >= currentKey
+  // Anotado este mes (en la zona de la clínica) y nunca resuelto: un error o algo que ya no va.
+  const justNoted = resolved === null && reportDayOf(zone.timezone, current.createdAt).slice(0, 7) === currentKey
   // Lo por pagar hasta este mes: lo vencido y lo de este mes, aunque aún no venza (el sueldo de
   // quien se va a fin de mes). Lo de meses que no llegan no se debe.
   const owed = justNoted
@@ -532,6 +557,7 @@ export async function payRecurringOccurrence(
         recurringMonth: input.month,
         ...(template.category === SALARY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
       },
+      viewer,
     )
     await audit(tx, orgId, actorUserId, id, "finance.expense_recurring_paid", { month: input.month, expenseId: row.id })
     return { ...row, fromCash: row.shiftId !== null }

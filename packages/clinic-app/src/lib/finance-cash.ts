@@ -837,8 +837,8 @@ export interface MonthExpenses {
   /** El impuesto de lo cobrado pagado en el mes: no es un gasto y no está en el total. */
   salesTaxCents?: number
   byCategory: Array<{ category: string; cents: number }>
-  /** Lo que queda a la vista con la búsqueda y el tipo. */
-  shown: { count: number; totalCents: number }
+  /** Lo que queda a la vista con la búsqueda y el tipo; `notCounted`, lo que se ve y no suma. */
+  shown: { count: number; totalCents: number; notCounted?: number }
   /** Incluye los anulados, marcados. */
   expenses: ExpenseRow[]
 }
@@ -1010,9 +1010,22 @@ export function payPurchaseApi(
     expectedDueCents?: number
     /** Lo pagado que mostró la pantalla: un envío repetido no paga dos veces. */
     expectedPaidCents?: number
+    /** La clave del cajón: reintentar tras un corte devuelve el mismo pago. */
+    requestId?: string
   },
 ): Promise<{ data: { balance: PurchaseBalance } }> {
   return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })
+}
+
+/**
+ * Pedirle a administración que anule un gasto de una caja ya cerrada: una tarea para el área,
+ * con el motivo. No anula nada: el gasto sigue hasta que administración lo haga.
+ */
+export function requestExpenseVoidApi(body: { title: string }): Promise<unknown> {
+  return apiFetch("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title: body.title.slice(0, 200), area: "administracion" }),
+  })
 }
 
 /** Gastos sueltos de Materiales que pueden ser este mismo pago: pagar la compra los contaría dos veces. */

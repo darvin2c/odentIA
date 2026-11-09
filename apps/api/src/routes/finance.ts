@@ -44,7 +44,6 @@ import {
   updateRecurringExpense,
   getMonthExpenses,
   purchaseLookalikes,
-  STAFF_PAY_CATEGORY,
   getPurchasesToPay,
   listClosures,
   listExpenses,
@@ -389,18 +388,12 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    // Lo que se le paga al personal lo anota quien lo ve (`commissions.write`, ADR 0166).
-    if (parsed.data.category?.trim() === STAFF_PAY_CATEGORY && !canAccess(memberRole, "commissions.write"))
-      return c.json(
-        errorBody(c, "FORBIDDEN", "Lo que se le paga al personal lo anotan quienes administran las comisiones"),
-        403,
-      )
     const { repeat, ...expenseInput } = parsed.data
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
         repeat
           ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat }, peopleOf(memberRole))
-          : createExpense(tx, orgId, userId, expenseInput),
+          : createExpense(tx, orgId, userId, expenseInput, {}, peopleOf(memberRole)),
       ),
     )
   })
@@ -530,6 +523,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         expectedDueCents: z.number().int().min(0).optional(),
         // Lo pagado que vio la pantalla: un envío repetido no paga dos veces.
         expectedPaidCents: z.number().int().min(0).optional(),
+        // La clave del cajón: el reintento tras un corte devuelve el mismo pago (ADR 0018).
+        requestId: z.uuid().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))

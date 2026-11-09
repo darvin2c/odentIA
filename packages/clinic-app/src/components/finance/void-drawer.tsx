@@ -23,18 +23,15 @@ export function VoidDrawer({
   open,
   title,
   description,
-  blocked,
+  submitLabel = "Anular",
   onClose,
   onConfirm,
 }: {
   open: boolean
   title: string
   description: string
-  /**
-   * Por qué esta persona no puede anularlo (la caja ya cerró y lo hace administración): se dice al
-   * abrir, antes de escribir el motivo, y no hay nada que enviar.
-   */
-  blocked?: string | null
+  /** Lo que hace el botón, si no es anular (pedírselo a quien puede). */
+  submitLabel?: string
   onClose: () => void
   onConfirm: (reason: string) => Promise<unknown>
 }) {
@@ -58,19 +55,16 @@ export function VoidDrawer({
       dock={false}
       open={open}
       title={title}
-      description={blocked ?? description}
-      submitLabel="Anular"
-      hideSubmit={Boolean(blocked)}
-      cancelLabel={blocked ? "Entendido" : "No anular"}
+      description={description}
+      submitLabel={submitLabel}
+      cancelLabel="No anular"
       onClose={() => {
         if (!surface.isSubmitting) onClose()
       }}
     >
-      {blocked ? null : (
-        <form.AppField name="reason">
-          {(field) => <field.TextareaField label="Motivo" maxLength={MAX_REASON} />}
-        </form.AppField>
-      )}
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField label="Motivo" maxLength={MAX_REASON} />}
+      </form.AppField>
     </FormDrawer>
   )
 }

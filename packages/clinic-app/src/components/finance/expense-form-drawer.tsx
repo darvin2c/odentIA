@@ -326,6 +326,7 @@ export function ExpenseFormDrawer({
             fromCash: value.fromCash,
             expectedDueCents: seen?.due ?? chosen.dueCents,
             expectedPaidCents: seen?.paid ?? chosen.paidCents,
+            requestId: requestId.current,
             ...receipt,
             ...spentAt,
           },
