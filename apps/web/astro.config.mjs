@@ -17,7 +17,7 @@ const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
 // páginas en el mapa del sitio (`src/lib/product-pages.json`, las mismas que sirve `servesPage` en
 // src/lib/product.ts); las propias de cada una no van en el de odentIA, el producto base.
 // Los productos que tienen web y su dominio en local. Otro detiene el armado en vez de publicar en
-// silencio la web de odentIA en su dominio (ADR 0167).
+// silencio la web de odentIA en su dominio (ADR 0168).
 const BASE_PRODUCT = "dental"
 const LOCAL_DOMAINS = { dental: "odentia.localhost", medical: "latidia.localhost", optical: "vistia.localhost" }
 const product = process.env.VITE_PRODUCT || BASE_PRODUCT

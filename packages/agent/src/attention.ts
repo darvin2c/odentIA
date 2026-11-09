@@ -105,8 +105,8 @@ export interface AttentionProgress {
   pickLinks: string[]
 }
 
-/** La hora del enlace con la hora elegida (`bookingPickAddress`), tal como queda en el mensaje. */
-const PICK_LINK_HOUR = /\/reserva\?\S*?[?&]hora=([^&\s]+)/g
+/** La hora del enlace con la hora elegida (`bookingPickAddress`), tal como queda en el mensaje; también si lleva otro destino. */
+const PICK_LINK_HOUR = /\/(?:reserva|pendientes)\?\S*?[?&]hora=([^&\s]+)/g
 
 /**
  * Cómo va la atención: cuántas veces le respondió, si ya ofreció horarios, qué

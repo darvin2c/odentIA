@@ -7,6 +7,9 @@
  *   pnpm --filter @odentia/services import:prepare -- <mapa.json> [--today AAAA-MM-DD]
  *     Escribe `plan.json` e `informe.md` junto al mapa y resume en pantalla,
  *     sin nombres ni números, lo que entra, lo que queda fuera y lo que hay que revisar.
+ *   pnpm --filter @odentia/services import:carta -- <carta.json>
+ *     La carta de bienvenida en PDF, junto al JSON: le pide a la clínica su lista
+ *     de pacientes por correo (`clinic-import-letter.ts`).
  *
  * Las rutas relativas se leen desde la carpeta donde se escribió el comando.
  */
@@ -14,7 +17,9 @@ import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { isZip, readXlsxRows, readZipEntries, xlsxSheetNames } from "@odentia/db/xlsx"
+import { configureZodMessages } from "@odentia/clinical"
 import { ZodError } from "zod"
+import { WELCOME_LETTER_MAX_PAGES, welcomeLetterPdf } from "./clinic-import-letter.js"
 import { checkClinicImportPlan, type ClinicImportCheck, type ClinicImportPlan } from "./clinic-import-plan.js"
 import {
   clinicImportMapSchema,
@@ -133,8 +138,24 @@ function clinicToday(): string {
   return given ?? new Date().toISOString().slice(0, 10)
 }
 
-function main(): void {
+/** «Clínica Dental Sonrisa» → «clinica-dental-sonrisa», para el nombre del PDF. */
+function fileSlug(value: string): string {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "clinica"
+}
+
+async function main(): Promise<void> {
   const [command, target] = process.argv.slice(2).filter((value) => value !== "--")
+  if (command === "letter" && target) {
+    const letterPath = resolve(cwd, target)
+    const { bytes, pages, letterPages, content } = await welcomeLetterPdf(JSON.parse(readFileSync(letterPath, "utf-8")))
+    const out = resolve(dirname(letterPath), `carta-${fileSlug(content.clinic)}.pdf`)
+    // La carta tiene un tope de hojas: si pasa, no se escribe, se dice y el comando falla para que se acorte.
+    const aviso = pages > WELCOME_LETTER_MAX_PAGES ? `Salió en ${pages} páginas: acorta el nombre de la clínica, el destinatario o quien acompaña` : undefined
+    if (!aviso) writeFileSync(out, bytes)
+    console.log(JSON.stringify({ escrito: aviso ? null : out, paginas: pages, hojasDeLaCarta: letterPages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
+    if (aviso) process.exitCode = 1
+    return
+  }
   if (command === "peek" && target) {
     const sheet = arg("--sheet")
     const header = arg("--header")
@@ -175,16 +196,18 @@ function main(): void {
     )
     return
   }
-  console.error("Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]")
+  console.error(
+    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>",
+  )
   process.exitCode = 2
 }
 
-// Lo que no se puede leer se dice con su motivo, sin la traza.
-try {
-  main()
-} catch (error) {
+// Lo que no se puede leer se dice con su motivo, sin la traza y en español.
+configureZodMessages()
+main().catch((error: unknown) => {
+  const what = process.argv.includes("letter") ? "La carta" : "El mapa"
   if (error instanceof ZodError)
-    for (const issue of error.issues) console.error(`El mapa: ${issue.path.join(".") || "(raíz)"}: ${issue.message}`)
+    for (const issue of error.issues) console.error(`${what}: ${issue.path.join(".") || "(raíz)"}: ${issue.message}`)
   else console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
-}
+})

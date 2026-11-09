@@ -21,7 +21,7 @@ import { createAppointment } from "./appointments.js"
 import { adminRuntime, type AppointmentChange, enqueueAppointmentNotice } from "./automation.js"
 import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
-import { sendLinkReceivedNotice } from "./clinic-messages.js"
+import { linkReceivedNoticeReady, sendLinkReceivedNotice } from "./clinic-messages.js"
 import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, formatZonedShort, NEUTRAL_TIMEZONE } from "./locale.js"
 import { consentStatusOf } from "./message-permission.js"
@@ -40,6 +40,7 @@ import {
   hasOwnRecord,
   registerPatient,
 } from "./patient-registration.js"
+import { expireEmailAppointmentTokens } from "./pair-access.js"
 import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
 import { personalLinkToken } from "./personal-link-token.js"
 import { scheduledItems } from "./plan-next.js"
@@ -339,7 +340,7 @@ export async function issueChangeLink(
     join conversation c on c.organization_id = m.organization_id and c.id = m.conversation_id
     where m.organization_id = ${orgId} and m.conversation_id = ${input.conversationId}::uuid
       and m.direction = 'out' and m.status <> 'failed' and m.created_at >= c.attention_started_at
-      and (m.template_link is not null or m.body like '%/reserva?%')
+      and (m.template_link is not null or m.body like '%/reserva?%' or m.body like '%/pendientes?%')
     limit 1`)
   if (given) return null
   return bookingLinkFor(tx, orgId, { conversationId: input.conversationId }, deps, "una-cita")
@@ -469,6 +470,16 @@ async function bookingLinkFor(
       .limit(1)
     if (!site) throw branchNotFound()
   }
+  // Su enlace muestra y maneja la cita: pide lo mismo que el chat (S3). Un familiar sin
+  // autorización no lo recibe en ningún modo; al cambiar una cita, simplemente no va.
+  if (chosen && !(await contactHandlesAppointment(tx, orgId, conv.contactId, chosen.id))) {
+    if (appointments === "una-cita") return null
+    throw new ServiceError(
+      "PATIENT_CONTEXT_FORBIDDEN",
+      409,
+      "El interlocutor no está autorizado a recibir información de este paciente",
+    )
+  }
   if (
     appointments === "sin-cita" &&
     chosen &&
@@ -477,15 +488,6 @@ async function bookingLinkFor(
     return null
   if (appointments === "una-cita") {
     if (!chosen) return null
-    // Cambiar por el enlace pide lo mismo que por el chat: un familiar sin autorización no recibe ninguna de las dos.
-    const allowed = await resolveAgentPatientContext(tx, orgId, conv.contactId, chosen.id).then(
-      () => true,
-      (error: unknown) => {
-        if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") return false
-        throw error
-      },
-    )
-    if (!allowed) return null
     const upcoming = await tx
       .select({ id: appointment.id })
       .from(appointment)
@@ -518,6 +520,28 @@ async function bookingLinkFor(
     forName: chosen && chosen.relationship !== "self" ? chosen.displayName : null,
     needsRegistration: !chosen,
   }
+}
+
+/**
+ * Quien abre el enlace puede ver y manejar la cita del paciente: la propia persona, su
+ * representante legal vigente o un autorizado de información vigente, lo mismo que pide el
+ * chat (`resolveAgentPatientContext`). Un vínculo sin autorización (una tía) no. Solo eso es
+ * «no autorizado»: otro error (el paciente o el contacto ya no existen o no están activos)
+ * sigue su curso con su propia causa, para que nadie lo lea como falta de autorización.
+ */
+export async function contactHandlesAppointment(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string,
+): Promise<boolean> {
+  return resolveAgentPatientContext(tx, orgId, contactId, patientId).then(
+    () => true,
+    (error: unknown) => {
+      if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") return false
+      throw error
+    },
+  )
 }
 
 /** El enlace por su huella. Un enlace desconocido no existe: no se distingue de uno mal escrito. */
@@ -657,6 +681,12 @@ export interface ResolvedPersonalLink {
    * y agenda lo aceptado. Otro vínculo (un familiar, un autorizado) ve solo su cita.
    */
   decides: boolean
+  /**
+   * Quien lo abre ve y maneja la cita del paciente (`contactHandlesAppointment`): sin eso el
+   * enlace no muestra ninguna cita ni deja reservar, cambiar, cancelar o confirmar. Se mira
+   * al abrirlo: así corta también los enlaces que ya se enviaron (S3).
+   */
+  handlesAppointment: boolean
   /** Pasó la vigencia de todo lo que no es su propia cita. */
   expired: boolean
 }
@@ -671,14 +701,31 @@ export async function resolvePersonalLink(
   const row = await findLink(tx, orgId, token, lock)
   const live = row.revokedAt === null
   const patientId = live ? await patientOf(tx, orgId, row) : row.patientId
-  const shown = live ? await shownAppointment(tx, orgId, row, patientId) : null
-  const own = shown && shown.id === row.appointmentId ? shown.startsAt : null
-  const deadline = own && own > row.expiresAt ? own : row.expiresAt
-  const canBook = live && row.booking && row.usedAt === null && row.expiresAt.getTime() > Date.now()
   const decides =
     live && patientId !== null && (await contactDecides(tx, orgId, patientId, row.contactId))
+  // Sin paciente aún, la cita que muestra es la que reservó ahí mismo.
+  const handlesAppointment =
+    live &&
+    (patientId === null ||
+      decides ||
+      (await contactHandlesAppointment(tx, orgId, row.contactId, patientId)))
+  const shown = handlesAppointment ? await shownAppointment(tx, orgId, row, patientId) : null
+  const own = shown && shown.id === row.appointmentId ? shown.startsAt : null
+  const deadline = own && own > row.expiresAt ? own : row.expiresAt
+  const canBook =
+    handlesAppointment && row.booking && row.usedAt === null && row.expiresAt.getTime() > Date.now()
   const expired = deadline.getTime() <= Date.now()
-  return { row, patientId, live, appointment: shown, deadline, canBook, decides, expired }
+  return {
+    row,
+    patientId,
+    live,
+    appointment: shown,
+    deadline,
+    canBook,
+    decides,
+    handlesAppointment,
+    expired,
+  }
 }
 
 /**
@@ -732,6 +779,8 @@ export async function revokePersonalLinks(
       ),
     )
     .returning({ id: appointmentBookingLink.id })
+  // Los botones «Confirmar» y «Cancelar» de los correos ya enviados llevan a su enlace: también vencen (S4).
+  await expireEmailAppointmentTokens(tx, orgId, { patientId })
   if (rows.length > 0) {
     await tx.insert(auditEvent).values({
       organizationId: orgId,
@@ -1004,9 +1053,15 @@ async function linkSlotRules(
   token: string,
   branchId: string,
   changing = false,
+  /** «Reservar otra» desde «Tu cita»: horarios libres de la sede, sin servicio ni duración propios. */
+  another = false,
 ): Promise<LinkSlotRules> {
   const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
   const forTest = await personIsTest(tx, orgId, link.row.contactId)
+  if (another) {
+    await requireBookAnother(tx, orgId, link)
+    return { serviceId: null, durationMin: null, forTest, currentProfessionalUserId: null }
+  }
   // Al cambiar su cita valen las reglas de su cita, aunque el enlace también ofrezca reservar otra.
   if (link.canBook && !(changing && link.appointment && isChangeable(link.appointment))) {
     if (link.row.branchId && link.row.branchId !== branchId)
@@ -1050,10 +1105,10 @@ export async function listBookingLinkSlots(
   tx: Db,
   orgId: string,
   token: string,
-  input: { branchId: string; from: string; to: string; changing?: boolean },
+  input: { branchId: string; from: string; to: string; changing?: boolean; another?: boolean },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
-  const { changing, ...range } = input
-  const rules = await linkSlotRules(tx, orgId, token, input.branchId, changing)
+  const { changing, another, ...range } = input
+  const rules = await linkSlotRules(tx, orgId, token, input.branchId, changing, another)
   return listWeekSlots(tx, orgId, {
     ...range,
     serviceId: rules.serviceId,
@@ -1093,9 +1148,9 @@ export async function listBookingLinkProfessionals(
   tx: Db,
   orgId: string,
   token: string,
-  input: { branchId: string; changing?: boolean },
+  input: { branchId: string; changing?: boolean; another?: boolean },
 ): Promise<BookingLinkProfessionals> {
-  const rules = await linkSlotRules(tx, orgId, token, input.branchId, input.changing)
+  const rules = await linkSlotRules(tx, orgId, token, input.branchId, input.changing, input.another)
   const now = new Date()
   const until = new Date(now.getTime() + NEXT_FREE_HORIZON_DAYS * 86_400_000)
   const attending = rules.serviceId
@@ -1147,6 +1202,86 @@ export async function listBookingLinkProfessionals(
     until: until.toISOString(),
     timeZone: found.timeZone,
   }
+}
+
+/**
+ * «Reservar otra» (entrega 2): cuántas citas en pie por venir puede tener a la vez quien
+ * reserva desde su enlace, contando la que ya tiene. Más que eso lo agenda recepción.
+ */
+export const UPCOMING_APPOINTMENTS_CAP = 2
+
+export interface BookAnother {
+  /** Citas en pie y por venir que ya tiene el paciente. */
+  upcoming: number
+  cap: number
+  /** Puede reservar otra desde aquí. */
+  allowed: boolean
+}
+
+/**
+ * «Reservar otra» en «Tu cita»: solo quien decide por el paciente (y lo maneja), con el
+ * enlace vigente, mostrando una cita por venir que sigue en pie y por debajo del tope de
+ * citas por venir. Nulo si no le corresponde: un enlace que no muestra una cita (para
+ * completar datos o firmar) no reserva por esta vía.
+ */
+export async function bookAnotherOf(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+): Promise<BookAnother | null> {
+  if (!link.patientId || !link.decides || !link.handlesAppointment || link.expired) return null
+  if (!link.appointment || link.appointment.status === "cancelada") return null
+  const [row] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(appointment)
+    .where(upcomingAppointmentOf(orgId, link.patientId, new Date()))
+  const upcoming = row?.n ?? 0
+  return { upcoming, cap: UPCOMING_APPOINTMENTS_CAP, allowed: upcoming < UPCOMING_APPOINTMENTS_CAP }
+}
+
+/** «Reservar otra» le corresponde y le queda cupo; si no, dice cuál de las dos falta. */
+async function requireBookAnother(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<void> {
+  const another = await bookAnotherOf(tx, orgId, link)
+  if (!another) throw linkExpired()
+  if (!another.allowed) throw anotherNotAllowed()
+}
+
+function anotherNotAllowed(): ServiceError {
+  return new ServiceError(
+    "BOOKING_ANOTHER_LIMIT",
+    409,
+    "Desde aquí puedes tener hasta dos citas por venir. Para otra, escríbenos y la vemos.",
+  )
+}
+
+/**
+ * M3: lo que aceptó de su presupuesto y aún no tiene una cita por venir: «Lo que
+ * aceptaste, por agendar». Cada tratamiento una vez.
+ */
+export async function schedulableItemsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<Array<{ planItemId: string; title: string }>> {
+  const rows = await tx
+    .select({ planItemId: treatmentPlanItem.id, title: treatmentPlanItem.title })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        eq(treatmentPlanItem.status, "pendiente"),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.createdAt))
+  const booked = await scheduledItems(
+    tx,
+    orgId,
+    patientId,
+    rows.map((row) => row.planItemId),
+  )
+  return rows.filter((row) => !booked.has(row.planItemId))
 }
 
 /** Tiene tratamientos aceptados por hacer: «Elegir horario» después de responder su presupuesto. */
@@ -1428,6 +1563,40 @@ async function whatsappThreadOf(tx: Db, orgId: string, contactId: string): Promi
 }
 
 /**
+ * B2: por dónde se le confirma lo que haga en su enlace (`tellConversation`), solo si de
+ * verdad sale: la conversación del enlace o su WhatsApp, con Sofi encendida y, pasadas las
+ * 24 horas de WhatsApp, con el mensaje aprobado «Recibido desde su enlace». Nulo: queda
+ * anotado en su caso y no se le escribe; la página no promete un mensaje.
+ */
+export async function linkReplyVia(
+  tx: Db,
+  orgId: string,
+  link: LinkRow,
+): Promise<"whatsapp" | "chat" | "correo" | null> {
+  const conversationId = link.conversationId ?? (await whatsappThreadOf(tx, orgId, link.contactId))
+  if (!conversationId) return null
+  if (!(await adminRuntime(tx, orgId)).receptionOn) return null
+  const [thread] = await tx
+    .select({
+      lastInboundAt: conversation.lastInboundAt,
+      provider: channelConnection.provider,
+      channel: channelConnection.channel,
+    })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread) return null
+  const via = thread.channel === "whatsapp" ? "whatsapp" : thread.channel === "email" ? "correo" : "chat"
+  if (
+    channelAdapters[thread.provider as ChannelProvider]?.capabilities.templates &&
+    !windowOpen(thread.lastInboundAt)
+  )
+    return (await linkReceivedNoticeReady(tx, orgId, conversationId)) ? via : null
+  return via
+}
+
+/**
  * Deja constancia en el caso y avisa por la conversación del enlace, con la
  * misma política que cualquier mensaje del agente. Con Sofi apagada nadie habla
  * en su nombre: queda solo la nota del caso. Tocar el botón del enlace no abre
@@ -1519,12 +1688,22 @@ export async function reserveBookingLink(
     professionalUserId: string
     roomId?: string
     planItemIds?: string[]
+    /** «Reservar otra» desde «Tu cita», aunque el enlace ya no ofrezca reservar (con tope). */
+    another?: boolean
   },
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true)
   const forTreatment = (input.planItemIds?.length ?? 0) > 0
-  if (!forTreatment) {
+  const another = input.another === true && !forTreatment
+  if (another) {
+    // Bajo el bloqueo del paciente: dos toques no pasan el tope.
+    if (link.patientId)
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`su-enlace-agenda:${orgId}:${link.patientId}`}))`,
+      )
+    await requireBookAnother(tx, orgId, link)
+  } else if (!forTreatment) {
     if (link.row.booking && link.row.usedAt)
       throw new ServiceError("BOOKING_LINK_USED", 409, "Con este enlace ya se reservó una cita")
     if (!link.canBook) throw linkExpired()
@@ -1559,7 +1738,7 @@ export async function reserveBookingLink(
     patientId,
     professionalUserId: input.professionalUserId,
     ...(input.roomId ? { roomId: input.roomId } : {}),
-    ...(!forTreatment && link.row.serviceId ? { serviceId: link.row.serviceId } : {}),
+    ...(!forTreatment && !another && link.row.serviceId ? { serviceId: link.row.serviceId } : {}),
     ...(forTreatment ? { planItemIds: input.planItemIds } : {}),
     startsAt: input.startsAt,
     // La eligió la propia persona: queda confirmada, sin pedirle «Confirmar» después.
@@ -1571,15 +1750,24 @@ export async function reserveBookingLink(
     // Se le confirma en la página y, si salió de una conversación, por ese chat (`tellConversation`): no se repite.
     notice: false,
   })
-  await tx
-    .update(appointmentBookingLink)
-    .set({ appointmentId: created.id, ...(forTreatment ? {} : { usedAt: new Date() }) })
-    .where(
-      and(
-        eq(appointmentBookingLink.organizationId, orgId),
-        eq(appointmentBookingLink.id, link.row.id),
-      ),
-    )
+  // Otra cita o lo aceptado no gastan la reserva que el enlace ofrecía, ni reemplazan «Tu cita»:
+  // la que ya tiene sigue siendo la suya («la que ya tienes sigue igual»). Solo si el enlace
+  // no muestra ninguna propia, la nueva pasa a ser la suya.
+  const keepsOwn =
+    (forTreatment || another) &&
+    link.appointment !== null &&
+    link.appointment.id === link.row.appointmentId &&
+    isChangeable(link.appointment)
+  if (!keepsOwn)
+    await tx
+      .update(appointmentBookingLink)
+      .set({ appointmentId: created.id, ...(forTreatment || another ? {} : { usedAt: new Date() }) })
+      .where(
+        and(
+          eq(appointmentBookingLink.organizationId, orgId),
+          eq(appointmentBookingLink.id, link.row.id),
+        ),
+      )
   // La cita que esperaba su sí en el chat ya no se reserva: su «sí» de después reservaría otra.
   if (link.row.conversationId) await expireBookingProposals(tx, orgId, link.row.conversationId)
   // Quien abrió el enlace (la madre que reserva para su hijo) es quien conversó: su conversación pasa a «Gestiona» (ADR 0085).

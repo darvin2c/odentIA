@@ -13,7 +13,7 @@ import { PrescriptionsSection } from "./prescriptions-section"
 const bare = bareProduct("optical")
 
 /**
- * Lo que vistIA aporta a las pantallas comunes (ADR 0079, 0168 y 0169). El ojo se
+ * Lo que vistIA aporta a las pantallas comunes (ADR 0079, 0169 y 0170). El ojo se
  * escribe en el examen (sin «dónde» aparte) y Clío no dicta: la mesa del plan
  * quitó dictar la refracción. Lo indicado queda aceptado al indicarlo (una óptica
  * cotiza con el pedido, no con el presupuesto clínico) y los controles pueden

@@ -53,11 +53,13 @@ import {
   placePhrase,
   positionalBody,
   PERSONAL_LINK_MESSAGE_KEY,
+  CONSENT_TO_SIGN_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
   DOCUMENT_READY_MESSAGE_KEY,
   NOTICE_PURPOSE,
   REMINDER_CONFIRMED_KEY,
+  REMINDER_PENDING_KEY,
   renderMessage,
   RESUME_MESSAGE_KEY,
   replyId,
@@ -84,6 +86,11 @@ import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
 import { nextOpportuneFrom } from "./opportune-hours.js"
 import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
 import { personalLinkButtonUrl } from "./public-links.js"
+
+/** El botón de «Su enlace» de un mensaje, con la base de lo que abre su plantilla. */
+function buttonUrlOf(tx: Db, orgId: string, def: Pick<MessageDef, "link">) {
+  return personalLinkButtonUrl(tx, orgId, def.link?.buttonAbre ?? def.link?.abre ?? "reserva")
+}
 import { loadDocumentClinic } from "./document-clinic.js"
 import { DocumentKit, documentFormat } from "./document-kit.js"
 
@@ -194,8 +201,8 @@ interface MessageDef {
   /** Datos que puede llevar; `required`: no puede faltar. */
   data: { key: MessageVariable; required: boolean }[]
   buttons: readonly MessageButton[]
-  /** Botón que abre «Su enlace» (ADR 0037); nulo en los demás. */
-  link: { title: string } | null
+  /** Botón que abre «Su enlace» (ADR 0037) y lo que abre; nulo en los demás. */
+  link: MessageSpec["link"] | null
   category: TemplateCategory
 }
 
@@ -209,6 +216,7 @@ const NOTICE_TITLES: Record<string, string> = {
   aviso_cita_reservada: "Recordar la cita: cita reservada",
   aviso_cita_reservada_datos: "Recordar la cita: cita reservada, faltan datos",
   recordatorio_cita_datos: "Recordar la cita: recordatorio, faltan datos",
+  recordatorio_cita_pendientes: "Recordar la cita: recordatorio, cosas por hacer antes",
   recordatorio_cita_confirmada: "Recordar la cita: recordatorio, cita confirmada",
   cita_sin_llegar: "Recordar la cita: ¿vienes en camino?",
   aviso_cita_movida: "Recordar la cita: cambio de fecha",
@@ -219,6 +227,7 @@ function catalogTitle(key: CatalogMessageKey): string {
   if (key === RESUME_MESSAGE_KEY) return "Retomar la conversación"
   if (key === BUDGET_READY_MESSAGE_KEY) return "Presupuesto listo"
   if (key === PERSONAL_LINK_MESSAGE_KEY) return "Su enlace"
+  if (key === CONSENT_TO_SIGN_MESSAGE_KEY) return "Firma tu consentimiento"
   if (key === ANSWER_READY_MESSAGE_KEY) return "Ver respuesta"
   if (key === LINK_RECEIVED_MESSAGE_KEY) return "Recibido desde su enlace"
   if (key === DOCUMENT_READY_MESSAGE_KEY) return "Documento listo"
@@ -241,6 +250,7 @@ function catalogDef(
         ? "bandeja"
         : key === BUDGET_READY_MESSAGE_KEY ||
             key === PERSONAL_LINK_MESSAGE_KEY ||
+            key === CONSENT_TO_SIGN_MESSAGE_KEY ||
             key === ANSWER_READY_MESSAGE_KEY ||
             key === LINK_RECEIVED_MESSAGE_KEY ||
             key === DOCUMENT_READY_MESSAGE_KEY
@@ -824,6 +834,7 @@ export async function requestMissingTemplates(
       if (def.link && !linkUrl) continue
       const sample = await sampleFor(tx, orgId, def)
       if (def.catalog?.header === "documento" && !sample) continue
+      const buttonUrl = def.link ? await buttonUrlOf(tx, orgId, def) : null
       try {
         // Punto de retorno: un rechazo del proveedor no debe abortar lo demás.
         const item = await tx.transaction((inner) =>
@@ -831,7 +842,7 @@ export async function requestMissingTemplates(
             inner,
             orgId,
             connectionId,
-            orderOf(def, text, def.link ? linkUrl : null, examples, sample),
+            orderOf(def, text, buttonUrl, examples, sample),
             secretsKey,
             deps,
           ),
@@ -1011,6 +1022,8 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
     "Al reservar una cita a quien le faltan datos para atenderla: en lugar del aviso de reserva, con su enlace para completarlos.",
   recordatorio_cita_datos: () =>
     "Antes de la cita, a quien aún le faltan datos para atenderla: en lugar del recordatorio, con el botón «Completar mis datos».",
+  recordatorio_cita_pendientes: () =>
+    "Antes de la cita, a quien decide por el paciente y tiene más de una cosa por hacer (sus datos, un consentimiento por firmar, el cuestionario o un presupuesto por responder): en lugar del recordatorio, dice cuántas son y abre «Tus pendientes».",
   recordatorio_cita_confirmada: () =>
     "Antes de una cita ya confirmada (la que eligió la persona o la que ya confirmó): en lugar del recordatorio, sin «Confirmar» y con «Cambiar mi cita».",
   cita_sin_llegar: () =>
@@ -1075,6 +1088,10 @@ function meanwhileOf(
   }
   if (def.id === PERSONAL_LINK_MESSAGE_KEY)
     return "Mientras tanto su enlace sale escrito a quien escribió en las últimas 24 horas, o por correo."
+  if (def.id === CONSENT_TO_SIGN_MESSAGE_KEY)
+    return "Mientras tanto el consentimiento sale con «Su enlace» y, a quien escribió en las últimas 24 horas o por correo, escrito con su enlace."
+  if (def.id === REMINDER_PENDING_KEY)
+    return "Mientras tanto sale el recordatorio con «Completar mis datos» si le faltan datos, o el de siempre; dentro de las 24 horas o por correo, ya escrito con su enlace."
   if (def.id === ANSWER_READY_MESSAGE_KEY)
     return "Mientras tanto la respuesta queda por entregar y sale sola cuando la persona vuelve a escribir."
   if (def.id === DOCUMENT_READY_MESSAGE_KEY)
@@ -1146,7 +1163,9 @@ function itemOf(
     when: line
       ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule), context.recallMonths)
       : def.id === PERSONAL_LINK_MESSAGE_KEY
-        ? "Cuando recepción pulsa «Enviarle su enlace» o envía un consentimiento para firmar antes de la cita."
+        ? "Cuando recepción pulsa «Enviarle su enlace»; también lleva un consentimiento para firmar mientras «Firma tu consentimiento» no está aprobado."
+        : def.id === CONSENT_TO_SIGN_MESSAGE_KEY
+          ? "Cuando alguien del equipo envía un consentimiento para leer y firmar antes de la cita: abre directo la hoja."
         : def.id === ANSWER_READY_MESSAGE_KEY
           ? "Cuando alguien del equipo responde un tema pasadas las 24 horas: la respuesta queda por entregar y le llega este aviso para verla."
         : def.id === DOCUMENT_READY_MESSAGE_KEY
@@ -1169,7 +1188,9 @@ function itemOf(
               does:
                 def.id === REMINDER_CONFIRMED_KEY
                   ? "Abre su enlace: ahí cambia la cita a otro horario o la cancela, sin ver nada de lo guardado."
-                  : "Abre su enlace: lo que tiene pendiente con la clínica, sin ver nada de lo guardado.",
+                  : def.id === CONSENT_TO_SIGN_MESSAGE_KEY
+                    ? "Abre la hoja del consentimiento para leerla y firmarla; si se firma en la cita, la lee y lo dice arriba."
+                    : "Abre su enlace: lo que tiene pendiente con la clínica, sin ver nada de lo guardado.",
             },
           ]
         : []),
@@ -1459,7 +1480,7 @@ export async function saveMessageText(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
+    orderOf(def, text, def.link ? await buttonUrlOf(tx, orgId, def) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
     deps.secretsKey,
     deps,
   ).catch(rejectedText)
@@ -1511,7 +1532,7 @@ export async function revertMessageText(
       tx,
       orgId,
       connectionId,
-      orderOf(def, original, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
+      orderOf(def, original, def.link ? await buttonUrlOf(tx, orgId, def) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
       deps.secretsKey,
       deps,
     )
@@ -1604,7 +1625,7 @@ export async function createClinicMessage(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
+    orderOf(def, text, def.link ? await buttonUrlOf(tx, orgId, def) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
     deps.secretsKey,
     deps,
   ).catch(rejectedText)
@@ -2113,6 +2134,23 @@ const LINK_RECEIVED_EVERY_MS = 24 * 60 * 60 * 1000
  * deja responderle con texto (ADR 0129). Si no se puede enviar, no pasa nada más:
  * lo que hizo ya vale, la nota está en el caso y su página se lo confirma.
  */
+/**
+ * «Recibido desde su enlace» saldría por esa conversación: la persona no pidió ningún
+ * mensaje de menos y el mensaje está aprobado. Lo lee la página para no prometer un
+ * mensaje que no saldrá (B2); el tope de uno al día no cuenta: ya se le avisó.
+ */
+export async function linkReceivedNoticeReady(tx: Db, orgId: string, conversationId: string): Promise<boolean> {
+  const [person] = await tx
+    .select({ contactId: conversation.contactId, connectionId: conversation.channelConnectionId })
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!person) return false
+  if (!(await mayWriteFirst(tx, orgId, person.contactId, NOTICE_PURPOSE))) return false
+  const template = await findMessageTemplate(tx, orgId, person.connectionId, LINK_RECEIVED_MESSAGE_KEY)
+  return template?.status === "aprobada"
+}
+
 export async function sendLinkReceivedNotice(
   tx: Db,
   orgId: string,

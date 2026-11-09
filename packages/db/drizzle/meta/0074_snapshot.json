@@ -1,5 +1,5 @@
 {
-  "id": "009708df-a369-421e-9c46-af5d24b07bb6",
+  "id": "6618cb27-5901-49fb-8946-407a3f57a615",
   "prevId": "c61def1b-2879-4e47-8200-7926dab4420c",
   "version": "7",
   "dialect": "postgresql",
@@ -955,7 +955,7 @@
       "checkConstraints": {
         "saas_demo_product_check": {
           "name": "saas_demo_product_check",
-          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical')"
         },
         "saas_demo_size_check": {
           "name": "saas_demo_size_check",
@@ -9999,6 +9999,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "informed_encounter_id": {
+          "name": "informed_encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10199,6 +10205,23 @@
           "columnsTo": [
             "system_key",
             "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consent_document_informed_encounter_fk": {
+          "name": "consent_document_informed_encounter_fk",
+          "tableFrom": "consent_document",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "informed_encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -23443,7 +23466,7 @@
       "checkConstraints": {
         "treatment_template_product_check": {
           "name": "treatment_template_product_check",
-          "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical')"
         },
         "treatment_template_usual_sessions_check": {
           "name": "treatment_template_usual_sessions_check",
@@ -31669,7 +31692,7 @@
         },
         "org_profile_product_check": {
           "name": "org_profile_product_check",
-          "value": "\"org_profile\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"org_profile\".\"product\" IN ('dental','medical')"
         },
         "org_profile_sheet_size_check": {
           "name": "org_profile_sheet_size_check",
@@ -40411,7 +40434,7 @@
       "checkConstraints": {
         "saas_plan_product_check": {
           "name": "saas_plan_product_check",
-          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical')"
         },
         "saas_plan_founders_check": {
           "name": "saas_plan_founders_check",
@@ -40762,13 +40785,6 @@
           "notNull": true,
           "default": "'invitacion'"
         },
-        "optical_mode": {
-          "name": "optical_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'invitacion'"
-        },
         "updated_by": {
           "name": "updated_by",
           "type": "text",
@@ -40822,10 +40838,6 @@
         "saas_signup_policy_medical_mode_check": {
           "name": "saas_signup_policy_medical_mode_check",
           "value": "\"admin\".\"saas_signup_policy\".\"medical_mode\" IN ('invitacion','abierta')"
-        },
-        "saas_signup_policy_optical_mode_check": {
-          "name": "saas_signup_policy_optical_mode_check",
-          "value": "\"admin\".\"saas_signup_policy\".\"optical_mode\" IN ('invitacion','abierta')"
         }
       },
       "isRLSEnabled": false
@@ -41416,7 +41428,7 @@
         },
         "saas_waitlist_request_product_check": {
           "name": "saas_waitlist_request_product_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical')"
         },
         "saas_waitlist_request_text_check": {
           "name": "saas_waitlist_request_text_check",

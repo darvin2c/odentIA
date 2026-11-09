@@ -3,6 +3,7 @@ import { BASE_MAIL_BRAND, logoAttachments, type MailBrand, mailBrandName, type M
 
 export {
   BASE_MAIL_BRAND,
+  brandPaper,
   configureMailLinks,
   type EmailContent,
   type EmailFact,

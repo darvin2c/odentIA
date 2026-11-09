@@ -527,7 +527,7 @@ const CLINICAL_SUBPATHS = [
   "/prescriptions",
   // El descanso médico (issue 229).
   "/medical-leaves",
-  // La receta de lentes de vistIA (ADR 0169).
+  // La receta de lentes de vistIA (ADR 0170).
   "/lens-prescriptions",
   "/follow-ups",
   "/documents",
