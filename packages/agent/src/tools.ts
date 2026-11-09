@@ -1541,7 +1541,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           const day = (iso: string) =>
             new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${iso}T12:00:00Z`))
           const lines = [`Pedidos de ${result.context.displayName} (vínculo ${result.context.relationship}).`]
-          if (!result.orders.length) lines.push("Sin pedidos abiertos ni entregados hace poco.")
+          if (!result.orders.length) lines.push("Sin pedidos abiertos ni entregados.")
           for (const order of result.orders) {
             const when = order.statusLabel === "Entregado" ? "" : `, prometido para el ${day(order.promisedOn)}${order.overdue ? " (ya pasó esa fecha)" : ""}`
             const due =

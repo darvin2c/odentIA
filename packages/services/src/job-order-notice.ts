@@ -2,8 +2,9 @@ import type { Db } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { jobOrder } from "@odentia/db/schema/orders"
-import { and, eq, sql } from "drizzle-orm"
-import { NOTICE_PURPOSE, ORDER_READY_MESSAGE_KEY, ORDER_READY_SUBJECT, renderMessage } from "./automation-messages.js"
+import { and, eq, ne, sql } from "drizzle-orm"
+import { NOTICE_PURPOSE, ORDER_READY_MESSAGE_KEY, orderReadySubjectOf, renderMessage } from "./automation-messages.js"
+import { orgProduct } from "./locale.js"
 import { clinicName, firstName } from "./automation-routing.js"
 import { serviceRecipient } from "./budget-send.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
@@ -88,6 +89,10 @@ export async function sendOrderReadyNotice(
   orderId: string,
   options: { resend?: boolean; confirmDoubtful?: boolean } = {},
 ): Promise<OrderNotice | null> {
+  // Al marcar «Listo» el aviso es del sistema: a quien pidió no recibir ningún
+  // mensaje no le sale, aunque haya escrito hace poco. Reenviarlo a mano es del
+  // equipo: si escribió en las últimas 24 horas, se le responde.
+  const initiative = options.resend ? "equipo" : "propia"
   // Dos marcas a la vez no envían dos avisos.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pedido-listo:${orgId}:${orderId}`}))`)
   const [order] = await tx
@@ -96,6 +101,13 @@ export async function sendOrderReadyNotice(
     .where(and(eq(jobOrder.organizationId, orgId), eq(jobOrder.id, orderId)))
   if (!order) throw new ServiceError("NOT_FOUND", 404, "Pedido no encontrado")
   if (order.status !== "listo") throw new ServiceError("JOB_ORDER_NOT_READY", 409, "El aviso sale cuando el pedido está listo")
+  // Un pedido que se rehízo sigue en el nuevo: avisar que el original está listo diría algo falso.
+  const [remade] = await tx
+    .select({ id: jobOrder.id })
+    .from(jobOrder)
+    .where(and(eq(jobOrder.organizationId, orgId), eq(jobOrder.remakeOf, orderId), ne(jobOrder.status, "anulado")))
+    .limit(1)
+  if (remade) throw new ServiceError("JOB_ORDER_REMADE", 409, "Este pedido se rehízo: el aviso sale cuando el nuevo esté listo")
   const before = await orderNoticeOf(tx, orgId, order)
   if (before && !options.resend) return before
   if (before?.status === "dudoso" && !options.confirmDoubtful)
@@ -117,17 +129,17 @@ export async function sendOrderReadyNotice(
   const spec = await currentCatalogMessage(tx, orgId, ORDER_READY_MESSAGE_KEY)
   const clinic = await clinicName(tx, orgId)
   const { params, text } = renderMessage(spec, { persona: firstName({ givenNames: null, displayName: recipient.displayName }), clinica: clinic })
-  const route = await openRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative })
   if ("cause" in route) return note(`No salió el aviso: ${route.detail}. Llámalo para decirle que puede recogerlo.`)
   let sentId: string
   try {
     // Punto de retorno: que el aviso no salga no deshace el paso del pedido.
     sentId = await tx.transaction(async (inner) => {
       if (route.via === "plantilla" && route.template) {
+        // Lo envía el sistema, no quien marcó el paso: la conversación no se da por leída ni pasa a su nombre.
         const sent = await sendTemplateOutbound(inner, orgId, Buffer.alloc(0), {
           conversationId: route.conversationId,
-          senderKind: actorUserId ? "user" : "agent",
-          senderUserId: actorUserId,
+          senderKind: "agent",
           fromAction: true,
           name: route.template.name,
           language: route.template.language,
@@ -137,11 +149,10 @@ export async function sendOrderReadyNotice(
         })
         return sent.id
       }
-      const body = route.via === "correo" ? `${ORDER_READY_SUBJECT}\n\n${text}\n\nPuedes responder a este correo.\n\n${clinic}` : text
+      const body = route.via === "correo" ? `${orderReadySubjectOf(await orgProduct(tx, orgId))}\n\n${text}\n\nPuedes responder a este correo.\n\n${clinic}` : text
       const sent = await sendOutbound(inner, orgId, {
         conversationId: route.conversationId,
-        senderKind: actorUserId ? "user" : "agent",
-        senderUserId: actorUserId,
+        senderKind: "agent",
         fromAction: true,
         content: { type: "text", text: body },
       })

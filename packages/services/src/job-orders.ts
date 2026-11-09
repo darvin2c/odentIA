@@ -651,8 +651,19 @@ export async function getJobOrder(
     dueCents: withMoney ? (due.get(id) ?? 0) : null,
     currency: await orgCurrency(tx, orgId),
     /** «Pedido listo»: si salió, si llegó, si falló o si no se sabe (ADR 0169). */
-    readyNotice: order.status === "listo" || order.status === "entregado" ? await orderNoticeOf(tx, orgId, order) : null,
+    readyNotice:
+      order.status === "listo"
+        ? await orderNoticeOf(tx, orgId, order)
+        : order.status === "entregado"
+          ? deliveredNotice(await orderNoticeOf(tx, orgId, order))
+          : null,
   }
+}
+
+/** Entregado, solo se dice el aviso que salió: lo que no salió ya no hace falta. */
+function deliveredNotice(notice: Awaited<ReturnType<typeof orderNoticeOf>>) {
+  if (!notice || notice.status === "no_salio" || notice.status === "fallo" || notice.status === "dudoso") return null
+  return { ...notice, canResend: false }
 }
 
 /** Lo que el producto muestra al vender y copia en el pedido (vistIA: las recetas de lentes vigentes). */

@@ -273,13 +273,15 @@ function ReadyNotice({ order }: { order: OrderDetail }) {
       queryClient.setQueryData(orderKeys.detail(updated.id), updated)
       invalidateOrders(queryClient)
       setConfirming(false)
-      toast.success(updated.readyNotice?.words ?? "Aviso enviado")
+      const words = updated.readyNotice?.words ?? "Aviso enviado"
+      if (updated.readyNotice?.status === "no_salio" || updated.readyNotice?.status === "fallo") toast.error(words)
+      else toast.success(words)
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
   if (!notice) return null
   const doubtful = notice.status === "dudoso"
-  const offer = canWrite && order.status === "listo" && (notice.canResend || doubtful)
+  const offer = canWrite && order.status === "listo" && !order.remadeAs && (notice.canResend || doubtful)
   return (
     <div className="flex flex-col items-start gap-2">
       <span role="status" className={notice.status === "fallo" || notice.status === "no_salio" ? "text-destructive" : undefined}>
