@@ -51,8 +51,8 @@ describe("señales de alarma (ADR 0084)", () => {
     }
   })
 
-  it("una frase negada justo antes no es una alarma, en los dos productos; un «no» en otra parte, sí", () => {
-    for (const product of ["dental", "medical"] as const) {
+  it("una frase negada justo antes no es una alarma, en todos los productos; un «no» en otra parte, sí", () => {
+    for (const product of ["dental", "medical", "optical"] as const) {
       const signals = agentTextsFor(product).alarmSignals
       for (const text of [
         // Las rondas de latidIA (auditoría del 29-oct): pedían una cita por tos y recibían el 106.
@@ -198,6 +198,38 @@ describe("señales de alarma (ADR 0084)", () => {
       "mi bebé tiene fiebre desde anoche",
     ]) {
       expect(hasAlarmSignal(text, medical), text).toBe(false)
+    }
+  })
+
+  it("vistIA suma las de la vista: van a una emergencia, no a la óptica", () => {
+    const optical = agentTextsFor("optical").alarmSignals
+    for (const text of [
+      "de repente dejé de ver del ojo derecho",
+      "perdí la vista de un ojo de golpe",
+      "veo como una cortina negra que me tapa la vista",
+      "una sombra me cubre el ojo izquierdo desde la mañana",
+      "veo destellos y muchas manchas negras flotando",
+      "me salen moscas volando y relámpagos en el ojo",
+      "me cayó lejía en el ojo",
+      "le salpicó ácido en los ojos",
+      "se me clavó un vidrio en el ojo",
+      "tengo un dolor muy fuerte en el ojo y estoy vomitando",
+      "de repente veo doble",
+    ]) {
+      expect(hasAlarmSignal(text, optical), text).toBe(true)
+      expect(hasAlarmSignal(text, agentTextsFor("dental").alarmSignals), text).toBe(false)
+    }
+    for (const text of [
+      "no veo bien de lejos desde hace meses",
+      "veo borroso cuando leo",
+      "a veces veo una mancha cuando estoy cansado",
+      "¿el cloro de la piscina daña los lentes de contacto?",
+      "me duele la cabeza al leer",
+      "no he perdido la vista, solo veo borroso",
+      "se me rompió la luna de los lentes",
+      "veo doble cuando estoy muy cansado de noche",
+    ]) {
+      expect(hasAlarmSignal(text, optical), text).toBe(false)
     }
   })
 })

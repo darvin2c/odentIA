@@ -24,6 +24,7 @@ import { Route as HomeRouteImport } from './../../../packages/clinic-app/src/rou
 import { Route as InboxRouteImport } from './../../../packages/clinic-app/src/routes/_org/inbox'
 import { Route as InventoryRouteImport } from './../../../packages/clinic-app/src/routes/_org/inventory'
 import { Route as MembersRouteImport } from './../../../packages/clinic-app/src/routes/_org/members'
+import { Route as OrdersRouteImport } from './../../../packages/clinic-app/src/routes/_org/orders'
 import { Route as PipelineRouteImport } from './../../../packages/clinic-app/src/routes/_org/pipeline'
 import { Route as ReportsRouteImport } from './../../../packages/clinic-app/src/routes/_org/reports'
 import { Route as ServicesRouteImport } from './../../../packages/clinic-app/src/routes/_org/services'
@@ -168,6 +169,12 @@ const InventoryRoute = InventoryRouteImport.update({
 const MembersRoute = MembersRouteImport.update({
   id: '/members',
   path: '/members',
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
+} as any)
+const OrdersRoute = OrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
   getParentRoute: () =>
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
@@ -546,6 +553,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/inventory': typeof InventoryRoute
   '/members': typeof MembersRoute
+  '/orders': typeof OrdersRoute
   '/pipeline': typeof PipelineRoute
   '/reports': typeof ReportsRoute
   '/services': typeof ServicesRouteWithChildren
@@ -625,6 +633,7 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/inventory': typeof InventoryRoute
   '/members': typeof MembersRoute
+  '/orders': typeof OrdersRoute
   '/pipeline': typeof PipelineRoute
   '/reports': typeof ReportsRoute
   '/tasks': typeof TasksRoute
@@ -704,6 +713,7 @@ export interface FileRoutesById {
   '/_org/inbox': typeof InboxRoute
   '/_org/inventory': typeof InventoryRoute
   '/_org/members': typeof MembersRoute
+  '/_org/orders': typeof OrdersRoute
   '/_org/pipeline': typeof PipelineRoute
   '/_org/reports': typeof ReportsRoute
   '/_org/services': typeof ServicesRouteWithChildren
@@ -785,6 +795,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
+    | '/orders'
     | '/pipeline'
     | '/reports'
     | '/services'
@@ -864,6 +875,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
+    | '/orders'
     | '/pipeline'
     | '/reports'
     | '/tasks'
@@ -942,6 +954,7 @@ export interface FileRouteTypes {
     | '/_org/inbox'
     | '/_org/inventory'
     | '/_org/members'
+    | '/_org/orders'
     | '/_org/pipeline'
     | '/_org/reports'
     | '/_org/services'
@@ -1129,6 +1142,13 @@ declare module '@tanstack/react-router' {
       path: '/members'
       fullPath: '/members'
       preLoaderRoute: typeof MembersRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
+    }
+    '/_org/orders': {
+      id: '/_org/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/pipeline': {
@@ -1686,6 +1706,7 @@ interface DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren {
   InboxRoute: typeof InboxRoute
   InventoryRoute: typeof InventoryRoute
   MembersRoute: typeof MembersRoute
+  OrdersRoute: typeof OrdersRoute
   PipelineRoute: typeof PipelineRoute
   ReportsRoute: typeof ReportsRoute
   ServicesRoute: typeof ServicesRouteWithChildren
@@ -1722,6 +1743,7 @@ const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren: DotDot
     InboxRoute: InboxRoute,
     InventoryRoute: InventoryRoute,
     MembersRoute: MembersRoute,
+    OrdersRoute: OrdersRoute,
     PipelineRoute: PipelineRoute,
     ReportsRoute: ReportsRoute,
     ServicesRoute: ServicesRouteWithChildren,

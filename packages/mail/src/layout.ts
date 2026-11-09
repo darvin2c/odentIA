@@ -74,7 +74,17 @@ export interface EmailContent {
 /* ---------- Marcas ---------- */
 
 /** Las marcas de la plataforma: odentIA, el producto dental, y latidIA, el médico. */
-export type MailBrand = "odentia" | "latidia"
+export type MailBrand = "odentia" | "latidia" | "vistia"
+
+/**
+ * La marca base, odentIA: la de los correos internos del equipo y la de lo que
+ * no dice su marca. Lo demás no compara marcas a mano: decide con un mapa
+ * completo por marca, así una marca nueva no sale con lo de otra.
+ */
+export const BASE_MAIL_BRAND = "odentia" satisfies MailBrand
+
+/** La web de cada otra marca, por su dominio (latidIA: `MEDICAL_DOMAIN`); completa en quien arranca. */
+export type MailBrandDomains = Record<Exclude<MailBrand, typeof BASE_MAIL_BRAND>, string | undefined>
 
 /** Lo que cambia de una marca a otra; el resto del correo es el mismo molde. */
 const MAIL_BRANDS: Record<
@@ -93,10 +103,16 @@ const MAIL_BRANDS: Record<
     marcaTinta: "#4c2a8a",
     oscuro: { boton: "#b79cf0", botonTinta: "#1e0b3d", enlace: "#d6c6f7" },
   },
+  vistia: {
+    name: "vistIA",
+    marca: "#147c3b",
+    marcaTinta: "#166534",
+    oscuro: { boton: "#4ade80", botonTinta: "#052e16", enlace: "#bbf7d0" },
+  },
 }
 
 /** El nombre de la marca, como se escribe: para los textos de cada plantilla. */
-export function mailBrandName(brand: MailBrand = "odentia"): string {
+export function mailBrandName(brand: MailBrand = BASE_MAIL_BRAND): string {
   return MAIL_BRANDS[brand].name
 }
 
@@ -130,13 +146,14 @@ function siteOf(panel: URL): string {
  * cada marca lleva su web. Sin configurar, el pie no lleva Términos,
  * Privacidad ni Ayuda.
  */
-export function configureMailLinks(webUrl: string, domains: { latidia?: string | undefined } = {}): void {
+export function configureMailLinks(webUrl: string, domains: Partial<MailBrandDomains> = {}): void {
   const panel = new URL(webUrl)
-  siteUrls = { odentia: siteOf(panel) }
-  if (domains.latidia) {
-    const latidia = new URL(panel)
-    latidia.hostname = `app.${domains.latidia.replace(/^\./, "")}`
-    siteUrls.latidia = siteOf(latidia)
+  siteUrls = { [BASE_MAIL_BRAND]: siteOf(panel) }
+  for (const [brand, domain] of Object.entries(domains) as [keyof MailBrandDomains, string | undefined][]) {
+    if (!domain) continue
+    const own = new URL(panel)
+    own.hostname = `app.${domain.replace(/^\./, "")}`
+    siteUrls[brand] = siteOf(own)
   }
 }
 
@@ -170,11 +187,31 @@ export const LOGO_CIDS: Record<keyof typeof LOGOS, string> = {
   latidiaLogotipoOscuro: "logotipo-oscuro@latidia",
   latidiaIsotipoClaro: "isotipo-claro@latidia",
   latidiaIsotipoOscuro: "isotipo-oscuro@latidia",
+  vistiaLogotipoClaro: "logotipo-claro@vistia",
+  vistiaLogotipoOscuro: "logotipo-oscuro@vistia",
+  vistiaIsotipoClaro: "isotipo-claro@vistia",
+  vistiaIsotipoOscuro: "isotipo-oscuro@vistia",
+}
+
+/** Las imágenes de cada marca en `LOGOS`, por tipo y tono. */
+const BRAND_LOGOS: Record<MailBrand, Record<"logotipo" | "isotipo", Record<"Claro" | "Oscuro", keyof typeof LOGOS>>> = {
+  odentia: {
+    logotipo: { Claro: "logotipoClaro", Oscuro: "logotipoOscuro" },
+    isotipo: { Claro: "isotipoClaro", Oscuro: "isotipoOscuro" },
+  },
+  latidia: {
+    logotipo: { Claro: "latidiaLogotipoClaro", Oscuro: "latidiaLogotipoOscuro" },
+    isotipo: { Claro: "latidiaIsotipoClaro", Oscuro: "latidiaIsotipoOscuro" },
+  },
+  vistia: {
+    logotipo: { Claro: "vistiaLogotipoClaro", Oscuro: "vistiaLogotipoOscuro" },
+    isotipo: { Claro: "vistiaIsotipoClaro", Oscuro: "vistiaIsotipoOscuro" },
+  },
 }
 
 /** La imagen de una marca en `LOGOS`: «logotipoClaro» o «latidiaLogotipoClaro». */
 function logoKey(brand: MailBrand, kind: "logotipo" | "isotipo", tone: "Claro" | "Oscuro"): keyof typeof LOGOS {
-  return brand === "latidia" ? `latidia${kind === "logotipo" ? "Logotipo" : "Isotipo"}${tone}` : `${kind}${tone}`
+  return BRAND_LOGOS[brand][kind][tone]
 }
 
 /**
@@ -317,7 +354,7 @@ function sectionsHtml(sections: readonly EmailSection[]): string {
 
 /** El correo en HTML y en texto plano, de las mismas piezas: nunca dicen cosas distintas. */
 export function renderEmail(content: EmailContent): MailTemplate {
-  const brand = content.brand ?? "odentia"
+  const brand = content.brand ?? BASE_MAIL_BRAND
   const B = MAIL_BRANDS[brand]
   const links = content.internal ? null : footerLinks(brand)
   const replies =
@@ -489,6 +526,6 @@ ${body.join("\n")}
     html,
     text: `${text.join("\n")}\n`,
     ...(content.replyTo ? { replyTo: content.replyTo } : {}),
-    ...(brand !== "odentia" ? { brand } : {}),
+    ...(brand !== BASE_MAIL_BRAND ? { brand } : {}),
   }
 }

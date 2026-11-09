@@ -28,7 +28,7 @@ export function AdminBrand() {
   )
 }
 
-/** Los logos de odentIA y latidIA, en una línea. */
+/** Los logos de odentIA, latidIA y vistIA, en una línea. */
 export function ProductLogos({ className = "" }: { className?: string }) {
   return (
     // Cada logo ya se nombra solo (`role="img"`).
@@ -38,6 +38,9 @@ export function ProductLogos({ className = "" }: { className?: string }) {
       </span>
       <span style={{ "--identity-accent": "var(--product-medical)" } as CSSProperties}>
         <Brand brand="latidia" className="w-24" />
+      </span>
+      <span style={{ "--identity-accent": "var(--product-optical)" } as CSSProperties}>
+        <Brand brand="vistia" className="w-24" />
       </span>
     </div>
   )

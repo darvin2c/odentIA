@@ -139,21 +139,30 @@ export type PatientSectionId = (typeof COMMON_SECTIONS)[number]["id"] | (string 
 export type Can = (permission: string) => boolean
 
 /**
- * Las secciones de la página, en el orden de navegación: las comunes y, en
- * Clínica después de Antecedentes, las que agrega el producto. Son clínicas:
- * piden leer la historia y aparecen cuando la persona ya es paciente.
+ * Las secciones de la página, en el orden de navegación: las comunes y las que
+ * agrega el producto. Las suyas son clínicas salvo que digan otra pestaña: en
+ * Clínica van después de Antecedentes y piden leer la historia; en otra, al
+ * final de las de esa pestaña, con su permiso. Todas aparecen cuando la
+ * persona ya es paciente.
  */
 export function patientSections(): readonly PatientSection[] {
   const own: PatientSection[] = productUi().record.sections.map((section) => ({
     id: section.id,
-    area: "clinica",
+    area: section.area ?? "clinica",
     label: section.label,
-    permission: "clinical.read",
+    permission: section.permission ?? "clinical.read",
     patient: true,
     ...(section.parent ? { parent: section.parent } : {}),
   }))
   const after = COMMON_SECTIONS.findIndex((section) => section.id === "antecedentes") + 1
-  return [...COMMON_SECTIONS.slice(0, after), ...own, ...COMMON_SECTIONS.slice(after)]
+  const clinical = own.filter((section) => section.area === "clinica")
+  const base: PatientSection[] = [...COMMON_SECTIONS.slice(0, after), ...clinical, ...COMMON_SECTIONS.slice(after)]
+  return own
+    .filter((section) => section.area !== "clinica")
+    .reduce((list, section) => {
+      const last = list.findLastIndex((item) => item.area === section.area)
+      return last < 0 ? [...list, section] : [...list.slice(0, last + 1), section, ...list.slice(last + 1)]
+    }, base)
 }
 
 /**

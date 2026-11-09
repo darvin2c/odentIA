@@ -59,6 +59,9 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
       medical: number
       medical_library: number
       medical_uncoded: number
+      optical: number
+      optical_library: number
+      optical_uncoded: number
     }>(sql`
       select r.expected_count as expected,
         (select count(*)::int from procedure_code_product p
@@ -74,7 +77,13 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
         (select count(*)::int from treatment_template t where t.product='medical' and t.is_active) as medical_library,
         (select count(*)::int from treatment_template t where t.product='medical' and t.is_active and not exists (
           select 1 from treatment_template_code m where m.template_id=t.id
-            and m.system_key=r.system_key and m.version=r.version)) as medical_uncoded
+            and m.system_key=r.system_key and m.version=r.version)) as medical_uncoded,
+        (select count(*)::int from procedure_code_product p
+          where p.system_key=r.system_key and p.product='optical') as optical,
+        (select count(*)::int from treatment_template t where t.product='optical' and t.is_active) as optical_library,
+        (select count(*)::int from treatment_template t where t.product='optical' and t.is_active and not exists (
+          select 1 from treatment_template_code m where m.template_id=t.id
+            and m.system_key=r.system_key and m.version=r.version)) as optical_uncoded
       from procedure_catalog_release r where r.is_current and r.system_key = 'CPMS'`)
     // La lista oficial entra entera y odentIA usa sus 505 códigos odontológicos
     // (ADR 0079); la biblioteca es la de consultorio y cada tratamiento lleva su
@@ -84,6 +93,9 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     // latidIA (issue 229, entrega 8): el resto de la CPMS y su biblioteca de 38
     // servicios, con código CPMS salvo la toma del Papanicolaou.
     expect(coverage).toMatchObject({ medical: 12002 - 505, medical_library: 38, medical_uncoded: 1 })
+    // vistIA: lo del ojo de la CPMS y su biblioteca de 19 servicios, con código CPMS
+    // salvo la evaluación de baja visión y la tonometría simple, que la CPMS no tiene.
+    expect(coverage).toMatchObject({ optical: 97, optical_library: 19, optical_uncoded: 2 })
     const [section] = await db.execute<{ section: string }>(
       sql`select section from procedure_code where system_key = 'CPMS' and code = 'D2392'`,
     )
@@ -106,7 +118,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     const [preserved] = await db.execute<{ count: number }>(
       sql`select count(*)::int as count from treatment_template_code where system_key = 'CPMS'`,
     )
-    expect(preserved?.count).toBe(Number(Reflect.get(coverage!, "library")) + 38 - 1)
+    expect(preserved?.count).toBe(Number(Reflect.get(coverage!, "library")) + 38 - 1 + 19 - 2)
   } finally {
     await Reflect.get(db, "$client").end()
     await container.stop()

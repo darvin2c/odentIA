@@ -5266,6 +5266,41 @@ await db.transaction(async (tx) => {
     .where(eq(saasDemo.id, demo.id))
 })
 
+// --- vistIA: una óptica para presentar, con el motor de «Crear demo» (ADR 0096) ---
+// La arma igual que la administración: su equipo, su biblioteca, meses de historia y
+// las próximas dos semanas. Se entra desde Clínicas › «Demos».
+await db.transaction(async (tx) => {
+  const [demo] = await tx
+    .insert(saasDemo)
+    .values({
+      product: "optical",
+      kind: "optica",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Óptica Clara Miraflores",
+      slug: "seed-optica-clara-miraflores",
+      presenterUserId: SEED_STAFF_ADMIN_ID,
+      createdBy: SEED_STAFF_ADMIN_ID,
+      seed: 20_261_108,
+      status: "creando",
+    })
+    .returning()
+  if (!demo) throw new Error("No se pudo pedir la demo de la óptica de la semilla")
+  const built = await buildDemo(tx, { ...demo, product: "optical", size: "pequeno" }, { secretsKey, fetch })
+  await tx
+    .update(saasDemo)
+    .set({
+      organizationId: built.organizationId,
+      slug: built.slug,
+      status: "lista",
+      historyThrough: built.historyThrough,
+      readyAt: new Date(),
+      progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
+    })
+    .where(eq(saasDemo.id, demo.id))
+})
+
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
 await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash, storage })
 

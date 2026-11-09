@@ -1,8 +1,12 @@
 ---
 // Título, descripción, migas y enlaces en src/lib/pages-data.ts (PAGES.omnicanal). Cada producto tiene su
-// página: la de latidIA (components/latidia/omnichannel) y la de odentIA (components/omnichannel).
+// página: la de odentIA (components/omnichannel), la de latidIA (components/latidia/omnichannel) y la de
+// vistIA (components/vistia).
 import OmnichannelPage from "../components/latidia/omnichannel/OmnichannelPage.astro"
 import DentalOmnichannelPage from "../components/omnichannel/OmnichannelPage.astro"
-import { MEDICAL } from "../lib/product"
+import VistiaPage from "../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../lib/product"
+
+const Page = ofProduct({ dental: DentalOmnichannelPage, medical: OmnichannelPage, optical: VistiaPage })
 ---
-{MEDICAL ? <OmnichannelPage /> : <DentalOmnichannelPage />}
+<Page />

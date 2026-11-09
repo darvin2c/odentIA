@@ -1,8 +1,11 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.seguridad). Cada web tiene su página, con la misma estructura:
-// odentIA (components/security) y latidIA (components/latidia/security).
+// Contenido en src/lib/pages-data.ts (PAGES.seguridad). Cada web tiene su página: odentIA
+// (components/security), latidIA (components/latidia/security) y vistIA (components/vistia).
 import SecurityPage from "../components/latidia/security/SecurityPage.astro"
 import DentalSecurityPage from "../components/security/SecurityPage.astro"
-import { MEDICAL } from "../lib/product"
+import VistiaPage from "../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../lib/product"
+
+const Page = ofProduct({ dental: DentalSecurityPage, medical: SecurityPage, optical: VistiaPage })
 ---
-{MEDICAL ? <SecurityPage /> : <DentalSecurityPage />}
+<Page />

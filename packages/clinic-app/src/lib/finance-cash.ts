@@ -9,7 +9,7 @@
  * o la sede. Aquí no hay país, moneda ni medio de pago escritos.
  */
 import type { PurchaseBalance, PurchasesToPay } from "./reports"
-import { currencyWord, parseMoney, upperFirst } from "@odentia/clinical"
+import { currencyWord, expenseCategoryWord, parseMoney, upperFirst } from "@odentia/clinical"
 import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
@@ -17,6 +17,7 @@ import { ApiError, apiFetch } from "./api"
 import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
 import { useOrgSecondCurrency } from "./org"
+import { appWords } from "./product-words"
 
 /** Efectivo según UN/CEFACT 4461: lo único que se cuenta al cerrar. */
 export const CASH_TYPE_CODE = "10"
@@ -280,7 +281,10 @@ export const TICKET_STATE_OPTIONS = [
 export interface TicketListRow {
   id: string
   number: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173): `displayName` es quien compró o «Venta de mostrador». */
+  patientId: string | null
+  /** La persona que compró en el mostrador, si se eligió: su página se abre desde la fila. */
+  buyerContactId: string | null
   displayName: string
   docType: string | null
   docNumber: string | null
@@ -392,7 +396,8 @@ export interface DayMovement {
 export interface VoidedTicket {
   ticketId: string
   ticketNumber: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173). */
+  patientId: string | null
   patientName: string
   currency: string
   totalCents: number
@@ -777,6 +782,33 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
 /** Los tipos con que se filtra Gastos: los de un gasto y el pago de comisiones (`EXPENSE_FILTER_TYPES`). */
 export const EXPENSE_FILTER_TYPES = [...EXPENSE_CATEGORIES, "Pago de comisiones"] as const
 
+/**
+ * Cómo se dice cada tipo de gasto (QA de Gastos, G25): «Personal» se leía como el gasto propio y
+ * «Servicios» como lo que se vende. Solo cambia la palabra: el valor guardado sigue igual, y Gastos,
+ * los filtros y Reportes dicen lo mismo.
+ */
+export function expenseCategoryLabel(category: string): string {
+  return expenseCategoryWord(category)
+}
+
+/**
+ * Una línea de ayuda por tipo, para quien duda dónde va lo que pagó. Lo del laboratorio y los
+ * insumos lo dice cada producto (una óptica no paga coronas ni resinas).
+ */
+export function expenseCategoryHint(category: string): string | undefined {
+  const own = appWords().expenseHints
+  const hints: Record<string, string> = {
+    Personal: "Sueldos y lo que se le paga al equipo (sin las comisiones).",
+    Alquiler: "El alquiler de la sede.",
+    Laboratorio: own.lab,
+    Materiales: own.supplies,
+    Servicios: "Luz, agua, internet y teléfono.",
+    Impuestos: "El IGV de lo cobrado, la renta, los arbitrios.",
+    Otros: "Lo que no va en los demás: taxi, útiles, limpieza.",
+  }
+  return hints[category]
+}
+
 /** Valor con que el servidor guarda «sin comprobante». */
 export const NO_RECEIPT = "ninguno"
 
@@ -797,6 +829,27 @@ export interface ExpenseRow {
   spentAt: string
   receiptKind: string
   receiptNumber: string | null
+  /** El tipo del país (SUNAT en el Perú) o «sin»; nulo en lo de antes, que era texto libre. */
+  receiptType?: string | null
+  /** Con qué se pagó (ADR 0167); nulo en lo de antes, que solo dice si salió de la caja. */
+  paymentMethodId?: string | null
+  methodName?: string | null
+  methodTypeCode?: string | null
+  paymentReference?: string | null
+  supplierTaxId?: string | null
+  /** De quién es el sueldo pagado (solo para quien administra comisiones). */
+  personName?: string | null
+  /** Corrige a otro gasto: lo que era antes. */
+  replacesExpenseId?: string | null
+  replaced?: {
+    amountCents: number
+    currency: string
+    category: string
+    concept: string
+    spentAt: string
+    methodName: string | null
+    reason: string | null
+  } | null
   notes: string | null
   voidedAt: string | null
   voidReason: string | null
@@ -888,11 +941,52 @@ export function createExpenseApi(body: {
   }
   /** La clave del formulario abierto: reintentar después de un corte devuelve el mismo gasto. */
   requestId?: string
-}): Promise<{ data: { id: string } }> {
+} & ExpensePaper): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+/** Con qué se pagó, el comprobante del país y a quién (ADR 0167). */
+export interface ExpensePaper {
+  paymentMethodId?: string | null
+  paymentReference?: string | null
+  receiptType?: string | null
+  supplierId?: string | null
+  supplierName?: string | null
+  supplierTaxId?: string | null
+}
+
+/** «Corregir»: anula el gasto con lo que cambió y registra este, en una sola operación. */
+export function correctExpenseApi(id: string, body: Parameters<typeof createExpenseApi>[0]): Promise<{ data: { id: string } }> {
+  const { repeat: _repeat, ...rest } = body
+  return apiFetch(`/api/finance/expenses/${id}/correct`, { method: "POST", body: JSON.stringify(rest) })
+}
+
+/** A quién se pagó: los proveedores de la clínica, con su documento. */
+export function fetchExpenseSuppliers(): Promise<{
+  data: Array<{ id: string; name: string; docType: string | null; docNumber: string | null }>
+}> {
+  return apiFetch("/api/finance/suppliers")
+}
+
+/** «Anotar lo que se repite»: la plantilla sola, sin pagar nada. */
+export function noteRecurringApi(body: {
+  branchId: string
+  category: string
+  concept: string
+  amountCents: number
+  currency?: string
+  everyMonths: 1 | 6 | 12
+  day: number
+  firstMonth?: string
+  memberUserId?: string | null
+  dueNextMonth?: boolean
+  paymentMethodId?: string | null
+  requestId?: string
+}): Promise<{ data: { id: string; firstMonth: string } }> {
+  return apiFetch("/api/finance/expenses/recurring", { method: "POST", body: JSON.stringify(body) })
 }
 
 // --- Gastos que se repiten ------------------------------------------------------------------
@@ -914,6 +1008,8 @@ export interface RecurringDue {
   amountCents: number
   currency: string
   fromCash: boolean
+  /** Con qué se suele pagar: se propone al pagar. */
+  paymentMethodId: string | null
   everyMonths: number
   /** Varios sueldos en una fila, para quien no administra comisiones: no se paga desde aquí. */
   group: number | null
@@ -933,6 +1029,8 @@ export interface RecurringTemplate {
   memberUserId: string | null
   memberName: string | null
   fromCash: boolean
+  paymentMethodId: string | null
+  dueNextMonth?: boolean
   nextMonth: string | null
   /** Varios sueldos en una fila, para quien no administra comisiones: no se cambia desde aquí. */
   group: number | null
@@ -962,7 +1060,15 @@ export function fetchRecurringPeople(): Promise<{ data: Array<{ userId: string; 
 
 export function payRecurringApi(
   id: string,
-  body: { month: string; amountCents?: number; fromCash?: boolean; requestId?: string },
+  body: {
+    month: string
+    amountCents?: number
+    fromCash?: boolean
+    requestId?: string
+    spentAt?: string
+    receiptNumber?: string | null
+    exchangeRate?: string
+  } & ExpensePaper,
 ): Promise<{ data: { id: string; amountCents: number; currency: string; fromCash: boolean } }> {
   return apiFetch(`/api/finance/expenses/recurring/${id}/pay`, { method: "POST", body: JSON.stringify(body) })
 }
@@ -976,7 +1082,15 @@ export function skipRecurringApi(id: string, month: string, undo = false): Promi
 
 export function updateRecurringApi(
   id: string,
-  body: { concept?: string; amountCents?: number; day?: number; memberUserId?: string | null; fromCash?: boolean; lastMonth?: string | null },
+  body: {
+    concept?: string
+    amountCents?: number
+    day?: number
+    memberUserId?: string | null
+    fromCash?: boolean
+    lastMonth?: string | null
+    paymentMethodId?: string | null
+  },
 ): Promise<unknown> {
   return apiFetch(`/api/finance/expenses/recurring/${id}`, { method: "PATCH", body: JSON.stringify(body) })
 }
@@ -1012,6 +1126,11 @@ export function payPurchaseApi(
     expectedPaidCents?: number
     /** La clave del cajón: reintentar tras un corte devuelve el mismo pago. */
     requestId?: string
+    /** Con qué se pagó: manda sobre `fromCash`. */
+    paymentMethodId?: string
+    paymentReference?: string
+    /** El tipo de comprobante del país. */
+    receiptType?: string
   },
 ): Promise<{ data: { balance: PurchaseBalance } }> {
   return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })

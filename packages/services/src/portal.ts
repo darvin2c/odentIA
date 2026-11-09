@@ -34,6 +34,7 @@ import {
 } from "./own-appointment.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
+import { listJobOrders } from "./job-orders.js"
 import { getPatientAccount } from "./payments.js"
 import {
   getPortalPolicy,
@@ -1746,6 +1747,44 @@ export interface PortalAccountView {
     paidAt: Date
     voidedAt: Date | null
   }>
+}
+
+/** Un pedido como lo ve la persona en su portal (ADR 0172): qué es, cómo va, para cuándo y lo que falta. */
+export interface PortalOrder {
+  id: string
+  orderNumber: number
+  title: string
+  statusLabel: string
+  /** Listo para recoger: lo que más le importa. */
+  ready: boolean
+  promisedOn: string
+  dueCents: number
+  currency: string | null
+}
+
+/**
+ * Sus pedidos en el portal (ADR 0172): los que se trabajan y el último entregado.
+ * Van con «Su cuenta» (es lo que compró y lo que le falta pagar), así que la
+ * clínica que la oculta los oculta también. Sin la receta ni nada clínico.
+ */
+export async function listPortalOrders(tx: Db, ctx: PortalContext): Promise<{ locale: string | null; items: PortalOrder[] }> {
+  requireScope(ctx.session, "account")
+  const open = await listJobOrders(tx, ctx.orgId, { status: "abiertos", patientId: ctx.session.patientId, withMoney: true })
+  const delivered = (await listJobOrders(tx, ctx.orgId, { status: "entregado", patientId: ctx.session.patientId, withMoney: true })).slice(0, 1)
+  await logAccess(tx, ctx.orgId, ctx.session.id, "orders.viewed")
+  return {
+    locale: await portalBudgetLocale(tx, ctx.orgId),
+    items: [...open, ...delivered].map((row) => ({
+      id: row.id,
+      orderNumber: row.orderNumber,
+      title: row.title,
+      statusLabel: row.statusLabel,
+      ready: row.status === "listo",
+      promisedOn: row.promisedOn,
+      dueCents: row.dueCents ?? 0,
+      currency: row.currency,
+    })),
+  }
 }
 
 /**

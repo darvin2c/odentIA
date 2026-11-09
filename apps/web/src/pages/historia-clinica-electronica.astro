@@ -1,6 +1,11 @@
 ---
-// Página solo de latidIA (lienzo de la web de latidIA, tablero «Historia»); en odentIA el
-// middleware responde 404. Título, descripción y preguntas están en RecordsPage.
+// /historia-clinica-electronica: de latidIA (lienzo de la web de latidIA, tablero «Historia») y de vistIA
+// (la ficha de la óptica, components/vistia); en odentIA el middleware responde 404 (la suya es
+// /historia-clinica-y-odontograma). Título, descripción y preguntas están en cada página.
 import RecordsPage from "../components/latidia/records/RecordsPage.astro"
+import VistiaPage from "../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../lib/product"
+
+const Page = ofProduct({ dental: null, medical: RecordsPage, optical: VistiaPage })
 ---
-<RecordsPage />
+{Page ? <Page /> : null}

@@ -42,6 +42,7 @@ import {
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { productDictation } from "./products.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -1114,7 +1115,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
           ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}),
           on: {
             ...(agentStep ? { reception: agentStep.receptionOn, admin: agentStep.adminOn } : {}),
-            clio: on?.clio ?? false,
+            clio: (on?.clio ?? false) && (await productDictation(tx, orgId)) !== null,
             registration: on?.registration ?? false,
             noticeSuggested: on?.notice_suggested ?? false,
             portal: on?.portal ?? false,

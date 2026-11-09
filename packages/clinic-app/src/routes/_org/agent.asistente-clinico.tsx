@@ -23,6 +23,7 @@ import { QueryErrorState } from "../../lib/query-error"
 import { productUi } from "../../product/product-ui"
 import { DICTATION_KIND_LABEL, type DictationKind } from "../../components/patient/dictation-session"
 import { ClinicalAssistantPageSkeleton, ClinicalAssistantSkeleton } from "../../components/skeletons/agent"
+import { appWords } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/agent/asistente-clinico")({
   pendingComponent: ClinicalAssistantPageSkeleton,
@@ -111,6 +112,16 @@ function ClinicalAssistantPage() {
     return (
       <PageShell>
         <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica." />
+      </PageShell>
+    )
+  }
+  if (!productUi().dictation) {
+    return (
+      <PageShell className="flex flex-col gap-6">
+        <PageHeader
+          title={`${CLINICAL_NAME}, tu agente clínico`}
+          subtitle={`Aún no disponible: ${CLINICAL_NAME} todavía no dicta en tu ${appWords().place.one}. Escribe la atención en sus campos.`}
+        />
       </PageShell>
     )
   }

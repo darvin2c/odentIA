@@ -55,8 +55,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
 })
 
 /**
- * La web de latidIA sirve solo sus páginas (`servesPage`); lo demás no existe
- * ahí. Sin precios que mostrar (la API nunca respondió) se responde 503: mejor
+ * Cada web sirve solo sus páginas (`servesPage`): la de latidIA y la de vistIA,
+ * las suyas; la de odentIA, todas menos las propias de las demás. Lo demás no
+ * existe ahí. Sin precios que mostrar (la API nunca respondió) se responde 503: mejor
  * «vuelve en un momento» que una cifra inventada.
  */
 async function render(context: APIContext, next: MiddlewareNext): Promise<Response> {

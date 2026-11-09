@@ -5,7 +5,7 @@
 // Este archivo también lo importan las islas (por `money` y los tipos): nada de lo que lee la
 // configuración del servidor se evalúa al cargarlo.
 import { edgeCache } from "./edge-cache"
-import { DEFAULT_DOMAIN, MEDICAL } from "./product"
+import { DEFAULT_DOMAIN, ofProduct, PRODUCT } from "./product"
 
 const FRESH_MS = 30_000
 
@@ -130,7 +130,7 @@ function planOf(plan: ApiPlan): PlanPrices {
  * isolate empieza sin nada en memoria, y sin esto un reinicio de la API daría 503 en vez de
  * los precios de hace un momento. La clave no es una dirección que exista.
  */
-const LAST_READ_KEY = `https://precios.odentia.internal/ultimo?product=${MEDICAL ? "medical" : "dental"}`
+const LAST_READ_KEY = `https://precios.odentia.internal/ultimo?product=${PRODUCT}`
 const LAST_READ_SECONDS = 86_400
 
 async function keepLastRead(value: Pricing): Promise<void> {
@@ -148,7 +148,7 @@ let inflight: Promise<Pricing> | null = null
 
 async function fetchPricing(): Promise<Pricing> {
   // La lista de este producto (ADR 0093): la red interna no lleva el dominio, así que se dice.
-  const res = await fetch(`${apiBase()}/api/public/founders/pricing?product=${MEDICAL ? "medical" : "dental"}`, {
+  const res = await fetch(`${apiBase()}/api/public/founders/pricing?product=${PRODUCT}`, {
     signal: AbortSignal.timeout(3000),
   })
   if (!res.ok) throw new Error(`precios: la API respondió ${res.status}`)
@@ -215,13 +215,19 @@ export interface ValuePrices {
  * completas. En latidIA «Completa» es dejar indicada una prestación (un
  * análisis, una ecografía), mucho más frecuente que un presupuesto dental:
  * se supone 15 simples, 40 estándar y 45 completas hasta medir los pilotos.
+ * En vistIA Clío no trabaja: ninguna consulta suya se cobra, así que no hay
+ * mezcla (y su web no muestra la calculadora).
  * Es un promedio para la calculadora, no lo que se cobra.
  */
 export const MIX = {
   informa: 0.5,
   gestiona: 0.5,
   agenda: 0.25,
-  ...(MEDICAL ? { simple: 0.15, estandar: 0.4, completa: 0.45 } : { simple: 0.4, estandar: 0.35, completa: 0.25 }),
+  ...ofProduct({
+    dental: { simple: 0.4, estandar: 0.35, completa: 0.25 },
+    medical: { simple: 0.15, estandar: 0.4, completa: 0.45 },
+    optical: { simple: 0, estandar: 0, completa: 0 },
+  }),
 }
 
 /** Las cifras de un plan para las islas; null si alguna acción no tiene precio. */

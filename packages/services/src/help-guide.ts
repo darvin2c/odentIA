@@ -54,6 +54,13 @@ const SETTINGS = "Configuración"
 /** Pantallas que se abren desde Integraciones: no están en la lista, pero se llega por ahí. */
 const INTEGRATIONS = `${SETTINGS} › Integraciones`
 
+/**
+ * Pantallas comunes que solo muestra el producto que las declara (los pedidos:
+ * `productUi().orders`, ADR 0171): están en las rutas de todas las apps, pero su
+ * tema lo pone la guía de ese producto, y las demás no las nombran.
+ */
+export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
+
 export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "inicio",
@@ -1000,6 +1007,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "cambio de hoy",
       "tipo de cambio",
       "vuelto",
+      "venta de mostrador",
+      "mostrador",
+      "vender sin ficha",
     ],
     writePermission: "finance.write",
     faqs: [
@@ -1019,8 +1029,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dejo el alquiler o los sueldos de cada mes?",
-        a: "Al registrar el gasto, marca «Se repite» y di si ya se pagó: con «Todavía no» se anota sin registrar ningún pago y queda «por pagar». Elige cada cuánto (cada mes, cada 6 meses o cada año), el día, si es el pago de este mes o del anterior, y si se paga en ese mes o al mes siguiente (el sueldo de noviembre que se paga el 2 de diciembre), para que no salga vencido antes de tiempo. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo: deja de repetirse desde el mes que viene, y lo vencido y lo de este mes siguen por pagar (si este mes no hubo, márcalo «No hubo este mes»). «Lo que se repite» lista todo, también lo que no toca este mes. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ven, pagan y cambian solo quienes administran las comisiones; caja y los demás ven «Sueldos» en una sola fila, sin nombres, y el pago sale en Caja como «Pago de sueldo». Para cambiar la persona, deja de repetirlo y anota otro. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
+        a: "En Finanzas › Gastos, en «Lo que se repite», toca «Anotar lo que se repite»: en qué se gasta, el tipo, lo de siempre, el día y cada cuánto (cada mes, cada 6 meses o cada año). Anotar no paga: queda «por pagar» cada vez que toca, desde el primer mes cuyo día aún no pasó, y nunca se paga solo. Para pagarlo, «Pagar» abre el gasto ya lleno con el importe y el medio de siempre: si llegó otro importe, como pasa con la luz, lo cambias ahí. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo: deja de repetirse desde el mes que viene, y lo vencido y lo de este mes siguen por pagar. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ven, pagan y cambian solo quienes administran las comisiones; caja y los demás ven «Sueldos» en una sola fila, sin nombres, y el pago sale en Caja como «Pago de sueldo». «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
         forms: ["gasto fijo", "gastos fijos", "pago mensual", "alquiler cada mes", "sueldo de la recepcionista", "gasto que se repite", "gasto recurrente"],
+      },
+      {
+        q: "¿Cómo registro un gasto?",
+        a: "En Finanzas › Gastos, «Registrar gasto»: escribe en qué se gastó, el importe y el tipo, y elige con qué se pagó, con los mismos medios de Cobrar. Solo el efectivo sale de la caja: la caja dice cuánto queda o cuánto falta, con el botón para ingresarlo. Con Yape, tarjeta o transferencia puedes anotar el n.º de operación. El comprobante se elige de la lista del país (boleta, factura, recibo por honorarios, recibo de servicios públicos) con su número; con factura o recibo por honorarios, también a quién se pagó y su RUC, para tu contador. Si es una compra de Inventario, elígela en «¿Es el pago de una compra?»: así no se cuenta dos veces. Lo que se repite, como el alquiler o la luz, se anota en «Lo que se repite»; y si ya está en «Por pagar», se paga con «Pagar» en su fila, así deja de estar por pagar y no queda dos veces.",
+        forms: ["registrar un gasto", "anotar un gasto", "donde anoto ese gasto", "donde anoto un gasto", "pague la luz", "gasto de la farmacia", "como anoto lo que pague"],
+      },
+      {
+        q: "¿Cómo corrijo un gasto mal anotado?",
+        a: "Toca el gasto en la lista: se abre su detalle, con «Anular» y «Corregir». «Corregir» abre el mismo cajón con todo puesto; al guardar, el de antes queda anulado con lo que cambió (por ejemplo, de S/ 24.00 a S/ 42.00) y queda este, enlazado. En la lista se ve uno, con la marca «Corregido», y en su detalle, lo de antes. Si salió de la caja, vuelve lo de antes y sale lo nuevo. Si la caja de ese día ya se cerró, lo corrige o lo anula administración: escribe el motivo y «Pedírselo a administración» se lo deja como tarea. El pago de una compra se corrige en su compra, y el de una comisión, en Comisiones.",
+        forms: ["corregir un gasto", "me equivoque en el importe", "cambiar un gasto", "editar un gasto", "anote mal un gasto"],
+      },
+      {
+        q: "¿En qué tipo va cada gasto?",
+        a: "«Sueldos» es lo que se le paga al equipo, sin las comisiones; «Alquiler», el de la sede; «Laboratorio», coronas, prótesis y trabajos de laboratorio; «Materiales», insumos como algodón, guantes o resinas; «Servicios básicos», luz, agua, internet y teléfono; «Impuestos», el IGV de lo cobrado, la renta o los arbitrios; y «Otros», lo demás, como un taxi, útiles o limpieza. Al elegir el tipo, el cajón lo dice debajo.",
+        forms: ["que tipo de gasto", "en que tipo va", "personal es mi gasto", "servicios es lo que vendo", "tipo de gasto"],
       },
       {
         q: "¿Por qué en Gastos sale «Pago de comisiones» sin decir a quién?",
@@ -1045,6 +1070,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo cobro una atención?",
         a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega en PDF por su chat o su correo, y queda en su portal.",
         forms: ["como cobro", "como le cobro a un paciente", "como registro un pago", "como registro un cobro"],
+      },
+      {
+        q: "¿Cómo vendo algo a quien no es paciente?",
+        a: "En Finanzas › Caja o Cobros, «Venta de mostrador»: buscas o escaneas lo que se vende, con su cantidad, y en «Para quién (opcional)» eliges «Buscar a la persona», «Solo su nombre» o «Sin nombre». Se paga entera, con uno o varios medios; en efectivo escribes lo que recibes y ves el vuelto. No abre una ficha ni entra en la cuenta de nadie, aunque la persona sea paciente: el ticket dice «Cliente» o «Venta de mostrador», el producto sale de la sede y el dinero entra en su caja. Se imprime, se devuelve o se anula como cualquier ticket; lo devuelto siempre se le paga, porque sin ficha no queda a favor.",
+        forms: [
+          "venta sin ficha",
+          "vender sin ficha",
+          "venta de mostrador",
+          "vender a alguien que no es paciente",
+          "vender un producto sin paciente",
+          "vender lentes de sol",
+          "cobrar a un cliente sin historia",
+          "venta rapida",
+        ],
       },
       {
         q: "¿Cómo cobro en otra moneda?",
@@ -2096,6 +2135,8 @@ const SAME_WORD: Readonly<Record<string, string>> = Object.fromEntries(
       ["inasistencia", "inasistencias faltaron falto"],
       ["correo", "email mail"],
       ["comision", "comisiones porcentaje"],
+      // vistIA: «lentes» sería «lent», como «lento»; con «anteojos» no se confunde.
+      ["anteojos", "lente lentes gafas"],
     ] as const
   ).flatMap(([word, others]) => others.split(" ").map((other) => [other, word] as const)),
 )

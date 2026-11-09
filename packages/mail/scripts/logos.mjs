@@ -19,6 +19,11 @@ const IMAGES = [
   { name: "latidiaLogotipoOscuro", file: "latidia-logotipo-oscuro.svg", height: 32 },
   { name: "latidiaIsotipoClaro", file: "latidia-isotipo-claro.svg", height: 32 },
   { name: "latidiaIsotipoOscuro", file: "latidia-isotipo-oscuro.svg", height: 32 },
+  // vistIA: la misma construcción con su [20] y su verde.
+  { name: "vistiaLogotipoClaro", file: "vistia-logotipo-claro.svg", height: 32 },
+  { name: "vistiaLogotipoOscuro", file: "vistia-logotipo-oscuro.svg", height: 32 },
+  { name: "vistiaIsotipoClaro", file: "vistia-isotipo-claro.svg", height: 32 },
+  { name: "vistiaIsotipoOscuro", file: "vistia-isotipo-oscuro.svg", height: 32 },
 ]
 
 const entries = []

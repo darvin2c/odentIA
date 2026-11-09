@@ -1,71 +1,119 @@
 ---
-// /buscador (odentIA y latidIA): la portada con la demo grande y viva del buscador (SearchDemo, la misma
+// /buscador (las tres webs): la portada con la demo grande y viva del buscador (SearchDemo, la misma
 // de las portadas), qué encuentra, cómo se abre en tres pasos, qué ve cada rol, lo que no es un nombre
 // (Ariadna y Argos), las preguntas y el cierre. Lo que dice cada tarjeta se comprobó en el producto:
 // `SEARCH_TYPE_PERMISSIONS` (clinic-app/lib/global-search.ts) y los permisos de packages/auth.
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
-import { MEDICAL } from "../../lib/product"
+import { ofProduct } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
 import SearchDemo from "../home/SearchDemo"
 import { DENTAL_SEARCH } from "../home/search-data"
 import { MEDICAL_SEARCH } from "../latidia/home/search-data"
+import { OPTICAL_SEARCH } from "../vistia/search-data"
 
 const cta = ctaOf(Astro.locals.pricing)
-const data = MEDICAL ? MEDICAL_SEARCH : DENTAL_SEARCH
-const clinicWord = MEDICAL ? "consultorio" : "clínica"
 const trail: [string, string][] = [["Inicio", "/"], ["Buscador", "/buscador"]]
-const histHref = MEDICAL ? "/historia-clinica-electronica" : "/historia-clinica-y-odontograma"
-const money = MEDICAL ? "cobros" : "pagos"
 
-const title = MEDICAL
-  ? "Buscador para tu consultorio: pacientes, citas, recetas y cobros en un paso"
-  : "Buscador para tu clínica dental: pacientes, citas, presupuestos y pagos en un paso"
-const description = MEDICAL
-  ? "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: pacientes, citas, recetas, mensajes y cobros aparecen juntos, cada uno debajo de su paciente. Cada rol encuentra solo lo que puede abrir."
-  : "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: pacientes, citas, presupuestos, mensajes y pagos aparecen juntos, cada uno debajo de su paciente. Cada rol encuentra solo lo que puede abrir."
-
-const found = MEDICAL
-  ? [
-      { title: "Personas", text: "Por nombre, apellido, teléfono, documento o número de historia. Si una mamá y su hijo comparten teléfono, aparecen los dos." },
-      { title: "Citas y controles", text: "La próxima cita y los controles de cada paciente, con su fecha. Enter te lleva a la Agenda." },
-      { title: "Mensajes", text: "Lo que escribió el paciente por cualquier canal, debajo de quien es. Enter abre la conversación en la Bandeja." },
-      { title: "Historia clínica", text: "Atenciones, diagnósticos y recetas, debajo de su paciente. Solo para quien puede abrir la historia." },
-      { title: "Documentos e imágenes", text: "Informes, hemogramas y estudios, por su nombre. Solo para quien puede abrir la historia." },
-      { title: "Cobros", text: "Tickets y comprobantes por su número, y lo que debe cada paciente. Solo para quien ve cobros." },
-    ]
-  : [
+/** Lo que cambia de un producto a otro en esta página; la estructura es la misma. */
+const copy = ofProduct({
+  dental: {
+    data: DENTAL_SEARCH,
+    clinicWord: "clínica",
+    histHref: "/historia-clinica-y-odontograma",
+    title: "Buscador para tu clínica dental: pacientes, citas, presupuestos y pagos en un paso",
+    description:
+      "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: pacientes, citas, presupuestos, mensajes y pagos aparecen juntos, cada uno debajo de su paciente. Cada rol encuentra solo lo que puede abrir.",
+    lead: "Pacientes, citas, mensajes, historia y pagos aparecen juntos, cada cosa debajo de su paciente. Pruébalo aquí al lado con datos de ejemplo.",
+    foundTitle: "Todo lo de tu paciente, en una sola lista.",
+    found: [
       { title: "Personas", text: "Por nombre, apellido, teléfono, DNI o número de historia. Si dos personas comparten un teléfono, aparecen las dos." },
       { title: "Citas y controles", text: "La próxima cita y los controles de cada paciente, con su fecha. Enter te lleva a la Agenda." },
       { title: "Mensajes", text: "Lo que escribió el paciente por cualquier canal, debajo de quien es. Enter abre la conversación en la Bandeja." },
       { title: "Historia clínica", text: "Atenciones, diagnósticos y tratamientos, debajo de su paciente. Solo para quien puede abrir la historia." },
       { title: "Documentos e imágenes", text: "Radiografías, consentimientos y estudios, por su nombre. Solo para quien puede abrir la historia." },
       { title: "Presupuestos y pagos", text: "Presupuestos y comprobantes por su número, y lo que debe cada paciente. Solo para quien los puede ver." },
-    ]
+    ],
+    typed: ["lucia", "Lucía"],
+    roles: [
+      { role: "Recepción", yes: "Pacientes, citas, mensajes, presupuestos, tareas y servicios.", no: "Historia clínica, documentos ni pagos de caja." },
+      { role: "Odontólogo", yes: "Pacientes, historia, documentos, citas, mensajes y presupuestos.", no: "Los pagos de caja." },
+      { role: "Caja", yes: "Pacientes, pagos y presupuestos.", no: "Historia clínica, citas ni mensajes." },
+    ],
+    forgot:
+      "Escribe lo que recuerdes de lo que hicieron: un presupuesto, un tratamiento, el nombre de una radiografía. Cada resultado dice a qué paciente pertenece.",
+    question: "¿Cuánto cobramos en octubre?",
+  },
+  medical: {
+    data: MEDICAL_SEARCH,
+    clinicWord: "consultorio",
+    histHref: "/historia-clinica-electronica",
+    title: "Buscador para tu consultorio: pacientes, citas, recetas y cobros en un paso",
+    description:
+      "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: pacientes, citas, recetas, mensajes y cobros aparecen juntos, cada uno debajo de su paciente. Cada rol encuentra solo lo que puede abrir.",
+    lead: "Pacientes, citas, mensajes, historia y cobros aparecen juntos, cada cosa debajo de su paciente. Pruébalo aquí al lado con datos de ejemplo.",
+    foundTitle: "Todo lo de tu paciente, en una sola lista.",
+    found: [
+      { title: "Personas", text: "Por nombre, apellido, teléfono, documento o número de historia. Si una mamá y su hijo comparten teléfono, aparecen los dos." },
+      { title: "Citas y controles", text: "La próxima cita y los controles de cada paciente, con su fecha. Enter te lleva a la Agenda." },
+      { title: "Mensajes", text: "Lo que escribió el paciente por cualquier canal, debajo de quien es. Enter abre la conversación en la Bandeja." },
+      { title: "Historia clínica", text: "Atenciones, diagnósticos y recetas, debajo de su paciente. Solo para quien puede abrir la historia." },
+      { title: "Documentos e imágenes", text: "Informes, hemogramas y estudios, por su nombre. Solo para quien puede abrir la historia." },
+      { title: "Cobros", text: "Tickets y comprobantes por su número, y lo que debe cada paciente. Solo para quien ve cobros." },
+    ],
+    typed: ["tomas", "Tomás"],
+    roles: [
+      { role: "Recepción", yes: "Pacientes, citas, mensajes, tareas y servicios.", no: "Historia clínica, documentos ni cobros." },
+      { role: "Médico", yes: "Pacientes, historia, documentos, citas y mensajes.", no: "Los cobros de caja." },
+      { role: "Caja", yes: "Pacientes y cobros.", no: "Historia clínica, citas ni mensajes." },
+    ],
+    forgot:
+      "Escribe lo que recuerdes de lo que hicieron: una receta, un diagnóstico, el nombre de un informe. Cada resultado dice a qué paciente pertenece.",
+    question: "¿Cuántas consultas cobramos en octubre?",
+  },
+  // vistIA: los mismos permisos por rol; quien atiende es el optómetra y en la óptica se habla de
+  // clientes, aunque la pantalla de las personas se llama «Pacientes».
+  optical: {
+    data: OPTICAL_SEARCH,
+    clinicWord: "óptica",
+    histHref: "/historia-clinica-electronica",
+    title: "Buscador para tu óptica: clientes, citas, productos y cobros en un paso",
+    description:
+      "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: clientes, citas, mensajes, productos y cobros aparecen juntos, cada uno debajo de su cliente. Cada rol encuentra solo lo que puede abrir.",
+    lead: "Clientes, citas, mensajes, historia y cobros aparecen juntos, cada cosa debajo de su cliente. Pruébalo aquí al lado con datos de ejemplo.",
+    foundTitle: "Todo lo de tu cliente, en una sola lista.",
+    found: [
+      { title: "Personas", text: "Por nombre, apellido, teléfono, documento o número de historia. Si una mamá y su hijo comparten teléfono, aparecen los dos." },
+      { title: "Citas y controles", text: "La próxima cita y los controles de cada cliente, con su fecha. Enter te lleva a la Agenda." },
+      { title: "Mensajes", text: "Lo que escribió el cliente por cualquier canal, debajo de quien es. Enter abre la conversación en la Bandeja." },
+      { title: "Historia clínica", text: "Atenciones y diagnósticos, debajo de su cliente. Solo para quien puede abrir la historia." },
+      { title: "Documentos y pruebas del ojo", text: "Retinografías, topografías y consentimientos, por su nombre. Solo para quien puede abrir la historia." },
+      { title: "Cobros e inventario", text: "Tickets por su número, lo que debe cada cliente y los productos con lo que queda en cada sede." },
+    ],
+    typed: ["rosa", "Rosa"],
+    roles: [
+      { role: "Recepción", yes: "Clientes, citas, mensajes, tareas y servicios.", no: "Historia clínica, documentos ni cobros." },
+      { role: "Optómetra", yes: "Clientes, historia, documentos, citas y mensajes.", no: "Los cobros de caja." },
+      { role: "Caja", yes: "Clientes y cobros.", no: "Historia clínica, citas ni mensajes." },
+    ],
+    forgot:
+      "Escribe lo que recuerdes de lo que hicieron: un diagnóstico, el nombre de una prueba del ojo, el producto que se llevó. Cada resultado dice a qué cliente pertenece.",
+    question: "¿Cuántos exámenes de la vista cobramos en octubre?",
+  },
+})
+const { data, clinicWord, histHref, title, description, found, roles } = copy
 
 const steps = [
   { n: "01", title: "Ábrelo donde estés", text: "Ctrl K (⌘ K en Mac) desde cualquier pantalla. En el teléfono, la lupa de arriba. El mismo atajo lo cierra." },
   {
     n: "02",
     title: "Escribe lo que recuerdes",
-    text: `Sin tildes ni mayúsculas, y con solo el comienzo del nombre o del apellido: «${MEDICAL ? "tomas" : "lucia"}» encuentra a ${MEDICAL ? "Tomás" : "Lucía"}.`,
+    text: `Sin tildes ni mayúsculas, y con solo el comienzo del nombre o del apellido: «${copy.typed[0]}» encuentra a ${copy.typed[1]}.`,
   },
   { n: "03", title: "Enter y estás ahí", text: "Con las flechas eliges y Enter te lleva a la pantalla que ya existe. Lo que abriste hace poco aparece al abrir el buscador." },
 ]
-
-const roles = MEDICAL
-  ? [
-      { role: "Recepción", yes: "Pacientes, citas, mensajes, tareas y servicios.", no: "Historia clínica, documentos ni cobros." },
-      { role: "Médico", yes: "Pacientes, historia, documentos, citas y mensajes.", no: "Los cobros de caja." },
-      { role: "Caja", yes: "Pacientes y cobros.", no: "Historia clínica, citas ni mensajes." },
-    ]
-  : [
-      { role: "Recepción", yes: "Pacientes, citas, mensajes, presupuestos, tareas y servicios.", no: "Historia clínica, documentos ni pagos de caja." },
-      { role: "Odontólogo", yes: "Pacientes, historia, documentos, citas, mensajes y presupuestos.", no: "Los pagos de caja." },
-      { role: "Caja", yes: "Pacientes, pagos y presupuestos.", no: "Historia clínica, citas ni mensajes." },
-    ]
 
 const faq: FaqItem[] = [
   {
@@ -82,9 +130,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Y si no recuerdo el nombre?",
-    a: MEDICAL
-      ? "Escribe lo que recuerdes de lo que hicieron: una receta, un diagnóstico, el nombre de un informe. Cada resultado dice a qué paciente pertenece."
-      : "Escribe lo que recuerdes de lo que hicieron: un presupuesto, un tratamiento, el nombre de una radiografía. Cada resultado dice a qué paciente pertenece.",
+    a: copy.forgot,
   },
   {
     q: "¿Puedo hacerle una pregunta, como «¿cuánto cobramos en octubre?»?",
@@ -100,7 +146,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <div class="fh-copy">
         <span class="tag tag-d rise">[ El buscador ]</span>
         <h1 class="fh-h1 rise d1">Escribe lo que recuerdes. <span class="acc">Llegas en un paso.</span></h1>
-        <p class="fh-lead rise d2">{`Pacientes, citas, mensajes, historia y ${money} aparecen juntos, cada cosa debajo de su paciente. Pruébalo aquí al lado con datos de ejemplo.`}</p>
+        <p class="fh-lead rise d2">{copy.lead}</p>
         <div class="fh-ctas rise d3">
           <a class="btn btn-p" href={cta.href}>{cta.label}</a>
           <a class="btn btn-g" href="#como">Ver cómo se abre</a>
@@ -116,7 +162,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="wrap fs-in">
       <div class="fs-head">
         <span class="tag">[ Qué encuentra ]</span>
-        <h2 class="fs-h2">Todo lo de tu paciente, en una sola lista.</h2>
+        <h2 class="fs-h2">{copy.foundTitle}</h2>
         <p class="fs-lead">Cada cosa aparece debajo de su dueño y lleva la palabra de lo que es. Un filtro por tipo deja solo lo que buscas, y también encuentra las pantallas: escribe «agenda» y Enter.</p>
       </div>
       <div class="fs-grid">
@@ -173,7 +219,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <div class="fs-head">
         <span class="tag">[ Si no es un nombre ]</span>
         <h2 class="fs-h2">Una pregunta no se busca: se le hace a Argos.</h2>
-        <p class="fs-lead">{`Si lo que escribes es una pregunta de tu ${clinicWord}, como «${MEDICAL ? "¿Cuántas consultas cobramos en octubre?" : "¿Cuánto cobramos en octubre?"}», el buscador ofrece «Preguntarle a Argos» y responde con los datos de tu ${clinicWord}. Si es de cómo se usa la aplicación, te responde Ariadna. Argos solo se ofrece a quien ve Reportes.`}</p>
+        <p class="fs-lead">{`Si lo que escribes es una pregunta de tu ${clinicWord}, como «${copy.question}», el buscador ofrece «Preguntarle a Argos» y responde con los datos de tu ${clinicWord}. Si es de cómo se usa la aplicación, te responde Ariadna. Argos solo se ofrece a quien ve Reportes.`}</p>
         <a class="fs-link" href="/agentes/administrador">Conoce a Argos</a>
       </div>
     </div>

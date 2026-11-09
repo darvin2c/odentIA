@@ -18,6 +18,7 @@
  *   respuestas: quien llama decide si la frase puede ir al proveedor.
  * - Buscar nunca identifica: un teléfono compartido trae a las dos personas.
  */
+import { expenseCategoryWord } from "@odentia/clinical"
 import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
@@ -30,6 +31,7 @@ import { PURCHASE_STATUS_WORDS } from "./purchase-balance.js"
 import { personSearchCondition } from "./person-search.js"
 import { digitsContain, foldedStartsWith, foldedWordsMatch, foldText, referenceNumber, searchDigits, searchWords, serviceWordsMatch } from "./search-text.js"
 import { pageTasks, taskAreasOfRole } from "./tasks.js"
+import { COUNTER_SALE_LABEL } from "./ticket-party.js"
 
 /** Tipos que se pueden quitar con el filtro de la ventana. */
 export const SEARCH_TYPES = [
@@ -125,6 +127,8 @@ export type SearchOwnerKind =
   | "respuesta"
   | "gasto"
   | "tarea"
+  /** El ticket de una venta de mostrador (ADR 0173): no es de nadie, es su propia fila. */
+  | "comprobante"
 
 export interface SearchOwner {
   key: string
@@ -492,6 +496,37 @@ export async function searchEverything(
       order by at desc limit ${PER_TYPE}`)
     for (const row of budgets) addToPerson(String(row.person_id), budgetItem(row, true))
   }
+  // Una venta de mostrador (ADR 0173) no es de ninguna ficha: se busca por su número o por quien
+  // compró (el contacto elegido o el nombre escrito) y es su propia fila, abierta en Cobros.
+  const counterTickets =
+    can("finance.read") && on("dinero") && (docNumber != null || !digits)
+      ? await rows(sql`
+      select t.id, t.ticket_number, t.total_cents, t.currency, t.created_at, t.branch_id,
+        case when bc.record_locked_at is null then coalesce(bc.display_name, t.buyer_name) end as buyer
+      from payment_ticket t
+      left join contact bc on bc.organization_id = t.organization_id and bc.id = t.buyer_contact_id
+      where t.organization_id = ${orgId} and t.patient_id is null and t.voided_at is null
+        and ${docNumber != null ? sql`t.ticket_number = ${docNumber}` : sql`bc.record_locked_at is null and ${foldedWordsMatch([sql`t.buyer_name`, sql`bc.display_name`], q)}`}
+      order by t.created_at desc limit ${PER_TYPE}`)
+      : []
+  for (const row of counterTickets) {
+    const amount = { cents: num(row.total_cents), currency: String(row.currency) }
+    addOwner({
+      key: `comprobante:${row.id}`,
+      kind: "comprobante",
+      type: "dinero",
+      id: String(row.id),
+      title: `Ticket N.º ${String(row.ticket_number).padStart(6, "0")}`,
+      badge: COUNTER_SALE_LABEL,
+      detail: str(row.buyer),
+      matched: true,
+      target: { screen: "ticket", ticketId: String(row.id), branchId: String(row.branch_id) },
+      items: [],
+      more: 0,
+      amount,
+      at: iso(row.created_at),
+    })
+  }
   if (seesPeople && can("finance.read") && on("dinero") && docNumber != null) {
     const tickets = await rows(sql`
       select t.id, t.ticket_number, t.total_cents, t.currency, t.created_at, t.branch_id, p.person_id
@@ -515,14 +550,15 @@ export async function searchEverything(
   // Lo que cada profesional cobra de comisión es de quien administra comisiones (ADR 0066:
   // cada resultado pide el permiso de su pantalla); `commissions.read` solo ve lo propio.
   const seesAllCommissions = can("commissions.write")
-  if (can("finance.read") && on("dinero") && !digits) {
+  // Un número también busca gastos: el n.º de operación de Yape o el del comprobante son solo números.
+  if (can("finance.read") && on("dinero")) {
     const expenses = await rows(sql`
       select e.id, e.concept, e.category, e.amount_cents, e.currency, e.spent_at, e.branch_id, s.id as supplier_id, s.name as supplier
       from expense e
       left join purchase_order po on po.organization_id = e.organization_id and po.id = e.purchase_order_id
       left join supplier s on s.organization_id = po.organization_id and s.id = po.supplier_id
       where e.organization_id = ${orgId} and e.voided_at is null
-        and ${foldedWordsMatch([sql`e.concept`, sql`e.category`, sql`e.notes`, sql`s.name`], q)}
+        and ${foldedWordsMatch([sql`e.concept`, sql`e.category`, sql`e.notes`, sql`s.name`, sql`e.supplier_name`, sql`e.receipt_number`, sql`e.payment_reference`, sql`nullif(e.receipt_kind, 'ninguno')`], q)}
         -- Lo que se le paga a una persona (comisiones y todo el tipo «Personal», que también es el
         -- pago de una comisión) dice a quién y cuánto: solo lo encuentra quien administra comisiones (ADR 0166).
         ${seesAllCommissions ? sql`` : sql`and e.category <> 'Personal' and not exists (select 1 from commission_settlement cs where cs.organization_id = e.organization_id and cs.expense_id = e.id)`}
@@ -532,7 +568,7 @@ export async function searchEverything(
         id: String(row.id),
         type: "dinero",
         kind: "gasto",
-        title: [str(row.concept), str(row.category)].filter(Boolean).join(" · "),
+        title: [str(row.concept), row.category ? expenseCategoryWord(String(row.category)) : null].filter(Boolean).join(" · "),
         detail: null,
         at: iso(row.spent_at),
         amount: { cents: num(row.amount_cents), currency: String(row.currency) },
@@ -822,8 +858,10 @@ export async function searchEverything(
       const read = readOf.get(itemKey(item))
       if (read) reads.set(`${read.patientId}:${read.resource}`, read)
     }
+  // El ticket de una venta de mostrador encontrado por quien compró también es el nombre de una persona.
   const personal =
-    result.some((owner) => owner.kind === "persona" && owner.matched) || readOf.size > 0
+    result.some((owner) => (owner.kind === "persona" || (owner.kind === "comprobante" && owner.detail !== null)) && owner.matched) ||
+    readOf.size > 0
   return { owners: result, clinicalReads: [...reads.values()], personal }
 }
 

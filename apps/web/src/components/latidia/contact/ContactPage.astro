@@ -1,8 +1,9 @@
 ---
 // /contacto de latidIA y de odentIA (lienzo de latidIA, tablero «Contacto»): los dos caminos (pedir la
 // invitación o escribirnos un correo), lo que pasa después, cómo escribirnos y las preguntas de antes de
-// empezar. Una sola página para las dos webs: las palabras de cada producto salen de `WORDS` y lo que
-// cambia de verdad (unidades dentales, presupuestos, el ejemplo del correo) de `MEDICAL`.
+// empezar. Una sola página para todas las webs: las palabras de cada producto salen de `WORDS` y lo que
+// cambia de verdad (unidades dentales, presupuestos, el ejemplo del correo) de `copy`, un mapa por producto.
+// vistIA lleva la misma página con lo suyo (`copy`).
 // Sin formulario: la web solo envía la lista de espera y el Libro de Reclamaciones (apps/AGENTS.md), así
 // que el tablero «Cuatro datos y tu mensaje» queda como un correo con lo que conviene contarnos.
 // El regalo, la invitación y los días hábiles para responder salen de Astro.locals.pricing; el correo,
@@ -12,7 +13,7 @@ import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { TITULAR } from "../../../lib/legal/types"
 import { PAGES } from "../../../lib/pages-data"
 import { businessDays, giftOf, shownPlan } from "../../../lib/pricing"
-import { MEDICAL, WORDS } from "../../../lib/product"
+import { ofProduct, WORDS } from "../../../lib/product"
 import { contactEmail, ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -26,12 +27,38 @@ const founders = plan !== null && plan === pricing.founders
 const answer = businessDays(pricing.terms.waitlistAnswerDays)
 // «Sin cuota» solo si el plan que se muestra no la cobra.
 const noFee = plan !== null && plan.plan === 0
-const title = MEDICAL ? "Habla con nosotros" : PAGES.contacto.title
-const description = MEDICAL
-  ? "¿Quieres saber si latidIA le sirve a tu consultorio médico? Pide tu invitación o escríbenos: te responde una persona del equipo."
-  : PAGES.contacto.description
-// Lo que se crea al empezar: la sede y los lugares donde se atiende («salas» en un consultorio, «unidades dentales» en una clínica).
-const setup = MEDICAL ? "Tu sede, tus salas, tu horario y tu tarifario." : "Tus sedes, tus unidades dentales, tu horario y tu tarifario."
+// Lo que cambia de un producto a otro. `setup` es lo que se crea al empezar: la sede y los lugares donde
+// se atiende («salas» en un consultorio, «unidades dentales» en una clínica, «salas de examen» en una óptica).
+const copy = ofProduct({
+  dental: {
+    title: PAGES.contacto.title,
+    description: PAGES.contacto.description,
+    setup: "Tus sedes, tus unidades dentales, tu horario y tu tarifario.",
+    solve: "La agenda, la historia y el odontograma, los presupuestos o los cobros.",
+    example: "Somos dos odontólogos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para armar los presupuestos?",
+    rooms: "unidades dentales",
+    country: "La moneda, la zona horaria, el número de emergencias que da Sofi y los diagnósticos (CIE-10 o CIE-11) van según tu país.",
+  },
+  medical: {
+    title: "Habla con nosotros",
+    description: "¿Quieres saber si latidIA le sirve a tu consultorio médico? Pide tu invitación o escríbenos: te responde una persona del equipo.",
+    setup: "Tu sede, tus salas, tu horario y tu tarifario.",
+    solve: "La agenda, la historia clínica, la receta, los controles o los cobros.",
+    example: "Somos dos médicos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para medicina familiar?",
+    rooms: "salas",
+    country: "La moneda, la zona horaria, el número de emergencias que da Sofi y los diagnósticos (CIE-10 o CIE-11) van según tu país.",
+  },
+  optical: {
+    title: "Habla con nosotros",
+    description: "¿Quieres saber si vistIA le sirve a tu óptica? Pide tu invitación o escríbenos: te responde una persona del equipo.",
+    setup: "Tus sedes, tus salas de examen, tu horario y tu tarifario.",
+    solve: "La agenda, la ficha de tus clientes, la caja, el inventario o los controles.",
+    example: "Somos una óptica con dos sedes y una optómetra. Nos escriben casi todo por WhatsApp. ¿Sofi puede agendar los exámenes de la vista?",
+    rooms: "salas",
+    country: "La moneda, la zona horaria y los diagnósticos (CIE-10 o CIE-11) van según tu país.",
+  },
+})
+const { title, description, setup } = copy
 const trail: [string, string][] = [
   ["Inicio", "/"],
   ["Habla con nosotros", "/contacto"],
@@ -57,13 +84,13 @@ const tell = [
   { title: "Por dónde te escriben", text: "WhatsApp, Instagram, Messenger, el correo… o todos a la vez." },
   {
     title: "Qué te gustaría resolver",
-    text: MEDICAL ? "La agenda, la historia clínica, la receta, los controles o los cobros." : "La agenda, la historia y el odontograma, los presupuestos o los cobros.",
+    text: copy.solve,
   },
 ]
 
 const faq: FaqItem[] = [
   {
-    q: "¿Puedo traer mis pacientes?",
+    q: `¿Puedo traer mis ${WORDS.patients}?`,
     a: "Escríbenos y lo vemos contigo. Los nuevos se registran solos cuando te escriben o cuando llenan sus datos desde su enlace.",
   },
   {
@@ -74,11 +101,11 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Necesito WhatsApp Business?",
-    a: "No para empezar: Sofi responde también por Instagram, Messenger, Telegram, el chat de tu web y el correo. Para WhatsApp conectas el número de ${WORDS.yourClinic} a través de Meta, con pasos guiados. Lo que cobra Meta se le paga a Meta.",
+    a: `No para empezar: Sofi responde también por Instagram, Messenger, Telegram, el chat de tu web y el correo. Para WhatsApp conectas el número de ${WORDS.yourClinic} a través de Meta, con pasos guiados. Lo que cobra Meta se le paga a Meta.`,
   },
   {
     q: "¿Sirve en mi país?",
-    a: `Está hecho para ${WORDS.audience} de habla hispana. La moneda, la zona horaria, el número de emergencias que da Sofi y los diagnósticos (CIE-10 o CIE-11) van según tu país.`,
+    a: `Está hecho para ${WORDS.audience} de habla hispana. ${copy.country}`,
   },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -114,7 +141,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           <div class="cp-path">
             <span class="cp-k">Camino 2 · Una duda</span>
             <p class="cp-path-t">Escríbenos y te contamos si te sirve.</p>
-            <p class="cp-path-x">Cuéntanos cuántos {WORDS.clinicians} y sedes tienen, y por dónde te escriben tus pacientes.</p>
+            <p class="cp-path-x">Cuéntanos cuántos {WORDS.clinicians} y sedes tienen, y por dónde te escriben tus {WORDS.patients}.</p>
             <a class="btn btn-g" href={mailto}>{contactEmail}</a>
           </div>
         </div>
@@ -149,9 +176,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           </ul>
           <figure class="cp-example">
             <figcaption>Un correo de ejemplo</figcaption>
-            <blockquote>{MEDICAL
-              ? "Somos dos médicos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para medicina familiar?"
-              : "Somos dos odontólogos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para armar los presupuestos?"}</blockquote>
+            <blockquote>{copy.example}</blockquote>
           </figure>
           <a class="btn btn-d" href={mailto}>Escribir un correo</a>
         </div>
@@ -164,9 +189,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <CtaBand title={`Cuéntanos de ${WORDS.yourClinic}.`}>
       <Fragment slot="text">
         {gift ? (
-          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, {MEDICAL ? "salas" : "unidades dentales"} ni usuarios.</>
+          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, {copy.rooms} ni usuarios.</>
         ) : (
-          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día. Sin límite de {WORDS.clinicians}, {MEDICAL ? "salas" : "unidades dentales"} ni usuarios.</>
+          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día. Sin límite de {WORDS.clinicians}, {copy.rooms} ni usuarios.</>
         )}
       </Fragment>
     </CtaBand>

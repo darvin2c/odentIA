@@ -1,6 +1,6 @@
 // Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
 import { giftOf, type Pricing } from "./pricing"
-import { DEFAULT_DOMAIN, MEDICAL, WORDS } from "./product"
+import { DEFAULT_DOMAIN, ofProduct, WORDS } from "./product"
 
 const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
 const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
@@ -36,141 +36,202 @@ export type NavMenu = { items: MenuItem[]; all?: NavLink & { short: string }; co
 /** Una entrada de la cabecera: un enlace o, con `menu`, un desplegable. */
 export type NavEntry = NavLink & { menu?: NavMenu }
 
-/** Los tres agentes de cada web (lienzo del paso 3, tablero 1): su color y lo que hace cada uno. */
-const agentsMenu: NavMenu = MEDICAL
-  ? {
-      items: [
-        { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde a cualquier hora, agenda y reconoce una urgencia.", color: "#0e7490" },
-        { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas y ordena la consulta: signos vitales, examen, receta y descanso.", color: "#1f9d7a" },
-        { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes.", color: "#c98a1c" },
-      ],
-      all: { href: "/agentes", label: "Los tres juntos, en una consulta de principio a fin", short: "Los tres juntos" },
-    }
-  : {
-      items: [
-        { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde, informa y agenda por todos tus canales, a cualquier hora.", color: "#0e7490" },
-        { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas la consulta y prepara la nota, el odontograma y el presupuesto.", color: "#1f9d7a" },
-        { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes de tu clínica.", color: "#c98a1c" },
-      ],
-      all: { href: "/agentes", label: "Los tres juntos, en un caso de principio a fin", short: "Los tres juntos" },
-    }
+/** Los agentes de cada web (lienzo del paso 3, tablero 1): su color y lo que hace cada uno. En vistIA
+ * son dos: Clío no dicta en una óptica. */
+const agentsMenu: NavMenu = ofProduct<NavMenu>({
+  dental: {
+    items: [
+      { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde, informa y agenda por todos tus canales, a cualquier hora.", color: "#0e7490" },
+      { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas la consulta y prepara la nota, el odontograma y el presupuesto.", color: "#1f9d7a" },
+      { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes de tu clínica.", color: "#c98a1c" },
+    ],
+    all: { href: "/agentes", label: "Los tres juntos, en un caso de principio a fin", short: "Los tres juntos" },
+  },
+  medical: {
+    items: [
+      { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde a cualquier hora, agenda y reconoce una urgencia.", color: "#0e7490" },
+      { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas y ordena la consulta: signos vitales, examen, receta y descanso.", color: "#1f9d7a" },
+      { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes.", color: "#c98a1c" },
+    ],
+    all: { href: "/agentes", label: "Los tres juntos, en una consulta de principio a fin", short: "Los tres juntos" },
+  },
+  optical: {
+    items: [
+      { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde por todos tus canales, a cualquier hora, y agenda el examen de la vista.", color: "#0e7490" },
+      { href: "/agentes/administrador", label: "Argos · administración", text: "Recuerda citas, invita al control y responde lo que le preguntes de tu óptica.", color: "#c98a1c" },
+    ],
+    all: { href: "/agentes", label: "Los dos juntos, de la primera pregunta al control", short: "Los dos juntos" },
+  },
+})
 
-/** «El sistema»: lo que tiene la clínica o el consultorio, en dos columnas. Las dos webs lo llevan
- * en el mismo lugar de la cabecera, para llegar a cada parte en un toque. */
-const systemMenu: NavMenu = MEDICAL
-  ? {
-      columns: 2,
-      items: [
-        { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales", text: "Examen por sistemas, antecedentes y su presión en el tiempo." },
-        { href: "/radiografias-y-ecografias", label: "Radiografías y ecografías", text: "Las que trae la persona, en su historia: brillo, zoom y comparar." },
-        { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
-        { href: "/receta-y-descanso-medico", label: "Receta y descanso médico", text: "Avisa embarazo y alergias; el descanso, firmado y numerado." },
-        { href: "/agenda-medica", label: "Agenda y controles", text: "Por sala y por médico, con controles que se repiten." },
-        { href: "/caja-y-cobros", label: "Caja y varias sedes", text: "Cada consulta cobrada, en cada sede." },
-        { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
-        { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente ve su cita, sus datos y sus papeles." },
-        { href: "/seguridad", label: "Seguridad y datos de salud", text: "Cada rol ve solo lo suyo." },
-      ],
-    }
-  : {
-      columns: 2,
-      items: [
-        { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma", text: "Odontograma en herradura, periodontograma y cada atención en orden." },
-        { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía", text: "Ábrelas en la ficha: brillo, medidas y comparar. Sin instalar nada." },
-        { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
-        { href: "/presupuestos-dentales", label: "Presupuestos", text: "Opciones claras con los precios de tu tarifario." },
-        { href: "/agenda-odontologica", label: "Agenda", text: "Por odontólogo y unidad dental, con recordatorios solos." },
-        { href: "/caja-y-cobros", label: "Caja y cobros", text: "Cobros, adelantos y el cierre de caja con su hoja." },
-        { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
-        { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente reserva y ve su cita y sus papeles." },
-        { href: "/varias-sedes", label: "Varias sedes", text: "Cada sede con su agenda y su caja; tú lo ves todo junto." },
-        { href: "/seguridad", label: "Seguridad", text: "Cada rol ve solo lo suyo." },
-      ],
-    }
+/** «El sistema»: lo que tiene la clínica, el consultorio o la óptica, en dos columnas. Todas las webs lo
+ * llevan en el mismo lugar de la cabecera, para llegar a cada parte en un toque. */
+const systemMenu: NavMenu = ofProduct<NavMenu>({
+  dental: {
+    columns: 2,
+    items: [
+      { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma", text: "Odontograma en herradura, periodontograma y cada atención en orden." },
+      { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía", text: "Ábrelas en la ficha: brillo, medidas y comparar. Sin instalar nada." },
+      { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
+      { href: "/presupuestos-dentales", label: "Presupuestos", text: "Opciones claras con los precios de tu tarifario." },
+      { href: "/agenda-odontologica", label: "Agenda", text: "Por odontólogo y unidad dental, con recordatorios solos." },
+      { href: "/caja-y-cobros", label: "Caja y cobros", text: "Cobros, adelantos y el cierre de caja con su hoja." },
+      { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
+      { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente reserva y ve su cita y sus papeles." },
+      { href: "/varias-sedes", label: "Varias sedes", text: "Cada sede con su agenda y su caja; tú lo ves todo junto." },
+      { href: "/seguridad", label: "Seguridad", text: "Cada rol ve solo lo suyo." },
+    ],
+  },
+  medical: {
+    columns: 2,
+    items: [
+      { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales", text: "Examen por sistemas, antecedentes y su presión en el tiempo." },
+      { href: "/radiografias-y-ecografias", label: "Radiografías y ecografías", text: "Las que trae la persona, en su historia: brillo, zoom y comparar." },
+      { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
+      { href: "/receta-y-descanso-medico", label: "Receta y descanso médico", text: "Avisa embarazo y alergias; el descanso, firmado y numerado." },
+      { href: "/agenda-medica", label: "Agenda y controles", text: "Por sala y por médico, con controles que se repiten." },
+      { href: "/caja-y-cobros", label: "Caja y varias sedes", text: "Cada consulta cobrada, en cada sede." },
+      { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
+      { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente ve su cita, sus datos y sus papeles." },
+      { href: "/seguridad", label: "Seguridad y datos de salud", text: "Cada rol ve solo lo suyo." },
+    ],
+  },
+  optical: {
+    columns: 2,
+    items: [
+      { href: "/agenda-para-opticas", label: "Agenda y controles", text: "Por sala de examen y optómetra, con recordatorios y el control que se repite." },
+      { href: "/historia-clinica-electronica", label: "Ficha e historia clínica", text: "Cada cliente con su historia, sus pruebas del ojo y sus documentos." },
+      { href: "/caja-y-cobros", label: "Caja, inventario y sedes", text: "Cobra el examen y lo que vendes; lo vendido sale del stock de la sede." },
+      { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
+      { href: "/portal-del-cliente", label: "Su enlace", text: "Tu cliente ve su cita, la cambia y ve sus documentos." },
+      { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
+      { href: "/seguridad", label: "Seguridad", text: "Cada rol ve solo lo suyo." },
+    ],
+  },
+})
 
-/** La misma cabecera en las dos webs: Agentes, El sistema, Omnicanal y Precios. */
+/** Adónde lleva «El sistema» al tocarlo: la primera parte de cada producto. */
+const systemHref = ofProduct({
+  dental: "/historia-clinica-y-odontograma",
+  medical: "/historia-clinica-electronica",
+  optical: "/agenda-para-opticas",
+})
+
+/** La misma cabecera en todas las webs: Agentes, El sistema, Omnicanal y Precios. */
 export const mainNav: NavEntry[] = [
   { href: "/agentes", label: "Agentes", menu: agentsMenu },
-  { href: MEDICAL ? "/historia-clinica-electronica" : "/historia-clinica-y-odontograma", label: "El sistema", menu: systemMenu },
+  { href: systemHref, label: "El sistema", menu: systemMenu },
   { href: "/omnicanal", label: "Omnicanal" },
   { href: "/precios", label: "Precios" },
 ]
 
-export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
-  ? [
-      {
-        title: "Agentes",
-        links: [
-          { href: "/agentes", label: "Los tres agentes" },
-          { href: "/agentes/recepcion", label: "Sofi · recepción" },
-          { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
-          { href: "/agentes/administrador", label: "Argos · administración" },
-        ],
-      },
-      {
-        title: "El sistema",
-        links: [
-          { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales" },
-          { href: "/radiografias-y-ecografias", label: "Radiografías y ecografías" },
-          { href: "/buscador", label: "Buscador" },
-          { href: "/receta-y-descanso-medico", label: "Receta y descanso médico" },
-          { href: "/agenda-medica", label: "Agenda y controles" },
-          { href: "/caja-y-cobros", label: "Caja y varias sedes" },
-          { href: "/reportes", label: "Reportes" },
-          { href: "/portal-del-paciente", label: "Su enlace" },
-        ],
-      },
-      {
-        title: WORDS.name,
-        links: [
-          { href: "/omnicanal", label: "Omnicanal y WhatsApp" },
-          { href: "/precios", label: "Precios" },
-          { href: "/seguridad", label: "Seguridad" },
-          { href: "/solicitar-invitacion", label: "Pide tu invitación" },
-          { href: "/contacto", label: "Habla con nosotros" },
-        ],
-      },
-    ]
-  : [
-  {
-    title: "Agentes",
-    links: [
-      { href: "/agentes", label: "Los tres agentes" },
-      { href: "/agentes/recepcion", label: "Sofi · recepción" },
-      { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
-      { href: "/agentes/administrador", label: "Argos · administración" },
-    ],
-  },
-  {
-    title: "Omnicanal",
-    links: [
-      { href: "/omnicanal", label: "Todos los canales" },
-      { href: "/whatsapp-para-clinicas-dentales", label: "WhatsApp para clínicas" },
-    ],
-  },
-  {
-    title: "El sistema",
-    links: [
-      { href: "/agenda-odontologica", label: "Agenda" },
-      { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma" },
-      { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía" },
-      { href: "/buscador", label: "Buscador" },
-      { href: "/presupuestos-dentales", label: "Presupuestos" },
-      { href: "/caja-y-cobros", label: "Caja y cobros" },
-      { href: "/portal-del-paciente", label: "Su enlace" },
-      { href: "/reportes", label: "Reportes" },
-      { href: "/varias-sedes", label: "Varias sedes" },
-    ],
-  },
-  {
-    title: "odentIA",
-    links: [
-      { href: "/precios", label: "Precios" },
-      { href: "/seguridad", label: "Seguridad" },
-      { href: "/contacto", label: "Habla con nosotros" },
-    ],
-  },
-]
+export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
+  dental: [
+    {
+      title: "Agentes",
+      links: [
+        { href: "/agentes", label: "Los tres agentes" },
+        { href: "/agentes/recepcion", label: "Sofi · recepción" },
+        { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
+        { href: "/agentes/administrador", label: "Argos · administración" },
+      ],
+    },
+    {
+      title: "Omnicanal",
+      links: [
+        { href: "/omnicanal", label: "Todos los canales" },
+        { href: "/whatsapp-para-clinicas-dentales", label: "WhatsApp para clínicas" },
+      ],
+    },
+    {
+      title: "El sistema",
+      links: [
+        { href: "/agenda-odontologica", label: "Agenda" },
+        { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma" },
+        { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía" },
+        { href: "/buscador", label: "Buscador" },
+        { href: "/presupuestos-dentales", label: "Presupuestos" },
+        { href: "/caja-y-cobros", label: "Caja y cobros" },
+        { href: "/portal-del-paciente", label: "Su enlace" },
+        { href: "/reportes", label: "Reportes" },
+        { href: "/varias-sedes", label: "Varias sedes" },
+      ],
+    },
+    {
+      title: "odentIA",
+      links: [
+        { href: "/precios", label: "Precios" },
+        { href: "/seguridad", label: "Seguridad" },
+        { href: "/contacto", label: "Habla con nosotros" },
+      ],
+    },
+  ],
+  medical: [
+    {
+      title: "Agentes",
+      links: [
+        { href: "/agentes", label: "Los tres agentes" },
+        { href: "/agentes/recepcion", label: "Sofi · recepción" },
+        { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
+        { href: "/agentes/administrador", label: "Argos · administración" },
+      ],
+    },
+    {
+      title: "El sistema",
+      links: [
+        { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales" },
+        { href: "/radiografias-y-ecografias", label: "Radiografías y ecografías" },
+        { href: "/buscador", label: "Buscador" },
+        { href: "/receta-y-descanso-medico", label: "Receta y descanso médico" },
+        { href: "/agenda-medica", label: "Agenda y controles" },
+        { href: "/caja-y-cobros", label: "Caja y varias sedes" },
+        { href: "/reportes", label: "Reportes" },
+        { href: "/portal-del-paciente", label: "Su enlace" },
+      ],
+    },
+    {
+      title: WORDS.name,
+      links: [
+        { href: "/omnicanal", label: "Omnicanal y WhatsApp" },
+        { href: "/precios", label: "Precios" },
+        { href: "/seguridad", label: "Seguridad" },
+        { href: "/solicitar-invitacion", label: "Pide tu invitación" },
+        { href: "/contacto", label: "Habla con nosotros" },
+      ],
+    },
+  ],
+  optical: [
+    {
+      title: "Agentes",
+      links: [
+        { href: "/agentes", label: "Los dos agentes" },
+        { href: "/agentes/recepcion", label: "Sofi · recepción" },
+        { href: "/agentes/administrador", label: "Argos · administración" },
+      ],
+    },
+    {
+      title: "El sistema",
+      links: [
+        { href: "/agenda-para-opticas", label: "Agenda y controles" },
+        { href: "/historia-clinica-electronica", label: "Ficha e historia clínica" },
+        { href: "/caja-y-cobros", label: "Caja, inventario y sedes" },
+        { href: "/reportes", label: "Reportes" },
+        { href: "/portal-del-cliente", label: "Su enlace" },
+        { href: "/buscador", label: "Buscador" },
+      ],
+    },
+    {
+      title: WORDS.name,
+      links: [
+        { href: "/omnicanal", label: "Omnicanal y WhatsApp" },
+        { href: "/precios", label: "Precios" },
+        { href: "/seguridad", label: "Seguridad" },
+        { href: "/solicitar-invitacion", label: "Pide tu invitación" },
+        { href: "/contacto", label: "Habla con nosotros" },
+      ],
+    },
+  ],
+})
 
 /** Dónde se habla con una persona: la página de contacto de cada web. */
 export const contactHref = "/contacto"

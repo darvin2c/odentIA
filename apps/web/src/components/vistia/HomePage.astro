@@ -1,0 +1,329 @@
+---
+// Inicio de vistIA: la portada con Sofi agendando un examen de la vista por WhatsApp, Omnicanal, los dos
+// agentes, un día en la Óptica Lucero, el sistema, lo que decides tú y la confianza, cómo se cobra,
+// preguntas y cierre. El documento (<Base>, título, descripción y datos estructurados) lo arma
+// src/pages/index.astro. Solo lo que vistIA hace hoy (components/vistia/pages-data.ts). Ninguna cifra de
+// precio vive aquí: salen de Astro.locals.pricing.
+import { giftOf, shownPlan } from "../../lib/pricing"
+import { contactHref, ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import ChargeDay, { type ChargeRow } from "../latidia/home/ChargeDay"
+import ContentBlock from "../pages/ContentBlock.astro"
+import { homeFaq } from "./faq"
+import { VISTIA_PAGES } from "./pages-data"
+import Visual from "./Visual.astro"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const faq = homeFaq(gift)
+// Un día en la óptica: el mismo de la página de los agentes.
+const day = VISTIA_PAGES.agentes.blocks[1]
+
+// Un sábado de cobros: lo que hizo cada agente con los precios del plan que se muestra. Rosa vino a su
+// examen, así que la conversación en que Sofi la agendó cuenta como «Agenda» (ADR 0085).
+const chargeRows: ChargeRow[] = plan
+  ? [
+      { tone: "sofi" as const, what: "Sofi agendó a Rosa, y vino", why: "Agenda · la reservó el viernes a las 23:41", amount: plan.tiers.agenda },
+      { tone: "sofi" as const, what: "Sofi le dio a Ana la dirección y el horario", why: "Informa", amount: plan.tiers.informa },
+      { tone: "argos" as const, what: "Argos trajo de vuelta a Pedro, y vino", why: "Cita recuperada", amount: plan.recovered },
+      { tone: "argos" as const, what: "Argos le recordó su control a Julia", why: "Recordar no se cobra", amount: 0 },
+    ].flatMap((row) => (row.amount === null ? [] : [{ ...row, amount: row.amount }]))
+  : []
+const currencyWord = plan?.currency === "USD" ? "dólares" : plan?.currency
+
+const channels = [
+  ["WhatsApp", "#25a35a"],
+  ["Instagram", "#d9467f"],
+  ["Messenger", "#3b6fe0"],
+  ["Telegram", "#2aa3d8"],
+  ["Chat de tu web", "#147c3b"],
+  ["Correo", "#64748b"],
+]
+
+const agents = [
+  {
+    key: "sofi" as const,
+    role: "Recepción",
+    name: "Sofi.",
+    text: "Responde siempre, en cualquier canal. Informa tus servicios y precios y agenda el examen de la vista con el sí de la persona.",
+    href: "/agentes/recepcion",
+    more: "Conoce a Sofi →",
+  },
+  {
+    key: "argos" as const,
+    role: "Administración",
+    name: "Argos.",
+    text: "Recuerda la cita, invita al control anual de la vista, ofrece otro horario a quien faltó y te dice cómo va tu óptica.",
+    href: "/agentes/administrador",
+    more: "Conoce a Argos →",
+  },
+]
+
+const system = [
+  { title: "Agenda y controles", text: "Por optómetra, sala de examen y sede. El control anual de la vista se repite solo.", href: "/agenda-para-opticas" },
+  { title: "Ficha e historia clínica", text: "Antecedentes, diagnósticos con CIE-10 o CIE-11, consentimientos y las pruebas del ojo con su informe.", href: "/historia-clinica-electronica" },
+  { title: "Caja e inventario", text: "Cobra el examen y lo que vendes en el mismo paso. Monturas, lunas y lentes, con su stock por sede.", href: "/caja-y-cobros" },
+  { title: "Varias sedes", text: "Cada sede con su agenda, su caja y su stock; tú lo ves todo junto.", href: "/caja-y-cobros" },
+  { title: "Reportes con Argos", text: "Lo cobrado, los clientes nuevos y quién faltó, y lo que quieras preguntarle a Argos.", href: "/reportes" },
+  { title: "Su enlace", text: "Tu cliente ve su próxima cita, la cambia y ve sus documentos, sin aplicación.", href: "/portal-del-cliente" },
+  { title: "Buscador", text: "Ctrl K desde cualquier pantalla: clientes, citas, mensajes y cobros en un paso.", href: "/buscador" },
+  { title: "Seguridad", text: "Cada rol ve solo lo suyo y tu óptica está separada de las demás.", href: "/seguridad" },
+]
+
+const trust = [
+  { title: "Cada óptica, aparte", text: "La conexión va cifrada, tus datos no se mezclan con los de otra óptica y cada permiso se revisa en el servidor." },
+  { title: "Cada rol ve lo suyo", text: "Recepción agenda, el optómetra ve la historia, caja cobra. Sofi no ve la historia clínica." },
+  { title: "Firmada no se cambia", text: "Al firmar, la atención queda fija y solo admite adendas, con el nombre y la hora." },
+  { title: "Tu equipo toma la palabra", text: "Cualquiera del equipo puede escribir en una conversación; Sofi espera y le deja un resumen." },
+]
+---
+<div class="vh-page">
+  <!-- 1 · Portada: Sofi agenda el examen de la vista de Rosa por WhatsApp -->
+  <section class="hero vh" data-vh-hero>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap vh-in">
+      <div class="vh-copy">
+        <span class="tag tag-d vh-tag rise">[ Para ópticas ]</span>
+        <h1 class="vh-h1 rise d1">Tú examinas y vendes.<br /><span>Tus agentes</span> hacen el resto.</h1>
+        <p class="vh-lead rise d2">
+          WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo en una sola ficha por cliente. Y dos agentes de IA:
+          <b class="c-sofi">Sofi</b> agenda el examen de la vista y <b class="c-argos">Argos</b> trae de vuelta a tus clientes.
+        </p>
+        <div class="vh-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="#dia">Ver cómo funciona</a>
+        </div>
+        <p class="vh-note rise d4">
+          {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes van por nuestra cuenta. </> : null}Sin tarjeta y sin límite de optómetras, sedes ni usuarios.
+        </p>
+        <ul class="vh-specs" aria-label="Para qué ópticas">
+          <li>Examinan y venden</li>
+          <li>Solo venden</li>
+          <li>Una o varias sedes</li>
+        </ul>
+      </div>
+      <div class="vh-demo">
+        <Visual kind="sofi" />
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · Omnicanal: una persona, todos sus canales, una ficha -->
+  <section class="vs white">
+    <div class="wrap vs-in">
+      <div class="vs-split">
+        <div class="vs-head">
+          <span class="tag">[ Omnicanal ]</span>
+          <h2>Escriba por donde escriba, es la misma Rosa.</h2>
+          <p>Rosa pregunta el precio por Instagram y agenda por WhatsApp. Todo cae en su única ficha, junto a su historia y lo que compró: nadie le vuelve a preguntar lo que ya contó.</p>
+          <a class="lk" href="/omnicanal">Cómo se conectan tus canales →</a>
+        </div>
+        <ul class="vo-chips" aria-label="Canales">
+          {channels.map(([name, color]) => (
+            <li><i style={`background: ${color}`} aria-hidden="true"></i>{name}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Los dos agentes -->
+  <section class="vs" id="agentes">
+    <div class="wrap vs-in">
+      <div class="vs-head wide">
+        <span class="tag">[ Dos agentes ]</span>
+        <h2>Uno en la recepción y otro en la administración.</h2>
+        <p>No conversan por conversar: hacen el trabajo, dentro de lo que tú les permites.</p>
+      </div>
+      <div class="va-grid">
+        {agents.map((agent) => (
+          <article class:list={["va-card", agent.key]}>
+            <span class="va-role">{agent.role}</span>
+            <h3 class="va-name">{agent.name}</h3>
+            <p class="va-text">{agent.text}</p>
+            <a class="lk va-more" href={agent.href}>{agent.more}</a>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · Un día en la Óptica Lucero -->
+  <div id="dia"><ContentBlock block={day} white /></div>
+
+  <!-- 5 · El sistema -->
+  <section class="vs" id="sistema">
+    <div class="wrap vs-in">
+      <div class="vs-head wide">
+        <span class="tag">[ El sistema ]</span>
+        <h2>Lo que una óptica usa todos los días, sin módulos aparte.</h2>
+      </div>
+      <ul class="vsys">
+        {system.map((item) => (
+          <li><a class="vsys-card" href={item.href}><h3>{item.title}</h3><p>{item.text}</p><span aria-hidden="true">→</span></a></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <!-- 6 · Tú decides y la confianza -->
+  <section class="vs white">
+    <div class="wrap vs-in">
+      <div class="vs-head wide">
+        <span class="tag">[ Tú decides ]</span>
+        <h2>Lo que hace cada agente, lo prendes o lo apagas.</h2>
+        <p>Cada interruptor dice qué pasa en los dos casos. Si apagas «Agendar citas», Sofi envía el enlace para que la persona elija la hora. Tu equipo siempre puede tomar una conversación: Sofi espera.</p>
+      </div>
+      <div class="vt">
+        <div class="vt-head">
+          <span class="vt-title"><span class="tag">[ Confianza ]</span><b>Los datos de tus clientes, cuidados.</b></span>
+          <a class="lk" href="/seguridad">Cómo protegemos tus datos →</a>
+        </div>
+        <div class="vt-grid">
+          {trust.map((item) => (
+            <div class="vt-card"><h3>{item.title}</h3><p>{item.text}</p></div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 · Cómo se cobra, en corto -->
+  <section class="vs" id="cobro">
+    <div class="wrap vc-in">
+      <div class="vs-head">
+        <span class="tag">[ Cómo se cobra ]</span>
+        <h2>No pagas por el software. Pagas por el trabajo hecho.</h2>
+        <p>Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un cliente, sí.</p>
+        <a class="lk" href="/precios">Ver precios →</a>
+      </div>
+      <div class="vc-card">
+        {plan && chargeRows.length > 0 ? (
+          <>
+            <ChargeDay client:visible rows={chargeRows} currency={plan.currency} title="Sábado · Óptica Lucero" />
+            <span class="vc-note">Ejemplo. Precios en {currencyWord} más impuestos.{founder ? ` Precio ${plan.name}.` : ""}</span>
+          </>
+        ) : (
+          <p class="vc-empty">Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
+        )}
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · Preguntas -->
+  <div class="vfaq"><Faq items={faq} title="Lo que suelen preguntarnos." /></div>
+
+  <CtaBand title="Tu óptica, atendida de día y de noche.">
+    <Fragment slot="text">
+      {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </> : null}Sin tarjeta y sin límite de optómetras, sedes ni usuarios.
+    </Fragment>
+  </CtaBand>
+</div>
+
+<style>
+  .vh-page { overflow-x: clip; background: var(--paper); }
+  .lk { color: var(--teal); font-weight: 700; text-decoration: none; font-size: 16px; min-height: 44px; display: inline-flex; align-items: center; align-self: flex-start; }
+  .lk:hover { color: var(--teal-hover); text-decoration: underline; }
+  .c-sofi { color: #4fc3d7; }
+  .c-argos { color: #f5c46b; }
+
+  /* 1 · Portada */
+  .vh { padding: 144px 0 96px; }
+  .vh-in { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .vh-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .vh-tag { font-size: 13px; letter-spacing: .12em; }
+  .vh-h1 { font-size: clamp(44px, 4.7vw, 66px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
+  .vh-h1 span { color: var(--sky); }
+  .vh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); max-width: 540px; }
+  .vh-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  .vh-note { font-size: 15px; line-height: 1.5; color: var(--on-night-3); }
+  .vh-specs { list-style: none; margin: 0; padding: 6px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .vh-specs li { font-size: 13px; color: var(--on-night-2); border: 1px solid rgba(255, 255, 255, .14); border-radius: 999px; padding: 6px 12px; }
+  .vh-demo { flex: 1 1 380px; min-width: 0; padding-bottom: 36px; }
+
+  /* Secciones claras */
+  .vs { padding: 88px 0; background: var(--bg); }
+  .vs.white { background: var(--paper); }
+  .vs-in { display: flex; flex-direction: column; gap: 44px; }
+  .vs-head { display: flex; flex-direction: column; gap: 16px; max-width: 660px; }
+  .vs-head.wide { max-width: 820px; }
+  .vs-head .tag { font-size: 13px; letter-spacing: .12em; }
+  .vs-head h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .vs-head p { font-size: 18px; line-height: 1.55; color: var(--muted); }
+
+  /* 2 · Omnicanal */
+  .vs-split { display: flex; flex-wrap: wrap; gap: 24px 64px; align-items: flex-end; justify-content: space-between; }
+  .vs-split .vs-head { flex: 1 1 520px; }
+  .vo-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-width: 400px; flex: 0 1 400px; }
+  .vo-chips li { display: inline-flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 600; }
+  .vo-chips i { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* 3 · Agentes */
+  .va-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 18px; }
+  .va-card { background: var(--paper); border: 1px solid var(--line); border-top: 4px solid var(--ac-line); border-radius: 26px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
+  .va-card.sofi { --ac: #0e7490; --ac-line: #0e7490; }
+  .va-card.argos { --ac: #9a6a12; --ac-line: #c98a1c; }
+  .va-role { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ac); }
+  .va-name { font-size: 60px; line-height: .9; letter-spacing: -.055em; font-weight: 800; color: var(--ac); }
+  .va-text { font-size: 17px; line-height: 1.5; color: var(--ink-2); }
+  .va-more { color: var(--ac); }
+  .va-more:hover { color: var(--ac); }
+
+  /* 5 · El sistema */
+  .vsys { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 14px; }
+  .vsys-card { position: relative; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 22px 48px 22px 22px; border-radius: 20px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); text-decoration: none; transition: box-shadow .2s ease, transform .2s ease; }
+  .vsys-card:hover { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--teal); transform: translateY(-1px); }
+  .vsys-card h3 { font-size: 18px; }
+  .vsys-card p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .vsys-card span { position: absolute; right: 18px; top: 22px; color: var(--teal); font-size: 18px; }
+
+  /* 6 · Confianza */
+  .vt { display: flex; flex-direction: column; gap: 20px; padding-top: 24px; border-top: 1px solid var(--line); }
+  .vt-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .vt-title { display: flex; flex-direction: column; gap: 8px; }
+  .vt-title .tag { font-size: 13px; letter-spacing: .12em; }
+  .vt-title b { font-size: 26px; letter-spacing: -.025em; line-height: 1.2; }
+  .vt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 16px; }
+  .vt-card { background: var(--bg); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 10px; box-shadow: inset 3px 0 0 var(--teal); }
+  .vt-card h3 { font-size: 19px; }
+  .vt-card p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+  /* 7 · Cobro */
+  .vc-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .vc-in > .vs-head { flex: 1 1 420px; min-width: 0; }
+  .vc-card { flex: 1 1 540px; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 24px; padding: 26px 28px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 20px 50px rgba(10, 38, 21, .08); }
+  .vc-note { font-size: 12px; color: var(--soft); }
+  .vc-empty { font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .vc-empty a { font-weight: 700; }
+  .vfaq { background: var(--paper); }
+
+  @media (max-width: 720px) {
+    .vh { padding: 104px 0 56px; }
+    .vh-in { gap: 26px; }
+    .vh-copy { gap: 18px; flex-basis: 100%; }
+    .vh-tag { font-size: 12px; }
+    .vh-h1 { font-size: 42px; }
+    .vh-lead { font-size: 17px; line-height: 1.5; }
+    .vh-ctas { flex-direction: column; gap: 10px; }
+    .vh-ctas .btn { width: 100%; }
+    .vh-note { font-size: 14px; text-align: center; }
+    .vh-specs { display: none; }
+    .vh-demo { flex-basis: 100%; }
+    .vs { padding: 64px 0; }
+    .vs-in { gap: 22px; }
+    .vs-head h2 { font-size: 32px; line-height: 1.05; }
+    .vs-head p { font-size: 16px; }
+    .vo-chips { flex-basis: 100%; gap: 6px; }
+    .vo-chips li { padding: 6px 11px; font-size: 13px; }
+    .va-card { padding: 20px; border-radius: 22px; gap: 12px; }
+    .va-name { font-size: 46px; }
+    .va-text { font-size: 16px; }
+    .vt-title b { font-size: 22px; }
+    .vc-in { gap: 22px; }
+    .vc-card { flex-basis: 100%; padding: 16px 18px; border-radius: 20px; }
+  }
+</style>

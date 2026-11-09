@@ -116,7 +116,7 @@ beforeAll(async () => {
     webhookBaseUrl: "https://api.example.com",
     trustedOrigins: [],
     cookieDomain: "odentia.localhost",
-    productDomains: { medical: "latidia.localhost" },
+    productDomains: { medical: "latidia.localhost", optical: "vistia.localhost" },
     webURL: "https://app.odentia.localhost",
     adminURL: "https://admin.odentia.localhost",
     mailer: {

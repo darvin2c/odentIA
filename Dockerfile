@@ -17,6 +17,7 @@ COPY apps/panel/package.json apps/panel/
 COPY apps/admin/package.json apps/admin/
 COPY apps/dental-clinic/package.json apps/dental-clinic/
 COPY apps/medical-clinic/package.json apps/medical-clinic/
+COPY apps/optical-clinic/package.json apps/optical-clinic/
 COPY apps/web/package.json apps/web/
 COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
@@ -28,6 +29,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/dental/package.json packages/dental/
 COPY packages/mail/package.json packages/mail/
 COPY packages/medical/package.json packages/medical/
+COPY packages/optical/package.json packages/optical/
 COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/
 COPY packages/ui-patterns/package.json packages/ui-patterns/

@@ -135,6 +135,9 @@ export function routeOutcome(route: AgentRoute): Record<string, unknown> {
 // `recordar_tema`: con un tema abierto, la persona puede preguntar por él en cualquier camino (ADR 0050).
 // El nombre que dice la persona se guarda en cualquier camino (objetivo de Sofi, ADR 0097).
 const ALWAYS = ["send_reply", "request_human_handoff", "recordar_tema", "update_contact"] as const
+/** Los caminos donde se pregunta por un pedido: información, citas y el caso derivado. */
+const ORDER_PATHS: ReadonlySet<RoutePath> = new Set<RoutePath>(["informacion", "cita", "cambio_cita", "derivar"])
+
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   // Con el caso ya en el equipo, lo que deja decir algo concreto: su cita y cómo comunicarse con la sede.
@@ -174,8 +177,10 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
 export function routeToolsFor(path: RoutePath, available: ReadonlySet<string>): readonly string[] | undefined {
   const base = ROUTE_TOOLS[path]
   if (!base) return undefined
-  if (path === "informacion" && !available.has("ver_presupuesto") && available.has("create_task")) return [...base, "create_task"]
-  return base
+  // «¿Ya están mis lentes?»: donde la clínica trabaja con pedidos, el turno los tiene (ADR 0172).
+  const orders = available.has("ver_pedidos") && ORDER_PATHS.has(path) ? ["ver_pedidos"] : []
+  if (path === "informacion" && !available.has("ver_presupuesto") && available.has("create_task")) return [...base, "create_task", ...orders]
+  return orders.length ? [...base, ...orders] : base
 }
 
 /** Con esta herramienta el modelo que escribe pide el resto cuando el camino no alcanza. */

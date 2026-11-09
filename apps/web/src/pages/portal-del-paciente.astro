@@ -1,7 +1,10 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.enlace); latidIA tiene su propia página (PortalPage).
+// Contenido en src/lib/pages-data.ts (PAGES.enlace); latidIA tiene su propia página (PortalPage). vistIA no
+// la sirve: la suya es /portal-del-cliente (en una óptica se atiende a clientes).
 import PortalPage from "../components/latidia/portal/PortalPage.astro"
 import DentalPortalPage from "../components/portal/PortalPage.astro"
-import { MEDICAL } from "../lib/product"
+import { ofProduct } from "../lib/product"
+
+const Page = ofProduct({ dental: DentalPortalPage, medical: PortalPage, optical: null })
 ---
-{MEDICAL ? <PortalPage /> : <DentalPortalPage />}
+{Page ? <Page /> : null}

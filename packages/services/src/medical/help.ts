@@ -26,6 +26,21 @@ type Faq = HelpFaq
 
 /** Lo que en un consultorio es otra cosa, por tema: sus palabras de búsqueda y sus preguntas. */
 const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
+  // Lo que un consultorio encarga al laboratorio y sus insumos (`expenseHints` de sus palabras).
+  finanzas: (topic) => ({
+    ...topic,
+    faqs: (topic.faqs ?? []).map((faq) =>
+      faq.q === "¿En qué tipo va cada gasto?"
+        ? {
+            ...faq,
+            a: faq.a.replace(
+              "«Laboratorio», coronas, prótesis y trabajos de laboratorio; «Materiales», insumos como algodón, guantes o resinas;",
+              "«Laboratorio», análisis y estudios que se encargan a un laboratorio; «Materiales», insumos como algodón, guantes o jeringas;",
+            ),
+          }
+        : faq,
+    ),
+  }),
   pacientes: (topic) => ({
     ...topic,
     terms: [

@@ -305,7 +305,7 @@ function ComplaintsPage() {
     <PageShell className="space-y-5">
       <PageHeader
         title="Libro de Reclamaciones"
-        subtitle="Las hojas que llegan desde las webs de odentIA y latidIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
+        subtitle="Las hojas que llegan desde las webs de odentIA, latidIA y vistIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
       />
       {list.isPending ? (
         <ComplaintsKpisSkeleton />

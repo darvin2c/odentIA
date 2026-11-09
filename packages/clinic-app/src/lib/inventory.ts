@@ -57,9 +57,20 @@ export interface ProductListItem extends ProductUnits, SedeStatus {
   /** La unidad de antes no se entendió: queda «Por revisar». */
   unitReview: boolean
   isActive: boolean
+  /** Lo que dice la etiqueta, todo opcional (el código de barras va sin espacios). */
+  barcode: string | null
+  brand: string | null
+  model: string | null
+  color: string | null
+  size: string | null
   /** Solo con precios. */
   salePriceCents?: number | null
   saleCurrency?: string | null
+}
+
+/** Lo de la etiqueta en una línea: «Ray-Ban · RB2140 · Negro · 50□22 140»; vacío si no dice nada. */
+export function productLabelLine(item: Partial<Pick<ProductListItem, "brand" | "model" | "color" | "size">>): string {
+  return [item.brand, item.model, item.color, item.size].filter((part): part is string => Boolean(part?.trim())).join(" · ")
 }
 
 export interface ProductList {
@@ -425,6 +436,12 @@ export interface ProductInputBody {
   purchaseFactor?: number
   minimums?: Array<{ branchId: string; minQuantity: number }>
   salePriceCents?: number | null
+  /** Vacío lo borra. */
+  barcode?: string | null
+  brand?: string | null
+  model?: string | null
+  color?: string | null
+  size?: string | null
 }
 
 /** `idempotencyKey`: la clave del formulario abierto; reintentar el alta no repite el producto. */

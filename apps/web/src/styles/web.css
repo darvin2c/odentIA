@@ -433,3 +433,28 @@ details.q p {
 :root[data-brand="latidia"] .hero {
   background: radial-gradient(1200px 700px at 72% 42%, #3a1d6e 0%, var(--night) 48%, var(--night-2) 100%);
 }
+
+/* vistIA (las ópticas): la misma web con su verde. Sobre claro, el verde #147c3b con texto blanco
+   (5,3:1), que también se lee como texto sobre el gris de las secciones; sobre la noche verde, el
+   verde claro #4ade80 con texto #06170d (más de 10:1). */
+:root[data-brand="vistia"] {
+  --teal: #147c3b;
+  --teal-hover: #0e5c2b;
+  --teal-soft: #e3f4e8;
+  --night: #0a2615;
+  --night-2: #06170d;
+  --on-night-2: #c3dccb;
+  --on-night-3: #9ebfa8;
+  --sky: #4ade80;
+  --sky-2: #86efac;
+}
+:root[data-brand="vistia"] .btn-p,
+:root[data-brand="vistia"] .btn-p:hover {
+  color: #06170d;
+}
+:root[data-brand="vistia"] .btn-p:hover {
+  background: #86efac;
+}
+:root[data-brand="vistia"] .hero {
+  background: radial-gradient(1200px 700px at 72% 42%, #0f3d24 0%, var(--night) 48%, var(--night-2) 100%);
+}

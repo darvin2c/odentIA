@@ -1,9 +1,9 @@
 ---
 // Documento de cada página: título y descripción propios, datos estructurados, cabecera y pie.
-import latidiaFavicon from "../../../../assets/brand/latidia/favicon.svg?url"
 import Footer from "../components/Footer.astro"
 import Header from "../components/Header.astro"
-import { MEDICAL, WORDS } from "../lib/product"
+import { ICON } from "../lib/logos"
+import { BRAND, WORDS } from "../lib/product"
 import "../styles/web.css"
 
 interface Props {
@@ -29,12 +29,12 @@ const org = {
   "@type": "Organization",
   name: WORDS.name,
   url: Astro.site?.toString(),
-  logo: new URL(MEDICAL ? latidiaFavicon : "/favicon.svg", Astro.site).toString(),
+  logo: new URL(ICON.svg, Astro.site).toString(),
 }
 const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
 ---
 <!doctype html>
-<html lang="es" data-brand={MEDICAL ? "latidia" : undefined}>
+<html lang="es" data-brand={BRAND}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -48,14 +48,8 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <meta name="theme-color" content={WORDS.themeColor} />
-    {MEDICAL ? (
-      <link rel="icon" href={latidiaFavicon} type="image/svg+xml" />
-    ) : (
-      <>
-        <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64" />
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-      </>
-    )}
+    {ICON.ico ? <link rel="icon" href={ICON.ico} sizes="16x16 32x32 48x48 64x64" /> : null}
+    <link rel="icon" href={ICON.svg} type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
     {ld.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
   </head>
