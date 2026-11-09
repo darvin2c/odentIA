@@ -570,6 +570,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         expectedPaidCents: z.number().int().min(0).optional(),
         // La clave del cajón: el reintento tras un corte devuelve el mismo pago (ADR 0018).
         requestId: z.uuid().optional(),
+        // Con qué se pagó (ADR 0167): manda sobre `fromCash`.
+        paymentMethodId: z.uuid().nullish(),
+        paymentReference: z.string().max(60).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))

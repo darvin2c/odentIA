@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { readExpenseMoney } from "../../lib/expense-exchange"
+import { CASH_TYPE_CODE, fetchPaymentMethods } from "../../lib/finance-collect"
 import { currencyChoices } from "../../lib/product-words"
 import {
   cashFormMessage,
@@ -36,6 +37,7 @@ import type { PurchaseOrderDetail } from "../../lib/inventory"
 import { useOrgProfile, useTodayRate } from "../../lib/org"
 import { purchaseOrderLabel } from "../../lib/reports"
 import { ChoiceButtons } from "../choice-buttons"
+import { PaymentMethodButtons } from "../finance/collect-drawer"
 import { ExpenseMoneyFields } from "../finance/expense-money-fields"
 import { MoneyInput } from "./fields"
 
@@ -45,7 +47,8 @@ interface PaymentValues {
   tender: string
   rate: string
   useCredit: boolean
-  fromCash: boolean
+  /** Con qué se pagó: un medio de la clínica, como en un gasto (ADR 0167). */
+  method: string
   day: string
   receiptKind: string
   receiptNumber: string
@@ -66,6 +69,8 @@ const SERVER_FIELDS: Record<string, string> = {
   spentAt: "day",
   tenderCents: "tender",
   exchangeRate: "rate",
+  paymentMethodId: "method",
+  fromCash: "method",
 }
 
 /** La compra cambió mientras se escribía (otro pago): se vuelve a leer antes de reintentar. */
@@ -131,6 +136,8 @@ export function PurchasePaymentDrawer({
     seen.current = { due, paid }
   }, [due, paid])
 
+  const methods = useQuery({ queryKey: ["org-payment-methods"], queryFn: fetchPaymentMethods, enabled: open })
+  const methodOf = (id: string) => (methods.data?.data ?? []).find((item) => item.id === id) ?? null
   const creditOf = (useCredit: boolean) => (useCredit ? Math.min(credit, Math.max(0, suggested)) : 0)
   const centsOf = (amount: string) => (amount.trim() === "" ? 0 : parseAmount(amount, order.currency, locale))
   const moneyOf = (value: PaymentValues) =>
@@ -163,22 +170,24 @@ export function PurchasePaymentDrawer({
             path: ["amount"],
             message: "Escribe un importe mayor que cero.",
           })
+        else if (cents > 0 && !value.method)
+          ctx.addIssue({ code: "custom", path: ["method"], message: "Elige con qué se pagó." })
         else if (
-          value.fromCash &&
+          methodOf(value.method)?.typeCode === CASH_TYPE_CODE &&
           state &&
           paid.outCents !== null &&
           paid.outCents > state.cashOnHandCents
         )
           ctx.addIssue({
             code: "custom",
-            path: ["fromCash"],
-            message: `En la caja solo hay ${second ? formatMoney(state.cashOnHandCents, payIn, locale) : money(state.cashOnHandCents)}: no alcanza para pagar con el efectivo.`,
+            path: ["method"],
+            message: `En la caja solo hay ${second ? formatMoney(state.cashOnHandCents, payIn, locale) : money(state.cashOnHandCents)}: no alcanza para pagar con el efectivo. Elige otro medio o ingresa lo que falta en Finanzas › Caja.`,
           })
         if (value.day > today) ctx.addIssue({ code: "custom", path: ["day"], message: "La fecha del pago no puede ser futura." })
         if (value.receiptKind.trim().length > 60) ctx.addIssue({ code: "custom", path: ["receiptKind"], message: "Escribe como mucho 60 caracteres." })
         if (value.receiptNumber.trim().length > 60) ctx.addIssue({ code: "custom", path: ["receiptNumber"], message: "Escribe como mucho 60 caracteres." })
       }),
-    [state, today, credit, suggested, order.currency, locale, payIn, business],
+    [state, today, credit, suggested, order.currency, locale, payIn, business, methods.data],
   )
 
   const mutation = useMutation({
@@ -188,7 +197,8 @@ export function PurchasePaymentDrawer({
         amountCents: centsOf(value.amount) ?? 0,
         ...moneyOf(value).body,
         ...(creditCents > 0 ? { creditCents } : {}),
-        fromCash: value.fromCash,
+        fromCash: methodOf(value.method)?.typeCode === CASH_TYPE_CODE,
+        ...(value.method ? { paymentMethodId: value.method } : {}),
         ...(value.day === today ? {} : { spentAt: noonOf(value.day, timeZone) }),
         ...(value.receiptKind.trim() ? { receiptKind: value.receiptKind.trim() } : {}),
         ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
@@ -204,7 +214,7 @@ export function PurchasePaymentDrawer({
     tender: "",
     rate: todayRate,
     useCredit: false,
-    fromCash: false,
+    method: "",
     day: todayIn(timeZone),
     receiptKind: "",
     receiptNumber: "",
@@ -387,17 +397,28 @@ export function PurchasePaymentDrawer({
             </field.Control>
           )}
         </form.AppField>
-        <form.AppField name="fromCash">
+        <form.AppField name="method">
           {(field) => (
-            <field.CheckboxField
-              id={`${uid}-caja`}
-              label="Sale del efectivo de la caja"
+            <field.Group
+              legend="¿Con qué se pagó?"
               description={
-                second && field.state.value
-                  ? `Se descuenta de la caja de ${currencyWord(figures.payIn, locale)}.`
-                  : "Si no, es transferencia u otro medio."
+                methodOf(field.state.value)?.typeCode === CASH_TYPE_CODE
+                  ? `Sale de la caja${second ? ` de ${currencyWord(figures.payIn, locale)}` : ""} de ${balance?.branchName ?? "la sede"}.`
+                  : "Solo el efectivo sale de la caja."
               }
-            />
+            >
+              {(control) => (
+                <PaymentMethodButtons
+                  id={control.id}
+                  methods={methods.data?.data ?? []}
+                  value={field.state.value}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
           )}
         </form.AppField>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">

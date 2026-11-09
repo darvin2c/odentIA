@@ -1,69 +1,59 @@
 /**
- * «Registrar gasto»: el formulario corto de Finanzas › Gastos, también desde
- * Reportes («Copiar el de agosto» llega con lo del mes anterior ya escrito).
+ * «Registrar gasto» (ADR 0167; QA de Gastos del 8 nov, UX 1 a 3): un gasto ya pagado, y nada más.
+ * Pregunta en qué, cuánto, de qué tipo, con qué se pagó y su comprobante; la caja va en una línea.
+ * Lo que se repite se anota en su sección, no aquí.
  *
- * Con el tipo Materiales pregunta «¿Es el pago de una compra de Inventario?»
- * si hay compras por pagar o sin llegar: elegir una registra el pago de esa
- * compra (`/api/finance/purchases/:id/payments`, la misma operación que desde
- * Inventario; ADR 0061) y así no se cuenta dos veces.
+ * El mismo cajón sirve para tres cosas (`mode`): registrar uno nuevo, corregir uno (anula el
+ * original con lo que cambió y registra este, en una operación) y pagar lo que toca de lo que se
+ * repite (el importe de siempre, editable, y el medio de siempre).
  *
- * Con otra moneda en la clínica, un gasto suelto lleva su moneda y su cambio, y
- * pagar una compra deja elegir con qué se paga. Sin ella no aparece nada de esto.
+ * Con el tipo Materiales pregunta si es el pago de una compra de Inventario: elegirla registra el
+ * pago de esa compra (`/api/finance/purchases/:id/payments`, la misma operación que desde
+ * Inventario; ADR 0061) y así no se cuenta dos veces. Con otra moneda en la clínica, un gasto suelto
+ * lleva su moneda y su cambio, y pagar una compra deja elegir con qué se paga.
  */
-import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
-import {
-  Button,
-  Checkbox,
-  cn,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  Input,
-  RadioGroup,
-  RadioGroupItem,
-  toast,
-} from "@odentia/ui"
-import {
-  DatePickerButton,
-  FormChoiceField,
-  FormDrawer,
-  useAppForm,
-  useFieldContext,
-  useFieldControl,
-  useFormSurface,
-} from "@odentia/ui-patterns"
+import { currencyWord, expenseReceiptTypes, formatMoney, formatMoneyInput, NO_RECEIPT_TYPE, suggestedReceiptType } from "@odentia/clinical"
+import { Button, cn, FieldDescription, FieldError, FieldLabel, Input, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
+import { DatePickerButton, FormDrawer, useAppForm, useFieldContext, useFieldControl, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { usePermission } from "../../lib/crm"
 import { readExpenseMoney } from "../../lib/expense-exchange"
-import { currencyChoices } from "../../lib/product-words"
-import { orgTaxesOf, useOrgProfile, useTodayRate } from "../../lib/org"
-import { ChoiceButtons } from "../choice-buttons"
 import {
   cashFormMessage,
+  correctExpenseApi,
   createExpenseApi,
+  dayKeyOf,
   errorCode,
   EXPENSE_CATEGORIES,
+  EXPENSE_CATEGORY_HINTS,
   type ExpenseCategory,
+  expenseCategoryLabel,
+  type ExpenseRow,
+  fetchExpenseSuppliers,
   fetchPurchasesToPay,
-  fetchRecurringPeople,
   financeKeys,
   formatDayKey,
   invalidateFinance,
+  NO_RECEIPT,
   noonOf,
   parseAmount,
   payPurchaseApi,
+  payRecurringApi,
+  type RecurringDue,
   todayIn,
   useCashState,
+  voidExpenseApi,
 } from "../../lib/finance-cash"
+import { CASH_TYPE_CODE, fetchPaymentMethods } from "../../lib/finance-collect"
+import { orgTaxesOf, useOrgProfile, useTodayRate } from "../../lib/org"
+import { currencyChoices } from "../../lib/product-words"
 import { type PurchaseBalance, purchaseOrderLabel } from "../../lib/reports"
+import { ChoiceButtons } from "../choice-buttons"
 import { MoneyInput } from "../inventory/fields"
 import { CashMoveDrawer, ChoiceChips } from "./cash-close-drawer"
+import { PaymentMethodButtons } from "./collect-drawer"
 import { ExpenseMoneyFields } from "./expense-money-fields"
 
 /** Dónde se registra el gasto: la sede y el formato de la clínica. */
@@ -85,9 +75,21 @@ export interface ExpenseDraft {
   day?: string
 }
 
-const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.map((value) => ({ value, label: value }))
+/** Qué hace el cajón: registrar uno nuevo, corregir uno o pagar lo que toca de lo que se repite. */
+export type ExpenseDrawerMode =
+  | { kind: "nuevo" }
+  | { kind: "corregir"; expense: ExpenseRow }
+  | { kind: "pagar"; due: RecurringDue }
+
+const NEW: ExpenseDrawerMode = { kind: "nuevo" }
+
+const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.map((value) => ({ value, label: expenseCategoryLabel(value) }))
 /** «No, es otro gasto de materiales». */
 const OTHER = "otro"
+
+const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
+
+const monthWord = (key: string) => MONTH_NAMES[Number(key.slice(5, 7)) - 1] ?? key
 
 interface ExpenseValues {
   category: ExpenseCategory | ""
@@ -103,61 +105,20 @@ interface ExpenseValues {
   /** Lo que salió, si se paga en la otra. */
   tender: string
   rate: string
-  fromCash: boolean
-  receiptKind: string
+  /** Con qué se pagó: un medio de la clínica (el mismo de Cobrar). */
+  method: string
+  /** El n.º de operación de lo que no es efectivo. */
+  reference: string
+  /** El tipo de comprobante del país, o «sin». */
+  receiptType: string
   receiptNumber: string
+  /** A quién se pagó: un proveedor de la lista o uno escrito. */
+  supplier: string
+  supplierTaxId: string
   spentDay: string
-  /** «Se repite»: queda anotado y aparece «por pagar» cada vez que toca. */
-  repeats: boolean
-  every: "1" | "6" | "12"
-  /** Día del mes en que se paga (1–31). */
-  repeatDay: string
-  /** El mes que paga (`YYYY-MM`): este o el anterior (el sueldo de octubre pagado en noviembre). */
-  repeatMonth: string
-  /** «¿Ya se pagó?»: con «no» se anota sin registrar ningún gasto y queda por pagar. */
-  paidNow: "si" | "no"
-  /** Se paga en ese mes o al mes siguiente (el sueldo de noviembre, el 2 de diciembre). */
-  dueNext: "mismo" | "siguiente"
-  /** De quién es un sueldo (solo con el tipo «Personal»). */
-  member: string
 }
 
-const EVERY_CHOICES = [
-  { value: "1", label: "Cada mes" },
-  { value: "6", label: "Cada 6 meses" },
-  { value: "12", label: "Cada año" },
-]
-
-const PAID_CHOICES = [
-  { value: "si", label: "Sí, ahora" },
-  { value: "no", label: "Todavía no" },
-]
-
-const DUE_CHOICES = [
-  { value: "mismo", label: "En ese mes" },
-  { value: "siguiente", label: "Al mes siguiente" },
-]
-
-/** Se anota sin pagar: no hay gasto, ni caja, ni fecha. */
-function annotatesOnly(value: Pick<ExpenseValues, "repeats" | "paidNow">): boolean {
-  return value.repeats && value.paidNow === "no"
-}
-
-const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
-
-/** Este mes y el anterior (`YYYY-MM`), los dos que puede pagar un gasto que empieza a repetirse. */
-function payableMonths(today: string): Array<{ value: string; label: string }> {
-  const year = Number(today.slice(0, 4))
-  const month = Number(today.slice(5, 7))
-  const prev = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
-  const key = (value: { year: number; month: number }) => `${value.year}-${String(value.month).padStart(2, "0")}`
-  return [
-    { value: key({ year, month }), label: MONTH_NAMES[month - 1] ?? "" },
-    { value: key(prev), label: MONTH_NAMES[prev.month - 1] ?? "" },
-  ]
-}
-
-/** «¿Es el pago de una compra de Inventario?»: el grupo con su error debajo. */
+/** «¿Es el pago de una compra de Inventario?»: «No» primero, las de esta sede por pagar, y las demás a pedido. */
 function PurchaseChoice({
   orders,
   branchId,
@@ -172,9 +133,14 @@ function PurchaseChoice({
   const field = useFieldContext<string>()
   const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: true })
   const legendId = `${control.id}-leyenda`
+  // Primero lo que se debe en esta sede (QA de Gastos, G24); lo demás, a pedido.
+  const here = orders.filter((order) => order.branchId === branchId && order.dueCents > 0)
+  const rest = orders.filter((order) => !here.includes(order))
+  const [all, setAll] = useState(here.length === 0 || rest.some((order) => order.orderId === field.state.value))
+  const shown = all ? [...here, ...rest] : here
   return (
     <fieldset data-invalid={control.invalid || undefined} className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3.5">
-      <legend id={legendId} className={cn("px-1 font-bold", control.invalid && "text-destructive")}>
+      <legend id={legendId} className="px-1 font-semibold">
         ¿Es el pago de una compra de Inventario?
       </legend>
       <RadioGroup
@@ -189,19 +155,21 @@ function PurchaseChoice({
         }}
         className="flex flex-col gap-1"
       >
-        {orders.map((order) => (
+        <FieldLabel className="flex min-h-11 cursor-pointer items-center gap-2.5 font-semibold">
+          <RadioGroupItem value={OTHER} />
+          No, es otro gasto
+        </FieldLabel>
+        {shown.map((order) => (
           <FieldLabel key={order.orderId} className="flex min-h-11 cursor-pointer items-center gap-2.5 font-normal">
             <RadioGroupItem value={order.orderId} />
             <span className="min-w-0 flex-1">
-              {purchaseOrderLabel(order.orderNumber)} · {order.supplierName}
-              {order.branchId !== branchId ? <span className="text-muted-foreground"> · {order.branchName}</span> : null}
+              Compra a {order.supplierName}{" "}
+              <span className="text-muted-foreground">
+                · {purchaseOrderLabel(order.orderNumber)}
+                {order.branchId !== branchId ? ` · ${order.branchName}` : ""}
+              </span>
             </span>
-            <span
-              className={cn(
-                "shrink-0 text-sm font-semibold",
-                order.dueCents > 0 ? "text-warning" : "text-muted-foreground",
-              )}
-            >
+            <span className={cn("shrink-0 text-sm font-semibold", order.dueCents > 0 ? "text-warning" : "text-muted-foreground")}>
               {order.dueCents > 0
                 ? `por pagar ${money(order.dueCents, order.currency)}`
                 : order.receivedCents === 0
@@ -210,13 +178,14 @@ function PurchaseChoice({
             </span>
           </FieldLabel>
         ))}
-        <FieldLabel className="flex min-h-11 cursor-pointer items-center gap-2.5 font-semibold">
-          <RadioGroupItem value={OTHER} />
-          No, es otro gasto de materiales
-        </FieldLabel>
       </RadioGroup>
+      {!all && rest.length > 0 ? (
+        <Button type="button" variant="link" className="h-auto self-start p-0" onClick={() => setAll(true)}>
+          Ver las demás compras ({rest.length})
+        </Button>
+      ) : null}
       <p id={descriptionId} className="text-sm text-muted-foreground">
-        Si eliges una compra, el monto y la sede se llenan solos y la compra queda al día en Inventario. Así no se cuenta dos veces.
+        Si es una compra, el monto se llena solo y la compra queda al día en Inventario: así no se cuenta dos veces.
       </p>
       {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
     </fieldset>
@@ -228,11 +197,13 @@ export function ExpenseFormDrawer({
   open,
   onClose,
   initial,
+  mode = NEW,
 }: {
   place: ExpensePlace
   open: boolean
   onClose: () => void
   initial?: ExpenseDraft | null
+  mode?: ExpenseDrawerMode
 }) {
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
@@ -243,17 +214,26 @@ export function ExpenseFormDrawer({
   const { second, todayRate } = useTodayRate(locale)
   const today = todayIn(orgTimeZone)
   const salesTaxHelpId = useId()
-  const salesTaxName = orgTaxesOf(useOrgProfile().data)?.name ?? null
+  const profile = useOrgProfile().data
+  const salesTaxName = orgTaxesOf(profile)?.name ?? null
+  const country = profile?.countryCode ?? "PE"
+  const receiptTypes = expenseReceiptTypes(country)
   // Lo que se vio de la compra al elegirla: si cambia mientras tanto, el servidor lo dice.
   const [seen, setSeen] = useState<{ due: number; paid: number } | null>(null)
-  const [moreOpen, setMoreOpen] = useState(false)
   // «Ingresar lo que falta»: el cajón del efectivo se apila encima, sin tocar el gasto.
   const [cashOpen, setCashOpen] = useState(false)
-  const canMoveCash = canWrite
   const currencies = second ? [place.currency, second.currency] : []
   // Una clave por cajón abierto (ADR 0018): si se corta la red y se vuelve a guardar, el servidor
-  // devuelve el mismo gasto en vez de registrar otro y sacar el efectivo dos veces (G2).
+  // devuelve el mismo gasto en vez de registrar otro y sacar el efectivo dos veces.
   const requestId = useRef<string>(crypto.randomUUID())
+  // El comprobante se propone por el tipo hasta que la persona lo elige.
+  const receiptTouched = useRef(false)
+  const paying = mode.kind === "pagar" ? mode.due : null
+  const correcting = mode.kind === "corregir" ? mode.expense : null
+
+  const methods = useQuery({ queryKey: ["org-payment-methods"], queryFn: fetchPaymentMethods, enabled: open })
+  const allMethods = methods.data?.data ?? []
+  const cashMethod = allMethods.find((method) => method.typeCode === CASH_TYPE_CODE) ?? null
 
   const form = useAppForm({
     defaultValues: {
@@ -267,54 +247,69 @@ export function ExpenseFormDrawer({
       payIn: place.currency,
       tender: "",
       rate: todayRate,
-      fromCash: true,
-      receiptKind: "",
+      method: "",
+      reference: "",
+      receiptType: "",
       receiptNumber: "",
+      supplier: "",
+      supplierTaxId: "",
       spentDay: today,
-      repeats: false,
-      every: "1",
-      repeatDay: String(Number(today.slice(8, 10))),
-      repeatMonth: today.slice(0, 7),
-      paidNow: "si",
-      dueNext: "mismo",
-      member: "",
     } as ExpenseValues,
     validators: {
       onSubmit: ({ value }) => {
         const { chosen, asksSalesTax, cents, after, paid } = derive(value)
         const fields: Record<string, string> = {}
-        if (value.category === "") fields.category = "Elige el tipo de gasto."
-        // Con compras por pagar en esta sede, que sea o no una de ellas lo dice la persona: si ya
-        // venía respondido «No», la misma compra se pagaba otra vez en Inventario (G4).
-        if (value.category === "Materiales" && value.purchase === "" && orders.some((order) => order.branchId === branchId && order.dueCents > 0))
-          fields.purchase = "Elige si es el pago de una de estas compras o de otro gasto."
+        if (!paying && value.category === "") fields.category = "Elige el tipo de gasto."
         if (asksSalesTax && value.salesTax === null) fields.salesTax = "Elige qué impuesto pagas."
-        if (!chosen && !value.concept.trim()) fields.concept = "Escribe en qué se gastó."
+        // Con compras por pagar en esta sede, que sea o no una de ellas lo dice la persona (G4).
+        if (
+          !paying &&
+          !correcting &&
+          value.category === "Materiales" &&
+          value.purchase === "" &&
+          orders.some((order) => order.branchId === branchId && order.dueCents > 0)
+        )
+          fields.purchase = "Elige si es el pago de una de estas compras o de otro gasto."
+        if (!paying && !chosen && !value.concept.trim()) fields.concept = "Escribe en qué se gastó."
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
-        else if (after !== null && after < 0 && state && !annotatesOnly(value))
-          // El freno se queda (el efectivo nunca queda negativo), pero dice qué
-          // hacer: quitar la casilla dejaría «fuera de la caja» lo que salió de ella.
-          fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagarlo todo con el efectivo. Si el dinero está en el cajón, ingrésalo a la caja con el botón de abajo. Si una parte se pagó por otro medio, anótala como otro gasto.`
+        if (!value.method) fields.method = "Elige con qué se pagó."
+        else if (after !== null && after < 0)
+          // Una sola salida por cada camino: ingresar lo que falta o decir que se pagó de otra forma.
+          fields.method = "No alcanza el efectivo de la caja: ingresa lo que falta o elige con qué se pagó."
         if (paid.tenderError) fields.tender = paid.tenderError
         if (paid.rateError) fields.rate = paid.rateError
-        if (value.spentDay > today && !annotatesOnly(value)) fields.spentDay = "La fecha del gasto no puede ser futura."
-        if (value.repeats && !chosen) {
-          const day = Number(value.repeatDay)
-          if (!Number.isInteger(day) || day < 1 || day > 31) fields.repeatDay = "Escribe un día del 1 al 31."
-        }
+        if (value.spentDay > today) fields.spentDay = "La fecha del gasto no puede ser futura."
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
     onSubmit: async ({ value }) => {
-      const { chosen, asksSalesTax, cents, currency, paid } = derive(value)
-      if (cents === null || value.category === "") return
+      const { chosen, asksSalesTax, cents, currency, paid, method } = derive(value)
+      if (cents === null || !method) return
       // Hoy lleva la hora real; otro día, su mediodía en la zona de la clínica.
-      const unpaid = annotatesOnly(value)
-      const spentAt = value.spentDay === today || unpaid ? {} : { spentAt: noonOf(value.spentDay, orgTimeZone) }
-      const receipt = {
-        ...(value.receiptKind.trim() ? { receiptKind: value.receiptKind.trim() } : {}),
-        ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
+      const spentAt = value.spentDay === today ? {} : { spentAt: noonOf(value.spentDay, orgTimeZone) }
+      const type = value.receiptType ? receiptTypes.find((item) => item.code === value.receiptType) : null
+      const supplier = (suppliers.data?.data ?? []).find(
+        (item) => item.name.toLocaleLowerCase(locale) === value.supplier.trim().toLocaleLowerCase(locale),
+      )
+      const asksSupplier = showsSupplier(value)
+      const paper = {
+        paymentMethodId: method.id,
+        ...(method.typeCode !== CASH_TYPE_CODE && value.reference.trim() ? { paymentReference: value.reference.trim() } : {}),
+        ...(value.receiptType ? { receiptType: value.receiptType } : {}),
+        ...(value.receiptType && value.receiptType !== NO_RECEIPT_TYPE && value.receiptNumber.trim()
+          ? { receiptNumber: value.receiptNumber.trim() }
+          : {}),
+        ...(asksSupplier && supplier ? { supplierId: supplier.id } : {}),
+        ...(asksSupplier && !supplier && value.supplier.trim() ? { supplierName: value.supplier.trim() } : {}),
+        ...(asksSupplier && type?.asksTaxId && value.supplierTaxId.trim() ? { supplierTaxId: value.supplierTaxId.trim() } : {}),
+      }
+      if (paying) {
+        await payRecurringMutation.mutateAsync({
+          due: paying,
+          body: { month: paying.month, amountCents: cents, requestId: requestId.current, ...paper, ...spentAt },
+        })
+        return
       }
       if (chosen) {
         // Lo que vio la persona al elegirla: si alguien pagó mientras tanto, o este envío ya entró, el servidor lo dice en vez de pagar de más.
@@ -323,41 +318,36 @@ export function ExpenseFormDrawer({
           body: {
             amountCents: cents,
             ...paid.body,
-            fromCash: value.fromCash,
+            fromCash: method.typeCode === CASH_TYPE_CODE,
+            paymentMethodId: method.id,
+            ...(paper.paymentReference ? { paymentReference: paper.paymentReference } : {}),
             expectedDueCents: seen?.due ?? chosen.dueCents,
             expectedPaidCents: seen?.paid ?? chosen.paidCents,
             requestId: requestId.current,
-            ...receipt,
+            ...(type ? { receiptKind: type.label } : {}),
+            ...(paper.receiptNumber ? { receiptNumber: paper.receiptNumber } : {}),
             ...spentAt,
           },
         })
         return
       }
-      await createMutation.mutateAsync({
+      const body = {
         requestId: requestId.current,
         branchId,
         concept: value.concept.trim(),
         amountCents: cents,
         ...(second && currency !== place.currency ? { currency } : {}),
         ...paid.body,
-        category: value.category,
-        fromCash: value.fromCash && !unpaid,
+        category: value.category as ExpenseCategory,
+        fromCash: method.typeCode === CASH_TYPE_CODE,
         ...(asksSalesTax ? { salesTax: value.salesTax === "cobros" } : {}),
-        ...receipt,
+        // Lo de antes, con su comprobante escrito a mano, lo conserva si no se elige un tipo.
+        ...(correcting && !value.receiptType && correcting.receiptKind !== NO_RECEIPT ? { receiptKind: correcting.receiptKind } : {}),
+        ...paper,
         ...spentAt,
-        ...(value.repeats && !(asksSalesTax && value.salesTax === "cobros")
-          ? {
-              repeat: {
-                everyMonths: Number(value.every) as 1 | 6 | 12,
-                day: Number(value.repeatDay),
-                month: value.repeatMonth,
-                memberUserId: value.category === "Personal" && value.member ? value.member : null,
-                ...(unpaid ? { paid: false } : {}),
-                dueNextMonth: value.dueNext === "siguiente",
-              },
-            }
-          : {}),
-      })
+      }
+      if (correcting) await correctMutation.mutateAsync({ id: correcting.id, body })
+      else await createMutation.mutateAsync(body)
     },
   })
   const surface = useFormSurface(form, {
@@ -368,10 +358,11 @@ export function ExpenseFormDrawer({
       tenderCents: "tender",
       tenderCurrency: "payIn",
       exchangeRate: "rate",
-      "repeat.month": "repeatMonth",
-      "repeat.day": "repeatDay",
-      "repeat.everyMonths": "every",
-      "repeat.memberUserId": "member",
+      paymentMethodId: "method",
+      fromCash: "method",
+      paymentReference: "reference",
+      supplierId: "supplier",
+      supplierName: "supplier",
     },
     formMessage: cashFormMessage,
   })
@@ -388,87 +379,87 @@ export function ExpenseFormDrawer({
     if (filled.current) return
     filled.current = true
     requestId.current = crypto.randomUUID()
+    receiptTouched.current = Boolean(correcting)
     const day = todayIn(orgTimeZone)
+    const category: ExpenseCategory | "" = paying
+      ? (paying.category as ExpenseCategory)
+      : correcting
+        ? (correcting.category as ExpenseCategory)
+        : (initial?.category ?? "")
+    const unit = correcting?.currency ?? paying?.currency ?? place.currency
+    const cents = correcting?.amountCents ?? paying?.amountCents ?? initial?.amountCents ?? null
     form.reset({
-      category: initial?.category ?? "",
-      salesTax: null,
+      category,
+      salesTax: correcting?.salesTax ? "cobros" : null,
       purchase: "",
-      concept: initial?.concept ?? "",
-      currency: place.currency,
-      amount: initial ? formatMoneyInput(initial.amountCents, place.currency, locale) : "",
-      payIn: place.currency,
+      concept: correcting?.concept ?? paying?.concept ?? initial?.concept ?? "",
+      currency: unit,
+      amount: cents !== null ? formatMoneyInput(cents, unit, locale) : "",
+      payIn: unit,
       tender: "",
-      rate: todayRate,
-      fromCash: !initial,
-      receiptKind: "",
-      receiptNumber: "",
-      spentDay: initial?.day && initial.day <= day ? initial.day : day,
-      repeats: false,
-      every: "1",
-      repeatDay: String(Number((initial?.day && initial.day <= day ? initial.day : day).slice(8, 10))),
-      repeatMonth: day.slice(0, 7),
-      paidNow: "si",
-      dueNext: "mismo",
-      member: "",
+      rate: correcting?.exchangeRate ?? todayRate,
+      // El medio de siempre: el que se dijo, o el efectivo si salía de la caja.
+      method: correcting?.paymentMethodId ?? paying?.paymentMethodId ?? "",
+      reference: correcting?.paymentReference ?? "",
+      receiptType: correcting ? (correcting.receiptType ?? "") : category ? suggestedReceiptType(country, category) : "",
+      receiptNumber: correcting?.receiptNumber ?? "",
+      supplier: correcting?.supplierName ?? "",
+      supplierTaxId: correcting?.supplierTaxId ?? "",
+      spentDay: correcting
+        ? dayKeyOf(correcting.spentAt, orgTimeZone)
+        : initial?.day && initial.day <= day
+          ? initial.day
+          : day,
     })
     setSeen(null)
-    setMoreOpen(Boolean(initial?.day && initial.day !== day))
-  }, [open, orgTimeZone, initial, place.currency, locale, form, todayRate])
+  }, [open, orgTimeZone, initial, place.currency, locale, form, todayRate, correcting, paying, country])
+  // Lo de antes que salía de la caja, sin medio: se propone el efectivo cuando llega la lista.
+  useEffect(() => {
+    if (!open || !cashMethod || form.getFieldValue("method") !== "") return
+    if (correcting?.fromCash || (paying && paying.fromCash && !paying.paymentMethodId))
+      form.setFieldValue("method", cashMethod.id, { dontUpdateMeta: true })
+  }, [open, cashMethod, form, correcting, paying])
   // El cambio de hoy puede llegar después de abrir: llega puesto, sin pisar lo escrito.
   useEffect(() => {
     if (open && todayRate && form.getFieldValue("rate") === "")
       form.setFieldValue("rate", todayRate, { dontUpdateMeta: true })
   }, [open, todayRate, form])
 
-  // Una fecha que no pasa abre «Más detalles» para que se vea su error.
-  const spentDayInvalid = useStore(form.store, (s) => (s.fieldMeta.spentDay?.errors.length ?? 0) > 0)
-  useEffect(() => {
-    if (spentDayInvalid) setMoreOpen(true)
-  }, [spentDayInvalid])
-
   // Las compras se preguntan solo con Materiales: las recibidas sin pagar primero, luego lo que aún no llega.
   const purchases = useQuery({
     queryKey: financeKeys.purchases(null),
     queryFn: () => fetchPurchasesToPay(),
-    enabled: open && values.category === "Materiales",
+    enabled: open && !paying && !correcting && values.category === "Materiales",
   })
   // Con otra moneda se ven las compras de las dos; sin ella, las de la moneda de la clínica.
   const allOrders = purchases.data?.data.orders ?? []
-  const listed = second
-    ? allOrders.filter((order) => currencies.includes(order.currency))
-    : allOrders
-  const picked =
-    values.category === "Materiales"
-      ? (listed.find((order) => order.orderId === values.purchase) ?? null)
-      : null
+  const listed = second ? allOrders.filter((order) => currencies.includes(order.currency)) : allOrders
+  const picked = values.category === "Materiales" ? (listed.find((order) => order.orderId === values.purchase) ?? null) : null
   // El impuesto de lo cobrado y lo que no es una compra: de qué moneda sale el dinero, y de esa caja.
-  const paysSalesTax =
-    values.category === "Impuestos" && salesTaxName !== null && values.salesTax === "cobros"
-  const outCurrency = second
-    ? picked
-      ? values.payIn
-      : paysSalesTax
-        ? place.currency
-        : values.currency
-    : undefined
+  const paysSalesTax = values.category === "Impuestos" && salesTaxName !== null && values.salesTax === "cobros"
+  const outCurrency = second ? (picked ? values.payIn : paysSalesTax ? place.currency : values.currency) : undefined
   const cash = useCashState(branchId, open, outCurrency)
   const state = cash.data?.data ?? null
   const unit = second
     ? (picked?.currency ?? (paysSalesTax ? place.currency : values.currency))
-    : (state?.currency ?? place.currency)
+    : (state?.currency ?? correcting?.currency ?? paying?.currency ?? place.currency)
   const orders = second ? listed : listed.filter((order) => order.currency === unit)
-  const money = (cents: number) => formatMoney(cents, unit, locale)
 
-  /** Lo que se deduce de lo elegido: la compra que se paga, si se pregunta el impuesto, la moneda y cómo queda la caja. */
+  /** El proveedor se pregunta donde hay a quién pagar con papel: compras, laboratorio o un comprobante con RUC. */
+  function showsSupplier(value: Pick<ExpenseValues, "category" | "receiptType" | "purchase">): boolean {
+    if (value.category === "Materiales" && value.purchase !== "" && value.purchase !== OTHER) return false
+    const type = receiptTypes.find((item) => item.code === value.receiptType)
+    return value.category === "Materiales" || value.category === "Laboratorio" || type?.asksTaxId === true
+  }
+
+  /** Lo que se deduce de lo elegido: la compra que se paga, si se pregunta el impuesto, la moneda, el medio y cómo queda la caja. */
   function derive(value: ExpenseValues) {
     // Solo un gasto de Materiales paga una compra: si se cambia el tipo, ya no es ese pago.
-    const chosen = value.category === "Materiales" ? (orders.find((order) => order.orderId === value.purchase) ?? null) : null
-    const asksSalesTax = value.category === "Impuestos" && salesTaxName !== null
+    const chosen = !paying && !correcting && value.category === "Materiales" ? (orders.find((order) => order.orderId === value.purchase) ?? null) : null
+    const asksSalesTax = !paying && value.category === "Impuestos" && salesTaxName !== null
     // El impuesto de lo cobrado solo se paga en moneda del negocio.
     const onlyBusiness = asksSalesTax && value.salesTax === "cobros"
-    const currency = second
-      ? (chosen?.currency ?? (onlyBusiness ? place.currency : value.currency))
-      : unit
+    const currency = second ? (chosen?.currency ?? (onlyBusiness ? place.currency : value.currency)) : unit
     const cents = value.amount.trim() === "" ? null : parseAmount(value.amount, currency, locale)
     const paid = readExpenseMoney({
       second,
@@ -480,47 +471,67 @@ export function ExpenseFormDrawer({
       rateText: value.rate,
       locale,
     })
-    // Con la caja a la vista se avisa antes de guardar si el efectivo no alcanza.
+    const method = allMethods.find((item) => item.id === value.method) ?? null
+    const fromCash = method?.typeCode === CASH_TYPE_CODE
+    // Con la caja a la vista se dice cómo queda; si no alcanza, se dice antes de guardar.
     const after =
-      value.fromCash &&
-      !annotatesOnly(value) &&
-      state &&
-      state.currency === paid.payIn &&
-      paid.outCents !== null &&
-      (!chosen || chosen.branchId === branchId)
+      fromCash && state && state.currency === paid.payIn && paid.outCents !== null && (!chosen || chosen.branchId === branchId)
         ? state.cashOnHandCents - paid.outCents
         : null
-    return { chosen, asksSalesTax, onlyBusiness, currency, cents, after, paid }
+    return { chosen, asksSalesTax, onlyBusiness, currency, cents, after, paid, method, fromCash }
   }
-  const { chosen, asksSalesTax, onlyBusiness, after, paid } = derive(values)
-  const asksSalesTaxNow = asksSalesTax
-  // De quién puede ser un sueldo: el equipo de hoy (solo se pide con «Se repite» y el tipo Personal).
-  const people = useQuery({
-    queryKey: ["finance", "recurring-people"],
-    queryFn: fetchRecurringPeople,
-    enabled: open && values.repeats && values.category === "Personal",
-    staleTime: 60_000,
-  })
+  const { chosen, asksSalesTax, onlyBusiness, cents, after, paid, method, fromCash } = derive(values)
   // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
   const advance = chosen !== null && chosen.dueCents === 0
-  const asksPurchase = values.category === "Materiales" && orders.length > 0
+  const asksPurchase = !paying && !correcting && values.category === "Materiales" && orders.length > 0
   const otherBranch = chosen !== null && chosen.branchId !== branchId
+  // Un pago a otra sede no sale de esta caja: el efectivo no se ofrece.
+  const methodOptions = otherBranch ? allMethods.filter((item) => item.typeCode !== CASH_TYPE_CODE) : allMethods
+  const asksSupplier = showsSupplier(values)
+  const pickedType = receiptTypes.find((item) => item.code === values.receiptType) ?? null
+  const suppliers = useQuery({
+    queryKey: ["finance", "suppliers"],
+    queryFn: fetchExpenseSuppliers,
+    enabled: open && asksSupplier,
+    staleTime: 60_000,
+  })
+  const supplierListId = useId()
+  const money = (amount: number) => formatMoney(amount, unit, locale)
 
-  const done = (message: string) => {
+  const done = (message: string, options?: Parameters<typeof toast.success>[1]) => {
     invalidateFinance(queryClient)
-    toast.success(message)
+    toast.success(message, options)
     onClose()
   }
+  /** Quedó en otro mes que el de hoy: se dice dónde verlo (QA de Gastos, G30). */
+  const inMonth = (day: string) => (day.slice(0, 7) !== today.slice(0, 7) ? `: quedó en ${monthWord(day)}` : "")
   const createMutation = useMutation({
     mutationFn: createExpenseApi,
-    onSuccess: (_result, input) =>
-      done(
-        input.repeat?.paid === false
-          ? `Anotado: queda por pagar el de ${MONTH_NAMES[Number(input.repeat.month?.slice(5, 7)) - 1] ?? "ese mes"}, sin registrar ningún pago`
-          : input.repeat
-            ? "Gasto registrado: aparecerá «por pagar» cada vez que toque"
-            : "Gasto registrado",
-      ),
+    onSuccess: () => done(`Gasto registrado${inMonth(form.getFieldValue("spentDay"))}`),
+  })
+  const correctMutation = useMutation({
+    mutationFn: (input: { id: string; body: Parameters<typeof createExpenseApi>[0] }) => correctExpenseApi(input.id, input.body),
+    onSuccess: () => done(`Gasto corregido${inMonth(form.getFieldValue("spentDay"))}: el de antes queda anulado, con lo que cambió`),
+  })
+  const payRecurringMutation = useMutation({
+    mutationFn: (input: { due: RecurringDue; body: Parameters<typeof payRecurringApi>[1] }) =>
+      payRecurringApi(input.due.recurringId, input.body),
+    onSuccess: (result, input) =>
+      done(`${input.due.concept} de ${monthWord(input.due.month)} registrado · ${formatMoney(result.data.amountCents, result.data.currency, locale)}`, {
+        duration: 10_000,
+        // «Deshacer» es anular este pago: vuelve a quedar por pagar.
+        action: {
+          label: "Anular este pago",
+          onClick: () => {
+            voidExpenseApi(result.data.id, "Se deshizo el pago recién registrado")
+              .then(() => toast.success(`${input.due.concept}: vuelve a estar por pagar`))
+              .catch((error: unknown) =>
+                toast.error(`No se pudo anular: ${error instanceof Error ? error.message : "inténtalo otra vez"}`),
+              )
+              .finally(() => invalidateFinance(queryClient))
+          },
+        },
+      }),
   })
   const payMutation = useMutation({
     mutationFn: (input: { orderId: string; body: Parameters<typeof payPurchaseApi>[1] }) => payPurchaseApi(input.orderId, input.body),
@@ -529,15 +540,9 @@ export function ExpenseFormDrawer({
       const left = result.data.balance.dueCents
       if (!order) done("Pago registrado")
       else if (order.dueCents === 0)
-        done(
-          `Adelanto registrado: ${purchaseOrderLabel(order.orderNumber)} lo descuenta cuando llegue${order.receivedCents > 0 ? " lo que falta" : ""}`,
-        )
-      else if (left > 0)
-        done(
-          `Pago registrado: a ${purchaseOrderLabel(order.orderNumber)} le falta ${formatMoney(left, order.currency, locale)}`,
-        )
-      else
-        done(`Pago registrado: ${purchaseOrderLabel(order.orderNumber)} queda al día en Inventario`)
+        done(`Adelanto registrado: ${purchaseOrderLabel(order.orderNumber)} lo descuenta cuando llegue${order.receivedCents > 0 ? " lo que falta" : ""}`)
+      else if (left > 0) done(`Pago registrado: a ${purchaseOrderLabel(order.orderNumber)} le falta ${formatMoney(left, order.currency, locale)}`)
+      else done(`Pago registrado: ${purchaseOrderLabel(order.orderNumber)} queda al día en Inventario`)
     },
     onError: (err) => {
       // La compra cambió: se relee y el próximo envío compara con lo que se ve ahora, no con lo de antes.
@@ -554,107 +559,71 @@ export function ExpenseFormDrawer({
     const order = orders.find((item) => item.orderId === value)
     setSeen(order ? { due: order.dueCents, paid: order.paidCents } : null)
     if (order) {
-      const suggested =
-        order.dueCents > 0 ? order.dueCents : Math.max(0, order.orderedCents - order.paidCents)
-      form.setFieldValue(
-        "amount",
-        suggested > 0 ? formatMoneyInput(suggested, order.currency, locale) : "",
-      )
+      const suggested = order.dueCents > 0 ? order.dueCents : Math.max(0, order.orderedCents - order.paidCents)
+      form.setFieldValue("amount", suggested > 0 ? formatMoneyInput(suggested, order.currency, locale) : "")
       form.setFieldValue("payIn", order.currency)
       form.setFieldValue("tender", "")
       // Un pago a otra sede no sale de esta caja.
-      if (order.branchId !== branchId) form.setFieldValue("fromCash", false)
+      if (order.branchId !== branchId && form.getFieldValue("method") === cashMethod?.id) form.setFieldValue("method", "")
     }
   }
+
+  const title = paying ? `Pagar ${paying.concept} · ${monthWord(paying.month)}` : correcting ? "Corregir gasto" : "Registrar gasto"
+  const amountWords = cents !== null && cents > 0 ? ` ${formatMoney(cents, paid.payIn === unit ? unit : unit, locale)}` : ""
+  const submitLabel = paying
+    ? `Registrar pago${amountWords}`
+    : correcting
+      ? "Guardar corrección"
+      : chosen
+        ? advance
+          ? "Registrar adelanto"
+          : "Registrar pago"
+        : `Registrar${amountWords || " gasto"}`
 
   return (
     <FormDrawer
       {...surface}
       open={open}
-      title="Registrar gasto"
-      description={chosen ? `Pago de una compra de ${chosen.branchName}.` : place.branchName ? `Gasto de ${place.branchName}.` : undefined}
-      submitLabel={chosen ? (advance ? "Registrar adelanto" : "Registrar pago") : annotatesOnly(values) ? "Anotar" : "Registrar gasto"}
+      title={title}
+      description={
+        paying
+          ? `${expenseCategoryLabel(paying.category)} de ${place.branchName}.`
+          : chosen
+            ? `Pago de una compra de ${chosen.branchName}.`
+            : place.branchName
+              ? `Gasto de ${place.branchName}.`
+              : undefined
+      }
+      submitLabel={submitLabel}
       submitDisabled={!canWrite}
       onClose={() => {
         if (!surface.isSubmitting) onClose()
       }}
     >
       <div className="flex flex-col gap-5">
-        <form.AppField name="category">
-          {(field) => (
-            <field.Group
-              legend="Tipo"
-              description={canStaffPay ? undefined : "Los sueldos y lo que se le paga al personal los anota administración."}
-            >
-              {(control) => (
-                <ChoiceChips
-                  id={control.id}
-                  invalid={control.invalid}
-                  aria-describedby={control.describedBy}
-                  onBlur={control.onBlur}
-                  value={field.state.value}
-                  options={categoryOptions}
-                  onChange={(next) => field.handleChange(next)}
-                />
-              )}
-            </field.Group>
-          )}
-        </form.AppField>
-        {asksSalesTax ? (
-          <form.AppField name="salesTax">
-            {(field) => (
-              <field.Group legend="¿Qué impuesto pagas?">
-                {(control) => (
-                  <>
-                    <ChoiceButtons
-                      id={control.id}
-                      invalid={control.invalid}
-                      onBlur={control.onBlur}
-                      aria-label="¿Qué impuesto pagas?"
-                      aria-describedby={[salesTaxHelpId, control.describedBy].filter(Boolean).join(" ")}
-                      tone="primary"
-                      columns={2}
-                      value={field.state.value}
-                      options={[
-                        { value: "cobros", label: `${salesTaxName} de tus cobros` },
-                        { value: "otro", label: "Otro (renta, municipal…)" },
-                      ]}
-                      onChange={(next) => field.handleChange(next)}
-                    />
-                    <FieldDescription id={salesTaxHelpId}>
-                      {field.state.value === "otro"
-                        ? "Resta de lo que deja, como cualquier gasto."
-                        : `El ${salesTaxName} ya se restó de lo cobrado, así que no vuelve a restar de lo que deja. Si pagas ${salesTaxName} y renta juntos, regístralos por separado.`}
-                    </FieldDescription>
-                  </>
-                )}
-              </field.Group>
-            )}
-          </form.AppField>
-        ) : null}
-        {asksPurchase ? (
-          <form.AppField name="purchase">
-            {() => (
-              <PurchaseChoice
-                orders={orders}
-                branchId={branchId}
-                money={(cents, currency) => formatMoney(cents, currency, locale)}
-                onChoose={choosePurchase}
-              />
-            )}
-          </form.AppField>
-        ) : null}
-        {chosen ? (
-          <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
-            Queda como gasto de <strong>Materiales</strong> de {chosen.branchName}:{" "}
-            {advance ? "Adelanto" : "Pago"} de compra {purchaseOrderLabel(chosen.orderNumber)} · {chosen.supplierName}.
+        {correcting ? (
+          <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-sm">
+            Antes: <strong>{formatMoney(correcting.amountCents, correcting.currency, locale)}</strong> ·{" "}
+            {expenseCategoryLabel(correcting.category)} ·{" "}
+            {correcting.methodName ?? (correcting.fromCash ? "Efectivo de la caja" : "Otro medio")}. Al guardar, ese queda anulado
+            con lo que cambió y se registra este. Si salió de la caja, vuelve y sale lo nuevo.
           </p>
-        ) : (
+        ) : null}
+        {paying ? null : (
           <form.AppField name="concept">
-            {(field) => <field.TextField label="En qué se gastó" maxLength={500} />}
+            {(field) =>
+              chosen ? (
+                <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
+                  Queda como gasto de <strong>Materiales</strong> de {chosen.branchName}: {advance ? "Adelanto" : "Pago"} de compra{" "}
+                  {purchaseOrderLabel(chosen.orderNumber)} · {chosen.supplierName}.
+                </p>
+              ) : (
+                <field.TextField label="En qué se gastó" maxLength={500} />
+              )
+            }
           </form.AppField>
         )}
-        {second && !chosen && !onlyBusiness ? (
+        {second && !chosen && !onlyBusiness && !paying ? (
           <form.AppField name="currency">
             {(field) => (
               <field.Group legend="Moneda" className="gap-3">
@@ -679,13 +648,15 @@ export function ExpenseFormDrawer({
             <field.Control
               label={second && chosen ? "Lo que cancelas" : "Importe"}
               description={
-                chosen
-                  ? chosen.dueCents > 0
-                    ? `Por pagar: ${money(chosen.dueCents)}. Puedes pagar una parte.`
-                    : chosen.receivedCents === 0
-                      ? "Aún no llega nada: queda como adelanto y se descuenta cuando llegue."
-                      : "Lo que llegó ya está pagado: queda como adelanto de lo que falta y se descuenta cuando llegue."
-                  : undefined
+                paying
+                  ? `Lo de siempre: ${formatMoney(paying.amountCents, paying.currency, locale)}. Si llegó otro, cámbialo.`
+                  : chosen
+                    ? chosen.dueCents > 0
+                      ? `Por pagar: ${money(chosen.dueCents)}. Puedes pagar una parte.`
+                      : chosen.receivedCents === 0
+                        ? "Aún no llega nada: queda como adelanto y se descuenta cuando llegue."
+                        : "Lo que llegó ya está pagado: queda como adelanto de lo que falta y se descuenta cuando llegue."
+                    : undefined
               }
             >
               {(control) =>
@@ -713,6 +684,86 @@ export function ExpenseFormDrawer({
             </field.Control>
           )}
         </form.AppField>
+        {paying ? null : (
+          <form.AppField
+            name="category"
+            listeners={{
+              // El comprobante que suele traer ese tipo, hasta que la persona elige otro.
+              onChange: ({ value }) => {
+                if (!receiptTouched.current && value) form.setFieldValue("receiptType", suggestedReceiptType(country, value))
+              },
+            }}
+          >
+            {(field) => (
+              <field.Group
+                legend="Tipo"
+                description={
+                  field.state.value
+                    ? EXPENSE_CATEGORY_HINTS[field.state.value]
+                    : canStaffPay
+                      ? undefined
+                      : "Los sueldos y lo que se le paga al personal los anota administración."
+                }
+              >
+                {(control) => (
+                  <ChoiceChips
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    options={categoryOptions}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        )}
+        {asksSalesTax ? (
+          <form.AppField name="salesTax">
+            {(field) => (
+              <field.Group legend="¿Qué impuesto pagas?">
+                {(control) => (
+                  <>
+                    <ChoiceButtons
+                      id={control.id}
+                      invalid={control.invalid}
+                      onBlur={control.onBlur}
+                      aria-label="¿Qué impuesto pagas?"
+                      aria-describedby={[salesTaxHelpId, control.describedBy].filter(Boolean).join(" ")}
+                      tone="primary"
+                      columns={2}
+                      value={field.state.value}
+                      options={[
+                        { value: "cobros", label: `${salesTaxName} de tus cobros` },
+                        { value: "otro", label: "Otro (renta, municipal…)" },
+                      ]}
+                      onChange={(next) => field.handleChange(next)}
+                    />
+                    <FieldDescription id={salesTaxHelpId}>
+                      {field.state.value === "otro"
+                        ? "Resta de lo que deja, como cualquier gasto."
+                        : `El ${salesTaxName} ya se restó de lo cobrado: no suma en «Gastado» ni resta de lo que deja.`}
+                    </FieldDescription>
+                  </>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        ) : null}
+        {asksPurchase ? (
+          <form.AppField name="purchase">
+            {() => (
+              <PurchaseChoice
+                orders={orders}
+                branchId={branchId}
+                money={(amount, currency) => formatMoney(amount, currency, locale)}
+                onChoose={choosePurchase}
+              />
+            )}
+          </form.AppField>
+        ) : null}
         {second && chosen && paid.asks ? (
           <form.AppField name="payIn">
             {(field) => (
@@ -741,261 +792,149 @@ export function ExpenseFormDrawer({
             business={place.currency}
             locale={locale}
             crosses={Boolean(chosen)}
-            reportWords={(value) =>
-              `En tus reportes cuenta como ${value}${paid.crossed ? "" : ", con este cambio"}.`
-            }
+            reportWords={(value) => `En tus reportes cuenta como ${value}${paid.crossed ? "" : ", con este cambio"}.`}
             field={(name, control) => <form.AppField name={name}>{() => control}</form.AppField>}
           />
         ) : null}
-        {annotatesOnly(values) ? null : (
-          <>
-        <form.AppField name="fromCash">
+        <form.AppField name="method">
           {(field) => (
-            <FormChoiceField
-              label="Se pagó con el efectivo de la caja"
-              description={
-                otherBranch && chosen
-                  ? `Es de otra sede (${chosen.branchName}): no sale de esta caja.`
-                  : second && !values.fromCash
-                    ? "No toca ninguna caja: salió de una cuenta o de otro lado."
-                    : after === null || (after < 0 && state)
-                      ? second
-                        ? `Se descuenta de la caja de ${currencyWord(paid.payIn, locale)}.`
-                        : "Se descuenta del efectivo que debe haber al cerrar."
-                      : second
-                        ? `Se descuenta de la caja de ${currencyWord(paid.payIn, locale)}: queda en ${formatMoney(after, paid.payIn, locale)}.`
-                        : `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${money(after)}.`
-              }
-            >
+            <field.Group legend="¿Con qué se pagó?">
               {(control) => (
-                <Checkbox
-                  id={control.id}
-                  aria-invalid={control.invalid || undefined}
-                  aria-describedby={control.describedBy}
-                  checked={field.state.value}
-                  disabled={otherBranch}
-                  onCheckedChange={(checked) => {
-                    field.handleChange(checked === true)
-                    control.onBlur()
-                  }}
-                />
+                <div className="flex flex-col gap-2.5">
+                  {methods.isPending ? (
+                    <p className="text-sm text-muted-foreground">Consultando los medios de la clínica…</p>
+                  ) : methodOptions.length === 0 ? (
+                    <p className="text-sm">La clínica aún no tiene medios de pago: se agregan en Configuración › Medios de pago.</p>
+                  ) : (
+                    <PaymentMethodButtons
+                      id={control.id}
+                      methods={methodOptions}
+                      value={field.state.value}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      onChange={(next) => field.handleChange(next)}
+                    />
+                  )}
+                  {/* La caja en una sola línea (QA de Gastos, G7): cómo queda o cuánto falta, con su salida. */}
+                  {fromCash && after !== null ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm">
+                      <span>
+                        {after >= 0
+                          ? `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0), paid.payIn, locale)}: queda ${formatMoney(after, paid.payIn, locale)}.`
+                          : `En la caja${second ? ` de ${currencyWord(paid.payIn, locale)}` : ""} hay ${formatMoney(after + (paid.outCents ?? 0), paid.payIn, locale)}: faltan ${formatMoney(-after, paid.payIn, locale)}.`}
+                      </span>
+                      {after < 0 && canWrite ? (
+                        <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
+                          Ingresar {formatMoney(-after, paid.payIn, locale)}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {fromCash && values.spentDay !== today ? (
+                    <p className="text-sm text-muted-foreground">El efectivo sale de la caja de hoy, aunque la fecha sea otra.</p>
+                  ) : null}
+                  {otherBranch ? (
+                    <p className="text-sm text-muted-foreground">Es de otra sede ({chosen?.branchName}): no sale de esta caja.</p>
+                  ) : null}
+                </div>
               )}
-            </FormChoiceField>
+            </field.Group>
           )}
         </form.AppField>
-        {after !== null && after < 0 && !otherBranch && canMoveCash ? (
-          // Lo que falta se ingresa encima, sin salir: al guardarlo, el gasto sigue como estaba.
-          <div className="flex flex-col items-start gap-2">
-            <p className="text-sm text-muted-foreground">
-              En la caja hay {formatMoney(after + (paid.outCents ?? 0), paid.payIn, locale)}: faltan{" "}
-              {formatMoney(-after, paid.payIn, locale)} para pagarlo con el efectivo. Si está en el cajón, ingrésalo; si se
-              pagó por otro medio, quita la casilla.
-            </p>
-            <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
-              Ingresar {formatMoney(-after, paid.payIn, locale)} a la caja
-            </Button>
-          </div>
+        {method && method.typeCode !== CASH_TYPE_CODE ? (
+          <form.AppField name="reference">
+            {(field) => <field.TextField label="N.º de operación (opcional)" maxLength={60} autoComplete="off" inputClassName="sm:w-56" />}
+          </form.AppField>
         ) : null}
-          </>
-        )}
-        {!chosen && !(asksSalesTaxNow && values.salesTax === "cobros") ? (
-          <>
-            <form.AppField name="repeats">
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,10rem)]">
+          <form.AppField
+            name="receiptType"
+            listeners={{
+              onChange: () => {
+                receiptTouched.current = true
+              },
+            }}
+          >
+            {(field) => (
+              <field.SelectField
+                label="Comprobante"
+                placeholder="Elige el comprobante"
+                options={[
+                  ...receiptTypes.map((type) => ({ value: type.code, label: type.label })),
+                  { value: NO_RECEIPT_TYPE, label: "Sin comprobante" },
+                ]}
+              />
+            )}
+          </form.AppField>
+          {values.receiptType && values.receiptType !== NO_RECEIPT_TYPE ? (
+            <form.AppField name="receiptNumber">
+              {(field) => <field.TextField label="Número" maxLength={60} autoComplete="off" placeholder="B001-2345" />}
+            </form.AppField>
+          ) : null}
+        </div>
+        {asksSupplier ? (
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,10rem)]">
+            <form.AppField
+              name="supplier"
+              listeners={{
+                // El RUC del proveedor de la lista, si se tiene y aún no se escribió otro.
+                onChange: ({ value }) => {
+                  const found = (suppliers.data?.data ?? []).find(
+                    (item) => item.name.toLocaleLowerCase(locale) === value.trim().toLocaleLowerCase(locale),
+                  )
+                  if (found?.docNumber && !form.getFieldValue("supplierTaxId")) form.setFieldValue("supplierTaxId", found.docNumber)
+                },
+              }}
+            >
               {(field) => (
-                <FormChoiceField
-                  label="Se repite"
-                  description="El alquiler, un sueldo, la luz: queda anotado y aparece «por pagar» en Gastos cada vez que toca. Nunca se paga solo."
-                >
+                <field.Control label="A quién se pagó (opcional)" description="El de tu lista de proveedores, o escríbelo.">
                   {(control) => (
-                    <Checkbox
-                      id={control.id}
-                      aria-describedby={control.describedBy}
-                      checked={field.state.value}
-                      onCheckedChange={(checked) => {
-                        field.handleChange(checked === true)
-                        control.onBlur()
-                      }}
-                    />
+                    <>
+                      <Input
+                        {...control.props}
+                        list={supplierListId}
+                        autoComplete="off"
+                        maxLength={200}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <datalist id={supplierListId}>
+                        {(suppliers.data?.data ?? []).map((item) => (
+                          <option key={item.id} value={item.name} />
+                        ))}
+                      </datalist>
+                    </>
                   )}
-                </FormChoiceField>
+                </field.Control>
               )}
             </form.AppField>
-            {values.repeats ? (
-              <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-3">
-                <form.AppField name="paidNow">
-                  {(field) => (
-                    <field.Group
-                      legend={`¿Ya se pagó el de ${MONTH_NAMES[Number(values.repeatMonth.slice(5, 7)) - 1] ?? "este mes"}?`}
-                      description={
-                        field.state.value === "no"
-                          ? "Se anota sin registrar ningún pago: queda «por pagar» y lo pagas desde Gastos cuando toque."
-                          : "Se registra este pago y desde ahí aparece por pagar cada vez que toca."
-                      }
-                      className="gap-3"
-                    >
-                      {(control) => (
-                        <ChoiceButtons
-                          id={control.id}
-                          invalid={control.invalid}
-                          aria-describedby={control.describedBy}
-                          onBlur={control.onBlur}
-                          tone="primary"
-                          value={field.state.value}
-                          options={PAID_CHOICES}
-                          onChange={(next) => {
-                            field.handleChange(next as ExpenseValues["paidNow"])
-                            // Lo que se anota sin pagar parte de hoy, no de la fecha de un pago.
-                            if (next === "no" && !payableMonths(today).some((item) => item.value === values.repeatMonth))
-                              form.setFieldValue("repeatMonth", today.slice(0, 7))
-                          }}
-                        />
-                      )}
-                    </field.Group>
-                  )}
-                </form.AppField>
-                <form.AppField name="every">
-                  {(field) => (
-                    <field.Group legend="Cada cuánto" className="gap-3">
-                      {(control) => (
-                        <ChoiceButtons
-                          id={control.id}
-                          invalid={control.invalid}
-                          aria-describedby={control.describedBy}
-                          onBlur={control.onBlur}
-                          tone="primary"
-                          value={field.state.value}
-                          options={EVERY_CHOICES}
-                          onChange={(next) => field.handleChange(next as ExpenseValues["every"])}
-                        />
-                      )}
-                    </field.Group>
-                  )}
-                </form.AppField>
-                <form.AppField name="repeatMonth">
-                  {(field) => (
-                    <field.Group
-                      legend="Este gasto es el pago de"
-                      description="El sueldo de octubre pagado en noviembre es de octubre. Desde ahí aparece por pagar cada vez que toca."
-                      className="gap-3"
-                    >
-                      {(control) => (
-                        <ChoiceButtons
-                          id={control.id}
-                          invalid={control.invalid}
-                          aria-describedby={control.describedBy}
-                          onBlur={control.onBlur}
-                          tone="primary"
-                          value={field.state.value}
-                          options={payableMonths(annotatesOnly(values) ? today : values.spentDay)}
-                          onChange={(next) => field.handleChange(next)}
-                        />
-                      )}
-                    </field.Group>
-                  )}
-                </form.AppField>
-                <form.AppField name="repeatDay">
-                  {(field) => (
-                    <field.TextField
-                      label="El día"
-                      description="Si el mes no tiene ese día, el último del mes."
-                      inputMode="numeric"
-                      inputClassName="w-24"
-                    />
-                  )}
-                </form.AppField>
-                <form.AppField name="dueNext">
-                  {(field) => (
-                    <field.Group
-                      legend="Se paga"
-                      description="El sueldo de noviembre que se paga el 2 de diciembre: «Al mes siguiente». Así no sale vencido antes de tiempo."
-                      className="gap-3"
-                    >
-                      {(control) => (
-                        <ChoiceButtons
-                          id={control.id}
-                          invalid={control.invalid}
-                          aria-describedby={control.describedBy}
-                          onBlur={control.onBlur}
-                          tone="primary"
-                          value={field.state.value}
-                          options={DUE_CHOICES}
-                          onChange={(next) => field.handleChange(next as ExpenseValues["dueNext"])}
-                        />
-                      )}
-                    </field.Group>
-                  )}
-                </form.AppField>
-                {values.category === "Personal" ? (
-                  <form.AppField name="member">
-                    {(field) => (
-                      <field.SelectField
-                        label="De quién es el sueldo (opcional)"
-                        placeholder="De nadie en particular"
-                        options={[
-                          { value: "", label: "De nadie en particular" },
-                          ...(people.data?.data ?? []).map((person) => ({ value: person.userId, label: person.name })),
-                        ]}
-                      />
-                    )}
-                  </form.AppField>
-                ) : null}
-              </div>
-            ) : null}
-          </>
-        ) : null}
-        {annotatesOnly(values) ? null : (
-          <>
-        <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
-          <CollapsibleTrigger render={<Button type="button" variant="link" className="h-auto p-0" />}>
-            Más detalles: comprobante recibido y fecha
-            <ChevronDown aria-hidden className={cn("transition-transform", moreOpen && "rotate-180")} />
-          </CollapsibleTrigger>
-          {/* Montado aunque esté cerrado: el error de la fecha (también del servidor) tiene dónde ir. */}
-          <CollapsibleContent keepMounted>
-            <div className="flex flex-col gap-4 pt-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <form.AppField name="receiptKind">
-                  {(field) => <field.TextField label="Comprobante recibido" maxLength={60} placeholder="Factura, recibo…" />}
-                </form.AppField>
-                <form.AppField name="receiptNumber">
-                  {(field) => <field.TextField label="Número" maxLength={60} autoComplete="off" />}
-                </form.AppField>
-              </div>
-              <form.AppField name="spentDay">
-                {(field) => (
-                  <field.Control label="Fecha del gasto">
-                    {(control) => (
-                      <DatePickerButton
-                        {...control.props}
-                        className="justify-start font-normal"
-                        value={field.state.value}
-                        max={today}
-                        onChange={(day) => {
-                          // El día propuesto con la fecha anterior: si sigue igual, nadie lo cambió.
-                          const proposed = String(Number(field.state.value.slice(8, 10)))
-                          field.handleChange(day)
-                          // El mes que paga sigue a la fecha: su mes o el anterior. El día, si no se escribió otro.
-                          if (!payableMonths(day).some((item) => item.value === form.getFieldValue("repeatMonth")))
-                            form.setFieldValue("repeatMonth", day.slice(0, 7))
-                          if (form.getFieldValue("repeatDay") === proposed)
-                            form.setFieldValue("repeatDay", String(Number(day.slice(8, 10))))
-                        }}
-                      >
-                        {formatDayKey(field.state.value, locale, today)}
-                      </DatePickerButton>
-                    )}
-                  </field.Control>
-                )}
+            {pickedType?.asksTaxId ? (
+              <form.AppField name="supplierTaxId">
+                {(field) => <field.TextField label="RUC (opcional)" inputMode="numeric" maxLength={20} autoComplete="off" />}
               </form.AppField>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-          </>
-        )}
+            ) : null}
+          </div>
+        ) : null}
+        <form.AppField name="spentDay">
+          {(field) => (
+            <field.Control label="Fecha">
+              {(control) => (
+                <DatePickerButton
+                  {...control.props}
+                  className="justify-start font-normal sm:w-64"
+                  value={field.state.value}
+                  max={today}
+                  onChange={(day) => field.handleChange(day)}
+                >
+                  {formatDayKey(field.state.value, locale, today)}
+                </DatePickerButton>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
         {!canWrite ? (
-          <p className="text-sm font-medium">
-            Tu rol no puede registrar gastos. Pídeselo a quien cobra o a administración.
-          </p>
+          <p className="text-sm font-medium">Tu rol no puede registrar gastos. Pídeselo a quien cobra o a administración.</p>
         ) : null}
       </div>
       <CashMoveDrawer

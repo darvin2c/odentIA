@@ -2224,6 +2224,9 @@ export interface PayPurchaseOrderInput {
    * devuelve ese pago en vez del aviso de «la compra cambió».
    */
   requestId?: string | null
+  /** Con qué se pagó (ADR 0167): manda sobre `fromCash`, como en un gasto. */
+  paymentMethodId?: string | null
+  paymentReference?: string | null
 }
 
 /**
@@ -2313,6 +2316,8 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
         receiptNumber: input.receiptNumber,
         notes: input.notes,
         fromCash: input.fromCash ?? false,
+        paymentMethodId: input.paymentMethodId,
+        paymentReference: input.paymentReference,
         requestId,
       },
       {
