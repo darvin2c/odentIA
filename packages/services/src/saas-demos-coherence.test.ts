@@ -775,6 +775,35 @@ describe(`una demo de óptica pequeña (vistIA, semilla ${OPTICA})`, () => {
     ).toBe(0)
   })
 
+  it("trae pedidos de lentes en cada paso, cada uno con la receta de su persona y lo que lleva cobrado en su caja", async () => {
+    const orgId = demo.organizationId
+    const states = await rows<{ status: string; n: number }>(sql`select status, count(*)::int as n from job_order
+      where organization_id = ${orgId} group by status order by status`)
+    expect(states.map((row) => row.status)).toEqual(["en_laboratorio", "entregado", "listo", "por_enviar", "por_revisar"])
+    // La receta copiada es de la misma persona, y no anulada.
+    expect(
+      await count(sql`select count(*)::int as n from job_order o
+        left join optical.lens_prescription l on l.organization_id = o.organization_id and l.id = (o.prescription->>'id')::uuid
+        where o.organization_id = ${orgId} and (l.id is null or l.patient_id <> o.patient_id or l.voided_at is not null)`),
+    ).toBe(0)
+    // Cada línea tiene su cargo, de la misma persona, por lo que dice el inventario.
+    expect(
+      await count(sql`select count(*)::int as n from job_order_line jl
+        join job_order o on o.id = jl.job_order_id
+        left join patient_charge c on c.organization_id = jl.organization_id and c.id = jl.charge_id
+        where jl.organization_id = ${orgId} and (c.id is null or c.patient_id <> o.patient_id or c.product_id is distinct from jl.product_id)`),
+    ).toBe(0)
+    // Uno atrasado en el laboratorio, para mostrar lo que pide atención.
+    expect(
+      await count(sql`select count(*)::int as n from job_order where organization_id = ${orgId}
+        and status = 'en_laboratorio' and promised_on < (now() at time zone 'America/Lima')::date`),
+    ).toBeGreaterThan(0)
+    // En el mostrador de una óptica atiende Ventas, y el taller tiene su persona.
+    const roles = await rows<{ role: string }>(sql`select distinct role from member where organization_id = ${orgId} order by role`)
+    expect(roles.map((row) => row.role)).toEqual(expect.arrayContaining(["sales", "workshop"]))
+    expect(roles.map((row) => row.role)).not.toContain("reception")
+  })
+
   it("las noches siguientes, cada examen firmado al cerrar el día también deja su receta", async () => {
     const orgId = demo.organizationId
     const [row] = await ownerDb.select().from(saasDemo).where(eq(saasDemo.id, demo.id))
