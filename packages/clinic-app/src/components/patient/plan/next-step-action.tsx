@@ -64,6 +64,8 @@ export function NextStepButton({
         lockedPatient: true,
         planItemIds: action.planItemIds,
         ...(action.serviceId ? { serviceId: action.serviceId } : {}),
+        // «Reservar lo aceptado y el control»: el control viene marcado en la misma cita.
+        ...(action.followUpId ? { followUpIds: [action.followUpId] } : {}),
       })
     } else if (step.kind === "respuesta" && action.budgetId) {
       setOpen("respuesta")

@@ -978,6 +978,11 @@ export interface CreateAppointmentInput {
    * aceptados y sin terminar.
    */
   planItemIds?: string[]
+  /**
+   * Controles pendientes del mismo paciente que se hacen en esta cita: quedan
+   * reservados con ella, en la misma transacción. Solo lo decide una persona del equipo.
+   */
+  followUpIds?: string[]
 }
 
 /** Lo que una cita puede traer: aceptado y todavía por hacer (la regla de «Por agendar», `to-schedule.ts`). */
@@ -1210,6 +1215,25 @@ export async function createAppointment(
         .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, input.patientId), eq(patientContact.relationship, "self")))
         .limit(1)
       if (self) await refreshConversationTier(tx, orgId, { contactId: self.contactId, at: new Date() })
+    }
+    // Los controles que vienen en la misma cita («Reservar lo aceptado y el control»): la misma
+    // operación que «Reservar el control» con esta cita (`scheduleFollowUp`), en la misma
+    // transacción, así nunca queda la cita sin su control (QA del 8 nov, entrega 3).
+    if (input.followUpIds?.length) {
+      // Import tardío: `follow-ups.ts` reserva sus citas con este mismo servicio.
+      const { scheduleFollowUp } = await import("./follow-ups.js")
+      for (const followUpId of [...new Set(input.followUpIds)]) {
+        try {
+          await scheduleFollowUp(tx, orgId, actorUserId, input.patientId, followUpId, { appointmentId: created.id })
+        } catch (error) {
+          // Otro lo reservó o lo canceló entre tanto: se dice junto a la casilla y no se reserva nada.
+          if (error instanceof ServiceError && (error.status === 404 || error.status === 409))
+            throw new ServiceError(error.code, error.status, `El control ya no está por reservar: ${error.message}`, {
+              followUpIds: "Ese control ya no está por reservar: quítalo de esta cita.",
+            })
+          throw error
+        }
+      }
     }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, created.id)
