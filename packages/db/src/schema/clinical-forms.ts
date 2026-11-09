@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -421,10 +422,23 @@ export const consentDocument = pgTable(
      */
     personSignedIp: text("person_signed_ip"),
     personSignedUserAgent: text("person_signed_user_agent"),
+    /**
+     * La atención en que el profesional confirmó lo firmado por enlace (entrega 2,
+     * «Un enlace por cosa»): se confirma solo dentro de una atención de ese paciente y
+     * queda en cuál. No es `encounter_id`, que es la que lo pidió (nula si se envió
+     * desde Documentos). Nula en lo firmado en la clínica o en papel.
+     */
+    informedEncounterId: uuid("informed_encounter_id"),
     ...timestamps,
   },
   (table) => [
     ...diagnosisCodeRef("consent_document", table),
+    // La atención es del mismo paciente y de la misma clínica.
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.informedEncounterId],
+      foreignColumns: [encounter.organizationId, encounter.patientId, encounter.id],
+      name: "consent_document_informed_encounter_fk",
+    }),
     index("consent_document_org_patient_idx").on(table.organizationId, table.patientId),
     index("consent_document_org_status_idx").on(table.organizationId, table.status),
     index("consent_document_org_template_idx").on(table.organizationId, table.templateId),

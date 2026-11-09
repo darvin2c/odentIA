@@ -19,7 +19,7 @@
  *
  * Con `PEDIDOS=1` (vistIA), cada caso es de un paciente de la demo con un pedido de
  * lentes en curso o listo, que escribe por su WhatsApp para saber de sus lentes:
- * mide `ver_pedidos` (ADR 0171). Cada conversación dice si Sofi lo leyó.
+ * mide `ver_pedidos` (ADR 0172). Cada conversación dice si Sofi lo leyó.
  *
  * Con `VUELVE=1` al inventarlos, todos los casos son de quien vuelve: un paciente
  * que escribe por el WhatsApp donde ya conversó otras veces, con un hilo largo de

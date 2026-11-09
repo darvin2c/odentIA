@@ -523,29 +523,36 @@
     {
       "idx": 74,
       "version": "7",
-      "when": 1794242957164,
-      "tag": "0074_vistia_opticas",
+      "when": 1794244030795,
+      "tag": "0074_confirmado_en_la_atencion",
       "breakpoints": true
     },
     {
       "idx": 75,
       "version": "7",
-      "when": 1794243117169,
-      "tag": "0075_receta_de_lentes",
+      "when": 1794246200057,
+      "tag": "0075_vistia_opticas",
       "breakpoints": true
     },
     {
       "idx": 76,
       "version": "7",
-      "when": 1794243151851,
-      "tag": "0076_pedidos",
+      "when": 1794246229674,
+      "tag": "0076_receta_de_lentes",
       "breakpoints": true
     },
     {
       "idx": 77,
       "version": "7",
-      "when": 1794243228460,
-      "tag": "0077_pedido_listo",
+      "when": 1794246250861,
+      "tag": "0077_pedidos",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794246290361,
+      "tag": "0078_pedido_listo",
       "breakpoints": true
     }
   ]

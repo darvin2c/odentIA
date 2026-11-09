@@ -1,6 +1,6 @@
 {
-  "id": "20b07989-4e4d-4527-845c-7d1a4bf419bb",
-  "prevId": "009708df-a369-421e-9c46-af5d24b07bb6",
+  "id": "aac5e1df-d461-4f1c-8cfd-a7fcd6a8a11d",
+  "prevId": "6618cb27-5901-49fb-8946-407a3f57a615",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9999,6 +9999,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "informed_encounter_id": {
+          "name": "informed_encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10199,6 +10205,23 @@
           "columnsTo": [
             "system_key",
             "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consent_document_informed_encounter_fk": {
+          "name": "consent_document_informed_encounter_fk",
+          "tableFrom": "consent_document",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "informed_encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -42141,354 +42164,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "optical.lens_prescription": {
-      "name": "lens_prescription",
-      "schema": "optical",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "encounter_id": {
-          "name": "encounter_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "lenses": {
-          "name": "lenses",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pupillary_distance": {
-          "name": "pupillary_distance",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "issued_on": {
-          "name": "issued_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "valid_until": {
-          "name": "valid_until",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prescriber_user_id": {
-          "name": "prescriber_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "prescriber_name": {
-          "name": "prescriber_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prescriber_registration": {
-          "name": "prescriber_registration",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "photo_document_id": {
-          "name": "photo_document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "verified_at": {
-          "name": "verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "verified_by": {
-          "name": "verified_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_at": {
-          "name": "voided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_by": {
-          "name": "voided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "void_reason": {
-          "name": "void_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "lens_prescription_patient_idx": {
-          "name": "lens_prescription_patient_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "issued_on",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "lens_prescription_encounter_kind_uidx": {
-          "name": "lens_prescription_encounter_kind_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "encounter_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"optical\".\"lens_prescription\".\"encounter_id\" IS NOT NULL AND \"optical\".\"lens_prescription\".\"voided_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "lens_prescription_organization_id_organization_id_fk": {
-          "name": "lens_prescription_organization_id_organization_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_prescriber_user_id_user_id_fk": {
-          "name": "lens_prescription_prescriber_user_id_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "prescriber_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_verified_by_user_id_fk": {
-          "name": "lens_prescription_verified_by_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "verified_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_voided_by_user_id_fk": {
-          "name": "lens_prescription_voided_by_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "voided_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_created_by_user_id_fk": {
-          "name": "lens_prescription_created_by_user_id_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_patient_fk": {
-          "name": "lens_prescription_patient_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "patient",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_encounter_fk": {
-          "name": "lens_prescription_encounter_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "encounter_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "lens_prescription_photo_fk": {
-          "name": "lens_prescription_photo_fk",
-          "tableFrom": "lens_prescription",
-          "tableTo": "patient_document",
-          "columnsFrom": [
-            "organization_id",
-            "photo_document_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "lens_prescription_kind_check": {
-          "name": "lens_prescription_kind_check",
-          "value": "\"optical\".\"lens_prescription\".\"kind\" IN ('anteojos','contacto')"
-        },
-        "lens_prescription_source_check": {
-          "name": "lens_prescription_source_check",
-          "value": "\"optical\".\"lens_prescription\".\"source\" IN ('examen','externa')"
-        },
-        "lens_prescription_source_encounter_check": {
-          "name": "lens_prescription_source_encounter_check",
-          "value": "(\"optical\".\"lens_prescription\".\"source\" = 'examen') = (\"optical\".\"lens_prescription\".\"encounter_id\" IS NOT NULL)"
-        },
-        "lens_prescription_valid_check": {
-          "name": "lens_prescription_valid_check",
-          "value": "\"optical\".\"lens_prescription\".\"valid_until\" >= \"optical\".\"lens_prescription\".\"issued_on\""
-        },
-        "lens_prescription_void_check": {
-          "name": "lens_prescription_void_check",
-          "value": "(\"optical\".\"lens_prescription\".\"voided_at\" IS NULL) = (\"optical\".\"lens_prescription\".\"void_reason\" IS NULL)"
-        }
-      },
-      "isRLSEnabled": false
     }
   },
   "enums": {},
@@ -42496,8 +42171,7 @@
     "admin": "admin",
     "auth": "auth",
     "catalog": "catalog",
-    "dental": "dental",
-    "optical": "optical"
+    "dental": "dental"
   },
   "sequences": {},
   "roles": {},

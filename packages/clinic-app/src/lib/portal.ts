@@ -401,7 +401,7 @@ export function sentenceEnd(text: string): string {
   return /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`
 }
 
-/** Un pedido en el portal (ADR 0171): qué es, cómo va, para cuándo y lo que falta pagar. */
+/** Un pedido en el portal (ADR 0172): qué es, cómo va, para cuándo y lo que falta pagar. */
 export interface PortalOrder {
   id: string
   orderNumber: number

@@ -6,7 +6,7 @@ import { orgFk, timestamps } from "./crm.js"
 import { opticalSchema } from "./schemas.js"
 
 /**
- * La receta de lentes de vistIA (entrega 3 del plan, ADR 0169): de anteojos o de
+ * La receta de lentes de vistIA (entrega 3 del plan, ADR 0170): de anteojos o de
  * lentes de contacto, de la óptica (sale del examen y la firma el optómetra) o
  * externa (transcrita de la que trae el cliente, «sin verificar» hasta que un
  * optómetra la revise). Es solo de vistIA: vive en su esquema, con la RLS de la

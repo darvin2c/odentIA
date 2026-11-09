@@ -19,7 +19,7 @@ import type { ProductAgentTexts } from "./product-agent.js"
 import type { ProductDictation, ProductHooks } from "./product-hooks.js"
 
 /**
- * Si el producto trabaja con pedidos (ADR 0170): su pantalla Pedidos, «Pedido
+ * Si el producto trabaja con pedidos (ADR 0171): su pantalla Pedidos, «Pedido
  * listo» en sus mensajes y lo que Sofi responde de ellos. El pedido es común; hoy
  * solo una óptica lo usa.
  */

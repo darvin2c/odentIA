@@ -45,7 +45,7 @@ export const ORG_ROLES = ["owner", "admin", "reception", "clinician", "cashier",
 export type OrgRole = (typeof ORG_ROLES)[number];
 
 /**
- * Los roles de cada producto (ADR 0170): Ventas y Taller son de vistIA, donde
+ * Los roles de cada producto (ADR 0171): Ventas y Taller son de vistIA, donde
  * quien vende también cobra y agenda, y el taller solo ve los pedidos. Un mapa
  * completo, así un producto nuevo dice los suyos.
  */
@@ -72,7 +72,7 @@ export const PERMISSION_DOMAINS = [
   "settings",
   "audit",
   "agent",
-  // El pedido al taller o al laboratorio (ADR 0170).
+  // El pedido al taller o al laboratorio (ADR 0171).
   "orders",
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
@@ -150,7 +150,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "inventory.receive",
   // La receta de lentes vigente, sin el resto de la historia (Ventas en vistIA).
   "clinical.prescription",
-  // La copia de la receta en el pedido, para hacerlo (Taller en vistIA, ADR 0170).
+  // La copia de la receta en el pedido, para hacerlo (Taller en vistIA, ADR 0171).
   "orders.prescription",
 ];
 
@@ -379,7 +379,7 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // Con precios (`inventory.read`) o sin ellos (`inventory.stock`, recepción).
   { prefix: "/inventory", permissions: ["inventory.read", "inventory.stock"] },
   { prefix: "/reports", permissions: ["reports.read"] },
-  // Los pedidos al taller o al laboratorio (ADR 0170).
+  // Los pedidos al taller o al laboratorio (ADR 0171).
   { prefix: "/orders", permissions: ["orders.read"] },
   // Regla específica antes de la genérica: la auditoría vive bajo Configuración
   // pero la consulta quien tiene `audit.read`.

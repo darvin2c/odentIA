@@ -1,6 +1,6 @@
-# 0169 · El examen de la vista y la receta de lentes
+# 0170 · El examen de la vista y la receta de lentes
 
-Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0168](0168-vistia-el-producto-de-las-opticas.md). Entrega 3 del plan «vistIA: plan para ópticas».
+Fecha: 2026-11-08 · Estado: aceptada · Sigue a [0169](0169-vistia-el-producto-de-las-opticas.md). Entrega 3 del plan «vistIA: plan para ópticas».
 
 ## Problema
 
@@ -18,7 +18,7 @@ Una óptica examina la vista y entrega una receta: la de anteojos y, aparte, la 
 
 - **Usar la receta de medicamentos para los lentes.** Sus datos (DCI, dosis, vía) no son los de un lente, y mezclarlos confundiría a quien vende.
 - **Guardar la receta solo dentro del examen.** La externa no tiene atención, y la vigente se busca entre todas: la venta (entrega 4) la necesita sin abrir la historia.
-- **Dictar el examen a Clío.** Sigue fuera (ADR 0168).
+- **Dictar el examen a Clío.** Sigue fuera (ADR 0169).
 
 ## Consecuencias
 

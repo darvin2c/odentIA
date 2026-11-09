@@ -14,7 +14,7 @@ import { orderNoticeOf, sendOrderReadyNotice } from "./job-order-notice.js"
 import { productHooks } from "./products.js"
 
 /**
- * El pedido (ADR 0170): lo que la clínica encarga a su taller o a un laboratorio
+ * El pedido (ADR 0171): lo que la clínica encarga a su taller o a un laboratorio
  * para entregárselo a la persona. Común a los productos; vistIA lo usa con los
  * lentes. La venta crea los cargos de lo que lleva (con la caja de siempre),
  * el pedido con la fecha prometida y, si deja un adelanto, lo cobra con los
@@ -345,7 +345,7 @@ export async function advanceJobOrder(
     at: now,
   })
   await audit(tx, orgId, actorUserId, "job_order.advanced", id, { from: row.status, to: next })
-  // Listo: le avisa a la persona que puede recogerlo (ADR 0171). Si no sale, el pedido lo dice.
+  // Listo: le avisa a la persona que puede recogerlo (ADR 0172). Si no sale, el pedido lo dice.
   if (next === "listo") await sendOrderReadyNotice(tx, orgId, actorUserId, id)
   return getJobOrder(tx, orgId, id)
 }
@@ -650,7 +650,7 @@ export async function getJobOrder(
     })),
     dueCents: withMoney ? (due.get(id) ?? 0) : null,
     currency: await orgCurrency(tx, orgId),
-    /** «Pedido listo»: si salió, si llegó, si falló o si no se sabe (ADR 0171). */
+    /** «Pedido listo»: si salió, si llegó, si falló o si no se sabe (ADR 0172). */
     readyNotice:
       order.status === "listo"
         ? await orderNoticeOf(tx, orgId, order)

@@ -1,5 +1,5 @@
 /**
- * Los pedidos al taller o al laboratorio (ADR 0170): el cliente de `/api/orders`.
+ * Los pedidos al taller o al laboratorio (ADR 0171): el cliente de `/api/orders`.
  * Los tipos replican lo que entrega el servidor (`listJobOrders`, `getJobOrder`);
  * lo que se puede hacer y lo que falta pagar lo decide el servidor, aquí solo
  * se dice.
@@ -82,7 +82,7 @@ export interface OrderDetail extends Omit<OrderRow, "remadeAs"> {
     at: string
     actorName: string | null
   }>
-  /** «Pedido listo» (ADR 0171): si salió, si llegó, si falló o si no se sabe; null antes de estar listo. */
+  /** «Pedido listo» (ADR 0172): si salió, si llegó, si falló o si no se sabe; null antes de estar listo. */
   readyNotice: OrderNotice | null
 }
 

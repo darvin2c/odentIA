@@ -136,7 +136,8 @@ export function DocumentPaperPanel({
     ) : send?.kind === "node" ? (
       send.node
     ) : send?.kind === "blocked" ? (
-      <Button type="button" disabled className={cn(mobile && "min-h-11")}>
+      // Sin estilo principal: no se puede usar, y lo principal es lo que el aviso pide (p. ej. «Confirmar consentimiento»).
+      <Button type="button" variant="outline" disabled className={cn(mobile && "min-h-11")}>
         Enviar
       </Button>
     ) : null

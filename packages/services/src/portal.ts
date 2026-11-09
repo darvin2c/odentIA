@@ -1749,7 +1749,7 @@ export interface PortalAccountView {
   }>
 }
 
-/** Un pedido como lo ve la persona en su portal (ADR 0171): qué es, cómo va, para cuándo y lo que falta. */
+/** Un pedido como lo ve la persona en su portal (ADR 0172): qué es, cómo va, para cuándo y lo que falta. */
 export interface PortalOrder {
   id: string
   orderNumber: number
@@ -1763,7 +1763,7 @@ export interface PortalOrder {
 }
 
 /**
- * Sus pedidos en el portal (ADR 0171): los que se trabajan y el último entregado.
+ * Sus pedidos en el portal (ADR 0172): los que se trabajan y el último entregado.
  * Van con «Su cuenta» (es lo que compró y lo que le falta pagar), así que la
  * clínica que la oculta los oculta también. Sin la receta ni nada clínico.
  */

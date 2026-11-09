@@ -13,7 +13,7 @@ import { ServiceError } from "./errors.js"
 import { openRoute } from "./message-gate.js"
 
 /**
- * «Pedido listo» (ADR 0171): al marcar «Listo» un pedido, a quien recibe los
+ * «Pedido listo» (ADR 0172): al marcar «Listo» un pedido, a quien recibe los
  * avisos de la persona, por la vía que haya (la plantilla aprobada, la respuesta
  * dentro de las 24 horas o el correo). El pedido guarda su mensaje: la pantalla
  * dice si salió, si llegó, si falló o si no se sabe, y un aviso dudoso no se

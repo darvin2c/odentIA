@@ -8,7 +8,7 @@ import { formatDate } from "../../lib/clinical-journey"
 /** Lo que dice el consentimiento sobre «Su enlace»: enviado, firmado por la persona o nada. */
 export function consentLinkWords(document: Pick<ConsentDocument, "status" | "linkSentAt" | "personSignedAt">): string | null {
   if (document.status !== "pendiente") return null
-  if (document.personSignedAt) return `Lo firmó desde su enlace el ${formatDate(document.personSignedAt)}: confírmalo antes de empezar.`
+  if (document.personSignedAt) return `Lo firmó desde su enlace el ${formatDate(document.personSignedAt)}: confírmalo en su atención, antes de empezar.`
   if (document.linkSentAt) return `Se le envió para firmar el ${formatDate(document.linkSentAt)}: espera su firma.`
   return null
 }
@@ -17,16 +17,21 @@ export function consentLinkWords(document: Pick<ConsentDocument, "status" | "lin
  * Firmar por enlace (tablero 2, «Antes de llegar»): «Enviar para firmar» lo
  * deja en «Su enlace» y se lo envía; cuando la persona firma, el profesional
  * lo confirma y recién entonces queda firmado. Aprobación de la persona y
- * confirmación del profesional son pasos distintos.
+ * confirmación del profesional son pasos distintos. Confirmar se hace solo
+ * dentro de la atención en curso de ese paciente (`encounterId`); fuera de
+ * ella, la fila dice «Lo confirmas en su atención».
  */
 export function ConsentLinkActions({
   document,
   onChanged,
   size = "sm",
+  encounterId = null,
 }: {
   document: ConsentDocument
   onChanged: () => void | Promise<void>
   size?: "sm" | "default"
+  /** La atención en curso donde se muestra: solo ahí se ofrece «Confirmar consentimiento». */
+  encounterId?: string | null
 }) {
   const [asking, setAsking] = useState(false)
   const [requestId] = useState(() => crypto.randomUUID())
@@ -38,7 +43,7 @@ export function ConsentLinkActions({
     },
   })
   const confirm = useMutation({
-    mutationFn: () => confirmLinkSignedConsent(document.id),
+    mutationFn: (inAttention: string) => confirmLinkSignedConsent(document.id, inAttention),
     onSuccess: async () => {
       await onChanged()
     },
@@ -49,9 +54,13 @@ export function ConsentLinkActions({
   return (
     <>
       {document.personSignedAt ? (
-        <Button type="button" size={size} disabled={confirm.isPending} onClick={() => confirm.mutate()}>
-          {confirm.isPending ? "Confirmando…" : "Confirmar"}
-        </Button>
+        encounterId ? (
+          <Button type="button" size={size} disabled={confirm.isPending} onClick={() => confirm.mutate(encounterId)}>
+            {confirm.isPending ? "Confirmando…" : "Confirmar consentimiento"}
+          </Button>
+        ) : (
+          <span className="text-sm text-muted-foreground">Lo confirmas en su atención</span>
+        )
       ) : (
         <Button type="button" size={size} variant="outline" onClick={() => setAsking(true)}>
           {document.linkSentAt ? "Enviar otra vez" : "Enviar para firmar"}
@@ -65,7 +74,7 @@ export function ConsentLinkActions({
       <ConfirmDialog
         open={asking}
         title="Enviar para firmar"
-        description={`«${document.titleSnapshot}» aparece en «Su enlace»: lo lee, escribe su documento y firma desde su teléfono. Después lo confirmas tú antes de empezar.`}
+        description={`Le llega «${document.titleSnapshot}» para leerlo y firmarlo desde su teléfono, escribiendo su documento. Después lo confirmas tú en su atención, antes de empezar.`}
         error={send.error ? submitErrorMessage(send.error) : null}
         confirmLabel="Enviar"
         variant="default"

@@ -1,6 +1,6 @@
 ---
 name: odentia-carga
-description: Cargar los pacientes de una clínica nueva desde los archivos que ya tiene (su Excel o lo que exporta su sistema), sin plantilla nuestra. Pedir los datos, leerlos con un mapa de columnas, revisar lo dudoso con quien acompaña el alta y dejar el plan listo para «Cargar datos» en la administración. Usar cuando el equipo trae los datos de una clínica que empieza.
+description: Cargar los pacientes de una clínica nueva desde los archivos que ya tiene (su Excel o lo que exporta su sistema), sin plantilla nuestra. Pedirle los datos con la carta de bienvenida en PDF con la marca, leerlos con un mapa de columnas, revisar lo dudoso con quien acompaña el alta y dejar el plan listo para «Cargar datos» en la administración. Usar cuando el equipo trae los datos de una clínica que empieza o pide la carta, el documento o el mensaje para pedírselos a una clínica nueva.
 ---
 
 # Cargar los datos de una clínica nueva
@@ -25,25 +25,60 @@ Primero va lo que otra cosa necesita: una cita necesita al profesional y la sede
 
 | Etapa | Qué se pide | Cuándo | Cómo se carga |
 |---|---|---|---|
-| 1 · La clínica | Razón social, RUC, nombre comercial y logo; sedes con dirección y horario; unidades dentales; equipo (nombre, correo, rol, especialidad y, de los odontólogos, su colegiatura); servicios y precios | Semana del alta | A mano en el alta, con la dueña: Equipo invita a cada persona y Servicios parte de la biblioteca del país |
-| 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta | Con esta skill |
+| 1 · La clínica | Todo lo que se configura, por área: empresa (razón social, RUC, dirección fiscal, logo, teléfono de urgencias, monedas); sedes y unidades dentales o consultorios; equipo (rol, título, especialidad, colegiatura) y horarios y ausencias de cada profesional; servicios y precios, especialidades y promociones; inventario y proveedores; caja (medios de pago, gastos fijos, comisiones, ticket y vigencia del presupuesto); lo que el asistente responde a los pacientes y sus formatos propios; canales | Semana del alta, en la carta | A mano en el alta, con lo que enviaron, y se revisa con la dueña en la reunión: Datos de la clínica y Sedes; Equipo invita a cada persona y cada profesional completa su perfil; Horarios y ausencias; Servicios parte de la biblioteca del país; Inventario con «Pegar tu lista»; medios de pago, gastos que se repiten y comisiones; «Lo que solo tú sabes» del asistente; los canales se conectan con ella en la reunión, nunca con contraseñas por correo |
+| 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta, en la carta | Con esta skill |
 | 3 · Día de corte | Citas de las próximas 2 a 4 semanas (fecha, hora, paciente, profesional, sede y motivo); saldos y deudas a esa fecha | La víspera de empezar a agendar en odentIA | Todavía no: las citas se registran a mano la primera semana |
 | 4 · Después | Historia anterior en PDF o fotos, con el número de historia o el DNI en el nombre o en una lista; alergias y antecedentes; radiografías y documentos; tratamientos en curso y presupuestos | Sin apuro | Todavía no |
 
 Mientras las etapas 3 y 4 no tengan carga, solo se pregunta si se pueden exportar; no se piden los archivos.
 
-El mensaje para pedir la lista de pacientes, que puede enviar quien acompaña el alta:
+## La carta de bienvenida
 
-> Para cargar a sus pacientes en odentIA, envíenos la lista de pacientes tal como la tienen: su Excel o lo que descarga su sistema actual. No hace falta ordenarla ni cambiar columnas. Si la tienen, que traiga el número de historia, nombres y apellidos, documento, fecha de nacimiento, sexo, celular, correo y dirección y, de los menores, quién es su apoderado (nombre, documento, parentesco y celular). Si su sistema tiene varias exportaciones, la que necesitamos es la de pacientes, no la de citas ni la de pagos.
+Los datos de las etapas 1 y 2 se piden con una carta en PDF con la marca del producto de la clínica (odentIA o latidIA) y su titular, SALLCA GROUP E.I.R.L. La idea es cargar todo lo que se pueda. Es una carta formal, que trata de usted a quien la recibe.
+- **La primera hoja:** fecha, destinatario, asunto y «De nuestra consideración:». Después, los próximos pasos: entrar y aceptar el contrato de encargo, enviar a soporte en un solo correo los datos de la clínica y la lista de pacientes, y la reunión de implementación. Luego, el tratamiento de su información, incluido que el correo se borra, como máximo, a los 30 días. Cierra con la despedida y la firma de quien acompaña.
+- **Desde la segunda hoja:** el anexo con todo lo que se puede cargar, por área (empresa, sedes, equipo y horarios, servicios, inventario y proveedores, caja y gastos, atención a sus pacientes, canales) y, al final, la lista de pacientes, para que lo reúnan.
+- **El pie de cada hoja** es del remitente (la marca, su web y su titular), nunca de la clínica. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
 
-Si solo puede sacar un reporte de citas, también sirve: cada paciente aparece en varias filas y se toma una vez.
+La carta es para clínicas de Perú: pide el RUC y la colegiatura. Le pide aceptar la invitación que le llegó al correo: se entrega cuando la clínica ya está creada en la administración (alta asistida) y su invitación salió. Si todavía no, dilo al entregarla.
+
+Cuando la pidan, pregunta en un solo mensaje lo que falte de esto (lo que ya se dijo en la conversación no se vuelve a preguntar):
+
+- **La clínica:** su nombre, como lo conocen sus pacientes. El producto se deduce de si es dental o médica y se dice, sin preguntarlo; sin saberlo, odentIA.
+- **A quién va:** su nombre, como lo escribe ella, y su cargo si lo dicen («Dra. Ana Pérez, directora»). El cargo no se inventa: sin él, solo el nombre.
+- **Quién acompaña el alta**, que firma la carta: nombre, cargo, correo de odentia32.com (o latidia72.com) y, si quiere, celular. Es el contacto para dudas, nunca para recibir la lista. Sin cargo, la firma lleva solo el nombre y la marca.
+- **Hasta cuándo** enviar los datos y la lista. Sugiere una fecha: unos días hábiles después de la carta.
+- **Si ya se sabe qué usa la clínica** para sus pacientes. Si no, la carta se lo pregunta (`askCurrentSystem`).
+
+Escribe `carta.json` en la carpeta privada de la clínica, fuera del repositorio (`~/odentia-cargas/<clinica>/`, con el nombre de la clínica en minúsculas y guiones), y genera el PDF, que queda junto a él. `date` se pone solo para fechar la carta otro día que hoy:
+
+```bash
+pnpm --filter @odentia/services import:carta -- <carpeta>/carta.json
+```
+
+```jsonc
+{
+  "product": "dental",                   // o "medical" (latidIA)
+  "clinic": "Clínica Dental Sonrisa",
+  "to": "Dra. Ana Pérez, directora",
+  "companion": { "name": "Carlos Ruiz", "role": "Implementación", "email": "carlos@odentia32.com", "phone": "987 654 321" },
+  "deadline": "2026-11-13",              // AAAA-MM-DD
+  "askCurrentSystem": true,              // false si ya se sabe qué usa
+  "date": "2026-11-09"                   // opcional: sin él, hoy en Lima
+}
+```
+
+El buzón es `soporte@odentia32.com` o, en latidIA, `soporte@latidia72.com`; otro, solo con `inbox`. Antes de la primera carta de latidIA, comprueba que `soporte@latidia72.com` recibe correo.
+
+El comando dice cuántas páginas salió: tres como máximo, y si pasan, falla. `hojasDeLaCarta` tiene que ser 1: la carta con su firma en la primera hoja y el anexo desde la segunda. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda sus datos a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
 
 ## Antes de empezar
 
 - La clínica ya existe (alta asistida) y tiene su país. El plan se prepara con ese país.
+- La lista llega por correo a soporte. Antes de abrir el adjunto, la clínica tiene que haber aceptado el contrato de encargo: odentIA se lo pide a la propietaria al entrar y no la deja seguir sin él. Que haya aceptado la invitación no basta, y la administración todavía no muestra el contrato: confírmalo con ella. Si no lo aceptó, no se abre: se le recuerda entrar.
+- Anota el día en que llegó el correo: desde ese día corren los 30 días que promete la carta.
 - Los archivos van en una carpeta privada fuera del repositorio (por ejemplo `~/odentia-cargas/<clinica>/`). Nunca se suben al repositorio ni se pegan en el chat.
 - El mapa se escribe con `import:peek` (las hojas y la forma de cada columna): no hace falta leer filas de personas. Lo dudoso se revisa con la persona sobre el `informe.md`.
-- Pendiente legal antes de cargar la primera clínica real: que la clínica acepte el contrato de encargo y que Anthropic figure en `packages/auth/src/data-processors.ts`.
+- Pendiente legal antes de cargar la primera clínica real: que Anthropic y el proveedor del buzón de soporte, que recibe la lista, figuren en `packages/auth/src/data-processors.ts`, avisando a la clínica como pide el contrato de encargo.
 
 ## Pasos
 
@@ -68,15 +103,26 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
    - Un motivo que se repite en muchas filas casi siempre es del mapa: un valor de sexo o de tipo de documento sin nombrar, o el formato de fecha. Corrige el mapa, no las filas.
    - Lo de una fila se decide en `overrides`, por clave:
      - `skip` la deja fuera, con un motivo;
-     - `set` corrige un dato ya en su forma final: fecha `AAAA-MM-DD`, tipo de documento en código y teléfono con `+`;
-     - `guardian` dice quién habla por ella.
+     - `set` corrige un dato ya en su forma final: fecha `AAAA-MM-DD`, tipo de documento en código y teléfono con `+`; con `null` lo quita (`"phone": null` carga la fila sin ese teléfono);
+     - `guardian` dice quién habla por ella; con `null`, que nadie habla por ella aunque el archivo traiga a alguien.
    - **Lo parecido lo decide la persona, nunca la skill.** Mismo nombre, mismo teléfono o la madre repetida sin documento: pregunta. Si son la misma persona, una queda fuera con `skip` o el niño apunta a la misma madre con `guardian`.
    - Un fijo sin código de país no se puede usar. Pregunta si se carga sin ese teléfono (`invalidPhones: "omitir"`).
 5. **Repetir los pasos 3 y 4** hasta que lo que queda fuera y los errores sean solo lo que la clínica acepta dejar fuera.
 6. **La carga la hace la persona en la administración:** la ficha de la clínica › «Cargar datos» › «Elegir el plan» (`plan.json`).
    - Primero ve el ensayo: además de lo del plan, dice quién ya estaba en la clínica.
    - Después pulsa «Cargar». Si se corta, «Seguir desde donde quedó» no duplica nada.
-7. **Al terminar**, borra los archivos de la clínica, `plan.json` e `informe.md`. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
+7. **Comprobar la carga**, antes de borrar nada:
+   - **Las cifras cuadran**, con el informe y el ensayo:
+     - creadas + ya estaban + no entraron = las personas del plan, que son los pacientes más quienes hablan por ellos (una madre que no es paciente también se crea);
+     - pacientes del plan + lo que quedó fuera al preparar (incluida la persona repetida que se tomó una vez) = las filas del archivo.
+
+     El contador de la pantalla se pierde si se recarga a mitad de la carga: lo que vale es «Volver a ensayar». Si no cuadra, no se borra nada hasta saber por qué.
+   - **«Volver a ensayar»** con el mismo plan: todo sale como ya cargado y nada como nuevo. Lo que sale como nuevo no entró.
+   - **Lo que no entró** aparece en la pantalla con su motivo. Se resuelve con la clínica o queda anotado como fuera.
+   - **Una muestra a mano**, comparada con el archivo: unas diez fichas elegidas a propósito. Entre ellas, un menor con quien habla por él, un DNI al que se le devolvió el cero, una celda con dos teléfonos, una persona repetida en el archivo y la última fila. Se revisan con la propietaria en la reunión de alta, mirando su pantalla: ni la administración ni el acceso de soporte abren pacientes.
+   - **«Faltan datos»** en Personas: los que entraron incompletos, para completarlos con la clínica.
+   - **Los datos de la clínica** (sedes, unidades dentales, equipo, servicios y precios) se repasan pantalla por pantalla en la reunión de alta, contra lo que envió.
+8. **Al terminar**, borra los archivos de la clínica, `plan.json` e `informe.md`, y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
 
 ## El mapa
 
@@ -95,7 +141,8 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
       "fullName": "Paciente",          // solo si no hay nombres y apellidos aparte: no se separa
       "docType": "Tipo", "docNumber": "DNI", "birthDate": "F. Nac", "sex": "Sexo",
       "phone": "Celular", "email": "Correo", "address": "Dirección",
-      "guardianName": "Apoderado", "guardianDocNumber": "DNI apoderado",
+      "guardianName": "Apoderado",     // o guardianGivenNames y guardianFamilyName, si vienen aparte
+      "guardianDocType": "Tipo doc. apoderado", "guardianDocNumber": "DNI apoderado",
       "guardianKinship": "Parentesco", "guardianPhone": "Cel. apoderado"
     },
     "defaults": { "docType": "DNI", "guardianDocType": "DNI" },
@@ -107,7 +154,8 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
   "overrides": {
     "1043": { "set": { "birthDate": "1985-12-12" } },
     "1050": { "skip": "Es paciente de otra clínica" },
-    "1051": { "guardian": { "key": "1043" } }
+    "1051": { "guardian": { "key": "1043" } },
+    "1052": { "set": { "phone": null }, "guardian": null }
   }
 }
 ```

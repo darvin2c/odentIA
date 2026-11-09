@@ -389,7 +389,7 @@ async function maySeeMoneyOf(
   )
 }
 
-/** Lo que Sofi dice de un pedido (ADR 0171): qué es, cómo va, para cuándo y, a quien puede oírlo, cuánto falta. */
+/** Lo que Sofi dice de un pedido (ADR 0172): qué es, cómo va, para cuándo y, a quien puede oírlo, cuánto falta. */
 export interface AgentPatientOrder {
   orderNumber: number
   title: string
@@ -405,7 +405,7 @@ export interface AgentPatientOrder {
 const AGENT_DELIVERED_ORDERS_SHOWN = 2
 
 /**
- * Los pedidos de la persona para Sofi (ADR 0171): los que se trabajan, del que
+ * Los pedidos de la persona para Sofi (ADR 0172): los que se trabajan, del que
  * vence antes al que vence después, y los últimos entregados. Lo que falta pagar
  * solo a quien puede oírlo, con la misma regla que el saldo de su resumen.
  */
