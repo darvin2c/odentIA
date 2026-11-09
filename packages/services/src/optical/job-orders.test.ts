@@ -5,12 +5,12 @@ import { jobOrder, jobOrderEvent } from "@odentia/db/schema/orders"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { clinicalFixture } from "./clinical-test-fixture.js"
-import { advanceJobOrder, createJobOrderSale, getJobOrder, listJobOrders, remakeJobOrder, saleReferencesOf, voidJobOrder } from "./job-orders.js"
-import { issueLensPrescription } from "./optical/lens-prescriptions.js"
-import { createPaymentMethod } from "./payment-methods.js"
-import { getTicketReturnable, returnFromTicket } from "./payments.js"
-import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { clinicalFixture } from "../clinical-test-fixture.js"
+import { advanceJobOrder, createJobOrderSale, getJobOrder, listJobOrders, remakeJobOrder, saleReferencesOf, voidJobOrder } from "../job-orders.js"
+import { issueLensPrescription } from "./lens-prescriptions.js"
+import { createPaymentMethod } from "../payment-methods.js"
+import { getTicketReturnable, returnFromTicket } from "../payments.js"
+import { insertOrg, ownerDb, setupTestDb } from "../test-setup.js"
 
 setupTestDb()
 

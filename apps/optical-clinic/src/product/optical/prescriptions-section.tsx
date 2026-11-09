@@ -20,6 +20,7 @@ import {
   AlertDescription,
   Badge,
   Button,
+  buttonVariants,
   Field,
   FieldError,
   FieldLabel,
@@ -29,6 +30,7 @@ import {
 } from "@odentia/ui"
 import { EmptyState, FormDrawer, LoadingState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { Glasses } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { ChoiceButtons } from "@odentia/clinic-app/components/choice-buttons"
@@ -106,6 +108,7 @@ function PrescriptionCard({
   patientId,
   prescription,
   canWrite,
+  canSell,
   onVerify,
   onVoid,
   verifying,
@@ -113,6 +116,8 @@ function PrescriptionCard({
   patientId: string
   prescription: LensPrescription
   canWrite: boolean
+  /** Vender con pedido pide los pedidos y la caja (Ventas). */
+  canSell: boolean
   onVerify: () => void
   onVoid: () => void
   verifying: boolean
@@ -145,6 +150,16 @@ function PrescriptionCard({
         </Alert>
       ) : null}
       <div className="flex flex-wrap gap-2">
+        {/* La venta se abre con esta persona y esta receta; vencida o sin verificar se informa allí, no impide. */}
+        {canSell ? (
+          <Link
+            to="/orders"
+            search={{ vender: 1, persona: patientId, receta: prescription.id }}
+            className={buttonVariants({ size: "sm" })}
+          >
+            Vender con esta receta
+          </Link>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -435,6 +450,9 @@ function IssueAgainDrawer({ patientId, from, onClose }: { patientId: string; fro
 export function PrescriptionsSection({ patientId }: RecordSectionProps) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
+  const canOrders = usePermission("orders.write")
+  const canCollect = usePermission("finance.write")
+  const canSell = canOrders && canCollect
   const myUserId = useMyUserId()
   const [externalOpen, setExternalOpen] = useState(false)
   const [voiding, setVoiding] = useState<LensPrescription | null>(null)
@@ -496,6 +514,7 @@ export function PrescriptionsSection({ patientId }: RecordSectionProps) {
               patientId={patientId}
               prescription={prescription}
               canWrite={canWrite}
+              canSell={canSell}
               verifying={verify.isPending && verify.variables === prescription.id}
               onVerify={() => verify.mutate(prescription.id)}
               onVoid={() => setVoiding(prescription)}

@@ -44,6 +44,7 @@ import {
   KeyRound,
   ListTodo,
   Package,
+  PackageCheck,
   Percent,
   Settings,
   Smile,
@@ -187,8 +188,12 @@ const clinicAgreement = {
 
 /** `unlessPermission`: la entrada sobra para quien ya llega a lo mismo por otra pantalla. */
 type NavChild = AppShellNavItem & { permission?: string; permissionsAny?: string[]; unlessPermission?: string }
+/**
+ * `shown`: la entrada es de una parte del producto (`productUi()`), que se pregunta al
+ * dibujar el menú: al cargar este módulo la app todavía no declaró su producto.
+ */
 type NavDefinition =
-  | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; children?: undefined })
+  | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; shown?: () => boolean; children?: undefined })
   | (Omit<AppShellNavGroup, "children"> & {
       permission?: string
       permissionsAny?: string[]
@@ -202,6 +207,8 @@ const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
+  // Solo donde el producto vende con pedido al taller o al laboratorio (vistIA, ADR 0168).
+  { label: "Pedidos", to: "/orders", icon: PackageCheck, permission: "orders.read", shown: () => Boolean(productUi().orders) },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   // El agente es una sola entrada, junto al trabajo diario; sus secciones
   // (resumen, aprender, conocimiento) son pestañas de página. Es de quien lo
@@ -368,7 +375,8 @@ function OrgLayout() {
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
     const selfVisible =
       (!item.permission || canAccess(role, item.permission)) &&
-      (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
+      (!item.permissionsAny || canAccessAny(role, item.permissionsAny)) &&
+      (item.children || !item.shown || item.shown())
     if (!item.children) return selfVisible ? [withNavState(item)] : []
     const children = item.children
       .filter(

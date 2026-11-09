@@ -249,6 +249,16 @@ export function tasksFilters(can: Can): FilterDef[] {
   return can("tasks.all") ? [{ key: "alcance", label: "Alcance", type: "select", options: [{ value: "clinica", label: "Toda la clínica" }] }] : []
 }
 
+/** Vender crea los cargos y cobra el adelanto: pide los pedidos y la caja, y que el producto venda con pedido. */
+export function canSellOrders(can: Can): boolean {
+  return Boolean(productUi().orders) && can("orders.write") && can("finance.write")
+}
+
+export function ordersPrimary(can: Can, run?: () => void): PageHeaderPrimary | undefined {
+  const orders = productUi().orders
+  return orders && canSellOrders(can) ? action(orders.sellLabel, PLUS, run) : undefined
+}
+
 export function pipelinePrimary(can: Can, run?: () => void): PageHeaderPrimary | undefined {
   return can("crm.write") ? action("Nueva oportunidad", PLUS, run) : undefined
 }

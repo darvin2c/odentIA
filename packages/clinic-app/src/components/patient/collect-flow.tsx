@@ -87,9 +87,15 @@ export function ApplyCreditDialog({
 export function CollectButton({
   patientId,
   patientName,
+  onChanged,
   ...options
-}: { patientId: string; patientName: string } & CollectButtonOptions) {
-  const flow = useCollectFlow({ patientId, patientName })
+}: {
+  patientId: string
+  patientName: string
+  /** Después de cobrar o aplicar saldo: lo que quien llama muestra de esa deuda (un pedido). */
+  onChanged?: () => void
+} & CollectButtonOptions) {
+  const flow = useCollectFlow({ patientId, patientName, onChanged })
   return (
     <>
       {flow.button(options)}
@@ -114,11 +120,14 @@ export function useCollectFlow({
   patientId,
   patientName,
   enabled = true,
+  onChanged,
 }: {
   patientId: string
   patientName: string
   /** Sin nada que cobrar a la vista no hace falta leer la cuenta. */
   enabled?: boolean
+  /** Después de cobrar o aplicar saldo, además de la cuenta de la persona. */
+  onChanged?: () => void
 }): { button: (options: CollectButtonOptions) => ReactNode; surfaces: ReactNode } {
   const canWrite = usePermission("finance.write")
   const uid = useId()
@@ -159,7 +168,10 @@ export function useCollectFlow({
     if (!branchId) setAsking(action)
     else begin(action)
   }
-  const changed = () => invalidatePatientAccount(queryClient, patientId)
+  const changed = () => {
+    invalidatePatientAccount(queryClient, patientId)
+    onChanged?.()
+  }
 
   const button = ({ size, variant, currency }: CollectButtonOptions): ReactNode => {
     if (!canWrite) return null
