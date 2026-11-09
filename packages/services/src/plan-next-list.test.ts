@@ -123,7 +123,7 @@ it("lo aceptado y el control vencido, en una fila y una cita; quién indicó el 
   expect(step).toEqual(steps[0])
   expect(await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).toEqual(step)
   expect(step).toMatchObject({
-    text: "Falta su cita: lo aceptado y su control",
+    text: "Falta su cita: lo aceptado y el control vencido",
     detail: expect.stringMatching(/^Tratamiento propio · respondió el .* · Control semestral vencido: tocaba el /),
     action: { label: "Reservar lo aceptado y el control", planItemIds: [item.id], followUpId: overdue.id },
   })
@@ -219,6 +219,10 @@ it("el control de un tratamiento va primero; reservar lo aceptado con el control
   )
   const [linked] = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.id, cleaning.id))
   expect(linked).toMatchObject({ status: "programado", appointmentId: visit.id })
+  // «Qué sigue» dice que el control va en esa misma cita, no una fila suelta «con cita».
+  await ownerDb.update(clinicalFollowUp).set({ status: "cancelado" }).where(eq(clinicalFollowUp.id, endo.id))
+  const after = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  expect(after.steps.find((row) => row.action?.appointmentId === visit.id && row.kind === "control")?.text).toMatch(/^Limpieza y control · en su cita del /)
   // Un control que ya no está por reservar no deja la cita a medias: no se reserva nada.
   await expect(
     f.run((tx) =>

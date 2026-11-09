@@ -621,10 +621,12 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     const yourAppointment = (date: Date) => (seesAgenda ? `su cita del ${day(date)}` : "su próxima cita")
     const what = context.budgetRequired ? "lo aceptado" : "lo indicado"
     const missing = nextAppointmentAt ? `${yourAppointment(nextAppointmentAt)} no lo lleva${partly ? " todo" : ""}` : "falta su cita"
+    // «el control vencido»: no es el control de lo aceptado, y lo vencido se dice en el título (segunda mesa).
+    const controlNoun = control && dayKey(control.dueAt) < dayKey(new Date()) ? "el control vencido" : "el control"
     const text = control
       ? nextAppointmentAt
-        ? `${what.charAt(0).toUpperCase()}${what.slice(1)} y su control no van en ${yourAppointment(nextAppointmentAt)}`
-        : `Falta su cita: ${what} y su control`
+        ? `${what.charAt(0).toUpperCase()}${what.slice(1)} y ${controlNoun} no van en ${yourAppointment(nextAppointmentAt)}`
+        : `Falta su cita: ${what} y ${controlNoun}`
       : decided
         ? decided.status === "aceptado"
           ? `Aceptó todo: ${missing}`
@@ -717,6 +719,14 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
         action: can("appointments.write") ? { label: "Reservar el control", followUpId: control.id } : null,
       }
     }
+    // En su próxima cita: lo dice, así se ve que va en la misma visita (segunda mesa del 9 nov).
+    if (control.appointmentId && control.appointmentId === nextAppointmentId && nextAppointmentAt)
+      return {
+        kind: "control",
+        text: `${control.title} · en su cita del ${day(nextAppointmentAt)}`,
+        detail: detail(due),
+        action: can("appointments.read") ? { label: "Ver la cita", appointmentId: control.appointmentId } : null,
+      }
     return {
       kind: "control",
       text: `${control.title} · con cita`,

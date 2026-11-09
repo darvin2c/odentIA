@@ -312,7 +312,7 @@ it("Pacientes filtrado por un atajo dice el paso de ese atajo; el paso único no
     )?.nextStep
   // La misma fila sin filtro, en «Control vencido» y en «Por agendar».
   for (const atajo of [undefined, "control_por_reservar", "por_agendar"])
-    expect(await rowIn(atajo)).toMatchObject({ kind: "agendar", text: "Falta su cita: lo aceptado y su control", actionLabel: "Reservar lo aceptado y el control" })
+    expect(await rowIn(atajo)).toMatchObject({ kind: "agendar", text: "Falta su cita: lo aceptado y el control vencido", actionLabel: "Reservar lo aceptado y el control" })
 
   // Con un presupuesto armado y sin enviar, el paso único es enviarlo; «Por agendar» sigue diciendo lo aceptado.
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: lia, title: "Otro plan" }).returning({ id: treatmentPlan.id })
