@@ -47,7 +47,10 @@ import { useActiveBranch } from "../../lib/active-branch"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
+  acceptedTotalsKey,
   CASH_TYPE_CODE,
+  fetchAcceptedTotals,
+  treatmentLineName,
   createManualChargeApi,
   fetchPatientAccount3,
   fetchPaymentMethods,
@@ -66,6 +69,7 @@ import {
   type RefundResult,
 } from "../../lib/finance-collect"
 import { useOrgSecondCurrency } from "../../lib/org"
+import { productUi } from "../../product/product-ui"
 import { useOrgEvents } from "../../lib/org-events"
 import type { PatientFull } from "../../lib/patients"
 import { AccountSkeleton } from "../skeletons/person-sections"
@@ -160,6 +164,8 @@ export function AccountTab({
   const [cobrarOpen, setCobrarOpen] = useState(false)
   /** «Cobrar lo que falta»: la moneda en que se abre el cobro. */
   const [collectIn, setCollectIn] = useState<string | undefined>(undefined)
+  /** «Cobrar un adelanto» de un tratamiento aceptado: su línea del presupuesto. */
+  const [advanceFor, setAdvanceFor] = useState<string | undefined>(undefined)
   /** Con otra moneda, de cuál se devuelve lo que tiene a favor. */
   const [refundUnit, setRefundUnit] = useState<string | null>(null)
   const [collect, setCollect] = useState<CollectResultBody | null>(null)
@@ -174,6 +180,15 @@ export function AccountTab({
     queryKey: ["patient-account3", patientId],
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canRead,
+  })
+  // Lo aceptado, lo pagado y lo que falta de cada presupuesto (QA de la ficha del 8 nov):
+  // caja lo veía en Plan, a otro clic. Pide caja y presupuesto a la vez.
+  const canBudgets = usePermission("budgets.read")
+  const acceptedTotals = useQuery({
+    queryKey: acceptedTotalsKey(patientId),
+    queryFn: () => fetchAcceptedTotals(patientId),
+    enabled: canRead && canBudgets,
+    retry: false,
   })
   // La ficha ya cargó al paciente: misma clave, sin otra petición.
   const patient = useQuery({
@@ -354,6 +369,11 @@ export function AccountTab({
         ? `, de ${creditSources.length} cobros`
         : ""
   const pending = data.pendiente
+  const placeName = (code: string) => {
+    const site = productUi().site
+    const place = Number(code)
+    return site?.isPlace(place) ? site.placeName(place) : null
+  }
   const orgRow = data.byCurrency.find((row) => row.currency === orgUnit)
   // Con otra moneda, las acciones van por moneda: primero lo que debe en la del negocio.
   const rows = second ? data.byCurrency : orgRow ? [orgRow] : []
@@ -533,6 +553,93 @@ export function AccountTab({
         ) : null}
       </section>
 
+      {(acceptedTotals.data?.data ?? []).length > 0 ? (
+        <Section title="Tratamiento aceptado">
+          <ul className="flex flex-col divide-y">
+            {(acceptedTotals.data?.data ?? []).map((group) => {
+              const names = group.lines.map((line) => treatmentLineName(line, placeName))
+              const advanceable = group.lines.find((line) => line.billingMode !== "session" && line.toChargeCents > 0)
+              const free = data.byCurrency.find((row) => row.currency === group.currency)?.aFavor ?? 0
+              return (
+                <li key={`${group.budgetId}-${group.currency}`} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-[1_1_16rem]">
+                      <p className="text-sm font-medium">
+                        {names.length > 3 ? `${names.slice(0, 3).join(", ")} y ${names.length - 3} más` : names.join(", ")}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {[
+                          `Presupuesto N.º ${group.budgetNumber}`,
+                          group.decidedAt ? `aceptado el ${formatDayLongLocale(group.decidedAt, locale, timeZone)}` : null,
+                          // Con dos monedas, cada una en su renglón: no se suman (ADR 0135).
+                          second ? `en ${currencyWord(group.currency, locale)}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    {canWrite && advanceable ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setAdvanceFor(advanceable.budgetItemId)
+                          setCollectIn(group.currency)
+                          withBranch("cobrar")
+                        }}
+                      >
+                        Cobrar un adelanto
+                      </Button>
+                    ) : null}
+                  </div>
+                  <dl className="grid grid-cols-3 gap-3">
+                    {(
+                      [
+                        ["Aceptado", group.agreedCents],
+                        ["Pagó", group.paidCents],
+                        ["Falta", group.remainingCents],
+                      ] as const
+                    ).map(([label, cents]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">{label}</dt>
+                        <dd className="break-words text-sm font-semibold tabular-nums sm:text-base">
+                          {money(cents, group.currency)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {/* «Falta» junta lo ya hecho sin pagar (en Pendiente) y lo que aún no se hace (segunda mesa). */}
+                  {group.remainingCents > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {group.owingCents > 0
+                        ? group.owingCents >= group.remainingCents
+                          ? `Todo lo que falta ya se puede cobrar: está en Pendiente.`
+                          : `De lo que falta, ${money(group.owingCents, group.currency)} ya se puede cobrar (está en Pendiente) y ${money(group.remainingCents - group.owingCents, group.currency)} se cobra al hacerlo.`
+                        : "Lo que falta se cobra al hacerlo."}
+                    </p>
+                  ) : null}
+                  {group.discountCents > 0 || group.returnedCents > 0 || free > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {[
+                        // Sin esto, aceptado ≠ pagó + falta y la cuenta no cuadra a la vista.
+                        group.discountCents > 0 ? `${money(group.discountCents, group.currency)} de descuento` : null,
+                        group.returnedCents > 0 ? `${money(group.returnedCents, group.currency)} devuelto` : null,
+                        // Lo que tiene a favor sin tratamiento no está en «Pagó»: se usa en el próximo cobro.
+                        free > 0 ? `además tiene ${money(free, group.currency)} a favor, que se usa en el próximo cobro` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                        .replace(/^./, (first) => first.toUpperCase())}
+                    </p>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+        </Section>
+      ) : null}
+
       <Section title="Pendiente">
         {pending.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -685,11 +792,13 @@ export function AccountTab({
         branchName={branchName}
         currency={orgUnit}
         debtCurrency={collectIn}
+        presetAdvanceFor={advanceFor}
         locale={locale}
         open={cobrarOpen}
         onClose={() => {
           setCobrarOpen(false)
           setCollectIn(undefined)
+          setAdvanceFor(undefined)
         }}
         onCollected={(result) => {
           invalidate()

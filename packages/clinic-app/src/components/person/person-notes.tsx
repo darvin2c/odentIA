@@ -1,7 +1,7 @@
 import { Button } from "@odentia/ui"
 import { AgentMark, FormDrawer, LoadingState, useAppForm, useFormSurface, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { z } from "zod"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
@@ -38,7 +38,7 @@ const noteSchema = z.object({
  * los datos del contacto. Son inmutables: una corrección es otra nota. La nota
  * clínica sigue en la historia. Las lee y escribe quien lleva el CRM.
  */
-export function PersonNotes({ personId }: { personId: string }) {
+export function PersonNotes({ personId, children }: { personId: string; children?: ReactNode }) {
   const canRead = usePermission("crm.read")
   const canWrite = usePermission("crm.write")
   const queryClient = useQueryClient()
@@ -71,7 +71,8 @@ export function PersonNotes({ personId }: { personId: string }) {
     form.reset()
     setOpen(true)
   }
-  if (!canRead) return null
+  // Sin las notas, lo que va con ellas (lo que recuerda el agente) se muestra solo.
+  if (!canRead) return <>{children}</>
   const list = notes.data?.data ?? []
   return (
     <SummaryCard
@@ -133,6 +134,7 @@ export function PersonNotes({ personId }: { personId: string }) {
           {(field) => <field.TextareaField label="Nota" rows={5} maxLength={NOTE_MAX_LENGTH} />}
         </form.AppField>
       </FormDrawer>
+      {children}
     </SummaryCard>
   )
 }
@@ -141,7 +143,7 @@ export function PersonNotes({ personId }: { personId: string }) {
  * Lo que recuerda el agente de la persona, aparte de las notas y solo para
  * leer: se corrige desde «Contexto» en la Bandeja. Nada clínico.
  */
-export function PersonAgentMemory({ personId }: { personId: string }) {
+export function PersonAgentMemory({ personId, inline = false }: { personId: string; inline?: boolean }) {
   const can = useCan()
   const receptionName = useReceptionName()
   const canRead = can("conversations.read") || can("crm.read")
@@ -157,7 +159,8 @@ export function PersonAgentMemory({ personId }: { personId: string }) {
   return (
     <section
       aria-label={`Lo que recuerda ${receptionName}`}
-      className="flex min-w-0 flex-col gap-3 rounded-xl border border-agent-border bg-agent-soft p-6"
+      // Dentro de la tarjeta de Notas, junto a lo que escribió el equipo (QA de la ficha del 9 nov).
+      className={`flex min-w-0 flex-col gap-3 rounded-xl border border-agent-border bg-agent-soft ${inline ? "mt-4 p-4" : "p-6"}`}
     >
       <div className="flex items-center gap-2">
         <AgentMark size="sm" />

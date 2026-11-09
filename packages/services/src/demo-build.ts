@@ -69,6 +69,7 @@ import {
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
+import { seedAcceptedProgress } from "./seed-reports-progress.js"
 import { demoPromotionsOf, seedOperation, seedPromotions } from "./seed-operation.js"
 import { seedRepliesRuns, seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
@@ -637,6 +638,10 @@ export async function buildDemo(
       },
     },
   })
+
+  // Lo que una visita de la historia ya hizo queda hecho, como en la demo de desarrollo: sin
+  // esto el Plan lo daba por no empezado y reservar decía «sesión 2 (1 prevista)» (QA del 8 nov).
+  await seedAcceptedProgress(tx, orgId)
 
   // --- Lo que hicieron los agentes y lo que Argos ya respondió --------------------------------
   await step(3, "agentes")

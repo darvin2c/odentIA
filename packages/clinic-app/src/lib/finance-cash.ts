@@ -625,6 +625,8 @@ export function addCashMovementApi(body: {
   concept: string
   /** La caja de esa moneda; sin ella, la de la moneda de la clínica. */
   currency?: string
+  /** La clave del formulario abierto: reintentar no mueve el efectivo dos veces. */
+  requestId?: string
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/cash/movements", {
     method: "POST",
@@ -814,6 +816,15 @@ export interface ExpenseRow {
   commission: boolean
   /** El pago de comisión al que lleva la fila (solo para quien administra comisiones). */
   commissionPayment?: { professionalUserId: string; year: number | null; month: number | null } | null
+  /**
+   * Los sueldos pagados en una sola fila «Pago de sueldos», para quien no administra comisiones:
+   * no dice a quién ni se anula desde aquí.
+   */
+  salary?: boolean
+  /** El pago del impuesto de lo cobrado (ADR 0083): se ve y no suma en «Gastado». */
+  salesTax?: boolean
+  /** Salió de una caja que ya se cerró: anularlo es de administración. */
+  shiftClosed?: boolean
 }
 
 export interface MonthExpenses {
@@ -823,9 +834,11 @@ export interface MonthExpenses {
   timezone: string
   /** Del mes entero, sin los anulados y solo en la moneda de la clínica. */
   totalCents: number
+  /** El impuesto de lo cobrado pagado en el mes: no es un gasto y no está en el total. */
+  salesTaxCents?: number
   byCategory: Array<{ category: string; cents: number }>
-  /** Lo que queda a la vista con la búsqueda y el tipo. */
-  shown: { count: number; totalCents: number }
+  /** Lo que queda a la vista con la búsqueda y el tipo; `notCounted`, lo que se ve y no suma. */
+  shown: { count: number; totalCents: number; notCounted?: number }
   /** Incluye los anulados, marcados. */
   expenses: ExpenseRow[]
 }
@@ -873,6 +886,8 @@ export function createExpenseApi(body: {
     /** Se paga al mes siguiente (el sueldo de noviembre, el 2 de diciembre). */
     dueNextMonth?: boolean
   }
+  /** La clave del formulario abierto: reintentar después de un corte devuelve el mismo gasto. */
+  requestId?: string
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
@@ -900,6 +915,8 @@ export interface RecurringDue {
   currency: string
   fromCash: boolean
   everyMonths: number
+  /** Varios sueldos en una fila, para quien no administra comisiones: no se paga desde aquí. */
+  group: number | null
 }
 
 export interface RecurringTemplate {
@@ -917,6 +934,8 @@ export interface RecurringTemplate {
   memberName: string | null
   fromCash: boolean
   nextMonth: string | null
+  /** Varios sueldos en una fila, para quien no administra comisiones: no se cambia desde aquí. */
+  group: number | null
 }
 
 export interface RecurringMonth {
@@ -943,7 +962,7 @@ export function fetchRecurringPeople(): Promise<{ data: Array<{ userId: string; 
 
 export function payRecurringApi(
   id: string,
-  body: { month: string; amountCents?: number; fromCash?: boolean },
+  body: { month: string; amountCents?: number; fromCash?: boolean; requestId?: string },
 ): Promise<{ data: { id: string; amountCents: number; currency: string; fromCash: boolean } }> {
   return apiFetch(`/api/finance/expenses/recurring/${id}/pay`, { method: "POST", body: JSON.stringify(body) })
 }
@@ -962,7 +981,7 @@ export function updateRecurringApi(
   return apiFetch(`/api/finance/expenses/recurring/${id}`, { method: "PATCH", body: JSON.stringify(body) })
 }
 
-/** `stillDue`: los meses de antes del fin que quedaron sin pagar y siguen por pagar. */
+/** `stillDue`: lo que sigue por pagar después de dejar de repetir: lo vencido y lo de este mes. */
 export function endRecurringApi(
   id: string,
 ): Promise<{ data: { previousLastMonth: string | null; stillDue: string[] } }> {
@@ -991,9 +1010,29 @@ export function payPurchaseApi(
     expectedDueCents?: number
     /** Lo pagado que mostró la pantalla: un envío repetido no paga dos veces. */
     expectedPaidCents?: number
+    /** La clave del cajón: reintentar tras un corte devuelve el mismo pago. */
+    requestId?: string
   },
 ): Promise<{ data: { balance: PurchaseBalance } }> {
   return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })
+}
+
+/**
+ * Pedirle a administración que anule un gasto de una caja ya cerrada: una tarea para el área,
+ * con el motivo. No anula nada: el gasto sigue hasta que administración lo haga.
+ */
+export function requestExpenseVoidApi(body: { title: string }): Promise<unknown> {
+  return apiFetch("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title: body.title.slice(0, 200), area: "administracion" }),
+  })
+}
+
+/** Gastos sueltos de Materiales que pueden ser este mismo pago: pagar la compra los contaría dos veces. */
+export function fetchPurchaseLookalikes(
+  orderId: string,
+): Promise<{ data: Array<{ id: string; concept: string; amountCents: number; currency: string; spentAt: string }> }> {
+  return apiFetch(`/api/finance/purchases/${orderId}/lookalikes`)
 }
 
 /** «No hubo ese gasto» en Reportes › Finanzas. */

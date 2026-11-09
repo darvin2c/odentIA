@@ -500,6 +500,23 @@ function coherent(demo: () => Built) {
       ).toBe(0)
   })
 
+  it("lo que una visita ya hizo no queda «por empezar», ni hay una oportunidad en «Presupuesto enviado» sin presupuesto (QA del 8 nov)", async () => {
+    const { organizationId: orgId } = demo()
+    // Claudia: atendida en abril y el Plan decía «Iniciar la primera sesión» (y reservar, «sesión 2 (1 prevista)»).
+    expect(
+      await count(sql`select count(*)::int as n from treatment_plan_item i
+        where i.organization_id = ${orgId} and i.decision_status = 'aceptado' and i.status = 'pendiente'
+          and exists (select 1 from encounter_procedure p join encounter e on e.organization_id = p.organization_id and e.id = p.encounter_id
+            where p.organization_id = i.organization_id and p.plan_item_id = i.id and p.voided_at is null and e.status = 'finalizada')`),
+    ).toBe(0)
+    // Rosa: «Presupuesto enviado» y su cajón decía «Sin presupuesto».
+    expect(
+      await count(sql`select count(*)::int as n from opportunity o
+        join pipeline_stage s on s.organization_id = o.organization_id and s.id = o.stage_id
+        where o.organization_id = ${orgId} and o.status = 'open' and s.moment = 'presupuesto_enviado' and o.budget_id is null`),
+    ).toBe(0)
+  })
+
   it("ponerla al día no deja un cobro sin su ticket ni su caja", async () => {
     const built = demo()
     const [row] = await ownerDb.select().from(saasDemo).where(eq(saasDemo.id, built.id))

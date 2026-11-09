@@ -116,6 +116,14 @@ describe("contrato de registro", () => {
     expect(validateRegistrationAnswers(config, { ...child, representative: { displayName: "María", relationship: "guardian", relationshipDetail: "Madre", phone: "+51999999999", docType: "DNI", docNumber: "12345678" } }, publicContext)).toEqual({})
     // El representante legal de un menor se identifica con su documento.
     expect(validateRegistrationAnswers(config, { ...child, representative: { displayName: "María", relationship: "guardian", relationshipDetail: "Madre", phone: "+51999999999" } }, publicContext)).toHaveProperty("representative.docNumber")
+    // En la clínica no frena registrarlo: se pide al firmar un consentimiento por el menor (QA del 9 nov).
+    expect(
+      validateRegistrationAnswers(
+        config,
+        { ...child, respondent: "staff", representative: { displayName: "María", relationship: "guardian", relationshipDetail: "Madre", phone: "+51999999999" } },
+        { ...publicContext, mode: "internal" },
+      ),
+    ).not.toHaveProperty("representative.docNumber")
     expect(validateRegistrationAnswers(config, { ...child, respondent: "staff" }, { ...publicContext, mode: "internal" })).toHaveProperty("representative")
   })
   it("valida fecha real y la frontera de mayoría de edad", () => {

@@ -17,6 +17,19 @@ export interface AttendedAppointment {
   professionalUserId: string
   /** Para decir «Atiendes la cita de la Dra. Ana Torres» cuando atiende otro. */
   professionalName: string
+  /**
+   * Es una cita de otro día que quedó sin cerrar («Registrar la atención»). Si la
+   * persona ya tiene otra atención en curso, no se continúa esa: lo de cada día va
+   * en su propia atención (mesa del 9 nov). Se avisa y se ofrece ir a la otra.
+   */
+  pastVisit?: boolean
+}
+
+/** La persona ya tiene otra atención en curso: la de esta cita no se abre encima. */
+class OtherEncounterOpen extends Error {
+  constructor(readonly encounterId: string) {
+    super("Ya tiene otra atención en curso")
+  }
 }
 
 /** La atención en curso de un paciente, sin nada de su historia: cuál es y quién la lleva. */
@@ -48,6 +61,9 @@ export function useAttendAppointment() {
         // Ya hay una atención abierta (de la persona o de esta cita): se retoma.
         if (err instanceof ApiError && (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")) {
           const current = await apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${input.patientId}/open-encounter`)
+          // Una cita pasada con otra atención abierta: no se escribe lo de ese día en la otra.
+          if (current.data && err.shape.code === "DRAFT_OPEN" && input.appointment.pastVisit)
+            throw new OtherEncounterOpen(current.data.id)
           if (current.data) return current.data.id
         }
         throw err
@@ -66,7 +82,26 @@ export function useAttendAppointment() {
         params: { patientId: input.patientId, encounterId },
       })
     },
-    onError: (err) => {
+    onError: (err, input) => {
+      if (err instanceof OtherEncounterOpen) {
+        toast.error(
+          "Ya tiene otra atención en curso. Termínala o anúlala y vuelve a «Registrar la atención» de esta cita: lo de cada día va en su propia atención.",
+          {
+            // Se queda hasta que la persona lo cierre: es una decisión, no un aviso al paso (segunda mesa).
+            duration: Number.POSITIVE_INFINITY,
+            closeButton: true,
+            action: {
+              label: "Ir a la atención en curso",
+              onClick: () =>
+                void navigate({
+                  to: "/patients/$patientId/encounters/$encounterId",
+                  params: { patientId: input.patientId, encounterId: err.encounterId },
+                }),
+            },
+          },
+        )
+        return
+      }
       toast.error(err instanceof ApiError ? (err.shape.message ?? "No se pudo abrir la atención.") : "No se pudo abrir la atención.")
     },
   })
