@@ -57,19 +57,26 @@ import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 
 /** Ancho del contenedor disponible (no del viewport): a partir de 960 px el área es de dos columnas. */
-function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: boolean } {
+function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: boolean; narrow: boolean } {
   const ref = useRef<HTMLDivElement | null>(null)
   const [wide, setWide] = useState(false)
+  const [narrow, setNarrow] = useState(false)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    const update = (): void => setWide(el.clientWidth >= 960)
+    const update = (): void => {
+      // Dentro de un panel plegado mide 0: no cambia nada.
+      if (el.clientWidth === 0) return
+      setWide(el.clientWidth >= 960)
+      // En el celular, una arcada a la vez: las dos juntas dejaban piezas de 23 px.
+      setNarrow(el.clientWidth < 520)
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
-  return { ref, wide }
+  return { ref, wide, narrow }
 }
 
 /** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
@@ -136,7 +143,9 @@ function StudioBody({
   const officialTitleRef = useRef<HTMLHeadingElement>(null)
   const queryClient = useQueryClient()
   const id = useId()
-  const { ref: containerRef, wide } = useContainerWide()
+  const { ref: containerRef, wide, narrow } = useContainerWide()
+  /** En el celular, qué arcada se ve. */
+  const [arch, setArch] = useState<"upper" | "lower">("upper")
   const detailMode = useDetailMode()
   const dirty = useRef(false)
   const handleDirtyChange = useCallback(
@@ -298,7 +307,8 @@ function StudioBody({
   const evolution = evolutionEmpty ? null : (
             <details
               key={selection.length > 0 ? "con-seleccion" : "sin-seleccion"}
-              open={selection.length > 0}
+              // En la ficha, con evolución que leer, sale abierta: plegada parecía vacía (QA del 9 nov).
+              open={selection.length > 0 || (!compact && visibleHistory.length > 0)}
             >
               <summary className="min-h-11 cursor-pointer px-4 py-3">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -438,7 +448,8 @@ function StudioBody({
           className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${wide ? "lg:sticky lg:top-4 self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-base font-semibold">Odontograma</h3>
+            {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
+            <h3 className={compact ? "sr-only" : "text-base font-semibold"}>Odontograma</h3>
             <div className="flex flex-wrap gap-2" aria-label="Dentición">
               {(
                 [
@@ -569,8 +580,36 @@ function StudioBody({
           )}
           {/* En el celular el arco llega casi al borde de la tarjeta: así las piezas
               quedan a 24 px una de otra, lo mínimo para tocarlas con el dedo. */}
+          {narrow ? (
+            // Una arcada a la vez en el celular: cada pieza a unos 44 px, lo que se toca con el dedo.
+            // Cada botón dice cuántas piezas de esa arcada tienen algo, sin depender del color.
+            <div className="flex gap-2" role="group" aria-label="Arcada">
+              {(
+                [
+                  ["upper", "Superior", [...(outerRows[0] ?? []), ...(innerRows?.[0] ?? [])]],
+                  ["lower", "Inferior", [...(outerRows[1] ?? []), ...(innerRows?.[1] ?? [])]],
+                ] as const
+              ).map(([value, label, rowTeeth]) => {
+                const marked = rowTeeth.filter((tooth) => entriesOf(tooth).length > 0).length
+                return (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    className="min-h-11 flex-1"
+                    variant={arch === value ? "default" : "outline"}
+                    aria-pressed={arch === value}
+                    onClick={() => setArch(value)}
+                  >
+                    {marked > 0 ? `${label} · ${marked} ${marked === 1 ? "hallazgo" : "hallazgos"}` : label}
+                  </Button>
+                )
+              })}
+            </div>
+          ) : null}
           <div className="-mx-3 sm:mx-0">
             <OdontogramArch
+              {...(narrow ? { single: arch } : {})}
               teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
               inner={
                 innerRows ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } : undefined

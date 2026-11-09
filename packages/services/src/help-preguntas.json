@@ -600,7 +600,7 @@
     {"q":"¿Dónde veo a los pacientes a los que Sofi no pudo escribir porque el WhatsApp falló?","expected":["bandeja"],"producto":"odentia","pantalla":"/home","temas":["bandeja"]},
     {"q":"¿Por qué la vista Día dice 15 citas y la vista Agenda dice 19 citas para el mismo día?","expected":[],"producto":"odentia","pantalla":"/agenda","es":"ninguna"},
     {"q":"¿Por qué no veo las tareas de los demás?","expected":["tareas"],"producto":"odentia","pantalla":"/tasks","faqs":["¿Por qué no veo las tareas de los demás?"]},
-    {"q":"¿Qué significa Faltan datos y por qué sale en casi todos?","expected":["pacientes"],"producto":"odentia","pantalla":"/people","faqs":["¿Qué significa «Faltan datos para atenderla»?"]},
+    {"q":"¿Qué significa Faltan datos y por qué sale en casi todos?","expected":["pacientes"],"producto":"odentia","pantalla":"/people","faqs":["¿Qué significa «Faltan datos para la atención»?"]},
     {"q":"Inicio dice que 120 presupuestos esperan respuesta, ¿por qué aquí solo hay 1 en Presupuesto enviado?","expected":[],"producto":"odentia","pantalla":"/pipeline","es":"datos"},
     {"q":"¿Por qué Reportes dice que este mes se cobró S/ 5,685 y aquí en Cobros solo salen 2 tickets por S/ 1,365?","expected":[],"producto":"odentia","pantalla":"/finance","es":"datos"},
     {"q":"¿Por qué la lidocaína sale en Por vencer si su estado solo dice Hacen falta?","expected":[],"producto":"odentia","pantalla":"/inventory","es":"ninguna"},

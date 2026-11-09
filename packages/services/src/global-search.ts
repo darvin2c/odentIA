@@ -251,7 +251,10 @@ export async function searchEverything(
         and (${personSearchCondition(q, { displayName: sql`c.display_name`, phone: sql`c.phone`, email: sql`c.email`, docNumber: sql`c.doc_number`, contactId: sql`c.id` })}
           ${record == null ? sql`` : sql`or p.patient_number = ${record}`})
       order by ${record == null ? sql`` : sql`(p.patient_number = ${record}) desc nulls last,`}
-        ${foldedStartsWith(sql`c.display_name`, q)} desc, c.display_name, c.id
+        ${foldedStartsWith(sql`c.display_name`, q)} desc,
+        -- A igual coincidencia, el paciente antes que un homónimo que aún no lo es: Enter abre
+        -- el primero, y anotar en la ficha de otra persona es un error de datos (QA del 9 nov).
+        (p.id is not null) desc, c.display_name, c.id
       limit ${PER_TYPE}`)
     matchedPeople.push(...found)
   }

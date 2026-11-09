@@ -17,6 +17,7 @@ import {
   getBudgetPresentation,
   getBudgetSignFrame,
   listBudgets,
+  noteBudgetNoAnswer,
   placeBudgetPath,
   operationBodySchema,
   previewBudgetSend,
@@ -96,6 +97,7 @@ const budgetPatchInput = z
 // (`anotar_respuesta_presupuesto`): opción, una respuesta por tratamiento,
 // quién decidió y la nota.
 const budgetDecisionInput = operationBodySchema("presupuesto.respuesta")
+const noAnswerInput = z.object({ callAgainAt: z.iso.datetime({ offset: true }) }).strict()
 
 // Una sola declaración para la pantalla y el agente (`reenviar_presupuesto`).
 const budgetSendInput = operationBodySchema("presupuesto.reenviar")
@@ -553,6 +555,19 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
             inPerson: inPerson === true,
           }),
         ),
+      ),
+    )
+  })
+
+  // «No contesta · volver a llamar»: una tarea de recepción con fecha; el presupuesto sigue esperando.
+  app.post("/:id/budgets/:budgetId/no-answer", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.decide") || !canAccess(memberRole, "tasks.write")) return forbid(c)
+    const parsed = noAnswerInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        noteBudgetNoAnswer(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data),
       ),
     )
   })

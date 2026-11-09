@@ -35,6 +35,6 @@ El gasto no guardaba con qué se pagó: solo si salió de la caja (`shift_id`). 
 ## Referencias
 
 - `packages/services/src/finance.ts` (`createExpense`, `correctExpense`, `listExpenseSuppliers`), `expense-recurring.ts` (`noteRecurringExpense`), `packages/clinical/src/expense-receipts.ts`.
-- Migraciones `0073_gasto_con_medio_y_comprobante` y `0074_gasto_con_medio_reglas`.
+- Migraciones `0074_gasto_con_medio_y_comprobante` y `0075_gasto_con_medio_reglas`.
 - Pruebas: `packages/services/src/gastos-rediseno.test.ts`.
 - Lienzo de la QA: https://claude.ai/artifact/UdxEE5j3zqnH2F86igQ9sN

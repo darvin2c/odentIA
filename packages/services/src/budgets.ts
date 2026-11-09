@@ -46,6 +46,7 @@ import { livePersonalLinkToken } from "./booking-links.js"
 import { budgetAwaitsAnswer, OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
+import { settleBudgetCallback } from "./budget-callback.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
 import {
@@ -1417,6 +1418,14 @@ export async function assembleEncounterBudget(
 ): Promise<AssembledBudget | null> {
   const required = (await productHooks(tx, orgId)).budgetRequired
   if (!required && !opts.onRequest) return null
+  // Lo pide quien atiende antes de firmar: solo de una atención en curso de esa persona.
+  if (opts.onRequest) {
+    const [open] = await tx.execute<{ status: string }>(sql`
+      select status from encounter where organization_id = ${orgId} and id = ${encounterId}::uuid and patient_id = ${patientId}::uuid`)
+    if (!open) throw notFound("Atención")
+    if (open.status !== "borrador")
+      throw new ServiceError("ENCOUNTER_CLOSED", 409, "Esta atención ya se cerró: su presupuesto se armó al firmarla")
+  }
   const candidates = await tx
     .select()
     .from(treatmentPlanItem)
@@ -2767,6 +2776,9 @@ export async function decideBudget(
     // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
     title: budgetInterest(own, current.title).title,
   })
+  // Ya respondió (aunque sea «lo pienso» o una parte): el «volver a llamar» de «No contesta» se
+  // cierra solo; la fila dice entonces lo que respondió.
+  await settleBudgetCallback(tx, orgId, budgetId)
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
 }
@@ -3044,6 +3056,8 @@ async function cancelBudgetRow(
   })
   // Su oportunidad ya no se cerrará sola al responderlo (ADR 0144).
   await releaseCancelledBudget(tx, orgId, { budgetId, userId: actorUserId })
+  // Anulado: ya no hay a quién volver a llamar por él.
+  await settleBudgetCallback(tx, orgId, budgetId, "Se anuló su presupuesto")
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
 }
@@ -3589,6 +3603,8 @@ export async function reviseBudget(
     reason,
     supersedesBudgetId: current.id,
   })
+  // Lo reemplaza una revisión: la llamada era por el anterior, y la revisión se entrega de nuevo.
+  await settleBudgetCallback(tx, orgId, current.id, "Su presupuesto se revisó")
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, revision)
 }
