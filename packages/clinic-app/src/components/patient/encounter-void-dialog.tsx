@@ -60,7 +60,7 @@ function answeredWords(budget: EncounterVoidBudget): string {
 function budgetLine(budget: EncounterVoidBudget): string {
   const which = `el presupuesto N.º ${budget.budgetNumber}`
   if (budget.effect === "quita") {
-    return `De ${which}, que no se le entregó, se quita ${joinNames(budget.treatments)}; lo demás sigue en él.`
+    return `Del presupuesto N.º ${budget.budgetNumber}, que no se le entregó, se quita ${joinNames(budget.treatments)}; lo demás sigue en él.`
   }
   if (!budget.delivered) return `También se anula ${which}, que no se le entregó.`
   const others =
@@ -75,9 +75,9 @@ function blockWords(budget: EncounterVoidBudget, block: EncounterVoidBlock): str
   const which = `el presupuesto N.º ${budget.budgetNumber}`
   switch (block.kind) {
     case "cobro":
-      return `Caja ya cobró ${block.treatments.length > 0 ? joinNames(block.treatments) : "un tratamiento"} de ${which}. Primero hay que anular ese cobro.`
+      return `Caja ya cobró ${block.treatments.length > 0 ? joinNames(block.treatments) : "un tratamiento"} del presupuesto N.º ${budget.budgetNumber}. Primero hay que anular ese cobro.`
     case "hecho":
-      return `${joinNames(block.treatments)}, de ${which}, ya se hizo en otra atención: ese presupuesto no se anula.`
+      return `${joinNames(block.treatments)}, del presupuesto N.º ${budget.budgetNumber}, ya se hizo en otra atención: ese presupuesto no se anula.`
     case "firma":
       return `${block.signerName ?? "Quien decide"} firmó que acepta ${which} el ${formatDate(block.signedAt)}: lo firmado no se anula desde aquí.`
     case "otros":
