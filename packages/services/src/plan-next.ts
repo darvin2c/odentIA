@@ -152,14 +152,18 @@ export function unsentBudgetOf(
   )
 }
 
-/** Las atenciones en borrador de esas personas: lo que sale de ellas aún se está preparando. */
-async function openEncountersOf(tx: Db, orgId: string, patientIds: string[]): Promise<Set<string>> {
+/**
+ * Las atenciones en borrador de esas personas: lo que sale de ellas aún se
+ * está preparando. Menos las que lleva quien mira (`viewerUserId`): para él, lo
+ * que arma en su consulta ya se puede mostrar o enviar.
+ */
+async function openEncountersOf(tx: Db, orgId: string, patientIds: string[], viewerUserId?: string): Promise<Set<string>> {
   if (patientIds.length === 0) return new Set()
   const rows = await tx
-    .select({ id: encounter.id })
+    .select({ id: encounter.id, professionalUserId: encounter.professionalUserId })
     .from(encounter)
     .where(and(eq(encounter.organizationId, orgId), inArray(encounter.patientId, patientIds), eq(encounter.status, "borrador")))
-  return new Set(rows.map((row) => row.id))
+  return new Set(rows.filter((row) => !viewerUserId || row.professionalUserId !== viewerUserId).map((row) => row.id))
 }
 
 /** «3 tratamientos · S/ 540», con el total de la opción que vale. */
@@ -171,13 +175,19 @@ export function budgetLine(budget: BudgetWithTotals, locale: string): string {
   return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} · ${money}${options}`
 }
 
+/**
+ * `viewerUserId`: quien mira. El presupuesto que se prepara en una atención en
+ * borrador solo se le ofrece enviar a quien la lleva (lo muestra o lo envía en
+ * plena consulta); a los demás, recién al firmarla (`unsentBudgetOf`).
+ */
 export async function getPlanNextStep(
   tx: Db,
   orgId: string,
   patientId: string,
   can: Can,
+  opts: { viewerUserId?: string } = {},
 ): Promise<PlanNextStep> {
-  const { facts, context } = await planFactsOf(tx, orgId, patientId)
+  const { facts, context } = await planFactsOf(tx, orgId, patientId, opts.viewerUserId)
   return planNextStepFrom(facts, context, can)
 }
 
@@ -190,13 +200,19 @@ export async function getPlanNextSteps(
   orgId: string,
   patientId: string,
   can: Can,
+  opts: { viewerUserId?: string } = {},
 ): Promise<{ step: PlanNextStep; steps: PlanNextStep[] }> {
-  const { facts, context } = await planFactsOf(tx, orgId, patientId)
+  const { facts, context } = await planFactsOf(tx, orgId, patientId, opts.viewerUserId)
   return { step: planNextStepFrom(facts, context, can), steps: planStepsFrom(facts, context, can) }
 }
 
 /** Lo de una persona que decide su «Qué sigue». */
-async function planFactsOf(tx: Db, orgId: string, patientId: string): Promise<{ facts: PlanFacts; context: PlanContext }> {
+async function planFactsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  viewerUserId?: string,
+): Promise<{ facts: PlanFacts; context: PlanContext }> {
   const [person] = await tx
     .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
@@ -258,7 +274,7 @@ async function planFactsOf(tx: Db, orgId: string, patientId: string): Promise<{ 
       name: firstName(person),
       budgets,
       items,
-      openEncounters: await openEncountersOf(tx, orgId, [patientId]),
+      openEncounters: await openEncountersOf(tx, orgId, [patientId], viewerUserId),
       withAppointment,
       sessions,
       control,

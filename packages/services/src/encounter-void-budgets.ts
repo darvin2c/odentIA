@@ -378,9 +378,9 @@ function blockedMessage(budget: EncounterVoidBudget): string {
     case "cobro":
       return `No se puede anular todavía: caja ya cobró ${block.treatments.length > 0 ? block.treatments.join(", ") : "un tratamiento"} del presupuesto N.º ${budget.budgetNumber}. Hay que anular ese cobro primero.`
     case "hecho":
-      return `No se puede anular todavía: ${block.treatments.join(", ")}, del presupuesto N.º ${budget.budgetNumber}, ya se hizo en otra atención.`
+      return `No se puede anular todavía: ${block.treatments.join(", ")}, del presupuesto N.º ${budget.budgetNumber}, ya se hizo en otra atención. Si esta atención no va, fírmala dejando en la evolución lo que pasó.`
     case "firma":
-      return `No se puede anular todavía: quien decide firmó que acepta ${which}.`
+      return `No se puede anular: quien decide firmó que acepta ${which}. Si esta atención no va, fírmala dejando en la evolución lo que pasó.`
     case "otros":
       return `No se puede anular todavía: ${which} ya tiene respuesta y lleva otros tratamientos. Revísalo sin lo de esta atención.`
     case "ajeno":

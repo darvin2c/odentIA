@@ -408,6 +408,8 @@ it("«Te espera»: el presupuesto armado que nadie envió sale al día siguiente
   // Mientras su atención sigue en borrador, se está preparando: nadie lo envía todavía.
   expect(await unsent(sender)).toEqual([])
   expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true))).kind).not.toBe("enviar")
+  // Quien la lleva sí lo ve: lo muestra o lo envía en plena consulta.
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true, { viewerUserId: f.actor }))).kind).toBe("enviar")
   // Firmada la atención, queda armado.
   await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`)
   expect(await unsent(sender)).toEqual([

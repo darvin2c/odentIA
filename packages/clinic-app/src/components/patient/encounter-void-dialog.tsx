@@ -37,9 +37,14 @@ import {
 
 /** «Resina · 16 y Limpieza»: lo de esta atención, como lo nombra el presupuesto. */
 function joinNames(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? ""
-  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`
+  // Entre comillas: un nombre como «3/4 de corona» no se lee como una parte de lo cobrado.
+  const quoted = names.map((name) => `«${name}»`)
+  if (quoted.length <= 1) return quoted[0] ?? ""
+  return `${quoted.slice(0, -1).join(", ")} y ${quoted[quoted.length - 1]}`
 }
+
+/** Lo que puede hacer quien no puede anular: firmar la atención contando lo que pasó. */
+const SIGN_INSTEAD = "Si esta atención no va, fírmala dejando en la evolución lo que pasó."
 
 /** Lo que ya respondió, para decirlo junto al presupuesto entregado. */
 function answeredWords(budget: EncounterVoidBudget): string {
@@ -67,7 +72,8 @@ function budgetLine(budget: EncounterVoidBudget): string {
     budget.others > 0
       ? ` Lleva además ${budget.others === 1 ? "otro tratamiento, que vuelve" : `otros ${budget.others} tratamientos, que vuelven`} al plan para presupuestarlo de nuevo.`
       : ""
-  return `Ya se le entregó ${which}${answeredWords(budget)}: se anula también.${others}`
+  // Lo tiene en la mano (o en su enlace): verá «Anulado» y conviene decírselo.
+  return `Ya se le entregó ${which}${answeredWords(budget)}: se anula también y, si lo consulta, verá «Anulado»; avísale.${others}`
 }
 
 /** Por qué no se puede anular todavía y, si existe, el lugar donde se resuelve. */
@@ -77,9 +83,9 @@ function blockWords(budget: EncounterVoidBudget, block: EncounterVoidBlock): str
     case "cobro":
       return `Caja ya cobró ${block.treatments.length > 0 ? joinNames(block.treatments) : "un tratamiento"} del presupuesto N.º ${budget.budgetNumber}. Primero hay que anular ese cobro.`
     case "hecho":
-      return `${joinNames(block.treatments)}, del presupuesto N.º ${budget.budgetNumber}, ya se hizo en otra atención: ese presupuesto no se anula.`
+      return `${joinNames(block.treatments)}, del presupuesto N.º ${budget.budgetNumber}, ya se hizo en otra atención, así que ese presupuesto no se anula. ${SIGN_INSTEAD}`
     case "firma":
-      return `${block.signerName ?? "Quien decide"} firmó que acepta ${which} el ${formatDate(block.signedAt)}: lo firmado no se anula desde aquí.`
+      return `${block.signerName ?? "Quien decide"} firmó el ${formatDate(block.signedAt)} que acepta ${which}: una aceptación firmada no se anula. ${SIGN_INSTEAD}`
     case "otros":
       return `${which.charAt(0).toUpperCase()}${which.slice(1)} ya tiene respuesta y lleva ${block.others === 1 ? "otro tratamiento" : `otros ${block.others} tratamientos`}: haz una revisión sin lo de esta atención.`
     case "ajeno":
