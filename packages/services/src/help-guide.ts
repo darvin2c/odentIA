@@ -33,6 +33,11 @@ export interface HelpTopic {
    * («Mis honorarios» del profesional, en el tema de Comisiones que también es de administración).
    */
   menuLabel?: string
+  /**
+   * Cómo se nombra una página de una sola cosa de esta lista (`/people/<id>`): «la ficha de una
+   * persona», no «Pacientes» (QA de la ficha del 9 nov).
+   */
+  itemLabel?: string
   /** Sección del menú o de Configuración donde está. */
   parent: string | null
   /** Para qué sirve, en una o dos frases. */
@@ -374,6 +379,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/people",
     alsoAt: ["/patients", "/contacts"],
     title: "Pacientes",
+    itemLabel: "la ficha de una persona",
     parent: "Personas",
     purpose:
       "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver. Arriba, en todas las pestañas, sus alergias (o si niega o no se le preguntó), su próxima cita si ves la agenda y lo que debe o tiene a favor si ves la caja; si lees la historia, también sus enfermedades y lo que toma. Sus conversaciones y oportunidades están en su Resumen.",
@@ -433,8 +439,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
       },
       {
-        q: "¿Qué significa «Faltan datos para atenderla»?",
-        a: "Que le falta algo de lo necesario para atenderla (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla por ella) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes. «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
+        q: "¿Puedo registrar a un menor si su madre o su padre no trae su documento?",
+        a: "Sí. Desde la página de quien lo trae, en Datos › Familia y responsables, «Registrar a alguien a su cargo»: queda como su responsable y su documento es opcional. Si no lo trae, regístralo igual; se le pide cuando firme un consentimiento por el menor, en la misma pantalla de la firma. Sus datos y su salud los completa su responsable en su celular o tú en ese momento.",
+        forms: ["menor sin dni de la madre", "registrar a un hijo sin documento", "no trae su dni", "registrar un menor"],
+      },
+      {
+        q: "¿Qué significa «Faltan datos para la atención»?",
+        a: "Que le falta algo de lo necesario para atenderla o atenderlo (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla en su nombre) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes; sin su sexo registrado se dice «para la atención». «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
       },
       {
         q: "¿Por qué el documento, el seguro y la dirección cambian según la clínica?",
@@ -1657,7 +1668,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Registro de pacientes",
     parent: SETTINGS,
     purpose:
-      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para atenderla».",
+      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
     terms: [
       "formulario de registro",
       "enlace de registro",

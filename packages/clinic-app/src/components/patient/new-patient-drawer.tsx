@@ -184,6 +184,9 @@ function draftFromPerson(person: PersonPage): Draft {
 /** El borrador con que abre: lo que ya se sabe de la persona, o el nombre que se buscó. */
 function initialDraft(target: NewPatientTarget): Draft {
   if (target.kind === "person") return draftFromPerson(target.person)
+  // Alguien a su cargo (un niño sin celular): lo completa el equipo ahora o su responsable en el suyo,
+  // nunca «el paciente, en su celular» por omisión (QA de la ficha del 9 nov).
+  if (target.kind === "dependent") return { ...EMPTY, who: "equipo" }
   if (target.kind === "new" && target.name?.trim()) {
     const [givenNames = "", ...rest] = target.name.trim().split(/\s+/)
     return { ...EMPTY, givenNames, surnames: rest.join(" ") }
@@ -376,8 +379,6 @@ export function NewPatientDrawer({
     if (!dependent && !picked && !current.phone && !phoneHalfWritten)
       found.phone = "Escribe su celular: ahí le avisamos sus citas"
     if (dependent && !current.relation) found.relation = `Elige qué es ${guardianFirst} para él o ella`
-    if (needsGuardianDocOf(current) && !current.guardianDocNumber.trim())
-      found.guardianDocNumber = "Hace falta el documento de quien lo representa"
     if (!current.promotions) found.promotions = "Pregúntale y elige una opción"
     if (config.data) {
       const server = validateRegistrationAnswers(config.data.data, answersFrom(current).answers, {
@@ -683,9 +684,10 @@ export function NewPatientDrawer({
               <form.AppField name="guardianDocNumber">
                 {(field) => (
                   <field.Control
-                    label={`Documento de ${guardian?.displayName}`}
+                    label={`Documento de ${guardian?.displayName} (si lo tienes)`}
                     id="np-guardian-doc"
-                    description="Al ser menor, queda como su representante legal."
+                    // No frena registrarlo: la firma de un consentimiento lo pide si falta (QA de la ficha del 9 nov).
+                    description="Al ser menor, queda como su representante legal. Si no lo trae, regístralo igual: se le pide al firmar un consentimiento."
                   >
                     {(control) => (
                       <div className="flex min-w-0 flex-col gap-2">
@@ -752,7 +754,14 @@ export function NewPatientDrawer({
                   tone="primary"
                   columns={2}
                   value={field.state.value}
-                  options={WHO_OPTIONS}
+                  options={
+                    dependent
+                      ? [
+                          { value: "paciente", label: `${guardianFirst}, en su celular` },
+                          { value: "equipo", label: "Yo, ahora" },
+                        ]
+                      : WHO_OPTIONS
+                  }
                   onChange={(next) => field.handleChange(next)}
                 />
               )}
@@ -952,10 +961,11 @@ function MatchesNote({
 }) {
   // Mientras se escribe, el recuadro no se achica: lo que viene debajo no salta y un clic
   // para salir del campo no cae en «Es esta persona» (QA del 8 nov: cambió el formulario por
-  // otra persona sin querer). Vuelve a su alto cuando ya no hay nada que buscar.
+  // otra persona sin querer). Vuelve a su alto cuando la búsqueda termina: con «es nuevo» quedaba
+  // un hueco en blanco del alto de la lista anterior (QA de la ficha del 9 nov).
   const box = useRef<HTMLDivElement>(null)
   const [minHeight, setMinHeight] = useState(0)
-  const active = searching || asked
+  const active = searching || refreshing
   useLayoutEffect(() => {
     if (!active) {
       if (minHeight !== 0) setMinHeight(0)
