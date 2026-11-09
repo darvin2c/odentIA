@@ -194,7 +194,7 @@ test("vistIA: la óptica con su marca, la receta del examen y la venta de lentes
   // El examen de la vista: la refracción de cada ojo, guardada sola.
   const { patientId, encounterId } = await patientWithEncounter(page, slug, "Carmen Ríos", "41223344")
   await gotoHydrated(page, vistiaUrl(slug, `/patients/${patientId}/encounters/${encounterId}`))
-  await page.getByRole("button", { name: "Agregar Examen de la vista" }).click()
+  // Sin «dónde» aparte, el examen de la vista va siempre a la vista, como en latidIA.
   await page.getByLabel("Esfera Ojo derecho").fill("-1,25")
   await page.getByLabel("Cilindro Ojo derecho").fill("-0,50")
   await page.getByLabel("Eje Ojo derecho").fill("180")
@@ -205,11 +205,9 @@ test("vistIA: la óptica con su marca, la receta del examen y la venta de lentes
       return detail.encounter.examination
     })
     .toMatchObject({ refraccion: { od: { esfera: -1.25, cilindro: -0.5, eje: 180 }, oi: { esfera: -1 } } })
-  await page.getByRole("button", { name: "Listo", exact: true }).click()
 
-  // La receta de anteojos sale de esa refracción, con un toque.
-  await page.getByRole("region", { name: "Receta de lentes", exact: true }).getByRole("button", { name: "Abrir" }).click()
-  await page.getByRole("button", { name: "Emitir receta de anteojos" }).click()
+  // La receta de anteojos sale de esa refracción, con un toque, en su bloque de la misma página.
+  await page.getByRole("region", { name: "Receta de lentes", exact: true }).getByRole("button", { name: "Emitir receta de anteojos" }).click()
   await expect(page.getByRole("button", { name: "Receta de anteojos emitida" })).toBeVisible()
   const issued = await call<{ items: Array<{ id: string; kind: string; source: string; lenses: { od?: { esfera?: number } } }> }>(
     page,

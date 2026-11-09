@@ -474,7 +474,7 @@ const OPTICAL_ONLY_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Y si le falta pagar al recogerlos?",
         a: "El pedido listo dice cuánto falta y ofrece el cobro de siempre, el mismo de Cobros. Entregar no lo exige: tú decides.",
-        forms: ["cobrar el saldo de los lentes", "cuanto le falta pagar", "pagar el resto del pedido"],
+        forms: ["cobrar el saldo de los lentes", "cuanto le falta pagar de sus lentes", "pagar el resto del pedido"],
       },
       {
         q: "¿Qué hago si no ve bien con sus lentes nuevos?",
