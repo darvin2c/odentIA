@@ -25,8 +25,9 @@ import {
 export const WELCOME_LETTER_RETENTION_DAYS = 30
 
 /**
- * Lo que cambia de un producto a otro. Los dominios son los de producción
- * (los de la web, `apps/web/src/lib/product.ts`): la carta sale para una clínica real.
+ * Lo que cambia de un producto a otro. Los dominios son los de producción,
+ * escritos aquí porque la carta sale para una clínica real y no hay un entorno
+ * de donde leerlos (el comando corre sin base ni variables).
  */
 const PRODUCT = {
   dental: {

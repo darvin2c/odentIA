@@ -109,10 +109,14 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
    - Primero ve el ensayo: además de lo del plan, dice quién ya estaba en la clínica.
    - Después pulsa «Cargar». Si se corta, «Seguir desde donde quedó» no duplica nada.
 7. **Comprobar la carga**, antes de borrar nada:
-   - **Las cifras cuadran.** Lo que dijo la pantalla al terminar (creadas, ya estaban, no entraron) es lo que dijo el ensayo. Sumado a lo que quedó fuera al preparar, da las filas del archivo que dice el informe. Si no cuadra, no se borra nada hasta saber por qué.
+   - **Las cifras cuadran**, con el informe y el ensayo:
+     - creadas + ya estaban + no entraron = las personas del plan, que son los pacientes más quienes hablan por ellos (una madre que no es paciente también se crea);
+     - pacientes del plan + lo que quedó fuera al preparar (incluida la persona repetida que se tomó una vez) = las filas del archivo.
+
+     El contador de la pantalla se pierde si se recarga a mitad de la carga: lo que vale es «Volver a ensayar». Si no cuadra, no se borra nada hasta saber por qué.
    - **«Volver a ensayar»** con el mismo plan: todo sale como ya cargado y nada como nuevo. Lo que sale como nuevo no entró.
    - **Lo que no entró** aparece en la pantalla con su motivo. Se resuelve con la clínica o queda anotado como fuera.
-   - **Una muestra a mano**, comparada con el archivo: unas diez fichas elegidas a propósito. Entre ellas, un menor con quien habla por él, un DNI al que se le devolvió el cero, una celda con dos teléfonos, una persona repetida en el archivo y la última fila. Las fichas las ve la propietaria en la reunión de alta o el equipo con el acceso de soporte que ella autoriza desde un caso de soporte. La administración no muestra pacientes.
+   - **Una muestra a mano**, comparada con el archivo: unas diez fichas elegidas a propósito. Entre ellas, un menor con quien habla por él, un DNI al que se le devolvió el cero, una celda con dos teléfonos, una persona repetida en el archivo y la última fila. Se revisan con la propietaria en la reunión de alta, mirando su pantalla: ni la administración ni el acceso de soporte abren pacientes.
    - **«Faltan datos»** en Personas: los que entraron incompletos, para completarlos con la clínica.
    - **Los datos de la clínica** (sedes, unidades dentales, equipo, servicios y precios) se repasan pantalla por pantalla en la reunión de alta, contra lo que envió.
 8. **Al terminar**, borra los archivos de la clínica, `plan.json` e `informe.md`, y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.

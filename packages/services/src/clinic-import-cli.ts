@@ -17,7 +17,8 @@ import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { isZip, readXlsxRows, readZipEntries, xlsxSheetNames } from "@odentia/db/xlsx"
-import { ZodError, z } from "zod"
+import { configureZodMessages } from "@odentia/clinical"
+import { ZodError } from "zod"
 import { welcomeLetterPdf } from "./clinic-import-letter.js"
 import { checkClinicImportPlan, type ClinicImportCheck, type ClinicImportPlan } from "./clinic-import-plan.js"
 import {
@@ -148,10 +149,10 @@ async function main(): Promise<void> {
     const letterPath = resolve(cwd, target)
     const { bytes, pages, content } = await welcomeLetterPdf(JSON.parse(readFileSync(letterPath, "utf-8")))
     const out = resolve(dirname(letterPath), `carta-${fileSlug(content.clinic)}.pdf`)
-    writeFileSync(out, bytes)
-    // La carta va en dos hojas: si pasa, se dice y el comando falla para que se acorte.
+    // La carta va en dos hojas: si pasa, no se escribe, se dice y el comando falla para que se acorte.
     const aviso = pages > 2 ? `Salió en ${pages} páginas: acorta el nombre de la clínica, el destinatario o quien acompaña` : undefined
-    console.log(JSON.stringify({ escrito: out, paginas: pages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
+    if (!aviso) writeFileSync(out, bytes)
+    console.log(JSON.stringify({ escrito: aviso ? null : out, paginas: pages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
     if (aviso) process.exitCode = 1
     return
   }
@@ -202,7 +203,7 @@ async function main(): Promise<void> {
 }
 
 // Lo que no se puede leer se dice con su motivo, sin la traza y en español.
-z.config(z.locales.es())
+configureZodMessages()
 main().catch((error: unknown) => {
   const what = process.argv.includes("letter") ? "La carta" : "El mapa"
   if (error instanceof ZodError)
