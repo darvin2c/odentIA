@@ -15,8 +15,14 @@ const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
 
 // La web de latidIA la publica el mismo servidor con VITE_PRODUCT=medical: su dominio y solo sus
 // páginas en el mapa del sitio (`src/lib/latidia-pages.json`); las propias de latidIA no van en el de odentIA.
-const medical = process.env.VITE_PRODUCT === "medical"
-const domain = process.env.VITE_BASE_DOMAIN || (medical ? "latidia.localhost" : "odentia.localhost")
+// Los productos que tienen web y su dominio en local. Otro detiene el armado en vez de publicar en
+// silencio la web de odentIA en su dominio (ADR 0168).
+const LOCAL_DOMAINS = { dental: "odentia.localhost", medical: "latidia.localhost" }
+const product = process.env.VITE_PRODUCT || "dental"
+if (!Object.hasOwn(LOCAL_DOMAINS, product))
+  throw new Error(`VITE_PRODUCT=${product}: esta web todavía no tiene las páginas de ese producto`)
+const medical = product === "medical"
+const domain = process.env.VITE_BASE_DOMAIN || LOCAL_DOMAINS[product]
 const latidiaPages = JSON.parse(readFileSync(new URL("./src/lib/latidia-pages.json", import.meta.url), "utf8"))
 const port = process.env.VITE_BASE_PORT ? `:${process.env.VITE_BASE_PORT}` : ""
 // En producción la web ocupa el dominio raíz (ADR 0046); en local la raíz es de la plataforma

@@ -76,6 +76,9 @@ import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 
+/** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1». */
+const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio" }
+
 /**
  * El motor de las demos para presentar (ADR 0096). Arma una clínica inventada
  * con la receta de su tipo: el equipo sin cuentas, su tarifario, meses de
@@ -336,7 +339,7 @@ export async function buildDemo(
       rent: demoPriceCents(index === 0 ? 5_500 : 4_200, country),
     })
   }
-  const roomWord = demo.product === "dental" ? "Unidad" : "Consultorio"
+  const roomWord = DEMO_ROOM[demo.product]
   const rooms = new Map<string, string[]>()
   for (const item of branches) {
     const ids: string[] = []

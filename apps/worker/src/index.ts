@@ -8,6 +8,7 @@ import {
 } from "@odentia/agent"
 import { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
+import type { ProductDomains } from "@odentia/clinical"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
@@ -17,6 +18,7 @@ import {
   configurePublicLinks,
   createStorage,
   ensureSuggestedConsentsEverywhere,
+  mailBrandDomains,
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
@@ -46,7 +48,8 @@ const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 const publicLinks = {
   webURL: env.WEB_URL,
   cookieDomain: env.COOKIE_DOMAIN,
-  productDomains: env.MEDICAL_DOMAIN ? { medical: env.MEDICAL_DOMAIN } : {},
+  // Uno por producto con dominio propio: el que se agregue tiene que decir el suyo.
+  productDomains: { medical: env.MEDICAL_DOMAIN || undefined } satisfies ProductDomains,
 }
 configurePublicLinks(publicLinks)
 configureDocumentChecks(secretsKey)
@@ -54,7 +57,7 @@ configureDocumentChecks(secretsKey)
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
 // El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
-configureMailLinks(env.WEB_URL, { latidia: env.MEDICAL_DOMAIN })
+configureMailLinks(env.WEB_URL, mailBrandDomains(publicLinks.productDomains))
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,

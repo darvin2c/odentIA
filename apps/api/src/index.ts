@@ -1,11 +1,12 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
 import { decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
-import { createAuth } from "@odentia/auth"
+import { type Auth, createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
+import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -14,7 +15,7 @@ import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
 // El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
-configureMailLinks(env.WEB_URL, { latidia: env.MEDICAL_DOMAIN })
+configureMailLinks(env.WEB_URL, mailBrandDomains(env.productDomains))
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
@@ -46,20 +47,20 @@ const auth = createAuth({
   cookieDomain: env.COOKIE_DOMAIN,
   trustedOrigins: env.trustedOrigins,
 })
-// latidIA en su dominio (decisión 9 del issue 229): misma base y mismo secreto,
-// su propia cookie. Quien trabaja en los dos productos entra una vez en cada uno.
-const productAuth = env.MEDICAL_DOMAIN
-  ? {
-      medical: createAuth({
-        ...authOptions,
-        product: "medical",
-        baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN),
-        webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN),
-        cookieDomain: env.MEDICAL_DOMAIN,
-        trustedOrigins: trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN, [new URL(env.ADMIN_URL).origin]),
-      }),
-    }
-  : {}
+// Cada producto en su dominio (decisión 9 del issue 229; latidIA en el suyo): misma base y
+// mismo secreto, su propia cookie. Quien trabaja en varios productos entra una vez en cada uno.
+const productAuth: Partial<Record<DomainProduct, Auth>> = {}
+for (const [product, domain] of Object.entries(env.productDomains) as [DomainProduct, string | undefined][]) {
+  if (!domain) continue
+  productAuth[product] = createAuth({
+    ...authOptions,
+    product,
+    baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
+    webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
+    cookieDomain: domain,
+    trustedOrigins: trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, domain, [new URL(env.ADMIN_URL).origin]),
+  })
+}
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
 }

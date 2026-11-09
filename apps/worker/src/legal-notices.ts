@@ -1,7 +1,7 @@
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { legalUpdateTemplate } from "@odentia/mail"
-import { productWords } from "@odentia/clinical"
+import { BASE_PRODUCT, productWords } from "@odentia/clinical"
 import { accountProduct, claimLegalNotices, panelOrigin } from "@odentia/services"
 
 export interface LegalNoticeDeps {
@@ -47,7 +47,7 @@ export async function runLegalNoticesTick(
     try {
       // La marca de la cuenta: latidIA si todas sus clínicas lo son, y su panel para entrar (issue 229).
       const product = await accountProduct(deps.ownerDb, r.userId)
-      const panel = (product === "dental" ? null : panelOrigin(product)) ?? deps.webUrl.replace(/\/+$/, "")
+      const panel = (product === BASE_PRODUCT ? null : panelOrigin(product)) ?? deps.webUrl.replace(/\/+$/, "")
       await deps.mailer.send({
         to: r.email,
         ...legalUpdateTemplate({

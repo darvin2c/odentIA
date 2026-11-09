@@ -3,9 +3,23 @@
 // (`latidia-pages.json`: `serves`) y algunas existen solo en ella (`own`), que en odentIA no existen.
 import LATIDIA_PAGES from "./latidia-pages.json"
 
-export type WebProduct = "dental" | "medical"
+/** Los productos que tienen web. */
+const WEB_PRODUCTS = ["dental", "medical"] as const
+export type WebProduct = (typeof WEB_PRODUCTS)[number]
 
-export const PRODUCT: WebProduct = import.meta.env.VITE_PRODUCT === "medical" ? "medical" : "dental"
+/**
+ * El producto de este armado; sin decirlo, odentIA. Uno que esta web aún no
+ * conoce detiene el armado en vez de publicar en silencio la web de odentIA en
+ * su dominio.
+ */
+function webProduct(asked: string | undefined): WebProduct {
+  if (!asked) return "dental"
+  const known = WEB_PRODUCTS.find((product) => product === asked)
+  if (!known) throw new Error(`VITE_PRODUCT=${asked}: esta web todavía no tiene las páginas de ese producto`)
+  return known
+}
+
+export const PRODUCT: WebProduct = webProduct(import.meta.env.VITE_PRODUCT)
 export const MEDICAL = PRODUCT === "medical"
 
 /** Las palabras que cambian entre las dos webs; lo demás se dice igual. */

@@ -4,7 +4,7 @@
  * hasta dónde. La comprobación contra el peor costo, tipo por tipo, se ve
  * antes de guardar; el servidor la exige igual.
  */
-import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import {
   FieldDescription,
   FieldGroup,
@@ -117,6 +117,13 @@ const GROUPS: Array<{ title: string; keys: PriceKey[] }> = [
   { title: "Argos", keys: ["cita", "preguntas"] },
   { title: "Almacenamiento", keys: ["almacenamiento"] },
 ]
+
+/** Que el plan por defecto de los demás productos no cambia: «El de latidIA no cambia.» */
+function othersUnchanged(product: ClinicalProduct): string {
+  const others = CLINICAL_PRODUCTS.filter((item) => item !== product).map((item) => productWords(item).name)
+  const list = new Intl.ListFormat("es", { type: "conjunction" }).format(others)
+  return others.length === 1 ? `El de ${list} no cambia.` : `Los de ${list} no cambian.`
+}
 
 /** «0.50» → 500000 millonésimas; null si está vacío o no es un importe. */
 function toMicros(text: string): number | null {
@@ -457,7 +464,7 @@ export function PlanDrawer({
                       aria-invalid={control.invalid || undefined}
                       value={field.state.value}
                       onValueChange={(value) => {
-                        if (value !== "dental" && value !== "medical") return
+                        if (!isClinicalProduct(value)) return
                         field.handleChange(value)
                         // Se marca por defecto o se publica en la web del producto nuevo, no del anterior.
                         form.setFieldValue("isDefault", false)
@@ -635,7 +642,7 @@ export function PlanDrawer({
               <field.CheckboxField
                 id="plan-default"
                 label={`Plan por defecto de ${words.name}`}
-                description={`Con él abren, prueban y se cuentan las clínicas de ${words.name} que no eligen otro. El de ${productWords(product === "dental" ? "medical" : "dental").name} no cambia.`}
+                description={`Con él abren, prueban y se cuentan las clínicas de ${words.name} que no eligen otro. ${othersUnchanged(product)}`}
               />
             )}
           </form.AppField>

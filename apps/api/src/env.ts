@@ -1,4 +1,5 @@
 import { fakeModelStartProblem } from "@odentia/agent"
+import type { ProductDomains } from "@odentia/clinical"
 import { z } from "zod"
 
 const envSchema = z.object({
@@ -150,7 +151,8 @@ function loadEnv() {
   return {
     ...rest,
     trustedOrigins: TRUSTED_ORIGINS.split(",").map((o) => o.trim()),
-    productDomains: rest.MEDICAL_DOMAIN ? { medical: rest.MEDICAL_DOMAIN } : {},
+    // Uno por producto con dominio propio: el que se agregue tiene que decir el suyo.
+    productDomains: { medical: rest.MEDICAL_DOMAIN || undefined } satisfies ProductDomains,
   }
 }
 

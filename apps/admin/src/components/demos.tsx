@@ -1,4 +1,4 @@
-import { CLINICAL_PRODUCTS, type ClinicalProduct } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -109,13 +109,16 @@ const optionsSchema = z.object({
   presenters: z.array(z.object({ id: z.string(), name: z.string(), email: z.string() })),
 })
 
+/** Cómo se llaman las salas de la demo de cada producto, en plural (las arma `buildDemo`). */
+const DEMO_ROOMS: Record<ClinicalProduct, string> = { dental: "unidades", medical: "consultorios" }
+
 /** Los pasos del armado, como los dice el avance (tablero 4). */
 const STEPS: Array<{ key: string; title: string; detail: (demo: DemoItem) => string }> = [
   {
     key: "equipo",
     title: "La clínica y su equipo",
     detail: (demo) =>
-      `${demo.sizeName}: sedes, ${demo.product === "dental" ? "unidades" : "consultorios"}, quien atiende y su horario`,
+      `${demo.sizeName}: sedes, ${DEMO_ROOMS[demo.product]}, quien atiende y su horario`,
   },
   {
     key: "tarifario",
@@ -304,7 +307,7 @@ export function CreateDemoDrawer({
   }, [options.data, currentUserId, form])
   const product = useStore(form.store, (state) => state.values.product)
   const kinds = useMemo(() => kindsOf(options.data, product), [options.data, product])
-  const kindWord = product === "dental" ? "Tipo de clínica" : "Tipo de consultorio"
+  const kindWord = `Tipo de ${productWords(product).place.one}`
   const kindOptionOf = (key: string) => kinds.find((item) => item.key === key)
   // El tipo y el nombre siguen al producto y al país: el nombre sale del tipo, y se puede cambiar.
   const followProduct = (next: ClinicalProduct) => {
@@ -352,7 +355,7 @@ export function CreateDemoDrawer({
                     aria-describedby={control.describedBy}
                     value={field.state.value}
                     onValueChange={(value) => {
-                      if (value === "dental" || value === "medical") field.handleChange(value)
+                      if (isClinicalProduct(value)) field.handleChange(value)
                       field.handleBlur()
                     }}
                     className="grid grid-cols-2 gap-2"

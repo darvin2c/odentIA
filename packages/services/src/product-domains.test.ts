@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isOnDomain, onDomain, productOfHost, trustedOriginsOn } from "./product-domains.js"
+import { isOnDomain, mailBrandDomains, onDomain, productOfHost, trustedOriginsOn } from "./product-domains.js"
 
 describe("los dos dominios de una instalación (decisión 9 del issue 229)", () => {
   it("lleva una dirección de odentIA al dominio de latidIA, con su esquema y su puerto", () => {
@@ -48,5 +48,12 @@ describe("los dos dominios de una instalación (decisión 9 del issue 229)", () 
         ["https://admin.odentia32.com"],
       ),
     ).toEqual(["https://latidia72.com", "https://app.latidia72.com", "https://*.latidia72.com"])
+  })
+})
+
+describe("el pie de los correos de cada marca", () => {
+  it("lleva la web de la marca de cada producto con dominio propio, y nada sin dominio", () => {
+    expect(mailBrandDomains({ medical: "latidia72.com" })).toEqual({ latidia: "latidia72.com" })
+    expect(mailBrandDomains({ medical: undefined })).toEqual({})
   })
 })

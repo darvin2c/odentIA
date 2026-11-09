@@ -106,7 +106,8 @@ export type MessageVariable = keyof typeof MESSAGE_VARIABLES
  * línea de Argos y lo que se manda a Meta para aprobar la plantilla no deben
  * hablar de ortodoncia en latidIA.
  */
-const PRODUCT_EXAMPLES: Partial<Record<ClinicalProduct, Partial<Record<MessageVariable, string>>>> = {
+const PRODUCT_EXAMPLES: Record<ClinicalProduct, Partial<Record<MessageVariable, string>>> = {
+  dental: {},
   medical: {
     lugar: "Consultorio Vida, sede Centro",
     clinica: "Consultorio Vida",
@@ -409,7 +410,8 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
  * (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
  * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia.
  */
-const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>>> = {
+const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>> = {
+  dental: {},
   medical: {
     invitar_a_volver: {
       template: "latidia_invitar_a_volver_v1",
@@ -422,14 +424,14 @@ const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<Automatio
 export function productTemplatesOf(key: AutomationMessageKey): string[] {
   return [
     AUTOMATION_MESSAGES[key].template,
-    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages?.[key] ? [messages[key].template] : [])),
+    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages[key] ? [messages[key].template] : [])),
   ]
 }
 
 export function automationMessageOf(kind: string, product: ClinicalProduct = "dental"): AutomationMessage | null {
   if (!(AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(kind)) return null
   const key = kind as AutomationMessageKey
-  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product]?.[key] }
+  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product][key] }
 }
 
 /**

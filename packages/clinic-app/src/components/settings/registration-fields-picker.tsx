@@ -1,4 +1,5 @@
 import type {
+  ClinicalProduct,
   RegistrationConfig,
   RegistrationFieldKey,
   RegistrationFieldMode,
@@ -75,6 +76,20 @@ const MEDICAL_HABITS: PickerItem[] = [
   { keys: ["medical.tabaco"], label: "Si fuma" },
   { keys: ["medical.alcohol"], label: "Si toma alcohol" },
 ]
+/**
+ * Lo de cada producto en el registro: lo que suma a «Otros antecedentes» y su
+ * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA).
+ */
+const PRODUCT_FIELDS: Record<ClinicalProduct, { personal: PickerItem[]; own: { title: string; help: string; items: PickerItem[] } }> = {
+  dental: {
+    personal: [],
+    own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
+  },
+  medical: {
+    personal: MEDICAL_PERSONAL,
+    own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
+  },
+}
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
   { keys: ["educationLevel"], label: "Nivel educativo" },
@@ -265,36 +280,23 @@ export function RegistrationFieldsPicker({
       <Group
         title="Otros antecedentes"
         help="Llegan a su entrevista de salud. Nunca son obligatorios."
-        items={product === "medical" ? [...PERSONAL, ...MEDICAL_PERSONAL] : PERSONAL}
+        items={[...PERSONAL, ...PRODUCT_FIELDS[product].personal]}
         fields={fields}
         options={TWO}
         onMode={onMode}
         disabled={disabled}
         errors={errors}
       />
-      {product === "dental" ? (
-        <Group
-          title="Su historia dental"
-          help="Ayuda a preparar la primera visita."
-          items={DENTAL}
-          fields={fields}
-          options={TWO}
-          onMode={onMode}
-          disabled={disabled}
-          errors={errors}
-        />
-      ) : (
-        <Group
-          title="Sus hábitos"
-          help="Llegan a sus antecedentes. Nunca son obligatorios."
-          items={MEDICAL_HABITS}
-          fields={fields}
-          options={TWO}
-          onMode={onMode}
-          disabled={disabled}
-          errors={errors}
-        />
-      )}
+      <Group
+        title={PRODUCT_FIELDS[product].own.title}
+        help={PRODUCT_FIELDS[product].own.help}
+        items={PRODUCT_FIELDS[product].own.items}
+        fields={fields}
+        options={TWO}
+        onMode={onMode}
+        disabled={disabled}
+        errors={errors}
+      />
       <Group
         title="Preguntas para conocerlo"
         help="Nunca son obligatorias: no hacen falta para atenderlo."

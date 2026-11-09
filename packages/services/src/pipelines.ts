@@ -1,3 +1,4 @@
+import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { auditEvent } from "@odentia/db/schema/org"
 import { pipeline, pipelineStage } from "@odentia/db/schema/crm"
@@ -33,6 +34,12 @@ export const SALE_MOMENT_NAMES: Record<SaleMoment, string> = {
  */
 const MEDICAL_MOMENT_NAMES: Partial<Record<SaleMoment, string>> = {
   evaluacion_agendada: "Consulta agendada",
+}
+
+/** Los nombres propios de cada producto; lo que no dice, el de `SALE_MOMENT_NAMES`. */
+const MOMENT_NAMES_BY_PRODUCT: Record<ClinicalProduct, Partial<Record<SaleMoment, string>>> = {
+  dental: {},
+  medical: MEDICAL_MOMENT_NAMES,
 }
 
 /** Orden de los pasos: una oportunidad avanza sola solo hacia adelante. */
@@ -94,12 +101,12 @@ export async function ensureDefaultPipeline(
         .values({ organizationId: orgId, name: "Ventas", isDefault: true })
         .returning()
       if (!created) throw new Error("No se pudo crear el embudo")
-      const medical = (await orgProduct(tx, orgId)) === "medical"
+      const names = MOMENT_NAMES_BY_PRODUCT[await orgProduct(tx, orgId)]
       await tx.insert(pipelineStage).values(
         SALE_MOMENTS.map((moment, position) => ({
           organizationId: orgId,
           pipelineId: created.id,
-          name: (medical ? MEDICAL_MOMENT_NAMES[moment] : undefined) ?? SALE_MOMENT_NAMES[moment],
+          name: names[moment] ?? SALE_MOMENT_NAMES[moment],
           position,
           moment,
         })),

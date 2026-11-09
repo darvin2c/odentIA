@@ -122,6 +122,7 @@ jobs:
         run: |
           pnpm --filter @odentia/dental exec vitest run src/boundaries.test.ts
           pnpm --filter @odentia/medical exec vitest run src/boundaries.test.ts
+          pnpm --filter @odentia/clinical exec vitest run src/product-choices.test.ts
           pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts
           pnpm --filter @odentia/ui-patterns exec vitest run src/scroll-policy.test.ts
 

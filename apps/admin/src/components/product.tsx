@@ -4,7 +4,7 @@
  * clínica, odentIA en celeste y latidIA en lila. Va como un punto con su nombre,
  * nunca como pastilla, para no confundirse con los estados.
  */
-import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import { cn } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { useQuery } from "@tanstack/react-query"
@@ -87,7 +87,7 @@ export function ProductFilter({
       onValueChange={(next: unknown[]) => {
         const picked = next[0]
         // Tocar otra vez lo elegido no deja el filtro vacío.
-        if (picked === "todos" || picked === "dental" || picked === "medical") onChange(picked)
+        if (picked === "todos" || isClinicalProduct(picked)) onChange(picked)
       }}
       spacing={1}
       className={cn("flex-wrap rounded-3xl border bg-muted p-1", className)}
