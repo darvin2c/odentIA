@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm"
 import { API, tenant, tenantPattern } from "./env"
 import { api, call, chooseOption, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { putAndRemovePhoto } from "./patient-photo"
 import {
   buildClinicalBase,
   createAcceptedBudget,
@@ -14,7 +15,6 @@ import {
   patientApiPath,
   setupAggregation,
 } from "./patients-fixture"
-import { putAndRemovePhoto } from "./patient-photo"
 import { surface } from "./surface"
 
 /** La persona (contacto) de un paciente: la dirección de su página (ADR 0029). */
@@ -373,9 +373,9 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   const firma = page.getByRole("dialog", { name: "Finalizar y firmar" })
   await expect(firma.getByText(/COP 12345/)).toBeVisible()
   await firma.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
-  // El diálogo dice qué quedó por cobrar; al confirmarlo llega el relevo.
+  // El diálogo dice qué se cargó hoy a su cuenta; al confirmarlo llega el relevo.
   const dialogo = page.getByRole("dialog", { name: "Atención finalizada" })
-  await expect(dialogo.getByText("Quedó por cobrar")).toBeVisible()
+  await expect(dialogo.getByText("Se cargó hoy a su cuenta")).toBeVisible()
   await dialogo.getByRole("button", { name: "Listo", exact: true }).click()
   // Al finalizar se permanece en la atención, con lo que sigue a la vista.
   await expect(page).toHaveURL(/\/encounters\//)

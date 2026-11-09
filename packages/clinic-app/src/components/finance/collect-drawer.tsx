@@ -72,13 +72,13 @@ import { MoreHorizontal, Plus, X } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
-import { BranchSwitcher } from "../branch-switcher"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { collectFormMessage, financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
-  acceptedTotalsKey,
   type AccountPendingItem,
+  acceptedTotalsKey,
+  amountHelpText,
   CASH_TYPE_CODE,
   type CollectInput,
   type CollectResultBody,
@@ -96,20 +96,20 @@ import {
   type ProductCharge,
   type PromotionItem,
   type PromotionOption,
-  amountHelpText,
   rateAuthorWords,
-  treatmentLineName,
-  sentence,
   type SaleProduct,
+  sentence,
+  treatmentLineName,
   voidChargeApi,
 } from "../../lib/finance-collect"
 import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
 import { orgSecondCurrency, useOrgProfile } from "../../lib/org"
 import { currencyChoices } from "../../lib/product-words"
+import { productUi } from "../../product/product-ui"
+import { BranchSwitcher } from "../branch-switcher"
 import { ChoiceButtons } from "../choice-buttons"
 import { PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
-import { productUi } from "../../product/product-ui"
 import { RateFarNote, RateField } from "./rate-input"
 
 /** Lo más que se vende de un producto en un concepto (el tope del servidor). */
@@ -624,6 +624,11 @@ export function CollectDrawer({
     debtCurrency: string
     payCurrency: string
   } | null>(null)
+  /**
+   * El importe parcial de lo pendiente escrito antes de ir a «Cobrar un adelanto»: vuelve escrito
+   * al volver (repaso del 9 nov, N3: 250 volvía a 450 y el botón cobraba 450 sin que se notara).
+   */
+  const [pendingDraft, setPendingDraft] = useState<string | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [adding, setAdding] = useState(false)
   const [addingProduct, setAddingProduct] = useState(false)
@@ -1771,7 +1776,11 @@ export function CollectDrawer({
                                       payCurrency: form.state.values.payCurrency,
                                     })
                                   form.setFieldValue("advance", false)
-                                  setAmountTouched(false)
+                                  // Lo que había escrito de lo pendiente vuelve; si no, sigue a lo marcado.
+                                  if (pendingDraft !== null)
+                                    form.setFieldValue("amount", pendingDraft)
+                                  setAmountTouched(pendingDraft !== null)
+                                  setPendingDraft(null)
                                   // Lo pendiente está en otra moneda: el cobro va a ella.
                                   if (pending.length === 0)
                                     chooseDebt(owedByCurrency[0]?.code ?? debt)
@@ -1788,6 +1797,8 @@ export function CollectDrawer({
                               disabled={busy}
                               onClick={() => {
                                 closeInline()
+                                // Un importe escrito a mano para lo pendiente se guarda para la vuelta.
+                                setPendingDraft(amountTouched ? form.state.values.amount : null)
                                 form.setFieldValue("advance", true)
                                 // Lo que ya había escrito del adelanto vuelve, con su «Para».
                                 form.setFieldValue("amount", advanceDraft?.amount ?? "")
