@@ -1,7 +1,8 @@
-/** La carta de bienvenida: lo que promete (buzón, fecha, plazo), lo que pide, su forma de carta y sus dos hojas. */
+/** La carta de bienvenida: lo que promete (buzón, fecha, plazo), lo que pide, su forma de carta y sus hojas. */
 import { PDFDocument } from "pdf-lib"
 import { describe, expect, it } from "vitest"
 import {
+  WELCOME_LETTER_MAX_PAGES,
   WELCOME_LETTER_RETENTION_DAYS,
   type WelcomeLetterInput,
   welcomeLetterContent,
@@ -26,7 +27,7 @@ function words(content: ReturnType<typeof welcomeLetterContent>): string {
     content.closing,
     content.send.title,
     content.send.body,
-    ...content.clinicData,
+    ...content.annex.flatMap((area) => [area.title, ...area.items]),
     content.list.lead,
     ...content.list.items,
     content.list.tail,
@@ -42,7 +43,7 @@ describe("welcomeLetterContent", () => {
     expect(content.title).toBe("Bienvenida a odentIA")
     expect(content.placeAndDate).toBe("Lima, 9 de noviembre de 2026")
     expect(content.steps[1]?.lead).toBe("Envío de la información, hasta el viernes 13 de noviembre.")
-    expect(content.steps[1]?.rest).toContain("en un solo correo a soporte@odentia32.com")
+    expect(content.steps[1]?.rest).toContain("a soporte@odentia32.com, en uno o varios correos")
     expect(content.send.title).toBe("Enviar a soporte@odentia32.com hasta el viernes 13 de noviembre")
     expect(text).toContain(`como máximo, a los ${WELCOME_LETTER_RETENTION_DAYS} días de recibirlos`)
     expect(WELCOME_LETTER_RETENTION_DAYS).toBe(30)
@@ -57,7 +58,7 @@ describe("welcomeLetterContent", () => {
       ...base,
       companion: { ...base.companion, role: "Implementación" },
     })
-    expect(content.subject).toBe("Bienvenida a odentIA e información para la carga de sus datos")
+    expect(content.subject).toBe("Bienvenida a odentIA e información para la implementación")
     expect(content.salutation).toBe("De nuestra consideración:")
     expect(content.closing).toContain("quedamos a su disposición")
     // El celular va con espacios que no cortan: no se parte entre dos líneas.
@@ -70,14 +71,38 @@ describe("welcomeLetterContent", () => {
     expect(welcomeLetterContent(base).signature.role).toBeNull()
   })
 
-  it("pide los datos de la clínica para cargarlos, no solo para tenerlos a mano", () => {
-    const data = welcomeLetterContent(base).clinicData.join("\n")
-    expect(data).toContain("Empresa: razón social, RUC, nombre comercial y logotipo")
-    expect(data).toContain("Sedes: nombre, dirección, teléfono y horario de atención")
-    expect(data).toContain("Unidades dentales: cantidad por sede")
-    expect(data).toContain("de los odontólogos, su especialidad y número de colegiatura (COP)")
-    expect(data).toContain("Servicios y precios")
-    expect(words(welcomeLetterContent(base))).not.toContain("tengan a mano")
+  it("pide todo lo que se puede cargar, por área, y la lista de pacientes al final", () => {
+    const content = welcomeLetterContent(base)
+    expect(content.annex.map((area) => area.title)).toEqual([
+      "Empresa",
+      "Sedes y unidades dentales",
+      "Equipo y horarios",
+      "Servicios y precios",
+      "Inventario y proveedores",
+      "Caja y gastos",
+      "Atención a sus pacientes",
+      "Canales de comunicación",
+    ])
+    expect(content.list.title).toBe("Lista de pacientes")
+    const text = words(content)
+    expect(text).toContain("Razón social, RUC, dirección fiscal y nombre comercial")
+    expect(text).toContain("Unidades dentales de cada sede")
+    expect(text).toContain("colegio profesional y número de colegiatura (COP)")
+    expect(text).toContain("qué días y horas atiende cada profesional en cada sede")
+    expect(text).toContain("cantidad actual y mínimo para reponer")
+    expect(text).toContain("Proveedores: nombre o razón social, RUC, teléfono, correo y dirección")
+    expect(text).toContain("Gastos fijos")
+    expect(text).toContain("comisiones")
+    expect(text).toContain("estacionamiento")
+    expect(text).toContain("WhatsApp, las páginas de Facebook e Instagram")
+    expect(content.send.body).toContain("No incluya contraseñas")
+    expect(text).not.toContain("tengan a mano")
+  })
+
+  it("el pie es del remitente, no de la clínica", () => {
+    const content = welcomeLetterContent(base)
+    expect(content.footer).toBe("odentIA · odentia32.com · SALLCA GROUP E.I.R.L. · RUC 20603338741")
+    expect(content.footer).not.toContain("Sonrisa")
   })
 
   it("latidIA: su marca, su dominio y sus palabras", () => {
@@ -86,9 +111,11 @@ describe("welcomeLetterContent", () => {
     expect(content.brandName).toBe("latidIA")
     expect(content.inbox).toBe("soporte@latidia72.com")
     expect(content.title).toBe("Bienvenida a latidIA")
+    expect(content.footer).toBe("latidIA · latidia72.com · SALLCA GROUP E.I.R.L. · RUC 20603338741")
     expect(text).toContain("la plataforma para clínicas y consultorios médicos")
-    expect(text).toContain("Consultorios: cantidad por sede")
-    expect(text).toContain("de los médicos, su especialidad y número de colegiatura (CMP)")
+    expect(content.annex[1]?.title).toBe("Sedes y consultorios")
+    expect(text).toContain("Consultorios de cada sede")
+    expect(text).toContain("colegio profesional y número de colegiatura (CMP)")
     expect(text).not.toMatch(/odentIA|unidades dentales|odontólogos|\(COP\)/i)
   })
 
@@ -140,7 +167,7 @@ describe("welcomeLetterContent", () => {
 
 describe("welcomeLetterPdf", () => {
   it.each(["dental", "medical"] as const)(
-    "la carta con su firma en la primera hoja y el anexo en la segunda (%s)",
+    "la carta con su firma en la primera hoja y el anexo desde la segunda (%s)",
     async (product) => {
       const { bytes, pages, letterPages, content } = await welcomeLetterPdf({
         ...base,
@@ -148,9 +175,10 @@ describe("welcomeLetterPdf", () => {
         companion: { ...base.companion, role: "Implementación" },
       })
       expect(letterPages).toBe(1)
-      expect(pages).toBe(2)
+      expect(pages).toBeGreaterThan(1)
+      expect(pages).toBeLessThanOrEqual(WELCOME_LETTER_MAX_PAGES)
       const pdf = await PDFDocument.load(bytes)
-      expect(pdf.getPageCount()).toBe(2)
+      expect(pdf.getPageCount()).toBe(pages)
       expect(pdf.getTitle()).toBe(content.title)
     },
   )
@@ -162,12 +190,12 @@ describe("welcomeLetterPdf", () => {
     clinic: fill("Centro Odontológico Especializado Sonrisa Feliz de Lurigancho ", 70),
     to: fill("Dra. María Fernanda Quispe Huamán de Rodríguez, directora ", 55),
     companion: {
-      name: fill("Carlos Alberto Ruiz Mendoza de la Torre ", 50),
+      name: fill("Carlos Alberto Ruiz Mendoza de la Torre ", 40),
       role: fill("Responsable de implementación y soporte ", 50),
-      email: `${fill("carlos.alberto.ruiz.mendoza.", 36)}@odentia32.com`,
+      email: `${fill("carlos.alberto.ruiz.mendoza.", 26)}@odentia32.com`,
       phone: "+51 987 654 321 0000",
     },
-    inbox: `${fill("cargas.pacientes.nuevas.", 36)}@odentia32.com`,
+    inbox: `${fill("cargas.pacientes.nuevas.", 26)}@odentia32.com`,
   }
 
   it.each([
@@ -176,10 +204,11 @@ describe("welcomeLetterPdf", () => {
     ["medical", true],
     ["medical", false],
   ] as const)(
-    "no pasa de dos hojas con todo en su largo máximo (%s, consulta su sistema: %s)",
+    "con todo en su largo máximo, la firma sigue en la primera hoja y no pasa del tope (%s, consulta su sistema: %s)",
     async (product, askCurrentSystem) => {
-      const { pages } = await welcomeLetterPdf({ ...longest, product, askCurrentSystem })
-      expect(pages).toBe(2)
+      const { pages, letterPages } = await welcomeLetterPdf({ ...longest, product, askCurrentSystem })
+      expect(letterPages).toBe(1)
+      expect(pages).toBeLessThanOrEqual(WELCOME_LETTER_MAX_PAGES)
     },
   )
 })

@@ -25,7 +25,7 @@ Primero va lo que otra cosa necesita: una cita necesita al profesional y la sede
 
 | Etapa | Qué se pide | Cuándo | Cómo se carga |
 |---|---|---|---|
-| 1 · La clínica | Razón social, RUC, nombre comercial y logo; sedes con dirección, teléfono y horario; unidades dentales o consultorios; equipo (nombre, correo, celular, rol, especialidad y colegiatura); servicios y precios | Semana del alta, en la carta | A mano en el alta con lo que enviaron, y se revisa con la dueña en la reunión: Equipo invita a cada persona y Servicios parte de la biblioteca del país |
+| 1 · La clínica | Todo lo que se configura, por área: empresa (razón social, RUC, dirección fiscal, logo, teléfono de urgencias, monedas); sedes y unidades dentales o consultorios; equipo (rol, título, especialidad, colegiatura) y horarios y ausencias de cada profesional; servicios y precios, especialidades y promociones; inventario y proveedores; caja (medios de pago, gastos fijos, comisiones, ticket y vigencia del presupuesto); lo que el asistente responde a los pacientes y sus formatos propios; canales | Semana del alta, en la carta | A mano en el alta, con lo que enviaron, y se revisa con la dueña en la reunión: Datos de la clínica y Sedes; Equipo invita a cada persona y cada profesional completa su perfil; Horarios y ausencias; Servicios parte de la biblioteca del país; Inventario con «Pegar tu lista»; medios de pago, gastos que se repiten y comisiones; «Lo que solo tú sabes» del asistente; los canales se conectan con ella en la reunión, nunca con contraseñas por correo |
 | 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta, en la carta | Con esta skill |
 | 3 · Día de corte | Citas de las próximas 2 a 4 semanas (fecha, hora, paciente, profesional, sede y motivo); saldos y deudas a esa fecha | La víspera de empezar a agendar en odentIA | Todavía no: las citas se registran a mano la primera semana |
 | 4 · Después | Historia anterior en PDF o fotos, con el número de historia o el DNI en el nombre o en una lista; alergias y antecedentes; radiografías y documentos; tratamientos en curso y presupuestos | Sin apuro | Todavía no |
@@ -36,7 +36,8 @@ Mientras las etapas 3 y 4 no tengan carga, solo se pregunta si se pueden exporta
 
 Los datos de las etapas 1 y 2 se piden con una carta en PDF con la marca del producto de la clínica (odentIA o latidIA) y su titular, SALLCA GROUP E.I.R.L. La idea es cargar todo lo que se pueda. Es una carta formal, que trata de usted a quien la recibe.
 - **La primera hoja:** fecha, destinatario, asunto y «De nuestra consideración:». Después, los próximos pasos: entrar y aceptar el contrato de encargo, enviar a soporte en un solo correo los datos de la clínica y la lista de pacientes, y la reunión de implementación. Luego, el tratamiento de su información, incluido que el correo se borra, como máximo, a los 30 días. Cierra con la despedida y la firma de quien acompaña.
-- **La segunda hoja:** el anexo con lo que hay que enviar, para que lo reúnan. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
+- **Desde la segunda hoja:** el anexo con todo lo que se puede cargar, por área (empresa, sedes, equipo y horarios, servicios, inventario y proveedores, caja y gastos, atención a sus pacientes, canales) y, al final, la lista de pacientes, para que lo reúnan.
+- **El pie de cada hoja** es del remitente (la marca, su web y su titular), nunca de la clínica. El texto vive en `packages/services/src/clinic-import-letter.ts`; no se escribe otro a mano.
 
 La carta es para clínicas de Perú: pide el RUC y la colegiatura. Le pide aceptar la invitación que le llegó al correo: se entrega cuando la clínica ya está creada en la administración (alta asistida) y su invitación salió. Si todavía no, dilo al entregarla.
 
@@ -68,7 +69,7 @@ pnpm --filter @odentia/services import:carta -- <carpeta>/carta.json
 
 El buzón es `soporte@odentia32.com` o, en latidIA, `soporte@latidia72.com`; otro, solo con `inbox`. Antes de la primera carta de latidIA, comprueba que `soporte@latidia72.com` recibe correo.
 
-El comando dice cuántas páginas salió: son dos, y si pasan, falla. `hojasDeLaCarta` tiene que ser 1: la firma en la primera hoja y el anexo en la segunda. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda sus datos a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
+El comando dice cuántas páginas salió: tres como máximo, y si pasan, falla. `hojasDeLaCarta` tiene que ser 1: la carta con su firma en la primera hoja y el anexo desde la segunda. Mira el PDF antes de entregarlo y da su ruta a quien acompaña el alta: lo envía la persona, no Claude. Si la clínica igual manda sus datos a quien la acompaña o por WhatsApp, se reenvía a soporte, se borra de ahí ese mismo día y sigue el mismo plazo.
 
 ## Antes de empezar
 

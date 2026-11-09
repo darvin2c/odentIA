@@ -1,12 +1,15 @@
 /**
  * La carta de bienvenida de una clínica nueva (ADR 0104): le da la bienvenida
- * con la marca de su producto y le pide los datos de su clínica y su lista de
- * pacientes por correo, tal como los tiene. La arma la skill de carga en la
- * máquina de quien acompaña el alta, sin base de datos (`import:carta`).
+ * con la marca de su producto y le pide, por correo y tal como los tiene, todos
+ * los datos que se pueden cargar: la empresa, sus sedes, su equipo, sus
+ * servicios, su inventario, su caja, lo que el asistente responde a sus
+ * pacientes, sus canales y su lista de pacientes. La arma la skill de carga en
+ * la máquina de quien acompaña el alta, sin base de datos (`import:carta`).
  *
  * Es una carta formal: fecha, destinatario, asunto, saludo, cuerpo, despedida
  * y firma de quien acompaña, en la primera hoja; lo que hay que enviar, en un
- * anexo en la segunda. Trata de usted a quien la recibe.
+ * anexo desde la segunda. Trata de usted a quien la recibe. El pie de cada hoja
+ * es del remitente (la marca y su titular), no de la clínica.
  *
  * El texto (`welcomeLetterContent`) va aparte del dibujo para probar lo que
  * promete: a qué buzón, hasta cuándo y en cuántos días se borra. Lo que la carta
@@ -28,6 +31,9 @@ import {
 /** Días, como máximo, que el correo con la lista queda en el buzón: lo dice la carta y lo cumple la skill. */
 export const WELCOME_LETTER_RETENTION_DAYS = 30
 
+/** Hojas de la carta como máximo: la carta en una y el anexo en las siguientes. */
+export const WELCOME_LETTER_MAX_PAGES = 3
+
 /**
  * Lo que cambia de un producto a otro. Los dominios son los de producción,
  * escritos aquí porque la carta sale para una clínica real y no hay un entorno
@@ -38,8 +44,8 @@ const PRODUCT = {
     brand: "odentia",
     domain: "odentia32.com",
     platform: "la plataforma para clínicas odontológicas",
-    rooms:
-      "Unidades dentales: cantidad por sede y cómo las identifican (por ejemplo, «Unidad 1»).",
+    sites: "Sedes y unidades dentales",
+    rooms: "Unidades dentales de cada sede: cuántas hay y cómo las identifican (por ejemplo, «Unidad 1»).",
     roles: "recepción, odontología, caja o administración",
     clinicians: "los odontólogos",
     college: "COP",
@@ -48,8 +54,8 @@ const PRODUCT = {
     brand: "latidia",
     domain: "latidia72.com",
     platform: "la plataforma para clínicas y consultorios médicos",
-    rooms:
-      "Consultorios: cantidad por sede y cómo los identifican (por ejemplo, «Consultorio 1»).",
+    sites: "Sedes y consultorios",
+    rooms: "Consultorios de cada sede: cuántos hay y cómo los identifican (por ejemplo, «Consultorio 1»).",
     roles: "recepción, consulta, caja o administración",
     clinicians: "los médicos",
     college: "CMP",
@@ -61,7 +67,7 @@ const isoDate = z.iso.date({ error: "Fecha AAAA-MM-DD que exista en el calendari
 
 /*
  * Los largos máximos son los que caben con todo lo demás en su largo máximo
- * (la prueba lo comprueba): la carta en la primera hoja y el anexo en la segunda.
+ * (la prueba lo comprueba): la carta con su firma en la primera hoja.
  */
 
 export const welcomeLetterSchema = z
@@ -74,20 +80,20 @@ export const welcomeLetterSchema = z
     to: z.string().trim().min(2).max(55),
     /** Quien acompaña el alta y firma la carta: para dudas, nunca para recibir datos de pacientes. */
     companion: z.strictObject({
-      name: z.string().trim().min(2).max(50),
+      name: z.string().trim().min(2).max(40),
       /** Su cargo, bajo la firma; sin él, solo el nombre y la marca. */
       role: z.string().trim().min(2).max(50).optional(),
-      email: z.email().max(50),
+      email: z.email().max(40),
       phone: z.string().trim().min(6).max(20).optional(),
     }),
-    /** Hasta cuándo enviar los datos y la lista. */
+    /** Hasta cuándo enviar la información. */
     deadline: isoDate,
     /** Si todavía no se sabe qué usa la clínica para sus pacientes: la carta se lo pregunta. */
     askCurrentSystem: z.boolean().default(true),
     /** El día de la carta; sin decirlo, hoy. */
     date: isoDate.optional(),
-    /** El buzón que recibe la lista; sin decirlo, soporte@ del dominio del producto. */
-    inbox: z.email().max(50).optional(),
+    /** El buzón que recibe la información; sin decirlo, soporte@ del dominio del producto. */
+    inbox: z.email().max(40).optional(),
   })
   .refine((letter) => letter.deadline >= (letter.date ?? todayInLima()), {
     path: ["deadline"],
@@ -101,6 +107,12 @@ export interface LetterStep {
   rest: string
 }
 
+/** Una sección del anexo: lo que se pide de un área de la clínica. */
+export interface AnnexSection {
+  title: string
+  items: string[]
+}
+
 export interface WelcomeLetterContent {
   brand: "odentia" | "latidia"
   brandName: string
@@ -110,7 +122,7 @@ export interface WelcomeLetterContent {
   placeAndDate: string
   to: string
   clinic: string
-  /** Título del PDF y del encabezado de la segunda hoja. */
+  /** Título del PDF y del encabezado de las hojas siguientes. */
   title: string
   subject: string
   salutation: string
@@ -120,14 +132,16 @@ export interface WelcomeLetterContent {
   after: string[]
   closing: string
   signature: { name: string; role: string | null; brand: string; contact: string }
+  /** El pie de cada hoja: el remitente, no la clínica. */
+  footer: string
   /** Lo que más importa, en un recuadro al empezar el anexo: a dónde y hasta cuándo. */
   send: { title: string; body: string }
-  /** Los datos de la clínica que se piden junto con la lista: lo que el equipo registra en el alta. */
-  clinicData: string[]
+  /** El anexo, por área: lo que el equipo registra en el alta con lo que la clínica envía. */
+  annex: AnnexSection[]
   /** Si la clínica todavía no dijo qué usa: la consulta, en el paso de la reunión. */
   currentSystem: string | null
-  /** «Lista de pacientes»: qué sirve, lo que conviene que traiga y lo que no se puede cargar. */
-  list: { lead: string; items: string[]; tail: string }
+  /** La última sección del anexo: qué sirve de la lista de pacientes y lo que no se puede cargar. */
+  list: { title: string; lead: string; items: string[]; tail: string }
 }
 
 const ZONE = { locale: "es-PE", timezone: "America/Lima" }
@@ -166,6 +180,7 @@ export function welcomeLetterContent(raw: WelcomeLetterInput): WelcomeLetterCont
   const currentSystem = letter.askCurrentSystem
     ? "En ella le consultaremos qué utiliza hoy para registrar a sus pacientes y si permite descargar sus citas y saldos."
     : null
+  const titular = CONSUMER_COMPLAINT_PROVIDER
   return {
     brand: product.brand,
     brandName,
@@ -175,12 +190,12 @@ export function welcomeLetterContent(raw: WelcomeLetterInput): WelcomeLetterCont
     to: letter.to,
     clinic: letter.clinic,
     title: `Bienvenida a ${brandName}`,
-    subject: `Bienvenida a ${brandName} e información para la carga de sus datos`,
+    subject: `Bienvenida a ${brandName} e información para la implementación`,
     // Formal y sin suponer el género de quien la recibe.
     salutation: "De nuestra consideración:",
     intro: [
-      `Le damos la más cordial bienvenida a ${brandName}, ${product.platform} de ${CONSUMER_COMPLAINT_PROVIDER.legalName} Desde ahora, sus pacientes, citas, historia clínica y comunicaciones estarán reunidos en un solo lugar.`,
-      "Para que su clínica comience a trabajar con su propia información, le solicitamos los datos de la clínica y su lista de pacientes tal como los maneja hoy, sin necesidad de ordenarlos ni adaptarlos a una plantilla.",
+      `Le damos la más cordial bienvenida a ${brandName}, ${product.platform} de ${titular.legalName} Desde ahora, sus pacientes, citas, historia clínica y comunicaciones estarán reunidos en un solo lugar.`,
+      "Para que su clínica comience a trabajar con toda su información, le solicitamos los datos que se detallan en el anexo, tal como los maneja hoy, sin necesidad de ordenarlos ni adaptarlos a una plantilla. Con ellos configuraremos su clínica y cargaremos a sus pacientes.",
     ],
     steps: [
       {
@@ -189,12 +204,12 @@ export function welcomeLetterContent(raw: WelcomeLetterInput): WelcomeLetterCont
       },
       {
         lead: `Envío de la información, hasta ${until}.`,
-        rest: `Remita los datos de la clínica y su lista de pacientes en un solo correo a ${inbox}, con el nombre de la clínica en el asunto (detalle en el anexo). Envíe lo que tenga disponible; lo que falte lo completaremos en la reunión. Por tratarse de datos de salud, le pedimos no usar WhatsApp.`,
+        rest: `Remita lo detallado en el anexo a ${inbox}, en uno o varios correos, con el nombre de la clínica en el asunto. Envíe lo que tenga disponible; lo que falte lo completaremos en la reunión. Por tratarse de datos de salud, le pedimos no usar WhatsApp.`,
       },
       {
         lead: "Reunión de implementación.",
         rest: [
-          `${companion.name} coordinará con usted una reunión para revisar la información y completar lo pendiente.`,
+          `${companion.name} coordinará con usted una reunión para revisar la información, completar lo pendiente y conectar sus canales.`,
           currentSystem,
           "Si no sabe cómo descargar la lista, lo haremos juntos.",
         ]
@@ -215,19 +230,76 @@ export function welcomeLetterContent(raw: WelcomeLetterInput): WelcomeLetterCont
       brand: brandName,
       contact,
     },
+    footer: `${brandName} · ${product.domain} · ${titular.legalName} · RUC ${titular.ruc}`,
     send: {
       title: `Enviar a ${inbox} hasta ${until}`,
-      body: "En un solo correo, con el nombre de la clínica en el asunto. Envíe lo que tenga disponible: lo que falte lo completaremos en la reunión.",
+      body: "En uno o varios correos, con el nombre de la clínica en el asunto. Envíe lo que tenga disponible: lo que falte lo completaremos en la reunión. No incluya contraseñas.",
     },
-    clinicData: [
-      "Empresa: razón social, RUC, nombre comercial y logotipo (en imagen).",
-      "Sedes: nombre, dirección, teléfono y horario de atención de cada una.",
-      product.rooms,
-      `Equipo: nombre completo, correo, celular y función de cada persona (${product.roles}) y, de ${product.clinicians}, su especialidad y número de colegiatura (${product.college}). Cada persona recibirá una invitación para ingresar.`,
-      "Servicios y precios: su tarifario en el formato que tenga; también sirve una foto o una copia en papel.",
+    annex: [
+      {
+        title: "Empresa",
+        items: [
+          "Razón social, RUC, dirección fiscal y nombre comercial.",
+          "Logotipo en imagen (PNG o JPG).",
+          "Teléfono para urgencias y monedas en que cobra (por ejemplo, soles y dólares).",
+        ],
+      },
+      {
+        title: product.sites,
+        items: [
+          "De cada sede o local: nombre, dirección y teléfono.",
+          product.rooms,
+        ],
+      },
+      {
+        title: "Equipo y horarios",
+        items: [
+          `De cada persona: nombre completo, correo, celular y función (${product.roles}). Cada una recibirá una invitación para ingresar.`,
+          `De ${product.clinicians}: título profesional, especialidad, colegio profesional y número de colegiatura (${product.college}).`,
+          "Horario de atención: qué días y horas atiende cada profesional en cada sede, y sus ausencias próximas (vacaciones, congresos).",
+        ],
+      },
+      {
+        title: "Servicios y precios",
+        items: [
+          "Su tarifario: nombre de cada servicio, precio y, si lo tiene, duración por sesión y número habitual de sesiones. Sirve una foto o una copia en papel.",
+          "Especialidades que ofrece y qué profesional atiende cada una.",
+          "Promociones o paquetes vigentes: qué incluyen, precio y hasta cuándo.",
+        ],
+      },
+      {
+        title: "Inventario y proveedores",
+        items: [
+          "Productos e insumos: nombre, unidad (caja, unidad, ml), cantidad actual y mínimo para reponer; lote y vencimiento, si los controla. Sirve su Excel.",
+          "Proveedores: nombre o razón social, RUC, teléfono, correo y dirección.",
+        ],
+      },
+      {
+        title: "Caja y gastos",
+        items: [
+          "Medios de pago que acepta (efectivo, tarjeta, Yape, Plin, transferencia u otros).",
+          "Gastos fijos (alquiler, servicios, sueldos y otros): monto y día de pago de cada uno.",
+          "Si paga comisiones a sus profesionales: el porcentaje de lo cobrado, por profesional o por servicio.",
+          "Si imprime tickets, el ancho del papel; y cuántos días tiene vigencia un presupuesto.",
+        ],
+      },
+      {
+        title: "Atención a sus pacientes",
+        items: [
+          "Para que nuestro asistente responda bien: si tiene estacionamiento, si el local es accesible, si acepta pago en cuotas, seguros o convenios, si atiende sin cita, qué debe llevar el paciente a su primera cita, qué pasa si llega tarde o no asiste y cómo se obtiene un presupuesto.",
+          "Sus formatos propios, si los usa: consentimientos, fichas o cuestionarios.",
+        ],
+      },
+      {
+        title: "Canales de comunicación",
+        items: [
+          "El número de WhatsApp, las páginas de Facebook e Instagram y el correo que usa con sus pacientes. Los conectamos juntos en la reunión.",
+        ],
+      },
     ],
     currentSystem,
     list: {
+      title: "Lista de pacientes",
       lead: "Puede enviar su Excel o el archivo que descarga su sistema actual; si este ofrece varias descargas, la de pacientes. Solo el nombre es indispensable; si la lista los incluye, también nos sirven:",
       items: [
         "número de historia clínica y documento de identidad;",
@@ -241,12 +313,10 @@ export function welcomeLetterContent(raw: WelcomeLetterInput): WelcomeLetterCont
 }
 
 /** La carta en PDF (A4), con el logotipo y el color de la marca y el titular en el membrete. */
-export async function welcomeLetterPdf(
-  raw: WelcomeLetterInput,
-): Promise<{
+export async function welcomeLetterPdf(raw: WelcomeLetterInput): Promise<{
   bytes: Uint8Array
   pages: number
-  /** Las hojas de la carta hasta la firma: una, y el anexo en la siguiente. */
+  /** Las hojas de la carta hasta la firma: una, y el anexo desde la siguiente. */
   letterPages: number
   content: WelcomeLetterContent
 }> {
@@ -270,12 +340,13 @@ export async function welcomeLetterPdf(
     sheetSize: "A4",
     receiptWidth: "80",
   }
+  // El pie es del remitente: la marca y su titular a la izquierda, y la página.
   const kit = await DocumentKit.open(sender, sheetFormat("A4"), {
     title: content.title,
-    docLabel: `Bienvenida · ${content.clinic}`,
+    docLabel: "",
+    legalNote: content.footer,
   })
-  // Dos hojas: la carta y el anexo con lo que hay que enviar, para reunirlo.
-  // La carta, con su firma, cabe en la primera hoja; el anexo, en la segunda.
+  // La carta, con su firma, cabe en la primera hoja; el anexo, en las siguientes.
   const body = { size: SIZE.dense, leading: 1.45 }
   const section = { before: 9, after: 2 }
 
@@ -326,7 +397,9 @@ export async function welcomeLetterPdf(
   kit.gap(12)
   kit.text({ text: content.signature.name, face: "sansSemi" }, signature)
   kit.text(
-    content.signature.role ? `${content.signature.role} · ${content.signature.brand}` : content.signature.brand,
+    content.signature.role
+      ? `${content.signature.role} · ${content.signature.brand}`
+      : content.signature.brand,
     { ...signature, tone: "gray" },
   )
   kit.text(content.signature.contact, { ...signature, tone: "gray" })
@@ -334,17 +407,22 @@ export async function welcomeLetterPdf(
 
   // El anexo empieza en su propia hoja, salvo que la carta ya haya pasado a ella.
   if (kit.pageCount === 1) kit.newPage()
-  kit.heading("Anexo: información para la carga", { size: SIZE.h2small, before: 4, after: 6 })
+  kit.heading("Anexo: información para la implementación", { size: SIZE.h2small, before: 4, after: 6 })
   // La hoja se usa sola para reunir los datos: repite a dónde y hasta cuándo.
   kit.panel({ title: content.send.title, body: content.send.body, size: SIZE.dense })
-  kit.subheading("1. Datos de la clínica", { before: 10, after: 2 })
-  kit.bullets(content.clinicData, body)
-
-  kit.subheading("2. Lista de pacientes", { before: 10, after: 2 })
-  kit.text(content.list.lead, body)
-  kit.bullets(content.list.items, body)
-  kit.gap(4)
-  kit.text(content.list.tail, body)
+  const sections = [...content.annex, { title: content.list.title, items: [] }]
+  sections.forEach((area, index) => {
+    kit.subheading(`${index + 1}. ${area.title}`, { before: 10, after: 2 })
+    if (area.items.length) {
+      kit.bullets(area.items, body)
+      return
+    }
+    // La lista de pacientes: qué sirve, lo que conviene que traiga y lo que no.
+    kit.text(content.list.lead, body)
+    kit.bullets(content.list.items, body)
+    kit.gap(4)
+    kit.text(content.list.tail, body)
+  })
 
   const bytes = await kit.finish()
   return { bytes, pages: kit.pageCount, letterPages, content }

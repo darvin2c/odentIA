@@ -19,7 +19,7 @@ import { basename, dirname, resolve } from "node:path"
 import { isZip, readXlsxRows, readZipEntries, xlsxSheetNames } from "@odentia/db/xlsx"
 import { configureZodMessages } from "@odentia/clinical"
 import { ZodError } from "zod"
-import { welcomeLetterPdf } from "./clinic-import-letter.js"
+import { WELCOME_LETTER_MAX_PAGES, welcomeLetterPdf } from "./clinic-import-letter.js"
 import { checkClinicImportPlan, type ClinicImportCheck, type ClinicImportPlan } from "./clinic-import-plan.js"
 import {
   clinicImportMapSchema,
@@ -149,8 +149,8 @@ async function main(): Promise<void> {
     const letterPath = resolve(cwd, target)
     const { bytes, pages, letterPages, content } = await welcomeLetterPdf(JSON.parse(readFileSync(letterPath, "utf-8")))
     const out = resolve(dirname(letterPath), `carta-${fileSlug(content.clinic)}.pdf`)
-    // La carta va en dos hojas: si pasa, no se escribe, se dice y el comando falla para que se acorte.
-    const aviso = pages > 2 ? `Salió en ${pages} páginas: acorta el nombre de la clínica, el destinatario o quien acompaña` : undefined
+    // La carta tiene un tope de hojas: si pasa, no se escribe, se dice y el comando falla para que se acorte.
+    const aviso = pages > WELCOME_LETTER_MAX_PAGES ? `Salió en ${pages} páginas: acorta el nombre de la clínica, el destinatario o quien acompaña` : undefined
     if (!aviso) writeFileSync(out, bytes)
     console.log(JSON.stringify({ escrito: aviso ? null : out, paginas: pages, hojasDeLaCarta: letterPages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
     if (aviso) process.exitCode = 1
