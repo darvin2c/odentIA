@@ -1816,9 +1816,8 @@ export function CollectDrawer({
                           )}
                           {!values.advance && advanceDraft ? (
                             <p role="status" className="basis-full text-sm text-muted-foreground">
-                              El adelanto de {draftSaid(advanceDraft)} va en otro cobro: cobra lo pendiente y
-                              después «Cobrar un adelanto» por {draftSaid(advanceDraft)}. Si vuelves ahora a
-                              «Cobrar un adelanto», lo trae escrito.
+                              El adelanto de {draftSaid(advanceDraft)} va en un cobro aparte: cobra esto primero
+                              y después «Cobrar un adelanto».
                             </p>
                           ) : null}
                         </div>

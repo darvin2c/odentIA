@@ -481,7 +481,8 @@ export function TicketView({
             las líneas sumaban 470 y el TOTAL decía 370, con el saldo a favor debajo como otro medio). */}
         {creditSummary ? (
           <div className="flex flex-col gap-1">
-            <Row label="Suma" value={plain(creditSummary.sumCents)} />
+            {/* Con una sola línea, la suma es esa línea: no se repite. */}
+            {conceptLines.length + (advance ? 1 : 0) > 1 ? <Row label="Suma" value={plain(creditSummary.sumCents)} /> : null}
             <Row label="Saldo a favor usado" value={`−${plain(creditSummary.creditCents)}`} />
           </div>
         ) : null}

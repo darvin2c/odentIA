@@ -209,7 +209,8 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
     totalCents: snap.totalCents,
   })
   if (credit) {
-    moneyRow(kit, "Suma", money(credit.sumCents))
+    // Con una sola línea, la suma es esa línea: no se repite.
+    if (snap.lines.length + (snap.advanceCents ? 1 : 0) > 1) moneyRow(kit, "Suma", money(credit.sumCents))
     moneyRow(kit, "Saldo a favor usado", `−${money(credit.creditCents)}`)
   }
   if (snap.taxes) {
