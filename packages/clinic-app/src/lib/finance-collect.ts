@@ -769,6 +769,12 @@ export interface SaleProduct {
   /** Precio de venta por unidad; null si aún no tiene (no se puede agregar). */
   salePriceCents: number | null
   currency: string | null
+  /** Lo de su etiqueta, si la tiene (código de barras, marca, modelo, color y medidas). */
+  barcode?: string | null
+  brand?: string | null
+  model?: string | null
+  color?: string | null
+  size?: string | null
   /** Lo que hay en la sede (lotes − faltante; puede ser negativo). */
   onHand: number
   /** «4 frascos»; null si no hay. */

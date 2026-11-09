@@ -572,6 +572,12 @@ export interface SaleProduct {
   /** Precio de venta por unidad; null si el producto aún no tiene precio (no se puede agregar). */
   salePriceCents: number | null
   currency: string | null
+  /** Lo de su etiqueta, si la tiene: el escáner la encuentra y la lista la dice. */
+  barcode: string | null
+  brand: string | null
+  model: string | null
+  color: string | null
+  size: string | null
   /** Lo que hay en la sede del cobro (lotes − faltante; puede ser negativo). */
   onHand: number
   /** «4 frascos»; null si no hay: «No hay en Miraflores: quedará como faltante». */
@@ -596,7 +602,8 @@ export async function listSaleProducts(
     eq(product.forSale, true),
   ]
   const q = input.q?.trim()
-  if (q) conditions.push(foldedWordsMatch([product.name, product.sku], q))
+  // Lo que lee el escáner es el código de barras entero; lo escrito busca también marca y modelo.
+  if (q) conditions.push(or(eq(product.barcode, q.replace(/\s+/g, "")), foldedWordsMatch([product.name, product.sku, product.brand, product.model], q))!)
   const rows = await tx
     .select({
       productId: product.id,
@@ -604,6 +611,11 @@ export async function listSaleProducts(
       unit: product.unit,
       salePriceCents: product.salePriceCents,
       currency: product.saleCurrency,
+      barcode: product.barcode,
+      brand: product.brand,
+      model: product.model,
+      color: product.color,
+      size: product.size,
     })
     .from(product)
     .where(and(...conditions))
