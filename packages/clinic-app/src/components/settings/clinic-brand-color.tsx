@@ -2,6 +2,7 @@ import {
   type BrandPalette,
   brandColorName,
   brandPalette,
+  dominantColors,
   normalizeBrandColor,
   PRODUCT_BRAND_COLORS,
   suggestedBrandColors,
@@ -10,8 +11,8 @@ import { Button, cn, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { rootRouteId, useRouter } from "@tanstack/react-router"
-import { Check, TriangleAlert } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { Camera, Check, TriangleAlert } from "lucide-react"
+import { type MouseEvent, useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { forgetClinicAppearance } from "../../lib/clinic-color"
 import { productUi } from "../../product/product-ui"
@@ -34,10 +35,55 @@ function codeProblem(text: string): string | null {
   return `${gap > 0 ? (count === 1 ? "Le falta" : "Le faltan") : count === 1 ? "Le sobra" : "Le sobran"} ${digits}: el código tiene 6, como #1D5FA8.`
 }
 
+/** La foto del letrero, leída en el navegador: no se sube ni se guarda. */
+interface SignPhoto {
+  url: string
+  pixels: ImageData
+  /** Los colores que saca de ella la misma cuenta que los del logo. */
+  colors: string[]
+  /** El que se tocó en la foto. */
+  picked: string | null
+}
+
+/** Lado mayor de la foto leída: basta para sacar el color y no pesa en un teléfono. */
+const PHOTO_SIDE = 320
+
+async function readSignPhoto(file: File): Promise<SignPhoto> {
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, PHOTO_SIDE / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+  const context = canvas.getContext("2d")
+  if (!context) throw new Error("El navegador no deja leer la foto")
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+  // Una foto trae más colores que un logo (cielo, pared, plantas): se ofrecen hasta cuatro.
+  return { url: canvas.toDataURL("image/jpeg", 0.85), pixels, colors: dominantColors(pixels.data, 4, 4), picked: null }
+}
+
+/** El color donde se tocó la foto: el promedio de un cuadrito, para que un píxel suelto no mande. */
+function colorAt(pixels: ImageData, x: number, y: number): string {
+  const total = [0, 0, 0]
+  let count = 0
+  for (let dy = -3; dy <= 3; dy++) {
+    for (let dx = -3; dx <= 3; dx++) {
+      const px = Math.min(pixels.width - 1, Math.max(0, Math.round(x) + dx))
+      const py = Math.min(pixels.height - 1, Math.max(0, Math.round(y) + dy))
+      const at = (py * pixels.width + px) * 4
+      for (let channel = 0; channel < 3; channel++) total[channel] = (total[channel] ?? 0) + (pixels.data[at + channel] ?? 0)
+      count++
+    }
+  }
+  return `#${total.map((sum) => Math.round(sum / count).toString(16).padStart(2, "0")).join("")}`
+}
+
 /**
  * El color de la marca (ADR 0162, lienzo «Color de la marca»): un solo color para toda
  * la clínica. Primero los colores de su logo, porque casi nadie sabe el código de su
- * color; luego los sugeridos, y «Elegir otro color» con la paleta y el código. Elegir
+ * color; luego los sugeridos, «Elegir otro color» con la paleta y el código, y «Sacar
+ * de una foto» del letrero, que se lee en el navegador y no se guarda. Elegir
  * solo cambia la vista previa: se guarda con «Usar este color», aparte del «Guardar»
  * de los datos, porque cambia al instante lo que ven los pacientes. Cualquier color
  * vale; lo que el sistema ajusta para que se lea, o el parecido con el rojo de los
@@ -66,6 +112,9 @@ export function ClinicBrandColorSettings({
   const [code, setCode] = useState(saved.toUpperCase())
   const [codeError, setCodeError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [photo, setPhoto] = useState<SignPhoto | null>(null)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const photoInput = useRef<HTMLInputElement>(null)
 
   // Lo guardado manda cuando cambia (al guardar o desde otra pestaña).
   useEffect(() => {
@@ -124,6 +173,30 @@ export function ClinicBrandColorSettings({
       setCodeError(null)
     }
   }
+  const onPhoto = async (file: File | undefined) => {
+    if (!file) return
+    setPhotoError(null)
+    try {
+      setPhoto(await readSignPhoto(file))
+    } catch {
+      setPhotoError("No pudimos leer esa foto. Prueba con otra, en JPG o PNG.")
+    }
+  }
+  const pickInPhoto = (event: MouseEvent<HTMLImageElement>) => {
+    if (!photo || save.isPending) return
+    const box = event.currentTarget.getBoundingClientRect()
+    const hex = colorAt(
+      photo.pixels,
+      ((event.clientX - box.left) / box.width) * photo.pixels.width,
+      ((event.clientY - box.top) / box.height) * photo.pixels.height,
+    )
+    setPhoto({ ...photo, picked: hex })
+    pick(hex)
+  }
+  const photoColors = photo
+    ? [...new Set([photo.picked, ...photo.colors].filter((hex): hex is string => !!hex))]
+    : []
+
   const submit = () => {
     const problem = otherOpen ? codeProblem(code) : null
     if (problem) {
@@ -249,16 +322,69 @@ export function ClinicBrandColorSettings({
                 {codeError ?? "Toca el color para elegir en la paleta, o escribe el código de tu marca."}
               </p>
             </fieldset>
-          ) : (
-            <Button type="button" variant="outline" className="min-h-11 self-start" onClick={() => setOtherOpen(true)}>
-              <span
-                aria-hidden
-                className="size-4 rounded-full"
-                style={{ background: "conic-gradient(#ef4444,#f59e0b,#22c55e,#06b6d4,#3b82f6,#a855f7,#ef4444)" }}
+          ) : null}
+
+          {photo ? (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-2 text-sm font-semibold">De tu foto</legend>
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: tocar la foto es un atajo con el dedo o el mouse; con teclado se eligen los colores sacados de ella, aquí debajo. */}
+              <img
+                src={photo.url}
+                alt="Tu foto. Tócala donde está el color de tu letrero."
+                onClick={pickInPhoto}
+                className="max-h-48 max-w-full cursor-crosshair self-start rounded-lg border"
               />
-              Elegir otro color
+              {photoColors.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {photoColors.map((hex) => swatch(hex, brandColorName(hex), true))}
+                </div>
+              ) : null}
+              <p className="text-sm text-muted-foreground">
+                {photoColors.length > 0
+                  ? "Elige uno, o toca en la foto el color de tu letrero. La foto no se guarda."
+                  : "No encontramos un color en la foto: tócala donde está tu color, o prueba con otra más de cerca. La foto no se guarda."}
+              </p>
+            </fieldset>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            {otherOpen ? null : (
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => setOtherOpen(true)}>
+                <span
+                  aria-hidden
+                  className="size-4 rounded-full"
+                  style={{ background: "conic-gradient(#ef4444,#f59e0b,#22c55e,#06b6d4,#3b82f6,#a855f7,#ef4444)" }}
+                />
+                Elegir otro color
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={save.isPending}
+              onClick={() => photoInput.current?.click()}
+            >
+              <Camera aria-hidden />
+              {photo ? "Otra foto" : "Sacar de una foto"}
             </Button>
-          )}
+            {/* En el teléfono ofrece la cámara o la galería; la foto no sale del navegador. */}
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                void onPhoto(event.target.files?.[0])
+                event.target.value = ""
+              }}
+            />
+          </div>
+          {photoError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {photoError}
+            </p>
+          ) : null}
 
           <ColorNotices palette={palette} chosen={chosen} />
         </div>

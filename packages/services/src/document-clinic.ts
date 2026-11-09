@@ -7,7 +7,7 @@
  * clínica subió a su carpeta del bucket público. Una dirección guardada a mano
  * que apunte a otro lado no se sigue (SSRF). Falla en silencio: sale con iniciales.
  */
-import { brandPalette } from "@odentia/clinical"
+import { brandPalette, dominantColors } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
@@ -117,43 +117,6 @@ export async function clinicLogoColors(tx: Db, orgId: string): Promise<string[]>
   } catch {
     return []
   }
-}
-
-/** Agrupa los píxeles con color en cajas de 16 tonos por canal y devuelve el promedio de las más llenas. */
-export function dominantColors(pixels: Uint8Array, channels: number): string[] {
-  const boxes = new Map<number, { count: number; r: number; g: number; b: number }>()
-  let colored = 0
-  for (let i = 0; i + 3 < pixels.length; i += channels) {
-    const r = pixels[i] ?? 0
-    const g = pixels[i + 1] ?? 0
-    const b = pixels[i + 2] ?? 0
-    const alpha = channels >= 4 ? (pixels[i + 3] ?? 0) : 255
-    if (alpha < 128) continue
-    const max = Math.max(r, g, b)
-    const min = Math.min(r, g, b)
-    // Blanco, negro y grises no son el color de una marca.
-    if (max - min < 40 || max < 40) continue
-    colored++
-    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
-    const box = boxes.get(key) ?? { count: 0, r: 0, g: 0, b: 0 }
-    box.count++
-    box.r += r
-    box.g += g
-    box.b += b
-    boxes.set(key, box)
-  }
-  const ranked = [...boxes.values()]
-    .filter((box) => box.count >= Math.max(4, colored * 0.03))
-    .sort((a, b) => b.count - a.count)
-    .map((box) => [box.r / box.count, box.g / box.count, box.b / box.count] as const)
-  const chosen: Array<readonly [number, number, number]> = []
-  for (const color of ranked) {
-    // El segundo tiene que verse distinto del primero, no ser el mismo con otra luz.
-    if (chosen.every((other) => Math.hypot(color[0] - other[0], color[1] - other[1], color[2] - other[2]) > 80))
-      chosen.push(color)
-    if (chosen.length === 2) break
-  }
-  return chosen.map((color) => `#${color.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`)
 }
 
 /**
