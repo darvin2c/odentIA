@@ -55,7 +55,7 @@ describe("welcomeLetterContent", () => {
     const data = welcomeLetterContent(base).clinicData.join("\n")
     expect(data).toContain("razón social, RUC, nombre comercial y su logo")
     expect(data).toContain("Cada sede: nombre, dirección, teléfono y horario de atención")
-    expect(data).toContain("Sus sillones")
+    expect(data).toContain("Sus unidades dentales: cuántas hay en cada sede")
     expect(data).toContain("de los odontólogos, su especialidad y su número de colegiatura (COP)")
     expect(data).toContain("Sus servicios y precios")
     expect(words(welcomeLetterContent(base))).not.toContain("tengan a mano")
@@ -69,7 +69,7 @@ describe("welcomeLetterContent", () => {
     expect(content.title).toBe("Bienvenidos a latidIA")
     expect(text).toContain("Sus consultorios")
     expect(text).toContain("de los médicos, su especialidad y su número de colegiatura (CMP)")
-    expect(text).not.toMatch(/odentIA|sillones|odontólogos|\(COP\)/)
+    expect(text).not.toMatch(/odentIA|unidades dentales|odontólogos|\(COP\)/)
   })
 
   it("sin teléfono de quien acompaña, solo su correo; sin la pregunta si ya se sabe qué usan", () => {

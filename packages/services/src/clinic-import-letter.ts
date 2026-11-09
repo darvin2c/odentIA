@@ -32,7 +32,7 @@ const PRODUCT = {
   dental: {
     brand: "odentia",
     domain: "odentia32.com",
-    rooms: "Sus sillones: cuántos hay en cada sede y cómo los llaman («Sillón 1»).",
+    rooms: "Sus unidades dentales: cuántas hay en cada sede y cómo las llaman («Unidad 1»).",
     roles: "recepción, odontología, caja o administración",
     clinicians: "los odontólogos",
     college: "COP",

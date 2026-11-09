@@ -25,7 +25,7 @@ Primero va lo que otra cosa necesita: una cita necesita al profesional y la sede
 
 | Etapa | Qué se pide | Cuándo | Cómo se carga |
 |---|---|---|---|
-| 1 · La clínica | Razón social, RUC, nombre comercial y logo; sedes con dirección, teléfono y horario; sillones o consultorios; equipo (nombre, correo, celular, rol, especialidad y colegiatura); servicios y precios | Semana del alta, en la carta | A mano en el alta con lo que enviaron, y se revisa con la dueña en la reunión: Equipo invita a cada persona y Servicios parte de la biblioteca del país |
+| 1 · La clínica | Razón social, RUC, nombre comercial y logo; sedes con dirección, teléfono y horario; unidades dentales o consultorios; equipo (nombre, correo, celular, rol, especialidad y colegiatura); servicios y precios | Semana del alta, en la carta | A mano en el alta con lo que enviaron, y se revisa con la dueña en la reunión: Equipo invita a cada persona y Servicios parte de la biblioteca del país |
 | 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta, en la carta | Con esta skill |
 | 3 · Día de corte | Citas de las próximas 2 a 4 semanas (fecha, hora, paciente, profesional, sede y motivo); saldos y deudas a esa fecha | La víspera de empezar a agendar en odentIA | Todavía no: las citas se registran a mano la primera semana |
 | 4 · Después | Historia anterior en PDF o fotos, con el número de historia o el DNI en el nombre o en una lista; alergias y antecedentes; radiografías y documentos; tratamientos en curso y presupuestos | Sin apuro | Todavía no |
