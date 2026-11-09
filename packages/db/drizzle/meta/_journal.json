@@ -505,6 +505,13 @@
       "when": 1794202116111,
       "tag": "0071_hoy_no_quita_lo_traido",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794234390530,
+      "tag": "0072_gasto_con_clave",
+      "breakpoints": true
     }
   ]
 }

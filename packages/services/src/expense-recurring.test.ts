@@ -26,6 +26,9 @@ import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
+/** Quien administra comisiones: ve, anota y paga lo del personal (ADR 0166). */
+const ADMIN = { seesPeople: true }
+
 describe("cuándo toca", () => {
   it("cada mes, cada 6 meses y hasta su fin", () => {
     const monthly = { firstMonth: "2026-01", lastMonth: null, everyMonths: 1 }
@@ -133,7 +136,7 @@ it("el sueldo de una persona va junto a su comisión del mes, pagado o no", asyn
         currency: "PEN",
         fromCash: false,
         repeat: { everyMonths: 1, day: 28, memberUserId: f.actor },
-      }),
+      }, ADMIN),
     ),
   ).rejects.toMatchObject({ code: "VALIDATION" })
   await f.run((tx) =>
@@ -145,7 +148,7 @@ it("el sueldo de una persona va junto a su comisión del mes, pagado o no", asyn
       currency: "PEN",
       fromCash: false,
       repeat: { everyMonths: 1, day: 28, memberUserId: f.actor },
-    }),
+    }, ADMIN),
   )
   const view = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...current }))
   expect(view.salary).toMatchObject({ cents: 300000, paidCents: 300000, dueCents: 0 })
@@ -173,7 +176,7 @@ it("el mes que paga, lo que se propone tras un cambio y lo que no se puede cambi
         currency: "PEN",
         fromCash: false,
         repeat: { everyMonths: 1, day: 31, memberUserId: f.actor, ...(month ? { month } : {}) },
-      }),
+      }, ADMIN),
     )
   // Empezar antes del mes anterior dejaría por pagar meses quizá ya pagados como gastos sueltos.
   await expect(salary(twoBack)).rejects.toMatchObject({ code: "VALIDATION" })
@@ -181,39 +184,40 @@ it("el mes que paga, lo que se propone tras un cambio y lo que no se puede cambi
   const created = await salary(before.key)
   expect(created.recurring.firstMonth).toBe(before.key)
   const id = created.recurring.id
-  const due = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))).due.find(
+  const due = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }, new Date(), ADMIN))).due.find(
     (row) => row.recurringId === id,
   )
   // El día de la plantilla viaja entero: «Cambiar» no lo corre al último del mes.
   expect(due).toMatchObject({ month: currentKey, day: 31 })
 
   // Se pagó otro importe; cambiar solo el concepto no hace volver al importe de antes.
-  await f.run((tx) => voidExpense(tx, "org_a", f.actor, created.expense!.id, { reason: "Prueba" }))
-  await f.run((tx) => payRecurringOccurrence(tx, "org_a", f.actor, id, { month: before.key, amountCents: 270000 }))
-  await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { concept: "Sueldo de recepción (turno mañana)" }))
-  const after = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))).due.find(
+  await f.run((tx) => voidExpense(tx, "org_a", f.actor, created.expense!.id, { reason: "Prueba" }, { seesPeople: true }))
+  await f.run((tx) => payRecurringOccurrence(tx, "org_a", f.actor, id, { month: before.key, amountCents: 270000 }, ADMIN))
+  await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { concept: "Sueldo de recepción (turno mañana)" }, ADMIN))
+  const after = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }, new Date(), ADMIN))).due.find(
     (row) => row.recurringId === id,
   )
   expect(after).toMatchObject({ amountCents: 270000, concept: "Sueldo de recepción (turno mañana)" })
   // Volver al importe de siempre (el de la plantilla) sí guarda: se compara con lo que se propone.
-  const back = await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { amountCents: 250000 }))
+  const back = await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { amountCents: 250000 }, ADMIN))
   expect(back.amountCents).toBe(250000)
-  const backDue = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))).due.find(
+  const backDue = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }, new Date(), ADMIN))).due.find(
     (row) => row.recurringId === id,
   )
   expect(backDue).toMatchObject({ amountCents: 250000 })
 
   // La persona no se cambia y el fin no queda antes de un mes pagado.
   await expect(
-    f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { memberUserId: randomUUID() })),
+    f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { memberUserId: randomUUID() }, ADMIN)),
   ).rejects.toMatchObject({ code: "VALIDATION" })
   await expect(
-    f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { lastMonth: twoBack })),
+    f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { lastMonth: twoBack }, ADMIN)),
   ).rejects.toMatchObject({ code: "VALIDATION" })
 
-  // Dejar de repetir termina en lo último pagado y dice si quedó algo antes sin pagar.
-  const ended = await f.run((tx) => endRecurringExpense(tx, "org_a", f.actor, id))
-  expect(ended).toMatchObject({ lastMonth: before.key, stillDue: [] })
+  // Dejar de repetir vale desde el mes que viene: el sueldo de este mes, aún sin pagar, sigue por
+  // pagar y se dice (QA de Gastos, G3; antes terminaba en lo último pagado y lo borraba).
+  const ended = await f.run((tx) => endRecurringExpense(tx, "org_a", f.actor, id, ADMIN))
+  expect(ended).toMatchObject({ lastMonth: currentKey, stillDue: [currentKey] })
 })
 
 it("se anota sin pagar, y el sueldo que se paga al mes siguiente no vence en su propio mes", async () => {
@@ -235,7 +239,7 @@ it("se anota sin pagar, y el sueldo que se paga al mes siguiente no vence en su 
       currency: "PEN",
       fromCash: false,
       repeat: { everyMonths: 1, day: 2, month: currentKey, paid: false, dueNextMonth: true },
-    }),
+    }, ADMIN),
   )
   expect(created.expense).toBeNull()
   expect(created.recurring).toMatchObject({ firstMonth: currentKey, dueNextMonth: true })
@@ -245,7 +249,7 @@ it("se anota sin pagar, y el sueldo que se paga al mes siguiente no vence en su 
   expect(spent[0]?.n).toBe(0)
 
   // Este mes queda por pagar, pero no vencido: vence el 2 del mes siguiente.
-  const month = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))
+  const month = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }, new Date(), ADMIN))
   expect(month.due.find((row) => row.recurringId === created.recurring.id)).toMatchObject({
     month: currentKey,
     dueOn: `${nextKey}-02`,
@@ -255,7 +259,7 @@ it("se anota sin pagar, y el sueldo que se paga al mes siguiente no vence en su 
 
   // El 5 del mes siguiente, ya venció y se debe.
   const later = new Date(Date.UTC(next.year, next.month - 1, 5, 17))
-  const nextMonth = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...next, branchId }, later))
+  const nextMonth = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...next, branchId }, later, ADMIN))
   expect(nextMonth.due.find((row) => row.month === currentKey && row.recurringId === created.recurring.id)).toMatchObject({
     overdue: true,
   })
@@ -282,4 +286,50 @@ it("un gasto pagado es el pago de su mes o del anterior, no de uno posterior a s
       }),
     ),
   ).rejects.toMatchObject({ fields: { "repeat.month": expect.any(String) } })
+})
+
+it("dejar de repetir no borra lo vencido sin pagar, y lo recién anotado sin pagar se va entero (G3)", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const now = new Date()
+  const before = lastMonthOf(now)
+  const current = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 }
+  const currentKey = `${current.year}-${String(current.month).padStart(2, "0")}`
+  // El alquiler del mes pasado se pagó; el de este mes, no.
+  const rent = await f.run((tx) =>
+    registerRecurringExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Alquiler",
+      concept: "Alquiler del depósito",
+      amountCents: 100000,
+      currency: "PEN",
+      fromCash: false,
+      spentAt: before.spentAt,
+      repeat: { everyMonths: 1, day: 1 },
+    }),
+  )
+  const ended = await f.run((tx) => endRecurringExpense(tx, "org_a", f.actor, rent.recurring.id))
+  expect(ended).toMatchObject({ lastMonth: currentKey, stillDue: [currentKey] })
+  // Sigue por pagar en Gastos (y lo vencido, en «Lo que debes»): es una deuda, no se borra.
+  const month = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))
+  expect(month.due.some((row) => row.recurringId === rent.recurring.id && row.month === currentKey)).toBe(true)
+  // Lo que ya no se repite sale de la lista de lo que se repite.
+  expect(month.templates.some((row) => row.id === rent.recurring.id)).toBe(false)
+
+  // Anotado este mes, sin pagar y nunca resuelto: era un error o ya no va, y se va entero.
+  const noted = await f.run((tx) =>
+    registerRecurringExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Servicios",
+      concept: "Internet que no se contrató",
+      amountCents: 9000,
+      currency: "PEN",
+      fromCash: false,
+      repeat: { everyMonths: 1, day: 28, month: currentKey, paid: false },
+    }),
+  )
+  const gone = await f.run((tx) => endRecurringExpense(tx, "org_a", f.actor, noted.recurring.id))
+  expect(gone.stillDue).toEqual([])
+  const after = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))
+  expect(after.due.some((row) => row.recurringId === noted.recurring.id)).toBe(false)
 })

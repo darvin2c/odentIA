@@ -327,12 +327,12 @@ describe("Gastos y cierres", () => {
 
     const bySearch = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...ref, q: "guantes" }))
     expect(bySearch.expenses.map((row) => row.concept)).toEqual(["Guantes y mascarillas"])
-    expect(bySearch.shown).toEqual({ count: 1, totalCents: 8550 })
+    expect(bySearch.shown).toEqual({ count: 1, totalCents: 8550, notCounted: 0 })
     expect(bySearch.totalCents).toBe(358550)
     const byReceipt = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...ref, q: "F001" }))
     expect(byReceipt.expenses.map((row) => row.concept)).toEqual(["Alquiler del local"])
     const byCategory = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...ref, category: "Alquiler" }))
-    expect(byCategory.shown).toEqual({ count: 1, totalCents: 350000 })
+    expect(byCategory.shown).toEqual({ count: 1, totalCents: 350000, notCounted: 0 })
     expect(byCategory.byCategory).toHaveLength(2)
   })
 
