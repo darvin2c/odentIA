@@ -32,12 +32,13 @@ CREATE TABLE "optical"."lens_prescription" (
 );
 --> statement-breakpoint
 ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_encounter_id_encounter_id_fk" FOREIGN KEY ("encounter_id") REFERENCES "public"."encounter"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_prescriber_user_id_user_id_fk" FOREIGN KEY ("prescriber_user_id") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_verified_by_user_id_fk" FOREIGN KEY ("verified_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_voided_by_user_id_fk" FOREIGN KEY ("voided_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_patient_fk" FOREIGN KEY ("organization_id","patient_id") REFERENCES "public"."patient"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_encounter_fk" FOREIGN KEY ("organization_id","patient_id","encounter_id") REFERENCES "public"."encounter"("organization_id","patient_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "optical"."lens_prescription" ADD CONSTRAINT "lens_prescription_photo_fk" FOREIGN KEY ("organization_id","photo_document_id") REFERENCES "public"."patient_document"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "lens_prescription_patient_idx" ON "optical"."lens_prescription" USING btree ("organization_id","patient_id","issued_on");--> statement-breakpoint
 CREATE UNIQUE INDEX "lens_prescription_encounter_kind_uidx" ON "optical"."lens_prescription" USING btree ("organization_id","encounter_id","kind") WHERE "optical"."lens_prescription"."encounter_id" IS NOT NULL AND "optical"."lens_prescription"."voided_at" IS NULL;--> statement-breakpoint
 
@@ -61,3 +62,30 @@ CREATE POLICY org_isolation ON optical.lens_prescription USING ((organization_id
 -- anula, con su motivo. No se borra.
 GRANT SELECT, INSERT ON TABLE optical.lens_prescription TO dentalagent_app;--> statement-breakpoint
 GRANT UPDATE (verified_at, verified_by, voided_at, voided_by, void_reason, updated_at) ON TABLE optical.lens_prescription TO dentalagent_app;
+--> statement-breakpoint
+
+-- Lo que dice la receta no cambia, ni para quien es dueño de la base: solo se
+-- verifica (la externa, una vez: verificada no se desverifica) o se anula, una vez
+-- y con su motivo. Anulada, ya nada cambia.
+CREATE FUNCTION optical.lens_prescription_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  moving text[] := ARRAY['updated_at','verified_at','verified_by','voided_at','voided_by','void_reason'];
+BEGIN
+  IF (to_jsonb(NEW) - 'updated_at') IS NOT DISTINCT FROM (to_jsonb(OLD) - 'updated_at') THEN
+    RETURN NEW;
+  END IF;
+  IF OLD.voided_at IS NOT NULL
+    OR (to_jsonb(NEW) - moving) IS DISTINCT FROM (to_jsonb(OLD) - moving)
+    OR ((NEW.verified_at, NEW.verified_by) IS DISTINCT FROM (OLD.verified_at, OLD.verified_by)
+      AND (OLD.verified_at IS NOT NULL OR OLD.source <> 'externa' OR NEW.verified_at IS NULL OR NEW.verified_by IS NULL))
+    OR (NEW.voided_at IS NOT NULL AND (NEW.voided_by IS NULL OR NEW.void_reason IS NULL))
+    OR (NEW.voided_at IS NULL AND (NEW.voided_by IS NOT NULL OR NEW.void_reason IS NOT NULL))
+  THEN
+    RAISE EXCEPTION 'Receta de lentes emitida: % no cambia', OLD.id USING ERRCODE = '25001';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER lens_prescription_immutable BEFORE UPDATE ON optical.lens_prescription FOR EACH ROW EXECUTE FUNCTION optical.lens_prescription_immutable();

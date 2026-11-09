@@ -1,14 +1,18 @@
 import { apiFetch, apiFetchBytes } from "@odentia/clinic-app/lib/api"
-import { usePermission } from "@odentia/clinic-app/lib/crm"
+import { usePermission, useMyUserId } from "@odentia/clinic-app/lib/crm"
+import { uploadPatientFile } from "@odentia/clinic-app/lib/encounter-documents"
 import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import type { RecordSectionProps } from "@odentia/clinic-app/product/product-ui"
 import {
   EYES,
   formatDay,
   lensText,
+  PD_FIELDS,
   PRESCRIPTION_KINDS,
   type PrescriptionKind,
   type PrescriptionLenses,
+  type PupillaryDistance,
+  pupillaryDistanceText,
   refractionText,
 } from "@odentia/optical"
 import {
@@ -28,18 +32,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Glasses } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { ChoiceButtons } from "@odentia/clinic-app/components/choice-buttons"
+import { EMPTY_LENSES, LensFields, type LensDrafts, lensDraftsOf, lensesBody, lensesDirty, numberOf } from "./lens-fields"
 
 interface LensPrescription {
   id: string
   kind: PrescriptionKind
   source: "examen" | "externa"
+  encounterId: string | null
   lenses: PrescriptionLenses
-  pupillaryDistance: { od?: number; oi?: number } | null
+  pupillaryDistance: PupillaryDistance | null
   notes: string | null
   issuedOn: string
   validUntil: string
   prescriberName: string
   prescriberRegistration: string | null
+  prescriberUserId: string | null
   verifiedAt: string | null
   voidedAt: string | null
   voidReason: string | null
@@ -85,14 +92,10 @@ function Lenses({ prescription }: { prescription: LensPrescription }) {
           <dd className="tabular-nums">{lensText(prescription.lenses[eye.key])}</dd>
         </div>
       ))}
-      {prescription.pupillaryDistance ? (
+      {pupillaryDistanceText(prescription.pupillaryDistance) ? (
         <div className="contents">
           <dt className="font-semibold">DP</dt>
-          <dd className="tabular-nums">
-            {EYES.filter((eye) => prescription.pupillaryDistance?.[eye.key] !== undefined)
-              .map((eye) => `${eye.short} ${String(prescription.pupillaryDistance![eye.key]).replace(".", ",")} mm`)
-              .join(" · ")}
-          </dd>
+          <dd className="tabular-nums">{pupillaryDistanceText(prescription.pupillaryDistance)}</dd>
         </div>
       ) : null}
     </dl>
@@ -169,80 +172,77 @@ function PrescriptionCard({
   )
 }
 
-type EyeText = { esfera: string; cilindro: string; eje: string; adicion: string; curvaBase: string; diametro: string; marca: string }
-const EMPTY_EYE: EyeText = { esfera: "", cilindro: "", eje: "", adicion: "", curvaBase: "", diametro: "", marca: "" }
+type PdText = Partial<Record<(typeof PD_FIELDS)[number]["key"], string>>
 
-function numberOf(text: string): number | string | undefined {
-  const clean = text.trim().replace("−", "-").replace(",", ".").replace(/^\+/, "")
-  if (!clean) return undefined
-  const value = Number(clean)
-  return Number.isFinite(value) ? value : text
-}
-
-/** Transcribir la receta que trae el cliente: queda «sin verificar» hasta que la revise un optómetra. */
+/**
+ * Transcribir la receta que trae el cliente: su graduación (con el prisma, en la
+ * de anteojos), su distancia pupilar si la dice y su foto, que queda entre sus
+ * documentos para verificarla. Queda «sin verificar» hasta que la revise un
+ * optómetra. Al guardar o cerrar, el cajón vuelve a empezar vacío.
+ */
 function ExternalPrescriptionDrawer({ patientId, open, onClose }: { patientId: string; open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [kind, setKind] = useState<PrescriptionKind>("anteojos")
-  const [eyes, setEyes] = useState<Record<"od" | "oi", EyeText>>({ od: EMPTY_EYE, oi: EMPTY_EYE })
+  const [lenses, setLenses] = useState<LensDrafts>(EMPTY_LENSES)
+  const [pd, setPd] = useState<PdText>({})
+  const [photo, setPhoto] = useState<File | null>(null)
   const [issuedOn, setIssuedOn] = useState("")
   const [prescriberName, setPrescriberName] = useState("")
   const [prescriberRegistration, setPrescriberRegistration] = useState("")
   const [notes, setNotes] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const reset = () => {
+    setKind("anteojos")
+    setLenses(EMPTY_LENSES)
+    setPd({})
+    setPhoto(null)
+    setIssuedOn("")
+    setPrescriberName("")
+    setPrescriberRegistration("")
+    setNotes("")
+    setErrors({})
+  }
+  const close = () => {
+    reset()
+    onClose()
+  }
   const save = useMutation({
-    mutationFn: () => {
-      const lenses: Record<string, Record<string, unknown>> = {}
-      for (const eye of EYES) {
-        const e = eyes[eye.key]
-        const lens: Record<string, unknown> = {
-          esfera: numberOf(e.esfera),
-          cilindro: numberOf(e.cilindro),
-          eje: numberOf(e.eje),
-          adicion: numberOf(e.adicion),
-          ...(kind === "contacto" ? { curvaBase: numberOf(e.curvaBase), diametro: numberOf(e.diametro), marca: e.marca.trim() || undefined } : {}),
-        }
-        if (Object.values(lens).some((value) => value !== undefined)) lenses[eye.key] = lens
-      }
+    mutationFn: async () => {
+      // La foto va primero entre sus documentos: la receta la nombra para verificarla.
+      const uploaded = photo
+        ? await uploadPatientFile(patientId, photo, { category: "otro", label: `Receta externa${prescriberName.trim() ? ` de ${prescriberName.trim()}` : ""}` })
+        : null
+      const pupillaryDistance = Object.fromEntries(
+        PD_FIELDS.map((field) => [field.key, numberOf(pd[field.key])]).filter(([, value]) => value !== undefined),
+      )
       return apiFetch(`/api/patients/${patientId}/lens-prescriptions/external`, {
         method: "POST",
         body: JSON.stringify({
           kind,
-          lenses,
+          lenses: lensesBody(kind, lenses),
           issuedOn,
           prescriberName,
           prescriberRegistration: prescriberRegistration.trim() || null,
           notes: notes.trim() || null,
+          pupillaryDistance: Object.keys(pupillaryDistance).length ? pupillaryDistance : null,
+          photoDocumentId: uploaded?.id ?? null,
         }),
       })
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKey(patientId) })
       toast.success("Receta guardada. Queda sin verificar hasta que la revise un optómetra.")
-      onClose()
+      close()
     },
     onError: (cause: unknown) => {
       const fields = (cause as { fields?: Record<string, string> }).fields
-      if (fields) setErrors(fields)
+      if (fields) setErrors(fields.file ? { ...fields, photo: fields.file } : fields)
     },
   })
-  const setEye = (eye: "od" | "oi", key: keyof EyeText, value: string) => setEyes((all) => ({ ...all, [eye]: { ...all[eye], [key]: value } }))
-  const columns: Array<{ key: keyof EyeText; label: string }> = [
-    { key: "esfera", label: "Esfera" },
-    { key: "cilindro", label: "Cilindro" },
-    { key: "eje", label: "Eje" },
-    { key: "adicion", label: "Adición" },
-    ...(kind === "contacto"
-      ? ([
-          { key: "curvaBase", label: "Curva base (mm)" },
-          { key: "diametro", label: "Diámetro (mm)" },
-          { key: "marca", label: "Marca" },
-        ] as const)
-      : []),
-  ]
   return (
     <FormDrawer
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="Receta externa"
       description="La que trae de su oftalmólogo. Queda «sin verificar» hasta que la revise un optómetra."
       onSubmit={(event: FormEvent) => {
@@ -251,7 +251,7 @@ function ExternalPrescriptionDrawer({ patientId, open, onClose }: { patientId: s
         save.mutate()
       }}
       isSubmitting={save.isPending}
-      isDirty={Boolean(issuedOn || prescriberName || eyes.od.esfera || eyes.oi.esfera)}
+      isDirty={Boolean(issuedOn || prescriberName || photo || lensesDirty(lenses))}
       error={save.error && !(save.error as { fields?: unknown }).fields ? submitErrorMessage(save.error) : null}
       submitLabel="Guardar receta"
     >
@@ -268,33 +268,32 @@ function ExternalPrescriptionDrawer({ patientId, open, onClose }: { patientId: s
             onChange={setKind}
           />
         </div>
-        {EYES.map((eye) => (
-          <fieldset key={eye.key} className="flex flex-col gap-2">
-            <legend className="text-sm font-semibold">{eye.label}</legend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {columns.map((column) => {
-                const id = `externa-${eye.key}-${column.key}`
-                const message = errors[`lentes.${eye.key}.${column.key}`]
-                return (
-                  <Field key={column.key} data-invalid={message ? true : undefined}>
-                    <FieldLabel htmlFor={id} className="text-xs text-muted-foreground">
-                      {column.label}
-                    </FieldLabel>
-                    <Input
-                      id={id}
-                      inputMode={column.key === "marca" ? "text" : "decimal"}
-                      value={eyes[eye.key][column.key]}
-                      aria-invalid={message ? true : undefined}
-                      onChange={(event) => setEye(eye.key, column.key, event.target.value)}
-                    />
-                    {message ? <FieldError>{message}</FieldError> : null}
-                  </Field>
-                )
-              })}
-            </div>
-          </fieldset>
-        ))}
-        {errors.lentes ? <FieldError>{errors.lentes}</FieldError> : null}
+        <LensFields idPrefix="externa" kind={kind} value={lenses} onChange={setLenses} errors={errors} />
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-semibold">Distancia pupilar (mm, si la dice)</legend>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {PD_FIELDS.map((field) => {
+              const id = `externa-dp-${field.key}`
+              const message = errors[`pupillaryDistance.${field.key}`]
+              return (
+                <Field key={field.key} data-invalid={message ? true : undefined} className="gap-1">
+                  <FieldLabel htmlFor={id} className="text-xs text-muted-foreground">
+                    {field.label}
+                  </FieldLabel>
+                  <Input
+                    id={id}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={pd[field.key] ?? ""}
+                    aria-invalid={message ? true : undefined}
+                    onChange={(event) => setPd((all) => ({ ...all, [field.key]: event.target.value }))}
+                  />
+                  {message ? <FieldError>{message}</FieldError> : null}
+                </Field>
+              )
+            })}
+          </div>
+        </fieldset>
         <Field data-invalid={errors.issuedOn ? true : undefined}>
           <FieldLabel htmlFor="externa-fecha">Fecha de la receta</FieldLabel>
           <Input id="externa-fecha" type="date" value={issuedOn} onChange={(event) => setIssuedOn(event.target.value)} />
@@ -313,7 +312,17 @@ function ExternalPrescriptionDrawer({ patientId, open, onClose }: { patientId: s
           <FieldLabel htmlFor="externa-notas">Indicaciones (opcional)</FieldLabel>
           <Textarea id="externa-notas" rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
         </Field>
-        <p className="text-xs text-muted-foreground">Sube la foto de la receta en Documentos de la ficha.</p>
+        <Field data-invalid={errors.photo || errors.photoDocumentId ? true : undefined}>
+          <FieldLabel htmlFor="externa-foto">Foto de la receta (opcional)</FieldLabel>
+          <Input
+            id="externa-foto"
+            type="file"
+            accept="image/*,application/pdf"
+            onChange={(event) => setPhoto(event.target.files?.[0] ?? null)}
+          />
+          <p className="text-xs text-muted-foreground">Queda entre sus documentos; el optómetra la mira al verificar.</p>
+          {errors.photo || errors.photoDocumentId ? <FieldError>{errors.photo ?? errors.photoDocumentId}</FieldError> : null}
+        </Field>
       </div>
     </FormDrawer>
   )
@@ -340,7 +349,11 @@ function VoidDrawer({ patientId, prescription, onClose }: { patientId: string; p
       open={prescription !== null}
       onClose={onClose}
       title="Anular la receta"
-      description="Queda en la historia como anulada, con el motivo. No se borra."
+      description={
+        prescription?.source === "examen"
+          ? "Queda en la historia como anulada, con el motivo. No se borra. Quien la firmó puede emitir otra desde el mismo examen, en «Anteriores»."
+          : "Queda en la historia como anulada, con el motivo. No se borra."
+      }
       onSubmit={(event: FormEvent) => {
         event.preventDefault()
         save.mutate()
@@ -360,6 +373,61 @@ function VoidDrawer({ patientId, prescription, onClose }: { patientId: string; p
 }
 
 /**
+ * Emitir otra receta desde el examen de una que se anuló, aunque la atención ya
+ * esté firmada: con su graduación escrita para corregirla. La firma quien atendió.
+ */
+function IssueAgainDrawer({ patientId, from, onClose }: { patientId: string; from: LensPrescription | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const [lenses, setLenses] = useState<LensDrafts>(EMPTY_LENSES)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [shown, setShown] = useState<string | null>(null)
+  if (from && shown !== from.id) {
+    setShown(from.id)
+    setLenses(lensDraftsOf(from.lenses))
+    setErrors({})
+  }
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/patients/${patientId}/lens-prescriptions`, {
+        method: "POST",
+        body: JSON.stringify({ encounterId: from?.encounterId, kind: from?.kind, lenses: lensesBody(from?.kind ?? "anteojos", lenses) }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKey(patientId) })
+      toast.success("Receta emitida")
+      setShown(null)
+      onClose()
+    },
+    onError: (cause: unknown) => {
+      const fields = (cause as { fields?: Record<string, string> }).fields
+      if (fields) setErrors(fields)
+    },
+  })
+  return (
+    <FormDrawer
+      open={from !== null}
+      onClose={() => {
+        setShown(null)
+        onClose()
+      }}
+      title={from ? `Otra receta de ${KIND_LABEL[from.kind].toLowerCase()}` : "Otra receta"}
+      description="Del mismo examen, con la graduación de la anulada para corregirla. La firmas tú."
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault()
+        setErrors({})
+        save.mutate()
+      }}
+      isSubmitting={save.isPending}
+      isDirty
+      error={save.error && !(save.error as { fields?: unknown }).fields ? submitErrorMessage(save.error) : null}
+      submitLabel="Emitir"
+    >
+      {from ? <LensFields idPrefix="otra" kind={from.kind} value={lenses} onChange={setLenses} errors={errors} /> : null}
+    </FormDrawer>
+  )
+}
+
+/**
  * Las recetas de lentes de la persona (entrega 3 del plan): la vigente de cada
  * tipo arriba, con su aviso si venció o si es externa sin verificar (se informa,
  * no impide vender), y las anteriores debajo.
@@ -367,8 +435,10 @@ function VoidDrawer({ patientId, prescription, onClose }: { patientId: string; p
 export function PrescriptionsSection({ patientId }: RecordSectionProps) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
+  const myUserId = useMyUserId()
   const [externalOpen, setExternalOpen] = useState(false)
   const [voiding, setVoiding] = useState<LensPrescription | null>(null)
+  const [again, setAgain] = useState<LensPrescription | null>(null)
   const query = useQuery({
     queryKey: queryKey(patientId),
     queryFn: () => apiFetch<{ data: Prescriptions }>(`/api/patients/${patientId}/lens-prescriptions`).then((body) => body.data),
@@ -387,6 +457,14 @@ export function PrescriptionsSection({ patientId }: RecordSectionProps) {
   const current = PRESCRIPTION_KINDS.map((kind) => data.current[kind.key]).filter((item): item is LensPrescription => Boolean(item))
   const currentIds = new Set(current.map((item) => item.id))
   const past = data.items.filter((item) => !currentIds.has(item.id))
+  // Una anulada de su examen se vuelve a emitir mientras ese examen no tenga otra viva de su tipo.
+  const live = new Set(data.items.filter((item) => !item.voidedAt && item.encounterId).map((item) => `${item.encounterId}:${item.kind}`))
+  const canIssueAgain = (item: LensPrescription) =>
+    canWrite &&
+    Boolean(item.voidedAt) &&
+    item.source === "examen" &&
+    item.prescriberUserId === myUserId &&
+    !live.has(`${item.encounterId}:${item.kind}`)
   return (
     <section className="flex flex-col gap-4" aria-labelledby="recetas-lentes">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -438,6 +516,11 @@ export function PrescriptionsSection({ patientId }: RecordSectionProps) {
                 <span className="text-muted-foreground tabular-nums">
                   {EYES.filter((eye) => item.lenses[eye.key]).map((eye) => `${eye.short} ${refractionText(item.lenses[eye.key])}`).join(" · ")}
                 </span>
+                {canIssueAgain(item) ? (
+                  <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => setAgain(item)}>
+                    Emitir otra desde su examen
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -445,6 +528,7 @@ export function PrescriptionsSection({ patientId }: RecordSectionProps) {
       ) : null}
       <ExternalPrescriptionDrawer patientId={patientId} open={externalOpen} onClose={() => setExternalOpen(false)} />
       <VoidDrawer patientId={patientId} prescription={voiding} onClose={() => setVoiding(null)} />
+      <IssueAgainDrawer patientId={patientId} from={again} onClose={() => setAgain(null)} />
     </section>
   )
 }

@@ -37,6 +37,7 @@ const transcribeInput = z
     prescriberName: z.string().trim().min(1, "Escribe quién la firmó.").max(200),
     prescriberRegistration: z.string().max(60).nullish(),
     notes: z.string().max(2000).nullish(),
+    pupillaryDistance: z.record(z.string(), z.unknown()).nullish(),
     photoDocumentId: z.uuid().nullish(),
   })
   .strict()

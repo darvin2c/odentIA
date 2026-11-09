@@ -526,6 +526,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
           addenda: [],
           plannedItems: planItems.filter((item) => item.status === "en_curso"),
           indicatedItems: [],
+          pendingTreatments: planItems.filter((item) => item.status === "en_curso").length,
         },
       }) as T
     }

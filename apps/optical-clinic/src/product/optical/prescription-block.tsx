@@ -1,10 +1,11 @@
 import { apiFetch } from "@odentia/clinic-app/lib/api"
 import type { EncounterBlockContext, ProductEncounterBlocks } from "@odentia/clinic-app/product/product-ui"
-import { EYES, lensesFromExam, lensText, readEyeExam, refractionText } from "@odentia/optical"
-import { Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
+import { EYES, lensesFromExam, lensText, readEyeExam, refractionText, VERTEX_FROM_DIOPTERS } from "@odentia/optical"
+import { Button, toast } from "@odentia/ui"
 import { FormDrawer, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useState } from "react"
+import { EMPTY_LENSES, LensFields, type LensDrafts, lensDraftsOf, lensesBody } from "./lens-fields"
 
 interface IssuedPrescription {
   id: string
@@ -14,32 +15,26 @@ interface IssuedPrescription {
   lenses: Record<"od" | "oi", Record<string, unknown> | undefined>
 }
 
-/** Los datos del lente de contacto que no salen de la refracción: curva base, diámetro y marca, por ojo. */
-type ContactExtra = Record<"od" | "oi", { curvaBase: string; diametro: string; marca: string }>
-const EMPTY_EXTRA: ContactExtra = {
-  od: { curvaBase: "", diametro: "", marca: "" },
-  oi: { curvaBase: "", diametro: "", marca: "" },
-}
-
-function decimalOf(text: string): number | string | undefined {
-  const clean = text.trim().replace(",", ".")
-  if (!clean) return undefined
-  const value = Number(clean)
-  return Number.isFinite(value) ? value : text
+/** El mensaje de un rechazo: los de cada dato, todos, o el general. */
+function rejectionText(cause: unknown): string {
+  const fields = (cause as { fields?: Record<string, string> }).fields
+  const messages = fields ? [...new Set(Object.values(fields))] : []
+  return messages.length ? messages.join(" ") : submitErrorMessage(cause)
 }
 
 /**
  * «Receta de lentes» en la atención (entrega 3 del plan): con la refracción del
  * examen guardada, la de anteojos se emite con un toque; la de lentes de contacto
- * pide además su curva base, su diámetro y su marca. La firma quien lleva la
- * atención.
+ * se abre con la graduación compensada por la distancia al ojo y sin prisma, que
+ * el optómetra revisa, y su curva base, su diámetro y su marca. La firma quien
+ * lleva la atención.
  */
 export function usePrescriptionBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
   const queryClient = useQueryClient()
   const exam = readEyeExam(ctx.detail.encounter.examination)
   const fromExam = lensesFromExam(exam?.refraccion)
   const [contactOpen, setContactOpen] = useState(false)
-  const [extra, setExtra] = useState<ContactExtra>(EMPTY_EXTRA)
+  const [contact, setContact] = useState<LensDrafts>(EMPTY_LENSES)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const key = ["lens-prescriptions", ctx.patientId] as const
   const list = useQuery({
@@ -51,22 +46,10 @@ export function usePrescriptionBlocks(ctx: EncounterBlockContext): ProductEncoun
   const issued = (list.data?.items ?? []).filter((item) => item.encounterId === ctx.encounterId && !item.voidedAt)
   const issue = useMutation({
     mutationFn: async (kind: "anteojos" | "contacto") => {
+      // La de anteojos la arma el servidor con el examen guardado: primero se guarda lo escrito.
       await ctx.flush()
       ctx.onPendingChange(true)
-      const lenses =
-        kind === "contacto" && fromExam
-          ? Object.fromEntries(
-              EYES.filter((eye) => fromExam[eye.key]).map((eye) => [
-                eye.key,
-                {
-                  ...fromExam[eye.key],
-                  curvaBase: decimalOf(extra[eye.key].curvaBase),
-                  diametro: decimalOf(extra[eye.key].diametro),
-                  marca: extra[eye.key].marca.trim() || undefined,
-                },
-              ]),
-            )
-          : undefined
+      const lenses = kind === "contacto" ? lensesBody("contacto", contact) : undefined
       return apiFetch(`/api/patients/${ctx.patientId}/lens-prescriptions`, {
         method: "POST",
         body: JSON.stringify({ encounterId: ctx.encounterId, kind, ...(lenses ? { lenses } : {}) }),
@@ -77,15 +60,27 @@ export function usePrescriptionBlocks(ctx: EncounterBlockContext): ProductEncoun
       await ctx.onChanged()
       toast.success(kind === "anteojos" ? "Receta de anteojos emitida" : "Receta de lentes de contacto emitida")
       setContactOpen(false)
-      setExtra(EMPTY_EXTRA)
+      setContact(EMPTY_LENSES)
     },
-    onError: (cause: unknown) => {
+    onError: (cause: unknown, kind) => {
       const fields = (cause as { fields?: Record<string, string> }).fields
-      if (fields) setErrors(fields)
-      else toast.error(submitErrorMessage(cause))
+      // En el cajón, cada error junto a su dato; la de anteojos no tiene cajón: se dice entero.
+      if (kind === "contacto" && fields) setErrors(fields)
+      else toast.error(rejectionText(cause))
     },
     onSettled: () => ctx.onPendingChange(false),
   })
+  const openContact = async () => {
+    // La graduación sale del examen ya guardado: lo último escrito también cuenta.
+    await ctx.flush()
+    const fresh = await apiFetch<{ data: { encounter: { examination: unknown } } }>(
+      `/api/patients/${ctx.patientId}/encounters/${ctx.encounterId}`,
+    ).catch(() => null)
+    const latest = readEyeExam(fresh?.data.encounter.examination ?? ctx.detail.encounter.examination)
+    setContact(lensDraftsOf(lensesFromExam(latest?.refraccion, "contacto")))
+    setErrors({})
+    setContactOpen(true)
+  }
   const has = (kind: "anteojos" | "contacto") => issued.some((item) => item.kind === kind)
   const disabled = !ctx.canWrite || !ctx.writable || ctx.locked || issue.isPending
   const content = (
@@ -117,7 +112,7 @@ export function usePrescriptionBlocks(ctx: EncounterBlockContext): ProductEncoun
           <Button type="button" disabled={disabled || !fromExam || has("anteojos")} onClick={() => issue.mutate("anteojos")}>
             {has("anteojos") ? "Receta de anteojos emitida" : "Emitir receta de anteojos"}
           </Button>
-          <Button type="button" variant="outline" disabled={disabled || !fromExam || has("contacto")} onClick={() => setContactOpen(true)}>
+          <Button type="button" variant="outline" disabled={disabled || !fromExam || has("contacto")} onClick={() => void openContact()}>
             {has("contacto") ? "Receta de lentes de contacto emitida" : "Emitir receta de lentes de contacto"}
           </Button>
         </div>
@@ -129,54 +124,24 @@ export function usePrescriptionBlocks(ctx: EncounterBlockContext): ProductEncoun
       open={contactOpen}
       onClose={() => setContactOpen(false)}
       title="Receta de lentes de contacto"
-      description="La graduación es la de la refracción; agrega la curva base, el diámetro y la marca de cada ojo."
+      description={`La graduación viene de la refracción, llevada al ojo desde ±${VERTEX_FROM_DIOPTERS.toFixed(2).replace(".", ",")} y sin prisma: revísala con la prueba del lente. Agrega la curva base, el diámetro y la marca.`}
       onSubmit={(event: FormEvent) => {
         event.preventDefault()
         setErrors({})
         issue.mutate("contacto")
       }}
       isSubmitting={issue.isPending}
-      isDirty={EYES.some((eye) => Object.values(extra[eye.key]).some(Boolean))}
+      isDirty
       submitLabel="Emitir"
     >
-      <div className="flex flex-col gap-4">
-        {EYES.filter((eye) => fromExam?.[eye.key]).map((eye) => (
-          <fieldset key={eye.key} className="flex flex-col gap-2">
-            <legend className="text-sm font-semibold">
-              {eye.label}: {refractionText(fromExam?.[eye.key])}
-            </legend>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {(
-                [
-                  { key: "curvaBase", label: "Curva base (mm)", mode: "decimal" },
-                  { key: "diametro", label: "Diámetro (mm)", mode: "decimal" },
-                  { key: "marca", label: "Marca", mode: "text" },
-                ] as const
-              ).map((field) => {
-                const id = `contacto-${eye.key}-${field.key}`
-                const message = errors[`lentes.${eye.key}.${field.key}`]
-                return (
-                  <Field key={field.key} data-invalid={message ? true : undefined}>
-                    <FieldLabel htmlFor={id} className="text-xs text-muted-foreground">
-                      {field.label}
-                    </FieldLabel>
-                    <Input
-                      id={id}
-                      inputMode={field.mode}
-                      value={extra[eye.key][field.key]}
-                      aria-invalid={message ? true : undefined}
-                      onChange={(event) =>
-                        setExtra((all) => ({ ...all, [eye.key]: { ...all[eye.key], [field.key]: event.target.value } }))
-                      }
-                    />
-                    {message ? <FieldError>{message}</FieldError> : null}
-                  </Field>
-                )
-              })}
-            </div>
-          </fieldset>
-        ))}
-      </div>
+      <LensFields
+        idPrefix="contacto"
+        kind="contacto"
+        value={contact}
+        onChange={setContact}
+        errors={errors}
+        eyes={EYES.filter((eye) => fromExam?.[eye.key])}
+      />
     </FormDrawer>
   )
   return {

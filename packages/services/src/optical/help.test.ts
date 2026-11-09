@@ -57,6 +57,9 @@ const OWN_QUOTED = [
   "Transcribir receta externa",
   "Sin verificar",
   "La revisé: verificar",
+  "Anteriores",
+  "Anular",
+  "Emitir otra desde su examen",
 ]
 
 /** La Ayuda de vistIA: las mismas pantallas, con lo que tiene una óptica. */

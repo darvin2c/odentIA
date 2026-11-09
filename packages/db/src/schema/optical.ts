@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm"
 import { check, date, foreignKey, index, jsonb, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
-import { encounter, patient } from "./clinical.js"
+import { encounter, patient, patientDocument } from "./clinical.js"
 import { orgFk, timestamps } from "./crm.js"
 import { opticalSchema } from "./schemas.js"
 
@@ -14,8 +14,9 @@ import { opticalSchema } from "./schemas.js"
  *
  * Los lentes van en `lenses` tal como los valida `parsePrescriptionLenses` de
  * `@odentia/optical` (esfera, cilindro, eje, adición, prisma y base por ojo; en
- * los de contacto, además curva base, diámetro y marca). Emitida, no cambia: solo
- * se verifica (externa) o se anula, con su motivo.
+ * los de contacto, además curva base, diámetro y marca, sin prisma). Emitida, no
+ * cambia: solo se verifica (la externa, una vez) o se anula, con su motivo, y
+ * anulada ya nada cambia (lo guarda `lens_prescription_immutable`).
  */
 export const lensPrescription = opticalSchema.table(
   "lens_prescription",
@@ -23,12 +24,12 @@ export const lensPrescription = opticalSchema.table(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     patientId: uuid("patient_id").notNull(),
-    /** La atención donde se examinó; nula en una externa. */
-    encounterId: uuid("encounter_id").references(() => encounter.id),
+    /** La atención donde se examinó, de la misma persona; nula en una externa. */
+    encounterId: uuid("encounter_id"),
     kind: text("kind").notNull(),
     source: text("source").notNull(),
     lenses: jsonb("lenses").notNull(),
-    /** Distancia pupilar de cada ojo, en mm (`{ od, oi }`); nula si no se midió. */
+    /** Distancia pupilar en mm (`{ od, oi, binocular, cerca }`, `PupillaryDistance`); nula si no se midió. */
     pupillaryDistance: jsonb("pupillary_distance"),
     notes: text("notes"),
     issuedOn: date("issued_on").notNull(),
@@ -37,7 +38,7 @@ export const lensPrescription = opticalSchema.table(
     prescriberUserId: text("prescriber_user_id").references(() => user.id),
     prescriberName: text("prescriber_name").notNull(),
     prescriberRegistration: text("prescriber_registration"),
-    /** La foto de la receta externa, entre los documentos de la persona. */
+    /** La foto de la receta externa, entre los documentos de la persona (de la misma clínica). */
     photoDocumentId: uuid("photo_document_id"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     verifiedBy: text("verified_by").references(() => user.id),
@@ -52,6 +53,17 @@ export const lensPrescription = opticalSchema.table(
       columns: [table.organizationId, table.patientId],
       foreignColumns: [patient.organizationId, patient.id],
       name: "lens_prescription_patient_fk",
+    }),
+    // La atención es de la misma clínica y de la misma persona: nunca la de otra.
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.encounterId],
+      foreignColumns: [encounter.organizationId, encounter.patientId, encounter.id],
+      name: "lens_prescription_encounter_fk",
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.photoDocumentId],
+      foreignColumns: [patientDocument.organizationId, patientDocument.id],
+      name: "lens_prescription_photo_fk",
     }),
     index("lens_prescription_patient_idx").on(table.organizationId, table.patientId, table.issuedOn),
     uniqueIndex("lens_prescription_encounter_kind_uidx")

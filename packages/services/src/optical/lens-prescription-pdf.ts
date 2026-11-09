@@ -7,14 +7,18 @@ import {
   PRESCRIPTION_KINDS,
   type PrescriptionLenses,
   PRISM_BASES,
+  pupillaryDistanceText,
+  type PupillaryDistance,
   type Refraction,
 } from "@odentia/optical"
 import { and, eq } from "drizzle-orm"
+import { documentCheckUrl } from "../document-check.js"
 import { loadDocumentClinic } from "../document-clinic.js"
-import { chartNumber, DocumentKit, dayTimeWords, dayWords, documentFormat, SIZE } from "../document-kit.js"
+import { ageWords, chartNumber, DocumentKit, dayTimeWords, dayWords, documentFormat, SIZE } from "../document-kit.js"
 import { notFound } from "../errors.js"
 import { orgProduct } from "../locale.js"
 import { joinPatientPerson, patientPerson } from "../patient-identity.js"
+import { drawnSignatureAt } from "../professional-profiles.js"
 import { patient } from "@odentia/db/schema/clinical"
 
 /** Una dioptría como va en la receta impresa: «+1,25», «−0,50»; vacía, «—». */
@@ -26,11 +30,24 @@ function diopter(value: number | undefined): string {
 
 const plain = (value: number | undefined, unit = "") => (value === undefined ? "—" : `${String(value).replace(".", ",")}${unit}`)
 
+/** Los prismas de un ojo: «1 Δ base adentro + 0,5 Δ base arriba». */
+function prismText(lens: Refraction | undefined): string {
+  const parts = [
+    [lens?.prisma, lens?.base],
+    [lens?.prisma2, lens?.base2],
+  ]
+    .filter(([amount]) => amount !== undefined)
+    .map(([amount, base]) => `${String(amount).replace(".", ",")} Δ ${PRISM_BASES.find((item) => item.key === base)?.label.toLowerCase() ?? ""}`)
+  return parts.length ? parts.join(" + ") : "—"
+}
+
 /**
  * La receta de lentes impresa (entrega 3 del plan): el membrete de la óptica, la
- * persona, la graduación de cada ojo en su tabla, la distancia pupilar, las
- * indicaciones y quien la firma. La externa dice de quién es y si se verificó; la
- * anulada lo dice arriba, con su motivo.
+ * persona con su edad, la graduación de cada ojo en su tabla, la distancia
+ * pupilar, las indicaciones y quien la firma, con su firma dibujada y el QR con
+ * que se comprueba (como el odontograma firmado, se genera de sus datos: no se
+ * guarda un archivo). La externa dice de quién es y si se verificó; la anulada lo
+ * dice arriba, con su motivo.
  */
 export async function renderLensPrescriptionPdf(
   tx: Db,
@@ -50,6 +67,7 @@ export async function renderLensPrescriptionPdf(
       patientNumber: patient.patientNumber,
       docType: patientPerson.docType,
       docNumber: patientPerson.docNumber,
+      birthDate: patientPerson.birthDate,
     })
     .from(patient)
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
@@ -74,10 +92,12 @@ export async function renderLensPrescriptionPdf(
     kit.stateBox({ kind: "alert", title: "ANULADA", detail: row.voidReason ? `Motivo: ${row.voidReason}` : null })
   }
   kit.gap(16)
+  const age = ageWords(person.birthDate, clinic)
   kit.facts(
     [
       { label: "Paciente", value: person.displayName, span: 2, strong: true },
       ...(person.docNumber ? [{ label: person.docType ?? "Documento", value: person.docNumber }] : []),
+      ...(age ? [{ label: "Edad", value: age }] : []),
       { label: "Historia clínica", value: chartNumber(person.patientNumber) },
     ],
     4,
@@ -99,31 +119,26 @@ export async function renderLensPrescriptionPdf(
     size: SIZE.read,
     rows: EYES.map((eye) => {
       const lens = lenses[eye.key] as (Refraction & ContactLens) | undefined
-      const base = PRISM_BASES.find((item) => item.key === lens?.base)?.label.toLowerCase()
       return [
         [{ inlines: eye.short, face: "sansSemi" as const }],
-        diopter(lens?.esfera),
+        // Con cilindro y sin esfera, la esfera es neutra: en blanco el taller lee «no se midió».
+        diopter(lens?.esfera ?? (lens?.cilindro !== undefined ? 0 : undefined)),
         lens?.cilindro === undefined ? "—" : diopter(lens.cilindro),
         lens?.eje === undefined ? "—" : `${lens.eje}°`,
         lens?.adicion === undefined ? "—" : diopter(lens.adicion),
         ...(contact
           ? [plain(lens?.curvaBase, " mm"), plain(lens?.diametro, " mm")]
-          : [lens?.prisma === undefined ? "—" : `${String(lens.prisma).replace(".", ",")} Δ ${base ?? ""}`]),
+          : [prismText(lens)]),
       ]
     }),
   })
   const brands = contact ? EYES.filter((eye) => (lenses[eye.key] as ContactLens | undefined)?.marca) : []
   if (brands.length > 0)
     kit.text(brands.map((eye) => `${eye.short}: ${(lenses[eye.key] as ContactLens).marca}`).join(" · "), { size: SIZE.read })
-  const dp = row.pupillaryDistance as { od?: number; oi?: number } | null
-  if (dp && (dp.od !== undefined || dp.oi !== undefined)) {
+  const dp = pupillaryDistanceText(row.pupillaryDistance as PupillaryDistance | null)
+  if (dp) {
     kit.subheading("Distancia pupilar", { before: 12 })
-    kit.text(
-      EYES.filter((eye) => dp[eye.key] !== undefined)
-        .map((eye) => `${eye.short} ${plain(dp[eye.key], " mm")}`)
-        .join(" · "),
-      { size: SIZE.read },
-    )
+    kit.text(dp, { size: SIZE.read })
   }
   if (row.notes) {
     kit.subheading("Indicaciones", { before: 12 })
@@ -140,8 +155,8 @@ export async function renderLensPrescriptionPdf(
       name: row.prescriberName,
       credential: row.prescriberRegistration,
       at: dayTimeWords(row.createdAt, clinic),
-      checkUrl: null,
-      strokes: null,
+      checkUrl: await documentCheckUrl(tx, orgId, "lens_prescription", row.id),
+      strokes: await drawnSignatureAt(tx, orgId, row.prescriberUserId, row.createdAt),
     }
     kit.gap(14)
     kit.anchorBottom(kit.signedBlockHeight(signed))

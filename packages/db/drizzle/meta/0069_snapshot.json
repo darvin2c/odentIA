@@ -1,5 +1,5 @@
 {
-  "id": "7d1da1d9-d9e9-4ade-8cb1-650718bc4874",
+  "id": "eee6445f-7557-4916-8ab2-b164a6e1d5ec",
   "prevId": "6f15fc40-5758-4655-a53b-68ee36427d0b",
   "version": "7",
   "dialect": "postgresql",
@@ -955,7 +955,7 @@
       "checkConstraints": {
         "saas_demo_product_check": {
           "name": "saas_demo_product_check",
-          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical')"
         },
         "saas_demo_size_check": {
           "name": "saas_demo_size_check",
@@ -23437,7 +23437,7 @@
       "checkConstraints": {
         "treatment_template_product_check": {
           "name": "treatment_template_product_check",
-          "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"catalog\".\"treatment_template\".\"product\" IN ('dental','medical')"
         },
         "treatment_template_usual_sessions_check": {
           "name": "treatment_template_usual_sessions_check",
@@ -31579,7 +31579,7 @@
         },
         "org_profile_product_check": {
           "name": "org_profile_product_check",
-          "value": "\"org_profile\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"org_profile\".\"product\" IN ('dental','medical')"
         },
         "org_profile_sheet_size_check": {
           "name": "org_profile_sheet_size_check",
@@ -40321,7 +40321,7 @@
       "checkConstraints": {
         "saas_plan_product_check": {
           "name": "saas_plan_product_check",
-          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical')"
         },
         "saas_plan_founders_check": {
           "name": "saas_plan_founders_check",
@@ -40672,13 +40672,6 @@
           "notNull": true,
           "default": "'invitacion'"
         },
-        "optical_mode": {
-          "name": "optical_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'invitacion'"
-        },
         "updated_by": {
           "name": "updated_by",
           "type": "text",
@@ -40732,10 +40725,6 @@
         "saas_signup_policy_medical_mode_check": {
           "name": "saas_signup_policy_medical_mode_check",
           "value": "\"admin\".\"saas_signup_policy\".\"medical_mode\" IN ('invitacion','abierta')"
-        },
-        "saas_signup_policy_optical_mode_check": {
-          "name": "saas_signup_policy_optical_mode_check",
-          "value": "\"admin\".\"saas_signup_policy\".\"optical_mode\" IN ('invitacion','abierta')"
         }
       },
       "isRLSEnabled": false
@@ -41326,7 +41315,7 @@
         },
         "saas_waitlist_request_product_check": {
           "name": "saas_waitlist_request_product_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical')"
         },
         "saas_waitlist_request_text_check": {
           "name": "saas_waitlist_request_text_check",

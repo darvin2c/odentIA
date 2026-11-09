@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { encounter } from "@odentia/db/schema/clinical"
+import { encounter, patientDocument } from "@odentia/db/schema/clinical"
 import { lensPrescription } from "@odentia/db/schema/optical"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
@@ -7,6 +7,7 @@ import {
   EYES,
   type EyeExam,
   formatDay,
+  Issues,
   lensText,
   lensesFromExam,
   type PrescriptionKind,
@@ -14,11 +15,14 @@ import {
   PRESCRIPTION_KINDS,
   parsePrescriptionLenses,
   prescriptionNotices,
+  type PupillaryDistance,
   readEyeExam,
+  readPupillaryDistance,
 } from "@odentia/optical"
-import { and, desc, eq, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm"
+import type { DocumentCheckFacts } from "../document-check.js"
 import { assertAttending } from "../encounter-attending.js"
-import { invalidField, notFound, ServiceError } from "../errors.js"
+import { fieldsError, invalidField, notFound, ServiceError } from "../errors.js"
 import { clinicToday } from "../inventory-stock.js"
 import { orgProduct } from "../locale.js"
 import { requirePatient } from "../patients.js"
@@ -44,12 +48,14 @@ export interface LensPrescriptionView {
   source: "examen" | "externa"
   encounterId: string | null
   lenses: PrescriptionLenses
-  pupillaryDistance: { od?: number; oi?: number } | null
+  pupillaryDistance: PupillaryDistance | null
   notes: string | null
   issuedOn: string
   validUntil: string
   prescriberName: string
   prescriberRegistration: string | null
+  /** Quien la firmó en la óptica (la de su examen); nulo en una externa. */
+  prescriberUserId: string | null
   photoDocumentId: string | null
   verifiedAt: string | null
   voidedAt: string | null
@@ -66,12 +72,13 @@ function toView(row: typeof lensPrescription.$inferSelect, today: string): LensP
     source: row.source as "examen" | "externa",
     encounterId: row.encounterId,
     lenses: row.lenses as PrescriptionLenses,
-    pupillaryDistance: (row.pupillaryDistance as { od?: number; oi?: number } | null) ?? null,
+    pupillaryDistance: (row.pupillaryDistance as PupillaryDistance | null) ?? null,
     notes: row.notes,
     issuedOn: row.issuedOn,
     validUntil: row.validUntil,
     prescriberName: row.prescriberName,
     prescriberRegistration: row.prescriberRegistration,
+    prescriberUserId: row.prescriberUserId,
     photoDocumentId: row.photoDocumentId,
     verifiedAt,
     voidedAt: row.voidedAt ? row.voidedAt.toISOString() : null,
@@ -101,10 +108,19 @@ function optionalText(value: unknown, field: string, label: string, max: number)
   return text || null
 }
 
+/** Los lentes de una receta, con todos sus errores junto a su dato (ADR 0113). */
+function lensesOf(kind: PrescriptionKind, raw: unknown): PrescriptionLenses {
+  const parsed = parsePrescriptionLenses(kind, raw)
+  if (!parsed.ok) throw fieldsError(parsed.errors)!
+  return parsed.value!
+}
+
 /**
- * Emite la receta de la óptica desde el examen de la atención en borrador: los
- * lentes son su refracción (de anteojos) o lo que se escribe para los de contacto;
- * la firma quien lleva la atención, con su colegiatura.
+ * Emite la receta de la óptica desde el examen de la atención: sin lentes escritos,
+ * los de anteojos son su refracción y los de contacto, la refracción compensada por
+ * la distancia al ojo y sin prisma. La firma quien lleva la atención, con su
+ * colegiatura, en borrador o ya firmada (su examen ya no cambia): así, una receta
+ * anulada después de firmar se emite otra vez sin abrir otra atención.
  */
 export async function issueLensPrescription(
   tx: Db,
@@ -123,14 +139,11 @@ export async function issueLensPrescription(
     .for("update")
   if (!enc) throw notFound("Atención")
   if (enc.status === "anulada") throw new ServiceError("VOIDED", 409, "La atención está anulada")
-  if (enc.status !== "borrador") throw new ServiceError("FINALIZED", 409, "La atención está finalizada")
   assertAttending(enc, actorUserId)
   const exam: EyeExam | null = readEyeExam(enc.examination)
-  // De anteojos, sin lentes escritos: la refracción del examen tal cual.
-  const raw = input.lenses ?? (kind === "anteojos" ? lensesFromExam(exam?.refraccion) : null)
+  const raw = input.lenses ?? lensesFromExam(exam?.refraccion, kind)
   if (!raw) throw invalidField("lentes", "Anota la refracción en el examen de la vista o escribe la graduación")
-  const parsed = parsePrescriptionLenses(kind, raw)
-  if (!parsed.ok) throw invalidField(parsed.path, parsed.error)
+  const lenses = lensesOf(kind, raw)
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const issuedOn = await clinicToday(tx, orgId)
   const [row] = await tx
@@ -141,7 +154,7 @@ export async function issueLensPrescription(
       encounterId: enc.id,
       kind,
       source: "examen",
-      lenses: parsed.value,
+      lenses,
       pupillaryDistance: exam?.dp ?? null,
       notes: optionalText(input.notes, "notes", "Las indicaciones", NOTES_MAX),
       issuedOn,
@@ -178,14 +191,21 @@ export async function transcribeLensPrescription(
     prescriberName: unknown
     prescriberRegistration?: unknown
     notes?: unknown
-    photoDocumentId?: string | null
+    pupillaryDistance?: unknown
+    photoDocumentId?: unknown
   },
 ): Promise<LensPrescriptionView> {
   await requireOptical(tx, orgId)
   await requirePatient(tx, orgId, patientId)
   const kind = kindOf(input.kind)
+  // La graduación y la distancia pupilar, con todos sus errores a la vez.
+  const issues = new Issues()
   const parsed = parsePrescriptionLenses(kind, input.lenses)
-  if (!parsed.ok) throw invalidField(parsed.path, parsed.error)
+  if (!parsed.ok) for (const [path, message] of Object.entries(parsed.errors)) issues.add(path, message)
+  const pupillaryDistance = readPupillaryDistance(input.pupillaryDistance, "pupillaryDistance", issues)
+  if (issues.any) throw fieldsError(issues.errors)!
+  const lenses = parsed.ok ? parsed.value! : {}
+  const photoDocumentId = await photoOf(tx, orgId, patientId, input.photoDocumentId)
   const today = await clinicToday(tx, orgId)
   const issuedOn = input.issuedOn
   if (typeof issuedOn !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(issuedOn) || Number.isNaN(Date.parse(issuedOn)))
@@ -201,19 +221,32 @@ export async function transcribeLensPrescription(
       encounterId: null,
       kind,
       source: "externa",
-      lenses: parsed.value,
+      lenses,
+      pupillaryDistance,
       notes: optionalText(input.notes, "notes", "Las indicaciones", NOTES_MAX),
       issuedOn,
       validUntil: validUntilOf(input.validUntil, issuedOn),
       prescriberName,
       prescriberRegistration: optionalText(input.prescriberRegistration, "prescriberRegistration", "Su colegiatura", 60),
-      photoDocumentId: input.photoDocumentId ?? null,
+      photoDocumentId,
       createdBy: actorUserId,
     })
     .returning()
   if (!row) throw new Error("No se guardó la receta")
   await audit(tx, orgId, actorUserId, "lens_prescription.transcribed", row.id, { patientId, kind })
   return toView(row, today)
+}
+
+/** La foto de la receta externa: un documento vigente de la misma persona; sin ella, null. */
+async function photoOf(tx: Db, orgId: string, patientId: string, value: unknown): Promise<string | null> {
+  if (value === undefined || value === null || value === "") return null
+  if (typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) throw invalidField("photoDocumentId", "Elige la foto de la receta")
+  const [doc] = await tx
+    .select({ id: patientDocument.id, retiredAt: patientDocument.retiredAt })
+    .from(patientDocument)
+    .where(and(eq(patientDocument.organizationId, orgId), eq(patientDocument.patientId, patientId), eq(patientDocument.id, value)))
+  if (!doc || doc.retiredAt) throw invalidField("photoDocumentId", "Esa foto no está entre los documentos de esta persona")
+  return doc.id
 }
 
 /** Un optómetra revisó la receta externa contra su foto: deja de estar «sin verificar». */
@@ -292,13 +325,23 @@ export async function seedDemoLensPrescriptions(tx: Db, orgId: string): Promise<
     on conflict do nothing`)
 }
 
-/** Las recetas en «Tus documentos» del portal: la vencida dice «Vencida» y la anulada, «Anulada». */
+/**
+ * Las recetas en «Tus documentos» del portal: solo lo terminado, la de la óptica y
+ * la externa que un optómetra ya verificó. La vencida dice «Vencida» y la anulada,
+ * «Anulada».
+ */
 export async function portalLensPrescriptions(tx: Db, orgId: string, patientId: string) {
   const today = await clinicToday(tx, orgId)
   const rows = await tx
     .select()
     .from(lensPrescription)
-    .where(and(eq(lensPrescription.organizationId, orgId), eq(lensPrescription.patientId, patientId)))
+    .where(
+      and(
+        eq(lensPrescription.organizationId, orgId),
+        eq(lensPrescription.patientId, patientId),
+        isNotNull(lensPrescription.verifiedAt),
+      ),
+    )
     .orderBy(desc(lensPrescription.issuedOn), desc(lensPrescription.createdAt))
   return rows.map((row) => {
     const kind = PRESCRIPTION_KINDS.find((item) => item.key === row.kind)?.label.toLowerCase() ?? row.kind
@@ -325,6 +368,27 @@ export async function prescriptionRecordLines(tx: Db, orgId: string, patientId: 
     const head = `${formatDay(row.issuedOn)} · ${kind} · ${row.source === "externa" ? `externa, de ${row.prescriberName}${row.verifiedAt ? "" : ", sin verificar"}` : row.prescriberName}${row.voidedAt ? ` · anulada: ${row.voidReason}` : ""}`
     return [head, ...EYES.filter((eye) => lenses[eye.key]).map((eye) => `  ${eye.short} ${lensText(lenses[eye.key])}`)]
   })
+}
+
+/** Lo que dice el QR de una receta de lentes: vigente, vencida o anulada, y quién la firmó. */
+export async function lensPrescriptionCheck(tx: Db, orgId: string, id: string): Promise<DocumentCheckFacts | null> {
+  const [row] = await tx
+    .select()
+    .from(lensPrescription)
+    .where(and(eq(lensPrescription.organizationId, orgId), eq(lensPrescription.id, id)))
+    .limit(1)
+  if (!row) return null
+  const today = await clinicToday(tx, orgId)
+  const kind = PRESCRIPTION_KINDS.find((item) => item.key === row.kind)?.label.toLowerCase() ?? row.kind
+  return {
+    patientId: row.patientId,
+    state: row.voidedAt ? "anulado" : row.validUntil < today ? "vencido" : "vigente",
+    label: `Receta de ${kind}`,
+    issuedAt: row.createdAt,
+    validUntil: row.validUntil,
+    voidedAt: row.voidedAt,
+    signer: { name: row.prescriberName, title: null, registration: row.prescriberRegistration },
+  }
 }
 
 /** La receta vigente de cada tipo: la más reciente sin anular (vencida, con su aviso). */

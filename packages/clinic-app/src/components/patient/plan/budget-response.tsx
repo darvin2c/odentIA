@@ -63,6 +63,7 @@ import {
   type BudgetWithTotals,
   budgetAnswerLabel,
   budgetNumberLabel,
+  ANSWER_ENCOUNTER_KEYS,
   budgetPaths,
   decideBudgetApi,
   lineAwaitsAnswer,
@@ -661,6 +662,10 @@ export function BudgetResponse({
           ),
         )
       }
+      // Desde cualquier lugar (el cajón, el Plan sobre la atención): la atención abierta se pone al día.
+      void Promise.all(
+        ANSWER_ENCOUNTER_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
       setChangingDecider(false)
       setConfirming(null)
       setSigning(false)

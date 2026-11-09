@@ -19,8 +19,23 @@ describe("la agudeza visual, como se escribe en una óptica", () => {
     expect(normalizeAcuity("NPL")).toBe("NPL")
   })
 
+  it("acepta la línea parcial, la distancia de cuenta dedos y, de cerca, Jaeger, N y M", () => {
+    expect(normalizeAcuity("20/25+1")).toBe("20/25+1")
+    expect(normalizeAcuity("20/20 −2")).toBe("20/20-2")
+    expect(normalizeAcuity("cd 1m")).toBe("CD 1 m")
+    expect(normalizeAcuity("CD a 50 cm")).toBe("CD 50 cm")
+    expect(normalizeAcuity("J1", true)).toBe("J1")
+    expect(normalizeAcuity("j2+", true)).toBe("J2+")
+    expect(normalizeAcuity("N5", true)).toBe("N5")
+    expect(normalizeAcuity("0,5M", true)).toBe("0,5M")
+    expect(normalizeAcuity("1.0 M", true)).toBe("1,0M")
+  })
+
   it("rechaza lo que no es una notación de agudeza", () => {
-    for (const text of ["20/0", "20/2000", "buena", "3", "2,5", "20-20"]) expect(normalizeAcuity(text), text).toBeNull()
+    for (const text of ["20/0", "20/2000", "buena", "3", "2,5", "20-20", "20/20+9", "CD 0 m"]) expect(normalizeAcuity(text), text).toBeNull()
+    // Jaeger, N y M son de cerca: de lejos no valen.
+    for (const text of ["J1", "N5", "0,5M"]) expect(normalizeAcuity(text), text).toBeNull()
+    expect(normalizeAcuity("J20", true)).toBeNull()
   })
 })
 
@@ -68,8 +83,47 @@ describe("el examen de la vista", () => {
     expect(parseEyeExam({ refraccion: { od: { prisma: 2 } } })).toMatchObject({ ok: false, path: "refraccion.od.base" })
     expect(parseEyeExam({ agudeza: { od: { ccLejos: "muy bien" } } })).toMatchObject({ ok: false, path: "agudeza.od.ccLejos" })
     expect(parseEyeExam({ dp: { oi: 50 } })).toMatchObject({ ok: false, path: "dp.oi" })
-    expect(parseEyeExam({ salud: { presion: { od: 15.5 } } })).toMatchObject({ ok: false, path: "salud.presion.od" })
+    expect(parseEyeExam({ salud: { presion: { od: 15.55 } } })).toMatchObject({ ok: false, path: "salud.presion.od" })
     expect(parseEyeExam({ sistemas: {} })).toMatchObject({ ok: false })
+  })
+
+  it("dice todos los datos que están mal a la vez, no solo el primero", () => {
+    const parsed = parseEyeExam({
+      refraccion: { od: { esfera: -1.3, cilindro: -0.5 } },
+      dp: { oi: 50 },
+      agudeza: { oi: { ccLejos: "muy bien" } },
+    })
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(Object.keys(parsed.errors).sort()).toEqual(["agudeza.oi.ccLejos", "dp.oi", "refraccion.od.eje", "refraccion.od.esfera"])
+  })
+
+  it("guarda el prisma compuesto, el de 0,75, la adición de baja visión, la presión con decimal y la distancia binocular", () => {
+    const parsed = parseEyeExam({
+      refraccion: { od: { esfera: 2, adicion: 6, prisma: 0.75, base: "adentro", prisma2: 1, base2: "arriba" } },
+      dp: { od: 31.5, oi: 32, binocular: 63.5, cerca: 60 },
+      salud: { presion: { od: 15.5 } },
+    })
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        refraccion: { od: { esfera: 2, adicion: 6, prisma: 0.75, base: "adentro", prisma2: 1, base2: "arriba" } },
+        dp: { od: 31.5, oi: 32, binocular: 63.5, cerca: 60 },
+        salud: { presion: { od: 15.5 } },
+      },
+    })
+    if (!parsed.ok) return
+    expect(eyeExamLines(parsed.value)).toEqual([
+      "Refracción OD: +2,00 · Add +6,00 · 0,75 Δ base adentro (nasal) + 1 Δ base arriba",
+      "Distancia pupilar: OD 31,5 mm, OI 32 mm · binocular 63,5 mm · de cerca 60 mm",
+      "Presión del ojo: OD 15,5 mmHg",
+    ])
+    // El segundo prisma va en el otro eje, y solo con el primero.
+    expect(parseEyeExam({ refraccion: { od: { prisma: 1, base: "adentro", prisma2: 1, base2: "afuera" } } })).toMatchObject({
+      ok: false,
+      path: "refraccion.od.base2",
+    })
+    expect(parseEyeExam({ refraccion: { od: { prisma2: 1, base2: "arriba" } } })).toMatchObject({ ok: false, path: "refraccion.od.prisma2" })
   })
 })
 
@@ -98,7 +152,7 @@ describe("el examen en la historia", () => {
 describe("lo que conviene que vea un oftalmólogo", () => {
   it("se informa la presión alta, el fondo o las pupilas con hallazgos y la vista que no mejora con lentes", () => {
     const exam = parseEyeExam({
-      agudeza: { od: { ccLejos: "20/70" }, oi: { ccLejos: "CD" } },
+      agudeza: { od: { ccLejos: "20/70" }, oi: { ccLejos: "CD 1 m" } },
       salud: { fondo: { estado: "con_hallazgos" }, pupilas: { estado: "con_hallazgos" }, presion: { od: 24, oi: 18 } },
     })
     if (!exam.ok) throw new Error(exam.error)
@@ -107,7 +161,7 @@ describe("lo que conviene que vea un oftalmólogo", () => {
       "Fondo de ojo con hallazgos",
       "Pupilas con hallazgos",
       "OD no llega a 20/40 con corrección (20/70)",
-      "OI solo cuenta dedos",
+      "OI solo cuenta dedos a 1 m",
     ])
   })
 

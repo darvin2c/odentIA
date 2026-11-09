@@ -65,7 +65,7 @@ const ONE_CURRENCY_CATALOG: readonly ArgosView[] = [
   {
     name: "gastos",
     about:
-      "Gastos registrados, como movimientos: el gasto en su fecha y su anulación (negativa) en la suya. Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento. Lo pagado a proveedores (pago_de_compra) está en la categoría Materiales.",
+      "Gastos registrados, cada uno en su fecha; un gasto anulado no está (anular es decir que no ocurrió). Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento. Lo pagado a proveedores (pago_de_compra) está en la categoría Materiales.",
     columns:
       "momento (timestamptz), dia, categoria (Alquiler, Materiales, Personal, Laboratorio, Servicios, Impuestos…), tipo ('gasto'|'pago_de_compra': pago a un proveedor de materiales|'pago_de_comisiones': el pago de comisiones ya contadas en «comisiones»|'pago_del_impuesto_de_lo_cobrado': el pago del IGV o IVA de lo cobrado, que no es un gasto porque ya salió de lo cobrado), monto, sede",
     keys: ["gestion", "caja"],
@@ -74,7 +74,7 @@ const ONE_CURRENCY_CATALOG: readonly ArgosView[] = [
     name: "comisiones",
     about:
       "Comisiones de los profesionales, como Finanzas › Comisiones: cada cobro de lo que atendió un profesional con su porcentaje. Cuenta al cobrar (momento del cobro).",
-    columns: "momento (timestamptz), dia, profesional, sede (la del cobro), base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea), sin_pagar",
+    columns: "momento (timestamptz), dia, profesional, sede (la del cobro), base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea; lo que un pago descontó resta en una fila aparte), sin_pagar",
     keys: ["gestion"],
   },
   {
