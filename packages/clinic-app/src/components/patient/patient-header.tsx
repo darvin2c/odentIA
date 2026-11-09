@@ -33,16 +33,14 @@ import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
-import { personHeaderRules } from "../../lib/screen-rules"
-import { label } from "../../lib/glossary"
-import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { label } from "../../lib/glossary"
 import { clinicToday } from "../../lib/inventory"
 import { useOrgLocale } from "../../lib/locale"
+import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import {
   ageFrom,
   fetchPatientHealth,
-  filiationGapsText,
   hcLabel,
   isCurrentMedication,
   type PatientFull,
@@ -50,6 +48,7 @@ import {
   type PatientSummary,
 } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
+import { personHeaderRules } from "../../lib/screen-rules"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
 import { useOpenRecordPanel } from "../person/record-panel"

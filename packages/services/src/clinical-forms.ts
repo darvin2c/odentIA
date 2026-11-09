@@ -1,17 +1,21 @@
-import { type Db, withOrgContext } from "@odentia/db"
+import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import {
+  BUDGET_SIGN_DECLARATION,
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   type ConsentSections,
-  BUDGET_SIGN_DECLARATION,
   clinicalProfileFor,
-  isLeftOut,
-  LEFT_OUT_DECISIONS,
   consentSectionsToText,
   consentSignatureNote,
+  documentText,
+  isLeftOut,
+  LEFT_OUT_DECISIONS,
   normalizeDrugText,
   parseConsentSections,
+  typedIdentityDocument,
 } from "@odentia/clinical"
+import { type Db, withOrgContext } from "@odentia/db"
+import { member, user } from "@odentia/db/schema/auth"
 import {
   diagnosisCatalog,
   encounter,
@@ -36,33 +40,44 @@ import {
   orgSpecialty,
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
-import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import { appointment } from "@odentia/db/schema/agenda"
-import { member, user } from "@odentia/db/schema/auth"
 import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
-import { foldedWordsMatch } from "./search-text.js"
 import { findOrgLocale } from "./locale.js"
-import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
-import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { requireCanAttend } from "./attending.js"
-import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
+import { assertAttending } from "./encounter-attending.js"
+import {
+  fieldsError,
+  invalidField,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
+import { findOrgCountry } from "./locale.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
+import { updatePersonIdentity } from "./people.js"
+import type { ProductSite, SiteColumns } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 import {
   assertStrokes,
   currentDrawnSignature,
   drawnSignatureAt,
   requireProfessionalSignature,
 } from "./professional-profiles.js"
-import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
+import {
+  patientIsMinor,
+  requireDecisionContact,
+  requireLinkedActiveContact,
+} from "./responsibilities.js"
+import { foldedWordsMatch } from "./search-text.js"
 import { createTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import type { ProductSite, SiteColumns } from "./product-hooks.js"
-import { productHooks } from "./products.js"
-import { assertAttending } from "./encounter-attending.js"
 
 /** El «dónde» del producto de la clínica (odentIA: piezas). */
 const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
@@ -2213,7 +2228,7 @@ export async function signConsentDocument(
   actorUserId: string,
   documentId: string,
   input: SignConsentInput,
-): Promise<ConsentDocumentRow> {
+): Promise<ConsentDocumentRow & { signerDocNotice?: string }> {
   const [current] = await tx
     .select()
     .from(consentDocument)
@@ -2270,6 +2285,18 @@ export async function signConsentDocument(
       "Representante legal"
     if (!signerDoc) throw invalidField("signerDoc", "El representante necesita documento de identidad")
   }
+  const keptDocument =
+    input.signerKind === "representante"
+      ? await keepSignerDocument(
+          tx,
+          orgId,
+          actorUserId,
+          input.signerContactId,
+          signerName,
+          verified,
+          input.signerDoc,
+        )
+      : { saved: false, notice: null }
   const method = input.method ?? "clinica"
   if (method !== "clinica" && method !== "papel")
     throw validation("Método de firma inválido: en la clínica o en papel")
@@ -2371,6 +2398,8 @@ export async function signConsentDocument(
     minor,
     witness: Boolean(witnessName),
     method,
+    // El documento del representante, escrito al firmar, quedó en su ficha (`contact.updated`).
+    ...(keptDocument.saved ? { signerDocSaved: true } : {}),
   })
   // Si quien recabó la firma no es el autor, se avisa al autor del documento.
   if (row.authorUserId && row.authorUserId !== actorUserId) {
@@ -2382,7 +2411,62 @@ export async function signConsentDocument(
       actorUserId,
     })
   }
-  return row
+  return keptDocument.notice ? { ...row, signerDocNotice: keptDocument.notice } : row
+}
+
+/**
+ * El documento que se escribe al firmar como representante, porque su ficha no
+ * lo tenía (se registró sin él, PR 558): queda en su persona, la misma de todas
+ * partes (ADR 0001), con el rastro de quién lo escribió (`updatePersonIdentity`
+ * deja `contact.updated` con quien firma la atención). Si ya tiene otro, no se
+ * cambia y se avisa; si no se entiende el tipo o no pasa la regla del país, el
+ * consentimiento lo lleva igual (como siempre) y se avisa que no quedó en la
+ * ficha. Nada de esto frena la firma.
+ */
+async function keepSignerDocument(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  contactId: string,
+  name: string,
+  stored: { docType: string | null; docNumber: string | null },
+  written: string | null | undefined,
+): Promise<{ saved: boolean; notice: string | null }> {
+  const typed = written?.trim()
+  if (!typed) return { saved: false, notice: null }
+  const parsed = typedIdentityDocument(typed, await findOrgCountry(tx, orgId))
+  if (stored.docNumber) {
+    if (sameDocument(parsed?.docNumber ?? typed, stored.docNumber))
+      return { saved: false, notice: null }
+    return {
+      saved: false,
+      notice: `La ficha de ${name} ya tiene ${documentText(stored.docType, stored.docNumber)}: firmó con ese y el que escribiste no se guardó.`,
+    }
+  }
+  const notSaved = (why: string) => ({
+    saved: false,
+    notice: `El documento quedó en el consentimiento, pero no en la ficha de ${name}: ${why}`,
+  })
+  if (!parsed) return notSaved("escribe el tipo y el número en su ficha (p. ej. «DNI 45678912»).")
+  try {
+    // En su propio punto de guardado: si no pasa (otro ya lo tiene, no cumple la regla), la firma sigue.
+    await tx.transaction((inner) =>
+      // Solo si sigue sin documento: otra sesión que lo guardó entre tanto no se pisa (`STALE_DATA`).
+      updatePersonIdentity(
+        inner as Db,
+        orgId,
+        { userId: actorUserId },
+        contactId,
+        { docType: parsed.docType, docNumber: parsed.docNumber },
+        { docNumber: null },
+      ),
+    )
+    return { saved: true, notice: null }
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    const said = Object.values(error.fields ?? {})[0] ?? error.message
+    return notSaved(/[.!?]$/.test(said) ? said : `${said}.`)
+  }
 }
 
 /** Un documento escrito por la persona, comparado sin espacios, puntos ni guiones. */

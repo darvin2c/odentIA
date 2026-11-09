@@ -7,6 +7,7 @@
  * su cuenta). Toda función recibe `tx: Db` ya contextualizado.
  */
 import { ATTENDING_ROLES } from "@odentia/auth/permissions"
+import { showsSession } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   APPOINTMENT_STATUSES,
@@ -15,6 +16,7 @@ import {
   scheduleRoom,
 } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
+import { scheduleBlock } from "@odentia/db/schema/availability"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
@@ -24,44 +26,53 @@ import {
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { scheduleBlock } from "@odentia/db/schema/availability"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm"
-import { foldedWordsMatch } from "./search-text.js"
 import { alias } from "drizzle-orm/pg-core"
-import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
-import { createWorkspaceNotification } from "./workspace.js"
-import { TEST_KEEP_MS } from "./conversation-state.js"
-import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
+import { requireCanAttend } from "./attending.js"
 import {
   appointmentConfirmationPlan,
-  cancelPendingForAppointment,
   type ConfirmationPlan,
+  cancelPendingForAppointment,
   enqueueAppointmentNotice,
   invalidateAppointmentTokens,
   preferredContact,
   rescheduleAppointmentReminders,
 } from "./automation.js"
-import { requireCanAttend } from "./attending.js"
+import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
+import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
+import { TEST_KEEP_MS } from "./conversation-state.js"
 import {
   branchNotFound,
-  roomNotFound,
-  isExclusionViolation,
   invalidField,
+  isExclusionViolation,
   notFound,
+  roomNotFound,
   ServiceError,
   validation,
 } from "./errors.js"
 import { looksLikeId } from "./ids.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
-import { listPatients } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { listPatients } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
-import { showsSession } from "@odentia/clinical"
-import { canBookAnother, sessionCountsOf, sessionsDoneSql, standingForSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
-import { countAgendaUpgrade, countRecoveredAppointment, refreshConversationTier } from "./saas-actions.js"
+import {
+  countAgendaUpgrade,
+  countRecoveredAppointment,
+  refreshConversationTier,
+} from "./saas-actions.js"
+import { foldedWordsMatch } from "./search-text.js"
+import { attendingRule } from "./specialties.js"
+import {
+  canBookAnother,
+  sessionCountsOf,
+  sessionsDoneSql,
+  standingForSql,
+  TO_SCHEDULE_STATUSES,
+} from "./to-schedule.js"
+import { createWorkspaceNotification } from "./workspace.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -1504,6 +1515,8 @@ export async function updateAppointment(
  * nuevo, aceptado, por hacer y sin otra cita por venir que lo lleve (salvo que le falten
  * sesiones). La hora no cambia: no se le avisa a la persona. Si lo que lleva suele durar más que
  * la cita, se devuelve para que la pantalla lo diga; la cita no se alarga sola (podría pisar otra).
+ * Lo sumado que su profesional no atiende (la regla de la agenda, `attendingRule`) también se
+ * devuelve (`outsideService`): se avisa, no se frena, como al reservar con quien se pidió (ADR 0039).
  */
 export async function setAppointmentPlanItems(
   tx: Db,
@@ -1511,7 +1524,9 @@ export async function setAppointmentPlanItems(
   actorUserId: string,
   id: string,
   input: { expectedVersion: number; add?: string[]; remove?: string[] },
-): Promise<AppointmentItem & { usualMinutes: number | null; added: string[] }> {
+): Promise<
+  AppointmentItem & { usualMinutes: number | null; added: string[]; outsideService: string[] }
+> {
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (current.version !== input.expectedVersion)
     throw conflict("STALE_VERSION", "La cita cambió mientras la mirabas; vuelve a abrirla e intenta de nuevo")
@@ -1588,8 +1603,25 @@ export async function setAppointmentPlanItems(
   const own = current.serviceId ? services.find((row) => row.serviceId === current.serviceId) : undefined
   const extra = services.filter((row) => row.serviceId !== current.serviceId).reduce((sum, row) => sum + (row.minutes ?? 0), 0)
   const usualMinutes = extra > 0 ? (own?.minutes ?? current.durationMin) + extra : null
+  // Lo sumado cuyo servicio atiende otra especialidad, no la de quien tiene la cita.
+  const outsideService: string[] = []
+  if (added.length > 0) {
+    const sums = await tx
+      .select({ title: treatmentPlanItem.title, serviceId: treatmentPlanItem.serviceId })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, added)))
+    for (const row of sums) {
+      if (!row.serviceId) continue
+      const rule = await attendingRule(tx, orgId, {
+        serviceId: row.serviceId,
+        branchId: current.branchId,
+      })
+      if (rule && !rule.professionalUserIds.includes(current.professionalUserId))
+        outsideService.push(row.title)
+    }
+  }
   // Lo que de verdad se sumó: «Deshacer» quita solo eso, no lo que la cita ya llevaba.
-  return { ...(await getAppointment(tx, orgId, id)), usualMinutes, added }
+  return { ...(await getAppointment(tx, orgId, id)), usualMinutes, added, outsideService }
 }
 
 /** Quién pidió cancelar: lo que recepción anota al liberar el hueco. */

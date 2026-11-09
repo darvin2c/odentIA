@@ -7,43 +7,52 @@ import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { countOverdueControls, getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { countOpenHandoffs, type HandoffScope, listHandoffs, openHandoffPeopleSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
-import { checkEncounterClosing } from "./encounters.js"
-import { alsoAuditWords, AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent, leadAuditCount, leadAuditIndex } from "./audit-words.js"
+import {
+  AUDIT_AREA_LABELS,
+  AUDIT_AREAS,
+  type AuditArea,
+  alsoAuditWords,
+  auditSubjectsOf,
+  describeAuditEvent,
+  leadAuditCount,
+  leadAuditIndex,
+} from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
+import { checkEncounterClosing } from "./encounters.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
+import { windowOpen } from "./message-window.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { registrationHoldDifferences } from "./patient-registration.js"
+import { productDictation, productHooks } from "./products.js"
 import { upcomingWork } from "./report-finance.js"
 import { patientsToSchedule } from "./to-schedule.js"
-import { windowOpen } from "./message-window.js"
 import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
   composeWaiting,
   WAITING_LIMITS,
+  type WaitingAcceptedUnbooked,
   type WaitingBudgets,
   type WaitingCase,
+  type WaitingOverdueControls,
   type WaitingPerson,
-  type WaitingStaleEncounter,
-  type WaitingStillOpen,
   type WaitingPortalReentry,
   type WaitingPossibleDuplicate,
   type WaitingRegistrationDone,
+  type WaitingStaleEncounter,
+  type WaitingStillOpen,
   type WaitingTask,
-  type WaitingUnconfirmed,
   type WaitingUnclosed,
-  type WaitingAcceptedUnbooked,
-  type WaitingOverdueControls,
+  type WaitingUnconfirmed,
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { registrationHoldDifferences } from "./patient-registration.js"
-import { productDictation } from "./products.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -744,7 +753,8 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string, professi
  * de la clínica (la cifra «No tienen cita» de Reportes › Finanzas).
  */
 async function acceptedUnbookedOf(tx: Db, orgId: string): Promise<WaitingAcceptedUnbooked | null> {
-  const patients = (await patientsToSchedule(tx, orgId)).length
+  const patients = (await patientsToSchedule(tx, orgId, (await productHooks(tx, orgId)).planPhases))
+    .length
   if (patients === 0) return null
   const { currency } = await getOrgLocale(tx, orgId)
   const work = await upcomingWork(tx, orgId, currency, new Date())

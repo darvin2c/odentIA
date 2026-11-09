@@ -14,6 +14,7 @@ import { sql } from "drizzle-orm"
 import { getDebts } from "./finance.js"
 import { patientsMissingData } from "./patient-registration.js"
 import { type PlanNextKind, planStepListsOf } from "./plan-next.js"
+import { productHooks } from "./products.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { patientsToSchedule, patientsWithOverdueControl } from "./to-schedule.js"
 
@@ -93,7 +94,12 @@ export async function peopleShortcutMembers(
   const wanted = (shortcut: PeopleShortcut) => only === undefined || only === shortcut
   const planAllowed = ["clinical.read", "budgets.read", "appointments.read"].some((permission) => can(permission))
   // Las dos reglas de lo que falta agendar: las mismas de Inicio y de Argos, sin recorrer paciente por paciente.
-  if (planAllowed && wanted("por_agendar")) members.por_agendar = await patientsToSchedule(tx, orgId)
+  if (planAllowed && wanted("por_agendar"))
+    members.por_agendar = await patientsToSchedule(
+      tx,
+      orgId,
+      (await productHooks(tx, orgId)).planPhases,
+    )
   if (planAllowed && wanted("control_por_reservar"))
     members.control_por_reservar = await patientsWithOverdueControl(tx, orgId, timezone)
   if (planAllowed && PLAN_SHORTCUTS.some(wanted)) {
