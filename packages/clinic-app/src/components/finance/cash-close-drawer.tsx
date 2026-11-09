@@ -579,6 +579,9 @@ const OTHER_PURPOSE = "otro"
 const MOVE_PURPOSES: Record<MoveKind, ReadonlyArray<{ value: string; label: string }>> = {
   aporte: [
     { value: "cambio", label: "Fondo para cambio" },
+    // Lo que falta para un gasto o un pago que sale del efectivo: abierto desde ahí, es esto y no
+    // «Fondo para cambio» (QA de Gastos, G7).
+    { value: "gasto", label: "Para pagar un gasto" },
     { value: OTHER_PURPOSE, label: "Otro" },
   ],
   retiro: [
@@ -634,6 +637,8 @@ export function CashMoveDrawer({
   const onHand = state?.cashOnHandCents ?? 0
   const centsOf = (text: string) => (text.trim() === "" ? null : parseAmount(text, unit, locale))
 
+  // Una clave por cajón abierto (ADR 0018): reintentar tras un corte no ingresa el efectivo dos veces.
+  const requestId = useRef<string>(crypto.randomUUID())
   const moveMutation = useMutation({
     mutationFn: addCashMovementApi,
     onSuccess: (_result, sent) => {
@@ -668,6 +673,7 @@ export function CashMoveDrawer({
       const extra = value.detail.trim()
       const label = MOVE_PURPOSES[value.kind].find((item) => item.value === value.purpose)?.label ?? ""
       await moveMutation.mutateAsync({
+        requestId: requestId.current,
         branchId,
         kind: value.kind,
         amountCents: cents,
@@ -683,9 +689,10 @@ export function CashMoveDrawer({
 
   useEffect(() => {
     if (!open) return
+    requestId.current = crypto.randomUUID()
     form.reset(
       initialAmountCents && initialAmountCents > 0
-        ? { ...MOVE_DEFAULTS, kind: "aporte", amount: formatMoneyInput(initialAmountCents, currency, locale) }
+        ? { ...MOVE_DEFAULTS, kind: "aporte", purpose: "gasto", amount: formatMoneyInput(initialAmountCents, currency, locale) }
         : MOVE_DEFAULTS,
     )
     setBox(currency)

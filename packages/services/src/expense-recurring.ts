@@ -12,7 +12,13 @@
  * - Registrar un gasto con «Se repite» crea la plantilla y deja ese gasto como
  *   su primera ocurrencia: nunca aparece «vencido» lo que ya se pagó.
  * - Escribir es de `finance.write` y leer de `finance.read` (lo decide la ruta).
- *   Caja ve el sueldo con el nombre de la persona: es quien lo paga.
+ * - Lo que se le paga al personal (el tipo «Personal», con persona o sin ella: el nombre
+ *   también puede ir en el concepto) lo ve, lo anota, lo paga y lo cambia solo quien
+ *   administra comisiones (`commissions.write`), como lo que se le paga de comisión
+ *   (PR 486). Los demás ven «Sueldos» en una sola fila, sin a quién: los ingresos son
+ *   un dato sensible (Ley 29733, art. 2, num. 5; QA de Gastos del 8 nov, S1; ADR 0166,
+ *   que cambia lo que decía el ADR 0150). Como con una comisión, el importe de cada pago
+ *   sigue en Caja y en Argos, sin a quién.
  */
 import { type MoneyFraction, roundMoneyValue, sumMoneyValues } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -36,7 +42,18 @@ import {
   suggestedAmounts,
   userNamesOf,
 } from "./expense-recurring-occurrences.js"
-import { createExpense, type CreateExpenseInput, EXPENSE_CATEGORIES, lockOrgUnit, requireBranch } from "./finance.js"
+import {
+  createExpense,
+  type CreateExpenseInput,
+  EXPENSE_CATEGORIES,
+  lockOrgUnit,
+  lockRequest,
+  replayedExpense,
+  requestKey,
+  requestReused,
+  requireBranch,
+  SALARY_PAYMENT_CONCEPT,
+} from "./finance.js"
 import { getOrgLocale } from "./locale.js"
 import { currentMonthIn, reportDayOf } from "./report-periods.js"
 import { orgMoneyOf } from "./report-value.js"
@@ -48,6 +65,28 @@ export const RECURRING_OVERDUE_MONTHS = 12
 
 /** El tipo de gasto que puede llevar persona: el sueldo de la decisión 6. */
 const SALARY_CATEGORY = "Personal"
+
+/** Cómo ve los sueldos quien no administra comisiones: una fila, sin a quién. */
+export const SALARIES_CONCEPT = "Sueldos"
+
+/**
+ * Quien mira o actúa: `seesPeople` es quien administra comisiones (`commissions.write`) y por
+ * eso ve y paga el sueldo de cada persona. Sin decirlo, no lo ve: es lo más protector.
+ */
+export interface PayViewer {
+  seesPeople: boolean
+}
+const HIDDEN: PayViewer = { seesPeople: false }
+
+function forbidden(message: string): ServiceError {
+  return new ServiceError("FORBIDDEN", 403, message)
+}
+
+/** Lo del personal solo lo toca quien administra comisiones; lo demás, cualquiera de caja (ADR 0166). */
+function requireSeesPerson(template: { category: string }, viewer: PayViewer): void {
+  if (template.category === SALARY_CATEGORY && !viewer.seesPeople)
+    throw forbidden("Lo que se le paga al personal lo ven, lo anotan y lo pagan quienes administran las comisiones")
+}
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -99,7 +138,7 @@ async function requireTeamMember(tx: Db, orgId: string, userId: string, field: s
   if (!row) throw invalidField(field, "Esa persona no es del equipo")
 }
 
-async function lockTemplate(tx: Db, orgId: string, id: string): Promise<RecurringTemplate> {
+async function lockTemplate(tx: Db, orgId: string, id: string, viewer: PayViewer = HIDDEN): Promise<RecurringTemplate> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound("Gasto que se repite")
   const [row] = await tx
     .select()
@@ -107,6 +146,7 @@ async function lockTemplate(tx: Db, orgId: string, id: string): Promise<Recurrin
     .where(and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.id, id)))
     .for("update")
   if (!row) throw notFound("Gasto que se repite")
+  requireSeesPerson(row, viewer)
   return row
 }
 
@@ -150,14 +190,46 @@ export async function registerRecurringExpense(
   orgId: string,
   actorUserId: string,
   input: CreateExpenseInput & { repeat: RepeatInput },
+  viewer: PayViewer = HIDDEN,
 ) {
   const { repeat, ...expenseInput } = input
+  // El mismo formulario enviado dos veces (un corte) devuelve lo que ya anotó (ADR 0018, G2); el
+  // mismo formulario con otra cosa es un error, no lo anotado antes como si fuera esto.
+  const requestId = requestKey(expenseInput.requestId)
+  if (requestId) {
+    await lockRequest(tx, "expense", orgId, requestId)
+    const [replay] = await tx
+      .select()
+      .from(expenseRecurring)
+      .where(and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.requestId, requestId)))
+    if (replay) {
+      requireSeesPerson(replay, viewer)
+      const [paidRow] = await tx
+        .select()
+        .from(expense)
+        .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
+      const same =
+        replay.branchId === expenseInput.branchId &&
+        replay.category === (expenseInput.category?.trim() || "Otros") &&
+        replay.concept === expenseInput.concept.trim() &&
+        replay.amountCents === expenseInput.amountCents &&
+        replay.everyMonths === repeat.everyMonths &&
+        replay.day === repeat.day &&
+        replay.memberUserId === (repeat.memberUserId?.trim() || null) &&
+        replay.dueNextMonth === (repeat.dueNextMonth === true) &&
+        (repeat.month == null || replay.firstMonth === repeat.month) &&
+        (paidRow !== undefined && paidRow.voidedAt === null) === (repeat.paid !== false)
+      if (!same) throw requestReused()
+      return paidRow ? { ...paidRow, expense: paidRow, recurring: replay } : { expense: null, recurring: replay }
+    }
+  }
   const everyMonths = everyOf(repeat.everyMonths)
   const day = dayOf(repeat.day)
   const category = expenseInput.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category)) throw invalidField("category", "Tipo de gasto inválido")
   if (expenseInput.salesTax)
     throw invalidField("repeat", "El impuesto de lo cobrado cambia cada mes: regístralo cada vez")
+  requireSeesPerson({ category }, viewer)
   const memberUserId = repeat.memberUserId?.trim() || null
   if (memberUserId) {
     if (category !== SALARY_CATEGORY) throw invalidField("repeat.memberUserId", "Solo un gasto de Personal es de una persona")
@@ -200,6 +272,7 @@ export async function registerRecurringExpense(
       memberUserId,
       fromCash: expenseInput.fromCash === true,
       dueNextMonth: repeat.dueNextMonth === true,
+      requestId,
       createdBy: actorUserId,
     })
     .returning()
@@ -212,10 +285,18 @@ export async function registerRecurringExpense(
   })
   // Aún no se paga: queda anotado y por pagar desde ese mes, sin ningún gasto.
   if (!paid) return { expense: null, recurring: template }
-  const row = await createExpense(tx, orgId, actorUserId, { ...expenseInput, category }, {
-    recurringId: template.id,
-    recurringMonth: firstMonth,
-  })
+  const row = await createExpense(
+    tx,
+    orgId,
+    actorUserId,
+    { ...expenseInput, category },
+    {
+      recurringId: template.id,
+      recurringMonth: firstMonth,
+      ...(category === SALARY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
+    },
+    viewer,
+  )
   return { ...row, expense: row, recurring: template }
 }
 
@@ -256,8 +337,9 @@ export async function updateRecurringExpense(
   actorUserId: string,
   id: string,
   input: UpdateRecurringInput,
+  viewer: PayViewer = HIDDEN,
 ) {
-  const current = await lockTemplate(tx, orgId, id)
+  const current = await lockTemplate(tx, orgId, id, viewer)
   const next: Partial<typeof expenseRecurring.$inferInsert> = {}
   if (input.concept !== undefined) next.concept = conceptOf(input.concept)
   if (input.amountCents !== undefined) next.amountCents = centsOf(input.amountCents)
@@ -314,30 +396,48 @@ export async function updateRecurringExpense(
 }
 
 /**
- * «Dejar de repetir»: ya no aparece por pagar y lo pagado queda en Gastos. Termina
- * en el último mes resuelto (pagado o marcado «este mes no»); sin ninguno, antes
- * del primero. Devuelve el fin que tenía, para «Deshacer».
+ * «Dejar de repetir»: deja de repetirse desde el mes que viene. Lo vencido sin
+ * pagar y lo de este mes siguen por pagar: son deudas, se dicen y no se borran
+ * (ADR 0150, «lo vencido sin pagar entra en "Lo que debes"»; QA de Gastos, G3).
+ * Si este mes no hubo, se marca «No hubo este mes». Termina en el último mes
+ * resuelto (pagado o «este mes no»), en el último por pagar hasta hoy o en este
+ * mes, el que sea después; sin ninguno, antes del primero. Lo anotado este mes y
+ * nunca resuelto termina antes del primero: era un error o ya no va. Devuelve el
+ * fin que tenía, para «Deshacer», y lo que sigue por pagar.
  */
-export async function endRecurringExpense(tx: Db, orgId: string, actorUserId: string, id: string) {
-  const current = await lockTemplate(tx, orgId, id)
-  const lastMonth = (await lastResolvedMonth(tx, orgId, id)) ?? addMonthKey(current.firstMonth, -1)
-  const row = await updateRecurringExpense(tx, orgId, actorUserId, id, { lastMonth })
-  // Lo de antes del fin que quedó sin pagar sigue por pagar: se dice, no se borra.
-  const { timezone } = await getOrgLocale(tx, orgId)
-  const now = currentMonthIn(timezone)
-  const stillDue =
-    row.lastMonth === null
-      ? []
-      : (
-          await loadOccurrences(tx, orgId, {
-            from: addMonthKey(monthKey(now.year, now.month), -RECURRING_OVERDUE_MONTHS),
-            to: row.lastMonth,
-            templateIds: [id],
-          })
-        )
-          .filter((item) => !item.paid && !item.skipped)
-          .map((item) => item.month)
-  return { id, lastMonth: row.lastMonth, previousLastMonth: current.lastMonth, stillDue }
+export async function endRecurringExpense(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  viewer: PayViewer = HIDDEN,
+) {
+  const current = await lockTemplate(tx, orgId, id, viewer)
+  const zone = await getOrgLocale(tx, orgId)
+  const today = reportDayOf(zone.timezone, new Date())
+  const currentKey = today.slice(0, 7)
+  const pending = (
+    await loadOccurrences(tx, orgId, {
+      from: addMonthKey(currentKey, -RECURRING_OVERDUE_MONTHS),
+      to: addMonthKey(currentKey, 1),
+      templateIds: [id],
+    })
+  ).filter((item) => !item.paid && !item.skipped)
+  const resolved = await lastResolvedMonth(tx, orgId, id)
+  // Anotado este mes (en la zona de la clínica) y nunca resuelto: un error o algo que ya no va.
+  const justNoted = resolved === null && reportDayOf(zone.timezone, current.createdAt).slice(0, 7) === currentKey
+  // Lo por pagar hasta este mes: lo vencido y lo de este mes, aunque aún no venza (el sueldo de
+  // quien se va a fin de mes). Lo de meses que no llegan no se debe.
+  const owed = justNoted
+    ? []
+    : pending
+        .filter((item) => item.month <= currentKey)
+        .map((item) => item.month)
+        .sort()
+  const ends = [resolved, owed.at(-1) ?? null].filter((month): month is string => month !== null).sort()
+  const lastMonth = ends.at(-1) ?? addMonthKey(current.firstMonth, -1)
+  const row = await updateRecurringExpense(tx, orgId, actorUserId, id, { lastMonth }, viewer)
+  return { id, lastMonth: row.lastMonth, previousLastMonth: current.lastMonth, stillDue: owed }
 }
 
 async function paymentOf(tx: Db, orgId: string, id: string, month: string) {
@@ -402,6 +502,8 @@ export interface PayRecurringInput {
   receiptKind?: string
   receiptNumber?: string | null
   notes?: string | null
+  /** La clave del cajón de pago: el reintento devuelve el mismo pago (ADR 0018). */
+  requestId?: string | null
 }
 
 /**
@@ -416,14 +518,22 @@ export async function payRecurringOccurrence(
   actorUserId: string,
   id: string,
   input: PayRecurringInput,
+  viewer: PayViewer = HIDDEN,
 ) {
-  const template = await lockTemplate(tx, orgId, id)
+  const template = await lockTemplate(tx, orgId, id, viewer)
   await requireOccurrence(tx, orgId, template, input.month)
+  const suggested = (await suggestedAmounts(tx, orgId, [template])).get(template.id) ?? template.amountCents
+  const replay = await replayedExpense(
+    tx,
+    orgId,
+    { requestId: input.requestId, branchId: template.branchId, amountCents: input.amountCents ?? suggested, concept: template.concept },
+    { recurringId: template.id, recurringMonth: input.month },
+  )
+  if (replay) return { ...replay, fromCash: replay.shiftId !== null }
   const paid = await paymentOf(tx, orgId, id, input.month)
   if (paid) throw await alreadyPaid(tx, orgId, paid)
   if (await skipOf(tx, orgId, id, input.month))
     throw conflict("RECURRING_SKIPPED", "Marcaste que ese mes no hubo: deshazlo para pagarlo")
-  const suggested = (await suggestedAmounts(tx, orgId, [template])).get(template.id) ?? template.amountCents
   try {
     const row = await createExpense(
       tx,
@@ -440,8 +550,14 @@ export async function payRecurringOccurrence(
         receiptKind: input.receiptKind,
         receiptNumber: input.receiptNumber,
         notes: input.notes,
+        requestId: input.requestId,
       },
-      { recurringId: template.id, recurringMonth: input.month },
+      {
+        recurringId: template.id,
+        recurringMonth: input.month,
+        ...(template.category === SALARY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
+      },
+      viewer,
     )
     await audit(tx, orgId, actorUserId, id, "finance.expense_recurring_paid", { month: input.month, expenseId: row.id })
     return { ...row, fromCash: row.shiftId !== null }
@@ -459,8 +575,9 @@ export async function skipRecurringOccurrence(
   actorUserId: string,
   id: string,
   input: { month: string },
+  viewer: PayViewer = HIDDEN,
 ) {
-  const template = await lockTemplate(tx, orgId, id)
+  const template = await lockTemplate(tx, orgId, id, viewer)
   await requireOccurrence(tx, orgId, template, input.month)
   const paid = await paymentOf(tx, orgId, id, input.month)
   if (paid) throw await alreadyPaid(tx, orgId, paid)
@@ -480,8 +597,9 @@ export async function unskipRecurringOccurrence(
   actorUserId: string,
   id: string,
   input: { month: string },
+  viewer: PayViewer = HIDDEN,
 ) {
-  await lockTemplate(tx, orgId, id)
+  await lockTemplate(tx, orgId, id, viewer)
   if (!isMonthKey(input.month)) throw invalidField("month", "El mes debe tener formato AAAA-MM")
   const rows = await tx
     .update(expenseRecurringSkip)
@@ -519,6 +637,43 @@ export interface RecurringDue {
   currency: string
   fromCash: boolean
   everyMonths: number
+  /**
+   * Varios sueldos juntos, para quien no administra comisiones: cuántos son. No se pagan
+   * desde esta fila (lo hace quien los ve). Nulo en una fila de un solo gasto.
+   */
+  group: number | null
+}
+
+/**
+ * Los sueldos de cada persona en una fila por mes y moneda, sin a quién ni cuánto a cada uno
+ * (S1). El id es del grupo: no lleva a ninguna plantilla.
+ */
+function groupSalaries<
+  T extends { category: string; memberUserId: string | null; memberName: string | null; amountCents: number; currency: string },
+>(
+  rows: T[],
+  keyOf: (row: T) => string,
+  merge: (first: T, key: string) => T,
+): T[] {
+  const out: T[] = []
+  const groups = new Map<string, T & { group: number }>()
+  for (const row of rows) {
+    if (row.category !== SALARY_CATEGORY) {
+      out.push(row)
+      continue
+    }
+    const key = `${keyOf(row)}|${row.currency}`
+    const seen = groups.get(key)
+    if (seen) {
+      seen.amountCents += row.amountCents
+      seen.group += 1
+      continue
+    }
+    const first = { ...merge(row, key), memberUserId: null, memberName: null, group: 1 }
+    groups.set(key, first)
+    out.push(first)
+  }
+  return out
 }
 
 /**
@@ -536,6 +691,7 @@ export async function getRecurringMonth(
   orgId: string,
   query: { year: number; month: number; branchId?: string },
   now: Date = new Date(),
+  viewer: PayViewer = HIDDEN,
 ) {
   if (!Number.isInteger(query.year) || query.year < 2000 || query.year > 2100) throw validation("Año inválido")
   if (!Number.isInteger(query.month) || query.month < 1 || query.month > 12) throw validation("Mes inválido")
@@ -595,6 +751,7 @@ export async function getRecurringMonth(
       currency: item.template.currency,
       fromCash: item.template.fromCash,
       everyMonths: item.template.everyMonths,
+      group: null as number | null,
     }))
     .sort(
       (a, b) =>
@@ -602,6 +759,23 @@ export async function getRecurringMonth(
         a.dueOn.localeCompare(b.dueOn) ||
         a.concept.localeCompare(b.concept),
     )
+  const templates = active.map((template) => ({
+    id: template.id,
+    branchId: template.branchId,
+    category: template.category,
+    concept: template.concept,
+    amountCents: suggested.get(template.id) ?? template.amountCents,
+    currency: template.currency,
+    everyMonths: template.everyMonths,
+    day: template.day,
+    firstMonth: template.firstMonth,
+    lastMonth: template.lastMonth,
+    memberUserId: template.memberUserId,
+    memberName: template.memberUserId ? (names.get(template.memberUserId) ?? null) : null,
+    fromCash: template.fromCash,
+    nextMonth: nextOf(template),
+    group: null as number | null,
+  }))
   const values = (list: Occurrence[]): Array<MoneyFraction | null> => list.map((item) => occurrenceValue(item, money))
   const paidOfMonth = ofMonth.filter((item) => item.paid)
   const dueOfMonth = ofMonth.filter((item) => !item.paid)
@@ -618,23 +792,22 @@ export async function getRecurringMonth(
       dueCents: occurrencesCents(dueOfMonth, money),
       count: ofMonth.length,
     },
-    due,
-    templates: active.map((template) => ({
-      id: template.id,
-      branchId: template.branchId,
-      category: template.category,
-      concept: template.concept,
-      amountCents: suggested.get(template.id) ?? template.amountCents,
-      currency: template.currency,
-      everyMonths: template.everyMonths,
-      day: template.day,
-      firstMonth: template.firstMonth,
-      lastMonth: template.lastMonth,
-      memberUserId: template.memberUserId,
-      memberName: template.memberUserId ? (names.get(template.memberUserId) ?? null) : null,
-      fromCash: template.fromCash,
-      nextMonth: nextOf(template),
-    })),
+    due: viewer.seesPeople
+      ? due
+      : groupSalaries(due, (row) => row.month, (row, key) => ({
+          ...row,
+          recurringId: `sueldos:${key}`,
+          concept: SALARIES_CONCEPT,
+          fromCash: false,
+        })),
+    templates: viewer.seesPeople
+      ? templates
+      : groupSalaries(templates, (row) => `${row.branchId}|${row.everyMonths}`, (row, key) => ({
+          ...row,
+          id: `sueldos:${key}`,
+          concept: SALARIES_CONCEPT,
+          fromCash: false,
+        })),
   }
 }
 

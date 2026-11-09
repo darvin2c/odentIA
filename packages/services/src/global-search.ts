@@ -520,8 +520,9 @@ export async function searchEverything(
       left join supplier s on s.organization_id = po.organization_id and s.id = po.supplier_id
       where e.organization_id = ${orgId} and e.voided_at is null
         and ${foldedWordsMatch([sql`e.concept`, sql`e.category`, sql`e.notes`, sql`s.name`], q)}
-        -- El pago de una comisión dice a quién y cuánto: solo lo encuentra quien administra comisiones.
-        ${seesAllCommissions ? sql`` : sql`and not exists (select 1 from commission_settlement cs where cs.organization_id = e.organization_id and cs.expense_id = e.id)`}
+        -- Lo que se le paga a una persona (comisiones y todo el tipo «Personal», que también es el
+        -- pago de una comisión) dice a quién y cuánto: solo lo encuentra quien administra comisiones (ADR 0166).
+        ${seesAllCommissions ? sql`` : sql`and e.category <> 'Personal' and not exists (select 1 from commission_settlement cs where cs.organization_id = e.organization_id and cs.expense_id = e.id)`}
       order by e.spent_at desc limit ${PER_TYPE}`)
     for (const row of expenses) {
       const item: SearchItem = {
