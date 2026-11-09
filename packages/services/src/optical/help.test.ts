@@ -59,6 +59,18 @@ const OWN_QUOTED = [
   "La revisé: verificar",
   "Anteriores",
   "Anular",
+  // El pedido de lentes (entrega 4).
+  "Vender lentes",
+  "Vender con esta receta",
+  "Sin adelanto",
+  "Atrasados",
+  "Enviado al laboratorio",
+  "Llegó del laboratorio",
+  "Revisado: está listo",
+  "Entregar",
+  "Marcar listo",
+  "Rehacer",
+  "Cambiar rol",
   "Emitir otra desde su examen",
 ]
 
@@ -84,8 +96,6 @@ describe("la guía de vistIA", () => {
       /descanso/i,
       /signos vitales|examen físico/i,
       /\bASA\b|anest/i,
-      // El pedido de los lentes al taller llega en la entrega 4.
-      /pedido de lentes/i,
     ]) {
       expect(text).not.toMatch(word)
     }
@@ -100,7 +110,12 @@ describe("la guía de vistIA", () => {
   })
 
   it("lleva las mismas pantallas y responde lo suyo", () => {
-    expect(OPTICAL_HELP_TOPICS.map((topic) => [topic.id, topic.path])).toEqual(HELP_TOPICS.map((topic) => [topic.id, topic.path]))
+    // Las de siempre, en su orden, y al final las que solo tiene una óptica.
+    expect(OPTICAL_HELP_TOPICS.slice(0, HELP_TOPICS.length).map((topic) => [topic.id, topic.path])).toEqual(
+      HELP_TOPICS.map((topic) => [topic.id, topic.path]),
+    )
+    expect(OPTICAL_HELP_TOPICS.slice(HELP_TOPICS.length).map((topic) => [topic.id, topic.path])).toEqual([["pedidos", "/orders"]])
+    expect(helpTopicForScreen("/orders", OPTICAL_HELP_TOPICS)?.id).toBe("pedidos")
     expect(helpTopicForScreen("/patients/123", OPTICAL_HELP_TOPICS)?.id).toBe("pacientes")
     const answer = (question: string) => matchHelpTopics(question, OPTICAL_HELP_TOPICS)[0]?.faq?.a ?? ""
     expect(answer("¿Quién es Ariadna?")).toContain("guía virtual de vistIA")

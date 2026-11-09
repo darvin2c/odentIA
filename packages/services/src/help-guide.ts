@@ -49,6 +49,13 @@ const SETTINGS = "Configuración"
 /** Pantallas que se abren desde Integraciones: no están en la lista, pero se llega por ahí. */
 const INTEGRATIONS = `${SETTINGS} › Integraciones`
 
+/**
+ * Pantallas comunes que solo muestra el producto que las declara (los pedidos:
+ * `productUi().orders`, ADR 0168): están en las rutas de todas las apps, pero su
+ * tema lo pone la guía de ese producto, y las demás no las nombran.
+ */
+export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
+
 export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "inicio",

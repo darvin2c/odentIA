@@ -8,8 +8,9 @@ import { HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
  * que una óptica no tiene: el odontograma, la pieza, el visor de tomografías en
  * cortes, el dictado de Clío, el riesgo anestésico ni el descanso médico. Lo
  * indicado queda aceptado al indicarlo, como en latidIA, y se invita a volver al
- * año, al control anual de la vista. El examen de la vista, la receta de lentes y
- * el pedido llegan en otra entrega: la guía no los promete.
+ * año, al control anual de la vista. El examen de la vista y la receta de lentes
+ * tienen sus preguntas en Pacientes, y «Pedidos» es una pantalla que solo tiene una
+ * óptica (`OPTICAL_ONLY_TOPICS`).
  */
 
 /** Las palabras que cambian en toda la guía. */
@@ -372,7 +373,18 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       return faq
     }),
   }),
-  equipo: (topic) => ({ ...topic, terms: [...topic.terms, "optometrista"] }),
+  equipo: (topic) => ({
+    ...topic,
+    terms: [...topic.terms, "optometrista", "ventas", "vendedor", "vendedora", "taller", "tallerista"],
+    faqs: [
+      ...(topic.faqs ?? []),
+      {
+        q: "¿Qué roles hay en una óptica?",
+        a: "Además de los de siempre, dos de las ópticas. Ventas atiende el mostrador: registra a los clientes, lleva la agenda, las conversaciones y las tareas, vende y cobra, ve el inventario con precios y los pedidos, y ve la receta de lentes vigente sin el resto de la historia clínica. Taller ve los pedidos con sus medidas y la copia de la receta con que se hacen, y marca cómo van; nada más de la óptica. Se eligen al invitar o en «Cambiar rol».",
+        forms: ["que hace el rol ventas", "que ve el taller", "rol para el vendedor", "rol para el que hace los lentes", "roles de una optica"],
+      },
+    ],
+  }),
   disponibilidad: (topic) => ({
     ...topic,
     terms: topic.terms.filter((term) => term !== "sillones" && term !== "sillón"),
@@ -398,5 +410,61 @@ function opticalTopic(topic: HelpTopic): HelpTopic {
   return EDITS[topic.id]?.(worded) ?? worded
 }
 
-/** La guía de la Ayuda en vistIA. */
-export const OPTICAL_HELP_TOPICS: readonly HelpTopic[] = HELP_TOPICS.map(opticalTopic)
+/** Lo que solo tiene una óptica: sus pantallas, que no están en la guía de odentIA. */
+const OPTICAL_ONLY_TOPICS: readonly HelpTopic[] = [
+  {
+    id: "pedidos",
+    path: "/orders",
+    title: "Pedidos",
+    parent: null,
+    purpose:
+      "Los lentes que se encargaron al laboratorio o al taller propio, del que vence antes al que vence después: en qué paso está cada uno (por enviar, en laboratorio, por revisar, listo o entregado), para cuándo se le prometió a la persona y, para quien ve la caja, cuánto le falta pagar. «Atrasados» junta los que pasaron su fecha sin estar listos. Cada pedido se abre al lado con lo que lleva, la copia de la receta con que se hace, las medidas para montar y quién marcó cada paso. Desde aquí se vende con «Vender lentes».",
+    terms: [
+      "pedidos",
+      "pedido de lentes",
+      "trabajos",
+      "laboratorio",
+      "taller",
+      "orden de trabajo",
+      "lentes listos",
+      "estado del pedido",
+      "saldo",
+      "adelanto",
+      "vender lentes",
+      "rehacer lentes",
+      "garantia",
+      "atrasados",
+    ],
+    writePermission: "orders.write",
+    faqs: [
+      {
+        q: "¿Cómo vendo unos lentes?",
+        a: "En Pedidos, «Vender lentes», o en «Recetas de lentes» de su ficha, «Vender con esta receta»: para quién, la receta (la vigente; si venció o no se verificó te lo dice, no lo impide), lo que lleva (la montura del inventario y las lunas con su precio), las medidas para montar, qué es, quién lo hace, para cuándo y el adelanto con su medio de pago, o «Sin adelanto». El adelanto se cobra en la caja de siempre y el pedido queda «Por enviar», con una copia de la receta para el taller.",
+        forms: ["como vendo lentes", "como hago una venta de anteojos", "como registro el adelanto", "como encargo los lentes al laboratorio"],
+      },
+      {
+        q: "¿Cómo marco cómo va un pedido?",
+        a: "Ábrelo: el botón dice el paso que sigue, «Enviado al laboratorio», «Llegó del laboratorio», «Revisado: está listo» o «Entregar». Si el taller propio no pasa por el laboratorio, «Marcar listo» en «…». Cada paso dice quién lo marcó y cuándo, y no se vuelve atrás: si algo salió mal, se rehace.",
+        forms: ["como marco que llegaron los lentes", "como paso el pedido a listo", "como entrego los lentes", "en que paso esta el pedido"],
+      },
+      {
+        q: "¿Y si le falta pagar al recogerlos?",
+        a: "El pedido listo dice cuánto falta y ofrece el cobro de siempre, el mismo de Cobros. Entregar no lo exige: tú decides.",
+        forms: ["cobrar el saldo de los lentes", "cuanto le falta pagar", "pagar el resto del pedido"],
+      },
+      {
+        q: "¿Qué hago si no ve bien con sus lentes nuevos?",
+        a: "En el pedido, «…» › «Rehacer», con por qué se rehace y para cuándo: sale otro pedido unido al original, con lo mismo y sin cobrar otra vez; lo que faltaba pagar sigue en el nuevo, y el original queda reemplazado. Rehacer y anular son de quien lleva la caja.",
+        forms: ["no ve bien con sus lentes", "rehacer un pedido", "garantia de los lentes", "se rompio la luna en el taller"],
+      },
+      {
+        q: "¿Cómo anulo un pedido?",
+        a: "En el pedido, «…» › «Anular», con el motivo, mientras no se haya entregado. Lo que no se cobró se anula con él y la montura vuelve al inventario; lo ya cobrado queda en su cuenta, para devolverlo o usarlo desde Cobros.",
+        forms: ["cancelar un pedido", "anular la venta de lentes", "se arrepintio de los lentes"],
+      },
+    ],
+  },
+]
+
+/** La guía de la Ayuda en vistIA: las pantallas de siempre, con lo de una óptica, y las suyas. */
+export const OPTICAL_HELP_TOPICS: readonly HelpTopic[] = [...HELP_TOPICS.map(opticalTopic), ...OPTICAL_ONLY_TOPICS]
