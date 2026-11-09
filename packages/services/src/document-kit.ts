@@ -1181,7 +1181,7 @@ export class DocumentKit {
 
   /** Un recuadro con cuerpo escrito: la declaración, las señales de alarma. */
   /** Lo que ocupará `panel`: para no dejarlo separado de lo que debe ir con él. */
-  panelHeight(input: { title?: string; body: string; size?: number }): number {
+  panelHeight(input: { title?: Inline | Inline[]; body: string; size?: number }): number {
     const size = input.size ?? SIZE.table
     const inner = this.width - 28
     const title = input.title
@@ -1191,7 +1191,8 @@ export class DocumentKit {
     return [...title, ...body].reduce((sum, line) => sum + line.height, 0) + 22
   }
 
-  panel(input: { title?: string; body: string; thickness?: number; size?: number }): void {
+  /** Recuadro con título (en negrita, salvo las partes que digan su letra) y texto. */
+  panel(input: { title?: Inline | Inline[]; body: string; thickness?: number; size?: number }): void {
     const size = input.size ?? SIZE.table
     const padX = 14
     const padY = 11
@@ -1202,7 +1203,8 @@ export class DocumentKit {
     const body = this.lay(input.body, inner, { size, leading: 1.45 })
     const height = this.panelHeight(input)
     if (height > this.pageRoom) {
-      if (input.title) this.subheading(input.title)
+      if (typeof input.title === "string") this.subheading(input.title)
+      else if (input.title) this.text(input.title, { face: "sansBold", size, leading: 1.35 })
       this.text(input.body, { size })
       return
     }

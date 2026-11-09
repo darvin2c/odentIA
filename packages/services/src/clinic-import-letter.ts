@@ -374,7 +374,10 @@ export async function welcomeLetterPdf(raw: WelcomeLetterInput): Promise<{
       { text: String(index + 1), face: "sansBold" },
       [
         {
-          inlines: [{ text: step.lead, face: "sansSemi" }, ` ${step.rest}`] satisfies Inline[],
+          inlines: [
+            { text: step.lead, face: "sansSemi" },
+            ...withBold(` ${step.rest}`, content.inbox),
+          ] satisfies Inline[],
           leading: 1.45,
         },
       ],
@@ -409,7 +412,14 @@ export async function welcomeLetterPdf(raw: WelcomeLetterInput): Promise<{
   if (kit.pageCount === 1) kit.newPage()
   kit.heading("Anexo: información para la implementación", { size: SIZE.h2small, before: 4, after: 6 })
   // La hoja se usa sola para reunir los datos: repite a dónde y hasta cuándo.
-  kit.panel({ title: content.send.title, body: content.send.body, size: SIZE.dense })
+  // En el recuadro solo resalta el buzón: lo demás va en letra normal.
+  kit.panel({
+    title: withBold(content.send.title, content.inbox).map((part) =>
+      typeof part === "string" ? { text: part, face: "sans" as const } : part,
+    ),
+    body: content.send.body,
+    size: SIZE.dense,
+  })
   const sections = [...content.annex, { title: content.list.title, items: [] }]
   sections.forEach((area, index) => {
     kit.subheading(`${index + 1}. ${area.title}`, { before: 10, after: 2 })
@@ -426,6 +436,15 @@ export async function welcomeLetterPdf(raw: WelcomeLetterInput): Promise<{
 
   const bytes = await kit.finish()
   return { bytes, pages: kit.pageCount, letterPages, content }
+}
+
+/** El texto con una parte en negrita (el buzón de soporte): lo único que resalta dentro de una línea. */
+function withBold(text: string, part: string): Inline[] {
+  const at = text.indexOf(part)
+  if (at < 0) return [text]
+  const before = text.slice(0, at)
+  const after = text.slice(at + part.length)
+  return [...(before ? [before] : []), { text: part, face: "sansBold" }, ...(after ? [after] : [])]
 }
 
 /** Lo que mide la despedida con la firma: dos líneas, tres de firma y sus espacios, para no partirla. */
