@@ -1146,7 +1146,7 @@ export const treatmentTemplate = catalogSchema.table(
   },
   (table) => [
     uniqueIndex("treatment_template_key_uidx").on(table.key),
-    check("treatment_template_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("treatment_template_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check("treatment_template_usual_sessions_check", sql`${table.usualSessions} BETWEEN 1 AND 60`),
   ],
 )
@@ -2286,9 +2286,11 @@ export const patientCharge = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /**
+     * Nulo solo en una venta de mostrador (ADR 0173): un producto que se cobra
+     * sin ficha, a un contacto, a un nombre o a nadie. Nunca un tratamiento.
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
     planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
     budgetItemId: uuid("budget_item_id").references(() => treatmentBudgetItem.id),
     encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
@@ -2393,6 +2395,11 @@ export const patientCharge = pgTable(
       "patient_charge_product_check",
       sql`(${table.productId} IS NULL) = (${table.productQuantity} IS NULL) AND (${table.productQuantity} IS NULL OR ${table.productQuantity} BETWEEN 1 AND 9999)`,
     ),
+    // Sin ficha solo se vende un producto: nada clínico ni del plan (ADR 0173).
+    check(
+      "patient_charge_counter_check",
+      sql`${table.patientId} IS NOT NULL OR (${table.productId} IS NOT NULL AND ${table.planItemId} IS NULL AND ${table.budgetItemId} IS NULL AND ${table.encounterProcedureId} IS NULL AND ${table.promotionId} IS NULL AND ${table.commissionSessions} IS NULL)`,
+    ),
   ],
 )
 
@@ -2401,9 +2408,8 @@ export const patientPayment = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /** Nulo solo en el pago de una venta de mostrador, siempre con su ticket (ADR 0173). */
+    patientId: uuid("patient_id").references(() => patient.id),
     /** Ticket del cobro atómico (un ticket agrupa un pago por medio). */
     ticketId: uuid("ticket_id").references(() => paymentTicket.id),
     branchId: uuid("branch_id").references(() => branch.id),
@@ -2466,6 +2472,7 @@ export const patientPayment = pgTable(
       "patient_payment_method_type_check",
       sql`${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1')`,
     ),
+    check("patient_payment_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.ticketId} IS NOT NULL`),
   ],
 )
 
@@ -2474,9 +2481,8 @@ export const patientPaymentApplication = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /** Nulo solo dentro de una venta de mostrador (ADR 0173). */
+    patientId: uuid("patient_id").references(() => patient.id),
     paymentId: uuid("payment_id")
       .notNull()
       .references(() => patientPayment.id),
@@ -2505,6 +2511,7 @@ export const patientPaymentApplication = pgTable(
     index("payment_application_payment_idx").on(table.organizationId, table.paymentId),
     index("payment_application_charge_idx").on(table.organizationId, table.chargeId),
     check("payment_application_amount_check", sql`${table.amountCents} > 0`),
+    check("payment_application_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.ticketId} IS NOT NULL`),
   ],
 )
 
@@ -2513,9 +2520,11 @@ export const patientPaymentRefund = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /**
+     * Nulo solo al devolver una venta de mostrador: sin cuenta no hay saldo a
+     * favor que devolver, así que sale siempre de una devolución (ADR 0173).
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
     paymentId: uuid("payment_id")
       .notNull()
       .references(() => patientPayment.id),
@@ -2553,6 +2562,7 @@ export const patientPaymentRefund = pgTable(
       "payment_refund_tender_check",
       sql`${table.tenderCents} IS NULL OR ${table.tenderCents} >= 0`,
     ),
+    check("payment_refund_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.returnId} IS NOT NULL`),
   ],
 )
 
@@ -2562,9 +2572,16 @@ export const paymentTicket = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /**
+     * Nulo en una venta de mostrador (ADR 0173): productos cobrados sin abrir
+     * una historia. Entonces quien compra es un contacto (`buyerContactId`), un
+     * nombre escrito (`buyerName`) o nadie («Venta de mostrador»).
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
+    /** La persona que compró en el mostrador, si se eligió (cualquier contacto, no solo pacientes). */
+    buyerContactId: uuid("buyer_contact_id"),
+    /** El nombre que se escribió en una venta de mostrador, si no se eligió a nadie. */
+    buyerName: text("buyer_name"),
     branchId: uuid("branch_id")
       .notNull()
       .references(() => branch.id),
@@ -2601,6 +2618,25 @@ export const paymentTicket = pgTable(
       "payment_ticket_change_currency_check",
       sql`${table.changeCurrency} IS NULL OR ${table.changeCurrency} ~ '^[A-Z]{3}$'`,
     ),
+    foreignKey({
+      name: "payment_ticket_buyer_contact_fk",
+      columns: [table.organizationId, table.buyerContactId],
+      foreignColumns: [contact.organizationId, contact.id],
+    }),
+    // Lo que compró una persona en el mostrador (y si es solo un contacto o ya hizo algo).
+    index("payment_ticket_org_buyer_idx")
+      .on(table.organizationId, table.buyerContactId)
+      .where(sql`${table.buyerContactId} IS NOT NULL`),
+    // Venta de mostrador (ADR 0173): sin ficha no hay saldo a favor que usar ni quién
+    // pague por el paciente; quien compra es un contacto o un nombre, nunca los dos.
+    check(
+      "payment_ticket_counter_check",
+      sql`(${table.patientId} IS NOT NULL AND ${table.buyerContactId} IS NULL AND ${table.buyerName} IS NULL) OR (${table.patientId} IS NULL AND ${table.creditAppliedCents} = 0 AND ${table.payerContactId} IS NULL AND (${table.buyerContactId} IS NULL OR ${table.buyerName} IS NULL))`,
+    ),
+    check(
+      "payment_ticket_buyer_name_check",
+      sql`${table.buyerName} IS NULL OR (${table.buyerName} = btrim(${table.buyerName}) AND char_length(${table.buyerName}) BETWEEN 1 AND 200)`,
+    ),
   ],
 )
 
@@ -2624,9 +2660,8 @@ export const paymentReturn = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /** Nulo al devolver una venta de mostrador: entonces siempre se le paga (ADR 0173). */
+    patientId: uuid("patient_id").references(() => patient.id),
     /** El ticket del que sale: sigue valiendo, con la devolución anotada. */
     ticketId: uuid("ticket_id").notNull(),
     /** Sede donde se devolvió: de su caja sale el dinero. */
@@ -2657,6 +2692,7 @@ export const paymentReturn = pgTable(
     index("payment_return_org_patient_idx").on(table.organizationId, table.patientId),
     check("payment_return_total_check", sql`${table.totalCents} > 0`),
     check("payment_return_outcome_check", sql`${table.outcome} IN ('pagado','a_favor')`),
+    check("payment_return_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.outcome} = 'pagado'`),
     check(
       "payment_return_method_check",
       sql`(${table.outcome} = 'pagado') = (${table.methodName} IS NOT NULL) AND (${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1'))`,

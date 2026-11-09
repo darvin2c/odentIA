@@ -1,4 +1,4 @@
-import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
+import { BASE_PRODUCT, CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { randomUUID } from "node:crypto"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
@@ -1402,8 +1402,9 @@ export async function listMyInvitations(tx: Db, email: string): Promise<PendingI
 
 /**
  * El producto de una cuenta, para lo que se le escribe a la persona y no a una
- * clínica (los avisos de los términos; issue 229): latidIA solo si todas sus
- * clínicas son de latidIA. Sin clínicas, o con alguna de odentIA, odentIA.
+ * clínica (los avisos de los términos; issue 229): el de sus clínicas si todas
+ * son del mismo producto (latidIA si todas son de latidIA). Sin clínicas, o con
+ * clínicas de productos distintos, el base: odentIA.
  */
 export async function accountProduct(tx: Db, userId: string): Promise<ClinicalProduct> {
   const rows = await tx
@@ -1411,7 +1412,9 @@ export async function accountProduct(tx: Db, userId: string): Promise<ClinicalPr
     .from(member)
     .leftJoin(orgProfile, eq(orgProfile.organizationId, member.organizationId))
     .where(eq(member.userId, userId))
-  return rows.length > 0 && rows.every((row) => row.product === "medical") ? "medical" : "dental"
+  const products = new Set(rows.map((row) => (isClinicalProduct(row.product) ? row.product : BASE_PRODUCT)))
+  const [only] = products
+  return products.size === 1 && only ? only : BASE_PRODUCT
 }
 
 export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrganization[]> {

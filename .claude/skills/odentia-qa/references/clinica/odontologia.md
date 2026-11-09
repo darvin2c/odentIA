@@ -431,6 +431,9 @@ Flujos que un odontólogo hace a menudo y que no tienen un camino propio en el c
 - [ ] Una corona, prótesis o férula lleva su orden al laboratorio: pieza, material, color (guía VITA), fecha de prueba y de entrega.
 - [ ] Lo que cobra el laboratorio queda como gasto y no se pierde en la comisión.
 - [ ] La sesión de prueba o cementación se reserva cuando llega el trabajo.
+- [ ] La factura del laboratorio se anota desde su orden o la elige: queda con la paciente, la pieza y el trabajo, sin escribirlos en el concepto.
+- [ ] La factura del laboratorio puede quedar por pagar hasta fin de mes, y la clínica ve cuánto le debe a cada laboratorio.
+- [ ] El costo del laboratorio se ve junto a lo cobrado de ese tratamiento.
 
 ### P-ODO-25 Cirugía oral
 
@@ -473,6 +476,7 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | C8 | Adulto fumador con periodontitis generalizada. | 01, 02, 12, 07, 18 | Sondaje de 6 sitios con el teclado; estadio III grado C propuesto y confirmado; raspado por cuadrantes en sesiones; reevaluación comparada; mantenimiento cada 3 meses. |
 | C9 | Adolescente de 14 años que empieza ortodoncia de 24 meses. | 01, 07, 08, 14, 18, 21 | Fotos y cefalometría de inicio; controles mensuales que se generan; cobro en cuotas; el representante decide. |
 | C10 | Corona sobre la 46 ya con endodoncia, con laboratorio y provisional. | 07, 11, 15, 21 | Sesiones de preparación, prueba y cementación; el trabajo de laboratorio; el precio acordado de la opción A. |
+| C10b | Llega la factura del laboratorio por la corona de la 46 (S/ 430, con el RUC del laboratorio), a pagar a fin de mes, y un motorizado cobra S/ 15 por traerla. | 24 | La factura se ata a la orden y queda por pagar; el motorizado queda sin comprobante; la comisión de la corona dice cuánto fue el laboratorio. |
 | C11 | Embarazada de 30 semanas con un absceso en la 26. | 02, 06, 10, 13, 14 | El embarazo a la vista; la radiografía con su consentimiento; la receta avisa los AINE en el tercer trimestre (hoy no avisa). |
 | C12 | Paciente alérgico a la penicilina a quien se le iba a recetar amoxicilina tras una exodoncia. | 02, 13 | La alergia se ve al recetar; avisa la reactividad cruzada; lo visto queda en la receta. |
 | C13 | Hipertenso que llega con 185/115 para una exodoncia programada. | 02, 04, 10 | La presión se nota antes de anestesiar y el aviso no bloquea (hoy no hay aviso). |

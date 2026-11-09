@@ -27,6 +27,8 @@ const OUTSIDE = [
   "packages/ui-patterns/src",
   "packages/clinic-app/src",
   "apps/dental-clinic/src",
+  "apps/optical-clinic/src",
+  "packages/optical/src",
   "apps/api/src",
   "apps/worker/src",
   "apps/panel/src",

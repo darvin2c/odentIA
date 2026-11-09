@@ -54,6 +54,13 @@ const SETTINGS = "Configuración"
 /** Pantallas que se abren desde Integraciones: no están en la lista, pero se llega por ahí. */
 const INTEGRATIONS = `${SETTINGS} › Integraciones`
 
+/**
+ * Pantallas comunes que solo muestra el producto que las declara (los pedidos:
+ * `productUi().orders`, ADR 0171): están en las rutas de todas las apps, pero su
+ * tema lo pone la guía de ese producto, y las demás no las nombran.
+ */
+export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
+
 export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "inicio",
@@ -485,7 +492,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué es «Su enlace»?",
-        a: "Una página personal de cada persona, sin contraseña, con lo que tiene pendiente: su cita (confirmar, cambiar, cancelar), sus datos por completar, el presupuesto que se le envió, el consentimiento por firmar y el cuestionario antes de su cita. Nunca muestra su historia ni lo guardado; el consentimiento se lee igual que su hoja en papel, con el diagnóstico que lo motiva. Le llega con el aviso de su cita cuando le faltan datos, o con «Enviarle su enlace» junto a «Completar». Lo que no es su cita (sus datos, el presupuesto, el consentimiento y el cuestionario) solo lo ve la propia persona si es mayor de edad o su representante legal; un familiar ve solo la cita. Cada cosa deja de servir cuando ya no hace falta; si lo abre después, le pide responder el mensaje para recibir uno nuevo. Para dejarlo sin efecto antes, «Enviarle su enlace» ofrece «Quitar enlace».",
+        a: "Una página personal de cada persona, sin contraseña, con lo que tiene pendiente: su cita (confirmar, cambiar, cancelar o reservar otra), sus datos por completar, el presupuesto que se le envió y lo que aceptó por agendar, el consentimiento por firmar y el cuestionario antes de su cita. Cada mensaje abre directo lo suyo: «Firma tu consentimiento» abre la hoja, el presupuesto abre el presupuesto, y arriba siempre está «Tus pendientes». Nunca muestra su historia ni lo guardado; el consentimiento se lee igual que su hoja en papel, con el diagnóstico que lo motiva. Le llega con el aviso de su cita cuando le falta algo, o con «Enviarle su enlace» junto a «Completar». Lo que no es su cita (sus datos, el presupuesto, el consentimiento y el cuestionario) solo lo ve la propia persona si es mayor de edad o su representante legal; la cita, además, un autorizado vigente. A un familiar sin autorización no le muestra nada, aunque ya tuviera el enlace. Cada cosa deja de servir cuando ya no hace falta; si lo abre después, le pide responder el mensaje para recibir uno nuevo. Para dejarlo sin efecto antes, «Quitar enlace» está junto a «Copiar enlace» y «Mostrar su código»: corta también los botones de sus correos.",
       },
       {
         q: "¿Qué pasa si el documento que escribió ya es de otra persona?",
@@ -559,7 +566,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo firma la persona su consentimiento?",
-        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» lee la misma hoja y la firma desde su teléfono, en «Su enlace», antes de llegar; queda pendiente hasta que tú lo confirmes con «Confirmar». Siempre se dice el nivel real, al pie de la hoja: «Firma simple · en la clínica», «en papel» o «por enlace».",
+        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, la lee igual y la firma en la cita: la hoja se lo dice arriba. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención. Siempre se dice el nivel real, al pie de la hoja: «Firma simple · en la clínica», «en papel» o «por enlace».",
       },
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
@@ -1012,6 +1019,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "cambio de hoy",
       "tipo de cambio",
       "vuelto",
+      "venta de mostrador",
+      "mostrador",
+      "vender sin ficha",
     ],
     writePermission: "finance.write",
     faqs: [
@@ -1031,16 +1041,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dejo el alquiler o los sueldos de cada mes?",
-        a: "Al registrar el gasto, marca «Se repite» y di si ya se pagó: con «Todavía no» se anota sin registrar ningún pago y queda «por pagar». Elige cada cuánto (cada mes, cada 6 meses o cada año), el día, si es el pago de este mes o del anterior, y si se paga en ese mes o al mes siguiente (el sueldo de noviembre que se paga el 2 de diciembre), para que no salga vencido antes de tiempo. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo: deja de repetirse desde el mes que viene, y lo vencido y lo de este mes siguen por pagar (si este mes no hubo, márcalo «No hubo este mes»). «Lo que se repite» lista todo, también lo que no toca este mes. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ven, pagan y cambian solo quienes administran las comisiones; caja y los demás ven «Sueldos» en una sola fila, sin nombres, y el pago sale en Caja como «Pago de sueldo». Para cambiar la persona, deja de repetirlo y anota otro. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
-        forms: [
-          "gasto fijo",
-          "gastos fijos",
-          "pago mensual",
-          "alquiler cada mes",
-          "sueldo de la recepcionista",
-          "gasto que se repite",
-          "gasto recurrente",
-        ],
+        a: "En Finanzas › Gastos, en «Lo que se repite», toca «Anotar lo que se repite»: en qué se gasta, el tipo, lo de siempre, el día y cada cuánto (cada mes, cada 6 meses o cada año). Anotar no paga: queda «por pagar» cada vez que toca, desde el primer mes cuyo día aún no pasó, y nunca se paga solo. Para pagarlo, «Pagar» abre el gasto ya lleno con el importe y el medio de siempre: si llegó otro importe, como pasa con la luz, lo cambias ahí. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo: deja de repetirse desde el mes que viene, y lo vencido y lo de este mes siguen por pagar. Un sueldo puede llevar de quién es: se ve junto a su comisión, y lo ven, pagan y cambian solo quienes administran las comisiones; caja y los demás ven «Sueldos» en una sola fila, sin nombres, y el pago sale en Caja como «Pago de sueldo». «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
+        forms: ["gasto fijo", "gastos fijos", "pago mensual", "alquiler cada mes", "sueldo de la recepcionista", "gasto que se repite", "gasto recurrente"],
+      },
+      {
+        q: "¿Cómo registro un gasto?",
+        a: "En Finanzas › Gastos, «Registrar gasto»: escribe en qué se gastó, el importe y el tipo, y elige con qué se pagó, con los mismos medios de Cobrar. Solo el efectivo sale de la caja: la caja dice cuánto queda o cuánto falta, con el botón para ingresarlo. Con Yape, tarjeta o transferencia puedes anotar el n.º de operación. El comprobante se elige de la lista del país (boleta, factura, recibo por honorarios, recibo de servicios públicos) con su número; con factura o recibo por honorarios, también a quién se pagó y su RUC, para tu contador. Si es una compra de Inventario, elígela en «¿Es el pago de una compra?»: así no se cuenta dos veces. Lo que se repite, como el alquiler o la luz, se anota en «Lo que se repite»; y si ya está en «Por pagar», se paga con «Pagar» en su fila, así deja de estar por pagar y no queda dos veces.",
+        forms: ["registrar un gasto", "anotar un gasto", "donde anoto ese gasto", "donde anoto un gasto", "pague la luz", "gasto de la farmacia", "como anoto lo que pague"],
+      },
+      {
+        q: "¿Cómo corrijo un gasto mal anotado?",
+        a: "Toca el gasto en la lista: se abre su detalle, con «Anular» y «Corregir». «Corregir» abre el mismo cajón con todo puesto; al guardar, el de antes queda anulado con lo que cambió (por ejemplo, de S/ 24.00 a S/ 42.00) y queda este, enlazado. En la lista se ve uno, con la marca «Corregido», y en su detalle, lo de antes. Si salió de la caja, vuelve lo de antes y sale lo nuevo. Si la caja de ese día ya se cerró, lo corrige o lo anula administración: escribe el motivo y «Pedírselo a administración» se lo deja como tarea. El pago de una compra se corrige en su compra, y el de una comisión, en Comisiones.",
+        forms: ["corregir un gasto", "me equivoque en el importe", "cambiar un gasto", "editar un gasto", "anote mal un gasto"],
+      },
+      {
+        q: "¿En qué tipo va cada gasto?",
+        a: "«Sueldos» es lo que se le paga al equipo, sin las comisiones; «Alquiler», el de la sede; «Laboratorio», coronas, prótesis y trabajos de laboratorio; «Materiales», insumos como algodón, guantes o resinas; «Servicios básicos», luz, agua, internet y teléfono; «Impuestos», el IGV de lo cobrado, la renta o los arbitrios; y «Otros», lo demás, como un taxi, útiles o limpieza. Al elegir el tipo, el cajón lo dice debajo.",
+        forms: ["que tipo de gasto", "en que tipo va", "personal es mi gasto", "servicios es lo que vendo", "tipo de gasto"],
       },
       {
         q: "¿Por qué en Gastos sale «Pago de comisiones» sin decir a quién?",
@@ -1063,12 +1080,21 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo cobro una atención?",
-        a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega por correo y queda en su enlace.",
+        a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega en PDF por su chat o su correo, y queda en su portal.",
+        forms: ["como cobro", "como le cobro a un paciente", "como registro un pago", "como registro un cobro"],
+      },
+      {
+        q: "¿Cómo vendo algo a quien no es paciente?",
+        a: "En Finanzas › Caja o Cobros, «Venta de mostrador»: buscas o escaneas lo que se vende, con su cantidad, y en «Para quién (opcional)» eliges «Buscar a la persona», «Solo su nombre» o «Sin nombre». Se paga entera, con uno o varios medios; en efectivo escribes lo que recibes y ves el vuelto. No abre una ficha ni entra en la cuenta de nadie, aunque la persona sea paciente: el ticket dice «Cliente» o «Venta de mostrador», el producto sale de la sede y el dinero entra en su caja. Se imprime, se devuelve o se anula como cualquier ticket; lo devuelto siempre se le paga, porque sin ficha no queda a favor.",
         forms: [
-          "como cobro",
-          "como le cobro a un paciente",
-          "como registro un pago",
-          "como registro un cobro",
+          "venta sin ficha",
+          "vender sin ficha",
+          "venta de mostrador",
+          "vender a alguien que no es paciente",
+          "vender un producto sin paciente",
+          "vender lentes de sol",
+          "cobrar a un cliente sin historia",
+          "venta rapida",
         ],
       },
       {
@@ -1745,7 +1771,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Necesito el portal para la cita o el presupuesto?",
-        a: "No. «Su enlace» ya le muestra su cita, sus datos por completar, el presupuesto que se le envió y el consentimiento por firmar. El portal es para lo privado, todo junto y cuando quiera.",
+        a: "No. Cada mensaje abre lo suyo en su enlace: su cita, sus datos por completar, el presupuesto que se le envió y el consentimiento por firmar. El portal es para lo privado, todo junto y cuando quiera.",
       },
     ],
   },
@@ -2094,6 +2120,8 @@ const SAME_WORD: Readonly<Record<string, string>> = Object.fromEntries(
       ["inasistencia", "inasistencias faltaron falto"],
       ["correo", "email mail"],
       ["comision", "comisiones porcentaje"],
+      // vistIA: «lentes» sería «lent», como «lento»; con «anteojos» no se confunde.
+      ["anteojos", "lente lentes gafas"],
     ] as const
   ).flatMap(([word, others]) => others.split(" ").map((other) => [other, word] as const)),
 )

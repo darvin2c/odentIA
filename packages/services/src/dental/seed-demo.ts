@@ -4672,7 +4672,51 @@ if (pedroRiosPerson) {
       { secretsKey },
     ),
   )
-  console.log(`«Su enlace» de Pedro Ríos (dental-smile): /reserva?token=${pedroLink.token}`)
+  console.log(`«Tus pendientes» de Pedro Ríos (dental-smile): /pendientes?token=${pedroLink.token}`)
+  // A Pedro le falta su fecha y su documento: el consentimiento que se le envió se lee
+  // en su teléfono y dice, antes de leer, que lo firma en su cita (ADR 0167).
+  const [endodontics] = await db
+    .select({ id: consentTemplate.id })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, ORG_A),
+        eq(consentTemplate.key, "endodoncia"),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  if (endodontics) {
+    await db.transaction(async (tx) => {
+      const toRead = await createConsentDocument(tx, ORG_A, ANA_ID, {
+        templateId: endodontics.id,
+        patientId: pedroRios.id,
+        procedureRef: "Endodoncia pieza 46",
+      })
+      await markConsentSentByLink(tx, ORG_A, ANA_ID, toRead.id)
+    })
+    console.log(`Su consentimiento, para leer y firmar en la cita: /pendientes?abre=firma&token=${pedroLink.token}`)
+  }
+}
+// Un familiar sin autorización (ADR 0167): Jorge, hermano de Rosa, quedó vinculado
+// a ella sin ninguna facultad y tiene un enlace de antes. Abierto, no le muestra la
+// cita de Rosa ni le deja tocarla; Sofi tampoco le daría uno.
+{
+  const [brother] = await db
+    .insert(contact)
+    .values({ organizationId: ORG_A, displayName: "Jorge Quispe", givenNames: "Jorge", familyName: "Quispe", phone: "+51987650011" })
+    .returning({ id: contact.id })
+  await db.insert(patientContact).values({
+    organizationId: ORG_A,
+    patientId: domainSeed.patientId,
+    contactId: brother!.id,
+    relationship: "family",
+    createdBy: ANA_ID,
+  })
+  const brotherLink = await db.transaction((tx) =>
+    issuePersonalLink(tx, ORG_A, { contactId: brother!.id, patientId: domainSeed.patientId, createdBy: ANA_ID }, { secretsKey }),
+  )
+  console.log(`El enlace de Jorge Quispe, familiar sin autorización (dental-smile): /pendientes?token=${brotherLink.token}`)
 }
 {
   const [exodonciaPending] = await db
@@ -4688,9 +4732,16 @@ if (pedroRiosPerson) {
       ),
     )
     .limit(1)
-  if (exodonciaPending)
+  if (exodonciaPending) {
     await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
-  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo.
+    // Lo que abre «Firma tu consentimiento»: la hoja directo, con «‹ Tus pendientes» arriba.
+    const rosaLink = await db.transaction((tx) =>
+      issuePersonalLink(tx, ORG_A, { contactId: domainSeed.contactId, patientId: domainSeed.patientId, createdBy: ANA_ID }, { secretsKey }),
+    )
+    console.log(`«Firma tu consentimiento» de Rosa (dental-smile): /pendientes?abre=firma&token=${rosaLink.token}`)
+  }
+  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo. Rosa
+  // está hoy en atención (su borrador de hoy): al abrirla, arriba sale para confirmarlo ahí.
   const [implant] = await db
     .select({ id: consentTemplate.id })
     .from(consentTemplate)
@@ -5217,6 +5268,41 @@ await db.transaction(async (tx) => {
     { ...demo, product: "medical", size: "pequeno" },
     { secretsKey, fetch },
   )
+  await tx
+    .update(saasDemo)
+    .set({
+      organizationId: built.organizationId,
+      slug: built.slug,
+      status: "lista",
+      historyThrough: built.historyThrough,
+      readyAt: new Date(),
+      progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
+    })
+    .where(eq(saasDemo.id, demo.id))
+})
+
+// --- vistIA: una óptica para presentar, con el motor de «Crear demo» (ADR 0096) ---
+// La arma igual que la administración: su equipo, su biblioteca, meses de historia y
+// las próximas dos semanas. Se entra desde Clínicas › «Demos».
+await db.transaction(async (tx) => {
+  const [demo] = await tx
+    .insert(saasDemo)
+    .values({
+      product: "optical",
+      kind: "optica",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Óptica Clara Miraflores",
+      slug: "seed-optica-clara-miraflores",
+      presenterUserId: SEED_STAFF_ADMIN_ID,
+      createdBy: SEED_STAFF_ADMIN_ID,
+      seed: 20_261_108,
+      status: "creando",
+    })
+    .returning()
+  if (!demo) throw new Error("No se pudo pedir la demo de la óptica de la semilla")
+  const built = await buildDemo(tx, { ...demo, product: "optical", size: "pequeno" }, { secretsKey, fetch })
   await tx
     .update(saasDemo)
     .set({

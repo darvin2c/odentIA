@@ -204,7 +204,7 @@ export function saasSettlementEmail(input: {
       { label: "Ajustes", value: input.adjustments },
       { label: "Total a pagarte", value: input.total, total: true },
     ],
-    reason: "Te escribimos porque vendes odentIA o latidIA y cerramos tu mes.",
+    reason: "Te escribimos porque vendes odentIA, latidIA o vistIA y cerramos tu mes.",
     replies: "Este correo no recibe respuestas: si algo no cuadra, escríbele a tu contacto en la administración.",
   })
 }

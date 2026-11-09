@@ -1,4 +1,5 @@
 import type {
+  ClinicalProduct,
   RegistrationConfig,
   RegistrationFieldKey,
   RegistrationFieldMode,
@@ -75,6 +76,25 @@ const MEDICAL_HABITS: PickerItem[] = [
   { keys: ["medical.tabaco"], label: "Si fuma" },
   { keys: ["medical.alcohol"], label: "Si toma alcohol" },
 ]
+/**
+ * Lo de cada producto en el registro: lo que suma a «Otros antecedentes» y su
+ * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA). vistIA
+ * todavía no pregunta nada propio: sus antecedentes de la vista llegan con el examen.
+ */
+const PRODUCT_FIELDS: Record<
+  ClinicalProduct,
+  { personal: PickerItem[]; own: { title: string; help: string; items: PickerItem[] } | null }
+> = {
+  dental: {
+    personal: [],
+    own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
+  },
+  medical: {
+    personal: MEDICAL_PERSONAL,
+    own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
+  },
+  optical: { personal: [], own: null },
+}
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
   { keys: ["educationLevel"], label: "Nivel educativo" },
@@ -197,6 +217,7 @@ export function RegistrationFieldsPicker({
 }) {
   // Lo de cada producto: «Su historia dental» en odentIA; la lactancia y los hábitos en latidIA.
   const product = productUi().product
+  const own = PRODUCT_FIELDS[product].own
   return (
     <div className="flex flex-col gap-7">
       <dl className="grid gap-2 rounded-2xl bg-muted/60 p-4 text-sm sm:grid-cols-3">
@@ -265,36 +286,25 @@ export function RegistrationFieldsPicker({
       <Group
         title="Otros antecedentes"
         help="Llegan a su entrevista de salud. Nunca son obligatorios."
-        items={product === "medical" ? [...PERSONAL, ...MEDICAL_PERSONAL] : PERSONAL}
+        items={[...PERSONAL, ...PRODUCT_FIELDS[product].personal]}
         fields={fields}
         options={TWO}
         onMode={onMode}
         disabled={disabled}
         errors={errors}
       />
-      {product === "dental" ? (
+      {own ? (
         <Group
-          title="Su historia dental"
-          help="Ayuda a preparar la primera visita."
-          items={DENTAL}
+          title={own.title}
+          help={own.help}
+          items={own.items}
           fields={fields}
           options={TWO}
           onMode={onMode}
           disabled={disabled}
           errors={errors}
         />
-      ) : (
-        <Group
-          title="Sus hábitos"
-          help="Llegan a sus antecedentes. Nunca son obligatorios."
-          items={MEDICAL_HABITS}
-          fields={fields}
-          options={TWO}
-          onMode={onMode}
-          disabled={disabled}
-          errors={errors}
-        />
-      )}
+      ) : null}
       <Group
         title="Preguntas para conocerlo"
         help="Nunca son obligatorias: no hacen falta para atenderlo."

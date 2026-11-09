@@ -129,13 +129,15 @@ export async function consentLinkJourney(input: {
   await gotoHydrated(page, documents)
   await expect(row().getByText("Se le envió para firmar", { exact: false })).toBeVisible()
 
-  // Firma desde su teléfono, sin sesión, con el mismo enlace que se le envió.
+  // Firma desde su teléfono, sin sesión, con el mismo enlace que se le envió: abre directo la hoja (`abre=firma`).
   const shown = await call<{ url: string }>("POST", `/api/patients/${patient.id}/personal-link/show`, {}, 201)
   const token = new URL(shown.url).searchParams.get("token")
   const visitor = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } })
   const phone = await visitor.newPage()
-  await gotoHydrated(phone, url(`/reserva?token=${token}`))
-  await phone.getByRole("button", { name: "Leer y firmar" }).click()
+  await gotoHydrated(phone, url(`/pendientes?abre=firma&token=${token}`))
+  await expect(phone.getByRole("heading", { level: 1, name: "Firma tu consentimiento" })).toBeVisible()
+  // Arriba, siempre, el camino a lo demás: un enlace de verdad, con el mismo token.
+  await expect(phone.getByRole("link", { name: "Tus pendientes", exact: true })).toHaveAttribute("href", `/pendientes?token=${token}`)
   // Lee la hoja del papel: la pieza y la declaración que acepta, sin el número de su documento.
   const sheet = phone.getByRole("article", { name: template.title })
   await expect(sheet.getByText("Procedimiento de prueba", { exact: true })).toBeVisible()
@@ -154,8 +156,18 @@ export async function consentLinkJourney(input: {
   await phone.mouse.move(box.x + 170, box.y + 25, { steps: 6 })
   await phone.mouse.up()
   await phone.getByRole("button", { name: "Firmar", exact: true }).click()
-  await expect(phone.getByText("Firmado, gracias")).toBeVisible()
+  // La confirmación grande, con el foco en ella y la página arriba.
+  const signedDone = phone.getByRole("heading", { name: "Listo, firmaste" })
+  await expect(signedDone).toBeFocused()
+  await expect(phone.getByText("Tu firma ya llegó a", { exact: false })).toBeVisible()
+  expect(await phone.evaluate(() => window.scrollY)).toBe(0)
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await phone.screenshot({ path: info.outputPath("1-firmado-telefono.png") })
+  // En la lista ya no está por firmar. Se vuelve por «‹ Tus pendientes» de arriba (exacto: debajo del
+  // «Listo» puede estar también «Ver tus pendientes», que lleva al mismo lugar).
+  await phone.getByRole("link", { name: "Tus pendientes", exact: true }).click()
+  await expect(phone.getByRole("heading", { level: 1, name: "Tus pendientes" })).toBeVisible()
+  await expect(phone.getByRole("region", { name: "Tu consentimiento" })).toHaveCount(0)
   await visitor.close()
 
   // Sofi lo agradece en su conversación, con las palabras de su producto y sin nombrar el procedimiento.
@@ -217,14 +229,25 @@ export async function consentLinkJourney(input: {
   await page.screenshot({ path: info.outputPath("4-historia.png") })
   await history.getByRole("button", { name: "Cerrar" }).click()
 
-  // Quien atiende lo confirma con su perfil: ahí queda firmado y ya se puede enviar.
+  // Desde la ficha no se confirma: se confirma dentro de su atención.
+  await expect(panel.getByText("Lo confirmas en su atención", { exact: true })).toBeVisible()
+  await expect(panel.getByRole("button", { name: /^Confirmar/ })).toHaveCount(0)
+
+  // Quien atiende abre la atención: arriba ve lo firmado, lo revisa y lo confirma con su perfil.
   await call("PUT", `/api/clinical-forms/professionals/${userId}/profile`, {
     professionalTitle: "Profesional",
     registrationBody: "COL",
     registrationNumber: "12345",
   })
-  await panel.getByRole("button", { name: "Confirmar", exact: true }).click()
-  await expect(panel.getByText(/^Firmado · /)).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Enviar", exact: true })).toBeEnabled()
+  const attention = await call<{ id: string }>("POST", `/api/patients/${patient.id}/encounters`, { reason: "Consulta" }, 201)
+  await gotoHydrated(page, url(`/patients/${patient.id}/encounters/${attention.id}`))
+  const notice = page.getByRole("region", { name: "Firmado en su enlace, por confirmar" })
+  await expect(notice.getByText("Eva Rojas (paciente)", { exact: false })).toBeVisible()
+  await notice.getByRole("button", { name: "Revisar y confirmar" }).click()
+  const signedSheet = surface(page, { name: paper })
+  await expect(signedSheet.getByText("Firmó Eva Rojas (paciente)", { exact: false })).toBeVisible()
+  await signedSheet.getByRole("button", { name: "Confirmar consentimiento", exact: true }).click()
+  await expect(signedSheet.getByText(/^Firmado · /)).toBeVisible()
+  await expect(signedSheet.getByRole("button", { name: "Enviar", exact: true })).toBeEnabled()
   await page.screenshot({ path: info.outputPath("5-confirmado.png") })
 }

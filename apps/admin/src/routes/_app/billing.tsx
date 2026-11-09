@@ -1177,7 +1177,7 @@ type SignupMode = "invitacion" | "abierta"
 /** Las dos formas de abrir clínicas de un producto, con el nombre de su web y de su plan (ADR 0093). */
 function signupModes(product: ClinicalProduct) {
   const { name } = productWords(product)
-  const place = product === "medical" ? "su consultorio" : "su clínica"
+  const place = `su ${productWords(product).place.one}`
   return [
     {
       value: "invitacion",
@@ -1231,9 +1231,10 @@ function SignupModeSection({ products }: { products: readonly ClinicalProduct[] 
               </FieldLegend>
               <RadioGroup
                 aria-labelledby={`alta-${product}`}
-                value={mode.data.modes[product]}
+                // Sin su modo (la API anterior, mientras se despliega), el seguro: «Solo con invitación».
+                value={mode.data.modes[product] ?? "invitacion"}
                 onValueChange={(value) => {
-                  if (value !== mode.data.modes[product]) setConfirming({ mode: value as SignupMode, product })
+                  if (value !== (mode.data.modes[product] ?? "invitacion")) setConfirming({ mode: value as SignupMode, product })
                 }}
                 className="gap-3"
               >

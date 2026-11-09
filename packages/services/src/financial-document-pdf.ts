@@ -36,6 +36,7 @@ import {
   getTicketReceipt,
   type TicketFrozen,
 } from "./payments.js"
+import { ticketPartyOf } from "./ticket-party.js"
 
 export { ticketFormat } from "./document-kit.js"
 
@@ -70,6 +71,12 @@ export interface TicketSnapshot {
   numberLabel: string
   status: "vigente" | "anulado"
   voidReason: string | null
+  /**
+   * Cómo se dice a quién es: «Paciente», «Cliente» (una venta de mostrador a
+   * alguien) o nulo, una venta de mostrador sin nombre (ADR 0173).
+   */
+  partyLabel: "Paciente" | "Cliente" | null
+  /** El paciente, quien compró en el mostrador o «Venta de mostrador». */
   patientName: string
   patientDoc: string | null
   payerName: string | null
@@ -107,10 +114,11 @@ export interface TicketSnapshot {
 export async function buildTicketSnapshot(
   tx: Db,
   orgId: string,
-  patientId: string,
+  /** Nulo: el ticket de una venta de mostrador (ADR 0173). */
+  patientId: string | null,
   documentId: string,
 ): Promise<TicketSnapshot> {
-  const patientRow = await requirePatient(tx, orgId, patientId)
+  const patientRow = patientId === null ? null : await requirePatient(tx, orgId, patientId)
   const receipt = await getTicketReceipt(tx, orgId, patientId, documentId)
   const { ticket } = receipt
   const frozen = ticket.snapshot as TicketFrozen
@@ -132,9 +140,13 @@ export async function buildTicketSnapshot(
       .limit(1)
     payerName = payer?.displayName ?? null
   }
-  const docType = frozen.patient.docType === undefined ? patientRow.docType : frozen.patient.docType
+  const docType =
+    frozen.patient?.docType === undefined ? (patientRow?.docType ?? null) : frozen.patient.docType
   const docNumber =
-    frozen.patient.docNumber === undefined ? patientRow.docNumber : frozen.patient.docNumber
+    frozen.patient?.docNumber === undefined
+      ? (patientRow?.docNumber ?? null)
+      : frozen.patient.docNumber
+  const party = ticketPartyOf(frozen)
   const lines = frozen.lines ?? []
   const advance = lines.find((line) => line.chargeId === null) ?? null
   return {
@@ -143,7 +155,10 @@ export async function buildTicketSnapshot(
     numberLabel: String(ticket.ticketNumber).padStart(6, "0"),
     status: ticket.voidedAt ? "anulado" : "vigente",
     voidReason: ticket.voidReason ?? null,
-    patientName: frozen.patient.displayName || patientRow.displayName,
+    partyLabel: party.label,
+    patientName: frozen.patient
+      ? frozen.patient.displayName || (patientRow?.displayName ?? "")
+      : party.name,
     patientDoc: docNumber ? `${docType ?? "Doc."} ${docNumber}` : null,
     payerName,
     issuerName: frozen.issuer?.name || null,
@@ -284,6 +299,22 @@ function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number
   }
 }
 
+/**
+ * A quién es, en el rollo: «Paciente: …», «Cliente: …» o, en una venta de
+ * mostrador sin nombre, «Venta de mostrador» solo (ADR 0173).
+ */
+function partyLine(kit: DocumentKit, label: "Paciente" | "Cliente" | null, name: string) {
+  kit.text(label ? [{ text: `${label}: `, face: "sansSemi" }, name] : [{ text: name, face: "sansSemi" }], {
+    size: SIZE.second,
+    leading: 1.4,
+  })
+}
+
+/** Lo mismo en la hoja: el dato «Paciente» o «Cliente»; sin nombre, «Venta» de mostrador. */
+function partyFact(label: "Paciente" | "Cliente" | null, name: string): { label: string; value: string } {
+  return label ? { label, value: name } : { label: "Venta", value: "De mostrador" }
+}
+
 export async function renderTicketPdf(
   snap: TicketSnapshot,
   paper?: string | null,
@@ -318,10 +349,7 @@ export async function renderTicketPdf(
     kit.text(shortDayTime(snap.paidAt, org), { size: SIZE.label, leading: 1.4 })
     voided()
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, snap.patientName], {
-      size: SIZE.second,
-      leading: 1.4,
-    })
+    partyLine(kit, snap.partyLabel, snap.patientName)
     if (snap.patientDoc) kit.text(snap.patientDoc, { size: SIZE.label, leading: 1.4 })
     if (snap.payerName && snap.payerName !== snap.patientName)
       kit.text(`Pagó: ${snap.payerName}`, { size: SIZE.label, leading: 1.4 })
@@ -361,8 +389,7 @@ export async function renderTicketPdf(
   kit.facts(
     [
       {
-        label: "Paciente",
-        value: snap.patientName,
+        ...partyFact(snap.partyLabel, snap.patientName),
         strong: true,
         ...(snap.patientDoc ? { sub: snap.patientDoc } : {}),
       },
@@ -524,7 +551,8 @@ export async function getRefundReceiptPdf(
 export async function renderReturnPdf(
   tx: Db,
   orgId: string,
-  patientId: string,
+  /** Nulo: la devolución de una venta de mostrador (ADR 0173). */
+  patientId: string | null,
   returnId: string,
   paper?: string | null,
 ): Promise<{ bytes: Uint8Array; filename: string; numberLabel: string; tradeName: string }> {
@@ -538,14 +566,15 @@ export async function renderReturnPdf(
   const numberLabel = String(row.returnNumber).padStart(6, "0")
   const ticketLabel = String(frozen.ticket.number).padStart(6, "0")
   const label = `Devolución N.º ${numberLabel}`
+  const party = ticketPartyOf(frozen)
   const kit = await DocumentKit.open(org, ticketFormat(org, paper), {
     title: label,
     docLabel: label,
-    patientLabel: frozen.patient.displayName,
+    patientLabel: party.name,
     legalNote: ticketFooterLines(frozen.notice).join(" "),
     createdAt: row.createdAt,
   })
-  const patientDoc = frozen.patient.docNumber
+  const patientDoc = frozen.patient?.docNumber
     ? `${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}`
     : null
   if (kit.thermal) {
@@ -574,10 +603,7 @@ export async function renderReturnPdf(
       leading: 1.4,
     })
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, frozen.patient.displayName], {
-      size: SIZE.second,
-      leading: 1.4,
-    })
+    partyLine(kit, party.label, party.name)
     if (patientDoc) kit.text(patientDoc, { size: SIZE.label, leading: 1.4 })
     if (frozen.issuer.name)
       kit.text(`Caja: ${frozen.issuer.name}`, { size: SIZE.label, leading: 1.4 })
@@ -605,8 +631,7 @@ export async function renderReturnPdf(
     kit.facts(
       [
         {
-          label: "Paciente",
-          value: frozen.patient.displayName,
+          ...partyFact(party.label, party.name),
           strong: true,
           ...(patientDoc ? { sub: patientDoc } : {}),
         },

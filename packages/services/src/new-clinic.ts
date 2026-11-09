@@ -30,6 +30,7 @@ import { turnOnNewClinicLines } from "./automation.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { noticeClinic, suggestedPrivacyNotice } from "./privacy-notice.js"
 import { upsertPortalPolicy } from "./portal-policy.js"
+import { productDictation } from "./products.js"
 import { setReportDigest } from "./report-digest.js"
 import { setNewClinicSpendCap } from "./saas-billing.js"
 
@@ -83,10 +84,12 @@ export async function setUpNewClinic(tx: Db, orgId: string, actorUserId: string)
     ADMIN_LINES.map((line) => line.key),
   )
 
-  // Sofi, Clío y Argos: una sola fila de ajustes; si ya existe, alguien ya decidió.
+  // Sofi, Clío y Argos: una sola fila de ajustes; si ya existe, alguien ya decidió. Clío nace
+  // encendido donde su producto dicta (en vistIA no dicta).
   const [agent] = await tx.select({ id: agentConfig.organizationId }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
   if (!agent) {
-    await upsertAgentConfig(tx, orgId, { enabled: true, clinicalAssistantEnabled: true }, { actorUserId })
+    const dictates = (await productDictation(tx, orgId)) !== null
+    await upsertAgentConfig(tx, orgId, { enabled: true, clinicalAssistantEnabled: dictates }, { actorUserId })
     await updateAdminSettings(tx, orgId, actorUserId, { enabled: true })
   }
 

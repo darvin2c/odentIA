@@ -16,7 +16,7 @@
  * promete lo cumple la skill (`.claude/skills/odentia-carga/SKILL.md`).
  */
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
-import { brandPaper } from "@odentia/mail"
+import { brandPaper, type MailBrand } from "@odentia/mail"
 import { z } from "zod"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import {
@@ -59,6 +59,17 @@ const PRODUCT = {
     roles: "recepción, consulta, caja o administración",
     clinicians: "los médicos",
     college: "CMP",
+  },
+  optical: {
+    brand: "vistia",
+    domain: "vistia20.com",
+    platform: "la plataforma para ópticas",
+    sites: "Sedes y salas de examen",
+    rooms: "Salas de examen de cada sede: cuántas hay y cómo las identifican (por ejemplo, «Sala 1»).",
+    roles: "recepción, optometría, ventas, taller, caja o administración",
+    // El optómetra es tecnólogo médico: se colegia en el Colegio Tecnológico Médico del Perú.
+    clinicians: "los optómetras",
+    college: "CTMP",
   },
 } as const
 
@@ -114,7 +125,7 @@ export interface AnnexSection {
 }
 
 export interface WelcomeLetterContent {
-  brand: "odentia" | "latidia"
+  brand: MailBrand
   brandName: string
   domain: string
   inbox: string

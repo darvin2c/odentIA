@@ -2,7 +2,7 @@
 // «Cada trabajo, con su precio» (ADR 0085): una tarjeta por agente con el precio de cada tipo. Con el
 // plan Fundadores, cada precio lleva al lado el de lista tachado. Sin plan publicado no se dibuja.
 import { hours, money, shownPlan } from "../../lib/pricing"
-import { MEDICAL, WORDS } from "../../lib/product"
+import { AGENTS, HAS_CLIO, ofProduct, WORDS } from "../../lib/product"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
@@ -19,6 +19,15 @@ const struck = (own: number | null, base: number | null | undefined) =>
   founder && own !== null && base != null && base !== own ? cut(base) : null
 
 type Row = { label: string; price: number | null; before?: string | null; text?: string }
+/** Lo que hace estándar y completa una consulta de Clío en cada producto; vistIA no la cobra. */
+const clioTiers = ofProduct({
+  dental: { estandar: "Diagnóstico, odontograma o más", completa: "Armó el presupuesto" },
+  medical: { estandar: "Nota con examen o diagnóstico", completa: "Dejó indicado lo que sigue" },
+  // vistIA: Clío no trabaja y su tarjeta no se dibuja.
+  optical: { estandar: "", completa: "" },
+})
+/** «Tres agentes», «Dos agentes»: los que trabajan en este producto. */
+const howMany = ({ 2: "Dos", 3: "Tres" } as Record<number, string>)[AGENTS.length] ?? String(AGENTS.length)
 type Card = { name: string; does: string; tone: "sofi" | "clio" | "argos"; when: string; href: string; rows: Row[] }
 const cards: Card[] = plan
   ? [
@@ -31,10 +40,11 @@ const cards: Card[] = plan
         rows: [
           { label: "Respondió o confirmó", price: plan.tiers.informa, before: struck(plan.tiers.informa, list?.tiers.informa) },
           { label: "Reservó, movió o canceló", price: plan.tiers.gestiona, before: struck(plan.tiers.gestiona, list?.tiers.gestiona) },
-          { label: "Y el paciente vino", price: plan.tiers.agenda, before: struck(plan.tiers.agenda, list?.tiers.agenda) },
+          { label: `Y el ${WORDS.patient} vino`, price: plan.tiers.agenda, before: struck(plan.tiers.agenda, list?.tiers.agenda) },
         ],
       },
-      {
+      // Clío, solo donde trabaja (en vistIA no dicta).
+      ...(HAS_CLIO ? [{
         name: "Clío",
         does: "Documenta",
         tone: "clio",
@@ -44,10 +54,10 @@ const cards: Card[] = plan
           // ADR 0085: simple es una sola parte; estándar, un diagnóstico, el odontograma o dos partes o más.
           // En latidIA, lo que lo hace estándar es más de una parte (el examen, el diagnóstico) y completa, dejar indicado lo que sigue.
           { label: "Una nota, receta o control", price: plan.tiers.simple, before: struck(plan.tiers.simple, list?.tiers.simple) },
-          { label: MEDICAL ? "Nota con examen o diagnóstico" : "Diagnóstico, odontograma o más", price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
-          { label: MEDICAL ? "Dejó indicado lo que sigue" : "Armó el presupuesto", price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
+          { label: clioTiers.estandar, price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
+          { label: clioTiers.completa, price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
         ],
-      },
+      } satisfies Card] : []),
       {
         name: "Argos",
         does: plan.argos ? "Recupera y responde" : "Recupera",
@@ -83,7 +93,7 @@ const note = plan
     <div class="wrap in">
       <div class="head">
         <span class="tag">[ Cada trabajo, con su precio ]</span>
-        <h2 class="h2 t">Tres agentes. Cada uno cobra por lo que hizo.</h2>
+        <h2 class="h2 t">{howMany} agentes. Cada uno cobra por lo que hizo.</h2>
         <p class="lead">Lo ves en tu cuenta, fila por fila, con su fecha. Si algo no cuadra, pides revisión desde esa misma fila.</p>
       </div>
       <div class="cards">

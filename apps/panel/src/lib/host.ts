@@ -1,3 +1,4 @@
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 export const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN as string
 /**
  * Puerto del proxy cuando no es el estándar (dev detrás de portless en 443 no
@@ -11,13 +12,14 @@ const BASE_PORT = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE
  * `VITE_BASE_DOMAIN`; una clínica de odentIA abre en `VITE_DENTAL_DOMAIN` y
  * una de latidIA en `VITE_MEDICAL_DOMAIN`. Sin ellos, todo en este.
  */
-const PRODUCT_DOMAINS: Record<string, string | undefined> = {
+const PRODUCT_DOMAINS: Record<ClinicalProduct, string | undefined> = {
   dental: import.meta.env.VITE_DENTAL_DOMAIN || undefined,
   medical: import.meta.env.VITE_MEDICAL_DOMAIN || undefined,
+  optical: import.meta.env.VITE_OPTICAL_DOMAIN || undefined,
 }
 
 /** El dominio de las clínicas de un producto; sin decir cuál, el de este panel. */
-export const domainOf = (product?: string | null): string => (product && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
+export const domainOf = (product?: string | null): string => (isClinicalProduct(product) && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
 
 /** Los dominios a los que se puede volver desde el panel: el suyo y el de cada producto. */
 export const KNOWN_DOMAINS: readonly string[] = [

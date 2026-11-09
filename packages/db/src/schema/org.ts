@@ -113,7 +113,7 @@ export const orgProfile = pgTable(
     ),
     check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
     check("org_profile_budget_valid_days_check", sql`${table.budgetValidDays} BETWEEN 1 AND 365`),
-    check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("org_profile_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
     check("org_profile_brand_color_check", sql`${table.brandColor} IS NULL OR ${table.brandColor} ~ '^#[0-9a-f]{6}$'`),
     check(

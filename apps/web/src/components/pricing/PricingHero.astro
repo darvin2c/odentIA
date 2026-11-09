@@ -4,7 +4,8 @@
 // la cuenta de un jueves que se llena fila por fila (isla WorkDayLedger). Sin un plan publicado, la
 // misma portada sin cifras ni cuenta: el h1 sigue en su sitio. Lienzo «Precios: por lo que hizo».
 import { businessDays, days, giftOf, money, shownPlan, valuePricesOf } from "../../lib/pricing"
-import { WORDS } from "../../lib/product"
+import { HAS_CLIO, WORDS } from "../../lib/product"
+import { SHOWS_VALUE } from "../../lib/value"
 import { contactHref, ctaOf } from "../../lib/site"
 import WorkDayLedger from "./WorkDayLedger"
 
@@ -15,16 +16,16 @@ const prices = valuePricesOf(plan)
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const list = pricing.list
-/** El trabajo más barato: una respuesta de Sofi o una consulta simple de Clío. */
+/** El trabajo más barato: una respuesta de Sofi o, donde Clío trabaja, una consulta simple suya. */
 const cheapest = (p: typeof plan) => {
-  const prices = [p?.tiers.informa, p?.tiers.simple].filter((value): value is number => value != null)
+  const prices = [p?.tiers.informa, HAS_CLIO ? p?.tiers.simple : null].filter((value): value is number => value != null)
   return prices.length ? Math.min(...prices) : null
 }
 const from = cheapest(plan)
 /** Qué cuesta ese «Desde»: los dos si cuestan lo mismo; si no, el más barato y el otro con su precio. */
 const fromWhat = (() => {
   const sofi = plan?.tiers.informa ?? null
-  const clio = plan?.tiers.simple ?? null
+  const clio = HAS_CLIO ? (plan?.tiers.simple ?? null) : null
   if (!plan || sofi === null) return "Una receta de Clío"
   if (clio === null) return "Una respuesta de Sofi"
   if (sofi === clio) return "Una respuesta de Sofi o una receta de Clío"
@@ -51,7 +52,7 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
             <span class="from-per">por trabajo</span>
             {fromBefore !== null && fromBefore !== from ? <s class="from-was"><span class="sr">antes </span>{money(fromBefore, plan.currency)}</s> : null}
           </div>
-          <span class="from-what">{fromWhat}; lo que te trae pacientes, más.</span>
+          <span class="from-what">{`${fromWhat}; lo que te trae ${WORDS.patients}, más.`}</span>
         </div>
       ) : (
         <p class="lead lead-d rise d2">
@@ -77,7 +78,7 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
       ) : null}
       <div class="ctas rise d3">
         <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-        {prices ? <a class="btn btn-g" href="#calcula">Calcula tu mes</a> : null}
+        {prices && SHOWS_VALUE ? <a class="btn btn-g" href="#calcula">Calcula tu mes</a> : null}
       </div>
       <p class="mono note rise d4">
         {founder ? (
@@ -130,6 +131,7 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
   .chip { border-radius: 999px; padding: 9px 14px; font-size: 15px; font-weight: 600; color: var(--on-night); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sky-2) 40%, transparent); text-decoration: none; }
   .chip b { color: var(--mint); }
   :global(:root[data-brand="latidia"]) .chip b { color: #ece4fb; }
+  :global(:root[data-brand="vistia"]) .chip b { color: #dcfce7; }
   a.chip:hover { background: color-mix(in srgb, var(--sky-2) 10%, transparent); }
   .grab { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; border-radius: 16px; padding: 12px 16px; background: color-mix(in srgb, var(--amber) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 50%, transparent); }
   .grab-tag { flex: none; border-radius: 8px; padding: 6px 10px; background: var(--amber); color: var(--night); font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }

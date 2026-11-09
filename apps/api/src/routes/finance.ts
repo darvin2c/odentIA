@@ -13,10 +13,18 @@ import type { Context } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { patientLockRefusal } from "../lib/record-lock.js"
-import { type CrmDeps, runService, validationError } from "./helpers.js"
+import { patientLockRefusal, personLockRefusal } from "../lib/record-lock.js"
+import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import {
   addCashMovement,
+  COUNTER_SALE_MAX_LINES,
+  counterReturnPdf,
+  counterTicketPdf,
+  getTicketReturnable,
+  returnFromTicket,
+  sellAtCounter,
+  ticketOwner,
+  voidTicket,
   closeCashWindow,
   createExpense,
   DEBT_SORTS,
@@ -26,7 +34,6 @@ import {
   getDebts,
   getTicketReceiptById,
   ServiceError,
-  ticketPatientId,
   listDebts,
   listTickets,
   TICKET_SORTS,
@@ -42,7 +49,10 @@ import {
   skipRecurringOccurrence,
   unskipRecurringOccurrence,
   updateRecurringExpense,
+  correctExpense,
   getMonthExpenses,
+  listExpenseSuppliers,
+  noteRecurringExpense,
   purchaseLookalikes,
   getPurchasesToPay,
   listClosures,
@@ -71,6 +81,77 @@ const reasonInput = z
       .max(2000, "Escribe el motivo en 2000 caracteres como mucho."),
   })
   .strict()
+
+// Venta de mostrador (ADR 0173): productos sin ficha, a una persona elegida, a un nombre o a nadie.
+const counterSaleInput = z
+  .object({
+    branchId: z.uuid({ error: "Elige la sede de la venta" }),
+    requestId: z.uuid({ error: "No se pudo identificar esta venta: cierra la venta y vuelve a abrirla" }),
+    lines: z
+      .array(
+        z
+          .object({
+            productId: z.uuid({ error: "Elige el producto de la lista" }),
+            quantity: z
+              .number({ error: "Escribe la cantidad" })
+              .int({ error: "La cantidad es un número entero" })
+              .min(1, { error: "La cantidad va de 1 a 9999" })
+              .max(9999, { error: "La cantidad va de 1 a 9999" })
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1, { error: "Agrega lo que se vende" })
+      .max(COUNTER_SALE_MAX_LINES, { error: `Una venta lleva hasta ${COUNTER_SALE_MAX_LINES} productos` }),
+    /** Una persona elegida (cualquier contacto): la guarda de la historia bloqueada la mira por este nombre. */
+    contactId: z.uuid({ error: "Elige a la persona de la lista" }).nullish(),
+    /** O un nombre escrito; sin los dos, «Venta de mostrador». */
+    buyerName: z.string().max(200, { error: "Escribe el nombre en 200 caracteres como mucho" }).nullish(),
+    payments: z
+      .array(
+        z
+          .object({
+            paymentMethodId: z.uuid({ error: "Elige el medio de pago" }),
+            amountCents: cents,
+            reference: z.string().max(200).nullish(),
+          })
+          .strict(),
+      )
+      .min(1, { error: "Elige con qué paga" })
+      .max(10),
+    cashReceivedCents: cents.nullish(),
+    tenderCurrency: currency.nullish(),
+    exchangeRate: z.string().max(40).nullish(),
+    changeCurrency: currency.nullish(),
+  })
+  .strict()
+// Devolver una venta de mostrador: sin cuenta, siempre se le paga por un medio.
+const counterReturnInput = z
+  .object({
+    branchId: z.uuid(),
+    lines: z
+      .array(
+        z
+          .object({
+            chargeId: z.uuid(),
+            quantity: z.number().int().min(1).max(9999).optional(),
+            amountCents: cents.optional(),
+            backToStock: z.boolean().optional(),
+          })
+          .strict(),
+      )
+      .min(1, { error: "Elige qué devuelve" })
+      .max(50),
+    paymentMethodId: z.uuid({ error: "Elige con qué se le devuelve" }),
+    reason: z
+      .string({ error: "Escribe el motivo de la devolución" })
+      .trim()
+      .min(1, { error: "Escribe el motivo de la devolución" })
+      .max(2000, { error: "Escribe el motivo en 2000 caracteres como mucho" }),
+    requestId: z.uuid(),
+  })
+  .strict()
+const paperQuery = z.object({ paper: z.enum(["A4", "Letter"]).optional() }).strict()
 
 export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
@@ -253,23 +334,165 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  /**
+   * El comprobante de una historia bloqueada se guarda, pero para los demás no existe (ADR 0080):
+   * la guarda del paciente del ticket o, en una venta de mostrador, de quien compró. Null si sigue.
+   */
+  const ticketLockRefusal = async (c: Context, orgId: string, ticketId: string): Promise<Response | null> => {
+    const owner = await withOrgContext(deps.db, orgId, (tx) => ticketOwner(tx, orgId, ticketId)).catch((error) => {
+      if (error instanceof ServiceError && error.status === 404) return null
+      throw error
+    })
+    if (owner?.patientId) return patientLockRefusal(c, deps.db, owner.patientId, "Ticket no encontrado")
+    if (owner?.buyerContactId) return personLockRefusal(c, deps.db, owner.buyerContactId, "Ticket no encontrado")
+    return null
+  }
+
   // Un ticket por su identificador: la lista y el buscador rápido lo abren sin saber de quién es.
   app.get("/tickets/:id", async (c) => {
     const { orgId } = orgContextOf(c)
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
-    // El comprobante de una historia bloqueada se guarda, pero para los demás no existe (ADR 0080).
-    const patientId = await withOrgContext(deps.db, orgId, (tx) => ticketPatientId(tx, orgId, params.data.id)).catch(
-      (error) => {
-        if (error instanceof ServiceError && error.status === 404) return null
-        throw error
-      },
-    )
-    const blocked = patientId ? await patientLockRefusal(c, deps.db, patientId, "Ticket no encontrado") : null
+    const blocked = await ticketLockRefusal(c, orgId, params.data.id)
     if (blocked) return blocked
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getTicketReceiptById(tx, orgId, params.data.id)),
     )
+  })
+
+  // --- Venta de mostrador (ADR 0173) -------------------------------------------------
+  // Productos sin ficha: el ticket, la caja y el almacén como en «Cobrar». Lo que se hace después
+  // con su ticket (anular, devolver, imprimir) va por aquí; uno con paciente no existe por aquí.
+  app.post("/counter-sales", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = counterSaleInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const body = parsed.data
+    const name = body.buyerName?.trim() ?? ""
+    if (body.contactId && name)
+      return validationError(c, [
+        { code: "custom", path: ["buyerName"], message: "Elige a la persona o escribe un nombre, no los dos", input: body },
+      ] as never)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        sellAtCounter(
+          tx,
+          orgId,
+          userId,
+          {
+          branchId: body.branchId,
+          requestId: body.requestId,
+          lines: body.lines.map((line) => ({ productId: line.productId, ...(line.quantity ? { quantity: line.quantity } : {}) })),
+          buyer: body.contactId ? { contactId: body.contactId } : name ? { name } : null,
+          payments: body.payments.map((p) => ({
+            paymentMethodId: p.paymentMethodId,
+            amountCents: p.amountCents,
+            reference: p.reference ?? undefined,
+          })),
+          cashReceivedCents: body.cashReceivedCents ?? undefined,
+          tenderCurrency: body.tenderCurrency ?? undefined,
+          exchangeRate: body.exchangeRate ?? undefined,
+          changeCurrency: body.changeCurrency ?? undefined,
+          },
+          // Quien solo ve pacientes elige solo a un paciente como quien compra.
+          (permission) => canAccess(memberRole, permission as Parameters<typeof canAccess>[1]),
+        ),
+      ),
+    )
+  })
+
+  app.get("/counter-sales/:ticketId/returnable", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({ ticketId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const blocked = await ticketLockRefusal(c, orgId, params.data.ticketId)
+    if (blocked) return blocked
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getTicketReturnable(tx, orgId, null, params.data.ticketId)),
+    )
+  })
+
+  // Anular: un error al cobrar. Devuelve el producto a su sede y saca el dinero de la caja;
+  // tras el cierre, solo administración.
+  app.post("/counter-sales/:ticketId/void", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const params = z.object({ ticketId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const blocked = await ticketLockRefusal(c, orgId, params.data.ticketId)
+    if (blocked) return blocked
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidTicket(tx, orgId, userId, null, params.data.ticketId, {
+          ...parsed.data,
+          allowPostClose: canAccess(memberRole, "finance.admin"),
+        }),
+      ),
+    )
+  })
+
+  // Devolver: la venta queda en pie y se le paga en el mismo paso, de la caja de hoy.
+  app.post("/counter-sales/:ticketId/returns", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const params = z.object({ ticketId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = counterReturnInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const blocked = await ticketLockRefusal(c, orgId, params.data.ticketId)
+    if (blocked) return blocked
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        returnFromTicket(tx, orgId, userId, null, params.data.ticketId, parsed.data),
+      ),
+    )
+  })
+
+  // El ticket en PDF (imprimir), desde lo congelado al cobrar.
+  app.get("/counter-sales/:ticketId/pdf", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({ ticketId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const query = paperQuery.safeParse(c.req.query())
+    if (!query.success) return validationError(c, query.error.issues)
+    const blocked = await ticketLockRefusal(c, orgId, params.data.ticketId)
+    if (blocked) return blocked
+    try {
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        counterTicketPdf(tx, orgId, params.data.ticketId, query.data.paper ?? null),
+      )
+      return c.body(Buffer.from(pdf.bytes), 200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${pdf.filename}"`,
+      })
+    } catch (error) {
+      return serviceErrorResponse(c, error) ?? Promise.reject(error)
+    }
+  })
+
+  // Una devolución de ese ticket en PDF.
+  app.get("/counter-sales/:ticketId/returns/:returnId/pdf", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({ ticketId: z.uuid(), returnId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const query = paperQuery.safeParse(c.req.query())
+    if (!query.success) return validationError(c, query.error.issues)
+    const blocked = await ticketLockRefusal(c, orgId, params.data.ticketId)
+    if (blocked) return blocked
+    try {
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        counterReturnPdf(tx, orgId, params.data.ticketId, params.data.returnId, query.data.paper ?? null),
+      )
+      return c.body(Buffer.from(pdf.bytes), 200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${pdf.filename}"`,
+      })
+    } catch (error) {
+      return serviceErrorResponse(c, error) ?? Promise.reject(error)
+    }
   })
 
   app.get("/movements", async (c) => {
@@ -349,26 +572,40 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
 
   const recurringMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "El mes debe tener formato AAAA-MM")
 
+  // Con qué se pagó, el comprobante del país y a quién (ADR 0167): lo mismo al registrar, corregir y pagar.
+  const paperFields = {
+    paymentMethodId: z.uuid().nullish(),
+    paymentReference: z.string().max(60).nullish(),
+    receiptType: z.string().max(20).nullish(),
+    supplierId: z.uuid().nullish(),
+    supplierName: z.string().max(200).nullish(),
+    supplierTaxId: z.string().max(20).nullish(),
+  }
+  const expenseFields = {
+    branchId: z.uuid(),
+    category: z.string().max(60).optional(),
+    concept: z.string().trim().min(1, "Escribe en qué se gastó.").max(500, "Escribe como mucho 500 caracteres."),
+    amountCents: cents,
+    currency: currency.optional(),
+    exchangeRate: z.string().max(40).optional(),
+    spentAt: isoDateTime.nullish(),
+    receiptKind: z.string().trim().min(1).max(60).optional(),
+    receiptNumber: z.string().max(60).nullish(),
+    notes: z.string().max(2000).nullish(),
+    fromCash: z.boolean().optional(),
+    // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
+    salesTax: z.boolean().optional(),
+    // La clave del formulario abierto: reintentar tras un corte devuelve el mismo gasto (ADR 0018).
+    requestId: z.uuid().optional(),
+    ...paperFields,
+  }
+
   app.post("/expenses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = z
       .object({
-        branchId: z.uuid(),
-        category: z.string().max(60).optional(),
-        concept: z.string().trim().min(1, "Escribe en qué se gastó.").max(500, "Escribe como mucho 500 caracteres."),
-        amountCents: cents,
-        currency: currency.optional(),
-        exchangeRate: z.string().max(40).optional(),
-        spentAt: isoDateTime.nullish(),
-        receiptKind: z.string().trim().min(1).max(60).optional(),
-        receiptNumber: z.string().max(60).nullish(),
-        notes: z.string().max(2000).nullish(),
-        fromCash: z.boolean().optional(),
-        // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
-        salesTax: z.boolean().optional(),
-        // La clave del formulario abierto: reintentar tras un corte devuelve el mismo gasto (ADR 0018).
-        requestId: z.uuid().optional(),
+        ...expenseFields,
         // «Se repite»: la plantilla, y este gasto queda como su primera ocurrencia.
         repeat: z
           .object({
@@ -413,6 +650,32 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       withOrgContext(deps.db, orgId, (tx) => getRecurringMonth(tx, orgId, parsed.data, new Date(), peopleOf(memberRole))),
     )
   })
+  // «Anotar lo que se repite» (ADR 0167): la plantilla sola, sin pagar nada.
+  app.post("/expenses/recurring", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid(),
+        category: z.string().max(60).optional(),
+        concept: z.string().trim().min(1, "Escribe en qué se gasta.").max(500, "Escribe como mucho 500 caracteres."),
+        amountCents: cents,
+        currency: currency.optional(),
+        everyMonths: z.union([z.literal(1), z.literal(6), z.literal(12)]),
+        day: z.number().int().min(1).max(31),
+        firstMonth: recurringMonthKey.nullish(),
+        memberUserId: z.string().max(200).nullish(),
+        dueNextMonth: z.boolean().optional(),
+        paymentMethodId: z.uuid().nullish(),
+        requestId: z.uuid().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => noteRecurringExpense(tx, orgId, userId, parsed.data, peopleOf(memberRole))),
+    )
+  })
   app.get("/expenses/recurring/people", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     // A quién se le anota un sueldo: lo elige quien lo verá (S1).
@@ -430,6 +693,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         memberUserId: z.string().max(200).nullish(),
         fromCash: z.boolean().optional(),
         lastMonth: recurringMonthKey.nullish(),
+        paymentMethodId: z.uuid().nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -460,6 +724,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
         requestId: z.uuid().optional(),
+        // El cambio de este pago, si es en la otra moneda; sin él, el de hoy.
+        exchangeRate: z.string().max(40).optional(),
+        ...paperFields,
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -525,6 +792,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         expectedPaidCents: z.number().int().min(0).optional(),
         // La clave del cajón: el reintento tras un corte devuelve el mismo pago (ADR 0018).
         requestId: z.uuid().optional(),
+        // Con qué se pagó (ADR 0167): manda sobre `fromCash`.
+        paymentMethodId: z.uuid().nullish(),
+        paymentReference: z.string().max(60).nullish(),
+        receiptType: z.string().max(20).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -563,6 +834,30 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => dismissExpenseGap(tx, orgId, userId, parsed.data)))
+  })
+
+  // «Corregir» (ADR 0167): anula el original con lo que cambió y registra el nuevo, en una operación.
+  app.post("/expenses/:id/correct", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
+    const parsed = z.object(expenseFields).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        correctExpense(tx, orgId, userId, c.req.param("id"), parsed.data, {
+          allowPostClose: canAccess(memberRole, "finance.admin"),
+          seesPeople: canAccess(memberRole, "commissions.write"),
+        }),
+      ),
+    )
+  })
+
+  // A quién se pagó: los proveedores de la clínica, solo nombre y documento (ADR 0167).
+  app.get("/suppliers", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listExpenseSuppliers(tx, orgId)))
   })
 
   app.post("/expenses/:id/void", async (c) => {

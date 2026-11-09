@@ -123,6 +123,7 @@ import {
   useClosingForm,
 } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterContextBody, EncounterHealthReview } from "./encounter-context"
+import { LinkSignedNotice } from "./link-signed-notice"
 import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
@@ -1656,10 +1657,11 @@ export function EncounterEditor({
         if (confirmingRef.current) return
         confirmingRef.current = true
         try {
-          await confirmLinkSignedConsent(need.documentId)
+          await confirmLinkSignedConsent(need.documentId, encounterId)
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
             queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+            queryClient.invalidateQueries({ queryKey: ["consents-to-confirm", patientId] }),
             refreshClosing(),
           ])
           await onChanged()
@@ -1862,6 +1864,8 @@ export function EncounterEditor({
 
   const examenBody = (
     <div className="grid gap-3 sm:grid-cols-2">
+      {/* Sin signos vitales en el producto (vistIA), sin su apartado. */}
+      {exam.vitals.length > 0 ? (
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0 sm:col-span-2">
         <legend className="mb-1 text-sm font-medium">Signos vitales</legend>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1899,6 +1903,7 @@ export function EncounterEditor({
         </p>
         <exam.VitalsNote patientId={patientId} encounterId={encounterId} vitals={parsedVitals} />
       </fieldset>
+      ) : null}
       <exam.Fields
         idPrefix={uid}
         draft={examination}
@@ -2188,6 +2193,20 @@ export function EncounterEditor({
       />
 
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
+
+      {/* Lo que firmó en su enlace se confirma aquí, delante de la persona: arriba al abrir, sin frenar nada. */}
+      <LinkSignedNotice
+        patientId={patientId}
+        encounterId={encounterId}
+        disabled={locked}
+        onChanged={async () => {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
+            refreshClosing(),
+          ])
+          await onChanged()
+        }}
+      />
 
       {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} /> : null}
       {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}

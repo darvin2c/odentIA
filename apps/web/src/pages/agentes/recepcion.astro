@@ -11,12 +11,15 @@ import CtaBand from "../../components/CtaBand.astro"
 import Faq from "../../components/Faq.astro"
 import Base from "../../layouts/Base.astro"
 import ReceptionPage from "../../components/latidia/agents/reception/ReceptionPage.astro"
-import { MEDICAL } from "../../lib/product"
+import VistiaPage from "../../components/vistia/VistiaPage.astro"
+import { ofProduct } from "../../lib/product"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
 import { hours } from "../../lib/pricing"
 import { AGENT_COLORS, ctaOf } from "../../lib/site"
 
+// latidIA y vistIA tienen la suya; odentIA la arma aquí.
+const Own = ofProduct({ dental: null, medical: ReceptionPage, optical: VistiaPage })
 const page = PAGES.recepcion
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
@@ -52,7 +55,7 @@ const faq: FaqItem[] = [
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
-{MEDICAL ? <ReceptionPage /> : (
+{Own ? <Own /> : (
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
   <SplitHero
     tag="Tu agente de recepción"

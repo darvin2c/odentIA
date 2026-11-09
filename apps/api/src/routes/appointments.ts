@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   appointmentPatientId,
   appointmentReminderReach,
+  newPersonRemindersVia,
   createAppointment,
   createRoom,
   createScheduleBlock,
@@ -409,6 +410,17 @@ export function createAppointmentsRoute(deps: CrmDeps) {
           statuses: csv(status),
         }),
       ),
+    )
+  })
+
+  // Por dónde le llegarían los recordatorios a alguien que aún no está registrado: la Agenda no promete WhatsApp si no saldrán (B2).
+  app.get("/reminders-via", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reservar citas"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({ via: await newPersonRemindersVia(tx, orgId) })),
     )
   })
 

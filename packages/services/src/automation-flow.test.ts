@@ -7,6 +7,7 @@ import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile, } from "@odentia/db/schema/org"
@@ -22,6 +23,7 @@ import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } f
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, LINK_RECEIVED_MESSAGE, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
+  appointmentRemindersVia,
   automationReplyOf,
   BUDGET_HOLD,
   cancelAppointmentByToken,
@@ -31,6 +33,7 @@ import {
   getMessagePermissions,
   getPublicLinkInfo,
   handleAutomationReply,
+  pendingBeforeAppointment,
   preferredContact,
   listBudgetHeldJobs,
   reconcileDeliveries,
@@ -73,7 +76,7 @@ import { agentTextsFor } from "./products.js"
 setupTestDb()
 // Los mensajes con «Su enlace» llevan un botón con la dirección de la clínica.
 // latidIA en su propio dominio (decisión 9 del lienzo del issue 229).
-configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test", productDomains: { medical: "latidia.test" } })
+configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test", productDomains: { medical: "latidia.test", optical: "vistia.test" } })
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -396,6 +399,63 @@ describe("por dónde le llega a cada persona", () => {
     ])
   })
 
+  /** Un consentimiento que el equipo le envió a firmar por su enlace y que aún no firma. */
+  async function consentSentToSign(c: Clinic, patientId: string) {
+    const [template] = await ownerDb
+      .insert(consentTemplate)
+      .values({ organizationId: c.orgId, key: `t-${randomUUID().slice(0, 8)}`, title: "Exodoncia", body: "Texto", status: "publicado" })
+      .returning({ id: consentTemplate.id })
+    await ownerDb.insert(consentDocument).values({
+      organizationId: c.orgId, templateId: template!.id, templateVersion: 1, bodySnapshot: "Texto", titleSnapshot: "Exodoncia",
+      patientId, signerName: "Paciente", procedureRef: "Exodoncia de la pieza 38", linkSentAt: new Date(),
+    })
+  }
+
+  it("«Antes de tu cita»: con más que sus datos por hacer, el recordatorio dice cuántas cosas y abre «Tus pendientes»", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const p = await person(c, "Lucía Paredes", { consent: ["recordatorio"] })
+    // Con su fecha de nacimiento y su documento: los consentimientos los firma desde su teléfono.
+    await ownerDb.update(contact).set({ birthDate: "1990-03-03", docType: "DNI", docNumber: "41234567" }).where(eq(contact.id, p.contactId))
+    await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await consentSentToSign(c, p.patientId)
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [job] = await jobsOf(c)
+    const sent = await messageOf(job!.sentMessageId)
+    expect(sent).toMatchObject({ contentType: "template", templateName: "odentia_antes_de_tu_cita_v1" })
+    // Lo que le falta de sus datos y el consentimiento: dos cosas, sin decir cuáles.
+    expect((sent.templateParams as string[])[3]).toBe("2 cosas")
+    expect(sent.body).toMatch(/tienes 2 cosas por hacer\. Lo ves todo aquí/)
+    expect(sent.body).not.toMatch(/consentimiento|Exodoncia|38/i)
+  })
+
+  it("«Antes de tu cita» no cuenta el consentimiento que solo se firma en la cita: sin fecha ni documento, solo sus datos", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes", "recordatorio_cita_datos"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const p = await person(c, "Pedro Ríos", { consent: ["recordatorio"] })
+    await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await consentSentToSign(c, p.patientId)
+    expect(await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId))).toEqual({ data: true, total: 1 })
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    await deliver(c)
+    const [job] = await jobsOf(c)
+    // No le dice «2 cosas por hacer»: el consentimiento lo lee en su enlace y lo firma en la cita.
+    expect(await messageOf(job!.sentMessageId)).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_datos_v1" })
+  })
+
+  it("«Antes de tu cita» sin aprobar: sale el de sus datos y, si no, el de siempre", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_datos"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const p = await person(c, "Lucía Paredes", { consent: ["recordatorio"] })
+    await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await consentSentToSign(c, p.patientId)
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    await deliver(c)
+    const [job] = await jobsOf(c)
+    expect(await messageOf(job!.sentMessageId)).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_datos_v1" })
+  })
+
   it("sin WhatsApp: sale por el correo de la clínica, con enlaces en vez de botones", async () => {
     const c = await clinic({ email: true })
     await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
@@ -410,12 +470,12 @@ describe("por dónde le llega a cada persona", () => {
     // La primera línea es el asunto.
     expect(lines[0]).toBe("Recordatorio de cita · Clínica Sonríe")
     // A Jorge le faltan datos: por correo sale el texto de la clínica con una línea más, la de su enlace.
-    expect(sent.body).toMatch(/Completar mis datos: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
+    expect(sent.body).toMatch(/Completar mis datos: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=datos&token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
     expect(sent.body).toContain("Hola, Jorge. Te recordamos la cita en Clínica Sonríe, sede Centro: mañana, miércoles 7 de octubre")
     // «Confirmar», «Cancelar» y la baja van a la página de la clínica, que es donde viven.
     expect(sent.body).toMatch(/Para confirmar: https:\/\/auto-\S+\.odentia\.test\/c\/\S+\nSi no podrás ir: https:\/\/auto-\S+\.odentia\.test\/c\/\S+/)
     // Al pie, su página «Tus mensajes»; la baja de un toque va en la cabecera del correo (ADR 0040).
-    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}#mensajes$/)
+    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=mensajes&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
     expect(sent.listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.odentia\.test\/baja\/\S+$/)
     expect(sent.replyButtons).toBeNull()
     const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, sent.conversationId))
@@ -433,7 +493,7 @@ describe("por dónde le llega a cada persona", () => {
     const [job] = await jobsOf(c)
     const sent = await messageOf(job!.sentMessageId)
     expect(sent.body).toMatch(/Para confirmar: https:\/\/auto-\S+\.latidia\.test\/c\/\S+/)
-    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.latidia\.test\/reserva\?/)
+    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.latidia\.test\/pendientes\?abre=mensajes&/)
     expect(sent.listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.latidia\.test\/baja\/\S+$/)
   })
 
@@ -639,7 +699,7 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     expect(sent.contentType).toBe("text")
     // El botón de su enlace va escrito al final, como en los demás mensajes con «Su enlace».
     expect(sent.body).toMatch(
-      /^Hola, Lucía\. Te esperamos mañana, miércoles 7 de octubre, a las 10:00.*, con Dra\. Ana Torres en Clínica Sonríe, sede Centro\. Si necesitas cambiar la cita, responde a este mensaje\.\n\nCambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
+      /^Hola, Lucía\. Te esperamos mañana, miércoles 7 de octubre, a las 10:00.*, con Dra\. Ana Torres en Clínica Sonríe, sede Centro\. Si necesitas cambiar la cita, responde a este mensaje\.\n\nCambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
     )
     expect(sent.replyButtons).toEqual([
       { id: replyId("responder", job.id), title: "No podré ir" },
@@ -656,7 +716,7 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     const { job, sent } = await sentTo(c, rosa.contactId)
     expect(job).toMatchObject({ status: "enviado", via: "correo" })
     expect(sent.body).toContain("Hola, Rosa. Te esperamos mañana, miércoles 7 de octubre")
-    expect(sent.body).toMatch(/Cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
+    expect(sent.body).toMatch(/Cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
     expect(sent.body).toMatch(/\nSi no podrás ir: https:\/\/auto-\S+\.odentia\.test\/c\/\S+/)
     expect(sent.body).not.toContain("Para confirmar")
   })
@@ -721,6 +781,24 @@ describe("como mucho un mensaje al día por persona", () => {
     await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.contactId, grandma.contactId))
     await ownerDb.update(contact).set({ birthDate: "2000-05-01" }).where(eq(contact.id, kid.contactId))
     expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(kid.contactId)
+  })
+
+  it("«Te escribiremos por WhatsApp» solo a quien le llegan los recordatorios del paciente, no al otro representante", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const mother = await person(c, "Carla Ramos", { openWindow: true })
+    const father = await person(c, "Luis Ramos", { openWindow: true })
+    const kid = await person(c, "Mateo Ramos", { whatsapp: false })
+    await ownerDb.update(contact).set({ birthDate: "2018-05-01" }).where(eq(contact.id, kid.contactId))
+    await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.patientId, kid.patientId))
+    await ownerDb.insert(patientContact).values([
+      { organizationId: c.orgId, patientId: kid.patientId, contactId: mother.contactId, relationship: "guardian", isPreferred: true },
+      { organizationId: c.orgId, patientId: kid.patientId, contactId: father.contactId, relationship: "guardian", isPreferred: false },
+    ])
+    expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(mother.contactId)
+    expect(await run(c, (tx) => appointmentRemindersVia(tx, c.orgId, mother.contactId, kid.patientId))).toBe("whatsapp")
+    // El padre tiene WhatsApp, pero los recordatorios de Mateo le llegan a la madre: a él no se le promete.
+    expect(await run(c, (tx) => appointmentRemindersVia(tx, c.orgId, father.contactId, kid.patientId))).toBeNull()
   })
 
   it("un seguimiento espera a mañana si la persona ya recibió algo hoy; el recordatorio de cita no espera", async () => {
@@ -927,9 +1005,11 @@ describe("los enlaces del correo pasan por la agenda", () => {
   })
 
   it("la baja del enlace apaga solo el tipo de mensaje de ese correo", async () => {
-    const { c, p, bajaToken } = await remindedByEmail()
+    const { c, p, bajaToken, confirmToken } = await remindedByEmail()
     // La página dice el tipo que apaga (el del recordatorio), no «todos los mensajes».
     expect((await run(c, (tx) => getPublicLinkInfo(tx, bajaToken))).stops).toEqual(UNSUBSCRIBE_WORDS.recordatorio)
+    // Por esta página solo se lee una baja: el botón «Confirmar» de un correo viejo no dice el día ni la hora.
+    await expect(run(c, (tx) => getPublicLinkInfo(tx, confirmToken))).rejects.toMatchObject({ code: "NOT_FOUND" })
     await run(c, (tx) => unsubscribeByToken(tx, bajaToken))
     expect(await run(c, (tx) => getMessagePermissions(tx, c.orgId, p.contactId))).toMatchObject([
       { purpose: "recordatorio", granted: false, source: "baja" },
@@ -1081,15 +1161,17 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los veinte, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los veintidós, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
+      ["odentia_antes_de_tu_cita_v1", "en_revision", "recordatorio_cita_pendientes"],
       ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada"],
       ["odentia_aviso_cita_datos_v2", "en_revision", "aviso_cita_reservada_datos"],
       ["odentia_aviso_cita_movida_v2", "en_revision", "aviso_cita_movida"],
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
       ["odentia_cita_sin_llegar_v1", "en_revision", "cita_sin_llegar"],
+      ["odentia_consentimiento_por_firmar_v1", "en_revision", "consentimiento_por_firmar"],
       ["odentia_documento_listo_v1", "en_revision", "documento_listo"],
       ["odentia_enlace_recibido_v1", "en_revision", "enlace_recibido"],
       ["odentia_invitar_a_volver_v1", "en_revision", "invitar_a_volver"],
@@ -1283,12 +1365,14 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     // Lo recién pedido puede no aparecer aún en la lectura de la cuenta: sigue en revisión.
     expect(synced.map((item) => [item.name, item.status, item.messageKey, item.variables])).toEqual([
       ["bienvenida", "aprobada", null, 1],
+      ["odentia_antes_de_tu_cita_v1", "en_revision", "recordatorio_cita_pendientes", 4],
       ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada", 3],
       ["odentia_aviso_cita_datos_v2", "en_revision", "aviso_cita_reservada_datos", 3],
       ["odentia_aviso_cita_movida_v2", "en_revision", "aviso_cita_movida", 3],
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
       ["odentia_cita_sin_llegar_v1", "en_revision", "cita_sin_llegar", 3],
+      ["odentia_consentimiento_por_firmar_v1", "en_revision", "consentimiento_por_firmar", 3],
       ["odentia_documento_listo_v1", "en_revision", "documento_listo", 2],
       ["odentia_enlace_recibido_v1", "en_revision", "enlace_recibido", 2],
       ["odentia_invitar_a_volver_v1", "en_revision", "invitar_a_volver", 2],
@@ -1310,7 +1394,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0, category: "marketing", contactId: null })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(21)
+    expect(rows).toHaveLength(23)
   })
 })
 
@@ -1821,7 +1905,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const body = (await messageOf(job!.sentMessageId)).body ?? ""
     expect(body.split("\n")[0]).toBe("¿Seguimos conversando? · Clínica Sonríe")
     expect(body).toContain("Hola, Jorge. Te escribimos de Clínica Sonríe sobre tu consulta de «Blanqueamiento». ¿Seguimos conversando?")
-    expect(body).toMatch(/Elegir mis mensajes: \S+#mensajes$/)
+    expect(body).toMatch(/Elegir mis mensajes: \S+\/pendientes\?abre=mensajes&token=\S+$/)
     expect((await messageOf(job!.sentMessageId)).listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.odentia\.test\/baja\/\S+$/)
   })
 

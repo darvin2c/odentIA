@@ -223,7 +223,7 @@ const recorder = BaseCallbackHandler.fromMethods({
   },
 })
 // Lo mismo que el worker de producción: enlaces públicos y búsqueda por vectores.
-const publicLinks = { webURL: env.WEB_URL!, cookieDomain: env.COOKIE_DOMAIN!, productDomains: env.MEDICAL_DOMAIN ? { medical: env.MEDICAL_DOMAIN } : {} }
+const publicLinks = { webURL: env.WEB_URL!, cookieDomain: env.COOKIE_DOMAIN!, productDomains: { medical: env.MEDICAL_DOMAIN || undefined, optical: env.OPTICAL_DOMAIN || undefined } }
 configurePublicLinks(publicLinks)
 const embedder = embedderFromEnv(env as never)
 const runtime: AgentRuntime = {

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './../../../packages/clinic-app/src/routes/public/index'
 import { Route as DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport } from './../../../packages/clinic-app/src/routes/_org'
 import { Route as AvisoRouteImport } from './../../../packages/clinic-app/src/routes/public/aviso'
+import { Route as PendientesRouteImport } from './../../../packages/clinic-app/src/routes/public/pendientes'
 import { Route as PortalRouteImport } from './../../../packages/clinic-app/src/routes/public/portal'
 import { Route as RegistroRouteImport } from './../../../packages/clinic-app/src/routes/public/registro'
 import { Route as ReservaRouteImport } from './../../../packages/clinic-app/src/routes/public/reserva'
@@ -23,6 +24,7 @@ import { Route as HomeRouteImport } from './../../../packages/clinic-app/src/rou
 import { Route as InboxRouteImport } from './../../../packages/clinic-app/src/routes/_org/inbox'
 import { Route as InventoryRouteImport } from './../../../packages/clinic-app/src/routes/_org/inventory'
 import { Route as MembersRouteImport } from './../../../packages/clinic-app/src/routes/_org/members'
+import { Route as OrdersRouteImport } from './../../../packages/clinic-app/src/routes/_org/orders'
 import { Route as PipelineRouteImport } from './../../../packages/clinic-app/src/routes/_org/pipeline'
 import { Route as ReportsRouteImport } from './../../../packages/clinic-app/src/routes/_org/reports'
 import { Route as ServicesRouteImport } from './../../../packages/clinic-app/src/routes/_org/services'
@@ -99,6 +101,11 @@ const AvisoRoute = AvisoRouteImport.update({
   path: '/aviso',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PendientesRoute = PendientesRouteImport.update({
+  id: '/pendientes',
+  path: '/pendientes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/portal',
   path: '/portal',
@@ -159,6 +166,12 @@ const InventoryRoute = InventoryRouteImport.update({
 const MembersRoute = MembersRouteImport.update({
   id: '/members',
   path: '/members',
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
+} as any)
+const OrdersRoute = OrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
   getParentRoute: () =>
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
@@ -508,6 +521,7 @@ const PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/aviso': typeof AvisoRoute
+  '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
@@ -519,6 +533,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/inventory': typeof InventoryRoute
   '/members': typeof MembersRoute
+  '/orders': typeof OrdersRoute
   '/pipeline': typeof PipelineRoute
   '/reports': typeof ReportsRoute
   '/services': typeof ServicesRouteWithChildren
@@ -583,6 +598,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/aviso': typeof AvisoRoute
+  '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
@@ -594,6 +610,7 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/inventory': typeof InventoryRoute
   '/members': typeof MembersRoute
+  '/orders': typeof OrdersRoute
   '/pipeline': typeof PipelineRoute
   '/reports': typeof ReportsRoute
   '/tasks': typeof TasksRoute
@@ -658,6 +675,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_org': typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
   '/aviso': typeof AvisoRoute
+  '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
@@ -669,6 +687,7 @@ export interface FileRoutesById {
   '/_org/inbox': typeof InboxRoute
   '/_org/inventory': typeof InventoryRoute
   '/_org/members': typeof MembersRoute
+  '/_org/orders': typeof OrdersRoute
   '/_org/pipeline': typeof PipelineRoute
   '/_org/reports': typeof ReportsRoute
   '/_org/services': typeof ServicesRouteWithChildren
@@ -735,6 +754,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/aviso'
+    | '/pendientes'
     | '/portal'
     | '/registro'
     | '/reserva'
@@ -746,6 +766,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
+    | '/orders'
     | '/pipeline'
     | '/reports'
     | '/services'
@@ -810,6 +831,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/aviso'
+    | '/pendientes'
     | '/portal'
     | '/registro'
     | '/reserva'
@@ -821,6 +843,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
+    | '/orders'
     | '/pipeline'
     | '/reports'
     | '/tasks'
@@ -884,6 +907,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_org'
     | '/aviso'
+    | '/pendientes'
     | '/portal'
     | '/registro'
     | '/reserva'
@@ -895,6 +919,7 @@ export interface FileRouteTypes {
     | '/_org/inbox'
     | '/_org/inventory'
     | '/_org/members'
+    | '/_org/orders'
     | '/_org/pipeline'
     | '/_org/reports'
     | '/_org/services'
@@ -961,6 +986,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
   AvisoRoute: typeof AvisoRoute
+  PendientesRoute: typeof PendientesRoute
   PortalRoute: typeof PortalRoute
   RegistroRoute: typeof RegistroRoute
   ReservaRoute: typeof ReservaRoute
@@ -994,6 +1020,13 @@ declare module '@tanstack/react-router' {
       path: '/aviso'
       fullPath: '/aviso'
       preLoaderRoute: typeof AvisoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pendientes': {
+      id: '/pendientes'
+      path: '/pendientes'
+      fullPath: '/pendientes'
+      preLoaderRoute: typeof PendientesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/portal': {
@@ -1071,6 +1104,13 @@ declare module '@tanstack/react-router' {
       path: '/members'
       fullPath: '/members'
       preLoaderRoute: typeof MembersRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
+    }
+    '/_org/orders': {
+      id: '/_org/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/pipeline': {
@@ -1599,6 +1639,7 @@ interface DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren {
   InboxRoute: typeof InboxRoute
   InventoryRoute: typeof InventoryRoute
   MembersRoute: typeof MembersRoute
+  OrdersRoute: typeof OrdersRoute
   PipelineRoute: typeof PipelineRoute
   ReportsRoute: typeof ReportsRoute
   ServicesRoute: typeof ServicesRouteWithChildren
@@ -1635,6 +1676,7 @@ const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren: DotDot
     InboxRoute: InboxRoute,
     InventoryRoute: InventoryRoute,
     MembersRoute: MembersRoute,
+    OrdersRoute: OrdersRoute,
     PipelineRoute: PipelineRoute,
     ReportsRoute: ReportsRoute,
     ServicesRoute: ServicesRouteWithChildren,
@@ -1671,6 +1713,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute:
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren,
   AvisoRoute: AvisoRoute,
+  PendientesRoute: PendientesRoute,
   PortalRoute: PortalRoute,
   RegistroRoute: RegistroRoute,
   ReservaRoute: ReservaRoute,

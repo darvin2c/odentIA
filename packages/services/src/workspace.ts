@@ -30,7 +30,7 @@ import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
 import { windowOpen } from "./message-window.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { productHooks } from "./products.js"
+import { productDictation, productHooks } from "./products.js"
 import { upcomingWork } from "./report-finance.js"
 import { patientsToSchedule } from "./to-schedule.js"
 import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
@@ -1125,7 +1125,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
           ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}),
           on: {
             ...(agentStep ? { reception: agentStep.receptionOn, admin: agentStep.adminOn } : {}),
-            clio: on?.clio ?? false,
+            clio: (on?.clio ?? false) && (await productDictation(tx, orgId)) !== null,
             registration: on?.registration ?? false,
             noticeSuggested: on?.notice_suggested ?? false,
             portal: on?.portal ?? false,

@@ -355,9 +355,14 @@ describe("una lista de precios por producto (ADR 0093)", () => {
 
   it("cada producto decide si se entra con invitación o libre", async () => {
     await setSignupMode(ownerDb, admin, "abierta", "medical")
-    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "abierta" })
+    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "abierta", optical: "invitacion" })
     expect((await getPublicPricing(ownerDb, "medical")).signupMode).toBe("abierta")
+    // vistIA tiene su propia columna: abrirla no abre las otras.
+    await setSignupMode(ownerDb, admin, "abierta", "optical")
+    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "abierta", optical: "abierta" })
     await setSignupMode(ownerDb, admin, "invitacion", "medical")
+    await setSignupMode(ownerDb, admin, "invitacion", "optical")
+    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "invitacion", optical: "invitacion" })
   })
 
   it("la solicitud de latidIA entra con Fundadores latidIA y gasta sus propios lugares", async () => {

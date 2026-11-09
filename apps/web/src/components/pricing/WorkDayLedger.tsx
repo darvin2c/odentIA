@@ -3,32 +3,20 @@
 // trabajo de un agente dice 0. Con «reducir movimiento», el día se ve completo desde el principio.
 import { useEffect, useRef, useState } from "react"
 import type { ValuePrices } from "../../lib/pricing"
-import { MEDICAL } from "../../lib/product"
+import { ofProduct } from "../../lib/product"
 import "./work-day-ledger.css"
 
 type Agent = "sofi" | "clio" | "argos" | null
 /** Qué se cobra en cada fila: un tipo, la cita recuperada, la conversación que se devuelve o nada. */
-type Charge = "gestiona" | "estandar" | "recovered" | "refund" | null
+type Charge = "informa" | "gestiona" | "estandar" | "recovered" | "refund" | null
 type Row = { time: string; agent: Agent; who: string; what: string; charge: Charge }
 
 const NAMES: Record<Exclude<Agent, null>, string> = { sofi: "Sofi", clio: "Clío", argos: "Argos" }
 
-/** Un jueves de ejemplo. En latidIA cambia lo que se dice, no lo que se cobra. */
-const DAY: Row[] = [
-  {
-    time: "08:12",
-    agent: "sofi",
-    who: "Sofi",
-    what: MEDICAL ? " agendó a Miguel, con fiebre desde ayer" : " agendó a Miguel por un dolor de muela",
-    charge: "gestiona",
-  },
-  {
-    time: "09:40",
-    agent: "clio",
-    who: "Clío",
-    what: MEDICAL ? " ordenó la consulta de Carlos: faringitis con placas" : " ordenó la consulta de Carlos: caries en la 36",
-    charge: "estandar",
-  },
+/** Lo que es igual en el jueves de odentIA y en el de latidIA: ahí cambia lo que se dice, no lo que se cobra. */
+const CLINIC_DAY = (miguel: string, carlos: string): Row[] => [
+  { time: "08:12", agent: "sofi", who: "Sofi", what: miguel, charge: "gestiona" },
+  { time: "09:40", agent: "clio", who: "Clío", what: carlos, charge: "estandar" },
   { time: "11:05", agent: "clio", who: "Clío", what: ": el Dr. Ríos descartó el borrador", charge: null },
   { time: "16:20", agent: "sofi", who: "Sofi", what: " reservó a Pedro; Pedro no vino", charge: "gestiona" },
   { time: "17:00", agent: "argos", who: "Argos", what: ": Rosa volvió tras faltar y la atendieron", charge: "recovered" },
@@ -37,6 +25,22 @@ const DAY: Row[] = [
   // El software no suma: la última fila del día lo dice en la misma cuenta.
   { time: "24 h", agent: null, who: "", what: "El sistema, todo el día", charge: null },
 ]
+
+/** Un jueves de ejemplo de cada producto. En vistIA, sin Clío: Sofi atiende y Argos recupera. */
+const DAY: Row[] = ofProduct({
+  dental: CLINIC_DAY(" agendó a Miguel por un dolor de muela", " ordenó la consulta de Carlos: caries en la 36"),
+  medical: CLINIC_DAY(" agendó a Miguel, con fiebre desde ayer", " ordenó la consulta de Carlos: faringitis con placas"),
+  optical: [
+    { time: "08:12", agent: "sofi", who: "Sofi", what: " agendó a Miguel para medirse la vista", charge: "gestiona" },
+    { time: "10:30", agent: "sofi", who: "Sofi", what: " le dio a Ana la dirección y el horario", charge: "informa" },
+    { time: "16:20", agent: "sofi", who: "Sofi", what: " reservó a Pedro; Pedro no vino", charge: "gestiona" },
+    { time: "17:00", agent: "argos", who: "Argos", what: ": Rosa volvió tras faltar y la atendieron", charge: "recovered" },
+    // ADR 0085: si la cita recuperada cuenta, se cobra solo ella y la conversación se devuelve.
+    { time: "17:00", agent: null, who: "", what: "Se devuelve la conversación de Rosa: cuenta la cita", charge: "refund" },
+    { time: "18:00", agent: "argos", who: "Argos", what: " le recordó su cita de mañana a Julia", charge: null },
+    { time: "24 h", agent: null, who: "", what: "El sistema, todo el día", charge: null },
+  ],
+})
 
 /** Una fila cada segundo y medio. */
 const STEP_MS = 1500

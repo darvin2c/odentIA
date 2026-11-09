@@ -27,6 +27,7 @@ import { TicketRowsSkeleton } from "../skeletons/finance"
 import { apiFetch } from "../../lib/api"
 import { plainAmount } from "../../lib/commissions"
 import { financeErrorMessage } from "../../lib/finance"
+import { COUNTER_SALE_LABEL } from "../../lib/finance-collect"
 import {
   fetchTickets,
   financeKeys,
@@ -181,12 +182,22 @@ export function TicketsTab({
         cell: ({ row }) => {
           const ticket = row.original
           const doc = ticket.docNumber ? documentText(ticket.docType, ticket.docNumber) : ""
+          // Una venta de mostrador (ADR 0173) no tiene ficha: se abre la página de quien compró, si se eligió.
+          const counter = ticket.patientId === null
           return (
             <div className="flex min-w-0 flex-col">
-              <PersonLink patientId={ticket.patientId} search={{ tab: "cuenta" }} className="font-medium hover:underline">
+              <PersonLink
+                patientId={ticket.patientId}
+                contactId={counter ? ticket.buyerContactId : null}
+                search={counter ? undefined : { tab: "cuenta" }}
+                className="font-medium hover:underline"
+              >
                 {ticket.displayName || "Paciente sin nombre"}
               </PersonLink>
               {doc ? <span className="text-xs text-muted-foreground">{doc}</span> : null}
+              {counter && ticket.displayName !== COUNTER_SALE_LABEL ? (
+                <span className="text-xs text-muted-foreground">{COUNTER_SALE_LABEL}</span>
+              ) : null}
             </div>
           )
         },

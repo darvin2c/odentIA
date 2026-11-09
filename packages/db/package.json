@@ -25,6 +25,7 @@
     "@odentia/clinical": "workspace:*",
     "@odentia/dental": "workspace:*",
     "@odentia/medical": "workspace:*",
+    "@odentia/optical": "workspace:*",
     "drizzle-orm": "0.45.2",
     "postgres": "3.4.9",
     "tsx": "4.23.13"

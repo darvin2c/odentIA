@@ -24,3 +24,6 @@
   .cd2-what span { font-size: 12px; }
   .cd2-sum { font-size: 26px; }
 }
+/* vistIA usa la misma cuenta del día, con las líneas en gris en vez de lila. */
+:root[data-brand="vistia"] .cd2-head { border-bottom-color: var(--line); }
+:root[data-brand="vistia"] .cd2-row { border-bottom-color: #eef2f6; }

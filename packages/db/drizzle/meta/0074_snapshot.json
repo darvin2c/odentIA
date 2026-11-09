@@ -1,5 +1,5 @@
 {
-  "id": "55fce5c7-9fb9-47df-b8b1-4b98c09b0d2d",
+  "id": "6618cb27-5901-49fb-8946-407a3f57a615",
   "prevId": "c61def1b-2879-4e47-8200-7926dab4420c",
   "version": "7",
   "dialect": "postgresql",
@@ -9999,6 +9999,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "informed_encounter_id": {
+          "name": "informed_encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10199,6 +10205,23 @@
           "columnsTo": [
             "system_key",
             "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consent_document_informed_encounter_fk": {
+          "name": "consent_document_informed_encounter_fk",
+          "tableFrom": "consent_document",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "informed_encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -27045,24 +27068,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "tooth_groups": {
-          "name": "tooth_groups",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dentition": {
-          "name": "dentition",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "family": {
-          "name": "family",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -27089,10 +27094,6 @@
         "dental_template_rule_leaves_check": {
           "name": "dental_template_rule_leaves_check",
           "value": "\"catalog\".\"dental_template_rule\".\"leaves_variant\" IS NULL OR \"catalog\".\"dental_template_rule\".\"leaves_condition\" IS NOT NULL"
-        },
-        "dental_template_rule_anatomy_check": {
-          "name": "dental_template_rule_anatomy_check",
-          "value": "(\"catalog\".\"dental_template_rule\".\"tooth_groups\" IS NULL AND \"catalog\".\"dental_template_rule\".\"family\" IS NULL AND \"catalog\".\"dental_template_rule\".\"dentition\" IS NULL)\n        OR (\"catalog\".\"dental_template_rule\".\"family\" IS NOT NULL AND cardinality(\"catalog\".\"dental_template_rule\".\"tooth_groups\") > 0\n          AND \"catalog\".\"dental_template_rule\".\"tooth_groups\" <@ ARRAY['anterior', 'premolar', 'molar']::text[]\n          AND (\"catalog\".\"dental_template_rule\".\"dentition\" IS NULL OR \"catalog\".\"dental_template_rule\".\"dentition\" IN ('permanent', 'deciduous')))"
         }
       },
       "isRLSEnabled": false

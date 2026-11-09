@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { session } from "@odentia/db/schema/auth"
 import { saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
@@ -189,7 +190,7 @@ test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", asyn
   await expect(page.getByRole("heading", { name: "Cobros y planes", level: 1 })).toBeVisible()
   // Cada producto decide su alta y tiene su lista (ADR 0093).
   const alta = page.locator("#alta")
-  await expect(alta.getByRole("radiogroup")).toHaveCount(2)
+  await expect(alta.getByRole("radiogroup")).toHaveCount(CLINICAL_PRODUCTS.length)
   await expect(alta.getByRole("radio", { name: /Cualquiera abre su consultorio con el plan por defecto de latidIA/ })).toBeVisible()
   await alta.scrollIntoViewIfNeeded()
   await shot("alta-por-producto")

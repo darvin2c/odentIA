@@ -20,12 +20,23 @@ export type HarnessRuntime = {
   stateDir: string
   baseDomain: string
   proxyPort: number
-  appPorts: { api: number; panel: number; platform: number; admin: number; latidiaPanel?: number; latidia?: number }
+  appPorts: {
+    api: number
+    panel: number
+    platform: number
+    admin: number
+    latidiaPanel?: number
+    latidia?: number
+    vistiaPanel?: number
+    vistia?: number
+  }
   /**
    * El dominio de latidIA en esta ejecución (`latidia.<tld>`; decisión 9 del
    * issue 229). Solo cuando corren sus recorridos: su panel y su app son otro build.
    */
   medicalDomain?: string
+  /** El dominio de vistIA (`vistia.<tld>`, ADR 0169), como el de latidIA: solo cuando corren sus recorridos. */
+  opticalDomain?: string
   postgres?: { host: string; port: number }
   storage?: { host: string; port: number }
   mailpit?: { host: string; httpPort: number; smtpPort: number }
@@ -181,6 +192,15 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
           E2E_MEDICAL_DOMAIN: runtime.medicalDomain,
         }
       : {}),
+    ...(runtime.opticalDomain
+      ? {
+          // Y vistIA en el suyo, igual que latidIA.
+          OPTICAL_DOMAIN: runtime.opticalDomain,
+          VITE_DENTAL_DOMAIN: runtime.baseDomain,
+          VITE_OPTICAL_DOMAIN: runtime.opticalDomain,
+          E2E_OPTICAL_DOMAIN: runtime.opticalDomain,
+        }
+      : {}),
   }
 }
 
@@ -194,5 +214,15 @@ export function latidiaBuildEnv(runtime: HarnessRuntime): Record<string, string>
     VITE_PRODUCT: "medical",
     VITE_BASE_DOMAIN: runtime.medicalDomain,
     VITE_API_URL: `https://api.${runtime.medicalDomain}:${runtime.proxyPort}`,
+  }
+}
+
+/** Lo mismo para el panel y la app de vistIA (`VITE_PRODUCT=optical`, como en el despliegue). */
+export function vistiaBuildEnv(runtime: HarnessRuntime): Record<string, string> {
+  if (!runtime.opticalDomain) throw new Error("Esta ejecución no levanta vistIA.")
+  return {
+    VITE_PRODUCT: "optical",
+    VITE_BASE_DOMAIN: runtime.opticalDomain,
+    VITE_API_URL: `https://api.${runtime.opticalDomain}:${runtime.proxyPort}`,
   }
 }

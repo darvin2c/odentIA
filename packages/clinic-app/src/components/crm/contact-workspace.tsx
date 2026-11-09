@@ -382,7 +382,10 @@ function CitasSection({ context, conversationId }: { context: ConversationContex
 /** Lo clínico: lo que entra en el panel y, en grande, lo que necesita ancho. Abrirlo deja su traza, como en su página. */
 function ClinicaSection({ line, warn }: { line: string; warn: boolean }) {
   const openWide = useOpenWide()
-  const own = productUi().record.sections.filter((item) => !item.parent)
+  // Lo clínico del producto; lo que va en otra pestaña (vistIA: sus pedidos) no es de aquí.
+  const own = productUi().record.sections.filter(
+    (item) => !item.parent && (item.area ?? "clinica") === "clinica",
+  )
   const sections = [
     { id: "antecedentes", label: "Antecedentes" },
     ...own.map((item) => ({ id: item.id, label: item.label })),

@@ -2,11 +2,13 @@
 // La tarjeta del plan al lado de «Calcula tu mes»: la calculadora se hidrata al entrar en pantalla y
 // recibe la tarjeta (armada aquí, en el servidor) para ponerla a su lado.
 import { shownPlan, valuePricesOf } from "../../lib/pricing"
+import { SHOWS_VALUE } from "../../lib/value"
 import PlanCard from "./PlanCard.astro"
 import ValueCalculator from "./ValueCalculator"
 
 const plan = shownPlan(Astro.locals.pricing)
-const prices = valuePricesOf(plan)
+// vistIA aún no tiene los números de una óptica: solo la tarjeta del plan.
+const prices = SHOWS_VALUE ? valuePricesOf(plan) : null
 ---
 {/* Sin plan publicado no hay tarjeta ni cuenta: la sección no se dibuja en vez de quedar vacía. */}
 {plan ? (

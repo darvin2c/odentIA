@@ -1,8 +1,9 @@
 /**
  * Formulario de producto (tableros 7, 16 y 19): nombre, cómo se usa (en las
  * atenciones, se vende o las dos), en qué se usa y en qué se compra, el mínimo
- * de cada sede y, si se vende, su precio con lo que deja. El código va plegado
- * en «Más datos»: vacío, lo pone odentIA. La ayuda y el error van junto a cada
+ * de cada sede y, si se vende, su precio con lo que deja. El código y lo de la
+ * etiqueta (código de barras, marca, modelo, color y medidas) van plegados en
+ * «Más datos»: el código vacío lo pone odentIA. La ayuda y el error van junto a cada
  * campo; junto a los botones solo queda lo que no es de un campo.
  */
 import { findInventoryUnit, formatMoneyInput, parseMoney, unitFor } from "@odentia/clinical"
@@ -74,7 +75,42 @@ const productShape = z.object({
   minimums: z.array(z.object({ branchId: z.string(), name: z.string(), minQuantity: z.string() })),
   salePrice: z.string(),
   sku: z.string().trim().max(60, "El código admite hasta 60 caracteres."),
+  barcode: z
+    .string()
+    .refine((value) => {
+      const code = value.replace(/\s+/g, "")
+      return code === "" || /^[0-9A-Za-z-]{4,64}$/.test(code)
+    }, "El código de barras: de 4 a 64 números o letras."),
+  brand: z.string().trim().max(80, "La marca admite hasta 80 caracteres."),
+  model: z.string().trim().max(80, "El modelo admite hasta 80 caracteres."),
+  color: z.string().trim().max(60, "El color admite hasta 60 caracteres."),
+  size: z.string().trim().max(60, "Las medidas admiten hasta 60 caracteres."),
 })
+
+/** Lo de la etiqueta, como lo nombra el servidor y la pantalla: todo opcional. */
+const LABEL_FIELDS = [
+  { key: "barcode", label: "Código de barras", max: 64 },
+  { key: "brand", label: "Marca", max: 80 },
+  { key: "model", label: "Modelo", max: 80 },
+  { key: "color", label: "Color", max: 60 },
+  { key: "size", label: "Medidas", max: 60 },
+] as const
+
+/** El lector de códigos escribe el código y pulsa Enter: en su campo no guarda el producto. */
+function keepScanInField(event: React.KeyboardEvent<HTMLInputElement>) {
+  if (event.key === "Enter") event.preventDefault()
+}
+
+/** Lo que se envía de la etiqueta: al editar, solo lo que cambió (vacío lo borra). */
+function labelBody(value: ProductValues, product: ProductDetail | null): Partial<ProductInputBody> {
+  const out: Partial<ProductInputBody> = {}
+  for (const field of LABEL_FIELDS) {
+    const text = field.key === "barcode" ? value.barcode.replace(/\s+/g, "") : value[field.key].trim()
+    const before = product?.[field.key] ?? ""
+    if (product ? text !== before : text) out[field.key] = text || null
+  }
+  return out
+}
 
 type ProductValues = z.input<typeof productShape>
 
@@ -113,6 +149,11 @@ export function ProductFormDrawer({
     }),
     salePrice: product?.salePriceCents != null && product.saleCurrency ? formatMoneyInput(product.salePriceCents, product.saleCurrency, locale) : "",
     sku: product?.sku ?? "",
+    barcode: product?.barcode ?? "",
+    brand: product?.brand ?? "",
+    model: product?.model ?? "",
+    color: product?.color ?? "",
+    size: product?.size ?? "",
   }))
   const [moreOpen, setMoreOpen] = React.useState(false)
   const unitLocked = Boolean(product?.hasHistory && !product.unitReview)
@@ -189,6 +230,7 @@ export function ProductFormDrawer({
         minimums: value.minimums.map((row) => ({ branchId: row.branchId, minQuantity: parseWhole(row.minQuantity) ?? 0 })),
         ...(sale !== undefined ? { salePriceCents: sale } : {}),
         ...(product ? (value.sku.trim() && value.sku.trim() !== product.sku ? { sku: value.sku.trim() } : {}) : { sku: value.sku.trim() || null }),
+        ...labelBody(value, product),
       }
       await mutation.mutateAsync(body)
     },
@@ -203,11 +245,16 @@ export function ProductFormDrawer({
   const purchaseSame = values.purchaseUnit.trim() === "" || same(values.purchaseUnit, values.unit)
   const useLabel = values.usage.care && values.usage.sale ? "Se usa y se vende por" : values.usage.sale ? "Se vende por" : "Se usa por"
 
-  // Un error del código (del cliente o del servidor) abre «Más datos»: nunca queda escondido.
-  const skuError = useStore(form.store, (state) => Object.values(state.fieldMeta.sku?.errorMap ?? {}).some(Boolean))
+  // Un error de lo plegado (del cliente o del servidor: un código de barras repetido) abre
+  // «Más datos»: nunca queda escondido.
+  const moreError = useStore(form.store, (state) =>
+    (["sku", ...LABEL_FIELDS.map((field) => field.key)] as const).some((key) =>
+      Object.values(state.fieldMeta[key]?.errorMap ?? {}).some(Boolean),
+    ),
+  )
   React.useEffect(() => {
-    if (skuError) setMoreOpen(true)
-  }, [skuError])
+    if (moreError) setMoreOpen(true)
+  }, [moreError])
 
   // Lo que deja cada venta: con el último precio de compra, por unidad de uso.
   const last = product?.lastPurchase
@@ -446,7 +493,7 @@ export function ProductFormDrawer({
           <CollapsibleTrigger
             render={
               <Button type="button" variant="link" className="group h-auto min-h-11 self-start p-0 sm:min-h-8">
-                Más datos <span className="font-normal text-muted-foreground">código</span>
+                Más datos <span className="font-normal text-muted-foreground">código y etiqueta</span>
                 <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none" />
               </Button>
             }
@@ -469,6 +516,22 @@ export function ProductFormDrawer({
                 />
               )}
             </form.AppField>
+            {LABEL_FIELDS.map((item) => (
+              <form.AppField key={item.key} name={item.key}>
+                {(field) => (
+                  <field.TextField
+                    label={
+                      <>
+                        {item.label} <Optional />
+                      </>
+                    }
+                    maxLength={item.max}
+                    autoComplete="off"
+                    onKeyDown={item.key === "barcode" ? keepScanInField : undefined}
+                  />
+                )}
+              </form.AppField>
+            ))}
           </CollapsibleContent>
         </Collapsible>
       </FieldGroup>

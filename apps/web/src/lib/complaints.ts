@@ -4,6 +4,7 @@
 //
 // Es la única página de la web que llama a la API (excepción a ADR 0046): la hoja se guarda en el servidor
 // y su copia llega al correo del consumidor.
+import { DEFAULT_DOMAIN } from "./product"
 
 /**
  * Datos del proveedor que encabezan la hoja (Anexo I). Única constante de la web; el correo que envía la
@@ -51,7 +52,7 @@ export const CURRENCIES = [
   { value: "USD", label: "USD (dólares)" },
 ] as const
 
-const domain = import.meta.env.VITE_BASE_DOMAIN || "odentia.localhost"
+const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
 const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
 
 /** La API vive en api.<dominio>, como el panel en app.<dominio> (ver `site.ts`). */

@@ -1,0 +1,57 @@
+---
+// Plantilla de las páginas interiores de vistIA: la portada oscura con su ilustración (`Visual`), las
+// migas, las secciones (los bloques de `ContentBlock`, los mismos de odentIA), los enlaces de vistIA,
+// las preguntas con FAQPage y el cierre. El contenido vive en ./pages-data.ts y se elige por la dirección
+// de la página: así cada página común la nombra en su mapa por producto sin pasarle nada.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import PageHero from "../PageHero.astro"
+import ContentBlock from "../pages/ContentBlock.astro"
+import Related from "../pages/Related.astro"
+import { VISTIA_LINKS, VISTIA_PAGES, type VistiaPageData } from "./pages-data"
+import Visual from "./Visual.astro"
+
+const path = Astro.url.pathname.replace(/\/+$/, "") || "/"
+const page: VistiaPageData | undefined = Object.values(VISTIA_PAGES).find((each) => each.path === path)
+if (!page) throw new Error(`vistIA: no hay página para ${path} en pages-data.ts`)
+const trail: [string, string][] = [["Inicio", "/"], ...(page.parent ? [page.parent] : []), [page.crumb, page.path]]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), ...(page.faq.length ? [faqJsonLd(page.faq)] : [])]
+const h = page.hero
+// Las secciones alternan fondo claro y blanco; los enlaces y las preguntas siguen la alternancia.
+const n = page.blocks.length
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <PageHero tag={h.tag} title={h.title} accent={h.accent} lead={h.lead} secondary={h.secondary}>
+    <Visual slot="visual" kind={h.visual} />
+  </PageHero>
+  <nav class="wrap crumbs" aria-label="Migas de pan">
+    <ol>
+      {trail.map(([name, path], i) => (
+        <li>{i < trail.length - 1 ? <a href={path}>{name}</a> : <span aria-current="page">{name}</span>}</li>
+      ))}
+    </ol>
+  </nav>
+  {page.blocks.map((b, i) =>
+    page.anchor?.block === i ? (
+      <div id={page.anchor.id}><ContentBlock block={b} white={i % 2 === 1} /></div>
+    ) : (
+      <ContentBlock block={b} white={i % 2 === 1} />
+    ),
+  )}
+  <Related hrefs={page.related} links={VISTIA_LINKS} white={n % 2 === 1} />
+  <div class:list={["faqwrap", { white: n % 2 === 0 }]}>
+    <Faq items={page.faq} />
+  </div>
+  <CtaBand title={page.cta.title} text={page.cta.text} />
+</Base>
+
+<style>
+  .crumbs ol { list-style: none; margin: 0; padding: 18px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--soft); }
+  .crumbs li + li::before { content: "/"; margin-right: 6px; color: #cbd5e1; }
+  .crumbs a { color: var(--soft); text-decoration: none; display: inline-block; padding: 6px 0; }
+  .crumbs a:hover { color: var(--teal); }
+  .crumbs span { display: inline-block; padding: 6px 0; color: var(--ink-2); }
+  .faqwrap.white { background: var(--paper); }
+</style>

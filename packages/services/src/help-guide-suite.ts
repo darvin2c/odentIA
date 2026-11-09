@@ -19,13 +19,13 @@ function screensText(): string {
       if (name === "node_modules" || name === "dist" || name === "__golden__") continue
       const path = join(dir, name)
       if (statSync(path).isDirectory()) walk(path)
-      else if (/\.tsx?$/.test(name) && !/\.(test|stories|spec|gen)\./.test(name) && !/^seed|^help-guide/.test(name) && !/medical[\\/]help\.ts$/.test(path)) {
+      else if (/\.tsx?$/.test(name) && !/\.(test|stories|spec|gen)\./.test(name) && !/^seed|^help-guide/.test(name) && !/(medical|optical)[\\/]help\.ts$/.test(path)) {
         // Sin comentarios: un botón que se fue no puede seguir valiendo porque alguien lo nombra en uno.
         out.push(readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""))
       }
     }
   }
-  for (const dir of ["packages/clinic-app/src", "packages/ui-patterns/src", "apps/dental-clinic/src", "apps/medical-clinic/src", "packages/services/src", "packages/clinical/src", "packages/dental/src", "packages/auth/src", "apps/api/src"]) {
+  for (const dir of ["packages/clinic-app/src", "packages/ui-patterns/src", "apps/dental-clinic/src", "apps/medical-clinic/src", "apps/optical-clinic/src", "packages/services/src", "packages/clinical/src", "packages/dental/src", "packages/auth/src", "apps/api/src"]) {
     walk(resolve(ROOT, dir))
   }
   return out.join("\n").normalize("NFC").toLowerCase()
@@ -77,7 +77,7 @@ interface Asked {
   q: string
   expected: string[]
   /** La guía con que se etiquetó la respuesta. */
-  producto: "odentia" | "latidia"
+  producto: "odentia" | "latidia" | "vistia"
   /** Ruta de la pantalla desde donde se preguntó, si se sabe. */
   pantalla?: string
   /** Lo que la responde, mostrado tal cual: preguntas frecuentes (su pregunta exacta) o el párrafo de una pantalla (su id). */
@@ -99,7 +99,9 @@ export const helpBanks = JSON.parse(readFileSync(new URL("./help-preguntas.json"
   Asked[]
 >
 
-const PRODUCTS: ReadonlySet<unknown> = new Set(["odentia", "latidia"])
+const PRODUCTS: ReadonlySet<unknown> = new Set(["odentia", "latidia", "vistia"])
+/** La etiqueta del banco de cada guía, por el nombre del producto. */
+const BANK_LABEL: Readonly<Record<string, Asked["producto"]>> = { odentIA: "odentia", latidIA: "latidia", vistIA: "vistia" }
 const NOT_IN_GUIDE: ReadonlySet<unknown> = new Set(["ninguna", "datos"])
 const TUNING = ["desarrollo", "control", "final"] as const
 
@@ -115,7 +117,7 @@ export function helpBankLabelProblems(product: Asked["producto"], topics: readon
   const problems: string[] = []
   for (const [bank, items] of Object.entries(helpBanks)) {
     for (const item of items) {
-      if (!PRODUCTS.has(item.producto)) problems.push(`[${bank}] «${item.q}»: el producto «${String(item.producto)}» no existe (odentia o latidia)`)
+      if (!PRODUCTS.has(item.producto)) problems.push(`[${bank}] «${item.q}»: el producto «${String(item.producto)}» no existe (odentia, latidia o vistia)`)
       if (item.es !== undefined && !NOT_IN_GUIDE.has(item.es)) problems.push(`[${bank}] «${item.q}»: «es» vale ninguna o datos, no «${String(item.es)}»`)
       if (item.repite !== undefined && (!TUNING.includes(item.repite) || !asked(item.repite).has(normalizeForSearch(item.q)))) {
         problems.push(`[${bank}] «${item.q}»: no está repetida en «${String(item.repite)}»`)
@@ -156,7 +158,9 @@ export function describeHelpSearch(product: string, topics: readonly HelpTopic[]
 
     it("el banco por respuesta nombra lo que la guía tiene", () => {
       // Cambiar una pregunta frecuente o una pantalla cambia su etiqueta en `help-preguntas.json` en el mismo cambio.
-      expect(helpBankLabelProblems(product === "latidIA" ? "latidia" : "odentia", topics).join("\n")).toBe("")
+      const label = BANK_LABEL[product]
+      if (!label) throw new Error(`La guía de ${product} no tiene etiqueta en el banco`)
+      expect(helpBankLabelProblems(label, topics).join("\n")).toBe("")
     })
 
     it("toda pregunta frecuente se encuentra a sí misma", () => {

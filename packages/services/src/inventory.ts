@@ -49,12 +49,13 @@ import { orgCounter, patient } from "@odentia/db/schema/clinical"
 import { expense } from "@odentia/db/schema/finance"
 import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, or, type SQL, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import {
   branchNotFound,
   invalidField,
   isUniqueViolation,
+  violatedConstraint,
   notFound,
   purchaseOrderNotFound,
   ServiceError,
@@ -600,6 +601,43 @@ export interface ProductInput {
   minimums?: ProductMinimumInput[]
   /** Precio de venta por unidad de uso, en la moneda de la clínica (solo si se vende). */
   salePriceCents?: number | null
+  /** Lo que dice la etiqueta, todo opcional: el código de barras, la marca, el modelo, el color y las medidas. */
+  barcode?: string | null
+  brand?: string | null
+  model?: string | null
+  color?: string | null
+  size?: string | null
+}
+
+const LABEL_FIELDS = [
+  { key: "brand", label: "La marca", max: 80 },
+  { key: "model", label: "El modelo", max: 80 },
+  { key: "color", label: "El color", max: 60 },
+  { key: "size", label: "Las medidas", max: 60 },
+] as const
+
+/** Lo de la etiqueta: cada uno opcional y corto; el código de barras, sin espacios. */
+function labelOf(input: Partial<ProductInput>, current: ProductRow | null) {
+  const out: Record<"barcode" | "brand" | "model" | "color" | "size", string | null> = {
+    barcode: current?.barcode ?? null,
+    brand: current?.brand ?? null,
+    model: current?.model ?? null,
+    color: current?.color ?? null,
+    size: current?.size ?? null,
+  }
+  for (const field of LABEL_FIELDS) {
+    const value = input[field.key]
+    if (value === undefined) continue
+    const text = value?.trim() ?? ""
+    if (text.length > field.max) throw invalidField(field.key, `${field.label} admite hasta ${field.max} caracteres`)
+    out[field.key] = text || null
+  }
+  if (input.barcode !== undefined) {
+    const code = input.barcode?.replace(/\s+/g, "") ?? ""
+    if (code && !/^[0-9A-Za-z-]{4,64}$/.test(code)) throw invalidField("barcode", "El código de barras: de 4 a 64 números o letras")
+    out.barcode = code || null
+  }
+  return out
 }
 
 const PLURAL_TO_UNIT = new Map(INVENTORY_UNITS.map((unit) => [unit.plural, unit]))
@@ -697,7 +735,18 @@ function resolveProduct(input: Partial<ProductInput>, current: ProductRow | null
     salePriceCents = null
     saleCurrency = null
   }
-  return { usedInCare, forSale, unit, unitCode, purchaseUnit, purchaseUnitCode, purchaseFactor, salePriceCents, saleCurrency }
+  return {
+    usedInCare,
+    forSale,
+    unit,
+    unitCode,
+    purchaseUnit,
+    purchaseUnitCode,
+    purchaseFactor,
+    salePriceCents,
+    saleCurrency,
+    ...labelOf(input, current),
+  }
 }
 
 const SKU_SKIP = new Set(["DE", "DEL", "LA", "LAS", "EL", "LOS", "CON", "Y", "E", "PARA", "POR", "EN", "A", "AL", "SIN", "O", "U"])
@@ -832,7 +881,10 @@ export async function createProduct(
     })
     return { ...row, minimums: await minimumsOf(tx, orgId, row.id) }
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")
+    if (isUniqueViolation(e))
+      throw violatedConstraint(e) === "product_org_barcode_uidx"
+        ? conflict("Ese código de barras ya es de otro producto.", "barcode")
+        : conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")
     throw e
   }
 }
@@ -875,7 +927,10 @@ export async function updateProduct(
     await audit(tx, orgId, actorUserId, "product", id, "product.updated")
     return { ...row, minimums: await minimumsOf(tx, orgId, id) }
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")
+    if (isUniqueViolation(e))
+      throw violatedConstraint(e) === "product_org_barcode_uidx"
+        ? conflict("Ese código de barras ya es de otro producto.", "barcode")
+        : conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")
     throw e
   }
 }
@@ -1064,6 +1119,11 @@ function productFields(row: ProductRow, prices: boolean) {
     purchaseFactor: row.purchaseFactor,
     unitReview: row.unitReview,
     isActive: row.isActive,
+    barcode: row.barcode,
+    brand: row.brand,
+    model: row.model,
+    color: row.color,
+    size: row.size,
     ...(prices ? { salePriceCents: row.salePriceCents, saleCurrency: row.saleCurrency } : {}),
   }
 }
@@ -1095,7 +1155,8 @@ export async function listProducts(
   const { today, horizon } = await todayOf(tx, orgId, options.now ?? new Date())
   const conditions = [eq(product.organizationId, orgId)]
   const q = options.q?.trim()
-  if (q) conditions.push(foldedWordsMatch([product.name, product.sku], q))
+  // Lo que lee el escáner es el código de barras entero; lo escrito busca también marca y modelo.
+  if (q) conditions.push(or(eq(product.barcode, q.replace(/\s+/g, "")), foldedWordsMatch([product.name, product.sku, product.brand, product.model], q))!)
   const rows = await tx.select().from(product).where(and(...conditions)).limit(5000)
   const statusAt = await sedeFigures(tx, orgId, [sede.id], today, horizon)
   const items = rows

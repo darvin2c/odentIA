@@ -2,6 +2,7 @@ import {
   assignableRoles,
   canAttend,
   ORG_ROLES,
+  PRODUCT_ROLES,
   type OrgRole,
   ROLE_DESCRIPTIONS,
 } from "@odentia/auth/permissions"
@@ -28,6 +29,7 @@ import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { CalendarCheck, Users } from "lucide-react"
 import { useMemo, useState } from "react"
+import { productUi } from "../../product/product-ui"
 import { z } from "zod"
 import { ProfessionalProfileDrawer } from "../../components/professional-profile-drawer"
 import { SettingsNoAccess } from "../../components/settings/no-access"
@@ -213,7 +215,7 @@ function TeamPage() {
   const can = useCan()
   const canView = usePermission("settings.read")
   const canManage = usePermission("settings.write")
-  const assignable = useMemo(() => assignableRoles(myRole), [myRole])
+  const assignable = useMemo(() => assignableRoles(myRole, productUi().product), [myRole])
   // Colegiatura con la que firma cada profesional (ADR 0003).
   const profilesQuery = useQuery({
     queryKey: ["professional-profiles"],
@@ -637,7 +639,7 @@ function TeamPage() {
             key: "rol",
             label: "Rol",
             type: "select",
-            options: ORG_ROLES.map((role) => ({ value: role, label: roleLabel(role) })),
+            options: PRODUCT_ROLES[productUi().product].map((role) => ({ value: role, label: roleLabel(role) })),
           },
         ]}
         sortOptions={[

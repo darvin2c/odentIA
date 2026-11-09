@@ -53,6 +53,7 @@ import {
   ClosureSheetDrawer,
 } from "../../components/finance/cash-close-drawer"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
+import { CounterSaleDrawer } from "../../components/finance/counter-sale-drawer"
 import { DebtsTab } from "../../components/finance/debts-tab"
 import { ExchangeRateLine } from "../../components/finance/exchange-rate-line"
 import { ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
@@ -243,7 +244,7 @@ interface CollectTarget {
  * medio escribir en la columna, el siguiente se abre encima como cajón (la regla de la columna
  * lateral) y el primero queda como estaba.
  */
-type PanelKind = "gasto" | "cerrar" | "efectivo"
+type PanelKind = "gasto" | "cerrar" | "efectivo" | "mostrador"
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
@@ -382,6 +383,7 @@ function FinanceWorkspace() {
     collect: () => collect(),
     close: () => openPanel("cerrar"),
     expense: () => openPanel("gasto"),
+    counter: () => openPanel("mostrador"),
   }
   // Acciones de la sección: en el teléfono, en una barra siempre a la vista (cobrar y cerrar sin desplazarse).
   const phoneActions = isMobile && ws ? financePhoneActions(view, access) : []
@@ -397,11 +399,13 @@ function FinanceWorkspace() {
   const headerOn = !isMobile && ws !== null
   // Mientras llegan la sede y el perfil, la acción sigue a la vista, deshabilitada: no aparece, se va y vuelve.
   const headerWaiting = !isMobile && ws === null && (profile.isPending || branchZone.isPending)
-  const { primary: headerPrimary, menu: headerMenu } = headerOn
+  const { primary: headerPrimary, secondary: headerSecondary, menu: headerMenu } = headerOn
     ? financeHeader(view, access, runAction)
     : headerWaiting
       ? financeHeader(view, access)
-      : { primary: undefined, menu: [] }
+      : { primary: undefined, secondary: undefined, menu: [] }
+  // En el teléfono la barra de abajo trae «Cobrar»; «Venta de mostrador» va en ⋯ de la cabecera.
+  const phoneSecondary = isMobile && ws ? financeHeader(view, access, runAction).secondary : undefined
 
   const commissionsSubtitle = financeCommissionsSubtitle(access)
 
@@ -427,6 +431,7 @@ function FinanceWorkspace() {
           </>
         }
         primary={headerPrimary}
+        secondary={headerSecondary ?? phoneSecondary}
         menu={headerMenu}
       />
 
@@ -598,6 +603,7 @@ function FinanceWorkspace() {
               <ExpensesTab
                 key={ws.branchId}
                 branchId={ws.branchId}
+                branchName={ws.branchName}
                 locale={ws.locale}
                 orgTimeZone={ws.orgTimeZone}
                 currency={ws.currency}
@@ -639,6 +645,23 @@ function FinanceWorkspace() {
             place={ws}
             open={openPanels.has("gasto")}
             onClose={() => closePanel("gasto")}
+          />
+          <CounterSaleDrawer
+            open={openPanels.has("mostrador")}
+            branchId={ws.branchId}
+            branchName={ws.branchName}
+            currency={ws.currency}
+            locale={ws.locale}
+            onClose={() => closePanel("mostrador")}
+            onSold={(sold, already) => {
+              closePanel("mostrador")
+              invalidateFinance(queryClient)
+              // Un reintento sin respuesta: lo que se ve es el ticket que ya estaba, no otra venta.
+              if (already) toast.info(`Esta venta ya estaba registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}: no se cobró otra vez.`)
+              else toast.success(`Venta registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}`)
+              // El ticket se abre al lado, el mismo de Cobros: imprimir, devolver o anular.
+              openTicket(sold.id)
+            }}
           />
           <CashMoveDrawer
             branchId={ws.branchId}
@@ -712,7 +735,7 @@ function FinanceWorkspace() {
             ticket={ticket.result.ticket}
             remainingCents={ticket.result.remainingCents}
             receipt={ticket.result.receipt ?? null}
-            patientName={ticket.result.ticket.snapshot.patient.displayName}
+            patientName={ticket.result.ticket.snapshot.patient?.displayName ?? ""}
             branchName={ticket.result.ticket.snapshot.branch.name}
             locale={prof.locale}
             timeZone={ws?.timeZone ?? prof.timezone}
@@ -721,7 +744,7 @@ function FinanceWorkspace() {
             onCollectRest={(currency) => {
               const { patient } = ticket.result.ticket.snapshot
               setTicket(null)
-              collect({ id: patient.id, name: patient.displayName, currency })
+              if (patient) collect({ id: patient.id, name: patient.displayName, currency })
             }}
             onChanged={() => {
               invalidateFinance(queryClient)

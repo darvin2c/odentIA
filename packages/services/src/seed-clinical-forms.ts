@@ -190,32 +190,24 @@ export async function seedClinicalForms(
           ],
         },
         {
-          id: "salud",
-          title: "Salud",
+          // Lo de su salud (alergias, medicamentos, enfermedades) ya lo pregunta «Tus datos y tu
+          // salud» de su enlace: el cuestionario no lo repite (entrega 2). Pregunta lo de la visita.
+          id: "visita",
+          title: "Tu visita",
           fields: [
             {
-              id: "alergia",
-              label: "¿Eres alérgica o alérgico a algún medicamento, material o alimento?",
+              id: "nervios",
+              label: "¿Te pone nerviosa o nervioso ir al dentista?",
               type: "booleano",
               required: true,
             },
             {
-              id: "alergia_cual",
-              label: "¿A qué y qué te pasó?",
+              id: "nervios_que",
+              label: "¿Qué te ayudaría a estar más tranquila o tranquilo?",
               type: "texto",
-              required: true,
-              showIf: { field: "alergia", equals: true },
-              // Al finalizarlo, pasa a sus antecedentes como alergia sin confirmar.
-              definition: "AllergyIntolerance.code",
+              showIf: { field: "nervios", equals: true },
             },
-            { id: "medicamentos", label: "¿Tomas algún medicamento? ¿Cuál y cuánto?", type: "texto_largo" },
-            {
-              id: "enfermedades",
-              label: "¿Te han diagnosticado alguna enfermedad?",
-              type: "opcion_multiple",
-              help: "Por ejemplo presión alta, diabetes, problemas del corazón o de coagulación.",
-              options: ["Presión alta", "Diabetes", "Corazón", "Coagulación", "Ninguna", "Otra"],
-            },
+            { id: "antes", label: "¿Algo que quieras que sepamos antes de empezar?", type: "texto_largo" },
           ],
         },
       ],
@@ -238,10 +230,9 @@ export async function seedClinicalForms(
         motivo: "Me duele una muela de abajo al tomar frío.",
         dolor: true,
         intensidad: 6,
-        alergia: true,
-        alergia_cual: "Penicilina: ronchas en la piel",
-        medicamentos: "Losartán 50 mg cada mañana",
-        enfermedades: ["Presión alta"],
+        nervios: true,
+        nervios_que: "Que me expliquen antes cada paso",
+        antes: "Trabajo de noche: prefiero las citas por la tarde.",
       },
     })
   }

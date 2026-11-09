@@ -1,8 +1,10 @@
 ---
 // Página propia (lienzo del paso 3, tablero «Clio»); título, descripción y preguntas siguen en PAGES.asistenteClinico.
-// En latidIA, la suya (tablero «Clio» del lienzo de latidIA).
+// En latidIA, la suya (tablero «Clio» del lienzo de latidIA). vistIA no la sirve: Clío no dicta en una óptica.
 import ClioPage from "../../components/agents/clio/ClioPage.astro"
 import ClinicalPage from "../../components/latidia/agents/clinical/ClinicalPage.astro"
-import { MEDICAL } from "../../lib/product"
+import { ofProduct } from "../../lib/product"
+
+const Page = ofProduct({ dental: ClioPage, medical: ClinicalPage, optical: null })
 ---
-{MEDICAL ? <ClinicalPage /> : <ClioPage />}
+{Page ? <Page /> : null}

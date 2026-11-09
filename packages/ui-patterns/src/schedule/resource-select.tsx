@@ -28,7 +28,11 @@ export interface ResourceSelectProps {
   onChange: (value: string) => void
   /** Texto del campo vacío («Buscar profesional…»). */
   placeholder?: string
-  /** Opcional: avisa del texto de búsqueda para recargar opciones en servidor. */
+  /**
+   * Opcional: avisa del texto de búsqueda para recargar opciones en servidor. Con
+   * él, la lista muestra lo que entrega el servidor sin volver a filtrarlo por el
+   * nombre: un código de barras, una marca o un código no están en la etiqueta.
+   */
   onQueryChange?: (query: string) => void
   /**
    * Lo que se ofrece cuando la búsqueda no encuentra a nadie, en lugar de «Sin
@@ -68,6 +72,7 @@ export function ResourceSelect({
   return (
     <Combobox
       items={items}
+      {...(onQueryChange ? { filter: null } : {})}
       value={selected}
       isItemEqualToValue={(a, b) => a.id === b.id}
       itemToStringLabel={(item) => item.label}

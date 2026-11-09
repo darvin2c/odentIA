@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { MEDICAL_SEARCH } from "../latidia/home/search-data"
+import { OPTICAL_SEARCH } from "../vistia/search-data"
 import { DENTAL_SEARCH } from "./search-data"
 import { looksLikeQuestion, searchDemo, searchDigits, wordsMatch } from "./search-demo"
 
@@ -31,6 +32,16 @@ describe("buscador de la demo", () => {
     const ticket = searchDemo(DENTAL_SEARCH, "B001-000245").owners[0]
     expect(ticket?.items.map((item) => item.kind)).toEqual(["Comprobante"])
     expect(owners("987 654", MEDICAL_SEARCH)).toEqual(["rosa", "tomas"])
+    // En vistIA, Rosa y su hijo Miguel comparten el teléfono; el ticket de sus lentes, por su número.
+    expect(owners("987 654", OPTICAL_SEARCH)).toEqual(["rosa", "miguel"])
+    expect(searchDemo(OPTICAL_SEARCH, "000214").owners[0]?.items.map((item) => item.kind)).toEqual(["Comprobante"])
+  })
+
+  it("en vistIA, lo del ojo y lo que se vende se encuentran por lo que dicen", () => {
+    expect(owners("miopia", OPTICAL_SEARCH)).toEqual(["rosa"])
+    expect(owners("retinografia", OPTICAL_SEARCH)).toEqual(["rosa"])
+    expect(owners("montura", OPTICAL_SEARCH)).toContain("montura")
+    expect(searchDemo(OPTICAL_SEARCH, OPTICAL_SEARCH.examples.at(-1) ?? "").question).toBe(true)
   })
 
   it("una pregunta pone primero a Argos y no es un nombre que faltó", () => {
