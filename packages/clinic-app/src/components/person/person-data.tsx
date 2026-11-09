@@ -69,7 +69,7 @@ function Card({
   return (
     <section
       aria-label={title}
-      className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
+      className="@container flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-heading text-sm font-medium">{title}</h3>
@@ -121,13 +121,14 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
       })
     : null
   return (
-    <section aria-labelledby="datos-titulo" className="flex min-w-0 flex-col gap-4">
+    <section aria-labelledby="datos-titulo" className="@container flex min-w-0 flex-col gap-4">
       <h2 id="datos-titulo" className="text-base font-semibold">
         Datos personales
       </h2>
-      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+      {/* Por su propio ancho, no el de la ventana: con un cajón abierto al lado, una columna (QA de la ficha del 8 nov). */}
+      <div className="grid min-w-0 gap-4 @3xl:grid-cols-2">
         <Card title="Identidad" onEdit={edit("identidad")}>
-          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 @sm:grid-cols-2">
             <Item label="Nombres">
               {person.givenNames ?? (person.familyName ? null : person.displayName)}
             </Item>
@@ -138,7 +139,7 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
           </dl>
         </Card>
         <Card title="Contacto" onEdit={edit("contacto")}>
-          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 @sm:grid-cols-2">
             <Item label="Teléfono">
               {person.phone ? (
                 <>
@@ -232,7 +233,7 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
       ) : contact.isError || !data ? (
         <QueryErrorState error={contact.error} onRetry={() => void contact.refetch()} />
       ) : (
-        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 @sm:grid-cols-2">
           <Item label="Medio preferido para avisos">
             <span className="flex flex-wrap items-center gap-2">
               {data.preferredChannel

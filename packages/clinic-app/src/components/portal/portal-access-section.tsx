@@ -171,7 +171,7 @@ export function PatientPortalAccessSection({
           </Button>
         ) : null}
         {summary.candidates.length === 0 && summary.access.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Entra la propia persona si es mayor de edad, o su representante legal si es menor. Registra a su representante en «Responsables».</p>
+          <p className="text-sm text-muted-foreground">Entra la propia persona si es mayor de edad, o su representante legal si es menor. Registra a su representante en «Familia y responsables».</p>
         ) : null}
         {drawer ? (
           <AccessDrawer

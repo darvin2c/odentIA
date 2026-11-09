@@ -3149,9 +3149,11 @@ const NEED_RANK: Record<ConsentNeedStatus, number> = {
 }
 
 /**
- * Consentimientos que pide una atención: por los servicios registrados como
- * hechos y por los indicados en ella, más los pendientes que se prepararon a
- * mano en la misma atención. Uno firmado para el mismo tratamiento en otra
+ * Consentimientos que pide una atención: por lo que se hace hoy, es decir, los
+ * servicios registrados como hechos y los tratamientos que se trajeron a ella
+ * (su cita o «Hacerla hoy»), más los pendientes que se prepararon a mano en la
+ * misma atención. Lo indicado para otro día no lo pide: se consiente el día que
+ * se hace (QA de la atención del 8 nov; ADR 0165). Uno firmado para el mismo tratamiento en otra
  * visita también lo cubre. Una sola definición para el bloque Documentos, el
  * cierre y la API.
  */
@@ -3205,7 +3207,8 @@ export async function getEncounterConsentNeeds(
       and(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        sql`exists (select 1 from encounter_plan_item today where today.organization_id = ${treatmentPlanItem.organizationId}
+          and today.plan_item_id = ${treatmentPlanItem.id} and today.encounter_id = ${encounterId})`,
         sql`${treatmentPlanItem.status} <> 'cancelado'`,
       ),
     )
@@ -3373,6 +3376,9 @@ export async function getEncounterConsentNeeds(
     if (covered.has(doc.id) || doc.encounterId !== encounterId || doc.status !== "pendiente") continue
     // El preparado para lo que dejó fuera ya no falta: queda en Documentos, sin pedirse al cerrar.
     if (doc.planItemId && leftOut.has(doc.planItemId)) continue
+    // El de un tratamiento que hoy no se hace (se quitó, «Hoy no», o es para otro día) tampoco:
+    // queda en Documentos y se firma el día que se haga (ADR 0165).
+    if (doc.planItemId && !sources.some((source) => source.planItemId === doc.planItemId)) continue
     if (needs.some((need) => need.templateKey === doc.key && need.documentId === doc.id)) continue
     needs.push({
       templateKey: doc.key,

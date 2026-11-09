@@ -30,6 +30,15 @@ export function phoneMaskOptions(country: CountryCode): Required<MaskitoOptions>
 }
 
 /**
+ * Máscara mientras se escribe un número con su prefijo («+44 7700 900878»):
+ * la de `@maskito/phone` sin país fijo, que reconoce el prefijo y agrupa con el
+ * estándar. Solo dura hasta salir del campo (ver `PhoneInput`).
+ */
+export function internationalMaskOptions(country: CountryCode): Required<MaskitoOptions> {
+  return maskitoPhone({ countryIsoCode: country, metadata, strict: false, separator: " " })
+}
+
+/**
  * Dígitos nacionales tal como los pinta la máscara del país. Es la forma
  * canónica del texto del campo cuando el valor no viene del teclado: valor
  * guardado, cambio de país o pegado de un número de otro país.

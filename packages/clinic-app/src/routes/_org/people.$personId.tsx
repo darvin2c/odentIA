@@ -33,7 +33,6 @@ import { SectionSideNav } from "../../components/person/section-side-nav"
 import { dataRequestsKey, fetchDataRequests } from "../../lib/data-requests"
 import { PersonHeader } from "../../components/patient/patient-header"
 import { PersonChannels } from "../../components/person/person-channels"
-import { PersonConversations } from "../../components/person/person-conversations"
 import { PersonData } from "../../components/person/person-data"
 import { PersonLoading, PersonSectionLoading } from "../../components/person/person-loading"
 import { PersonLinks } from "../../components/person/person-links"
@@ -364,8 +363,6 @@ function PersonPageRoute() {
             summary={clinicalSummary ? summary : undefined}
           />
         )
-      case "conversaciones":
-        return <PersonConversations person={person} />
       case "citas":
         return patientId ? (
           <CitasPanel patientId={patientId} patientName={person.displayName} />
@@ -425,20 +422,30 @@ function PersonPageRoute() {
             }
           />
         ) : null
+      // Datos en cuatro (QA de la ficha del 8 nov): cada bloque con su permiso.
       case "filiacion":
-        return <PersonData person={person} detail={patientDetail} />
+        return (
+          <div className="flex min-w-0 flex-col gap-6">
+            <PersonData person={person} detail={patientDetail} />
+            {can("crm.read") ? <PersonChannels person={person} /> : null}
+          </div>
+        )
       case "contactos":
-        return <PersonLinks person={person} detail={patientDetail} />
-      case "canales":
-        return <PersonChannels person={person} />
-      case "responsables":
-        return patientId ? <ResponsablesTab patientId={patientId} /> : null
+        return (
+          <div className="flex min-w-0 flex-col gap-6">
+            <PersonLinks person={person} detail={patientDetail} />
+            {patientId ? <ResponsablesTab patientId={patientId} /> : null}
+          </div>
+        )
       case "portal":
         return patientId ? <PatientPortalAccessSection patientId={patientId} /> : null
-      case "accesos":
-        return patientId ? <AccesosPanel patientId={patientId} /> : null
       case "pedidos":
-        return patientId ? <DataRequestsPanel patientId={patientId} /> : null
+        return patientId ? (
+          <div className="flex min-w-0 flex-col gap-6">
+            {can("patients.write") ? <DataRequestsPanel patientId={patientId} /> : null}
+            {can("audit.read") ? <AccesosPanel patientId={patientId} /> : null}
+          </div>
+        ) : null
     }
     // Las secciones que agrega el producto (odentIA: Odontograma y Periodontograma).
     const own = productUi().record.sections.find((item) => item.id === section)

@@ -1074,7 +1074,7 @@ it("al reservar, el equipo registra con lo mínimo a la persona de la conversaci
   expect(detail.registration).toMatchObject({ entryPoint: "conversation", respondent: "staff", contextContactId: person.id, conversationId: threadId })
   // Lo que la clínica pide y falta queda en el caso, con las mismas palabras que el enlace de reserva.
   const notes = (await withOrgContext(appDb, "org_a", (tx) => getCaseBrief(tx, "org_a", threadId))).known.map((item) => item.text)
-  expect(notes).toContain("El equipo la registró con lo mínimo. Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento.")
+  expect(notes).toContain("El equipo registró a esta persona con lo mínimo. Faltan datos para la atención: confirmar apellidos y nombres, fecha de nacimiento.")
 })
 
 it("desde su página, sin conversación, el equipo registra con lo mínimo a una persona que ya existe y a alguien a su cargo", async () => {
@@ -1176,7 +1176,7 @@ it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con l
   expect(self).toBeTruthy()
   const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", self!.contactId))
   expect(notes.map((note) => note.body)).toContain(
-    "El equipo la registró con lo mínimo. Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento.",
+    "El equipo registró a esta persona con lo mínimo. Faltan datos para la atención: confirmar apellidos y nombres, fecha de nacimiento.",
   )
 })
 

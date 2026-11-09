@@ -118,10 +118,10 @@ export function DataConsentSection({ detail }: { detail: PatientFull }): React.J
     <Link
       to="/patients/$patientId"
       params={{ patientId }}
-      search={{ tab: "responsables" }}
+      search={{ tab: "contactos" }}
       className={cn(buttonVariants({ variant: "link", size: "sm" }), "h-auto p-0")}
     >
-      Registrar un representante en Responsables
+      Registrar un representante en Familia y responsables
     </Link>
   )
 

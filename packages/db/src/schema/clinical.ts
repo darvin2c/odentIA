@@ -878,6 +878,13 @@ export const encounter = pgTable(
      * decisión 3 de la fase 3). Historia como el resto: no cambia al cerrar.
      */
     consentSkipReason: text("consent_skip_reason"),
+    /**
+     * «Viene a su control»: el control por cumplir que quien atiende dijo, al
+     * empezar, que es el de hoy. El cierre lo trae marcado y se cumple al
+     * firmar; antes no cambia nada. Sin llave foránea: el control nace después
+     * en el esquema y nunca se borra (se cancela); el servicio lo valida.
+     */
+    visitFollowUpId: uuid("visit_follow_up_id"),
     ...timestamps,
   },
   (table) => [

@@ -1,4 +1,3 @@
-import { budgetAnswerText } from "@odentia/clinical"
 import {
   Attachment,
   AttachmentActions,
@@ -30,7 +29,7 @@ import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-ove
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
-import { EncounterHistoryCard } from "./encounter-history-card"
+import { EncounterHistoryCard, VoidedEncounterLine } from "./encounter-history-card"
 import { NewEncounterButton } from "./new-encounter-button"
 import { useOpenWide, type WideTarget } from "./wide-section"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -76,12 +75,38 @@ const DOCUMENT_FILTER_OF: Partial<Record<TimelineItem["type"], DocumentFilter>> 
   form: "formularios",
 }
 
-type GroupMode = "dia" | "atencion"
+/**
+ * Lo que ya no vale y se pliega al final de su día (QA de la ficha del 8 nov:
+ * lo anulado iba arriba de lo vigente): la atención anulada, el tratamiento
+ * cancelado y el presupuesto o el consentimiento anulados. La receta anulada y
+ * la revocación se ven: la receta impresa pudo salir y revocar es un hecho
+ * clínico vigente (mesa del 9 nov).
+ */
+function isRetired(item: TimelineItem): boolean {
+  if (item.type === "encounter") return item.status === "anulada"
+  if (item.type === "plan") return item.status === "cancelado" || item.status === "reemplazado"
+  if (item.type === "budget") return item.status === "cancelado"
+  if (item.type === "follow_up") return item.status === "cancelado"
+  if (item.type === "consent") return item.status === "anulado"
+  return false
+}
 
-const GROUP_MODES: Array<{ value: GroupMode; label: string }> = [
-  { value: "dia", label: "Día" },
-  { value: "atencion", label: "Atención" },
-]
+/** «1 atención y 1 presupuesto»: lo plegado dicho por lo que es, no solo cuántos. */
+function retiredSummary(items: TimelineItem[]): string {
+  const NAMES: Partial<Record<TimelineItem["type"], [string, string]>> = {
+    encounter: ["atención", "atenciones"],
+    plan: ["tratamiento", "tratamientos"],
+    budget: ["presupuesto", "presupuestos"],
+    follow_up: ["control", "controles"],
+    consent: ["consentimiento", "consentimientos"],
+  }
+  const parts: string[] = []
+  for (const [type, [one, many]] of Object.entries(NAMES) as Array<[TimelineItem["type"], [string, string]]>) {
+    const n = items.filter((item) => item.type === type).length
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`)
+  }
+  return parts.length <= 1 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}`
+}
 
 function dayKey(iso: string, timezone: string): string {
   const time = new Date(iso).getTime()
@@ -114,12 +139,14 @@ function itemDateTime(iso: string, timezone: string, locale: string | undefined)
 
 function CardHeaderRow({
   badge,
+  badgeVariant,
   context,
   createdAt,
   timezone,
   locale,
 }: {
   badge: string
+  badgeVariant?: "destructive"
   context?: string | null
   createdAt: string
   timezone: string
@@ -127,7 +154,7 @@ function CardHeaderRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Badge>{badge}</Badge>
+      <Badge variant={badgeVariant}>{badge}</Badge>
       {context ? <span className="text-xs text-muted-foreground">{context}</span> : null}
       <time
         dateTime={createdAt}
@@ -284,14 +311,6 @@ function AnamnesisCard({
   )
 }
 
-/**
- * La decisión vigente de un tratamiento, con las mismas palabras que Plan
- * (`budgetAnswerText`): «Aceptado», «Lo está pensando», «No aceptó»…
- */
-function decisionLabel(decision: string): string {
-  return budgetAnswerText(decision)
-}
-
 const STATUS_LABELS: Record<string, string> = {
   pendiente: "Pendiente",
   programado: "Programado",
@@ -339,7 +358,7 @@ function JourneyCard({
     <div className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
       <CardHeaderRow
         badge={timelineTypeLabel(item.type)}
-        context={item.decision ? decisionLabel(item.decision) : null}
+        context={item.openEncounter ? "De la atención en curso, sin firmar" : null}
         createdAt={item.createdAt}
         timezone={timezone}
         locale={locale}
@@ -380,7 +399,7 @@ function JourneyCard({
 }
 
 /**
- * Un papel como hecho de la historia: «Firmó el consentimiento…», «Se pidió…»,
+ * Un papel como hecho de la historia: «Firmó: …», «Se pidió…»,
  * «Se completó el formulario…» o la receta emitida. El papel en sí se abre en
  * Documentos.
  */
@@ -410,6 +429,9 @@ function FactCard({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <CardHeaderRow
           badge={voided ? `${timelineTypeLabel(item.type)} ${FEMININE_TYPES.has(item.type) ? "anulada" : "anulado"}` : timelineTypeLabel(item.type)}
+          // Una receta anulada no se confunde con una vigente (segunda mesa del 9 nov).
+          badgeVariant={voided ? "destructive" : undefined}
+          context={item.openEncounter ? "De la atención en curso, sin firmar" : null}
           createdAt={item.createdAt}
           timezone={timezone}
           locale={locale}
@@ -426,37 +448,11 @@ function FactCard({
   )
 }
 
-/** Atención anulada: queda en la historia con su motivo, sin su contenido. */
-function VoidedEncounterCard({
-  item,
-  timezone,
-  locale,
-}: {
-  item: TimelineItem
-  timezone: string
-  locale: string | undefined
-}) {
-  return (
-    <div className="flex flex-col gap-1 rounded-xl border border-dashed px-6 py-4">
-      <CardHeaderRow
-        badge="Atención anulada"
-        context={item.title}
-        createdAt={item.createdAt}
-        timezone={timezone}
-        locale={locale}
-      />
-      <p className="text-sm text-muted-foreground">
-        Motivo: {item.voidReason ?? "sin registrar"}
-      </p>
-    </div>
-  )
-}
-
 /** Historia clínica unificada: atenciones (también las anuladas), notas, anamnesis, papeles, odontograma y plan. */
 export function Timeline({ patientId, initialTooth, onOdontogramSelect }: TimelineProps) {
   const [filter, setFilter] = useState<FeedFilter>("todo")
-  const [mode, setMode] = useState<GroupMode>("dia")
-  const [order, setOrder] = useState<"desc" | "asc">("desc")
+  // Lo plegado de cada día que se abrió.
+  const [openRetired, setOpenRetired] = useState<ReadonlySet<string>>(new Set())
   const [tooth, setTooth] = useState<string>(
     initialTooth != null ? String(initialTooth) : ALL_TEETH,
   )
@@ -471,12 +467,11 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   const toothNumber = tooth === ALL_TEETH ? undefined : Number(tooth)
 
   const feed = useInfiniteQuery({
-    queryKey: ["timeline", patientId, types, toothNumber, order],
+    queryKey: ["timeline", patientId, types, toothNumber],
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams()
       if (types) params.set("types", types)
       if (toothNumber != null) params.set("toothNumber", String(toothNumber))
-      if (order !== "desc") params.set("order", order)
       if (pageParam) params.set("cursor", pageParam)
       const query = params.toString()
       return apiFetch<TimelinePage>(
@@ -491,66 +486,54 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   const timezone = feed.data?.pages[0]?.timezone ?? activeOrgTimeZone()
   const locale = feed.data?.pages[0]?.locale ?? activeOrgLocale()
 
+  // Un día, con su atención como tarjeta (lo nacido en ella va dentro, lo dice el
+  // servidor) y lo anulado plegado al final del día: ya no hace falta agrupar
+  // «por atención» aparte (QA de la ficha del 8 nov).
   const groups = useMemo(() => {
-    const ordered = new Map<string, { heading: string; sample: string; items: TimelineItem[] }>()
-    if (mode === "dia") {
-      for (const item of items) {
-        const key = dayKey(item.createdAt, timezone)
-        const group = ordered.get(key)
-        if (group) group.items.push(item)
-        else
-          ordered.set(key, {
-            heading: dayHeading(item.createdAt, timezone, locale),
-            sample: item.createdAt,
-            items: [item],
-          })
-      }
-      return [...ordered.entries()]
-    }
-    // Modo Atención: una sección por atención con su motivo y fecha, y una
-    // sección final "Generales" con notas sueltas y eventos no vinculados.
-    // Los documentos de cada atención se ven dentro de su tarjeta
-    // (misma unidad clínica), no duplicados en Generales.
+    const ordered = new Map<string, { heading: string; sample: string; items: TimelineItem[]; retired: TimelineItem[] }>()
     for (const item of items) {
-      if (item.type !== "encounter") continue
-      ordered.set(item.id, {
-        heading: `Atención · ${item.title} · ${dayHeading(item.createdAt, timezone, locale)}`,
-        sample: item.createdAt,
-        items: [item],
-      })
-    }
-    const generales = items.filter((item) => item.type !== "encounter")
-    if (generales.length > 0) {
-      ordered.set("generales", {
-        heading: "Generales",
-        sample: generales[0]!.createdAt,
-        items: generales,
-      })
+      const key = dayKey(item.createdAt, timezone)
+      const group =
+        ordered.get(key) ??
+        ordered
+          .set(key, { heading: dayHeading(item.createdAt, timezone, locale), sample: item.createdAt, items: [], retired: [] })
+          .get(key)!
+      if (isRetired(item)) group.retired.push(item)
+      else group.items.push(item)
     }
     return [...ordered.entries()]
-  }, [items, mode, timezone, locale])
+  }, [items, timezone, locale])
 
   // El filtro por lugar y los hechos propios del producto (odentIA: la pieza y el odontograma firmado).
   const { site, history } = productUi()
 
-  const hasActiveFilter = filter !== "todo" || tooth !== ALL_TEETH || order !== "desc"
+  const hasActiveFilter = filter !== "todo" || tooth !== ALL_TEETH
+
+  const renderItem = (item: TimelineItem) =>
+    item.type === "encounter" && item.status === "anulada" ? (
+      <VoidedEncounterLine key={item.id} item={item} />
+    ) : item.type === "encounter" ? (
+      <EncounterHistoryCard key={item.id} patientId={patientId} item={item} />
+    ) : item.type === "prescription" || item.type === "consent" || item.type === "order" || item.type === "form" ? (
+      <FactCard key={item.id} item={item} timezone={timezone} locale={locale} />
+    ) : item.type === "note" ? (
+      <NoteCard key={item.id} item={item} timezone={timezone} locale={locale} />
+    ) : item.type === "odontogram" ? (
+      <OdontogramCard key={item.id} item={item} timezone={timezone} locale={locale} onOdontogramSelect={onOdontogramSelect} />
+    ) : history.owns(item.type) ? (
+      <history.Item key={item.id} item={item} patientId={patientId} />
+    ) : item.type === "document" ? (
+      <DocumentCard key={item.id} patientId={patientId} item={item} />
+    ) : item.type === "anamnesis" ? (
+      <AnamnesisCard key={item.id} item={item} timezone={timezone} locale={locale} onView={setViewingAnamnesis} />
+    ) : (
+      <JourneyCard key={item.id} item={item} timezone={timezone} locale={locale} />
+    )
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <ViewTabs label="Filtrar historia clínica" value={filter} options={FILTERS} onValueChange={setFilter} />
-        <div className="flex flex-wrap items-center gap-2">
-          <ViewTabs label="Agrupar historia clínica" value={mode} options={GROUP_MODES} onValueChange={setMode} />
-          <ViewTabs
-            label="Orden de historia clínica"
-            value={order}
-            options={[
-              { value: "desc", label: "Recientes" },
-              { value: "asc", label: "Antiguos" },
-            ]}
-            onValueChange={setOrder}
-          />
-        </div>
       </div>
 
       {site ? (
@@ -616,52 +599,34 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
           <h3 className="text-sm font-semibold text-muted-foreground">
             <time dateTime={group.sample}>{group.heading}</time>
           </h3>
-          {group.items.map((item) =>
-            item.type === "encounter" && item.status === "anulada" ? (
-              <VoidedEncounterCard key={item.id} item={item} timezone={timezone} locale={locale} />
-            ) : item.type === "encounter" ? (
-              <EncounterHistoryCard key={item.id} patientId={patientId} item={item} />
-            ) : item.type === "prescription" ||
-              item.type === "consent" ||
-              item.type === "order" ||
-              item.type === "form" ? (
-              <FactCard
-                key={item.id}
-                item={item}
-                timezone={timezone}
-                locale={locale}
-              />
-            ) : item.type === "note" ? (
-              <NoteCard key={item.id} item={item} timezone={timezone} locale={locale} />
-            ) : item.type === "odontogram" ? (
-              <OdontogramCard
-                key={item.id}
-                item={item}
-                timezone={timezone}
-                locale={locale}
-                onOdontogramSelect={onOdontogramSelect}
-              />
-            ) : history.owns(item.type) ? (
-              <history.Item key={item.id} item={item} patientId={patientId} />
-            ) : item.type === "document" ? (
-              <DocumentCard key={item.id} patientId={patientId} item={item} />
-            ) : item.type === "anamnesis" ? (
-              <AnamnesisCard
-                key={item.id}
-                item={item}
-                timezone={timezone}
-                locale={locale}
-                onView={setViewingAnamnesis}
-              />
-            ) : (
-              <JourneyCard
-                key={item.id}
-                item={item}
-                timezone={timezone}
-                locale={locale}
-              />
-            ),
-          )}
+          {group.items.map(renderItem)}
+          {group.retired.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto justify-start p-0 text-muted-foreground"
+                aria-expanded={openRetired.has(key)}
+                aria-controls={`retired-${key}`}
+                onClick={() =>
+                  setOpenRetired((current) => {
+                    const next = new Set(current)
+                    if (next.has(key)) next.delete(key)
+                    else next.add(key)
+                    return next
+                  })
+                }
+              >
+                {openRetired.has(key) ? "Ocultar lo anulado" : `Anulado ese día: ${retiredSummary(group.retired)} · Ver`}
+              </Button>
+              {openRetired.has(key) ? (
+                <div id={`retired-${key}`} className="flex flex-col gap-2">
+                  {group.retired.map(renderItem)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ))}
 

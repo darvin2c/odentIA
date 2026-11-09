@@ -1,5 +1,5 @@
 import { member } from "@odentia/db/schema/auth"
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
@@ -64,6 +64,23 @@ async function fakeSpeech(page: Page) {
   }
 }
 
+/**
+ * «Escribir en vez de dictar». Sin nada dictado, la barra del dictado no ocupa la atención: se
+ * abre desde «¿Qué puedo decir?» de la cabecera; con algo dictado o sugerencias, desde la barra.
+ */
+async function writeDictation(page: Page, text: string, from?: Locator) {
+  const bar = from ?? page.getByRole("region", { name: "Dictado de la atención" })
+  if (from || (await bar.count()) > 0) {
+    await bar.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+  } else {
+    await page.getByRole("button", { name: "¿Qué puedo decir?", exact: true }).click()
+    await page.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+  }
+  const typing = from ?? page.getByRole("region", { name: "Dictado de la atención" })
+  await typing.getByLabel("Escribe lo dictado").fill(text)
+  await typing.getByRole("button", { name: "Ordenar lo dictado" }).click()
+}
+
 test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al firmar", async ({ owner }, info) => {
   const { page, org } = owner
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
@@ -76,26 +93,27 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
   await page.getByRole("button", { name: "Atender", exact: true }).first().click()
   await expect(page).toHaveURL(/\/encounters\//)
 
-  const idle = page.getByRole("region", { name: "Dictado de la atención" })
-  const consulta = page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })
+  const dictate = page.getByRole("button", { name: "Dictar", exact: true })
   const reason = page.getByLabel("Motivo de consulta", { exact: true })
-  // Con Clío apagada tampoco se abre: «Consulta» espera a que la pidan.
-  await expect(consulta).toHaveAttribute("aria-expanded", "false")
-  await expect(reason).toHaveCount(0)
-  await expect(idle).toHaveCount(0)
+  // El motivo se escribe en la misma página: nada se abre encima ni toma el cursor (en el teléfono subiría el teclado).
+  await expect(reason).toBeVisible()
+  await expect(reason).not.toBeFocused()
+  await expect(dictate).toHaveCount(0)
 
   await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
   await gotoHydrated(page, page.url())
-  await expect(idle.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
-  await expect(consulta).toHaveAttribute("aria-expanded", "false")
-  await expect(reason).toHaveCount(0)
+  // Con Clío encendida, dictar es un botón de la cabecera: el cuadro del dictado no ocupa la atención.
+  await expect(dictate).toBeVisible()
+  await expect(page.getByRole("region", { name: "Dictado de la atención" })).toHaveCount(0)
+  await expect(reason).not.toBeFocused()
   await info.attach("atender-sin-motivo", { body: await page.screenshot(), contentType: "image/png" })
 
-  // En el teléfono tampoco se abre el cajón encima.
+  // En el teléfono tampoco se abre nada encima.
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, page.url())
-  await expect(idle.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
+  await expect(dictate).toBeVisible()
   await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
+  await expect(reason).not.toBeFocused()
   await info.attach("atender-sin-motivo-movil", { body: await page.screenshot(), contentType: "image/png" })
 
   // Si no lo dictó ni lo escribió, «Finalizar y firmar» lleva a su campo con el cursor ahí.
@@ -105,12 +123,10 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
   await expect(reason).toBeFocused()
   await expect(page.getByText("Escribe el motivo: es obligatorio para cerrar")).toBeVisible()
 
-  // Ya escrito, volver a abrir «Consulta» no lleva el cursor ahí: en el teléfono subiría el teclado.
+  // Ya escrito, al volver a la atención sigue ahí y el cursor no salta al campo.
   await reason.fill("Dolor en una muela")
   await expect(page.getByText(/^Guardado /)).toBeVisible()
-  await page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Cerrar" }).click()
-  await expect(reason).toHaveCount(0)
-  await consulta.click()
+  await gotoHydrated(page, page.url())
   await expect(reason).toHaveValue("Dolor en una muela")
   await expect(reason).not.toBeFocused()
 })
@@ -144,6 +160,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await expect(page.getByRole("region", { name: "Cierre de la atención" })).toBeVisible()
   await expect(page.getByRole("region", { name: "Dictado de la atención" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Dictar", exact: true })).toHaveCount(0)
 
   // --- Página del asistente: dictado de práctica y encendido ---
   await gotoHydrated(page, tenant(org.slug, "/agent"))
@@ -185,24 +202,24 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const review = page.getByRole("region", { name: "Sugerencias por revisar" })
-  const block = (name: string) => page.locator(`section[aria-label="${name}"]`).filter({ has: page.getByRole("heading", { level: 2, name, exact: true }) })
+  const block = (name: string) => page.getByRole("region", { name, exact: true })
   const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
-  const write = async (text: string, from = idle) => {
-    await from.getByRole("button", { name: "Escribir en vez de dictar" }).click()
-    await from.getByLabel("Escribe lo dictado").fill(text)
-    await from.getByRole("button", { name: "Ordenar lo dictado" }).click()
-  }
-  await expect(idle).toContainText("Nada entra a la historia hasta que confirmes.")
+  const write = (text: string, from?: Locator) => writeDictation(page, text, from)
+  // Sin nada dictado, la barra no ocupa la atención: «¿Qué puedo decir?» dice cómo funciona.
+  await expect(idle).toHaveCount(0)
+  await page.getByRole("button", { name: "¿Qué puedo decir?", exact: true }).click()
+  await expect(page.getByRole("dialog").filter({ hasText: "Escribir en vez de dictar" })).toContainText("Nada entra a la historia hasta que confirmes.")
+  await page.keyboard.press("Escape")
   await write(DICTATION)
   await expect(review).toContainText("Clío dejó 4 sugerencias por revisar")
   await expect(review).toContainText("4 listas. Nada entra a la historia hasta que lo confirmes.")
-  // Cada sugerencia vive en su bloque, que la cuenta en su resumen.
+  // Cada sugerencia vive en su parte de la atención, debajo de lo registrado (sugerido no es registrado).
   await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
-  await expect(block("Diagnóstico")).toContainText("Sin diagnósticos confirmados · 1 sugerencia")
+  await expect(block("Diagnóstico (0)")).toContainText("Sin diagnósticos registrados.")
   await expect(suggested("Plan de tratamiento")).toContainText("Endodoncia multirradicular · S/ 650.00")
-  // Indicaciones y controles se revisan en un solo bloque, «Plan y controles» (ADR 0034).
-  await expect(block("Plan y controles")).toContainText("Sin indicaciones confirmadas · 2 sugerencias")
-  await expect(block("Plan y controles").getByRole("list", { name: "Sugerencias de Clío: Controles" }).getByRole("listitem")).toHaveCount(1)
+  // Indicaciones y controles se revisan en el Plan (ADR 0034).
+  await expect(block("Plan").getByRole("list", { name: "Sugerencias de Clío: Plan de tratamiento" })).toBeVisible()
+  await expect(block("Plan").getByRole("list", { name: "Sugerencias de Clío: Controles" }).getByRole("listitem")).toHaveCount(1)
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // La atención ya tiene motivo: se dice antes de confirmar que lo dictado se agrega.
   await expect(suggested("Consulta")).toContainText("Se agrega a lo que ya hay en Motivo de consulta.")
@@ -216,12 +233,12 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(page.getByText("Faltan 2 para cerrar: diagnóstico y evolución")).toBeVisible()
   await expect(signButton).toBeEnabled()
   await signButton.click()
-  const missingPanel = page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Evolución, pronóstico e indicaciones" })
-  await expect(missingPanel.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
-  await expect(missingPanel.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()
+  // En la misma página: sin cajón que cerrar.
+  const missing = block("Evolución e indicaciones")
+  await expect(missing.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
+  await expect(missing.getByLabel("Evolución", { exact: true })).toBeFocused()
+  await expect(missing.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()
   await expect(page.getByRole("dialog", { name: "Finalizar y firmar" })).toHaveCount(0)
-  await missingPanel.getByRole("button", { name: "Cerrar" }).click()
-  await expect(missingPanel).toHaveCount(0)
   // Nada entra a la historia hasta que lo confirmes.
   const detail = () => call<{ encounter: { reason: string | null; evolution: string | null; status: string }; diagnoses: Array<{ diagnosisCode: string; toothNumber: number | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
   expect((await detail()).diagnoses).toEqual([])
@@ -247,9 +264,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(saved.encounter).toMatchObject({ reason: joinedReason, evolution: "Se realizó apertura cameral sin complicaciones." })
   expect(saved.diagnoses).toEqual([expect.objectContaining({ diagnosisCode: "K02.1", toothNumber: 16 })])
   // El borrador de la pantalla también se une: si lo pisara, el autoguardado borraría lo de antes.
-  await page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true }).click()
   await expect(page.getByLabel("Motivo de consulta", { exact: true })).toHaveValue(joinedReason)
-  await page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Cerrar" }).click()
   // La pantalla refleja lo confirmado sin recargar.
   // La lista de cierre solo dice lo que falta: el diagnóstico ya no aparece.
   await expect(closing.getByRole("listitem").filter({ hasText: "diagnóstico" })).toHaveCount(0)
@@ -312,7 +327,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await finding.getByRole("button", { name: "Diente no erupcionado" }).click()
   await expect(finding).not.toContainText("Por revisar")
   await finding.getByRole("button", { name: "Confirmar", exact: true }).click()
-  await expect(block("Odontograma")).toContainText("1 hallazgo en esta atención")
+  // Lo registrado hoy se ve debajo del odontograma, sin abrir nada.
+  await expect(page.getByRole("list", { name: "Hallazgos de esta atención" }).getByRole("listitem")).toHaveCount(1)
+  await expect(page.getByRole("list", { name: "Hallazgos de esta atención" })).toContainText("Pieza 46")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictado-odontograma", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
@@ -337,7 +354,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  const dictate = idle.getByRole("button", { name: "Dictar", exact: true })
+  // Recargada y sin sugerencias pendientes, dictar está en la cabecera.
+  const dictate = page.getByRole("button", { name: "Dictar", exact: true })
   expect((await dictate.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await dictate.click()
   await expect(live).toContainText("Escuchando")
@@ -437,7 +455,7 @@ test("dictado: el corte del servicio de voz del navegador no pausa; si la red no
   // «Lo dictado» se abre al lado desde 1280 px: la misma ventana que las demás atenciones de este archivo.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  await page.getByRole("region", { name: "Dictado de la atención" }).getByRole("button", { name: "Dictar", exact: true }).click()
+  await page.getByRole("button", { name: "Dictar", exact: true }).click()
   const live = page.getByRole("region", { name: "Dictado en curso" })
   const lost = page.getByRole("alert").filter({ hasText: "No pude seguir escuchando" })
   await expect(live).toContainText("Escuchando")
@@ -493,13 +511,8 @@ test("asistente clínico: la alergia dictada y lo hecho hoy se confirman donde v
   await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
-  const write = async (text: string) => {
-    await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
-    await idle.getByLabel("Escribe lo dictado").fill(text)
-    await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
-  }
+  const write = (text: string) => writeDictation(page, text)
   await write("Es alérgica a la penicilina. Le hice la endodoncia multirradicular en la dieciséis.")
 
   // La alergia va junto a las alertas, con su código; qué tan fuerte fue es un aviso que se toca.
@@ -560,11 +573,8 @@ test("asistente clínico: la próxima cita y el presupuesto se piden por voz y s
   const dictation = () => call<{ suggestions: Array<{ kind: string; status: string }>; confirmed: number }>(page, "GET", dictationPath, org.slug)
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
-  await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
-  await idle.getByLabel("Escribe lo dictado").fill("En la dieciséis hacemos endodoncia. Cítalo en quince días para la endodoncia. Arma el presupuesto para enseñárselo.")
-  await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  await writeDictation(page, "En la dieciséis hacemos endodoncia. Cítalo en quince días para la endodoncia. Arma el presupuesto para enseñárselo.")
 
   // La cita: tu primer hueco desde ese día, con otros para tocar y el aviso que recibirá.
   const booking = suggested("Próxima cita").getByRole("listitem").first()
@@ -585,7 +595,10 @@ test("asistente clínico: la próxima cita y el presupuesto se piden por voz y s
   await budget.getByRole("button", { name: "Armar", exact: true }).click()
   await expect(page.getByText("Presupuesto armado.")).toBeVisible()
   await expect(suggested("Plan de tratamiento")).toHaveCount(0)
-  await page.getByRole("button", { name: "Mostrar a Rosa" }).click()
+  // En la atención, mostrar, imprimir y enviar van en un menú; lo principal es «Anotar su respuesta».
+  await expect(page.getByRole("region", { name: "Presupuesto", exact: true }).getByRole("button", { name: "Anotar su respuesta" })).toBeVisible()
+  await page.getByRole("button", { name: "Mostrar · Imprimir · Enviar" }).click()
+  await page.getByRole("menuitem", { name: "Mostrar a Rosa" }).click()
   const shown = page.getByRole("dialog", { name: "Presupuesto para Rosa Quispe" })
   await expect(shown).toContainText("Mostrarlo no le envía nada")
   await expect(shown.locator("iframe")).toBeVisible({ timeout: 15_000 })
@@ -635,10 +648,7 @@ test("asistente clínico: el material dicho es el total de la atención y sale d
   await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  const idle = page.getByRole("region", { name: "Dictado de la atención" })
-  await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
-  await idle.getByLabel("Escribe lo dictado").fill("Usé una mascarilla. Usé cuatro pares de guantes.")
-  await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  await writeDictation(page, "Usé una mascarilla. Usé cuatro pares de guantes.")
 
   // Van con lo hecho hoy; los guantes dicen que la endodoncia ya los trae y que no se suman.
   const materials = page.getByRole("list", { name: "Sugerencias de Clío: Materiales" })

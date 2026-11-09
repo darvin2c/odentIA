@@ -292,3 +292,25 @@ export function ticketUntaxedNote(taxes: {
   if (untaxed.size === 2) return `Parte de lo cobrado no lleva ${taxes.name}.`
   return untaxed.has("servicios") ? `La atención no lleva ${taxes.name}.` : `Los productos no llevan ${taxes.name}.`
 }
+
+/**
+ * Un ticket que usó saldo a favor, dicho para que cuadre a la vista (QA del 9
+ * nov): las líneas dicen lo que cada concepto quedó pagado (dinero nuevo más
+ * saldo a favor) y el total es solo el dinero nuevo. Se dice la suma de las
+ * líneas, el saldo a favor que se restó y lo pagado hoy, que es lo que suman
+ * los medios. Solo presentación: los importes congelados no cambian. Null si
+ * no usó saldo a favor (el ticket se lee como siempre).
+ */
+export function ticketCreditSummary(ticket: {
+  /** Lo que cada línea quedó pagado con este ticket. */
+  lineCents: readonly number[]
+  /** Lo que quedó a favor como adelanto en este ticket. */
+  advanceCents?: number | null
+  creditAppliedCents: number
+  /** El total del ticket: el dinero nuevo. */
+  totalCents: number
+}): { sumCents: number; creditCents: number; paidTodayCents: number } | null {
+  if (ticket.creditAppliedCents <= 0) return null
+  const sumCents = ticket.lineCents.reduce((sum, cents) => sum + cents, 0) + (ticket.advanceCents ?? 0)
+  return { sumCents, creditCents: ticket.creditAppliedCents, paidTodayCents: ticket.totalCents }
+}

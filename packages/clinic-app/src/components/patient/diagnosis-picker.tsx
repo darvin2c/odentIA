@@ -245,6 +245,8 @@ export function DiagnosisPicker({
                 variant={isChosen(item) ? "default" : "outline"}
                 aria-pressed={isChosen(item)}
                 disabled={disabled}
+                // Un nombre largo baja de línea en vez de salirse del panel a 390 px (QA del 9 nov).
+                className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left"
                 onClick={() =>
                   onChange({ code: item.code, description: item.description, system: item.system })
                 }

@@ -30,6 +30,7 @@
     "./lib/query-error": "./src/lib/query-error.tsx",
     "./lib/route-tree-checks": "./src/lib/route-tree-checks.ts",
     "./lib/services": "./src/lib/services.ts",
+    "./lib/site-findings": "./src/lib/site-findings.ts",
     "./product/product-ui": "./src/product/product-ui.ts",
     "./vite": "./vite.ts"
   },

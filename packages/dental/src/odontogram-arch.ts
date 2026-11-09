@@ -7,6 +7,11 @@
  */
 
 export const ARCH_ASPECT = 0.9
+/**
+ * Una sola arcada a lo ancho (en el celular): una U más alta que ancha, para que las piezas
+ * lleguen a unos 44 px, el mínimo táctil, en un ancho de 330 px (QA del 9 nov: medían 23–35).
+ */
+export const SINGLE_ARCH_ASPECT = 1.1
 
 /** Exponente de la superelipse: lados casi rectos y frente redondeado. */
 const SHAPE_N = 2.8
@@ -118,9 +123,15 @@ function polyline(pts: readonly Point[]) {
  * mixta) las temporales van en una herradura más chica dentro de la otra; los
  * números de las permanentes pasan afuera para no mezclarse con las temporales.
  */
-export function archLayout(width: number, outer: ArchRows, inner?: ArchRows): ArchLayout {
+export function archLayout(
+  width: number,
+  outer: ArchRows,
+  inner?: ArchRows,
+  opts: { single?: "upper" | "lower" } = {},
+): ArchLayout {
   const W = width
-  const H = W * ARCH_ASPECT
+  const single = opts.single
+  const H = W * (single ? SINGLE_ARCH_ASPECT : ARCH_ASPECT)
   const inside = !inner
   const count = Math.max(outer.upper.length, outer.lower.length)
   let t = W * 0.12
@@ -131,17 +142,19 @@ export function archLayout(width: number, outer: ArchRows, inner?: ArchRows): Ar
   let curve: Point[] = []
   // El tamaño de la pieza depende del largo de la curva y la curva del margen
   // que deja la pieza: unas pocas vueltas bastan para que se estabilice.
+  const margin = () => (inside ? h / 2 + 2 : h / 2 + LABEL_PX + 8)
   for (let i = 0; i < 6; i++) {
     h = t / 1.2
-    gap = t + 0.012 * W
+    // Una sola arcada no deja hueco para la otra: ocupa todo el alto.
+    gap = single ? 0 : t + 0.012 * W
     a = W / 2 - (inside ? t / 2 + 2 : h / 2 + LABEL_PX + 9)
-    b = (H - gap) / 2 - (inside ? h / 2 + 2 : h / 2 + LABEL_PX + 8)
+    b = single ? H - 2 * margin() : (H - gap) / 2 - margin()
     curve = halfArch(a, b, TUCK)
     const fit = (polyline(curve).length / (count - 1)) * 0.97 - 0.005 * W
-    t = Math.min(W * (count <= 10 ? 0.13 : 0.1), fit)
+    t = Math.min(W * (single ? 0.15 : count <= 10 ? 0.13 : 0.1), fit)
   }
-  const yUpper = (H - gap) / 2
-  const yLower = (H + gap) / 2
+  const yUpper = single === "upper" ? H - margin() : (H - gap) / 2
+  const yLower = single === "lower" ? margin() : (H + gap) / 2
   const teeth: ArchTooth[] = []
   const gums: ArchGum[] = []
 

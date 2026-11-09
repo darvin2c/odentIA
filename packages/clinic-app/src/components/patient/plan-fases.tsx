@@ -249,11 +249,17 @@ function PlanPhasesGroup({
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {[
+                            // Con su nombre, como la Historia (repaso de la ficha del 9 nov).
                             item.diagnosisCode
-                              ? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)
+                              ? (item.diagnosisName ?? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode))
                               : null,
-                            // Con una revisión enviada, lo que espera es el precio nuevo.
-                            item.newTermsPending ? "Precio nuevo por responder" : planDecisionLabel(item.decisionStatus),
+                            // Con una revisión enviada, lo que espera es el precio nuevo. Lo realizado
+                            // ya no dice «Aceptado»: una etiqueta por renglón.
+                            item.newTermsPending
+                              ? "Precio nuevo por responder"
+                              : item.status === "realizado"
+                                ? null
+                                : planDecisionLabel(item.decisionStatus),
                             // Lo de una sola sesión no dice «0 de 1 sesión»: solo lo de varias.
                             // Lo que se terminó antes de sus previstas lo dice: por eso no ofrece «Falta otra sesión».
                             item.status === "realizado" && sessions < planned
@@ -267,9 +273,11 @@ function PlanPhasesGroup({
                             .join(" · ")}
                         </span>
                       </div>
-                      <Badge variant={statusVariant(item.status)}>
-                        {planStatusLabel(item.status)}
-                      </Badge>
+                      {/* «Pendiente» junto a «Aceptado · Iniciar la primera sesión» eran dos etiquetas
+                          para lo mismo: lo que no empezó lo dice su renglón. */}
+                      {item.status === "pendiente" && item.decisionStatus === "aceptado" ? null : (
+                        <Badge variant={statusVariant(item.status)}>{planStatusLabel(item.status)}</Badge>
+                      )}
                       <div className="flex items-center gap-1">
                         {canWrite && !closed ? (
                           <>

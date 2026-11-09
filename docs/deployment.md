@@ -150,7 +150,7 @@ producto del dominio desde el que se pide (decisión 17).
 
 ### vistIA en su dominio
 
-vistIA, el producto de las ópticas (ADR 0166), va en `vistia20.com` igual que latidIA en el
+vistIA, el producto de las ópticas (ADR 0168), va en `vistia20.com` igual que latidIA en el
 suyo: con `OPTICAL_DOMAIN=vistia20.com` en la API y el worker, la API responde también en
 `api.vistia20.com` con su propia sesión, CORS acepta `vistia20.com`, `app.vistia20.com` y
 `*.vistia20.com`, y los enlaces de una óptica van en `<óptica>.vistia20.com`. Sin

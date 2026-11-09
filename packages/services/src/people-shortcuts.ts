@@ -3,8 +3,8 @@
  * algo ahora. No inventan reglas:
  * - «Por agendar» y «Control vencido» son las reglas de `to-schedule.ts`, las
  *   mismas de Inicio y de las líneas de Argos: el número es el mismo en las tres.
- * - Los presupuestos caen en el mismo paso que dice «Qué sigue» (`planNextStepsOf`,
- *   la regla de `getPlanNextStep`): un solo paso por persona.
+ * - Los presupuestos salen de la lista de «Qué sigue» (`planStepListsOf`, la
+ *   regla de `getPlanNextSteps`): quien tiene ese paso en cualquier fila.
  * - «Por invitar a volver» es `lapsedToInvite`, lo que falta de su ficha es
  *   `patientsMissingData` y «Deben», sus cobros (`getDebts`).
  * Así la lista y su atajo no pueden contradecirse.
@@ -13,7 +13,7 @@ import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { getDebts } from "./finance.js"
 import { patientsMissingData } from "./patient-registration.js"
-import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
+import { type PlanNextKind, planStepListsOf } from "./plan-next.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { patientsToSchedule, patientsWithOverdueControl } from "./to-schedule.js"
 
@@ -38,6 +38,7 @@ const SHORTCUT_OF_PLAN: Record<PlanNextKind, PeopleShortcut | null> = {
   continuar: null,
   respuesta: "presupuesto_sin_respuesta",
   control: null,
+  cerrar: null,
   ninguno: null,
 }
 
@@ -97,11 +98,11 @@ export async function peopleShortcutMembers(
     members.control_por_reservar = await patientsWithOverdueControl(tx, orgId, timezone)
   if (planAllowed && PLAN_SHORTCUTS.some(wanted)) {
     for (const shortcut of PLAN_SHORTCUTS) members[shortcut] = []
-    // Todos de una vez, con la misma regla de «Qué sigue» (`planNextStepsOf`).
-    const steps = await planNextStepsOf(tx, orgId, await plannedPatientIds(tx, orgId), () => true)
-    for (const [patientId, step] of steps) {
-      const shortcut = SHORTCUT_OF_PLAN[step.kind]
-      if (shortcut && members[shortcut]) members[shortcut]?.push(patientId)
+    // Todos de una vez, con la misma lista de «Qué sigue» (`planStepListsOf`): el paso en cualquier fila.
+    const lists = await planStepListsOf(tx, orgId, await plannedPatientIds(tx, orgId), () => true)
+    for (const [patientId, steps] of lists) {
+      const shortcuts = new Set(steps.map((step) => SHORTCUT_OF_PLAN[step.kind]))
+      for (const shortcut of shortcuts) if (shortcut && members[shortcut]) members[shortcut]?.push(patientId)
     }
   }
   if (can("patients.read") && wanted("faltan_datos")) members.faltan_datos = [...(await patientsMissingData(tx, orgId))]
