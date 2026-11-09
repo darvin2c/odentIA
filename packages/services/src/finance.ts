@@ -1947,12 +1947,26 @@ export async function getMonthExpenses(
       }
     }
   }
+  // Lo anulado para convertirlo en un sueldo no dice su motivo a quien no ve los sueldos: el motivo
+  // cuenta lo que se pagaba y a quién (ADR 0166).
+  const voidedIds = rows.filter((row) => row.voidedAt !== null).map((row) => row.id)
+  const intoSalary = new Set(
+    viewer.seesCommissions || voidedIds.length === 0
+      ? []
+      : (
+          await tx
+            .select({ id: expense.replacesExpenseId })
+            .from(expense)
+            .where(and(eq(expense.organizationId, orgId), inArray(expense.replacesExpenseId, voidedIds), eq(expense.category, STAFF_PAY_CATEGORY)))
+        ).map((row) => row.id),
+  )
   const detailed = rows.filter((row) => !replacedIds.has(row.id)).map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
     const was = row.replacesExpenseId ? before.get(row.replacesExpenseId) : undefined
     return {
       ...row,
+      voidReason: intoSalary.has(row.id) ? null : row.voidReason,
       // El tipo con que se ve y se filtra: el mismo que su cifra del mes (`byCategory`).
       category: settlement !== undefined ? COMMISSION_PAYMENTS_CONCEPT : row.category,
       fromCash: row.shiftId !== null,
@@ -2029,6 +2043,12 @@ export async function correctExpense(
   opts: { allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   if (!looksLikeId(expenseId)) throw notFound("Gasto")
+  // El pago de una factura se bloquea en el orden de pagarla: primero la factura (ADR 0174).
+  const [owedBy] = await tx
+    .select({ payableId: expense.payableId })
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.id, expenseId)))
+  if (owedBy?.payableId) await lockPayable(tx, orgId, owedBy.payableId)
   const [original] = await tx
     .select()
     .from(expense)
@@ -2137,10 +2157,12 @@ export async function voidExpense(
   opts: { fromCommission?: boolean; allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   const [found] = await tx
-    .select({ purchaseOrderId: expense.purchaseOrderId })
+    .select({ purchaseOrderId: expense.purchaseOrderId, payableId: expense.payableId })
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
   if (!found) throw notFound("Gasto")
+  // El pago de una factura (ADR 0174): la factura se bloquea antes que la caja, como al pagarla.
+  if (found.payableId) await lockPayable(tx, orgId, found.payableId)
   // Lo pagado al personal lo anula quien lo ve (`commissions.write`, ADR 0166); el pago de una
   // comisión se anula con su pago, que ya pide ese permiso.
   if (!opts.fromCommission && opts.seesPeople !== true && (await salaryPaymentsOf(tx, orgId, [expenseId])).size > 0)

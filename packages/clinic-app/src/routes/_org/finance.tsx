@@ -653,6 +653,10 @@ function FinanceWorkspace() {
             place={ws}
             open={openPanels.has("gasto")}
             onClose={() => closePanel("gasto")}
+            onPayInvoice={(payable) => {
+              closePanel("gasto")
+              setExpenseMode({ mode: { kind: "factura", payable }, branchId: ws.branchId })
+            }}
           />
           {/* Lo de otra sede no se paga ni se corrige en esta: al cambiar de sede se cierra. */}
           {expenseMode && expenseMode.branchId === ws.branchId ? (

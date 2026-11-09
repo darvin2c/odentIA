@@ -308,7 +308,7 @@ export const ARGOS_NOT_RECORDED: readonly string[] = [
   "Facturas o boletas: solo tickets de pago.",
   "Una fecha prevista para cada tratamiento: no se sabe cuáles están atrasados ni cuáles se abandonaron. Lo más cercano: los tratamientos pendientes, los planes sin iniciar o parados y cuánto dura un tratamiento.",
   "Quién hará un tratamiento: solo quién lo indicó (planes.indicado_por).",
-  "Costos por tratamiento o por profesional (materiales de cada tratamiento, la parte de los gastos fijos que le toca): su rentabilidad no se puede saber. Lo más cercano: por tratamiento, lo cobrado de cada uno (pagos_por_venta), sin restarle nada, porque las comisiones y los gastos no se ligan a cada tratamiento; por profesional, lo cobrado de lo que atendió menos su comisión.",
+  "Costos por tratamiento o por profesional (materiales de cada tratamiento, la parte de los gastos fijos que le toca): su rentabilidad no se puede saber. Lo más cercano: por tratamiento, lo cobrado de cada uno (pagos_por_venta), sin restarle nada, porque las comisiones y casi todos los gastos no se ligan a cada tratamiento; por profesional, lo cobrado de lo que atendió menos su comisión.",
   "Quién canceló una cita (la persona o la clínica) ni si se reprogramó.",
   "Cuotas o tratamientos financiados.",
   "Lo que se debía al cierre de meses pasados (cómo evolucionó la cartera o la deuda): solo está lo que se debe hoy (deudas). No lo reemplaces con lo cargado o lo cobrado de esos meses.",
@@ -321,7 +321,8 @@ export const ARGOS_NOT_RECORDED: readonly string[] = [
 /** Lo que odentIA sí guarda pero Argos no lee: la respuesta dice que no lo puede consultar, nunca que no se registra. */
 export const ARGOS_NOT_READABLE: readonly string[] = [
   "La historia clínica (diagnósticos, enfermedades, alergias, {fichas}notas): está en la ficha de cada paciente, y Argos no la lee.",
-  "Lo que está por pagar (las facturas por pagar, como la del laboratorio de un tratamiento, y lo que se repite y aún no se paga): está en Finanzas › Gastos › Por pagar y en Reportes › Lo que debes; lo ya pagado sí está en gastos.",
+  "Lo que está por pagar (las facturas por pagar y lo que se repite y aún no se paga): está en Finanzas › Gastos › Por pagar y en Reportes › Lo que debes; lo ya pagado sí está en gastos.",
+  "El costo del laboratorio de cada tratamiento (la factura del laboratorio atada a la paciente): lo ve quien administra comisiones en la cuenta de la paciente.",
 ]
 
 /** Las vistas que lee una llave. */

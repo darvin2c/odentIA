@@ -1016,9 +1016,10 @@ function PayablesCard({ data }: { data: ReportFinance }) {
           <li className="flex min-w-0 flex-col">
             <span className="flex justify-between gap-2">
               <strong>Facturas por pagar</strong>
-              <strong className="tabular-nums">{money(invoices.cents)}</strong>
+              <strong className="tabular-nums">{invoices.byCurrency ? amountsWords(invoices.byCurrency, locale) : money(invoices.cents)}</strong>
             </span>
             <span className="text-[13px] text-muted-foreground">
+              {invoices.byCurrency ? `En total, unos ${money(invoices.cents)} al cambio de hoy. ` : ""}
               {invoices.count === 1 ? "1 factura" : `${invoices.count} facturas`}
               {invoices.overdueCents > 0 ? `, ${money(invoices.overdueCents)} vencido` : ""} ·{" "}
               <Link to="/finance" search={{ tab: "gastos" }} className="font-bold text-primary-soft-foreground">

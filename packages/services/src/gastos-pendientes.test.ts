@@ -155,3 +155,29 @@ it("caja descarga los sueldos juntos y sin nombres; quien administra comisiones,
   expect(owner.body).toContain("Honorarios de Ana Pérez")
   expect(owner.body).toContain("777111")
 })
+
+it("lo anulado para convertirlo en sueldo no dice su motivo a caja (ADR 0166)", async () => {
+  const { f, branchId, yape } = await setup()
+  const base = { branchId, currency: "PEN", paymentMethodId: yape.id }
+  const taxi = await f.run((tx) => createExpense(tx, "org_a", f.actor, { ...base, category: "Otros", concept: "Taxi", amountCents: 2_000 }))
+  // Administración lo corrige a un sueldo en otro mes: el anulado queda en este, con su motivo.
+  const next = new Date()
+  next.setUTCMonth(next.getUTCMonth() + 1)
+  await f.run((tx) =>
+    correctExpense(
+      tx,
+      "org_a",
+      f.actor,
+      taxi.id,
+      { ...base, category: "Personal", concept: "Adelanto de sueldo de la asistente", amountCents: 150_000, spentAt: next.toISOString(), requestId: randomUUID() },
+      { seesPeople: true },
+    ),
+  )
+  const cashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...thisMonth(), branchId }))
+  const voided = cashier.expenses.find((row) => row.id === taxi.id)
+  expect(voided?.voidedAt).not.toBeNull()
+  expect(voided?.voidReason).toBeNull()
+  expect(JSON.stringify(cashier)).not.toContain("asistente")
+  const owner = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...thisMonth(), branchId }, { seesCommissions: true }))
+  expect(owner.expenses.find((row) => row.id === taxi.id)?.voidReason).toMatch(/Personal/)
+})

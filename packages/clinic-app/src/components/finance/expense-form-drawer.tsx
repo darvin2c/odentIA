@@ -66,6 +66,7 @@ import { MoneyInput } from "../inventory/fields"
 import { CashMoveDrawer, ChoiceChips } from "./cash-close-drawer"
 import { PaymentMethodButtons } from "./collect-drawer"
 import { ExpenseMoneyFields } from "./expense-money-fields"
+import { useOpenPayables } from "./payables"
 
 /** Dónde se registra el gasto: la sede y el formato de la clínica. */
 export interface ExpensePlace {
@@ -165,12 +166,15 @@ export function ExpenseFormDrawer({
   onClose,
   initial,
   mode = NEW,
+  onPayInvoice,
 }: {
   place: ExpensePlace
   open: boolean
   onClose: () => void
   initial?: ExpenseDraft | null
   mode?: ExpenseDrawerMode
+  /** Pagar una factura por pagar en vez de registrar un gasto suelto (ADR 0174). */
+  onPayInvoice?: (payable: Payable) => void
 }) {
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
@@ -494,6 +498,10 @@ export function ExpenseFormDrawer({
   // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
   const advance = chosen !== null && chosen.dueCents === 0
   const asksPurchase = !fixed && !correcting && values.category === "Materiales" && orders.length > 0
+  // Un gasto suelto de un tipo con facturas por pagar puede ser el pago de una: se dice, para no
+  // pagarla dos veces (la factura seguiría por pagar).
+  const openInvoices = useOpenPayables(branchId, open && !fixed && !correcting && Boolean(onPayInvoice))
+  const sameKindInvoices = (openInvoices.data?.data.payables ?? []).filter((row) => row.category === values.category)
   const otherBranch = chosen !== null && chosen.branchId !== branchId
   // Un pago a otra sede no sale de esta caja: el efectivo no se ofrece.
   const methodOptions = otherBranch ? allMethods.filter((item) => item.typeCode !== CASH_TYPE_CODE) : allMethods
@@ -661,6 +669,25 @@ export function ExpenseFormDrawer({
               </field.Group>
             )}
           </form.AppField>
+        ) : null}
+        {sameKindInvoices.length > 0 && onPayInvoice ? (
+          <div role="status" className="flex flex-col gap-1.5 rounded-lg border border-dashed px-3 py-2.5 text-sm">
+            <p>
+              Hay {sameKindInvoices.length === 1 ? "una factura" : `${sameKindInvoices.length} facturas`} de{" "}
+              {expenseCategoryLabel(values.category)} por pagar. Si es el pago de una, págala desde ella: así deja de estar
+              por pagar y no se paga dos veces.
+            </p>
+            {sameKindInvoices.slice(0, 3).map((row) => (
+              <p key={row.id} className="flex flex-wrap items-center justify-between gap-x-3">
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  {row.concept} · queda {formatMoney(row.dueCents, row.currency, locale)}
+                </span>
+                <Button type="button" variant="link" className="h-auto p-0" onClick={() => onPayInvoice(row)}>
+                  Pagar esta
+                </Button>
+              </p>
+            ))}
+          </div>
         ) : null}
         <form.AppField name="amount">
           {(field) => (

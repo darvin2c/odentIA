@@ -663,12 +663,14 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
 
   // --- Facturas por pagar (ADR 0174): la del laboratorio que se paga después -----------------
   app.get("/payables", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const parsed = z
       .object({ branchId: z.uuid().optional(), patientId: z.uuid().optional(), open: z.enum(["1", "0"]).optional() })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { open, ...query } = parsed.data
+    // Las facturas de una paciente son el costo de su tratamiento: lo ve quien administra comisiones (ADR 0174).
+    if (query.patientId && !canAccess(memberRole, "commissions.write")) return forbid(c)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPayables(tx, orgId, { ...query, open: open === "1" })))
   })
 

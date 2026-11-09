@@ -25,6 +25,7 @@ import {
   STAFF_PAY_CATEGORY,
 } from "./finance.js"
 import { looksLikeId } from "./ids.js"
+import { foreignBreakdown, type OrgMoney, todayValueCents } from "./report-value.js"
 import { getOrgLocale } from "./locale.js"
 import { joinPatientPerson } from "./patient-identity.js"
 
@@ -53,8 +54,10 @@ function conflict(code: string, message: string): ServiceError {
 }
 
 function dayOf(value: string, field: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(`${value}T00:00:00Z`)))
-    throw invalidField(field, "Escribe la fecha como AAAA-MM-DD")
+  // «2026-02-31» no existe: `Date` lo pasaría al 3 de marzo, así que se compara de vuelta.
+  const parsed = new Date(`${value}T00:00:00Z`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value)
+    throw invalidField(field, "Esa fecha no existe")
   return value
 }
 
@@ -133,6 +136,24 @@ export async function notePayable(tx: Db, orgId: string, actorUserId: string, in
     }
   } else if (input.planItemId) throw invalidField("planItemId", "Elige primero la paciente")
   const receiptNumber = paper.receiptType === "sin" ? null : input.receiptNumber?.trim().slice(0, 60) || null
+  // La misma factura (el mismo número del mismo proveedor) no se anota dos veces: se pagaría dos veces.
+  if (receiptNumber) {
+    const [twin] = await tx
+      .select({ id: expensePayable.id, concept: expensePayable.concept })
+      .from(expensePayable)
+      .where(
+        and(
+          eq(expensePayable.organizationId, orgId),
+          isNull(expensePayable.voidedAt),
+          sql`upper(${expensePayable.receiptNumber}) = upper(${receiptNumber})`,
+          paper.supplierTaxId
+            ? sql`(${expensePayable.supplierTaxId} = ${paper.supplierTaxId} or lower(${expensePayable.supplierName}) = lower(${paper.supplierName}))`
+            : sql`lower(${expensePayable.supplierName}) = lower(${paper.supplierName})`,
+        ),
+      )
+      .limit(1)
+    if (twin) throw invalidField("receiptNumber", `Esa factura ya está anotada: ${twin.concept}`)
+  }
   const [row] = await tx
     .insert(expensePayable)
     .values({
@@ -288,13 +309,14 @@ export async function payablesOwedAt(
   tx: Db,
   orgId: string,
   at: Date,
-  query: { branchId?: string; currency: string; timezone: string },
-): Promise<{ cents: number; count: number; overdueCents: number }> {
-  const day = todayIn(query.timezone, at)
+  query: { branchId?: string; money: OrgMoney; timezone: string },
+): Promise<{ cents: number; count: number; overdueCents: number; byCurrency?: Array<{ currency: string; cents: number }> }> {
+  // `at` es el fin del periodo (sin incluir) o ahora: el último día que cuenta es el de un instante antes.
+  const day = todayIn(query.timezone, new Date(at.getTime() - 1))
   const branch = query.branchId ? sql`and p.branch_id = ${query.branchId}::uuid` : sql``
-  const [row] = await tx.execute<{ cents: string | null; count: number; overdue: string | null }>(sql`
+  const rows = await tx.execute<{ currency: string; cents: string | null; count: number; overdue: string | null }>(sql`
     with owed as (
-      select p.due_on,
+      select p.due_on, p.currency,
         p.amount_cents - coalesce((
           select sum(e.amount_cents) from expense e
           where e.organization_id = p.organization_id and e.payable_id = p.id
@@ -302,12 +324,24 @@ export async function payablesOwedAt(
             and (e.voided_at is null or e.voided_at >= ${at.toISOString()}::timestamptz)
         ), 0) as due
       from expense_payable p
-      where p.organization_id = ${orgId} and p.currency = ${query.currency} ${branch}
+      where p.organization_id = ${orgId} ${branch}
         and p.issued_on <= ${day}::date
         and (p.voided_at is null or p.voided_at >= ${at.toISOString()}::timestamptz)
     )
-    select sum(greatest(due, 0))::text as cents, count(*) filter (where due > 0)::int as count,
+    select currency::text as currency, sum(greatest(due, 0))::text as cents, count(*) filter (where due > 0)::int as count,
       sum(greatest(due, 0)) filter (where due_on is not null and due_on < ${day}::date)::text as overdue
-    from owed`)
-  return { cents: Number(row?.cents ?? 0), count: Number(row?.count ?? 0), overdueCents: Number(row?.overdue ?? 0) }
+    from owed group by currency`)
+  // Lo de otra moneda, al cambio de hoy, como las compras: el total no deja nada fuera.
+  const valued = [...rows].flatMap((row) => {
+    const cents = Number(row.cents ?? 0)
+    const value = todayValueCents(cents, row.currency, query.money)
+    const overdue = todayValueCents(Number(row.overdue ?? 0), row.currency, query.money)
+    return value === null || cents <= 0 ? [] : [{ currency: row.currency, cents, value, overdue: overdue ?? 0, count: Number(row.count) }]
+  })
+  return {
+    cents: valued.reduce((sum, item) => sum + item.value, 0),
+    count: valued.reduce((sum, item) => sum + item.count, 0),
+    overdueCents: valued.reduce((sum, item) => sum + item.overdue, 0),
+    ...foreignBreakdown(valued.map((item) => ({ currency: item.currency, cents: item.cents })), query.money.currency),
+  }
 }

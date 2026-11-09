@@ -274,7 +274,14 @@ export function NotePayableDrawer({
       <div className="flex flex-col gap-5">
         <form.AppField name="category">
           {(field) => (
-            <field.Group legend="Tipo" description={expenseCategoryHint(field.state.value)}>
+            <field.Group
+              legend="Tipo"
+              description={
+                field.state.value === "Materiales"
+                  ? "Si es mercadería de una compra de Inventario, se paga en la compra: no la anotes aquí."
+                  : expenseCategoryHint(field.state.value)
+              }
+            >
               {(control) => (
                 <ChoiceChips
                   id={control.id}

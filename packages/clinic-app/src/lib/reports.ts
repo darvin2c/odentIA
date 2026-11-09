@@ -657,7 +657,7 @@ export interface ReportFinance extends ReportHead {
     salesTax: { cents: number }
     /** Gastos que se repiten, vencidos y sin pagar. */
     /** Facturas por pagar (ADR 0174): lo que falta y lo vencido. */
-    invoices?: { cents: number; count: number; overdueCents: number }
+    invoices?: { cents: number; count: number; overdueCents: number; byCurrency?: CurrencyAmount[] }
     fixed?: {
       cents: number
       count: number

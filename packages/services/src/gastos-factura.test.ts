@@ -121,10 +121,19 @@ it("el pago va en el tipo, la sede y la moneda de su factura; lo del equipo no s
   await expect(
     f.run((tx) => notePayable(tx, "org_a", f.actor, { branchId, ...lab, amountCents: 1_000, issuedOn: "2026-11-05", dueOn: "2026-11-01" })),
   ).rejects.toMatchObject({ fields: { dueOn: expect.any(String) } })
+  // Una fecha que no existe es un error del campo, no del servidor.
+  await expect(
+    f.run((tx) => notePayable(tx, "org_a", f.actor, { branchId, ...lab, amountCents: 1_000, issuedOn: "2026-02-31" })),
+  ).rejects.toMatchObject({ fields: { issuedOn: expect.any(String) } })
+  // La misma factura del mismo proveedor no se anota dos veces.
+  await expect(
+    f.run((tx) => notePayable(tx, "org_a", f.actor, { branchId, ...lab, amountCents: 2_000 })),
+  ).rejects.toMatchObject({ fields: { receiptNumber: expect.stringMatching(/ya está anotada/) } })
   // Reintentar con la misma clave devuelve la misma factura.
   const requestId = randomUUID()
-  const once = await f.run((tx) => notePayable(tx, "org_a", f.actor, { requestId, branchId, ...lab, amountCents: 5_000 }))
-  const again = await f.run((tx) => notePayable(tx, "org_a", f.actor, { requestId, branchId, ...lab, amountCents: 5_000 }))
+  const nextPaper = { ...lab, receiptNumber: `${lab.receiptNumber}-B` }
+  const once = await f.run((tx) => notePayable(tx, "org_a", f.actor, { requestId, branchId, ...nextPaper, amountCents: 5_000 }))
+  const again = await f.run((tx) => notePayable(tx, "org_a", f.actor, { requestId, branchId, ...nextPaper, amountCents: 5_000 }))
   expect(again.id).toBe(once.id)
 })
 
@@ -133,7 +142,7 @@ it("se anula solo sin pagos vigentes, y lo que se debía sale en Lo que debes", 
   const owed = await f.run((tx) => notePayable(tx, "org_a", f.actor, { branchId, ...lab, amountCents: 30_000, dueOn: "2099-12-31" }))
   const paid = await f.run((tx) => createExpense(tx, "org_a", f.actor, payment(branchId, transfer.id, 10_000), { payableId: owed.id }))
   const before = new Date()
-  expect(await f.run((tx) => payablesOwedAt(tx, "org_a", before, { branchId, currency: "PEN", timezone: "America/Lima" }))).toMatchObject({
+  expect(await f.run((tx) => payablesOwedAt(tx, "org_a", before, { branchId, money: { currency: "PEN", secondCurrency: null, exchangeRate: null, exchangeFactor: null }, timezone: "America/Lima" }))).toMatchObject({
     cents: 20_000,
     count: 1,
     overdueCents: 0,
@@ -147,5 +156,5 @@ it("se anula solo sin pagos vigentes, y lo que se debía sale en Lo que debes", 
   await expect(
     f.run((tx) => createExpense(tx, "org_a", f.actor, payment(branchId, transfer.id, 1_000), { payableId: owed.id })),
   ).rejects.toMatchObject({ code: "PAYABLE_VOIDED" })
-  expect((await f.run((tx) => payablesOwedAt(tx, "org_a", new Date(), { branchId, currency: "PEN", timezone: "America/Lima" }))).cents).toBe(0)
+  expect((await f.run((tx) => payablesOwedAt(tx, "org_a", new Date(), { branchId, money: { currency: "PEN", secondCurrency: null, exchangeRate: null, exchangeFactor: null }, timezone: "America/Lima" }))).cents).toBe(0)
 })
