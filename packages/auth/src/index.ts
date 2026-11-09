@@ -1,4 +1,4 @@
-import { type ClinicalProduct, productWords } from "@odentia/clinical"
+import { brandEmailColors, type ClinicalProduct, normalizeBrandColor, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   changeEmailConfirmationTemplate,
@@ -242,12 +242,26 @@ export function createAuth({
             inviterName: inviter.user.name,
             url: `${webURL}/accept-invitation/${invitation.id}`,
             brand,
+            accent: await clinicMailAccent(ownerDb, org.id),
           })
           await mailer.send({ to: email, ...template })
         },
       }),
     ],
   })
+}
+
+/**
+ * El color que eligió la clínica para el botón de sus correos al equipo (ADR 0162); sin
+ * color, el de la marca. Los correos de la cuenta (verificar, entrar, contraseña) no lo
+ * llevan: la persona puede estar en varias clínicas y el remitente es la plataforma.
+ */
+async function clinicMailAccent(db: Db, orgId: string) {
+  const [row] = await db.execute<{ brand_color: string | null }>(
+    sql`select brand_color from org_profile where organization_id = ${orgId} limit 1`,
+  )
+  const hex = normalizeBrandColor(row?.brand_color ?? "")
+  return hex ? brandEmailColors(hex) : undefined
 }
 
 /**
@@ -269,9 +283,9 @@ export async function lockClinicIdentityFields({ organization: changes }: { orga
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
 export { ACCESS_LINK_TTL_SECONDS } from "./access-link.js"
+export { ADMIN_DEVICE_COOKIE } from "./admin-device.js"
 export { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "./email-verification.js"
 export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
-export { termsState } from "./terms.js"
 export * from "./permissions.js"
-export { ADMIN_DEVICE_COOKIE } from "./admin-device.js"
 export { SESSION_TWO_FACTOR_PREFIX } from "./team-two-factor.js"
+export { termsState } from "./terms.js"

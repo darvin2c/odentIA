@@ -2,6 +2,7 @@
  * El resumen del lunes (ADR 0071): el enlace para dejar de recibirlo no se
  * puede falsificar y el correo dice las cifras con el molde común.
  */
+import { brandEmailColors } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
 import { readReportDigestToken, reportDigestEmail, reportDigestToken } from "./report-digest.js"
 
@@ -39,6 +40,13 @@ describe("el correo", () => {
     expect(mail.text).toContain("Dejar de recibirlo: https://dental-smile.odentia.localhost/resumen-lunes/baja/abc")
     expect(mail.html).toContain('href="https://dental-smile.odentia.localhost/reports"')
     expect(mail.html).toContain("Dejar de recibirlo</a>")
+  })
+
+  it("con el color de la clínica, el botón lo lleva; sin él, el de odentIA", () => {
+    const input = { firstName: "Ana", clinic: "Clínica Sonríe", week: "w", collected: "S/ 0.00", facts: [], changes: [], recommendation: null, reportsUrl: "https://dental-smile.odentia.localhost/reports", stopUrl: null }
+    const orange = brandEmailColors("#ea580c")
+    expect(reportDigestEmail({ ...input, accent: orange }).html).toContain(`background-color:${orange.boton};`)
+    expect(reportDigestEmail(input).html).toContain("background-color:#0e7490;")
   })
 
   it("sin nada que mirar, el asunto solo dice lo cobrado", () => {

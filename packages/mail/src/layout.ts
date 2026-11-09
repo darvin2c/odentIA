@@ -69,6 +69,8 @@ export interface EmailContent {
   replies?: string
   /** La marca del correo: el logo, el color y la firma (issue 229). Sin decirla, odentIA. */
   brand?: MailBrand
+  /** El color de la clínica, en un correo de una clínica a su equipo (ADR 0162). Sin él, el de la marca. */
+  accent?: MailAccent
 }
 
 /* ---------- Marcas ---------- */
@@ -93,6 +95,21 @@ const MAIL_BRANDS: Record<
     marcaTinta: "#4c2a8a",
     oscuro: { boton: "#b79cf0", botonTinta: "#1e0b3d", enlace: "#d6c6f7" },
   },
+}
+
+/**
+ * El color de una clínica en un correo suyo (ADR 0162): el botón, su enlace de respaldo y
+ * la línea sobre el título, lo que actúa. Cabecera, firma y pie siguen con la marca del
+ * producto, que es quien lo envía. Lo calcula quien conoce el color (`brandEmailColors`
+ * de `@odentia/clinical`): este paquete no hace cuentas de color.
+ */
+export interface MailAccent {
+  /** El relleno del botón y su letra. */
+  boton: string
+  botonTinta: string
+  /** Enlaces y la línea sobre el título: legibles sobre la tarjeta blanca. */
+  enlace: string
+  oscuro: { boton: string; botonTinta: string; enlace: string }
 }
 
 /** El nombre de la marca, como se escribe: para los textos de cada plantilla. */
@@ -215,7 +232,7 @@ const BANDS = {
  * Modo oscuro para quien lo respeta (Apple Mail, Outlook nuevo) y ajuste al
  * teléfono. Gmail oscurece por su cuenta: por eso el molde no depende de esto.
  */
-const style = (brand: (typeof MAIL_BRANDS)[MailBrand]) => `
+const style = (brand: (typeof MAIL_BRANDS)[MailBrand], accent: MailAccent | undefined) => `
 .oscuro{display:none}
 @media (max-width:620px){
 .tarjeta{width:100%!important}
@@ -235,9 +252,10 @@ body,.fondo{background-color:#0c1118!important}
 .t3{color:#94a3b8!important}
 .claro{display:none!important}
 .oscuro{display:block!important}
-.boton td{background-color:${brand.oscuro.boton}!important}
-.boton a{color:${brand.oscuro.botonTinta}!important}
-a.enlace{color:${brand.oscuro.enlace}!important}
+.boton td{background-color:${(accent ?? brand).oscuro.boton}!important}
+.boton a{color:${(accent ?? brand).oscuro.botonTinta}!important}
+a.enlace{color:${brand.oscuro.enlace}!important}${accent ? `
+a.accion{color:${accent.oscuro.enlace}!important}` : ""}
 }`
 
 /** La versión clara y, oculta, la oscura: el modo oscuro la cambia; Outlook de escritorio ni la ve. */
@@ -257,12 +275,12 @@ function row(content: string, padding: string, extra = ""): string {
   return `<tr><td class="px" style="padding:${padding};${FONT}${extra}">${content}</td></tr>`
 }
 
-function button(action: { label: string; url: string }, marca: string): string {
+function button(action: { label: string; url: string }, marca: string, tinta = "#ffffff"): string {
   const url = escapeHtml(action.url)
   return (
     `<table role="presentation" class="boton" cellpadding="0" cellspacing="0" border="0"><tr>` +
     `<td bgcolor="${marca}" style="border-radius:6px;background-color:${marca};">` +
-    `<a href="${url}" target="_blank" style="display:inline-block;padding:12px 24px;${FONT}font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">${escapeHtml(action.label)}</a>` +
+    `<a href="${url}" target="_blank" style="display:inline-block;padding:12px 24px;${FONT}font-size:15px;line-height:20px;font-weight:bold;color:${tinta};text-decoration:none;border-radius:6px;">${escapeHtml(action.label)}</a>` +
     `</td></tr></table>`
   )
 }
@@ -307,6 +325,7 @@ function sectionsHtml(sections: readonly EmailSection[]): string {
 export function renderEmail(content: EmailContent): MailTemplate {
   const brand = content.brand ?? "odentia"
   const B = MAIL_BRANDS[brand]
+  const A = content.accent
   const links = content.internal ? null : footerLinks(brand)
   const replies =
     content.replies ?? `Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de ${B.name}.`
@@ -334,7 +353,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
 
   const head =
     (content.eyebrow
-      ? `<p style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${B.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
+      ? `<p style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${A?.enlace ?? B.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
       : "") +
     `<h1 class="t1" style="margin:0;${FONT}font-size:22px;line-height:28px;font-weight:bold;color:${C.tinta};">${escapeHtml(content.title)}</h1>` +
     content.paragraphs
@@ -369,7 +388,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
     )
   }
   if (content.sections?.length) body.push(row(sectionsHtml(content.sections), "24px 32px 0 32px"))
-  if (content.action) body.push(row(button(content.action, B.marca), "24px 32px 0 32px"))
+  if (content.action) body.push(row(A ? button(content.action, A.boton, A.botonTinta) : button(content.action, B.marca), "24px 32px 0 32px"))
   if (content.note) body.push(row(p(content.note, `font-size:14px;line-height:22px;color:${C.nota};`), "20px 32px 0 32px"))
   if (content.notices?.length) {
     body.push(
@@ -387,7 +406,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
     const url = escapeHtml(content.action.url)
     body.push(
       row(
-        `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:19px;color:${C.suave};">Si el botón no funciona, copia este enlace en tu navegador:<br><a class="enlace" href="${url}" target="_blank" style="color:${B.marca};word-break:break-all;">${url}</a></p>`,
+        `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:19px;color:${C.suave};">Si el botón no funciona, copia este enlace en tu navegador:<br><a class="${A ? "enlace accion" : "enlace"}" href="${url}" target="_blank" style="color:${A?.enlace ?? B.marca};word-break:break-all;">${url}</a></p>`,
         "20px 32px 0 32px",
       ),
     )
@@ -432,7 +451,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <title>${escapeHtml(content.subject)}</title>
-<style>${style(B)}
+<style>${style(B, A)}
 </style>
 </head>
 <body class="fondo" style="margin:0;padding:0;background-color:${C.fondo};">

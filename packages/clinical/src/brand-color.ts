@@ -295,3 +295,65 @@ export function brandPalette(hex: string): BrandPalette {
     reddish: saturation > 0.35 && (hue >= 345 || hue <= 15),
   }
 }
+
+/**
+ * El color de la clínica en un correo suyo a su equipo: el botón con su relleno y su
+ * letra, como en la app, y los enlaces en el tono legible, en claro y en oscuro. Tiene la
+ * forma de `MailAccent` de `@odentia/mail`, que no hace cuentas de color.
+ */
+export function brandEmailColors(hex: string): {
+  boton: string
+  botonTinta: string
+  enlace: string
+  oscuro: { boton: string; botonTinta: string; enlace: string }
+} {
+  const { light, dark } = brandPalette(hex)
+  return {
+    boton: light.fill,
+    botonTinta: light.fillForeground,
+    enlace: light.primary,
+    oscuro: { boton: dark.fill, botonTinta: dark.fillForeground, enlace: dark.primary },
+  }
+}
+
+/**
+ * Los colores de una imagen, del más presente al menos, sin blancos, negros ni grises:
+ * agrupa los píxeles con color en cajas de 16 tonos por canal y devuelve el promedio de
+ * las más llenas. La misma cuenta para el logo (en el servidor) y para la foto del
+ * letrero (en el navegador, sin subirla).
+ */
+export function dominantColors(pixels: ArrayLike<number>, channels: number, limit = 2): string[] {
+  const boxes = new Map<number, { count: number; r: number; g: number; b: number }>()
+  let colored = 0
+  for (let i = 0; i + 3 < pixels.length; i += channels) {
+    const r = pixels[i] ?? 0
+    const g = pixels[i + 1] ?? 0
+    const b = pixels[i + 2] ?? 0
+    const alpha = channels >= 4 ? (pixels[i + 3] ?? 0) : 255
+    if (alpha < 128) continue
+    const max = Math.max(r, g, b)
+    const min = Math.min(r, g, b)
+    // Blanco, negro y grises no son el color de una marca.
+    if (max - min < 40 || max < 40) continue
+    colored++
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
+    const box = boxes.get(key) ?? { count: 0, r: 0, g: 0, b: 0 }
+    box.count++
+    box.r += r
+    box.g += g
+    box.b += b
+    boxes.set(key, box)
+  }
+  const ranked = [...boxes.values()]
+    .filter((box) => box.count >= Math.max(4, colored * 0.03))
+    .sort((a, b) => b.count - a.count)
+    .map((box) => [box.r / box.count, box.g / box.count, box.b / box.count] as const)
+  const chosen: Array<readonly [number, number, number]> = []
+  for (const color of ranked) {
+    // El segundo tiene que verse distinto del primero, no ser el mismo con otra luz.
+    if (chosen.every((other) => Math.hypot(color[0] - other[0], color[1] - other[1], color[2] - other[2]) > 80))
+      chosen.push(color)
+    if (chosen.length === limit) break
+  }
+  return chosen.map((color) => `#${color.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`)
+}

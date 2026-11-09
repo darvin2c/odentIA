@@ -1,5 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer"
-import { logoAttachments, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "./layout.js"
+import { logoAttachments, type MailAccent, type MailBrand, type MailTemplate, mailBrandName, renderEmail } from "./layout.js"
 
 export {
   configureMailLinks,
@@ -9,9 +9,10 @@ export {
   escapeHtml,
   LOGO_CIDS,
   logoAttachments,
+  type MailAccent,
   type MailBrand,
-  mailBrandName,
   type MailTemplate,
+  mailBrandName,
   renderEmail,
   resetMailLinks,
 } from "./layout.js"
@@ -234,14 +235,18 @@ export function invitationTemplate({
   inviterName,
   url,
   brand,
+  accent,
 }: {
   organizationName: string
   inviterName: string
   url: string
+  /** El color de la clínica que invita, si eligió uno: el botón lo lleva. */
+  accent?: MailAccent | undefined
 } & Branded): MailTemplate {
   const name = mailBrandName(brand)
   return renderEmail({
     brand,
+    ...(accent ? { accent } : {}),
     subject: `Te invitaron a ${organizationName}`,
     preview: `${inviterName} te invitó a unirte al equipo en ${name}.`,
     title: `Te invitaron a ${organizationName}`,
