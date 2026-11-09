@@ -44,6 +44,18 @@ describe("EmptyState", () => {
     expect(onSecondary).toHaveBeenCalledTimes(1)
   })
 
+  it("lo propio de la acción va en su lugar y reemplaza los botones", () => {
+    render(
+      <EmptyState title="Este enlace venció" actionLabel="Otra" onAction={vi.fn()}>
+        <button type="button" disabled>
+          Enviando…
+        </button>
+      </EmptyState>,
+    )
+    expect(screen.getByRole("button", { name: "Enviando…" }).hasAttribute("disabled")).toBe(true)
+    expect(screen.queryByRole("button", { name: "Otra" })).toBeNull()
+  })
+
   it("label sin handler no renderiza botón (guard de contrato)", () => {
     render(<EmptyState title="Sin mesas" actionLabel="Nueva mesa" />)
     expect(screen.queryByRole("button", { name: "Nueva mesa" })).toBeNull()

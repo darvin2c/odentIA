@@ -1,9 +1,7 @@
 import type { RegistrationAnswers } from "@odentia/clinical"
-import { Button } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { CircleCheck } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
 import { fetchPersonalDataForm, type PersonalDataForm as PersonalDataFormView, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
@@ -86,18 +84,13 @@ export function PersonalDataForm({
   slug,
   token,
   clinicName,
-  appointmentLine,
-  backLabel,
-  onDone,
+  onSent,
 }: {
   slug: string
   token: string
   clinicName: string
-  /** «Te esperamos el jueves 23 a las 10:00.», si tiene cita. */
-  appointmentLine?: string | null
-  /** El nombre de volver, el mismo de toda la página: «Ver mi cita». */
-  backLabel: string
-  onDone: () => void
+  /** Lo envió (o no había nada que enviar): la página dice «Listo» con estas palabras y lo que sigue. */
+  onSent: (words: { title: string; text: string }) => void
 }) {
   // La dirección se sugiere por la página de la clínica, sin el token (issue 36).
   const addressSource = useMemo(() => publicAddressSource(slug), [slug])
@@ -110,48 +103,6 @@ export function PersonalDataForm({
     retry: false,
     mutationFn: (input: PersonalDataInput) => submitPersonalData(slug, token, input),
   })
-  // Solo su salud y no contó nada: no hay nada que enviar; la tarjeta sigue ahí, opcional.
-  const [nothingToTell, setNothingToTell] = useState(false)
-  const alreadySent = send.error instanceof ApiError && send.error.shape.code === "DATA_ALREADY_SENT"
-  if (nothingToTell) {
-    return (
-      <div role="status" className="flex flex-col items-center gap-4 rounded-3xl border bg-card px-5 py-10 text-center">
-        <p className="text-sm text-pretty text-muted-foreground">
-          No nos contaste nada de tu salud. Si quieres, cuéntanoslo antes de venir o en la cita.
-          {appointmentLine ? ` ${appointmentLine}` : ""}
-        </p>
-        <Button type="button" variant="link" className="min-h-11" onClick={onDone}>
-          {backLabel}
-        </Button>
-      </div>
-    )
-  }
-  if (send.isSuccess || alreadySent) {
-    const form = formQuery.data?.data
-    const withHealth = !!form?.asksHealth && !!send.variables?.health
-    const onlyHealth = !!form && form.missing.length === 0
-    return (
-      <div role="status" className="flex flex-col items-center gap-4 rounded-3xl border bg-card px-5 py-10 text-center">
-        <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <CircleCheck className="size-6" aria-hidden />
-        </span>
-        <div className="flex flex-col gap-1.5">
-          <p className="text-xl font-semibold">{form?.firstName ? `Listo, ${form.firstName}` : "Listo"}</p>
-          <p className="text-sm text-pretty text-muted-foreground">
-            {alreadySent
-              ? `${clinicName} ya tiene tus datos.`
-              : onlyHealth
-                ? `${clinicName} ya tiene ${withHealth ? "lo que nos contaste de tu salud" : "tus respuestas"}.`
-                : `${clinicName} ya tiene tus datos${withHealth ? " y tu salud" : ""}.`}
-            {appointmentLine ? ` ${appointmentLine}` : ""}
-          </p>
-        </div>
-        <Button type="button" variant="link" className="min-h-11" onClick={onDone}>
-          {backLabel}
-        </Button>
-      </div>
-    )
-  }
   if (formQuery.isPending) return <LoadingState kind="indeterminate" message="Cargando…" />
   if (formQuery.isError) {
     if (formQuery.error instanceof ApiError && formQuery.error.shape.code === "BOOKING_LINK_EXPIRED") {
@@ -180,16 +131,29 @@ export function PersonalDataForm({
         addressSource={addressSource}
         onSubmit={async (answers) => {
           const input = toInput(answers, form.pending)
+          const listo = form.firstName ? `Listo, ${form.firstName}` : "Listo"
           if (!sendsSomething(input)) {
             // Queda dicho que ya respondió, para no volver a pedírselo; si falla, no pasa nada.
             if (form.missing.length === 0) void submitPersonalData(slug, token, input).catch(() => undefined)
-            setNothingToTell(true)
+            // Solo su salud y no contó nada: no hay nada que enviar; la tarjeta sigue ahí, opcional.
+            onSent({ title: "Gracias", text: "No nos contaste nada de tu salud. Si quieres, cuéntanoslo antes de venir o en la cita." })
             return
           }
+          const withHealth = form.asksHealth && !!input.health
           try {
             await send.mutateAsync(input)
+            onSent({
+              title: listo,
+              text:
+                form.missing.length === 0
+                  ? `${clinicName} ya tiene ${withHealth ? "lo que nos contaste de tu salud" : "tus respuestas"}.`
+                  : `${clinicName} ya tiene tus datos${withHealth ? " y tu salud" : ""}.`,
+            })
           } catch (error) {
-            if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") return
+            if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") {
+              onSent({ title: listo, text: `${clinicName} ya tiene tus datos.` })
+              return
+            }
             // Lo que es de un dato, el cuestionario lo dice en su campo.
             if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
             throw new Error(

@@ -264,7 +264,8 @@ export function ExpensesTab({
         header: "Pagado con",
         meta: { view: { primary: true } },
         cell: ({ row }) => (
-          <span className="[overflow-wrap:anywhere]">
+          // Por palabras: «Transferencia» no se parte a la mitad en una columna angosta.
+          <span className="break-words">
             {methodText(
               row.original,
               second ? `Caja de ${currencyWord(row.original.tenderCurrency ?? row.original.currency, locale)}` : "Efectivo de la caja",

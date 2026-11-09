@@ -192,6 +192,8 @@ export function ExpenseFormDrawer({
   const requestId = useRef<string>(crypto.randomUUID())
   // El comprobante se propone por el tipo hasta que la persona lo elige.
   const receiptTouched = useRef(false)
+  // Lo último que propuso el tipo: elegir otro valor es lo que cuenta como elección de la persona.
+  const lastSuggested = useRef("")
   const paying = mode.kind === "pagar" ? mode.due : null
   const correcting = mode.kind === "corregir" ? mode.expense : null
 
@@ -375,7 +377,7 @@ export function ExpenseFormDrawer({
       // El medio de siempre: el que se dijo, o el efectivo si salía de la caja.
       method: correcting?.paymentMethodId ?? paying?.paymentMethodId ?? "",
       reference: correcting?.paymentReference ?? "",
-      receiptType: correcting ? (correcting.receiptType ?? "") : category ? suggestedReceiptType(country, category) : "",
+      receiptType: correcting ? (correcting.receiptType ?? "") : (lastSuggested.current = category ? suggestedReceiptType(country, category) : ""),
       receiptNumber: correcting?.receiptNumber ?? "",
       supplier: correcting?.supplierName ?? "",
       supplierTaxId: correcting?.supplierTaxId ?? "",
@@ -683,7 +685,10 @@ export function ExpenseFormDrawer({
               // El comprobante que suele traer ese tipo, hasta que la persona elige otro.
               onChange: ({ value }) => {
                 // Solo mientras la persona no eligió uno: lo que cambia el código no cuenta como elegido.
-                if (!receiptTouched.current && value) form.setFieldValue("receiptType", suggestedReceiptType(country, value), { dontUpdateMeta: true })
+                if (!receiptTouched.current && value) {
+                  lastSuggested.current = suggestedReceiptType(country, value)
+                  form.setFieldValue("receiptType", lastSuggested.current, { dontUpdateMeta: true })
+                }
               },
             }}
           >
@@ -851,9 +856,10 @@ export function ExpenseFormDrawer({
           <form.AppField
             name="receiptType"
             listeners={{
-              // Solo lo que elige la persona: `setFieldValue` del tipo no pasa por aquí con `dontUpdateMeta`.
-              onChange: ({ fieldApi }) => {
-                if (fieldApi.state.meta.isTouched) receiptTouched.current = true
+              // Solo lo que elige la persona: un valor distinto del que propuso el tipo (abrir y cerrar la
+              // lista sin elegir no cuenta).
+              onChange: ({ value }) => {
+                if (value !== lastSuggested.current) receiptTouched.current = true
               },
             }}
           >

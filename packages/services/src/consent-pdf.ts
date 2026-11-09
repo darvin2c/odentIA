@@ -25,6 +25,7 @@ import {
   type DocumentClinic,
   DocumentKit,
   dayTimeWords,
+  dayWords,
   documentFormat,
   SIZE,
   strokesOf,
@@ -241,6 +242,13 @@ export async function renderConsentPdf(
         tone: "gray",
       },
     )
+    // Se confirma dentro de una atención de ese paciente: el papel dice en cuál.
+    if (data.informedEncounterAt) {
+      kit.text(`Confirmado en la atención del ${dayWords(data.informedEncounterAt, zone)}`, {
+        size: SIZE.label,
+        tone: "gray",
+      })
+    }
   }
   if (revocation && doc.status === "revocado") {
     kit.gap(14)

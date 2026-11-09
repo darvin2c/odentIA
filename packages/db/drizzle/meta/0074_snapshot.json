@@ -1,5 +1,5 @@
 {
-  "id": "45894510-419e-43f7-a18b-e5e7cbe1c266",
+  "id": "6618cb27-5901-49fb-8946-407a3f57a615",
   "prevId": "c61def1b-2879-4e47-8200-7926dab4420c",
   "version": "7",
   "dialect": "postgresql",
@@ -9999,6 +9999,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "informed_encounter_id": {
+          "name": "informed_encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10199,6 +10205,23 @@
           "columnsTo": [
             "system_key",
             "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consent_document_informed_encounter_fk": {
+          "name": "consent_document_informed_encounter_fk",
+          "tableFrom": "consent_document",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "informed_encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -30216,60 +30239,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "payment_method_id": {
-          "name": "payment_method_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "method_name": {
-          "name": "method_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "method_type_code": {
-          "name": "method_type_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payment_reference": {
-          "name": "payment_reference",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "receipt_type": {
-          "name": "receipt_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "supplier_id": {
-          "name": "supplier_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "supplier_name": {
-          "name": "supplier_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "supplier_tax_id": {
-          "name": "supplier_tax_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "replaces_expense_id": {
-          "name": "replaces_expense_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -30328,49 +30297,6 @@
           ],
           "isUnique": true,
           "where": "\"expense\".\"request_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "expense_org_id_uidx": {
-          "name": "expense_org_id_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "expense_replaces_uidx": {
-          "name": "expense_replaces_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "replaces_expense_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"expense\".\"replaces_expense_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -30521,51 +30447,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "expense_payment_method_org_fk": {
-          "name": "expense_payment_method_org_fk",
-          "tableFrom": "expense",
-          "tableTo": "organization_payment_method",
-          "columnsFrom": [
-            "organization_id",
-            "payment_method_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "expense_supplier_org_fk": {
-          "name": "expense_supplier_org_fk",
-          "tableFrom": "expense",
-          "tableTo": "supplier",
-          "columnsFrom": [
-            "organization_id",
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "expense_replaces_org_fk": {
-          "name": "expense_replaces_org_fk",
-          "tableFrom": "expense",
-          "tableTo": "expense",
-          "columnsFrom": [
-            "organization_id",
-            "replaces_expense_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "expense_recurring_id_org_fk": {
           "name": "expense_recurring_id_org_fk",
           "tableFrom": "expense",
@@ -30601,10 +30482,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "expense_method_check": {
-          "name": "expense_method_check",
-          "value": "(\"expense\".\"payment_method_id\" IS NULL OR \"expense\".\"method_name\" IS NOT NULL) AND (\"expense\".\"method_type_code\" IS NULL OR \"expense\".\"method_type_code\" IN ('10','48','30','68','20','1'))"
-        },
         "expense_recurring_link_check": {
           "name": "expense_recurring_link_check",
           "value": "(\"expense\".\"recurring_id\" IS NULL) = (\"expense\".\"recurring_month\" IS NULL) AND (\"expense\".\"recurring_month\" IS NULL OR \"expense\".\"recurring_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')"
@@ -30832,12 +30709,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "payment_method_id": {
-          "name": "payment_method_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -30997,21 +30868,6 @@
             "created_by"
           ],
           "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "expense_recurring_payment_method_org_fk": {
-          "name": "expense_recurring_payment_method_org_fk",
-          "tableFrom": "expense_recurring",
-          "tableTo": "organization_payment_method",
-          "columnsFrom": [
-            "organization_id",
-            "payment_method_id"
-          ],
-          "columnsTo": [
-            "organization_id",
             "id"
           ],
           "onDelete": "no action",

@@ -1,7 +1,7 @@
 import { Badge, Button } from "@odentia/ui"
 import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
 import { MapPin } from "lucide-react"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { longDay, timeLabel } from "./week-slots"
 
 /** Lo que el bloque necesita de la cita: lo mismo en «Su enlace» y en el portal. */
@@ -34,6 +34,7 @@ export function AppointmentBlock({
   onChange,
   onCancel,
   onConfirm,
+  children,
 }: {
   title: string
   appointment: AppointmentBlockData
@@ -50,6 +51,8 @@ export function AppointmentBlock({
   onChange: () => void
   onCancel: () => void
   onConfirm: () => void
+  /** Lo que sigue a sus botones en «Su enlace»: «Reservar otra», o por qué no. */
+  children?: ReactNode
 }) {
   const [asking, setAsking] = useState(false)
   const when = `${longDay(appointment.startsAt, appointment.timeZone)} · ${timeLabel(appointment.startsAt, appointment.timeZone)}`
@@ -112,6 +115,7 @@ export function AppointmentBlock({
           Añadir al calendario
         </SubmitButton>
       </div>
+      {children}
       <ConfirmDialog
         open={asking}
         title="¿Cancelar tu cita?"

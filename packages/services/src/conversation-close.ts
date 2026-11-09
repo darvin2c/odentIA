@@ -21,6 +21,7 @@ import {
 import { reopenIfClosed, sendOutbound } from "./conversations.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgLocale, formatZoned } from "./locale.js"
 import { windowOpen } from "./message-window.js"
@@ -580,6 +581,37 @@ export function silenceCloseAt(input: {
   return nextOpportuneFrom(from, input.schedule) ?? from
 }
 
+/**
+ * X5 (entrega 2): cuándo salió el último mensaje de esta atención con su enlace que aún
+ * espera su respuesta: salió de verdad (aceptado por el canal, no solo encolado) y su enlace
+ * vivo tiene un consentimiento por firmar o un presupuesto por responder. El silencio cuenta
+ * desde ahí, no desde su último mensaje: lo que se le mandó necesita su tiempo. Nunca impide
+ * cerrar: solo corre la cuenta (ADR 0024).
+ */
+function awaitingLinkSentSql(conv: SQL): SQL {
+  const awaitingBudget = budgetAwaitsAnswerSql({
+    id: sql`awaiting_budget.id`,
+    status: sql`awaiting_budget.status`,
+    organizationId: sql`awaiting_budget.organization_id`,
+  })
+  return sql`(select max(coalesce(link_out.sent_at, link_out.created_at)) from message link_out
+    where link_out.organization_id = ${conv}.organization_id and link_out.conversation_id = ${conv}.id
+      and link_out.direction = 'out' and link_out.status in ('sent', 'delivered', 'read')
+      and link_out.created_at >= ${conv}.attention_started_at
+      and (link_out.template_link is not null or link_out.body like '%{{su-enlace:%'
+        or link_out.body like '%/pendientes?%' or link_out.body like '%/reserva?%')
+      and exists (select 1 from appointment_booking_link live_link
+        where live_link.organization_id = ${conv}.organization_id and live_link.contact_id = ${conv}.contact_id
+          and live_link.patient_id is not null and live_link.revoked_at is null and live_link.expires_at > now()
+          and (exists (select 1 from consent_document awaiting_consent
+                where awaiting_consent.organization_id = live_link.organization_id
+                  and awaiting_consent.patient_id = live_link.patient_id and awaiting_consent.status = 'pendiente'
+                  and awaiting_consent.link_sent_at is not null and awaiting_consent.person_signed_at is null)
+            or exists (select 1 from treatment_budget awaiting_budget
+                where awaiting_budget.organization_id = live_link.organization_id
+                  and awaiting_budget.patient_id = live_link.patient_id and ${awaitingBudget}))))`
+}
+
 interface CareRow {
   id: string
   contactName: string
@@ -598,6 +630,8 @@ interface CareRow {
   handoffOpen: boolean
   proposalPending: boolean
   appointmentChanged: boolean
+  /** X5: el último envío con su enlace que salió y aún espera su respuesta (`awaitingLinkSentSql`). */
+  awaitingLinkSentAt: Date | string | null
 }
 
 /**
@@ -644,6 +678,7 @@ export async function tickConversationCare(
       handoffOpen: sql<boolean>`${handoffOpenExistsSql(conv)}`,
       proposalPending: sql<boolean>`${proposalPendingExistsSql(conv)}`,
       appointmentChanged: sql<boolean>`${appointmentChangedSql(conv)}`,
+      awaitingLinkSentAt: sql<Date | string | null>`${awaitingLinkSentSql(conv)}`,
     })
     .from(conversation)
     .innerJoin(contact, eq(contact.id, conversation.contactId))
@@ -695,7 +730,15 @@ export async function tickConversationCare(
       return "closed"
     }
     if (now.getTime() - (row.lastMessageAt ?? row.attentionStartedAt).getTime() < NUDGE_AFTER_HOURS * HOUR_MS) return null
-    const silenceFrom = new Date(Math.max(row.lastInboundAt?.getTime() ?? 0, row.attentionStartedAt.getTime()))
+    // El silencio cuenta desde lo último que escribió o, si después salió algo con su enlace
+    // que aún espera su respuesta (un consentimiento, un presupuesto), desde ese envío (X5).
+    const silenceFrom = new Date(
+      Math.max(
+        row.lastInboundAt?.getTime() ?? 0,
+        row.attentionStartedAt.getTime(),
+        row.awaitingLinkSentAt ? new Date(row.awaitingLinkSentAt).getTime() : 0,
+      ),
+    )
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
     const writable = canWriteNow(row, now)
     if (now.getTime() >= closeAt.getTime()) {
