@@ -1,5 +1,5 @@
-import type { FilterDef, PageHeaderMenuItem, PageHeaderPrimary } from "@odentia/ui-patterns"
-import { Banknote, CalendarCheck, Lock, LogOut, Plus, SquarePen } from "lucide-react"
+import type { FilterDef, PageHeaderMenuItem, PageHeaderPrimary, PageHeaderProps } from "@odentia/ui-patterns"
+import { Banknote, CalendarCheck, Lock, LogOut, Plus, ShoppingBag, SquarePen } from "lucide-react"
 import type { ReactNode } from "react"
 import { productUi } from "../product/product-ui"
 
@@ -41,12 +41,20 @@ export function financeAccess(can: Can) {
 }
 export type FinanceAccess = ReturnType<typeof financeAccess>
 
-/** En el escritorio, la acción principal de la sección y lo demás en ⋯. */
+/**
+ * En el escritorio, la acción principal de la sección y lo demás en ⋯. En Caja y
+ * Cobros, junto a «Cobrar», «Venta de mostrador» (ADR 0173): productos sin ficha;
+ * en el teléfono va en ⋯.
+ */
 export function financeHeader(
   view: string,
   access: FinanceAccess,
-  run?: { collect: () => void; close: () => void; expense: () => void },
-): { primary?: PageHeaderPrimary; menu: PageHeaderMenuItem[] } {
+  run?: { collect: () => void; close: () => void; expense: () => void; counter: () => void },
+): { primary?: PageHeaderPrimary; secondary?: PageHeaderProps["secondary"]; menu: PageHeaderMenuItem[] } {
+  const secondary =
+    (view === "caja" || view === "cobros") && access.write
+      ? { label: "Venta de mostrador", icon: <ShoppingBag aria-hidden />, ...(run ? { onClick: run.counter } : { disabled: true }) }
+      : undefined
   const primary =
     (view === "caja" || view === "cobros" || view === "deudas") && access.write
       ? action("Cobrar", <Banknote aria-hidden />, run?.collect)
@@ -62,7 +70,7 @@ export function financeHeader(
           ...(access.close ? [menuItem("Cerrar caja", run?.close, <Lock aria-hidden />)] : []),
         ]
       : []
-  return { primary, menu }
+  return { primary, secondary, menu }
 }
 
 export interface FinancePhoneAction {

@@ -63,12 +63,18 @@ const MAX_PAYMENTS = 3
 
 const NO_SALE_PRICE = "Ponle precio de venta en Inventario: sin precio no se puede vender."
 
-/** Un producto que se vende, como lo muestra el buscador. */
-interface SaleItem {
+/** Un producto que se vende, como lo muestra el buscador (también la venta de mostrador). */
+export interface SaleItem {
   productId: string
   name: string
   /** null: sin precio de venta (no se puede vender). */
   salePriceCents: number | null
+  /** La moneda de su precio de venta. */
+  currency: string | null
+  /** Unidad de uso, en singular («frasco»): se vende por ella. */
+  unit: string
+  /** Lo que hay en la sede (lotes − faltante; puede ser negativo). */
+  onHand: number
   /** «2 unidades» en la sede; null si no hay. */
   onHandText: string | null
   /** El código de barras, sin espacios; lo que lee el escáner. */
@@ -915,7 +921,7 @@ export function SaleDrawer({
 }
 
 /** Lo de la etiqueta, el precio y lo que hay en la sede, para elegir el producto. */
-function itemDetail(item: SaleItem, money: (cents: number) => string, branchName: string): string {
+export function itemDetail(item: SaleItem, money: (cents: number) => string, branchName: string): string {
   const sale = [
     item.salePriceCents !== null ? money(item.salePriceCents) : "Sin precio de venta",
     item.onHandText ? `hay ${item.onHandText}` : `no hay en ${branchName || "esta sede"}`,
@@ -932,7 +938,7 @@ const scanCode = (text: string) => text.replace(/\s+/g, "")
  * código de barras exacto. El lector escribe el código y pulsa Enter: si un solo
  * producto lo tiene, queda elegido.
  */
-function ProductSearch({
+export function ProductSearch({
   id,
   invalid,
   describedBy,
@@ -953,29 +959,36 @@ function ProductSearch({
   value: SaleItem | null
   onChange: (product: SaleItem | null) => void
 }) {
+  const queryClient = useQueryClient()
   const [query, setQuery] = React.useState("")
   const search = React.useDeferredValue(query.trim())
-  const products = useQuery({
-    // Su propia clave: guarda la búsqueda junto a lo que trajo (el escáner la compara).
-    queryKey: ["sale-products", "pedido", branchId, search],
+  // Su propia clave: guarda la búsqueda junto a lo que trajo.
+  const searchQuery = (q: string) => ({
+    queryKey: ["sale-products", "pedido", branchId, q],
     queryFn: async (): Promise<{ q: string; items: SaleItem[] }> => {
-      const list = await fetchSaleProducts({ branchId, q: search || undefined, limit: 20 })
+      const list = await fetchSaleProducts({ branchId, q: q || undefined, limit: 20 })
       return {
-        q: search,
+        q,
         // Su búsqueda dice el código de barras y la etiqueta.
         items: list.data.items.map((item) => ({
           productId: item.productId,
           name: item.name,
           salePriceCents: item.salePriceCents,
+          currency: item.currency,
+          unit: item.unit,
+          onHand: item.onHand,
           onHandText: item.onHandText,
           barcode: item.barcode ?? null,
           label: productLabelLine(item),
         })),
       }
     },
+    staleTime: 15_000,
+  })
+  const products = useQuery({
+    ...searchQuery(search),
     enabled: Boolean(branchId),
     placeholderData: (previous) => previous,
-    staleTime: 15_000,
   })
   const items = products.data?.items ?? []
   // Lo elegido sigue en la lista aunque la búsqueda ya no lo traiga (el escáner no pasa por ella).
@@ -987,31 +1000,30 @@ function ProductSearch({
     detail: itemDetail(item, money, branchName),
   }))
 
-  // El escáner escribe más rápido de lo que llega la búsqueda: el código espera su respuesta.
-  const scanning = React.useRef<string | null>(null)
-  const settleScan = React.useCallback(() => {
-    const code = scanning.current
-    const data = products.data
-    if (!code || !data || scanCode(data.q) !== code) return
-    scanning.current = null
-    const matches = data.items.filter((item) => item.barcode === code)
+  // El escáner escribe más rápido de lo que llega la búsqueda, y el buscador puede vaciarse al
+  // pulsar Enter: el código se lee del campo en ese momento y se busca aparte. Si un solo
+  // producto lo lleva, queda elegido; si no, Enter sigue siendo el del buscador.
+  const scan = async (code: string) => {
+    if (!branchId) return
+    const found = await queryClient.fetchQuery(searchQuery(code)).catch(() => null)
+    const matches = (found?.items ?? []).filter((item) => item.barcode === code)
     if (matches.length === 1 && matches[0]) {
       onChange(matches[0])
       setQuery("")
     }
-  }, [products.data, onChange])
-  React.useEffect(settleScan, [settleScan])
+  }
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: solo escucha el Enter del buscador, que es el del lector de códigos.
     <div
       className="flex flex-col gap-2"
       onKeyDown={(event) => {
-        if (event.key !== "Enter" || !query.trim()) return
+        if (event.key !== "Enter") return
+        const code = scanCode(event.target instanceof HTMLInputElement ? event.target.value : query)
+        if (!code) return
         // Enter en el buscador no vende: busca el código que acaba de leer el escáner.
         event.preventDefault()
-        scanning.current = scanCode(query)
-        settleScan()
+        void scan(code)
       }}
     >
       <ResourceSelect

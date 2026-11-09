@@ -12,7 +12,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { TicketView, ticketDisplayNumber } from "./ticket-view"
 import { financeErrorMessage } from "../../lib/finance"
 import { financeKeys } from "../../lib/finance-cash"
-import { fetchTicketById } from "../../lib/finance-collect"
+import { fetchTicketById, ticketPartyOf } from "../../lib/finance-collect"
 
 export function TicketPanel({
   ticketId,
@@ -95,7 +95,7 @@ export function TicketPanel({
           ticket={row}
           remainingCents={row.snapshot?.remainingCents ?? 0}
           closedAfter={body.closedAfter ?? false}
-          patientName={row.snapshot.patient.displayName}
+          patientName={ticketPartyOf(row.snapshot).name}
           branchName={row.snapshot.branch.name}
           locale={locale}
           timeZone={timeZone}
@@ -105,7 +105,8 @@ export function TicketPanel({
           onChanged={() => {
             onChanged()
             void query.refetch()
-            void queryClient.invalidateQueries({ queryKey: ["patient-account3", body.patientId] })
+            if (body.patientId)
+              void queryClient.invalidateQueries({ queryKey: ["patient-account3", body.patientId] })
           }}
         />
       ) : null}
