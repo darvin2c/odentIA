@@ -285,6 +285,8 @@ export interface AgendaAvailability {
     id: string
     label: string
     nextFree: { startsAt: string; endsAt: string; roomId: string | null } | null
+    /** Se pidió al abrir y no está entre quienes atienden el servicio: viene igual, y se dice. */
+    outsideService?: true
   }[]
   defaultDurationMin: number
   open: { professionalUserId: string; startsAt: string; endsAt: string }[]

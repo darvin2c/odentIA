@@ -55,7 +55,7 @@ import {
   fetchFollowUps,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
-import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
@@ -130,6 +130,12 @@ export interface EncounterEditorProps {
   patient: PatientFull
   /** Refresca el query del encounter (lo implementa la ruta). */
   onChanged: () => Promise<void>
+  /**
+   * Se firmó aquí: «Atención finalizada» se abre en este editor, así que la ruta
+   * lo mantiene montado hasta cerrarlo (`onFinalized`), aunque la atención ya
+   * se relea firmada.
+   */
+  onSigned?: () => void
   /** Invalida resumen/plan/timeline y navega (cuenta si hubo cargos, historia si no). */
   onFinalized: (hasCharges: boolean) => Promise<void>
 }
@@ -435,6 +441,7 @@ export function EncounterEditor({
   detail,
   patient,
   onChanged,
+  onSigned,
   onFinalized,
 }: EncounterEditorProps): React.JSX.Element {
   const encounter = detail.encounter
@@ -444,6 +451,7 @@ export function EncounterEditor({
   const canRead = usePermission("clinical.read")
   const canReadFinance = usePermission("finance.read")
   const memberName = useMemberName()
+  const members = useOrgMembers()
   const orgProfile = useOrgProfile().data
   const orgLocale = orgProfile?.locale
   const uid = useId()
@@ -1187,6 +1195,7 @@ export function EncounterEditor({
           ),
         }),
       })
+      onSigned?.()
       setConfirmOpen(false)
       setSessionAnswers({})
       closingForm.reset()
@@ -2757,6 +2766,7 @@ export function EncounterEditor({
               listRef={nextSessionsRef}
               canBook={canBook}
               onBook={(ids) => setBookingNext(ids)}
+              nameOf={(userId) => members.find((item) => item.userId === userId)?.user.name}
             />
           ) : null}
           {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Reservar la sesión 2». */}
@@ -2772,6 +2782,7 @@ export function EncounterEditor({
                 // La sesión siguiente suele hacerla quien atendió hoy: su columna, que se puede cambiar.
                 professionalUserId: encounter.professionalUserId,
                 professionalLabel: memberName(encounter.professionalUserId),
+                keepProfessional: true,
               }}
               onClose={() => setBookingNext(null)}
               onSaved={(appointment) => {
@@ -2783,7 +2794,14 @@ export function EncounterEditor({
                     return booked
                       ? {
                           ...session,
-                          booked: { appointmentId: appointment.id, startsAt: appointment.startsAt, n: booked.n, m: booked.m },
+                          booked: {
+                            appointmentId: appointment.id,
+                            startsAt: appointment.startsAt,
+                            professionalUserId: appointment.professionalUserId,
+                            professionalName: appointment.professionalName,
+                            n: booked.n,
+                            m: booked.m,
+                          },
                           toBook: null,
                         }
                       : session
