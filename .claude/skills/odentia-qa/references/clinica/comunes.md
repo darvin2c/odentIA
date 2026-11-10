@@ -227,7 +227,7 @@ No tiene camino en el código.
 - [ ] Nada aparece sobre la firma o el registro en la tablet que se le pasa al paciente (hoy: no se activa ahí, lo dice la ayuda).
 - [ ] Quien cierra sesión o deja la clínica deja de recibirlos en ese equipo.
 
-**Fuentes:** ADR 0176 y 0084. Ley 29733 de datos personales y su reglamento (datos sensibles de salud; verificar artículos), Ley 26842 (reserva del acto médico; verificar el artículo).
+**Fuentes:** ADR 0177 y 0084. Ley 29733 de datos personales y su reglamento (datos sensibles de salud; verificar artículos), Ley 26842 (reserva del acto médico; verificar el artículo).
 
 ## P-COM-22 Guardia de urgencias de la clínica
 

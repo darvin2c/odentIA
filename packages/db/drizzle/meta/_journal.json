@@ -610,20 +610,6 @@
       "when": 1794275895229,
       "tag": "0086_registro_guarda_su_aviso",
       "breakpoints": true
-    },
-    {
-      "idx": 87,
-      "version": "7",
-      "when": 1794327781551,
-      "tag": "0087_app_instalable_avisos",
-      "breakpoints": true
-    },
-    {
-      "idx": 88,
-      "version": "7",
-      "when": 1794327796947,
-      "tag": "0088_app_instalable_avisos_reglas",
-      "breakpoints": true
     }
   ]
 }

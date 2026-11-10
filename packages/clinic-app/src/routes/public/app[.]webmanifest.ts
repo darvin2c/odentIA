@@ -4,7 +4,7 @@ import { clinicWebManifest } from "../../lib/web-manifest"
 import { productUi } from "../../product/product-ui"
 
 /**
- * El manifiesto de la app instalada de esta clínica (ADR 0176). Solo lo enlaza
+ * El manifiesto de la app instalada de esta clínica (ADR 0177). Solo lo enlaza
  * la zona con sesión (`_org`): el portal del paciente no ofrece instalar la app
  * del equipo. Se pide de nuevo en cada carga: un cambio de nombre o color se ve.
  */

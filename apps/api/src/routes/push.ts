@@ -10,7 +10,7 @@ const endpointInput = z.object({ endpoint: z.string().url().max(1000) })
 const subscribeInput = endpointInput.extend({ keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100) }) })
 
 /**
- * Avisos en este equipo (push web, ADR 0176). Cada persona del equipo los
+ * Avisos en este equipo (push web, ADR 0177). Cada persona del equipo los
  * activa para sí en su equipo: no hace falta un permiso, porque lo que llega
  * se decide al enviar con los permisos que tiene en ese momento.
  */

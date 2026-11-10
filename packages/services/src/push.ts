@@ -13,7 +13,7 @@ import { clinicOpenSchedule } from "./topic-urgency.js"
 import { listWorkspaceWaitingPeople, type WorkspaceAccess, workspaceAccessFor } from "./workspace.js"
 
 /**
- * Avisos en el equipo (push web, ADR 0176). No son una tercera bandeja: dicen
+ * Avisos en el equipo (push web, ADR 0177). No son una tercera bandeja: dicen
  * que algo cambió en lo que ya existe y la app cuenta qué.
  *
  * - «Te espera»: aparece una persona nueva en lo que cuenta Inicio para quien

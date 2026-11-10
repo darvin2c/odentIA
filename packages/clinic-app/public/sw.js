@@ -1,4 +1,4 @@
-// La app instalada de la clínica (ADR 0176). A propósito no tiene `fetch`: no guarda
+// La app instalada de la clínica (ADR 0177). A propósito no tiene `fetch`: no guarda
 // páginas ni datos en el equipo (lo que arma el servidor lleva datos de la clínica) y
 // no puede dejar a nadie en una versión vieja. Solo muestra los avisos y, al tocarlos,
 // abre la pantalla en la ventana que ya está abierta.

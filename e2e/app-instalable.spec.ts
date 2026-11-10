@@ -4,7 +4,7 @@ import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
- * La app instalable y los avisos en el equipo (ADR 0176). Lo que no se puede
+ * La app instalable y los avisos en el equipo (ADR 0177). Lo que no se puede
  * probar aquí: la entrega real por FCM, Apple o Mozilla, la pantalla bloqueada y
  * la ventana de instalar del navegador. El servicio de push del navegador se
  * reemplaza por uno de mentira (`PushManager`): todo lo demás es real.

@@ -1,4 +1,4 @@
-# 0176. La app instalable y los avisos en el equipo
+# 0177. La app instalable y los avisos en el equipo
 
 - Estado: aceptada (10 nov 2026)
 - Contexto: pedido del dueño del producto de llevar odentIA «a app»; mesa de las cinco voces del 10 nov.

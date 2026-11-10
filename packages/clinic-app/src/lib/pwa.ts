@@ -1,7 +1,7 @@
 import { apiFetch } from "./api"
 
 /**
- * La app instalada de la clínica y sus avisos en este equipo (ADR 0176).
+ * La app instalada de la clínica y sus avisos en este equipo (ADR 0177).
  *
  * Cada clínica es su propio origen (`<slug>.<dominio>`): el permiso del
  * navegador y la suscripción son de esta clínica en este equipo, no de la

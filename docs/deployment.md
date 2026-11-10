@@ -362,7 +362,7 @@ contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el cor
 Vacío, esos avisos quedan pendientes y el caso sigue en la bandeja de Soporte.
 
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT` (`mailto:` de odentIA) son
-las claves de los avisos en el equipo (ADR 0176): la API sirve la pública y el worker
+las claves de los avisos en el equipo (ADR 0177): la API sirve la pública y el worker
 envía con el par. Son una sola para los tres productos y se generan una vez
 (`npx web-push generate-vapid-keys`); cambiarlas deja sin avisos a todos los equipos
 suscritos hasta que cada persona los vuelva a activar. Vacías, no se ofrecen.
