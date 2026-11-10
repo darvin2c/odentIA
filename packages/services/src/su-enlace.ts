@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import {
   CONSENT_DECLARATION,
   clinicalProfileFor,
-  consentSignatureNote,
+  CONSENT_SIGNATURE_NOTES,
   diagnosisCodeLabel,
   documentIssuerCountry,
   documentText,
@@ -27,7 +27,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { adminRuntime, appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
@@ -1409,11 +1409,6 @@ export async function getPersonalLinkConsent(
     .innerJoin(contact, joinPatientPerson())
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, doc.patientId)))
     .limit(1)
-  const [profile] = await tx
-    .select({ country: orgProfile.countryCode })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
   const diagnosisTitle = (await consentDiagnosisTitles(tx, [doc])).get(doc.id)
   const diagnosisCode = doc.diagnosisCode ? diagnosisCodeLabel(doc.diagnosisSystem, doc.diagnosisCode) : null
   return {
@@ -1425,7 +1420,7 @@ export async function getPersonalLinkConsent(
     body: doc.bodySnapshot,
     declaration: doc.declarationSnapshot ?? CONSENT_DECLARATION,
     signatureWords: CONSENT_SIGNATURE_WORDS.enlace,
-    signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+    signatureNote: CONSENT_SIGNATURE_NOTES.enlace,
     clinic: await loadDocumentLetterhead(tx, orgId),
     patient: { name: person?.name ?? "", chartNumber: person ? chartNumber(person.patientNumber) : "" },
     minor: await patientIsMinor(tx, orgId, doc.patientId),
@@ -2041,6 +2036,24 @@ export interface PersonalLinkShown {
   url: string
   expiresAt: string
   recipientName: string
+}
+
+/**
+ * Por qué no puede firmar desde su teléfono quien recibe su enlace (`serviceRecipient`), con la
+ * regla de la firma a distancia (`remoteSignBlock`): «Firmar en su teléfono» no se ofrece si su
+ * enlace no lo dejaría firmar (entrega 11). `sin-destinatario`: no hay a quién mostrárselo.
+ */
+export async function consentPhoneSignBlock(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<RemoteSignBlock | "sin-destinatario" | null> {
+  const recipient = await serviceRecipient(tx, orgId, patientId).catch((e: unknown) => {
+    if (e instanceof ServiceError) return null
+    throw e
+  })
+  if (!recipient) return "sin-destinatario"
+  return remoteSignBlock(tx, orgId, patientId, recipient.contactId)
 }
 
 /**

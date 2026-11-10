@@ -73,7 +73,10 @@ export function ConsentLinkActions({
             {/* Pudo solo mostrarse con el código: no se dice «otra vez». */}
             {document.linkSentAt ? "Enviarlo por mensaje" : "Enviar para firmar"}
           </Button>
-          <ConsentPhoneButton document={document} size={size} onShown={onChanged} />
+          {/* Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), no se ofrece. */}
+          {document.phoneSignBlock ? null : (
+            <ConsentPhoneButton document={document} size={size} onShown={onChanged} />
+          )}
         </>
       )}
       {error && !asking ? (

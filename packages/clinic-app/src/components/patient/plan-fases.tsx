@@ -281,7 +281,7 @@ function PlanPhasesGroup({
                                   ? NEXT_ACTION_LABELS[next]
                                   : null,
                             // El consentimiento va con el tratamiento: lo que falta firmar se ve aquí también.
-                            !closed ? treatmentConsentWords(item.consent) : null,
+                            !closed ? treatmentConsentWords(item.consent, item.consentMissing) : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
