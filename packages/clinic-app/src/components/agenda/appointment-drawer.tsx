@@ -44,6 +44,7 @@ import {
   type AppointmentContext,
   type AppointmentStatus,
   appointmentSessionsText,
+  appointmentShortWords,
   professionalSaid,
   visitLabel,
   visitState,
@@ -53,6 +54,7 @@ import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
+import { appointmentWhat } from "../../lib/patient-appointments"
 import { attendWord } from "../../lib/patient-overview"
 import { filiationGapsText, type PatientFull } from "../../lib/patients"
 import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
@@ -201,13 +203,29 @@ function RealAppointmentDrawer({
 
   // ----- Cancelar -----
   const setStatus = useMutation({
-    mutationFn: (input: { status: AppointmentStatus; cancelReason?: CancelReason; cancelNote?: string; via?: ConfirmVia }) =>
-      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
+    mutationFn: (input: {
+      status: AppointmentStatus
+      cancelReason?: CancelReason
+      cancelNote?: string
+      via?: ConfirmVia
+    }) =>
+      // «Vino»: la cita pasada queda atendida sin abrir otra atención (decisión B1 del 10 nov).
+      input.status === "atendida"
+        ? apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/came`, {
+            method: "POST",
+            body: "{}",
+          })
+        : apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
+            method: "POST",
+            body: JSON.stringify(input),
+          }),
     onSuccess: async (result) => {
-      if (result.data.status === "confirmada" || result.data.status === "no_asistio") announceVisitStatus(result.data)
+      if (
+        result.data.status === "confirmada" ||
+        result.data.status === "no_asistio" ||
+        result.data.status === "atendida"
+      )
+        announceVisitStatus(result.data)
       else
         toast.success(STATUS_DONE[result.data.status], {
           description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
@@ -587,8 +605,23 @@ function RealAppointmentDrawer({
                   No vino
                 </SubmitButton>
               ) : null}
-              {unclosed && canWrite && !canAttend ? (
-                <p className="text-sm text-muted-foreground">Si vino, la registra {appointment.professionalName}: también le aparece en Inicio.</p>
+              {/* «Vino» sin abrir otra atención: vino a pagar, a recoger algo, o ya lo atendieron (B1). */}
+              {unclosed && canWrite ? (
+                <SubmitButton
+                  variant="outline"
+                  className="h-11 bg-card"
+                  disabled={busy}
+                  pending={setStatus.isPending && setStatus.variables?.status === "atendida"}
+                  onClick={() => changeStatus("atendida")}
+                >
+                  Vino
+                </SubmitButton>
+              ) : null}
+              {unclosed && canWrite ? (
+                <p className="text-sm text-muted-foreground">
+                  «Vino» la deja atendida sin abrir otra atención; lo que se le hizo lo registra{" "}
+                  {canAttend ? "quien la atendió" : appointment.professionalName}.
+                </p>
               ) : null}
 
               {/* Llegó: «Atender» para quien atiende y «Deshacer» mientras no empiece la atención. */}
@@ -668,7 +701,15 @@ function RealAppointmentDrawer({
                   </span>
                 </DetailField>
               ) : null}
-              <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
+              <DetailField label="Servicio">
+                {appointmentWhat({ ...appointment, reason: null }) ?? "Sin servicio"}
+                {/* Lo sumado que no cabe en lo reservado: se dice aquí, con «Reprogramar» al pie (QA del 10 nov, M3). */}
+                {appointmentShortWords(appointment) ? (
+                  <span className="block text-sm font-semibold text-warning">
+                    {appointmentShortWords(appointment)}.
+                  </span>
+                ) : null}
+              </DetailField>
               {/* Lo que viene a hacer de un tratamiento de varias sesiones: «Endodoncia · sesión 2 de 2». */}
               {appointment.sessions?.length ? (
                 <DetailField label={appointment.sessions.length === 1 ? "Sesión" : "Sesiones"}>

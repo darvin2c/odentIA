@@ -237,6 +237,8 @@ export interface CollectSnapshotLine {
   amountCents: number
   /** Lo que este cobro pagó de él; los tickets anteriores a congelarlo no lo traen. */
   appliedCents?: number
+  /** Lo que le queda después de este cobro; 0 si lo completa. Los anteriores no lo traen. */
+  leftCents?: number
   promotion: string | null
 }
 

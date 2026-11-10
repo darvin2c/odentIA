@@ -40,6 +40,14 @@ import { ticketPartyOf } from "./ticket-party.js"
 
 export { ticketFormat } from "./document-kit.js"
 
+/** «Paga una parte: cuesta S/ 650», o «Con esto queda pagado: cuesta S/ 650» si lo completa. */
+function partialWords(
+  line: { ofCents: number | null; completes?: boolean },
+  money: (cents: number) => string,
+): string {
+  return `${line.completes ? "Con esto queda pagado" : "Paga una parte"}: cuesta ${money(line.ofCents ?? 0)}`
+}
+
 /** Lo que el papel de caja suma a la clínica: la frase al pie congelada. */
 export interface DocOrg extends DocumentClinic {
   currency: string
@@ -52,6 +60,8 @@ export interface TicketLine {
   amountCents: number
   /** Precio completo del concepto, si este cobro solo pagó una parte. */
   ofCents: number | null
+  /** Con este pago queda pagado entero (`leftCents` 0); null en los tickets anteriores. */
+  completes?: boolean
   /** Promoción aplicada al concepto (snapshot; null = sin promoción). */
   promotion: string | null
 }
@@ -173,6 +183,7 @@ export async function buildTicketSnapshot(
         description: line.description,
         amountCents: line.appliedCents,
         ofCents: line.appliedCents < line.amountCents ? line.amountCents : null,
+        completes: line.leftCents === 0,
         promotion: line.promotion,
       })),
     advanceCents: advance ? advance.amountCents : null,
@@ -378,7 +389,7 @@ export async function renderTicketPdf(
     thermalRule(kit)
     for (const line of snap.lines) {
       moneyRow(kit, line.description, money(line.amountCents))
-      if (line.ofCents != null) smallNote(kit, `Paga una parte: cuesta ${money(line.ofCents)}`)
+      if (line.ofCents != null) smallNote(kit, partialWords(line, money))
       if (line.promotion) smallNote(kit, `Promoción: ${line.promotion}`)
       kit.gap(3)
     }
@@ -431,7 +442,7 @@ export async function renderTicketPdf(
           ...(line.ofCents != null
             ? [
                 {
-                  inlines: `Paga una parte: cuesta ${money(line.ofCents)}`,
+                  inlines: partialWords(line, money),
                   size: SIZE.second,
                   tone: "gray" as const,
                 },

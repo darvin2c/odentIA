@@ -2,6 +2,7 @@ import {
   appendDictated,
   formatMoney,
   formatVitals,
+  gapWords,
   moneyTotalsText,
   parseVitals,
   VITAL_SIGNS,
@@ -89,7 +90,7 @@ import { BookingHere } from "../agenda/schedule-host"
 import { useNoticesColumnDockBlocker } from "../notices-column"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
-import { ConsentSigningScreen, useSignAs } from "./consent-signing"
+import { ConsentSigningScreen, PaperSignDrawer, useSignAs } from "./consent-signing"
 import {
   DictationHeaderButton,
   DictationMobileBar,
@@ -103,6 +104,7 @@ import {
   useDictationSession,
 } from "./dictation-session"
 import { DictationSignDialog } from "./dictation-sign-dialog"
+import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
@@ -134,8 +136,9 @@ import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { EncounterVisitStrip } from "./encounter-visit"
-import { CollectButton } from "./collect-flow"
+import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
+import { useDiscardEncounter, useOpenEncounter } from "./stale-encounter"
 import { PatientClinicalStrip } from "./patient-header"
 import { BudgetSendButton } from "./plan/budget-send"
 
@@ -557,6 +560,14 @@ export function EncounterEditor({
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
+  // «Cobrar» de «Atención finalizada»: el cajón y el ticket viven aquí, no en la fila de la deuda.
+  // La fila se oculta mientras la cuenta se vuelve a leer, y cobrar la vuelve a leer: el cajón se
+  // desmontaba con el cobro en curso y el ticket nunca se veía (QA del 10 nov, B7).
+  const finalizedCollect = useCollectFlow({
+    patientId,
+    patientName: patient.patient.displayName,
+    enabled: finalizedBilling !== null,
+  })
   // El presupuesto que quedó armado al firmar (decisión 12): el cierre pregunta si enviarlo ya.
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
   // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
@@ -573,6 +584,7 @@ export function EncounterEditor({
   const [finalizedWaiting, setFinalizedWaiting] = useState<Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>>([])
   /** Lo que sigue en curso tras firmar, con su próxima sesión: «Reservar la sesión 2» ahí mismo. */
   const [finalizedNext, setFinalizedNext] = useState<NextSession[]>([])
+  const [finalizedFreed, setFinalizedFreed] = useState<FreedAppointment[]>([])
   /** Los tratamientos con que se abrió «Nueva cita» desde «Atención finalizada». */
   const [bookingNext, setBookingNext] = useState<string[] | null>(null)
   /** Desde qué día conviene la sesión que se reserva desde el cierre (la endodoncia, una semana). */
@@ -595,6 +607,14 @@ export function EncounterEditor({
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [voidOpen, setVoidOpen] = useState(false)
+  const openRef = useOpenEncounter(patientId)
+  const discard = useDiscardEncounter(patientId)
+  // Lo guardado cambia si está vacía: se vuelve a preguntar al guardar.
+  const savedStamp = String(detail.encounter.updatedAt ?? "")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se relee cuando cambia lo guardado.
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
+  }, [savedStamp, detail.documents.length, patientId, queryClient])
   const [takingOver, setTakingOver] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileForSignature, setProfileForSignature] = useState(false)
@@ -1179,6 +1199,7 @@ export function EncounterEditor({
     setFinalizedBookedAfter([])
     setFinalizedWaiting([])
     setFinalizedNext([])
+    setFinalizedFreed([])
     setBookingNext(null)
     setBudgetLater(false)
     setCorrectingMaterials(false)
@@ -1260,6 +1281,7 @@ export function EncounterEditor({
           bookedAfter?: FinalizedBookedAfter[]
           waitingAfter?: Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>
           nextSessions?: NextSession[]
+          freedAppointments?: FreedAppointment[]
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1293,6 +1315,7 @@ export function EncounterEditor({
       setFinalizedBookedAfter(result.data.bookedAfter ?? [])
       setFinalizedWaiting(result.data.waitingAfter ?? [])
       setFinalizedNext(result.data.nextSessions ?? [])
+      setFinalizedFreed(result.data.freedAppointments ?? [])
       setFinalizedBilling(result.data.billing)
       // «Debe en total» cuenta lo que este cierre acaba de cargar.
       if (canReadFinance) void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
@@ -1584,7 +1607,7 @@ export function EncounterEditor({
   // Solo falta la colegiatura: se puede abrir el cierre, que la pide ahí mismo.
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
-  const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
+  const recorded = closingSections.filter((section) => !section.empty)
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
   // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
@@ -1602,12 +1625,18 @@ export function EncounterEditor({
   const unrecordedAll =
     !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
-  const finalizeDescription = [
-    recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
-    unrecordedAll.length > 0 ? `Sin registrar: ${unrecordedAll.join(", ")}.` : "",
-  ]
-    .filter(Boolean)
-    .join(" ")
+  // En pocas líneas, una por bloque: el párrafo de todo junto no se leía (producción, 10 nov).
+  const finalizeDescription =
+    recorded.length > 0 || unrecordedAll.length > 0 ? (
+      <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+        {recorded.map((section) => (
+          <li key={section.key}>
+            <span className="font-medium text-foreground">{section.title}:</span> {section.summary}
+          </li>
+        ))}
+        {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
+      </ul>
+    ) : null
 
   /** Al dictar, si cabe, el respaldo se muestra al lado. */
   const startDictation = () => {
@@ -1636,6 +1665,15 @@ export function EncounterEditor({
   const unsaved = saveState !== "saved"
   // Lo que falta registrar no apaga «Finalizar y firmar»: lleva a su bloque y lo marca (`requestSign`).
   const canSign = !(locked || !closingQuery.isSuccess || dictation.busy || unsaved)
+  // El botón del pie no espera al guardado: `requestSign` guarda lo último y vuelve a comprobar
+  // antes de abrir el cierre. Si se apagara mientras se guarda, el primer clic justo después de
+  // escribir la evolución no haría nada. Sin conexión sí espera: no se podría guardar.
+  const canRequestSign = !(
+    locked ||
+    !closingQuery.isSuccess ||
+    dictation.busy ||
+    saveState === "offline"
+  )
   const signBlockedReason =
     saveState === "offline"
       ? "Sin conexión: lo escrito se guarda al volver y recién entonces se puede firmar."
@@ -1697,8 +1735,13 @@ export function EncounterEditor({
         queryFn: () => fetchConsents({ patientId }),
         staleTime: 0,
       })
+      // También el preparado en otra atención para el tratamiento que se hace hoy: el pendiente va
+      // con el tratamiento, no con la atención (consentimientos, 10 nov: «Firmar ahora» no hacía nada).
       const pending = list.data.filter(
-        (doc) => doc.encounterId === encounterId && doc.status === "pendiente" && !doc.personSignedAt,
+        (doc) =>
+          (doc.encounterId === encounterId || doc.id === need.documentId || (need.planItemId != null && doc.planItemId === need.planItemId)) &&
+          doc.status === "pendiente" &&
+          !doc.personSignedAt,
       )
       // Primero el que se pulsó (QA del 8 nov: «Firmar ahora» de la endodoncia abría la prótesis).
       const pressed = (doc: ConsentDocument) =>
@@ -1711,6 +1754,32 @@ export function EncounterEditor({
       // Desde el cierre, el aviso va en el cierre (el diálogo tapa la página).
       if (confirmOpen) setSubmitErrors(closingForm, { form: submitErrorMessage(err) })
       else setSaveError(submitErrorMessage(err))
+    }
+  }
+  /** «Firmado en papel» desde el cierre: la foto de la hoja firmada. */
+  const [paperDoc, setPaperDoc] = useState<ConsentDocument | null>(null)
+  const openPaper = async (need: ConsentNeed) => {
+    if (!need.documentId) return
+    const list = await queryClient.fetchQuery({
+      queryKey: ["consents", patientId],
+      queryFn: () => fetchConsents({ patientId }),
+      staleTime: 0,
+    })
+    const doc = list.data.find((item) => item.id === need.documentId && item.status === "pendiente")
+    if (doc) setPaperDoc(doc)
+  }
+  /** «Firmar de nuevo aquí»: lo firmado en su enlace se firma en la tablet; la firma del enlace queda en la historia. */
+  const signAgainHere = async (documentId: string) => {
+    try {
+      const list = await queryClient.fetchQuery({
+        queryKey: ["consents", patientId],
+        queryFn: () => fetchConsents({ patientId }),
+        staleTime: 0,
+      })
+      const doc = list.data.find((item) => item.id === documentId && item.status === "pendiente")
+      if (doc) setSigningDocs([doc])
+    } catch (err) {
+      setSaveError(submitErrorMessage(err))
     }
   }
   /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
@@ -2217,6 +2286,7 @@ export function EncounterEditor({
         patientId={patientId}
         encounterId={encounterId}
         disabled={locked}
+        onSignAgain={(documentId) => void signAgainHere(documentId)}
         onChanged={async () => {
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
@@ -2648,15 +2718,38 @@ export function EncounterEditor({
               )}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-              <Button
-                type="button"
-                variant="ghost"
-                className="text-destructive"
-                disabled={locked}
-                onClick={() => setVoidOpen(true)}
-              >
-                Anular esta atención…
-              </Button>
+              {/* Sin nada registrado se descarta de un toque, sin motivo ni rastro en la Historia (10 nov). */}
+              {openRef.data?.data?.id === encounterId &&
+              openRef.data.data.empty &&
+              detail.procedures.length === 0 &&
+              activeDiagnosisRows.length === 0 ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive"
+                  disabled={locked || discard.isPending}
+                  onClick={() =>
+                    discard.mutate(encounterId, {
+                      onSuccess: () => {
+                        clearTimer()
+                        void navigate({ to: "/patients/$patientId", params: { patientId } })
+                      },
+                    })
+                  }
+                >
+                  {discard.isPending ? "Descartando…" : "Descartar esta atención"}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive"
+                  disabled={locked}
+                  onClick={() => setVoidOpen(true)}
+                >
+                  Anular esta atención…
+                </Button>
+              )}
             </div>
             {dictation.busy ? (
               <p className="text-xs text-muted-foreground">
@@ -2671,16 +2764,19 @@ export function EncounterEditor({
         </div>
       </MasterDetail>
 
-      {/* Pie fijo: lo que falta y «Finalizar y firmar», en escritorio, tablet y teléfono. */}
+      {/* Pie fijo: lo que falta y «Finalizar y firmar», en escritorio, tablet y teléfono.
+          El botón no se mueve cuando cambia el texto (de «Falta 1…» a «Listo para firmar»): el texto
+          ocupa lo que queda y se parte en líneas, sin empujar el botón a otra fila; si el texto crece,
+          el botón queda abajo, pegado al borde del pie. */}
       {canWrite && attending ? (
         <div
           className={cn(
-            "sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border",
+            "sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border",
             // En el teléfono, mientras se dicta, el pie es la barra del dictado (que también firma).
             dictationMobileBarVisible(dictation) && "max-sm:hidden",
           )}
         >
-          <span id={`${uid}-footer`} className="text-sm text-muted-foreground">
+          <span id={`${uid}-footer`} className="min-w-0 flex-1 text-sm text-muted-foreground">
             {footerMissing.length > 0 ? (
               // Cada cosa que falta lleva a su bloque, como «Registrar» en el cierre.
               <>
@@ -2704,7 +2800,13 @@ export function EncounterEditor({
               footerText
             )}
           </span>
-          <Button type="button" disabled={!canSign} aria-describedby={`${uid}-footer`} onClick={requestSign}>
+          <Button
+            type="button"
+            className="shrink-0 self-end"
+            disabled={!canRequestSign}
+            aria-describedby={`${uid}-footer`}
+            onClick={requestSign}
+          >
             Finalizar y firmar
           </Button>
         </div>
@@ -2759,6 +2861,7 @@ export function EncounterEditor({
         confirmLabel={needsRegistration ? "Guardar y firmar" : null}
         initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
+        onPaper={(need) => void openPaper(need)}
         onClose={() => {
           if (!finalizing) setConfirmOpen(false)
         }}
@@ -2778,9 +2881,25 @@ export function EncounterEditor({
           />
         }
       >
-        {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
+        {finalizeDescription}
       </EncounterClosingDialog>
       {product.overlay}
+      <PaperSignDrawer
+        open={paperDoc !== null}
+        document={paperDoc}
+        patientId={patientId}
+        encounterId={encounterId}
+        onClose={() => setPaperDoc(null)}
+        onSigned={async () => {
+          setPaperDoc(null)
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
+            queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+            refreshClosing(),
+          ])
+          await onChanged()
+        }}
+      />
       <ConsentSigningScreen
         open={signingDocs !== null}
         documents={signingDocs ?? []}
@@ -2852,6 +2971,24 @@ export function EncounterEditor({
                   : "Caja ya lo ve en su lista de por cobrar."}
             </DialogDescription>
           </DialogHeader>
+          {/* La cita reservada para lo que hoy quedó hecho: usarla para lo que sigue o liberarla (M1). */}
+          <FinalizedFreedAppointments
+            appointments={finalizedFreed}
+            next={(() => {
+              const first = finalizedNext.find((session) => session.toBook && !session.booked)
+              return first ? { planItemId: first.planItemId, title: first.title } : null
+            })()}
+            canBook={canBook}
+            // Su Plan, «Qué sigue» y sus citas cambian: lo de esta persona se vuelve a leer.
+            onChanged={(_, how) => {
+              // Lo que ya va en esa cita no se ofrece otra vez (revisión antes de entregar).
+              if (how === "usada") {
+                const used = finalizedNext.find((session) => session.toBook && !session.booked)?.planItemId
+                if (used) setFinalizedNext((current) => current.filter((session) => session.planItemId !== used))
+              }
+              void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes(patientId) })
+            }}
+          />
           {finalizedNext.length > 0 ? (
             <FinalizedNextSessions
               sessions={finalizedNext}
@@ -2882,22 +3019,25 @@ export function EncounterEditor({
                 // «Qué sigue»), desde que ese control se puede hacer (repaso del 9 nov, N6).
                 // Y no antes de lo que su tratamiento deja entre sesiones: la endodoncia con medicación,
                 // una semana (QA del 9 nov, repaso 3).
+                // Lo aceptado no espera la ventana del control (decisión B3 del 10 nov): el control se
+                // suma a la cita solo si su día cae en ella (lo decide el servidor al reservar).
                 date: [
                   addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
-                  finalizedControls?.next?.joinsNext?.from ?? "",
                   gapFrom ?? "",
                 ].sort().at(-1)!,
                 ...(gapFrom && !finalizedControls?.next?.joinsNext
-                  ? { note: "Entre sesiones se deja actuar la medicación: se busca hora desde una semana después de hoy." }
+                  ? {
+                      note: `Entre sesiones se espera ${gapWords(
+                        finalizedNext.find((session) => session.planItemId === bookingNext[0])?.toBook?.gapDays ?? 7,
+                      )}: se busca hora desde ese día.`,
+                    }
                   : {}),
                 ...(finalizedControls?.next?.joinsNext
                   ? {
                       followUpIds: [finalizedControls.next.id],
-                      // Por qué empieza ese día, como en «Qué sigue» (QA antes de entregar).
                       note: `${finalizedControls.next.title} toca el ${controlDaySaid(
                         new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(finalizedControls.next.dueAt)),
-                      )}; se puede hacer desde el ${controlDaySaid(finalizedControls.next.joinsNext.from)}.`,
-                      notBefore: finalizedControls.next.joinsNext.from,
+                      )}: se suma a esta cita si es desde el ${controlDaySaid(finalizedControls.next.joinsNext.from)}; si no, queda por reservar.`,
                     }
                   : {}),
               }}
@@ -2977,9 +3117,10 @@ export function EncounterEditor({
                 {owedSameAsToday ? " · lo de hoy" : null}
               </span>
               {/* Secundario: la acción de quien atiende es reservar lo que sigue. */}
-              <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" variant="outline" />
+              {finalizedCollect.button({ size: "sm", variant: "outline" })}
             </div>
           ) : null}
+          {finalizedCollect.surfaces}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
           ) : null}

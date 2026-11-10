@@ -8,8 +8,10 @@ import { type AgendaAppointment, invalidateAppointmentQueries, ofProfessional } 
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { fetchOpenEncounter, type OpenEncounterRef } from "../../lib/encounters"
 import type { Encounter, PatientFull } from "../../lib/patients"
 import { usePersonArchived } from "../../lib/person-archived"
+import { encounterDayWords, StaleEncounterDialog } from "./stale-encounter"
 
 /** Cita de agenda desde la que se atiende: fija la sede y dice de quién es. */
 export interface AttendedAppointment {
@@ -32,10 +34,14 @@ class OtherEncounterOpen extends Error {
   }
 }
 
-/** La atención en curso de un paciente, sin nada de su historia: cuál es y quién la lleva. */
-interface OpenEncounterRef {
-  id: string
-  professionalUserId: string
+/**
+ * La persona tiene abierta una atención de otro día (10 nov): no se continúa en silencio ni se
+ * rechaza; en su ficha se pregunta qué hacer con ella (seguir, cerrarla o descartarla).
+ */
+class StaleEncounterOpen extends Error {
+  constructor(readonly open: OpenEncounterRef) {
+    super("Quedó abierta una atención de otro día")
+  }
 }
 
 /**
@@ -60,7 +66,10 @@ export function useAttendAppointment() {
       } catch (err) {
         // Ya hay una atención abierta (de la persona o de esta cita): se retoma.
         if (err instanceof ApiError && (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")) {
-          const current = await apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${input.patientId}/open-encounter`)
+          const current = await fetchOpenEncounter(input.patientId)
+          // La de otro día no se continúa en silencio: se pregunta en su ficha.
+          if (current.data && err.shape.code === "DRAFT_OPEN" && !current.data.today)
+            throw new StaleEncounterOpen(current.data)
           // Una cita pasada con otra atención abierta: no se escribe lo de ese día en la otra.
           if (current.data && err.shape.code === "DRAFT_OPEN" && input.appointment.pastVisit)
             throw new OtherEncounterOpen(current.data.id)
@@ -83,6 +92,11 @@ export function useAttendAppointment() {
       })
     },
     onError: (err, input) => {
+      if (err instanceof StaleEncounterOpen) {
+        toast.info(`Quedó abierta su atención del ${encounterDayWords(err.open.startedAt)}: elige en su ficha qué hacer con ella.`)
+        void navigate({ to: "/patients/$patientId", params: { patientId: input.patientId } })
+        return
+      }
       if (err instanceof OtherEncounterOpen) {
         toast.error(
           "Ya tiene otra atención en curso. Termínala o anúlala y vuelve a «Registrar la atención» de esta cita: lo de cada día va en su propia atención.",
@@ -190,11 +204,14 @@ export function NewEncounterButton({
   const search = useSearch({ strict: false }) as { atender?: boolean }
   const openQuery = useQuery({
     queryKey: ["open-encounter", patientId],
-    queryFn: () =>
-      apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${patientId}/open-encounter`),
-    enabled: canWrite && !appointment && !openEncounterId,
+    queryFn: () => fetchOpenEncounter(patientId),
+    enabled: canWrite && !appointment,
   })
-  const inProgressId = openEncounterId ?? openQuery.data?.data?.id ?? null
+  const openRef = openQuery.data?.data ?? null
+  // La de otro día no se continúa con un clic: se pregunta qué hacer con ella (10 nov).
+  const staleRef = openRef && !openRef.today ? openRef : null
+  const [asking, setAsking] = useState<OpenEncounterRef | null>(null)
+  const inProgressId = staleRef ? null : (openEncounterId ?? openRef?.id ?? null)
   // En la página de la persona: si hoy tiene cita, atender es un clic y se une a ella.
   const todayVisit = useTodayAppointment(patientId, canWrite && canSeeAgenda && !appointment && !inProgressId)
   const visit: AttendedAppointment | null =
@@ -221,12 +238,15 @@ export function NewEncounterButton({
       await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
       open(result.data.id)
     } catch (err) {
-      // Ya hay una atención abierta: se retoma.
+      // Ya hay una atención abierta: se retoma la de hoy; la de otro día, se pregunta.
       if (err instanceof ApiError && err.shape.code === "DRAFT_OPEN") {
         try {
-          const current = await apiFetch<{ data: OpenEncounterRef | null }>(
-            `/api/patients/${patientId}/open-encounter`,
-          )
+          const current = await fetchOpenEncounter(patientId)
+          if (current.data && !current.data.today) {
+            setAsking(current.data)
+            setSaving(false)
+            return
+          }
           if (current.data) {
             open(current.data.id)
             return
@@ -249,11 +269,34 @@ export function NewEncounterButton({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `open` cambia en cada render; corre una vez por llegada.
   useEffect(() => {
     if (!wantsToAttend || !canWrite || openQuery.isPending) return
-    if (inProgressId) open(inProgressId)
+    if (staleRef) setAsking(staleRef)
+    else if (inProgressId) open(inProgressId)
     else if (!visit) void startOnArrival.current()
     void navigate({ to: ".", search: (previous: Record<string, unknown>) => ({ ...previous, atender: undefined }), replace: true } as never)
   }, [wantsToAttend, canWrite, openQuery.isPending, inProgressId, visit, navigate])
   if (!canWrite) return null
+  const staleDialog = (
+    <StaleEncounterDialog
+      patientId={patientId}
+      open={asking}
+      onClose={() => setAsking(null)}
+      onDiscarded={async () => {
+        // Descartada la vacía, se sigue con lo que se quería: atender hoy.
+        if (visit) attend.mutate({ patientId, appointment: visit })
+        else await start()
+      }}
+    />
+  )
+  if (!appointment && staleRef) {
+    return (
+      <>
+        <Button variant={variant} size={size} onClick={() => setAsking(staleRef)}>
+          Atender
+        </Button>
+        {staleDialog}
+      </>
+    )
+  }
   if (!appointment && inProgressId) {
     return (
       <Button variant={variant} size={size} onClick={() => open(inProgressId)}>
@@ -265,19 +308,25 @@ export function NewEncounterButton({
     // La hora de la cita de hoy dice cuál se atiende: «Atender (10:00)».
     const at = !appointment && todayVisit ? clockOf(todayVisit.startsAt) : null
     return (
-      <SubmitButton
-        variant={variant}
-        size={size}
-        pending={attend.isPending}
-        onClick={() => attend.mutate({ patientId, appointment: visit })}
-      >
-        {at ? `Atender (${at})` : "Atender"}
-      </SubmitButton>
+      <>
+        <SubmitButton
+          variant={variant}
+          size={size}
+          pending={attend.isPending}
+          onClick={() => attend.mutate({ patientId, appointment: visit })}
+        >
+          {at ? `Atender (${at})` : "Atender"}
+        </SubmitButton>
+        {staleDialog}
+      </>
     )
   }
   return (
-    <SubmitButton variant={variant} size={size} pending={saving} onClick={() => void start()}>
-      Atender
-    </SubmitButton>
+    <>
+      <SubmitButton variant={variant} size={size} pending={saving} onClick={() => void start()}>
+        Atender
+      </SubmitButton>
+      {staleDialog}
+    </>
   )
 }

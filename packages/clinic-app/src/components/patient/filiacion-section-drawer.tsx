@@ -21,13 +21,13 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { staffAddressSource } from "../../lib/address-suggestions"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useClinicalProfile } from "../../lib/org"
 import { attendWord } from "../../lib/patient-overview"
 import { filiationGapsText, type Patient } from "../../lib/patients"
-import type { PersonPage } from "../../lib/people"
+import type { PersonListItem, PersonPage } from "../../lib/people"
 import {
   countryChoices,
   documentChoices,
@@ -234,6 +234,61 @@ function initialValues(source: Partial<Record<string, unknown>>, fields: Section
       const raw = f.type.kind === "insurance" ? insuranceChoiceOf(source.insuranceType as string, source.insuranceScheme as string) : source[f.key]
       return [f.key, typeof raw === "string" ? raw : ""]
     }),
+  )
+}
+
+/**
+ * El número que se escribe ya es de otra persona de la clínica: se dice, con la misma búsqueda
+ * del registro (por sus últimos 8 dígitos), y se puede abrir su página (repaso final de la
+ * ficha del 10 nov, B8). No frena: en una familia se comparte el teléfono.
+ */
+function SharedPhoneNote({
+  phone,
+  self,
+}: {
+  phone: string
+  self: { personId?: string; patientId?: string }
+}) {
+  const digits = phone.replace(/\D/g, "")
+  const probe = digits.length >= 8 ? digits.slice(-8) : ""
+  const [asked, setAsked] = useState(probe)
+  useEffect(() => {
+    const timer = setTimeout(() => setAsked(probe), 350)
+    return () => clearTimeout(timer)
+  }, [probe])
+  const found = useQuery({
+    queryKey: ["people", "shared-phone", asked],
+    queryFn: () =>
+      apiFetch<{ data: PersonListItem[] }>(
+        `/api/people?${new URLSearchParams({ ver: "todos", limit: "4", q: asked })}`,
+      ),
+    enabled: asked !== "",
+    retry: false,
+  })
+  const others = (found.data?.data ?? []).filter(
+    (row) =>
+      row.id !== self.personId &&
+      (!self.patientId || row.patient?.id !== self.patientId) &&
+      (row.phone ?? "").replace(/\D/g, "").endsWith(asked),
+  )
+  if (asked === "" || others.length === 0) return null
+  return (
+    <span className="text-warning" role="status">
+      Este número también es de{" "}
+      {others.map((row, index) => (
+        <span key={row.id}>
+          {index > 0 ? (index === others.length - 1 ? " y " : ", ") : null}
+          <Link
+            to="/people/$personId"
+            params={{ personId: row.id }}
+            className="font-medium underline"
+          >
+            {row.displayName}
+          </Link>
+        </span>
+      ))}
+      . Si es de su familia, guárdalo igual.
+    </span>
   )
 }
 
@@ -472,6 +527,12 @@ export function FiliacionSectionDrawer({
           const hint =
             item.key === "docNumber" && duplicateOf && (values.docNumber ?? "").trim() === duplicateOf.docNumber ? (
               <OpenDuplicate docType={duplicateOf.docType} docNumber={duplicateOf.docNumber} />
+            ) : item.key === "phone" && (values.phone ?? "") !== (original.phone ?? "") ? (
+              // Al cambiarlo, si ese número ya es de otra persona se dice (como en el registro).
+              <SharedPhoneNote
+                phone={values.phone ?? ""}
+                self={{ personId: person?.id, patientId: patient?.id }}
+              />
             ) : (
               item.hint
             )

@@ -20,12 +20,8 @@ import {
 } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useId } from "react"
-import { fetchBudgets } from "../../lib/budgets"
-import {
-  fetchFollowUps,
-  fetchPrescriptions,
-  formatDate,
-} from "../../lib/clinical-journey"
+import { budgetNumberLabel, fetchBudgets } from "../../lib/budgets"
+import { fetchFollowUps, fetchPrescriptions, formatDate } from "../../lib/clinical-journey"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
@@ -163,7 +159,10 @@ export function DocumentLinkSelects({
           <SelectContent>
             {budgetList.map((budget) => (
               <SelectItem key={budget.id} value={budget.id}>
-                Presupuesto N.º {budget.budgetNumber} · {budget.title}
+                {/* Sin título propio se llama «Presupuesto N.º 456»: no se repite. */}
+                {budget.title && budget.title !== budgetNumberLabel(budget.budgetNumber)
+                  ? `${budgetNumberLabel(budget.budgetNumber)} · ${budget.title}`
+                  : budgetNumberLabel(budget.budgetNumber)}
               </SelectItem>
             ))}
           </SelectContent>

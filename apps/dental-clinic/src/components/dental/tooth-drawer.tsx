@@ -1230,6 +1230,8 @@ export function ToothDrawer({
                       aria-describedby={control.describedBy}
                       onBlur={control.onBlur}
                       value={field.state.value?.id ?? ""}
+                      // Lo que encaja en la pieza, primero (la endodoncia posterior en la 46).
+                      place={multi ? null : (tooth ?? null)}
                       onChange={(service) => {
                         field.handleChange(service)
                         // Nace con las sesiones habituales del servicio, como en «Indicar un tratamiento»:
@@ -1273,6 +1275,7 @@ export function ToothDrawer({
                     key={place}
                     service={draft.treatService!}
                     place={place}
+                    diagnosisCode={draft.diagnosisCode || null}
                     pending={switching || fieldDisabled}
                     onUse={
                       fitTeeth.length === 1

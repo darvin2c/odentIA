@@ -29,7 +29,13 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { TextDecoder } from "node:util"
-import { type PatientGuide, parsePatientGuide } from "@odentia/clinical"
+import {
+  type FinishControl,
+  type PatientGuide,
+  parseFinishControls,
+  parsePatientGuide,
+  parseSessionGapDays,
+} from "@odentia/clinical"
 import { notInArray, sql } from "drizzle-orm"
 import type { Db } from "./client.js"
 
@@ -103,6 +109,73 @@ export function librarySessions(file: string, keys: ReadonlySet<string>): Map<st
     sessions.set(key, value)
   }
   return sessions
+}
+
+/** La espera entre sesiones y los controles al terminar de un tratamiento de la biblioteca. */
+export interface LibraryFollowUpRule {
+  sessionGapDays: number | null
+  finishControls: FinishControl[]
+}
+
+/**
+ * La espera entre sesiones y los controles al terminar que trae la guía clínica (decisión B5
+ * del 10 nov): `<archivo>` con `template_key,session_gap_days,controls`, donde `controls` va
+ * como `365:Control radiográfico de la endodoncia`, varios separados por `|`. Solo lo que tiene
+ * fuente; lo que no está no espera ni deja controles. Fail closed como las sesiones.
+ *
+ * Las de odentIA (`biblioteca_controles.csv`): la endodoncia y la pulpectomía dejan la medicación
+ * intraconducto al menos 7 días (con 7 el conducto quedó sin bacterias y con 10 minutos no:
+ * Sjögren y col., Int Endod J 1991;24:119-125) y su control clínico y radiográfico al año, cuando
+ * la lesión periapical se da por sanada (ESE, Int Endod J 2006;39:921-930). La pulpotomía y la
+ * apexificación ya no esperan 7 días por ser del mismo tipo: la apexificación cambia el hidróxido
+ * cada uno a tres meses, y eso lo pone la clínica.
+ */
+export function libraryFollowUpRules(
+  file: string,
+  keys: ReadonlySet<string>,
+): Map<string, LibraryFollowUpRule> {
+  const rules = new Map<string, LibraryFollowUpRule>()
+  for (const line of strictLines(file, "template_key,session_gap_days,controls")) {
+    const [key, gap, controls] = splitHead(line, 3)
+    if (!key || !keys.has(key))
+      throw new Error(`Controles de un tratamiento que no está en ${file}: ${line}`)
+    if (rules.has(key)) throw new Error(`Controles repetidos en ${file}: ${key}`)
+    try {
+      const sessionGapDays = gap ? parseSessionGapDays(Number(gap)) : null
+      if (sessionGapDays === 0) throw new Error("una espera de 0 días no se escribe")
+      const finishControls = parseFinishControls(
+        (controls ?? "")
+          .split("|")
+          .filter(Boolean)
+          .map((part) => {
+            const [days, ...title] = part.split(":")
+            return { afterDays: Number(days), title: title.join(":") }
+          }),
+      )
+      rules.set(key, { sessionGapDays, finishControls })
+    } catch (error) {
+      throw new Error(`${file}: ${line}: ${(error as Error).message}`)
+    }
+  }
+  return rules
+}
+
+/** Escribe en la biblioteca de un producto su espera y sus controles; lo que no trae el archivo queda sin nada. Una sugerencia: no sube la versión. */
+export async function seedFollowUpRules(
+  tx: Db,
+  product: string,
+  rules: ReadonlyMap<string, LibraryFollowUpRule>,
+): Promise<void> {
+  await tx.execute(
+    sql`update "treatment_template" set "session_gap_days" = null, "finish_controls" = '[]'::jsonb
+      where "product" = ${product} and ("session_gap_days" is not null or "finish_controls" <> '[]'::jsonb)`,
+  )
+  for (const [key, rule] of rules)
+    await tx.execute(
+      sql`update "treatment_template" set "session_gap_days" = ${rule.sessionGapDays},
+        "finish_controls" = ${JSON.stringify(rule.finishControls)}::jsonb
+        where "key" = ${key} and "product" = ${product}`,
+    )
 }
 
 /** Las listas oficiales leídas de sus CSV, para sembrarlas y para que una biblioteca valide sus códigos. */

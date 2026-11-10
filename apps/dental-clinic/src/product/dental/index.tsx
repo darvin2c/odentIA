@@ -5,6 +5,9 @@ import type {
 } from "@odentia/clinic-app/product/product-ui"
 import { DENTAL_IMAGING_TYPES, DENTAL_MEDICATION_CATALOG } from "@odentia/clinical"
 import {
+  anatomyFitRank,
+  anatomyFits,
+  anatomySibling,
   conditionLabel,
   dentalProfileFor,
   FDI_ADULT,
@@ -28,7 +31,7 @@ import {
   PeriodontogramSkeleton,
 } from "../../components/dental/odontogram-skeleton"
 import { useSignedOdontogramPapers } from "../../components/dental/signed-odontogram-papers"
-import { ToothFitNotice } from "../../components/dental/tooth-fit-notice"
+import { ToothFitNotice, toothAnatomyOf } from "../../components/dental/tooth-fit-notice"
 import { useActiveFindings } from "../../lib/dental/use-odontogram"
 import { dentalEncounter } from "./encounter"
 import { dentalHealth } from "./health"
@@ -174,7 +177,19 @@ export const dentalUi: ProductUi = {
         [conditionLabel(condition), variantLabel(condition, variant)].filter(Boolean).join(" · "),
     },
     // La endodoncia anterior en la 46: se avisa y se ofrece la posterior (entrega 8 de la atención).
-    toothFit: { Notice: (props) => <ToothFitNotice {...props} /> },
+    // Al buscar en una pieza, primero lo que encaja (QA del 10 nov, B3); solo ordena.
+    toothFit: {
+      Notice: (props) => <ToothFitNotice {...props} />,
+      rank: (anatomy, place) => anatomyFitRank(anatomy ? toothAnatomyOf(anatomy) : null, place),
+      sibling: (anatomy, place) => {
+        const own = anatomy ? toothAnatomyOf(anatomy) : null
+        if (!anatomy || !own || own.groups.length === 0 || anatomyFits(own, place)) return null
+        return anatomySibling(
+          place,
+          anatomy.siblings.map((sibling) => ({ ...sibling, ...toothAnatomyOf(sibling) })),
+        )
+      },
+    },
   },
   // El odontograma firmado (solo en Perú; ADR 0036): un hecho de la historia y de la atención que lo firmó.
   history: {

@@ -24,7 +24,7 @@ import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
-import { checkEncounterClosing } from "./encounters.js"
+import { checkEncounterClosing, encounterHasRecords } from "./encounters.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
@@ -537,7 +537,15 @@ async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, tim
   const items: WaitingStaleEncounter[] = []
   for (const { row, patientName, personId } of rows) {
     const closing = await checkEncounterClosing(tx, orgId, userId, row)
-    items.push({ id: row.id, patientId: row.patientId, personId, patientName, startedAt: row.startedAt.toISOString(), missing: closing.missing })
+    items.push({
+      id: row.id,
+      patientId: row.patientId,
+      personId,
+      patientName,
+      startedAt: row.startedAt.toISOString(),
+      missing: closing.missing,
+      empty: !(await encounterHasRecords(tx, orgId, row)),
+    })
   }
   return items
 }

@@ -82,6 +82,21 @@ export function anatomySibling<T extends Pick<TreatmentAnatomy, "groups" | "dent
   return fitting.reduce((best, sibling) => (rank(sibling) < rank(best) ? sibling : best))
 }
 
+/**
+ * El orden de un servicio para una pieza, al buscarlo (QA del 10 nov, B3): primero lo que
+ * encaja (el más específico antes, como `anatomySibling`), después lo que no tiene anatomía
+ * (propio de la clínica: no se juzga) y al final lo que es para otro grupo. Solo ordena:
+ * nada se esconde. Menor va antes; una pieza que no es FDI deja a todos iguales.
+ */
+export function anatomyFitRank(
+  anatomy: Pick<TreatmentAnatomy, "groups" | "dentition"> | null,
+  tooth: number,
+): number {
+  if (!isValidTooth(tooth) || !anatomy || anatomy.groups.length === 0) return 50
+  if (!anatomyFits(anatomy, tooth)) return 100
+  return (anatomy.dentition ? 0 : 10) + anatomy.groups.length
+}
+
 /** Lo que se dice cuando un tratamiento no es para la pieza. */
 export interface ToothFitNotice<T> {
   tooth: number

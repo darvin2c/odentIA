@@ -765,7 +765,12 @@ function BudgetsBlock({ sessionToken }: { sessionToken: string }) {
   if (query.isError) return <ErrorState title="No pudimos cargar tus presupuestos" message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
   const awaiting = query.data.filter((budget) => AWAITING.has(budget.status))
   const decided = query.data.filter((budget) => !AWAITING.has(budget.status))
-  const row = (budget: PortalBudget) => `Presupuesto N.º ${budget.budgetNumber} · ${budget.title} · ${portalTotalsText(budget, budget)}`
+  // Sin título propio se llama «Presupuesto N.º 456»: no se repite (repaso final de la ficha, B3).
+  const row = (budget: PortalBudget) => {
+    const number = `Presupuesto N.º ${budget.budgetNumber}`
+    const named = budget.title && budget.title !== number ? `${number} · ${budget.title}` : number
+    return `${named} · ${portalTotalsText(budget, budget)}`
+  }
   return (
     <Block title="Por decidir" count={awaiting.length}>
       {awaiting.length === 0 ? <p className="text-sm text-muted-foreground">No tienes presupuestos por responder.</p> : null}

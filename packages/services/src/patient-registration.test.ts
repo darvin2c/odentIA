@@ -1154,7 +1154,9 @@ it("a su cargo, el documento que se escribe de su madre ya registrada se le guar
   expect(mother).toMatchObject({ docType: "DNI", docNumber: "40123456" })
 })
 
-it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con lo mínimo y lo que falta queda en sus notas", async () => {
+// Lo que falta lo dice «Faltan datos» de su página, al día: no queda una nota que envejece a
+// nombre de quien la registró (repaso final de la ficha del 10 nov, B2).
+it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con lo mínimo y lo que falta no queda en sus notas", async () => {
   await seedActor()
   await publish("org_a")
   const answers = (phone?: string): RegistrationAnswers => ({
@@ -1166,16 +1168,23 @@ it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con l
     withOrgContext(appDb, "org_a", (tx) =>
       registerPatient(tx, "org_a", { kind: "internal", userId: ACTOR, scope: "essentials" }, { submissionId: randomUUID(), ...input }),
     )
-  // Sin teléfono también se registra (una urgencia sin celular): una sola ficha, y lo que
-  // falta, también el teléfono o correo, queda en sus notas. Con vínculos ya no es «alguien nuevo».
-  const withoutPhone = await register({ answers: { ...answers(), demographics: { displayName: "Elsa Mori", givenNames: "Elsa", familyName: "Mori" } } })
-  const elsa = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", withoutPhone.id))
+  // Sin teléfono también se registra (una urgencia sin celular): una sola ficha, sin una nota
+  // de lo que falta. Con vínculos ya no es «alguien nuevo».
+  const withoutPhone = await register({
+    answers: {
+      ...answers(),
+      demographics: { displayName: "Elsa Mori", givenNames: "Elsa", familyName: "Mori" },
+    },
+  })
+  const elsa = await withOrgContext(appDb, "org_a", (tx) =>
+    getPatient(tx, "org_a", withoutPhone.id),
+  )
   const elsaSelf = elsa.contacts.find((link) => link.relationship === "self")!
   expect(elsa.contacts.filter((link) => link.relationship === "self")).toHaveLength(1)
   expect(withoutPhone.whatsapp).toBeUndefined()
-  expect((await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", elsaSelf.contactId))).map((note) => note.body)).toContain(
-    "El equipo registró a esta persona con lo mínimo. Faltan datos para la atención: confirmar apellidos y nombres, fecha de nacimiento, teléfono o correo.",
-  )
+  expect(
+    await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", elsaSelf.contactId)),
+  ).toEqual([])
   const { person } = await makeContactWithConversation("org_a", "Otra Persona")
   await expect(
     register({ answers: answers("+51987111222"), contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }] }),
@@ -1187,10 +1196,9 @@ it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con l
   expect(detail.registration).toMatchObject({ entryPoint: "platform", respondent: "staff", conversationId: null })
   const self = detail.contacts.find((link) => link.relationship === "self")
   expect(self).toBeTruthy()
-  const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", self!.contactId))
-  expect(notes.map((note) => note.body)).toContain(
-    "El equipo registró a esta persona con lo mínimo. Faltan datos para la atención: confirmar apellidos y nombres, fecha de nacimiento.",
-  )
+  expect(
+    await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", self!.contactId)),
+  ).toEqual([])
 })
 
 it("desde la Agenda, su teléfono pasa a ser su WhatsApp a nombre de quien la registra; si ya es de otra persona, no se mueve y se dice", async () => {

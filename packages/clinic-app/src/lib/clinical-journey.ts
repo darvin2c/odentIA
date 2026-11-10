@@ -363,6 +363,18 @@ export function cancelFollowUpApi(
   })
 }
 
+/** Otro día para un control pendiente (`YYYY-MM-DD`); el reservado se cambia moviendo su cita. */
+export function changeFollowUpDueApi(
+  patientId: string,
+  followUpId: string,
+  body: { dueAt: string },
+): Promise<{ data: FollowUp }> {
+  return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/due`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
 // --- Recetas ----------------------------------------------------------------
 
 export const PRESCRIPTION_STATUS_LABELS: Record<string, string> = {

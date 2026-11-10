@@ -43,6 +43,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { firstName } from "./automation-routing.js"
+import { OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
 import { BUDGET_CALLBACK_KEY } from "./budget-callback.js"
 import {
   type BudgetWithTotals,
@@ -225,6 +226,48 @@ export function budgetLine(budget: BudgetWithTotals, locale: string, names?: str
   const value = valueOptionOf(budget.options)
   const count = value?.lineCount ?? budget.items.length
   return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} · ${say(budget.totals)}`
+}
+
+/**
+ * Las líneas que todavía esperan respuesta cuando ya respondió una parte (aceptó la
+ * resina y dejó la profilaxis para después): las de la opción que vale con la misma
+ * regla que `budgetAwaitsAnswer` (`OPEN_LINE_DECISIONS`). `null` si nada se respondió
+ * todavía: entonces se habla del presupuesto entero.
+ */
+export function awaitingLines(
+  budget: Pick<BudgetWithTotals, "items" | "options">,
+): BudgetWithTotals["items"] | null {
+  const value = budget.options.length > 1 ? valueOptionOf(budget.options) : null
+  const lines = value ? budget.items.filter((line) => line.optionId === value.id) : budget.items
+  const open = lines.filter((line) =>
+    (OPEN_LINE_DECISIONS as readonly string[]).includes(line.decision),
+  )
+  return open.length > 0 && open.length < lines.length ? open : null
+}
+
+/** «Profilaxis · S/ 120.00»: lo que espera respuesta con lo que suma, por moneda. */
+export function awaitingLinesText(
+  lines: BudgetWithTotals["items"],
+  locale: string,
+  names: string,
+): string {
+  const currencies = [...new Set(lines.map((line) => line.currency))].sort()
+  const totals = currencies.map((currency) => {
+    const own = lines.filter((line) => line.currency === currency)
+    return {
+      currency,
+      totalCents: own.some((line) => line.lineTotalCents == null)
+        ? null
+        : own.reduce((sum, line) => sum + (line.lineTotalCents ?? 0), 0),
+    }
+  })
+  const amount = moneyTotalsText(
+    totals,
+    (cents, currency) => formatMoney(cents, currency, locale),
+    "falta algún precio",
+  )
+  const what = names || `${lines.length} ${lines.length === 1 ? "tratamiento" : "tratamientos"}`
+  return `${what} · ${amount}`
 }
 
 /**
@@ -771,6 +814,14 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     open.find(
       (control) => control.id !== treatmentControl?.id && control.id !== joinedControl?.id && control.id !== pairedControl?.id,
     ) ?? null
+  // Los controles que no salen en ninguna fila (el radiográfico del año detrás del de
+  // mantenimiento): la fila del próximo dice cuántos más hay (repaso final de la atención, B13).
+  const moreControls = open.filter(
+    (control) =>
+      ![treatmentControl, joinedControl, pairedControl, laterControl].some(
+        (shown) => shown?.id === control.id,
+      ),
+  ).length
 
   // Quien no reserva (caja) ve la fila sin botón: se le dice a quién le toca (QA del 9 nov).
   const bookedBy = can("appointments.write") ? null : "la cita la reserva recepción"
@@ -1006,12 +1057,15 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
             label: join ? "Otra cita" : control ? `${label} y el control` : label,
             planItemIds: listReady.map((item) => item.id),
             serviceId: listReady[0]?.serviceId ?? null,
-            ...(control ? { followUpId: control.id, followUpIds: controls.map((row) => row.id) } : {}),
-            // Las dos fechas en una frase: cuándo toca y desde cuándo se puede (segunda mesa del 9 nov).
+            ...(control
+              ? { followUpId: control.id, followUpIds: controls.map((row) => row.id) }
+              : {}),
+            // Lo aceptado no espera la ventana del control (decisión B3 del 10 nov): se busca hora
+            // como siempre, y el control se suma a esa cita solo si su día cae en la ventana; si no,
+            // queda por reservar (lo decide `createAppointment`).
             ...(opens && control
               ? {
-                  date: opens,
-                  note: `${control.title} toca el ${day(control.dueAt)}; se puede hacer desde el ${day(new Date(`${opens}T12:00:00Z`))}.`,
+                  note: `${control.title} toca el ${day(control.dueAt)}: se suma a esta cita si es desde el ${day(new Date(`${opens}T12:00:00Z`))}; si no, queda por reservar.`,
                 }
               : {}),
             ...(join ? { join } : {}),
@@ -1028,8 +1082,20 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
    */
   const answerStep = (budget: BudgetWithTotals): PlanNextStep => {
     const titleOf = new Map(items.map((item) => [item.id, item.title]))
-    const titles = [...new Set(budget.items.map((line) => titleOf.get(line.planItemId)).filter((title): title is string => !!title))]
-    const names = titles.length > 2 ? `${titles.slice(0, 2).join(" · ")} · y ${titles.length - 2} más` : titles.join(" · ")
+    // Si ya respondió una parte, solo lo que espera respuesta: lo aceptado no se vuelve a preguntar
+    // ni suma (repaso final de la ficha del 10 nov, M2).
+    const open = awaitingLines(budget)
+    const titles = [
+      ...new Set(
+        (open ?? budget.items)
+          .map((line) => titleOf.get(line.planItemId))
+          .filter((title): title is string => !!title),
+      ),
+    ]
+    const names =
+      titles.length > 2
+        ? `${titles.slice(0, 2).join(" · ")} · y ${titles.length - 2} más`
+        : titles.join(" · ")
     const callback = facts.callbacks?.get(budget.id)
     const callbackText = callback
       ? (() => {
@@ -1050,7 +1116,9 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       kind: "respuesta",
       text: callbackText ?? (budget.status === "presentado" ? "Entregado · espera respuesta" : "Lo está pensando"),
       detail: [
-        budgetLine(budget, locale, budget.options.length > 1 ? undefined : names || undefined),
+        open
+          ? awaitingLinesText(open, locale, names)
+          : budgetLine(budget, locale, budget.options.length > 1 ? undefined : names || undefined),
         budget.presentedAt ? `Entregado el ${day(budget.presentedAt)}` : null,
       ]
         .filter(Boolean)
@@ -1137,6 +1205,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     pairedItems,
     blockerOf,
     laterControl,
+    moreControls,
     continueStep,
     bookedNext,
     bookedStep,
@@ -1209,7 +1278,14 @@ function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
     if (steps.some((step) => step.action?.planItemIds?.includes(item.id))) continue
     steps.push(p.bookedStep(item))
   }
-  if (p.laterControl) steps.push(p.controlStep(p.laterControl))
+  if (p.laterControl) {
+    const step = p.controlStep(p.laterControl)
+    const more =
+      p.moreControls > 0
+        ? `y ${p.moreControls} ${p.moreControls === 1 ? "control" : "controles"} más`
+        : null
+    steps.push(more ? { ...step, detail: [step.detail, more].filter(Boolean).join(" · ") } : step)
+  }
   return steps
 }
 

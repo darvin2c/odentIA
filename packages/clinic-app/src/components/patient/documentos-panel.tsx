@@ -641,13 +641,16 @@ export function DocumentosSection({
           )
         : ""
       const date = budget.presentedAt ?? budget.createdAt
+      // Sin título propio, el presupuesto se llama «Presupuesto N.º 456»: no se repite (repaso
+      // final de la ficha, B3).
+      const number = budgetNumberLabel(budget.budgetNumber)
       return {
         key: `presupuesto-${budget.id}`,
         kind: "presupuesto",
         filter: FILTER_OF_KIND.presupuesto,
         teeth: [],
         retired: false,
-        title: `${budgetNumberLabel(budget.budgetNumber)}${budget.title ? ` · ${budget.title}` : ""}`,
+        title: budget.title && budget.title !== number ? `${number} · ${budget.title}` : number,
         detail: [formatDate(date), total || null].filter(Boolean).join(" · "),
         date,
         status: { label: budget.stateText, tone: budgetStatusTone(budget.status) as Tone },

@@ -231,7 +231,15 @@ it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya n
   // El servicio de la clínica es una endodoncia de la biblioteca.
   const [template] = await ownerDb
     .insert(treatmentTemplate)
-    .values({ key: `endo-espera-${randomUUID()}`, name: "Endodoncia de prueba", kind: "endodoncia", scope: "tooth" })
+    .values({
+      key: `endo-espera-${randomUUID()}`,
+      name: "Endodoncia de prueba",
+      kind: "endodoncia",
+      scope: "tooth",
+      // Lo de la guía, como lo carga `seed:procedures` desde `biblioteca_controles.csv` (ADR 0176).
+      sessionGapDays: 7,
+      finishControls: [{ afterDays: 365, title: "Control radiográfico de la endodoncia" }],
+    })
     .returning()
   // Su familia de la biblioteca (lo dental se escribe en SQL: lo común no importa el esquema dental, ADR 0079).
   await ownerDb.execute(
@@ -244,7 +252,7 @@ it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya n
   const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   const lima = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(date)
   const inAWeek = lima(new Date(Date.now() + 7 * DAY))
-  expect(closed.nextSessions[0]?.toBook).toEqual({ n: 2, m: 2, from: inAWeek })
+  expect(closed.nextSessions[0]?.toBook).toEqual({ n: 2, m: 2, from: inAWeek, gapDays: 7 })
   const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
   expect(next).toMatchObject({ kind: "continuar", action: { label: "Reservar la sesión 2", date: inAWeek } })
 
@@ -258,6 +266,11 @@ it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya n
   // Terminada en la sesión 2, queda su control radiográfico al año.
   const second = await attention(f)
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: endo.id }))
+  // El cierre lo dice antes de firmar: «Controles que quedan» (B5).
+  const before = await f.run((tx) => getEncounterClosing(tx, ...f.args, second))
+  expect(before.controls.finishing).toMatchObject([
+    { title: "Control radiográfico de la endodoncia", afterDays: 365 },
+  ])
   await f.run((tx) => finalizeEncounter(tx, ...f.args, second))
   const controls = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.planItemId, endo.id))
   const yearly = controls.find((row) => row.title === "Control radiográfico de la endodoncia")

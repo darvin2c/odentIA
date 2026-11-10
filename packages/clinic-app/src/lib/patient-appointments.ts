@@ -141,11 +141,16 @@ export function appointmentLine(
  * cabecera solo decía el servicio). «Corona metal-cerámica y Control» o «… y 2 más».
  */
 export function appointmentWhat(
-  appointment: Pick<AgendaAppointment, "serviceName" | "reason" | "sessions">,
+  appointment: Pick<AgendaAppointment, "serviceName" | "reason" | "sessions" | "brings">,
 ): string | null {
   const main = appointment.serviceName ?? appointment.reason
+  // También lo de una sola sesión que se le sumó (la resina a su consulta, QA del 10 nov, M3).
   const others = [
-    ...new Set((appointment.sessions ?? []).map((session) => session.title.trim())),
+    ...new Set(
+      [...(appointment.sessions ?? []), ...(appointment.brings ?? [])].map((session) =>
+        session.title.trim(),
+      ),
+    ),
   ].filter((title) => !main || title.toLowerCase() !== main.trim().toLowerCase())
   const all = [main, ...others].filter((title): title is string => !!title)
   if (all.length <= 2) return all.join(" y ") || null

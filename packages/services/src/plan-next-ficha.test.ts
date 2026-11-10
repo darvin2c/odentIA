@@ -215,7 +215,13 @@ it("la corona y el control de la endodoncia de la misma pieza: una fila, primero
   expect(first).toMatchObject({
     kind: "agendar",
     text: "Falta su cita: lo aceptado y el control",
-    action: { label: "Reservar lo aceptado y el control", planItemIds: [corona.id], followUpIds: [control.id], date: expect.any(String) },
+    // La corona no espera la ventana del control (decisión B3): sin fecha forzada, con la nota del control.
+    action: {
+      label: "Reservar lo aceptado y el control",
+      planItemIds: [corona.id],
+      followUpIds: [control.id],
+      note: expect.stringMatching(/se suma a esta cita si es desde el/),
+    },
   })
   // Lo de otra pieza no se atrasa por el control: va en su fila.
   expect(second).toMatchObject({ kind: "agendar", action: { planItemIds: [resina.id] } })

@@ -687,7 +687,10 @@ it("atención en curso: solo cuál es y quién la lleva, para quien atiende y si
   const before = await log()
   const open = await professional.request(path)
   expect(open.status).toBe(200)
-  expect(await open.json()).toEqual({ data: { id: draft.id, professionalUserId: "u-1" } })
+  // De qué día y si está vacía (para preguntar qué hacer con la de otro día), nada de su historia.
+  expect(await open.json()).toEqual({
+    data: { id: draft.id, professionalUserId: "u-1", startedAt: expect.any(String), today: true, empty: true },
+  })
   // No es una lectura de la historia: no deja traza en la bitácora.
   expect(await log()).toBe(before)
 })

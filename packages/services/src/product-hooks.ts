@@ -430,11 +430,12 @@ export interface ProductHooks {
   /** La fase que propone un tipo de tratamiento de la biblioteca. */
   phaseFor(kind: string | null): string
   /**
-   * Cuántos días, como mínimo, entre una sesión y la siguiente de un tipo de tratamiento de la
-   * biblioteca (odentIA: la endodoncia con medicación intraconducto, una semana). Sin él, o sin
-   * nada que decir, la siguiente se propone desde mañana.
+   * Las familias de cada tratamiento de la biblioteca (odentIA: lo que deja en la pieza,
+   * «crown», y su familia anatómica, «pulpectomia-deciduo»), por id del tratamiento: con ella se une cada servicio a
+   * su consentimiento sugerido (`SuggestedConsentTemplate.serviceFamilies`). Sin él, solo por
+   * la clave.
    */
-  sessionGapDays?(kind: string | null): number | null
+  treatmentFamiliesOf?(tx: Db, templateIds: readonly string[]): Promise<Map<string, string[]>>
   /**
    * Los tipos de tratamiento de la biblioteca que se hacen de una vez y nunca piden otra sesión
    * (odentIA: consultas, evaluaciones y radiografías). Sin él, ninguno.

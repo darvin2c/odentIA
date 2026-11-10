@@ -117,8 +117,8 @@ export interface NextSession {
   title: string
   serviceId: string | null
   booked: BookedSession | null
-  /** `from`: desde qué día conviene (la endodoncia, una semana después), si no es mañana. */
-  toBook: { n: number; m: number; from?: string } | null
+  /** `from`: desde qué día conviene (la espera de su servicio, `gapDays`), si no es mañana. */
+  toBook: { n: number; m: number; from?: string; gapDays?: number } | null
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */
@@ -154,7 +154,32 @@ export interface ClosingControls {
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
   next: ClosingNextControl | null
+  /** Los controles que dejarán los tratamientos que terminan al firmar: se cambian o se quitan aquí. */
+  finishing?: FinishingControl[]
+  /** Los controles que ya tiene abiertos, salvo el de la cita de hoy. */
+  open?: ClosingOpenControl[]
 }
+
+/** Un control que va a quedar al firmar, por el servicio de lo que termina hoy. */
+export interface FinishingControl {
+  key: string
+  title: string
+  /** `YYYY-MM-DD`, en la zona de la clínica. */
+  dueDay: string
+  afterDays: number
+}
+
+/** Un control abierto de la persona: pendiente o con su cita. */
+export interface ClosingOpenControl {
+  id: string
+  title: string
+  dueAt: string
+  status: string
+  scheduledAt: string | null
+}
+
+/** Lo que quien firma cambió de un control que va a quedar. */
+export type FinishingControlChange = { key: string; dueDay: string } | { key: string; remove: true }
 
 /** Cuánto de un producto, en su unidad de uso («2 guantes»). */
 export interface MaterialQuantity {
@@ -402,6 +427,26 @@ export function voidEncounterApi(
   budgets: ReadonlyArray<{ id: string; status: string }> = [],
 ) {
   return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason, budgets })
+}
+
+/** La atención en curso de un paciente, sin nada de su historia: cuál, de quién, de qué día y si está vacía. */
+export interface OpenEncounterRef {
+  id: string
+  professionalUserId: string
+  startedAt: string
+  /** Empezó hoy, en el día de la clínica. */
+  today: boolean
+  /** Sin nada registrado: se descarta de un toque. */
+  empty: boolean
+}
+
+export function fetchOpenEncounter(patientId: string) {
+  return apiFetch<{ data: OpenEncounterRef | null }>(`${base(patientId)}/open-encounter`)
+}
+
+/** «Descartar»: una atención en borrador sin nada registrado se borra, sin motivo. */
+export function discardEncounterApi(patientId: string, encounterId: string) {
+  return post<{ discarded: true; appointmentId: string | null }>(`${base(patientId)}/encounters/${encounterId}/discard`)
 }
 
 export function takeOverEncounterApi(patientId: string, encounterId: string) {

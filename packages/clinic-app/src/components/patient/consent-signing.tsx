@@ -233,6 +233,8 @@ function SigningFlow({
           signatureData: { strokes: value.docs[position]?.strokes ?? [] },
           comprehensionConfirmed: true,
           method: "clinica",
+          // Ya lo firmó en su enlace y prefiere firmarlo de nuevo aquí.
+          ...(document.personSignedAt ? { signAgain: true } : {}),
         })
         done.add(document.id)
         setSigned(new Set(done))
@@ -269,6 +271,9 @@ function SigningFlow({
       [
         ["consents", patientId],
         ["consent-needs", patientId],
+        ["consents-to-confirm", patientId],
+        ["treatment-plans", patientId],
+        ["plan-items", patientId],
         ["patient-documents", patientId],
         // El documento escrito del representante queda en su ficha: «Faltan datos» y quién firma lo ven.
         ["patient", patientId],

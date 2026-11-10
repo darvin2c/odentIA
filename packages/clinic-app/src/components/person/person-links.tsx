@@ -139,6 +139,23 @@ const LINK_DEFAULTS = {
 }
 
 /**
+ * «por ella» o «por él» según su sexo registrado; sin él, «en su nombre»: nunca el femenino
+ * por omisión (repaso final de la ficha del 10 nov, B1; la regla de `speaksForWords`).
+ */
+function forWhom(sex: string | null | undefined): string {
+  return sex === "M" ? "por él" : sex === "F" ? "por ella" : "en su nombre"
+}
+
+/** «Habla por sí misma», «por sí mismo» o, sin sexo registrado, que nadie más habla por ella. */
+function speaksForItself(sex: string | null | undefined): string {
+  return sex === "M"
+    ? "Habla por sí mismo."
+    : sex === "F"
+      ? "Habla por sí misma."
+      : "Nadie más habla en su nombre."
+}
+
+/**
  * Datos › Personas vinculadas: quién habla por la persona (si es paciente) y
  * de quién es responsable. Vincular usa el mismo buscador de personas de toda
  * la aplicación; la propia persona no se desvincula. Lo cambia quien edita la
@@ -252,7 +269,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
     <div className="flex min-w-0 flex-col gap-4">
       {patientId ? (
         <SummaryCard
-          title="Quién habla por ella"
+          title={`Quién habla ${forWhom(person.sex)}`}
           action={
             canWrite && !person.archived ? (
               <Button
@@ -268,7 +285,8 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         >
           {talkers.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Habla por sí misma. Si un familiar o tutor escribe o decide por ella, vincúlalo aquí.
+              {speaksForItself(person.sex)} Si un familiar o tutor escribe o decide{" "}
+              {forWhom(person.sex)}, vincúlalo aquí.
             </p>
           ) : (
             <ul className="flex flex-col divide-y">
@@ -447,7 +465,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         }}
         title={
           linking === "talker"
-            ? "Vincular a quien habla por ella"
+            ? `Vincular a quien habla ${forWhom(person.sex)}`
             : "Vincular a un paciente a su cargo"
         }
         description="Buscar no identifica a nadie: confirma que es la persona correcta antes de vincular."

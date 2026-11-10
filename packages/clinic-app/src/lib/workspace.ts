@@ -83,6 +83,8 @@ export type WaitingRow =
       startedAt: string
       /** Lo que falta para cerrarla (`reason`, `diagnosis`, `evolution`, `signature`). */
       missing: string[]
+      /** Sin nada registrado: se descarta de un toque. */
+      empty?: boolean
     }
   | {
       kind: "case"

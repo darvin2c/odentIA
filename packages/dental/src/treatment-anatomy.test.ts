@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  anatomyFitRank,
   anatomyFits,
   anatomyGroupsWords,
   anatomySibling,
@@ -124,4 +125,22 @@ it("la endodoncia de permanente en un molar temporal avisa y no ofrece la de mol
   expect(toothFitNotice({ name: "Endodoncia anterior vital", anatomy: { groups: ["anterior"], dentition: "permanent" } }, 46, [permanentEndo])?.message).toBe(
     "La 46 es un molar y «Endodoncia anterior vital» es para dientes anteriores.",
   )
+})
+
+it("al buscar en una pieza, primero lo que encaja; lo propio después y lo de otro grupo al final, sin esconder nada (QA del 10 nov, B3)", () => {
+  const services = [
+    { id: "anterior", anatomy: ANTERIOR },
+    { id: "propio", anatomy: null },
+    { id: "posterior", anatomy: POSTERIOR_ENDO },
+    { id: "pulpectomia", anatomy: DECIDUOUS_MOLAR },
+  ]
+  const order = (tooth: number) =>
+    [...services]
+      .sort((a, b) => anatomyFitRank(a.anatomy, tooth) - anatomyFitRank(b.anatomy, tooth))
+      .map((s) => s.id)
+  expect(order(46)).toEqual(["posterior", "propio", "anterior", "pulpectomia"])
+  // En la 75, la pulpectomía de temporales antes que la posterior que vale para las dos.
+  expect(order(75)).toEqual(["pulpectomia", "posterior", "propio", "anterior"])
+  // Lo que no es una pieza FDI no se juzga: queda como venía.
+  expect(order(99)).toEqual(["anterior", "propio", "posterior", "pulpectomia"])
 })

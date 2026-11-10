@@ -261,6 +261,8 @@ export interface WaitingStaleEncounter {
   startedAt: string
   /** Lo que falta para cerrarla, como claves (`ClosingRequirement`); los nombres los pone la interfaz. */
   missing: string[]
+  /** Sin nada registrado: se descarta de un toque, sin motivo. Opcional mientras dura el despliegue. */
+  empty?: boolean
 }
 
 /**

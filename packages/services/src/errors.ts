@@ -104,6 +104,11 @@ export function isUniqueViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23505"
 }
 
+/** Una fila que otra nombra (FK sin propagar) no se pudo borrar. */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return pgCodeOf(error) === "23503"
+}
+
 /** La restricción que rompió un error de Postgres (`constraint_name`), si la dice. */
 export function violatedConstraint(error: unknown): string | undefined {
   for (const item of [error, causeOf(error)]) {

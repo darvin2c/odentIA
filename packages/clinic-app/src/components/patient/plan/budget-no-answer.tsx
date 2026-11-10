@@ -10,7 +10,8 @@ import { useState } from "react"
 import { apiFetch } from "../../../lib/api"
 import { PLAN_QUERY_KEYS } from "../../../lib/budgets"
 import { usePermission } from "../../../lib/crm"
-import { activeOrgLocale } from "../../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../../lib/locale"
+import { nextAppointment, usePatientAppointments } from "../../../lib/patient-appointments"
 import { errorMessage } from "../../agenda/shared"
 
 /** «Mañana», «En 3 días» o «En una semana», sin caer en domingo. */
@@ -28,6 +29,23 @@ function callDay(days: number): Date {
   return date
 }
 
+/** El día civil en la zona de la clínica, para comparar la llamada con su cita. */
+function civilDay(date: Date): string {
+  return date.toLocaleDateString("en-CA", { timeZone: activeOrgTimeZone() })
+}
+
+/** «jue, 12 nov». */
+function dayText(date: Date): string {
+  return date
+    .toLocaleDateString(activeOrgLocale(), {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: activeOrgTimeZone(),
+    })
+    .replace(/\./g, "")
+}
+
 export function BudgetNoAnswer({
   patientId,
   budgetId,
@@ -40,14 +58,19 @@ export function BudgetNoAnswer({
   onCancel: () => void
 }): React.JSX.Element | null {
   const canTask = usePermission("tasks.write")
+  const canAgenda = usePermission("appointments.read")
   const queryClient = useQueryClient()
   const [days, setDays] = useState<number>(3)
   const [saving, setSaving] = useState(false)
+  // Su próxima cita, la misma consulta de la cabecera: si viene antes de esa llamada o ese mismo
+  // día, se le pregunta en su cita (repaso final de la ficha, B4). Se avisa; quien llama decide.
+  const appointments = usePatientAppointments(patientId, canTask && canAgenda)
   if (!canTask) return null
   const day = callDay(days)
-  const dayWords = day
-    .toLocaleDateString(activeOrgLocale(), { weekday: "short", day: "numeric", month: "short" })
-    .replace(/\./g, "")
+  const dayWords = dayText(day)
+  const next = appointments.data ? nextAppointment(appointments.data.data) : null
+  const comesFirst =
+    next && civilDay(new Date(next.startsAt)) <= civilDay(day) ? new Date(next.startsAt) : null
   const save = async () => {
     setSaving(true)
     try {
@@ -86,6 +109,11 @@ export function BudgetNoAnswer({
           </Button>
         ))}
       </div>
+      {comesFirst ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {`Viene el ${dayText(comesFirst)}: pregúntaselo en su cita.`}
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" className="min-h-11 sm:min-h-8" disabled={saving} onClick={() => void save()}>
           {`Guardar: volver a llamar el ${dayWords}`}

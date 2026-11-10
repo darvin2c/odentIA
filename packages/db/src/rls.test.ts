@@ -306,11 +306,12 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
     ),
   )
   expect(deleted).toHaveLength(0)
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      tx.execute(sql`delete from encounter where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`),
+  // La app solo borra un borrador vacío («Descartar»): la firmada no se borra.
+  expect(
+    await withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from encounter where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' returning id`),
     ),
-  ).rejects.toThrow()
+  ).toHaveLength(0)
 })
 
 it("aísla hallazgos y evaluaciones por tenant y conserva sus originales", async () => {

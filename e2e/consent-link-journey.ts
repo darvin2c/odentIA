@@ -127,7 +127,7 @@ export async function consentLinkJourney(input: {
   await page.getByRole("alertdialog").getByRole("button", { name: "Enviar", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toBeHidden()
   await gotoHydrated(page, documents)
-  await expect(row().getByText("Se le envió para firmar", { exact: false })).toBeVisible()
+  await expect(row().getByText("Lo tiene en su enlace desde el", { exact: false })).toBeVisible()
 
   // Firma desde su teléfono, sin sesión, con el mismo enlace que se le envió: abre directo la hoja (`abre=firma`).
   const shown = await call<{ url: string }>("POST", `/api/patients/${patient.id}/personal-link/show`, {}, 201)

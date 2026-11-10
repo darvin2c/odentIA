@@ -11,12 +11,12 @@ import {
   ErrorState,
   ExpandableText,
   FilterBar,
+  ListSearchScope,
   PageHeader,
   PageShell,
   RowActions,
   type RowActionItem,
   SkeletonRegion,
-  useListSearch,
   ViewTabs,
 } from "@odentia/ui-patterns"
 import { type InfiniteData, useInfiniteQuery, useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -40,6 +40,7 @@ import {
   useCan,
   usePermission,
 } from "../../lib/crm"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { pipelinePrimary } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 import { useOrgProfile } from "../../lib/org"
@@ -126,7 +127,8 @@ function PipelinePage() {
   const orgLocale = profile.data?.locale
   const can = useCan()
   const canWrite = usePermission("crm.write")
-  const listSearch = useListSearch()
+  // Lo buscado (el nombre de una persona) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const q = listSearch.get("q") ?? ""
   const embudo = listSearch.get("embudo")
   const vista = listSearch.get("vista") === "lista" ? "lista" : "tablero"
@@ -327,20 +329,22 @@ function PipelinePage() {
         primary={pipelinePrimary(can, () => setCreateOpen(true))}
       />
       <div className="flex items-center gap-2 rounded-xl bg-card p-2">
-        <FilterBar
-          className="min-w-0 flex-1 rounded-none bg-transparent p-1"
-          filters={[
-            // El embudo solo se elige si hay más de uno: con uno solo no cambia nada.
-            ...(pipelines.length > 1
-              ? [{ key: "embudo", label: "Embudo", type: "select" as const, options: pipelines.map((p) => ({ value: p.id, label: p.name })) }]
-              : []),
-            ...PIPELINE_FILTERS,
-          ]}
-          sortOptions={[]}
-          searchPlaceholder="Buscar por persona o interés…" searchLabel="Buscar en oportunidades"
-          searchPending={boardFetching + listFetching > 0}
-          resetKeys={["q", "asignado", "tarea", "movio"]}
-        />
+        <ListSearchScope value={listSearch}>
+          <FilterBar
+            className="min-w-0 flex-1 rounded-none bg-transparent p-1"
+            filters={[
+              // El embudo solo se elige si hay más de uno: con uno solo no cambia nada.
+              ...(pipelines.length > 1
+                ? [{ key: "embudo", label: "Embudo", type: "select" as const, options: pipelines.map((p) => ({ value: p.id, label: p.name })) }]
+                : []),
+              ...PIPELINE_FILTERS,
+            ]}
+            sortOptions={[]}
+            searchPlaceholder="Buscar por persona o interés…" searchLabel="Buscar en oportunidades"
+            searchPending={boardFetching + listFetching > 0}
+            resetKeys={["q", "asignado", "tarea", "movio"]}
+          />
+        </ListSearchScope>
         <ViewTabs
           label="Vista de oportunidades"
           className="shrink-0"

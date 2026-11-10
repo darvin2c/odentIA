@@ -7,6 +7,7 @@ import {
   findingDiagnosisCodes,
   hisDiagnosisType,
   isDiagnosisCodeFormat,
+  isPulpNecrosis,
   isSelectableDiagnosisSystem,
   normalizeDiagnosisCode,
   normalizeSearchText,
@@ -150,4 +151,17 @@ it("la lesión periapical sana en su control, no al terminar: la pulpitis sí se
   expect(healsAtFollowUp("ICD-10-PE", "K04.7")).toBe(true)
   expect(healsAtFollowUp("ICD-10", "K04.0")).toBe(false)
   expect(healsAtFollowUp("ICD-10", null)).toBe(false)
+})
+
+it("la pulpa no vital: necrosis y lo periapical crónico, no la periodontitis apical aguda (decisión B2)", () => {
+  expect(isPulpNecrosis("K04.1")).toBe(true)
+  expect(isPulpNecrosis("K04.5")).toBe(true)
+  expect(isPulpNecrosis("DA09.1")).toBe(true)
+  expect(isPulpNecrosis("DA09.61")).toBe(true)
+  expect(isPulpNecrosis("DA09.71")).toBe(true)
+  expect(isPulpNecrosis("DA09.70")).toBe(false)
+  expect(isPulpNecrosis("K04.4")).toBe(false)
+  expect(isPulpNecrosis("K04.0")).toBe(false)
+  expect(isPulpNecrosis("DA09.0")).toBe(false)
+  expect(isPulpNecrosis(null)).toBe(false)
 })

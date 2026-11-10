@@ -11,6 +11,7 @@ import {
   confirmLinkSignedConsent,
   consentDocumentPatientId,
   sendConsentToSign,
+  showPersonalLink,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -313,6 +314,8 @@ const consentSign = z
     comprehensionConfirmed: z.literal(true, {
       message: "La persona firmante debe confirmar que comprendió la información",
     }),
+    // Lo firmó en su enlace y lo firma de nuevo aquí.
+    signAgain: z.boolean().optional(),
     // El profesional confirma con su perfil: el trazo es opcional.
     professionalSignature: z.unknown().optional(),
     witness: z
@@ -1076,6 +1079,23 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
           { patientId: consent.patientId, consentId: consent.id, requestId: parsed.data.requestId ?? null },
           { secretsKey: deps.secretsKey },
         )
+      }),
+    )
+  })
+
+  // Para leerlo y firmarlo en su teléfono sin enviarle nada: su enlace, que abre la hoja, para
+  // mostrarlo como código o copiarlo (consentimientos, 10 nov). No sale ningún mensaje.
+  app.post("/consents/:id/show-link", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para preparar consentimientos")
+    }
+    c.header("Cache-Control", "no-store")
+    c.header("Referrer-Policy", "no-referrer")
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { shown: true })
+        return showPersonalLink(tx, orgId, userId, consent.patientId, { secretsKey: deps.secretsKey }, consent.id)
       }),
     )
   })

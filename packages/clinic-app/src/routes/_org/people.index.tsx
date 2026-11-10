@@ -12,6 +12,7 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  ListSearchScope,
   type FilterDef,
   internationalText,
   PageHeader,
@@ -19,7 +20,6 @@ import {
   PersonAvatar,
   ScrollingTabsList,
   SkeletonRegion,
-  useListSearch,
 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
@@ -33,6 +33,7 @@ import { PeopleLoading, visiblePeopleViews } from "../../components/person/perso
 import { PeopleSkeleton } from "../../components/skeletons/people"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { peopleHeader, peopleSubtitle } from "../../lib/screen-rules"
 import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
 import { channelLabel } from "../../lib/channels"
@@ -65,6 +66,7 @@ const NEW_PATIENT: NewPatientTarget = { kind: "new" }
  */
 export const Route = createFileRoute("/_org/people/")({
   // `nuevo`: abre «Nuevo paciente» con ese nombre (lo usa el buscador rápido cuando no encuentra a alguien).
+  // `q` solo llega de enlaces viejos: la lista lo pasa a memoria y lo saca de la dirección (M4).
   validateSearch: (search: Record<string, unknown>): { ver?: PeopleView; q?: string; nuevo?: string; atajo?: string } => ({
     ...search,
     ver: isPeopleView(search.ver) ? search.ver : undefined,
@@ -121,7 +123,8 @@ function PeoplePage() {
   const canRegister = can("patients.write")
   const [registering, setRegistering] = useState(false)
   const [registerTarget, setRegisterTarget] = useState<NewPatientTarget>(NEW_PATIENT)
-  const listSearch = useListSearch()
+  // Lo buscado (un nombre, un teléfono, un documento) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const { nuevo } = Route.useSearch()
   const navigate = Route.useNavigate()
   useEffect(() => {
@@ -380,13 +383,15 @@ function PeoplePage() {
             ))}
           </ScrollingTabsList>
         </Tabs>
-        <FilterBar
-          filters={shortcutFilters}
-          resetKeys={["atajo"]}
-          sortOptions={[]}
-          searchPlaceholder="Buscar por nombre, teléfono o documento" searchLabel="Buscar en pacientes"
-          searchPending={query.isFetching && filtered}
-        />
+        <ListSearchScope value={listSearch}>
+          <FilterBar
+            filters={shortcutFilters}
+            resetKeys={["atajo"]}
+            sortOptions={[]}
+            searchPlaceholder="Buscar por nombre, teléfono o documento" searchLabel="Buscar en pacientes"
+            searchPending={query.isFetching && filtered}
+          />
+        </ListSearchScope>
         <p className="text-xs text-muted-foreground">
           {atajoRule ? `«${atajoLabel}»: ${atajoRule.charAt(0).toLowerCase()}${atajoRule.slice(1)} ` : ""}Una sola búsqueda en toda la clínica.
         </p>

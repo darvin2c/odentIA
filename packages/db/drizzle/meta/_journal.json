@@ -610,6 +610,41 @@
       "when": 1794275895229,
       "tag": "0086_registro_guarda_su_aviso",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794323237178,
+      "tag": "0087_controles_configurables",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794323239852,
+      "tag": "0088_controles_configurables_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794323242573,
+      "tag": "0089_consentimiento_por_familia",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794323803537,
+      "tag": "0090_consentimiento_por_tratamiento",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1794325900036,
+      "tag": "0091_descartar_atencion_vacia",
+      "breakpoints": true
     }
   ]
 }

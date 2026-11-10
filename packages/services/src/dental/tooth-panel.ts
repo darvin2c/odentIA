@@ -51,7 +51,11 @@ async function findingCodeOf(
   tx: Db,
   orgId: string,
   input: Pick<RegisterToothFindingInput, "condition" | "details" | "diagnosis">,
-): Promise<{ diagnosisCode: string | null; diagnosisSystem: string | null }> {
+): Promise<{
+  diagnosisCode: string | null
+  diagnosisSystem: string | null
+  otherCategory?: boolean
+}> {
   const chosen = input.diagnosis
   const code = chosen?.diagnosisCode?.trim()
   if (!chosen || !code) return { diagnosisCode: null, diagnosisSystem: null }
@@ -72,9 +76,10 @@ async function findingCodeOf(
   const category = (value: string) => normalizeDiagnosisCode(system, value).split(".")[0]
   if (category(own) === category(code)) return asChosen
   const found = await findDiagnosisCode(tx, system, own)
+  // Lo elegido es de otra categoría (la pulpitis o la periodontitis apical junto a una caries).
   return found
-    ? { diagnosisCode: found.code, diagnosisSystem: system }
-    : { diagnosisCode: null, diagnosisSystem: null }
+    ? { diagnosisCode: found.code, diagnosisSystem: system, otherCategory: true }
+    : { diagnosisCode: null, diagnosisSystem: null, otherCategory: true }
 }
 
 /**
@@ -108,7 +113,10 @@ export async function registerToothFinding(
       `«${service.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles» de la atención`,
     )
   const targets = group ? [teeth[0]!] : teeth
-  const findingCode = await findingCodeOf(tx, orgId, input)
+  const { otherCategory, ...findingCode } = await findingCodeOf(tx, orgId, input)
+  // La pulpitis elegida en el panel de una caries OD es de la pieza, no de sus caras (QA del
+  // 10 nov, B9: quedaba «46 · Distal, Oclusal», y la periodontitis apical también).
+  const diagnosisSurfaces = otherCategory ? [] : surfaces
   const entries = []
   const diagnoses = []
   const planItems = []
@@ -138,7 +146,7 @@ export async function registerToothFinding(
           diagnosisSystem: input.diagnosis.diagnosisSystem ?? null,
           diagnosisType: input.diagnosis.diagnosisType,
           toothNumber,
-          surfaces,
+          surfaces: diagnosisSurfaces,
         }),
       )
     }

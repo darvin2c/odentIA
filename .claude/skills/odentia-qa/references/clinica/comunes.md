@@ -40,6 +40,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] La cita usa la unidad o el consultorio correcto y avisa si está ocupado, sin frenar (ADR 0121; las excepciones las decide el equipo, nunca Sofi).
 - [ ] Una cita de sesión 2 no se ofrece el mismo día de la sesión 1 si el tratamiento pide espera.
 - [ ] Al firmar, la cita queda atendida y lo que sigue queda reservado o pendiente, sin perderse (ADR 0113).
+- [ ] Si una sesión se hace antes de su cita, el cierre ofrece liberar esa cita o usarla para lo que sigue.
 
 **Ya falló:** «¿Vino?» abría «Por confirmar» (PR 551); la grilla no mostraba qué unidad estaba libre (8 nov).
 **Fuentes:** ADR 0002, 0032, 0081, 0113, 0121 y 0128.
@@ -213,6 +214,7 @@ No tiene camino en el código.
 - [ ] El pago a un especialista que no está en planilla (recibo por honorarios) dice a quién y su RUC, y no se suma dos veces con su comisión.
 - [ ] Gastos y Reportes dicen la misma cifra por tipo y por sede.
 - [ ] Del lado de lo que cobra la clínica: con deuda abierta, un adelanto sin «Para» lo avisa y ofrece cobrarlo a lo que debe; todo ticket dice cuánto le falta pagar y cuánto le queda a favor, y la lista de Cobros no suma como dinero lo que solo usó saldo a favor.
+- [ ] En caja, el cobro de un menor lo paga por defecto su representante.
 
 **Fuentes:** ADR 0061, 0150, 0151 y 0167. SUNAT: tabla 10 de comprobantes, RUC de 11 dígitos con verificador y el registro de compras (verificar los artículos antes de citarlos).
 
