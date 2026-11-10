@@ -28,7 +28,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { Check } from "lucide-react"
-import { useId, useRef } from "react"
+import { useId, useRef, useState } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import type { ConsentNeed } from "../../lib/encounter-documents"
@@ -44,6 +44,8 @@ import {
   type ClosingResolvable,
   type ClosingSession,
   controlDaySaid,
+  type FinishingControl,
+  type FinishingControlChange,
   keepsDiagnosis,
   type HealthGap,
   type NextSession,
@@ -99,6 +101,11 @@ export interface ClosingValues extends SignatureRegistration {
    * ortodoncia que sigue).
    */
   askControl?: boolean
+  /**
+   * Lo cambiado de los controles que dejan los tratamientos de hoy (`controls.finishing`), por su
+   * `key`: otro día o quitarlo. Vale solo para esta persona.
+   */
+  finishChanges?: Record<string, { dueDay?: string; remove?: boolean }>
 }
 
 /** Los datos de `/finalize` que la pantalla llama de otro modo. */
@@ -113,6 +120,7 @@ const EMPTY_CLOSING: ClosingValues = {
   nextControl: "",
   nextControlDate: "",
   fulfill: {},
+  finishChanges: {},
 }
 
 /** Un control de Clío marcado para entrar con la firma: ya dice cuándo vuelve. */
@@ -277,13 +285,139 @@ export function closingControlsBody(
   controls: ClosingControls | null,
   dictated: DictatedControl | null,
   continuing = false,
-): { followUpIds?: string[]; nextControl?: { dueAt: string } | { none: true } } {
+): {
+  followUpIds?: string[]
+  nextControl?: { dueAt: string } | { none: true }
+  finishControlChanges?: FinishingControlChange[]
+} {
   if (!controls) return {}
   const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
-  if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds }
-  if (value.nextControl === "none") return { followUpIds, nextControl: { none: true } }
+  const changes = finishingChanges(value, controls)
+  const extra = changes.length > 0 ? { finishControlChanges: changes } : {}
+  if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds, ...extra }
+  if (value.nextControl === "none") return { followUpIds, nextControl: { none: true }, ...extra }
   const day = chosenDay(value, controls)
-  return day ? { followUpIds, nextControl: { dueAt: day } } : { followUpIds }
+  return day ? { followUpIds, nextControl: { dueAt: day }, ...extra } : { followUpIds, ...extra }
+}
+
+/** Lo cambiado de los controles que van a quedar, como lo pide `/finalize`. */
+function finishingChanges(value: Pick<ClosingValues, "finishChanges">, controls: ClosingControls): FinishingControlChange[] {
+  return (controls.finishing ?? []).flatMap((control): FinishingControlChange[] => {
+    const change = value.finishChanges?.[control.key]
+    if (change?.remove) return [{ key: control.key, remove: true }]
+    if (change?.dueDay && change.dueDay !== control.dueDay) return [{ key: control.key, dueDay: change.dueDay }]
+    return []
+  })
+}
+
+/**
+ * «Controles que quedan» (decisión B5 del 10 nov): los que dejan los tratamientos que terminan al
+ * firmar, cada uno con «Cambiar fecha» y «Quitar» (solo para esta persona), y los que ya tiene
+ * abiertos, que se cambian en «Plan y controles» o moviendo su cita. Arriba de «¿Cuándo vuelve?».
+ */
+function ClosingControlsLeft({
+  form,
+  controls,
+  busy,
+}: {
+  form: ClosingForm
+  controls: ClosingControls
+  busy: boolean
+}): React.JSX.Element | null {
+  const ids = useId()
+  const changes = useStore(form.store, (state) => state.values.finishChanges ?? {})
+  const finishing = controls.finishing ?? []
+  const open = (controls.open ?? []).filter((control) => !controls.due.some((due) => due.id === control.id))
+  if (finishing.length === 0 && open.length === 0) return null
+  const tomorrow = dayOf(new Date(Date.now() + 86_400_000).toISOString())
+  const set = (control: FinishingControl, next: { dueDay?: string; remove?: boolean } | null) => {
+    const rest = { ...changes }
+    if (next) rest[control.key] = next
+    else delete rest[control.key]
+    form.setFieldValue("finishChanges", rest)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-medium">Controles que quedan</p>
+      <ul className="flex flex-col gap-2">
+        {finishing.map((control) => {
+          const change = changes[control.key]
+          const day = change?.dueDay || control.dueDay
+          const editing = change?.dueDay !== undefined && !change.remove
+          return (
+            <li key={control.key} className="flex flex-col gap-1.5 rounded-md border px-3 py-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <span className={change?.remove ? "text-sm text-muted-foreground line-through" : "text-sm"}>
+                  {control.title}
+                  <span className="text-muted-foreground"> · {controlDaySaid(day)}</span>
+                </span>
+                <span className="flex gap-1">
+                  {change?.remove ? (
+                    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => set(control, null)}>
+                      Deshacer
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        aria-expanded={editing}
+                        onClick={() => set(control, editing ? null : { dueDay: day })}
+                      >
+                        {editing ? "Dejar la sugerida" : "Cambiar fecha"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => set(control, { remove: true })}
+                      >
+                        Quitar
+                      </Button>
+                    </>
+                  )}
+                </span>
+              </div>
+              {editing ? (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor={`${ids}-${control.key.replace(/[^\w-]/g, "_")}`} className="text-xs text-muted-foreground">
+                    Día del control
+                  </label>
+                  <DatePickerButton
+                    id={`${ids}-${control.key.replace(/[^\w-]/g, "_")}`}
+                    className="w-56"
+                    min={tomorrow}
+                    openAt={day}
+                    disabled={busy}
+                    value={day}
+                    onChange={(next: string) => set(control, { dueDay: next })}
+                  />
+                </div>
+              ) : null}
+            </li>
+          )
+        })}
+        {open.map((control) => (
+          <li key={control.id} className="rounded-md border px-3 py-2 text-sm">
+            {control.title}
+            <span className="text-muted-foreground">
+              {control.scheduledAt
+                ? ` · con su cita el ${controlDaySaid(dayOf(control.scheduledAt))}: se cambia moviendo la cita`
+                : ` · ${controlDaySaid(dayOf(control.dueAt))} · se cambia en Plan y controles`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {finishing.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Los sugiere su servicio y quedan al firmar. Lo que cambies o quites vale solo para esta persona.
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 /** El día de un instante en la zona de la clínica. */
@@ -353,6 +487,7 @@ export function ClosingNextVisit({
   const beside = values.askControl ? controlBesideAccepted(continuing, day) : null
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
+      <ClosingControlsLeft form={form} controls={controls} busy={busy} />
       {/* El control que trae su cita de hoy se cumple al firmar: se dice cuál y de quién (QA del 9 nov, repaso 3). */}
       {controls.byAppointment.map((control) => (
         <p key={control.id} className="text-sm">
@@ -399,7 +534,9 @@ export function ClosingNextVisit({
           <p className="text-xs text-muted-foreground">
             {/* Lo de hoy terminó (la endodoncia): su control se indica ahora, si hace falta (segunda mesa del 9 nov). */}
             {continuing.every((visit) => visit.accepted)
-              ? "Lo de hoy queda terminado: si necesita su control, indícalo también."
+              ? controls.finishing?.length
+                ? "Lo de hoy queda terminado: si además necesita otro control, indícalo también."
+                : "Lo de hoy queda terminado: si necesita su control, indícalo también."
               : "El control se indica en la sesión en que termine."}{" "}
             <Button
               type="button"
@@ -422,7 +559,7 @@ export function ClosingNextVisit({
                   ? `Sigue pendiente su ${inSentence(known.control.title)} del ${controlDaySaid(dayOf(known.control.dueAt))}: recepción lo verá.`
                   : known.control.scheduledAt
                     ? `Vuelve el ${controlDaySaid(dayOf(known.control.scheduledAt))}, con su cita.`
-                    : `Vuelve el ${controlDaySaid(dayOf(known.control.dueAt))} · Para cambiarlo, en Plan y controles.`}
+                    : `Vuelve el ${controlDaySaid(dayOf(known.control.dueAt))}.`}
           </p>
         ) : (
           <>
@@ -501,6 +638,70 @@ export function ClosingNextVisit({
   )
 }
 
+/** Las constancias de un toque para seguir sin el consentimiento de lo que se hizo hoy. */
+const SKIP_REASONS = ["Urgencia"] as const
+
+/**
+ * Seguir sin el consentimiento de algo que se hizo hoy (producción, 10 nov): una constancia de un
+ * toque («Urgencia») u «Otro motivo» con su texto, no un campo vacío en rojo. Lo firmado en papel
+ * no es una palabra: se sube la hoja con «Firmado en papel» en su fila. Lo indicado para otro día
+ * nunca llega aquí: se firma antes de hacerlo. La constancia queda en la atención para siempre; una
+ * firma posterior se agrega con su fecha.
+ */
+function ConsentSkipReason({ form, disabled }: { form: ClosingForm; disabled: boolean }): React.JSX.Element {
+  const ids = useId()
+  const reason = useStore(form.store, (state) => state.values.consentSkipReason)
+  const preset = (SKIP_REASONS as readonly string[]).includes(reason)
+  const [other, setOther] = useState(false)
+  const choose = (value: string) => {
+    setOther(false)
+    form.setFieldValue("consentSkipReason", value)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p id={`${ids}-motivo`} className="text-sm font-medium">
+        Se hizo hoy sin el consentimiento firmado: ¿por qué?
+      </p>
+      <ToggleGroup
+        aria-labelledby={`${ids}-motivo`}
+        value={other ? ["otro"] : preset ? [reason] : []}
+        onValueChange={(next: unknown[]) => {
+          const picked = next[0]
+          if (picked === "otro") {
+            setOther(true)
+            form.setFieldValue("consentSkipReason", "")
+          } else if (typeof picked === "string") choose(picked)
+        }}
+        disabled={disabled}
+        spacing={2}
+        className="flex-wrap"
+      >
+        {[...SKIP_REASONS, "otro"].map((value) => (
+          <ToggleGroupItem key={value} value={value} className={CHIP}>
+            {(value === "otro" ? other : reason === value) ? <Check aria-hidden className="size-4" /> : null}
+            {value === "otro" ? "Otro motivo" : value}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      {other ? (
+        <form.AppField name="consentSkipReason">
+          {(field) => <field.TextareaField label="Otro motivo" rows={2} maxLength={2000} />}
+        </form.AppField>
+      ) : (
+        <form.AppField name="consentSkipReason">
+          {(field) =>
+            field.state.meta.errors.length > 0 ? (
+              <p role="alert" className="text-sm text-destructive">
+                {String(field.state.meta.errors[0])}
+              </p>
+            ) : null
+          }
+        </form.AppField>
+      )}
+    </div>
+  )
+}
+
 /** «dentro de 6 meses», «dentro de 1 año». */
 function recallWords(months: number): string {
   return months === 12 ? "dentro de 1 año" : months === 1 ? "dentro de 1 mes" : `dentro de ${months} meses`
@@ -531,7 +732,7 @@ export function useClosingForm(options: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
         if (latest.current.needsReason() && !value.consentSkipReason.trim())
-          fields.consentSkipReason = "Escribe por qué sigues sin el consentimiento, o fírmalo ahora"
+          fields.consentSkipReason = "Elige por qué sigues sin el consentimiento, o fírmalo ahora"
         if (latest.current.needsRegistration) Object.assign(fields, signatureRegistrationErrors(value))
         if (latest.current.needsNextDay?.(value)) fields.nextControlDate = "Elige el día en que vuelve, o uno de los atajos"
         return Object.keys(fields).length > 0 ? { fields } : undefined
@@ -899,6 +1100,7 @@ export function EncounterClosingDialog({
   canSign,
   blockedReason,
   onSignNow,
+  onPaper,
   onClose,
   signatureHint = null,
   registration = null,
@@ -940,6 +1142,8 @@ export function EncounterClosingDialog({
   /** Por qué aún no se puede firmar (sin guardar, sin conexión…). */
   blockedReason: string | null
   onSignNow: (need: ConsentNeed) => void
+  /** «Firmado en papel»: sube la foto de la hoja firmada (la constancia lleva la hoja). */
+  onPaper?: (need: ConsentNeed) => void
   onClose: () => void
   /** Su firma dibujada: si la tiene y cómo agregarla o cambiarla. */
   signatureHint?: React.ReactNode
@@ -1062,26 +1266,22 @@ export function EncounterClosingDialog({
                       <span className="text-xs text-muted-foreground">{line.detail}</span>
                     </div>
                     {need.status !== "sin_publicar" ? (
-                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
-                        {need.personSigned ? "Confirmar" : "Firmar ahora"}
-                      </Button>
+                      <span className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
+                          {need.personSigned ? "Confirmar" : "Firmar ahora"}
+                        </Button>
+                        {/* Firmado en papel: con la foto de la hoja, no una palabra (consentimientos, 10 nov). */}
+                        {onPaper && need.documentId && !need.personSigned ? (
+                          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => onPaper(need)}>
+                            Firmado en papel
+                          </Button>
+                        ) : null}
+                      </span>
                     ) : null}
                   </div>
                 )
               })}
-              {needsReason ? (
-                <form.AppField name="consentSkipReason">
-                  {(field) => (
-                    <field.TextareaField
-                      label="Seguir sin él: ¿por qué?"
-                      rows={2}
-                      maxLength={2000}
-                      required
-                      placeholder="Ej.: urgencia, se firmará en la próxima visita"
-                    />
-                  )}
-                </form.AppField>
-              ) : null}
+              {needsReason ? <ConsentSkipReason form={form} disabled={busy} /> : null}
               <form.AppField name="endTime">
                 {(field) => (
                   <field.Control label="Hora de fin">

@@ -108,6 +108,18 @@ export interface SuggestedConsentTemplate {
    * dentro de otros y pedirlo en cada uno solo agregaría firmas.
    */
   servicePrefixes?: readonly string[]
+  /**
+   * La familia del tratamiento en la biblioteca que lo pide (odentIA: lo que deja en la pieza,
+   * `leaves_condition` de `seeds/biblioteca.csv`: «root_canal_treatment», «crown»…). Se elige
+   * por lo que el tratamiento es, no por cómo empieza su clave: con el prefijo, la pulpectomía
+   * quedaba sin consentimiento y la corona caía en el de prótesis (QA del 10 nov, A1 y M2).
+   * La clave (`servicePrefixes`) queda para lo que la biblioteca no dice y para los productos
+   * sin familias. odentIA da de cada tratamiento lo que deja en la pieza y su familia de
+   * `seeds/biblioteca_piezas.csv` («pulpectomia-deciduo»).
+   */
+  serviceFamilies?: readonly string[]
+  /** Claves que no lo piden aunque su familia sí (la corona de acero de un temporal). */
+  exceptPrefixes?: readonly string[]
 }
 
 /** Plantillas sugeridas por procedimiento: cada clínica nace con ellas activas. */
@@ -137,6 +149,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "exodoncia",
     title: "Exodoncia simple o quirúrgica",
+    serviceFamilies: ["missing_tooth"],
     servicePrefixes: ["exodoncia-"],
     sections: {
       procedure:
@@ -160,6 +173,14 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "endodoncia",
     title: "Tratamiento de conductos (endodoncia)",
+    // La de la pieza permanente; la pulpectomía y la pulpotomía de un temporal van con la
+    // odontopediatría (QA del 10 nov, A1).
+    serviceFamilies: [
+      "endodoncia-vital",
+      "endodoncia-no-vital",
+      "endodoncia-bicuspide-raices",
+      "retratamiento",
+    ],
     servicePrefixes: ["endodoncia-", "retratamiento-de-endodoncia-"],
     sections: {
       procedure:
@@ -198,6 +219,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "implante",
     title: "Implante dental",
+    serviceFamilies: ["implant"],
     servicePrefixes: ["colocacion-de-implante-"],
     sections: {
       procedure:
@@ -255,7 +277,20 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "protesis",
     title: "Prótesis dental",
-    servicePrefixes: ["corona-de-", "corona-metal-", "protesis-completa-", "protesis-parcial-", "puente-"],
+    // Para reponer piezas ausentes, también la corona sobre un implante; la corona sobre la
+    // propia pieza tiene el suyo («corona»).
+    servicePrefixes: [
+      "protesis-completa-",
+      "protesis-parcial-",
+      "protesis-inmediata-",
+      "puente-",
+      "corona-de-metal-colado-sobre-pilar-",
+      "corona-de-metal-sobre-implante",
+      "corona-de-porcelana-sobre-pilar",
+      "corona-de-titanio-sobre-pilar",
+      "corona-metal-ceramica-sobre-pilar-",
+      "corona-retenedora-sobre-pilar",
+    ],
     sections: {
       procedure:
         "Preparación de piezas, toma de impresiones y adaptación de una prótesis fija o removible para reponer piezas ausentes.",
@@ -270,11 +305,58 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
     },
   },
   {
-    key: "odontopediatria",
-    title: "Atención odontopediátrica",
+    key: "corona",
+    title: "Corona sobre la propia pieza",
+    // Lo que deja una corona o un perno-muñón en la pieza; la de acrílico indirecta no lo dice
+    // en la biblioteca y va por su clave.
+    serviceFamilies: ["crown", "post_and_core"],
+    servicePrefixes: [
+      "corona-de-acrilico-indirecta",
+      "3-4-de-corona-",
+      "poste-prefabricado-y-nucleo",
+      "reconstruccion-de-munon",
+    ],
+    exceptPrefixes: [
+      "corona-de-acero-prefabricada-deciduo",
+      "corona-de-acero-con-frente-estetico-deciduo",
+    ],
     sections: {
       procedure:
-        "Tratamientos preventivos y restauradores en el menor (sellantes, flúor, restauraciones, pulpotomías o extracciones de piezas temporales), con manejo de conducta adaptado a su edad.",
+        "Tallado de la pieza indicada con anestesia local, toma de impresiones o escaneo, colocación de una corona provisional y, en otra sesión, cementado de la corona definitiva que la cubre. Si la pieza está muy destruida puede necesitar antes un perno y muñón.",
+      benefits: [
+        "Proteger la pieza debilitada o tratada de conductos frente a una fractura",
+        "Recuperar su forma, su función y su estética",
+      ],
+      risks: [
+        "Sensibilidad de la pieza tallada, por lo general temporal",
+        "Molestias o despegado de la corona provisional",
+        "Inflamación de la encía alrededor de la corona",
+        "Fractura de la pieza o de la corona, o que la corona se despegue y haya que cementarla de nuevo",
+        "En una pieza con nervio, que necesite después un tratamiento de conductos",
+      ],
+      alternatives: [
+        "Incrustación (onlay) o restauración directa con resina, si queda suficiente pieza",
+        "No colocar corona y controlar la pieza, con riesgo de fractura",
+      ],
+      consequences:
+        "Fractura de la pieza debilitada, que puede obligar a extraerla, y pérdida de su función.",
+    },
+  },
+  {
+    key: "odontopediatria",
+    title: "Atención odontopediátrica",
+    // Toda terapia pulpar de un temporal pide consentimiento, firmado por su representante (QA
+    // del 10 nov, A1: la pulpectomía de la 75 de un niño de 7 años se firmaba sin él).
+    serviceFamilies: ["pulpectomia-deciduo", "pulpotomy"],
+    servicePrefixes: [
+      "pulpectomia-",
+      "pulpotomia",
+      "corona-de-acero-prefabricada-deciduo",
+      "corona-de-acero-con-frente-estetico-deciduo",
+    ],
+    sections: {
+      procedure:
+        "Tratamientos preventivos y restauradores en el menor (sellantes, flúor, restauraciones, pulpotomías, pulpectomías, coronas de acero o extracciones de piezas temporales), con manejo de conducta adaptado a su edad.",
       benefits: [
         "Tratar la caries y prevenir nuevas lesiones",
         "Conservar el espacio para las piezas permanentes",

@@ -2055,6 +2055,8 @@ export async function showPersonalLink(
   actorUserId: string,
   patientId: string,
   deps: { secretsKey: Buffer },
+  /** El consentimiento que abre para leerlo y firmarlo en su teléfono (`abre=firma`). */
+  consentId?: string | null,
 ): Promise<PersonalLinkShown> {
   const recipient = await serviceRecipient(tx, orgId, patientId)
   const link = await issuePersonalLink(
@@ -2064,7 +2066,9 @@ export async function showPersonalLink(
     { contactId: recipient.contactId, patientId, createdBy: actorUserId, booking: false },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token, "pendientes")
+  const url = consentId
+    ? await personalLinkUrl(tx, orgId, link.token, "firma", consentId)
+    : await personalLinkUrl(tx, orgId, link.token, "pendientes")
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -2074,6 +2078,7 @@ export async function showPersonalLink(
     entityId: patientId,
     metadata: {
       patientId,
+      ...(consentId ? { consentId } : {}),
       recipientContactId: recipient.contactId,
       recipientName: recipient.displayName,
     },

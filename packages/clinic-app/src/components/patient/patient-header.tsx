@@ -57,6 +57,7 @@ import { WriteToPersonDialog } from "../write-to-person"
 import { CollectButton } from "./collect-flow"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
+import { StaleEncounterNotice } from "./stale-encounter"
 import { UpcomingLine, usePersonUpcoming } from "./next-up"
 import { PatientAvatar } from "./patient-avatar"
 import { useOpenWide } from "./wide-section"
@@ -630,6 +631,8 @@ export function PersonHeader({
         people={writeTargets}
         onOpened={(conversationId, target) => openPanel?.({ conversationId, name: target.displayName })}
       />
+      {/* La atención que quedó abierta de otro día: qué hacer con ella, sin frenar (10 nov). */}
+      {patient && !person.archived ? <StaleEncounterNotice patientId={patient.id} /> : null}
     </header>
   )
 }

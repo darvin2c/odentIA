@@ -20,13 +20,26 @@ export interface ArrivalInput {
 
 export interface VisitStatusInput {
   id: string
-  status: "confirmada" | "no_asistio"
+  /** «atendida» es «Vino»: la cita pasada queda atendida sin abrir otra atención (decisión B1). */
+  status: "confirmada" | "no_asistio" | "atendida"
 }
 
 /** Lo que se dice al confirmar una cita o marcar que no vino, en la fila y en el cajón: de quién, y si el agente le avisa. */
-export function announceVisitStatus(appointment: Pick<AgendaAppointment, "patientName" | "status" | "notice">): string {
-  const text = appointment.status === "confirmada" ? `Cita de ${appointment.patientName} confirmada` : `Cita de ${appointment.patientName}: no vino`
-  toast.success(text, appointment.notice?.queued ? { description: "El agente le avisa y le ofrece otra fecha." } : undefined)
+export function announceVisitStatus(
+  appointment: Pick<AgendaAppointment, "patientName" | "status" | "notice">,
+): string {
+  const text =
+    appointment.status === "confirmada"
+      ? `Cita de ${appointment.patientName} confirmada`
+      : appointment.status === "atendida"
+        ? `Cita de ${appointment.patientName}: vino, queda atendida`
+        : `Cita de ${appointment.patientName}: no vino`
+  toast.success(
+    text,
+    appointment.notice?.queued
+      ? { description: "El agente le avisa y le ofrece otra fecha." }
+      : undefined,
+  )
   return text
 }
 
@@ -35,7 +48,15 @@ export function useAppointmentVisitStatus(options: { onDone?: (text: string) => 
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: VisitStatusInput) =>
-      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, { method: "POST", body: JSON.stringify({ status: input.status }) }),
+      input.status === "atendida"
+        ? apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/came`, {
+            method: "POST",
+            body: "{}",
+          })
+        : apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, {
+            method: "POST",
+            body: JSON.stringify({ status: input.status }),
+          }),
     onSuccess: async (result) => {
       options.onDone?.(announceVisitStatus(result.data))
       await invalidateAppointmentQueries(queryClient)

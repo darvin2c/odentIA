@@ -57,6 +57,8 @@ import {
 import { acceptedBudgetLines } from "./agreed-lines.js"
 import {
   appointmentSessionsOf,
+  type FreedAppointment,
+  freedAppointmentsOf,
   markArrivedOnAttend,
   notifyAppointmentChanged,
   setAppointmentStatus,
@@ -98,12 +100,22 @@ import {
 import {
   branchNotFound,
   invalidField,
+  isForeignKeyViolation,
   isUniqueViolation,
   notFound,
   ServiceError,
   validation,
 } from "./errors.js"
+import {
+  applyFinishingControlChanges,
+  createFinishControls,
+  type FinishingControl,
+  type FinishingControlChange,
+  finishingControlsOf,
+  undoFinishControls,
+} from "./finish-controls.js"
 import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
+import { treatmentConsentStates } from "./consent-state.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
@@ -125,7 +137,7 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { nextSessionFromOf } from "./session-gap.js"
+import { nextSessionGapOf } from "./session-gap.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
@@ -567,15 +579,26 @@ async function joinOpenDraft(
   return joined
 }
 
-/** Borrador abierto de un paciente, sin nada de la historia: cuál es y quién lo lleva. */
+/** El borrador abierto de un paciente, sin nada de su historia. */
+export interface OpenEncounterRef {
+  id: string
+  professionalUserId: string
+  startedAt: Date
+  /** Empezó hoy, en el día de la clínica: si no, la app pregunta qué hacer con ella. */
+  today: boolean
+  /** Sin nada registrado: se descarta de un toque, sin motivo. */
+  empty: boolean
+}
+
+/** Borrador abierto de un paciente, sin nada de la historia: cuál es, quién lo lleva, de qué día y si está vacío. */
 export async function getOpenEncounterRef(
   tx: Db,
   orgId: string,
   patientId: string,
-): Promise<{ id: string; professionalUserId: string } | null> {
+): Promise<OpenEncounterRef | null> {
   await requirePatient(tx, orgId, patientId)
   const [row] = await tx
-    .select({ id: encounter.id, professionalUserId: encounter.professionalUserId })
+    .select()
     .from(encounter)
     .where(
       and(
@@ -585,7 +608,106 @@ export async function getOpenEncounterRef(
       ),
     )
     .limit(1)
-  return row ?? null
+  if (!row) return null
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+  return {
+    id: row.id,
+    professionalUserId: row.professionalUserId,
+    startedAt: row.startedAt,
+    today: day(row.startedAt) === day(new Date()),
+    empty: !(await encounterHasRecords(tx, orgId, row)),
+  }
+}
+
+/**
+ * Si la atención tiene algo registrado: lo escrito de la consulta (relato, examen, signos,
+ * evolución, indicaciones, pronóstico), hallazgos, diagnósticos, procedimientos, documentos
+ * (consentimientos, recetas, órdenes, descansos, formularios, archivos), lo indicado en el
+ * Plan, controles, materiales o cobros (que salen de sus procedimientos). El motivo no cuenta:
+ * suele venir de la cita. Lo que no está aquí lo frena igual la base al descartar.
+ */
+export async function encounterHasRecords(
+  tx: Db,
+  orgId: string,
+  row: Pick<
+    EncounterRow,
+    "id" | "presentIllness" | "illnessDuration" | "vitals" | "evolution" | "indications" | "prognosis" | "examination"
+  >,
+): Promise<boolean> {
+  const written = [row.presentIllness, row.illnessDuration, row.evolution, row.indications, row.prognosis]
+  if (written.some((text) => typeof text === "string" && text.trim().length > 0)) return true
+  const filled = (value: unknown): boolean =>
+    value !== null &&
+    value !== undefined &&
+    (typeof value !== "object" || Object.values(value as Record<string, unknown>).some((item) => filled(item))) &&
+    !(typeof value === "string" && value.trim() === "")
+  if (filled(row.vitals) || filled(row.examination)) return true
+  const [found] = await tx.execute<{ any: boolean }>(sql`
+    select (
+      exists (select 1 from encounter_procedure where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from encounter_diagnosis where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_note where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_form_response where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_order where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from consent_document where organization_id = ${orgId}
+        and (encounter_id = ${row.id} or informed_encounter_id = ${row.id}))
+      or exists (select 1 from medical_leave where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from patient_document_context where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from prescription where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from stock_movement where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from treatment_plan where organization_id = ${orgId} and origin_encounter_id = ${row.id})
+      or exists (select 1 from treatment_plan_item where organization_id = ${orgId} and source_encounter_id = ${row.id})
+      or exists (select 1 from clinical_follow_up where organization_id = ${orgId}
+        and (origin_encounter_id = ${row.id} or completed_encounter_id = ${row.id}))
+      or exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id})
+    ) as any`)
+  return found?.any === true
+}
+
+/**
+ * «Descartar» (10 nov): una atención en borrador sin nada registrado se borra de un toque, sin
+ * motivo. No queda en la Historia (no hay nada que contar); queda el evento de auditoría. Con
+ * algo registrado se cierra o se anula con su motivo, como siempre. La base solo deja borrar
+ * borradores, y lo que la nombra con contenido clínico frena el borrado (sus FK no se propagan).
+ */
+export async function discardEmptyEncounter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<{ discarded: true; appointmentId: string | null }> {
+  await requirePatient(tx, orgId, patientId)
+  const locked = await lockEncounter(tx, orgId, patientId, encounterId)
+  assertOpenDraft(locked, actorUserId)
+  const notEmpty = () =>
+    conflict("ENCOUNTER_NOT_EMPTY", "Tiene algo registrado: termínala o anúlala con su motivo")
+  if (await encounterHasRecords(tx, orgId, locked)) throw notEmpty()
+  try {
+    await tx.transaction(async (inner) => {
+      await inner
+        .delete(encounter)
+        .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.status, "borrador")))
+    })
+  } catch (error) {
+    // Algo la nombra (FK sin propagar): no está vacía.
+    if (isForeignKeyViolation(error)) throw notEmpty()
+    throw error
+  }
+  await audit(tx, orgId, actorUserId, "encounter.discarded", "encounter", encounterId, {
+    patientId,
+    startedAt: locked.startedAt.toISOString(),
+    professionalUserId: locked.professionalUserId,
+    appointmentId: locked.appointmentId,
+    ...(locked.reason ? { hadReason: true } : {}),
+  })
+  // La Agenda deja de decir «En atención»; la llegada se conserva, como al anular.
+  if (locked.appointmentId) await notifyAppointmentChanged(tx, orgId)
+  return { discarded: true, appointmentId: locked.appointmentId }
 }
 
 export async function createEncounter(
@@ -1049,10 +1171,13 @@ export async function getEncounterDetail(
     row.status === "borrador"
       ? await removableFromEncounter(tx, orgId, encounterId, row.professionalUserId)
       : new Set<string>()
+  // El consentimiento va con el tratamiento: el Plan de la atención también lo dice.
+  const consents = await treatmentConsentStates(tx, orgId, [...attention.keys()])
   const withProgress = <T extends { id: string }>(item: T) => ({
     ...item,
     sessionsDone: counts.get(item.id)?.done ?? 0,
     removable: removable.has(item.id),
+    consent: consents.get(item.id) ?? null,
   })
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),
@@ -1716,8 +1841,10 @@ export async function addEncounterProcedure(
         procedureId: row.id,
         plannedSessions: acceptedPlannedSessions,
       })
-      if (done)
+      if (done) {
         await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+        await createFinishControls(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+      }
     } else if (item && (item.status === "pendiente" || item.status === "programado")) {
       await setPlanItemStatus(tx, orgId, actorUserId, patientId, planItemIdParam, {
         status: "en_curso",
@@ -1774,8 +1901,10 @@ export async function addEncounterProcedure(
     // El servicio directo de una sesión nace realizado: lo que su producto hace con
     // un tratamiento realizado (odentIA: lo tratado queda dibujado). El de varias se
     // dibuja al terminarlo.
-    if (directDone)
+    if (directDone) {
       await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+      await createFinishControls(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+    }
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -1914,6 +2043,11 @@ export interface FinalizeEncounterBase {
    * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
    */
   nextSessions: NextSession[]
+  /**
+   * Las citas por venir que se reservaron para lo que hoy quedó hecho (la sesión 2 hecha antes):
+   * «Atención finalizada» ofrece liberarlas o usarlas para lo que sigue (QA del 10 nov, M1).
+   */
+  freedAppointments: FreedAppointment[]
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
@@ -2067,7 +2201,7 @@ export interface NextSession {
    * La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no
    * le falta. `from`: desde qué día conviene (`nextSessionFromOf`), si no es mañana.
    */
-  toBook: { n: number; m: number; from?: string } | null
+  toBook: { n: number; m: number; from?: string; gapDays?: number } | null
 }
 
 /** Lo aceptado que va después de otro tratamiento sin terminar y ya tiene su cita. */
@@ -2200,7 +2334,7 @@ export async function nextSessionsOf(
       firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt, professionalUserId: row.professionalUserId })
   }
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
-  const fromOf = await nextSessionFromOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
+  const fromOf = await nextSessionGapOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
   const out: NextSession[] = []
   for (const item of items) {
     const id = item.id
@@ -2211,7 +2345,11 @@ export async function nextSessionsOf(
     const from = fromOf.get(id)
     const toBook =
       !booked && canBookAnother(item, count)
-        ? { n: count.done + count.booked + 1, m: item.plannedSessions, ...(from ? { from } : {}) }
+        ? {
+            n: count.done + count.booked + 1,
+            m: item.plannedSessions,
+            ...(from ? { from: from.from, gapDays: from.days } : {}),
+          }
         : null
     if (booked || toBook) out.push({ planItemId: id, title: item.title, serviceId: item.serviceId, booked, toBook })
   }
@@ -2374,6 +2512,24 @@ export interface ClosingControls {
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
   next: ClosingNextControl | null
+  /**
+   * Los controles que dejan los tratamientos que terminan al firmar (B5 del 10 nov), por su
+   * servicio: el cierre los muestra y quien firma los cambia o los quita para esta persona
+   * (`FinalizeEncounterInput.finishControlChanges`).
+   */
+  finishing: FinishingControl[]
+  /** Los controles que ya tiene abiertos (sin el de la cita de hoy): lo que va a quedar. */
+  open: ClosingOpenControl[]
+}
+
+/** Un control abierto de la persona, como lo dice el cierre: pendiente o con su cita. */
+export interface ClosingOpenControl {
+  id: string
+  title: string
+  dueAt: Date
+  status: string
+  /** La hora de su cita, si la tiene en pie: se cambia moviendo la cita. */
+  scheduledAt: Date | null
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -2422,8 +2578,9 @@ export async function checkEncounterClosing(
       throw e
     missing.push("signature")
   }
+  // Solo lo de lo que se hizo hoy: lo indicado o traído para otro día se firma cuando se haga.
   const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
-    (need) => need.status !== "firmado",
+    (need) => need.status !== "firmado" && need.doneToday,
   )
   const materials = await closingMaterialsOf(tx, orgId, row)
   const health = {
@@ -2432,7 +2589,28 @@ export async function checkEncounterClosing(
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
-  const controls = await closingControlsOf(tx, orgId, actorUserId, row)
+  // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
+  // control: se muestra con lo que termina al firmar, para cambiarlo o quitarlo igual (QA antes de
+  // entregar); no como uno que ya tenía.
+  const doneToday = await tx.execute<{ id: string; plan_item_id: string }>(sql`
+    select f.id, link.plan_item_id from clinical_follow_up f
+    join clinical_follow_up_item link on link.organization_id = f.organization_id and link.follow_up_id = f.id
+    join encounter_procedure today on today.organization_id = link.organization_id and today.plan_item_id = link.plan_item_id
+      and today.encounter_id = ${row.id} and today.voided_at is null
+    where f.organization_id = ${orgId} and f.patient_id = ${row.patientId}
+      and f.finish_after_days is not null and f.status = 'pendiente'`)
+  const fromToday = new Set(doneToday.map((link) => link.id))
+  const base = await closingControlsOf(tx, orgId, actorUserId, row)
+  const controls = {
+    ...base,
+    open: base.open.filter((control) => !fromToday.has(control.id)),
+    finishing: await finishingControlsOf(tx, orgId, [
+      ...new Set([
+        ...sessions.finishing.map((session) => session.planItemId).filter((id) => !keepOpenPlanItemIds.includes(id)),
+        ...doneToday.map((link) => link.plan_item_id),
+      ]),
+    ]),
+  }
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,
     patientId: row.patientId,
@@ -2510,7 +2688,7 @@ async function closingControlsOf(
   orgId: string,
   actorUserId: string,
   row: EncounterRow,
-): Promise<ClosingControls> {
+): Promise<Omit<ClosingControls, "finishing">> {
   const { timezone } = await findOrgLocale(tx, orgId)
   const { recallMonths } = await productHooks(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
@@ -2569,6 +2747,20 @@ async function closingControlsOf(
     })),
     shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
     due,
+    open: open
+      .filter((control) => !byAppointment.includes(control))
+      .map((control) => ({
+        id: control.id,
+        title: control.title,
+        dueAt: control.dueAt,
+        status: control.status,
+        scheduledAt:
+          control.startsAt &&
+          control.appointmentStatus &&
+          ["programada", "confirmada"].includes(control.appointmentStatus)
+            ? control.startsAt
+            : null,
+      })),
     next: first
       ? {
           id: first.id,
@@ -2724,6 +2916,11 @@ export interface FinalizeEncounterInput {
    * pantalla mostró marcados: quedan resueltos con su tratamiento. Sin él, ninguno.
    */
   resolveDiagnosisIds?: string[]
+  /**
+   * Lo que quien firma cambió de los controles que dejan los tratamientos de hoy
+   * (`closing.controls.finishing`, por su `key`): otro día o quitarlo, solo para esta persona.
+   */
+  finishControlChanges?: FinishingControlChange[]
 }
 
 /**
@@ -2860,6 +3057,8 @@ export async function finalizeEncounter(
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
   const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  // Los controles que dejó lo terminado, como quedaron en el cierre (otro día, o quitados).
+  await applyFinishingControlChanges(tx, { orgId, actorUserId, patientId, encounterId }, input.finishControlChanges ?? [])
   // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
   await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], now)
   const procedures = await tx
@@ -3200,6 +3399,14 @@ export async function finalizeEncounter(
     },
     keptOpen,
     bookedAfter,
+    freedAppointments: await freedAppointmentsOf(
+      tx,
+      orgId,
+      patientId,
+      [...closing.sessions.finishing, ...closing.sessions.continuing].map(
+        (session) => session.planItemId,
+      ),
+    ),
     waitingAfter:
       continuingNext.length > 0
         ? closing.sessions.accepted
@@ -3383,8 +3590,10 @@ async function voidProcedureRow(
           .where(eq(treatmentPlanItem.id, item.id))
       }
       // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
-      if (direct || item.status === "realizado")
+      if (direct || item.status === "realizado") {
         await (await productHooks(tx, orgId)).treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+        await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
+      }
     }
   }
   await audit(
@@ -3498,6 +3707,11 @@ async function voidEncounterPapers(
         eq(consentDocument.status, "pendiente"),
         // Lo que la persona ya firmó por su enlace espera al profesional, no se anula: es un acto suyo.
         isNull(consentDocument.personSignedAt),
+        // El de un tratamiento que sigue vigente no se anula con la atención: va con el tratamiento y
+        // se firma en la atención en que se haga (consentimientos, 10 nov).
+        sql`(${consentDocument.planItemId} is null or not exists (select 1 from treatment_plan_item vigente
+          where vigente.organization_id = ${consentDocument.organizationId} and vigente.id = ${consentDocument.planItemId}
+            and vigente.status not in ('cancelado', 'reemplazado')))`,
       ),
     )
     .returning({ id: consentDocument.id })
@@ -3578,6 +3792,7 @@ async function undoCompletionsOf(
       encounterId,
     })
     await hooks.treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+    await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
   }
 }
 

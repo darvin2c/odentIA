@@ -1258,21 +1258,27 @@ export async function registerPatient(
 
   let whatsapp: RegistrationWhatsApp | undefined
   // 5b. Con los datos esenciales, lo que la clínica exige y no se pidió queda
-  // anotado en el caso de la conversación o, sin conversación (la Agenda), en
-  // las notas de su persona, a nombre de quien la registró. Los apellidos llegan
-  // en su único campo: no hay nada que repartir ni que revisar (ADR 0054).
+  // anotado en el caso de la conversación, que lee quien la sigue (Sofi y
+  // recepción). Sin conversación (la Agenda, su página) no se anota en sus notas:
+  // «Faltan datos» de Pendientes lo dice con la misma regla y se pone al día solo;
+  // la nota quedaba vieja al completar un dato y firmada por quien la registró
+  // como si la hubiera escrito (repaso final de la ficha del 10 nov, B2). Los
+  // apellidos llegan en su único campo: no hay nada que repartir ni que revisar (ADR 0054).
   if (essentials) {
     const who = publicContext
       ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
       : actorUserId === null
         ? "Se registró en el chat con lo mínimo"
         : "El equipo registró a esta persona con lo mínimo"
-    const note = pendingRegistrationNote(who, config, answers)
-    if (conversationId) await addAgentCaseNote(tx, orgId, conversationId, note)
+    if (conversationId)
+      await addAgentCaseNote(
+        tx,
+        orgId,
+        conversationId,
+        pendingRegistrationNote(who, config, answers),
+      )
     else {
-      // Lo pendiente se anota en su persona, que el alta ya creó (`person_id`).
       const personId = created.personId
-      await createContactNote(tx, orgId, personId, { body: note }, { userId: actorUserId })
       // Registrarla en «Nueva cita» con su teléfono es un alta manual del equipo: ese
       // número pasa a ser su WhatsApp (ADR 0027), con la misma operación que
       // «Escribirle» y a nombre de quien la registra, para que le lleguen el aviso y

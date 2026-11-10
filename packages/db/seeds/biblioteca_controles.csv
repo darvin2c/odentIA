@@ -1,0 +1,14 @@
+template_key,session_gap_days,controls
+endodoncia-anterior-no-vital,7,365:Control radiográfico de la endodoncia
+endodoncia-anterior-vital,7,365:Control radiográfico de la endodoncia
+endodoncia-bicuspide-no-vital,7,365:Control radiográfico de la endodoncia
+endodoncia-bicuspide-vital,7,365:Control radiográfico de la endodoncia
+endodoncia-de-bicuspide-dos-raices,7,365:Control radiográfico de la endodoncia
+endodoncia-de-bicuspide-una-raiz,7,365:Control radiográfico de la endodoncia
+endodoncia-posterior-no-vital,7,365:Control radiográfico de la endodoncia
+endodoncia-posterior-vital,7,365:Control radiográfico de la endodoncia
+retratamiento-de-endodoncia-anterior,7,365:Control radiográfico de la endodoncia
+retratamiento-de-endodoncia-bicuspide,7,365:Control radiográfico de la endodoncia
+retratamiento-de-endodoncia-posterior,7,365:Control radiográfico de la endodoncia
+pulpectomia-anterior-deciduo,7,365:Control radiográfico de la pulpectomía
+pulpectomia-posterior-deciduo,7,365:Control radiográfico de la pulpectomía

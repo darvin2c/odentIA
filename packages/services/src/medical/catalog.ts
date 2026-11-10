@@ -12,6 +12,9 @@ export const medicalCatalog: ProductCatalog = {
   everydayWords: {
     chequeo: ["consulta", "control", "evaluacion"],
     revision: ["consulta", "control", "evaluacion"],
+    // «evaluación» también es la consulta, como en odentIA (repaso final de la ficha del 10 nov, B10).
+    evaluacion: ["consulta"],
+    valoracion: ["consulta", "evaluacion"],
     analisis: ["laboratorio", "examen"],
     vacuna: ["inmunizacion"],
     inyeccion: ["inyectable", "aplicacion"],

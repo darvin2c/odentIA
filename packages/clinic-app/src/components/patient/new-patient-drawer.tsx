@@ -53,6 +53,13 @@ import { placeErrors } from "./form-errors"
 import { SendPersonalLinkButton } from "./send-personal-link"
 
 /**
+ * El campo de la fecha guarda desde el principio el renglón de la edad («38 años»): al
+ * aparecer, empujaba el formulario y el clic en la casilla del aviso caía en el vacío
+ * (repaso final de la ficha del 10 nov, B9). 2,25 rem del campo + 0,25 de espacio + 1,25 del renglón.
+ */
+const BIRTH_DATE_ROOM = "min-h-[3.75rem] content-start"
+
+/**
  * A quién se registra: alguien nuevo (se busca primero, para no duplicarlo),
  * una persona que ya existe como su propia ficha, o alguien a su cargo.
  */
@@ -642,6 +649,7 @@ export function NewPatientDrawer({
                       aria-describedby={control.describedBy}
                       onBlur={control.onBlur}
                       onChange={(value) => field.handleChange(value ?? "")}
+                      className={BIRTH_DATE_ROOM}
                     />
                   )}
                 </field.Control>
@@ -786,6 +794,7 @@ export function NewPatientDrawer({
                             aria-describedby={control.describedBy}
                             onBlur={control.onBlur}
                             onChange={(value) => field.handleChange(value ?? "")}
+                            className={BIRTH_DATE_ROOM}
                           />
                         )}
                       </field.Control>

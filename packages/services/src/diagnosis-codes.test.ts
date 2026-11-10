@@ -1,6 +1,7 @@
 import {
   encounterDiagnosis,
   patient,
+  patientCondition,
   patientContact,
   patientFamilyHistory,
 } from "@odentia/db/schema/clinical"
@@ -174,6 +175,33 @@ it("el buscador ignora tildes y mayúsculas, busca en la lista de la clínica y 
   expect(
     (await f.run((tx) => searchDiagnosisCodes(tx, "org_a", "caries"))).map((row) => row.code),
   ).toEqual(["DA08.0"])
+})
+
+// Repaso final de la ficha del 10 nov (B5): «hipertension» daba primero la hipertensión
+// intracraneal (8D60) por orden de código; lo que la clínica ya usa, sus antecedentes también, va antes.
+it("el buscador pone primero lo que la clínica ya usa, también en los antecedentes, con su categoría", async () => {
+  await seedDiagnosisCodes(
+    [
+      { code: "8D60", title: "Hipertensión intracraneal" },
+      { code: "8D60.Z", title: "Hipertensión intracraneal, sin especificación" },
+      { code: "BA00", title: "Hipertensión esencial" },
+      { code: "BA00.Z", title: "Hipertensión esencial, sin especificación" },
+    ],
+    "ICD-11",
+  )
+  const f = await clinicalFixture()
+  await f.run((tx) => setOrgDiagnosisSystem(tx, "org_a", f.actor, "ICD-11"))
+  const search = async () =>
+    (await f.run((tx) => searchDiagnosisCodes(tx, "org_a", "hipertension"))).map((row) => row.code)
+  expect(await search()).toEqual(["8D60", "8D60.Z", "BA00", "BA00.Z"])
+  await ownerDb.insert(patientCondition).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    name: "Hipertensión arterial",
+    diagnosisSystem: "ICD-11",
+    diagnosisCode: "BA00.Z",
+  })
+  expect(await search()).toEqual(["BA00", "BA00.Z", "8D60", "8D60.Z"])
 })
 
 it("el odontograma propone el código del hallazgo y los más usados salen de la clínica", async () => {

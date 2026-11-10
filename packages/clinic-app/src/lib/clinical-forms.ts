@@ -507,6 +507,8 @@ export function signConsent(
     method?: "clinica" | "papel"
     /** En papel: la foto de la hoja firmada, ya en Documentos. */
     paperDocumentId?: string | null
+    /** Lo firmó en su enlace y lo firma de nuevo aquí: la firma del enlace queda en la historia. */
+    signAgain?: boolean
   },
 ) {
   // `signerDocNotice`: el documento escrito del representante no quedó en su ficha (por qué).
@@ -654,6 +656,16 @@ export async function sendConsentByLink(
     method: "POST",
     body: JSON.stringify({ requestId }),
   })
+}
+
+/**
+ * Su enlace que abre el consentimiento, para mostrarlo como código o copiarlo: la persona lo
+ * lee y lo firma en su teléfono, sin que la clínica le envíe ningún mensaje.
+ */
+export async function showConsentLink(
+  consentId: string,
+): Promise<{ data: { url: string; expiresAt: string; recipientName: string } }> {
+  return apiFetch(`${BASE}/consents/${consentId}/show-link`, { method: "POST", body: "{}" })
 }
 
 /**

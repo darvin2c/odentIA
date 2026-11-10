@@ -1103,6 +1103,32 @@ export function CollectDrawer({
     return [...seen.entries()].map(([contactId, value]) => ({ contactId, ...value }))
   }, [responsibilities.data])
 
+  // En un menor (con su representante legal vigente) paga por defecto quien responde por él: su
+  // responsable económico o, si no hay, su representante (QA del 10 nov, M3: el ticket salía a
+  // nombre del niño). Solo si nadie eligió todavía; «Cambiar» sigue ofreciendo al paciente.
+  const payerByDefault = useMemo(() => {
+    const current = (responsibilities.data?.data ?? []).filter((row) => row.isCurrent)
+    if (!current.some((row) => row.kind === "representante_legal")) return null
+    return (
+      current.find((row) => row.kind === "responsable_economico")?.contactId ??
+      current.find((row) => row.kind === "representante_legal")?.contactId ??
+      null
+    )
+  }, [responsibilities.data])
+  const payerDefaulted = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se repone al cerrar y con cada paciente.
+  useEffect(() => {
+    payerDefaulted.current = false
+  }, [open, effectiveId])
+  useEffect(() => {
+    if (!open || payerDefaulted.current || !payerByDefault) return
+    payerDefaulted.current = true
+    // Sin tocar su estado: un valor por defecto no es un cambio, y cerrar no debe preguntar
+    // «¿Salir sin guardar?» (e2e de caja, ficha por rol).
+    if (!form.getFieldValue("payerContactId"))
+      form.setFieldValue("payerContactId", payerByDefault, { dontUpdateMeta: true })
+  }, [open, payerByDefault, form])
+
   /** Promociones vigentes que incluyen el servicio del concepto, en la moneda de la clínica. */
   const offersFor = (item: AccountPendingItem): Array<{ promo: PromotionOption; price: PromotionItem }> => {
     if (!item.serviceId) return []

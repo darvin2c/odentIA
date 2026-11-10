@@ -11,6 +11,7 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm"
 import { acceptedBudgetLines } from "./agreed-lines.js"
@@ -22,6 +23,8 @@ import {
 } from "./diagnosis-codes.js"
 import { assertAttending } from "./encounter-attending.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { treatmentConsentStates } from "./consent-state.js"
+import { createFinishControls } from "./finish-controls.js"
 import { orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
@@ -993,9 +996,11 @@ export async function listPlanItems(
   // Lo indicado y aún por decidir cuenta como si se aceptara: la endodoncia y la corona indicadas en
   // la misma consulta ya tienen su orden antes de responder el presupuesto (QA antes de entregar).
   const asDecided = withProgress.map((item) => (item.decisionStatus === "pendiente" ? { ...item, decisionStatus: "aceptado" } : item))
+  // El consentimiento va con el tratamiento: el Plan dice si falta firmarlo (consentimientos, 10 nov).
+  const consents = await treatmentConsentStates(tx, orgId, withProgress.map((item) => item.id))
   return withProgress.map((item, index) => {
     const before = waitingFor(asDecided[index]!, asDecided, phases)
-    return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null }
+    return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null, consent: consents.get(item.id) ?? null }
   })
 }
 
@@ -1299,6 +1304,10 @@ export async function updatePlanItem(
     )
     .returning()
   if (!updated) throw notFound("Ítem del plan")
+  // Cambió lo que su consentimiento describe: lo firmado deja de contar y el pendiente se anula para
+  // prepararlo con el texto nuevo (consentimientos, 10 nov).
+  if (fields.some((field) => field === "serviceId" || field === "site" || field === "diagnosisCode"))
+    await resetPlanItemConsents(tx, orgId, actorUserId, updated.id)
   if (budget && budget.status === "borrador") {
     // La línea del borrador es snapshot: se actualiza en la misma transacción.
     // Solo el borrador sigue a la nueva indicación; presentados/decididos son
@@ -1488,7 +1497,19 @@ export async function setPlanItemStatus(
       encounterId: input.encounterId,
       planItemId: updated.id,
     })
-  return { ...(await withPlanItemParts(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
+  // Y los controles que deja su servicio al terminar (B5), en todos los productos.
+  if (input.status === "realizado")
+    await createFinishControls(tx, {
+      orgId,
+      actorUserId,
+      patientId,
+      encounterId: input.encounterId ?? null,
+      planItemId: updated.id,
+    })
+  return {
+    ...(await withPlanItemParts(tx, orgId, updated)),
+    decision: updated.decisionStatus as PlanItemDecision,
+  }
 }
 
 /**
@@ -1612,12 +1633,36 @@ export async function revisePlanItem(
     .where(and(eq(treatmentPlanItem.id, next.id), eq(treatmentPlanItem.organizationId, orgId)))
     .returning()
   if (!revised) throw notFound("Ítem del plan")
+  // El nuevo pide su consentimiento con su texto; lo pendiente del reemplazado se anula.
+  await resetPlanItemConsents(tx, orgId, actorUserId, item.id)
   await audit(tx, orgId, actorUserId, "plan.item_revised", "treatment_plan_item", item.id, {
     patientId,
     reason,
     supersededBy: revised.id,
   })
   return { ...(await withPlanItemParts(tx, orgId, revised)), decision: revised.decisionStatus as PlanItemDecision }
+}
+
+/** Lo firmado del tratamiento deja de contar y lo pendiente se anula: se firma el texto nuevo. */
+async function resetPlanItemConsents(tx: Db, orgId: string, actorUserId: string, planItemId: string): Promise<void> {
+  const now = new Date()
+  await tx
+    .update(treatmentPlanItem)
+    .set({ consentResetAt: now })
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, planItemId)))
+  const { cancelConsentDocument } = await import("./clinical-forms.js")
+  const pending = await tx
+    .select({ id: consentDocument.id })
+    .from(consentDocument)
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        eq(consentDocument.planItemId, planItemId),
+        eq(consentDocument.status, "pendiente"),
+      ),
+    )
+  for (const doc of pending)
+    await cancelConsentDocument(tx, orgId, actorUserId, doc.id, "Cambió el tratamiento: se prepara con el texto nuevo")
 }
 
 export interface PlanItemPlanningInput {

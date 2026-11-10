@@ -188,9 +188,12 @@ export function quotableItems(
     if (item.priceCents == null) return false
     // Aceptado al hacerlo y aún en curso (una endodoncia en dos sesiones): ya está decidido.
     if (!item.budgetId && item.decision === "aceptado" && item.status === "en_curso") return false
-    if (!item.budgetId) return true
     // La opción que no eligió no es algo pendiente: eligió otro camino (repaso de la ficha del 9
     // nov: «Preparar presupuesto con lo pendiente» armaba la exodoncia de una 46 ya endodonciada).
+    // Va antes de mirar el presupuesto: si ese presupuesto se anuló, la opción queda sin
+    // presupuesto y sigue sin ser algo pendiente (repaso final del 10 nov, M1).
+    if (item.decision === "no_elegida") return false
+    if (!item.budgetId) return true
     // Lo que dijo que no, sí puede volver a ofrecerse.
     if (item.decision === "rechazado") return true
     return budgetsById.get(item.budgetId)?.status === "cancelado"

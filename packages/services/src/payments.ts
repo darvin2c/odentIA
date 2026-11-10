@@ -1129,6 +1129,11 @@ export interface TicketFrozen {
     amountCents: number
     /** Lo que este cobro pagó de él. */
     appliedCents: number
+    /**
+     * Lo que le queda por pagar después de este cobro (QA del 10 nov, B8: el que completaba la
+     * endodoncia decía «Paga una parte»). Falta en los tickets anteriores.
+     */
+    leftCents?: number
     promotion: string | null
   }>
   methods: Array<{
@@ -1868,6 +1873,7 @@ export async function collectCharge(
     description: string
     amountCents: number
     appliedCents: number
+    leftCents?: number
     promotion: string | null
   }> = targets
     .filter(
@@ -1879,6 +1885,7 @@ export async function collectCharge(
       amountCents: t.charge.amountCents,
       appliedCents:
         (creditAppliedByCharge[t.charge.id] ?? 0) + (newAppliedByCharge[t.charge.id] ?? 0),
+      leftCents: Math.max(0, t.outstanding),
       promotion: t.charge.promotionName,
     }))
   if (input.advanceCents !== undefined && advanceFor === undefined)

@@ -1,4 +1,11 @@
-import { formatMoney, formatMoneyInput, moneyTotalsText, parseMoney } from "@odentia/clinical"
+import {
+  afterDaysWords,
+  type FinishControl,
+  formatMoney,
+  formatMoneyInput,
+  moneyTotalsText,
+  parseMoney,
+} from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -842,55 +849,86 @@ function offerSchemaFor(rules: {
   scopeShown: boolean
   codeIssue: (value: OfficialCoding | null) => string | null
 }) {
-  return z.object({
-    name: z.string().trim().min(1, "Ingresa el nombre").max(200, "Máximo 200 caracteres"),
-    code: z.string().trim().max(40, "Máximo 40 caracteres"),
-    currency: z.string(),
-    price: z.string(),
-    durationMin: z.string().refine(
-      (value) => {
-        if (value.trim() === "") return true
-        const n = Number(value)
-        return Number.isInteger(n) && n >= 1 && n <= 1440
-      },
-      { message: "Duración: minutos enteros entre 1 y 1440" },
-    ),
-    usualSessions: z.string().refine(
-      (value) => {
-        const n = Number(value.trim())
-        return /^\d{1,2}$/.test(value.trim()) && n >= 1 && n <= 60
-      },
-      { message: "Sesiones habituales: un número entero entre 1 y 60" },
-    ),
-    specialtyId: z.string().min(1, "Elige la especialidad"),
-    scope: rules.scopeShown ? z.string().min(1, "Elige dónde se hace") : z.string(),
-    billingMode: z.enum(["treatment", "session"]),
-    priceDisclosure: z.enum(["exacto", "desde", "evaluacion"]),
-    /** Vacío: sin una evaluación propia. */
-    evaluationServiceId: z.string(),
-    /** Lo que deja en la pieza al completarse; vacío = nada. */
-    leavesCondition: z.string(),
-    leavesVariant: z.string(),
-    /** El código del país de un servicio propio (ADR 0069). */
-    officialCode: z.custom<OfficialCoding | null>().superRefine((value, ctx) => {
-      const message = rules.codeIssue(value)
-      if (message) ctx.addIssue({ code: "custom", message })
-    }),
-    /** Los materiales que se descuentan cada vez (ADR 0067), cada uno con su cantidad. */
-    /** Lo que se le explica al paciente. */
-    patientGuide: guideSchema,
-    materials: z.array(materialLineSchema).superRefine((lines, ctx) => {
-      const result = materialsToSave(lines, rules.locale, MATERIAL_QUANTITY_MAX)
-      if (!("errors" in result)) return
-      lines.forEach((line, index) => {
-        const message = result.errors[line.productId]
-        if (message) ctx.addIssue({ code: "custom", path: [index, "quantityText"], message })
-      })
-    }),
-  }).superRefine((values, ctx) => {
-    const message = priceIssue(values.price, values.currency, rules.locale)
-    if (message) ctx.addIssue({ code: "custom", path: ["price"], message })
-  })
+  return z
+    .object({
+      name: z.string().trim().min(1, "Ingresa el nombre").max(200, "Máximo 200 caracteres"),
+      code: z.string().trim().max(40, "Máximo 40 caracteres"),
+      currency: z.string(),
+      price: z.string(),
+      durationMin: z.string().refine(
+        (value) => {
+          if (value.trim() === "") return true
+          const n = Number(value)
+          return Number.isInteger(n) && n >= 1 && n <= 1440
+        },
+        { message: "Duración: minutos enteros entre 1 y 1440" },
+      ),
+      usualSessions: z.string().refine(
+        (value) => {
+          const n = Number(value.trim())
+          return /^\d{1,2}$/.test(value.trim()) && n >= 1 && n <= 60
+        },
+        { message: "Sesiones habituales: un número entero entre 1 y 60" },
+      ),
+      /** Días de espera entre sesiones; vacío, sin espera. */
+      sessionGapDays: z
+        .string()
+        .refine(
+          (value) =>
+            value.trim() === "" || (/^\d{1,3}$/.test(value.trim()) && Number(value.trim()) <= 120),
+          { message: "Días de espera: un número entero de 0 a 120" },
+        ),
+      /** Los controles al terminar, cada uno con su plazo en días y su nombre. */
+      finishControls: z.array(
+        z.object({
+          afterDays: z
+            .string()
+            .refine(
+              (value) =>
+                /^\d{1,4}$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 1825,
+              {
+                message: "El plazo: de 1 a 1825 días",
+              },
+            ),
+          title: z
+            .string()
+            .trim()
+            .min(3, "Escribe el nombre del control")
+            .max(120, "Máximo 120 caracteres"),
+        }),
+      ),
+      /** «Volver a lo sugerido»: espera y controles vuelven a los de la guía. */
+      followUpReset: z.boolean(),
+      specialtyId: z.string().min(1, "Elige la especialidad"),
+      scope: rules.scopeShown ? z.string().min(1, "Elige dónde se hace") : z.string(),
+      billingMode: z.enum(["treatment", "session"]),
+      priceDisclosure: z.enum(["exacto", "desde", "evaluacion"]),
+      /** Vacío: sin una evaluación propia. */
+      evaluationServiceId: z.string(),
+      /** Lo que deja en la pieza al completarse; vacío = nada. */
+      leavesCondition: z.string(),
+      leavesVariant: z.string(),
+      /** El código del país de un servicio propio (ADR 0069). */
+      officialCode: z.custom<OfficialCoding | null>().superRefine((value, ctx) => {
+        const message = rules.codeIssue(value)
+        if (message) ctx.addIssue({ code: "custom", message })
+      }),
+      /** Los materiales que se descuentan cada vez (ADR 0067), cada uno con su cantidad. */
+      /** Lo que se le explica al paciente. */
+      patientGuide: guideSchema,
+      materials: z.array(materialLineSchema).superRefine((lines, ctx) => {
+        const result = materialsToSave(lines, rules.locale, MATERIAL_QUANTITY_MAX)
+        if (!("errors" in result)) return
+        lines.forEach((line, index) => {
+          const message = result.errors[line.productId]
+          if (message) ctx.addIssue({ code: "custom", path: [index, "quantityText"], message })
+        })
+      }),
+    })
+    .superRefine((values, ctx) => {
+      const message = priceIssue(values.price, values.currency, rules.locale)
+      if (message) ctx.addIssue({ code: "custom", path: ["price"], message })
+    })
 }
 type OfferSchema = ReturnType<typeof offerSchemaFor>
 type OfferFormValues = z.infer<OfferSchema>
@@ -902,6 +940,9 @@ const emptyOfferValues: OfferFormValues = {
   price: "",
   durationMin: "",
   usualSessions: "1",
+  sessionGapDays: "",
+  finishControls: [],
+  followUpReset: false,
   specialtyId: "",
   scope: "",
   billingMode: "treatment",
@@ -935,6 +976,7 @@ function offerValues(
     price: formatMoneyInput(offer.priceCents, offer.currency, locale),
     durationMin: offer.durationMin === null ? "" : String(offer.durationMin),
     usualSessions: String(offer.usualSessions ?? 1),
+    ...followUpValues(offer),
     specialtyId: offer.specialtyId ?? "",
     scope,
     billingMode: offer.billingMode ?? "treatment",
@@ -944,6 +986,61 @@ function offerValues(
     leavesVariant: offer.leavesFinding?.variant ?? "",
     patientGuide: guideDraftOf(offer.patientGuide),
     ...loaded,
+  }
+}
+
+/** La espera y los controles que rigen hoy en el servicio: los de la clínica o los de la guía. */
+function followUpValues(
+  offer: ServiceCatalogItem,
+): Pick<OfferFormValues, "sessionGapDays" | "finishControls" | "followUpReset"> {
+  const gap = offer.ownSessionGapDays ?? offer.librarySessionGapDays ?? 0
+  const controls = offer.ownFinishControls ?? offer.libraryFinishControls ?? []
+  return {
+    sessionGapDays: gap ? String(gap) : "",
+    finishControls: controls.map((control) => ({
+      afterDays: String(control.afterDays),
+      title: control.title,
+    })),
+    followUpReset: false,
+  }
+}
+
+/**
+ * Lo que viaja de la espera y los controles: solo lo que cambió; «Volver a lo sugerido», los dos
+ * nulos (así una mejora de la guía le sigue llegando).
+ */
+function followUpBody(
+  value: OfferFormValues,
+  offer: ServiceCatalogItem | null,
+): { sessionGapDays?: number | null; finishControls?: FinishControl[] | null } {
+  const gap = value.sessionGapDays.trim() === "" ? 0 : Number(value.sessionGapDays.trim())
+  const controls = value.finishControls.map((control) => ({
+    afterDays: Number(control.afterDays.trim()),
+    title: control.title.trim(),
+  }))
+  if (value.followUpReset && offer) {
+    // Volvió a lo sugerido: si después cambió algo, vale lo que dejó escrito (revisión antes de entregar).
+    const suggested = followUpValues({ ...offer, ownSessionGapDays: null, ownFinishControls: null })
+    const same =
+      value.sessionGapDays.trim() === suggested.sessionGapDays &&
+      JSON.stringify(controls) ===
+        JSON.stringify(suggested.finishControls.map((row) => ({ afterDays: Number(row.afterDays), title: row.title })))
+    return same ? { sessionGapDays: null, finishControls: null } : { sessionGapDays: gap, finishControls: controls }
+  }
+  const before = offer ? followUpValues(offer) : { sessionGapDays: "", finishControls: [] }
+  const sameControls =
+    JSON.stringify(controls) ===
+    JSON.stringify(
+      before.finishControls.map((control) => ({
+        afterDays: Number(control.afterDays),
+        title: control.title,
+      })),
+    )
+  return {
+    ...(value.sessionGapDays.trim() !== before.sessionGapDays.trim()
+      ? { sessionGapDays: gap }
+      : {}),
+    ...(sameControls ? {} : { finishControls: controls }),
   }
 }
 
@@ -1160,6 +1257,8 @@ function OfferEditor({
       ...(Number(value.usualSessions.trim()) !== (offer?.usualSessions ?? 1)
         ? { usualSessions: Number(value.usualSessions.trim()) }
         : {}),
+      // La espera y los controles (decisión B5): sin tocarlos siguen siendo los de la guía.
+      ...followUpBody(value, offer),
       priceDisclosure: value.priceDisclosure,
       evaluationServiceId: value.evaluationServiceId === "" ? null : value.evaluationServiceId,
       // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
@@ -1805,6 +1904,7 @@ function OfferFields({
           )}
         </form.AppField>
       </div>
+      <ServiceFollowUpFields form={form} idPrefix={idPrefix} offer={offer} />
       <form.AppField name="billingMode">
         {(field) => (
           <field.Group
@@ -2011,5 +2111,150 @@ function DisclosureChoice({ id, legendId }: { id: string; legendId: string }) {
         <FieldError id={errorId} errors={errors.map((message) => ({ message }))} />
       ) : null}
     </Field>
+  )
+}
+
+/**
+ * La espera entre sesiones y los controles al terminar (decisión B5 del 10 nov), con lo que trae
+ * la guía ya escrito. La espera se pide solo con más de una sesión (o si ya tiene una). Lo que se
+ * cambia aquí vale para lo que se indique de aquí en adelante; un control ya indicado se cambia en
+ * la ficha de su paciente.
+ */
+function ServiceFollowUpFields({
+  form,
+  idPrefix,
+  offer,
+}: {
+  form: OfferForm
+  idPrefix: string
+  offer: ServiceCatalogItem | null
+}): React.JSX.Element {
+  const sessions = useStore(form.store, (state) => Number(state.values.usualSessions.trim()) || 1)
+  const gap = useStore(form.store, (state) => state.values.sessionGapDays)
+  const controls = useStore(form.store, (state) => state.values.finishControls)
+  const reset = useStore(form.store, (state) => state.values.followUpReset)
+  const suggestedGap = offer?.librarySessionGapDays ?? null
+  const suggestedControls = offer?.libraryFinishControls ?? []
+  const own =
+    offer && (offer.ownSessionGapDays != null || offer.ownFinishControls != null) && !reset
+  const suggestedWords = [
+    suggestedGap ? `${suggestedGap} días entre sesiones` : null,
+    ...suggestedControls.map(
+      (control) => `${control.title.toLowerCase()} ${afterDaysWords(control.afterDays)}`,
+    ),
+  ].filter(Boolean)
+  const showGap = sessions > 1 || gap.trim() !== ""
+  return (
+    <div className="flex flex-col gap-3">
+      {showGap ? (
+        <div className="grid grid-cols-2 gap-3">
+          <form.AppField name="sessionGapDays">
+            {(field) => (
+              <field.TextField
+                id={`${idPrefix}-espera`}
+                label="Días de espera entre sesiones"
+                description="Desde qué día se propone la sesión siguiente; vacío, sin espera."
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={120}
+              />
+            )}
+          </form.AppField>
+        </div>
+      ) : null}
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-sm font-medium">Controles al terminar</legend>
+        {controls.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Sin controles al terminar.</p>
+        ) : (
+          controls.map((_, index) => (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: las filas no se reordenan; quitar una borra su índice.
+              key={index}
+              className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2"
+            >
+              <form.AppField name={`finishControls[${index}].title`}>
+                {(field) => <field.TextField id={`${idPrefix}-control-${index}`} label="Control" />}
+              </form.AppField>
+              <form.AppField name={`finishControls[${index}].afterDays`}>
+                {(field) => (
+                  <field.TextField
+                    id={`${idPrefix}-control-${index}-dias`}
+                    label="A los días"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={1825}
+                  />
+                )}
+              </form.AppField>
+              <Button
+                type="button"
+                variant="ghost"
+                className="mb-0.5"
+                onClick={() => {
+                  form.setFieldValue(
+                    "finishControls",
+                    controls.filter((__, other) => other !== index),
+                  )
+                  form.setFieldValue("followUpReset", false)
+                }}
+              >
+                Quitar
+              </Button>
+            </div>
+          ))
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={controls.length >= 6}
+            onClick={() => {
+              // Un plazo libre: dos controles el mismo día serían el mismo control.
+              const taken = new Set(controls.map((row) => Number(row.afterDays)))
+              const days = [30, 90, 180, 365, 730].find((option) => !taken.has(option)) ?? 1
+              form.setFieldValue("finishControls", [
+                ...controls,
+                { afterDays: String(days), title: offer ? `Control de ${offer.name.toLowerCase()}` : "Control" },
+              ])
+              form.setFieldValue("followUpReset", false)
+            }}
+          >
+            Agregar control
+          </Button>
+          {/* Sin nada sugerido (lo propio, latidIA), «Volver a lo sugerido» sería vaciarlo: no se ofrece. */}
+          {own && offer && (suggestedGap || suggestedControls.length > 0) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                form.setFieldValue("sessionGapDays", suggestedGap ? String(suggestedGap) : "")
+                form.setFieldValue(
+                  "finishControls",
+                  suggestedControls.map((control) => ({
+                    afterDays: String(control.afterDays),
+                    title: control.title,
+                  })),
+                )
+                form.setFieldValue("followUpReset", true)
+              }}
+            >
+              Volver a lo sugerido
+            </Button>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {suggestedWords.length > 0
+            ? `Sugerido por la guía clínica: ${suggestedWords.join(", ")}. `
+            : ""}
+          Al terminar el tratamiento quedan indicados con su fecha; en el cierre de la atención se
+          pueden cambiar o quitar para esa persona.
+        </p>
+      </fieldset>
+    </div>
   )
 }

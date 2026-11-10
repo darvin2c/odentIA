@@ -16,6 +16,7 @@ import { productUi } from "../../product/product-ui"
 import { useAppointmentVisitStatus } from "../agenda/arrival"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { useAttendAppointment } from "../patient/new-encounter-button"
+import { useDiscardEncounter } from "../patient/stale-encounter"
 import { WriteToPersonDialog } from "../write-to-person"
 
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
@@ -104,7 +105,34 @@ export function VisitPanel({
                     )
                   }
                 >
-                  {status.isPending ? "Guardando…" : "No vino"}
+                  {status.isPending && status.variables?.status === "no_asistio"
+                    ? "Guardando…"
+                    : "No vino"}
+                </Button>
+              ) : null}
+              {/* «Vino» sin abrir otra atención (decisión B1 del 10 nov): queda atendida. */}
+              {canWrite ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={ACTION}
+                  disabled={status.isPending}
+                  onClick={() =>
+                    status.mutate(
+                      { id: row.id, status: "atendida" },
+                      // El aviso lo dice y el panel se cierra: ya no queda nada que preguntar.
+                      {
+                        onSuccess: () => {
+                          onChanged()
+                          onClose()
+                        },
+                      },
+                    )
+                  }
+                >
+                  {status.isPending && status.variables?.status === "atendida"
+                    ? "Guardando…"
+                    : "Vino"}
                 </Button>
               ) : null}
               {canAttend ? (
@@ -125,7 +153,9 @@ export function VisitPanel({
               ) : null}
             </div>
             {!canAttend && row.professionalName ? (
-              <p className="text-[13px] text-muted-foreground">Si vino, la registra quien atendió: a {row.professionalName} también le aparece en «Te espera».</p>
+              <p className="text-[13px] text-muted-foreground">
+                «Vino» la deja atendida sin abrir otra atención; lo que se le hizo lo registra {row.professionalName}, a quien también le aparece en «Te espera».
+              </p>
             ) : null}
           </div>
         )
@@ -298,6 +328,7 @@ export function EncounterPanel({
   onChanged: () => void
 }) {
   const queryClient = useQueryClient()
+  const discard = useDiscardEncounter(row.patientId)
   const text = waitingText(row, context)
   const orgProfile = useOrgProfile().data
   const needsLicense = row.missing.includes("signature")
@@ -346,7 +377,25 @@ export function EncounterPanel({
           >
             Continuar la atención
           </Link>
-          {canVoid ? (
+          {row.empty ? (
+            // Sin nada registrado se descarta de un toque, sin motivo (10 nov).
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={discard.isPending}
+              onClick={() =>
+                discard.mutate(row.id, {
+                  onSuccess: () => {
+                    onChanged()
+                    onClose()
+                  },
+                })
+              }
+            >
+              {discard.isPending ? "Descartando…" : "Descartarla: no tiene nada registrado"}
+            </Button>
+          ) : canVoid ? (
             <p className="text-[13px] text-muted-foreground">
               ¿No se hizo?{" "}
               <Button type="button" variant="link" className="h-auto min-h-0 p-0 text-[13px] font-semibold text-destructive" onClick={onVoid}>
@@ -358,7 +407,11 @@ export function EncounterPanel({
       }
     >
       <div className="flex flex-col gap-4">
-        <p className="text-sm">Se empezó y no se firmó. Mientras siga abierta no puedes abrirle otra atención.</p>
+        <p className="text-sm">
+          {row.empty
+            ? "Se abrió y no tiene nada registrado. Descártala o sigue en ella si es lo de ese día."
+            : "Se empezó y no se firmó. Ciérrala (sin procedimientos también se cierra) o anúlala para atender hoy en otra."}
+        </p>
         {has.length > 0 ? (
           <div className="rounded-xl border p-3 text-sm">
             <p className="text-[13px] font-bold text-muted-foreground">Lo que ya tiene</p>

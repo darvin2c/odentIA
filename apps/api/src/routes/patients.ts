@@ -41,6 +41,7 @@ import {
   getEncounterVoidPreview,
   getLatestAnamnesis,
   getOpenEncounterRef,
+  discardEmptyEncounter,
   getPatient,
   getPatientDocument,
   getPatientHealth,
@@ -440,6 +441,21 @@ const finalizeInput = z
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
     // Los diagnósticos que el cierre proponía resolver y quien firma dejó marcados.
     resolveDiagnosisIds: z.array(z.uuid()).max(100).optional(),
+    // Los controles que dejan los tratamientos de hoy, como quedaron en el cierre: otro día o quitarlo.
+    finishControlChanges: z
+      .array(
+        z.union([
+          z
+            .object({
+              key: z.string().max(200),
+              dueDay: z.iso.date({ error: "Elige un día del calendario" }),
+            })
+            .strict(),
+          z.object({ key: z.string().max(200), remove: z.literal(true) }).strict(),
+        ]),
+      )
+      .max(20)
+      .optional(),
     // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
     nextControl: z
       .union([
@@ -1636,6 +1652,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           parsed.data,
           { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
+      ),
+    )
+  })
+  // «Descartar»: la atención en borrador sin nada registrado se borra sin motivo; queda su auditoría.
+  app.post("/:id/encounters/:encounterId/discard", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para descartar atenciones"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        discardEmptyEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
       ),
     )
   })

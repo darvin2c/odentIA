@@ -122,6 +122,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Un toque en «Continuar hoy» o «Viene a su control» llena el motivo, propone el diagnóstico activo y vincula el tratamiento. **Por la cita y por la ficha hace lo mismo.**
 - [ ] Si ya tiene cita para esa sesión otro día, lo dice.
 - [ ] Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia en curso) dice «va después de terminar…» y su «Hacerla hoy» queda como segunda opción; es la misma regla de «Qué sigue», Inicio, el enlace y Argos.
+- [ ] Continuar un tratamiento no trae un diagnóstico ya resuelto: la corona después de la endodoncia no propone la pulpitis que esa endodoncia resolvió.
 - [ ] Motivo, tiempo y relato son campos de la página, sin cajón. Se guardan mientras se escribe.
 - [ ] Hay un solo borrador por paciente. Si otro profesional lo toma, queda registrado (`takeOverEncounter`).
 - [ ] Se atiende sin cita (ADR 0098) y en domingo o fuera de horario, si la clínica lo permite.
@@ -227,6 +228,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Tiene procedimiento, beneficios, riesgos, alternativas y consecuencias de no hacerlo.
 - [ ] La tablet, el enlace, el papel y el PDF muestran lo mismo, con la misma declaración.
 - [ ] Un menor firma por su representante.
+- [ ] Toda terapia pulpar (pulpotomía y pulpectomía) pide su consentimiento, y en un menor lo firma su representante. Caso: pulpectomía de una molar temporal en un niño de 7 años.
 - [ ] Cerrar sin consentimiento pide escribir por qué, y no traba la atención.
 - [ ] Lo firmado por enlace queda pendiente hasta que el profesional lo confirma. Lo firmado se revoca, no se borra.
 - [ ] Hay plantilla para lo que se hace a menudo: anestesia local, exodoncia, endodoncia, periodoncia, implante, ortodoncia, blanqueamiento, prótesis, odontopediatría y radiografías.
@@ -330,6 +332,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Si una sesión termina en «Falta otra sesión» y lo que va después ya tiene cita, el cierre lo avisa para revisar esa cita.
 - [ ] El cierre dice lo que se cargó hoy y una sola cifra de lo que debe, que sigue siendo cierta después de cobrar ahí mismo.
 - [ ] La periodontitis apical o el absceso periapical no se proponen resueltos al terminar la endodoncia: sanan en su control con radiografía. La pulpitis sí.
+- [ ] El consentimiento de una corona sobre la propia pieza es el de la corona, no el de prótesis para reponer piezas ausentes.
 
 **Ya falló:** tras un pago parcial, el cierre decía a la vez «Quedó por cobrar S/ 450» y «Debe S/ 200», y en la sesión 2 «ya estaba incluido en lo cobrado» debiendo 200 (9 nov); «Sí, terminar» venía marcado aunque faltaba una sesión; la sesión 2 se proponía el mismo día; el control de otro odontólogo venía desmarcado (8 y 9 nov; PR 524, 533, 535 y 537).
 **Fuentes:** NTS 139-MINSA; ADR 0003, 0152 y 0161.

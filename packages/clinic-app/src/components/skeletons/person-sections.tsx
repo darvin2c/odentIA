@@ -652,7 +652,10 @@ export function FiliacionSkeleton({ canEdit }: { canEdit: boolean }) {
 export function PersonLinksSkeleton({ canWrite }: { canWrite: boolean }) {
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <SummaryCardShape title="Quién habla por ella" action={canWrite ? <WaitingButton>Vincular a una persona</WaitingButton> : undefined}>
+      <SummaryCardShape
+        title="Quién habla en su nombre"
+        action={canWrite ? <WaitingButton>Vincular a una persona</WaitingButton> : undefined}
+      >
         <RowsShape rows={1} />
       </SummaryCardShape>
       <SummaryCardShape title="A su cargo" action={canWrite ? <WaitingButton>Vincular a un paciente</WaitingButton> : undefined}>

@@ -67,6 +67,7 @@ import { foldedWordsMatch } from "./search-text.js"
 import { attendingRule } from "./specialties.js"
 import {
   canBookAnother,
+  controlWindowStart,
   sessionCountsOf,
   sessionsDoneSql,
   standingForSql,
@@ -198,6 +199,21 @@ export interface AppointmentItem {
    * `getAppointment`); vacío si no lleva ninguno de varias sesiones.
    */
   sessions: AppointmentSession[]
+  /**
+   * Solo al reservar: los controles que se pidieron en esta cita y no se sumaron porque su día no
+   * cae en su ventana (desde `from`, `YYYY-MM-DD`); siguen por reservar (decisión B3 del 10 nov).
+   */
+  controlsLeftOut?: Array<{ id: string; title: string; from: string }>
+  /**
+   * Todo lo que se le sumó y aún no se hizo, también lo de una sola sesión (la resina sumada a su
+   * consulta, QA del 10 nov, M3): la cabecera, Citas y el cajón dicen «Consulta y Resina 36».
+   */
+  brings?: Array<{ planItemId: string; title: string }>
+  /**
+   * Los minutos que suele pedir lo que lleva (su servicio y cada tratamiento sumado), cuando son
+   * más que los reservados: «Reservada 30 min; lo que lleva necesita unos 90». Null si alcanza.
+   */
+  needsMinutes?: number | null
 }
 
 /**
@@ -447,7 +463,10 @@ export async function getAppointment(tx: Db, orgId: string, id: string): Promise
     .limit(1)
   if (!row) throw notFound("Cita")
   const item = toItem(row)
-  item.sessions = (await appointmentSessionsOf(tx, orgId, [item.id])).get(item.id) ?? []
+  const what = await appointmentLoadOf(tx, orgId, [item])
+  item.sessions = what.sessions.get(item.id) ?? []
+  item.brings = what.brings.get(item.id) ?? []
+  item.needsMinutes = what.needs.get(item.id) ?? null
   return item
 }
 
@@ -463,13 +482,48 @@ export async function appointmentSessionsOf(
   orgId: string,
   appointmentIds: readonly string[],
 ): Promise<Map<string, AppointmentSession[]>> {
+  return (await appointmentLinesOf(tx, orgId, appointmentIds)).sessions
+}
+
+/**
+ * Lo que lleva cada cita: la sesión de cada tratamiento de varias (`sessions`) y todo lo que aún
+ * no se hizo (`brings`), con los minutos que suele pedir cada uno. Lo ya realizado o cancelado no
+ * cuenta: la cita reservada para la sesión 2 que se hizo antes ya no decía «sesión 3 (2
+ * previstas)» (QA del 10 nov, M1).
+ */
+async function appointmentLinesOf(
+  tx: Db,
+  orgId: string,
+  appointmentIds: readonly string[],
+): Promise<{
+  sessions: Map<string, AppointmentSession[]>
+  brings: Map<
+    string,
+    Array<{ planItemId: string; title: string; serviceId: string | null; minutes: number | null }>
+  >
+}> {
   const out = new Map<string, AppointmentSession[]>()
+  const brings = new Map<
+    string,
+    Array<{ planItemId: string; title: string; serviceId: string | null; minutes: number | null }>
+  >()
   const ids = [...new Set(appointmentIds)]
-  if (ids.length === 0) return out
+  if (ids.length === 0) return { sessions: out, brings }
   const item = { id: sql`session_item.id`, organizationId: sql`session_item.organization_id` }
-  const rows = await tx.execute<{ appointment_id: string; plan_item_id: string; title: string; done: number; before: number; m: number }>(sql`
+  const rows = await tx.execute<{
+    appointment_id: string
+    plan_item_id: string
+    title: string
+    done: number
+    before: number
+    m: number
+    service_id: string | null
+    minutes: number | null
+  }>(sql`
     select session_link.appointment_id, session_item.id as plan_item_id, session_item.title,
-      session_item.planned_sessions as m,
+      session_item.planned_sessions as m, session_item.service_id,
+      (select s.duration_min from service_catalog s where s.organization_id = session_item.organization_id
+        and s.id = session_item.service_id) as minutes,
       ${sessionsDoneSql(item, sql`session_appointment.id`)} as done,
       (select count(*)::int from appointment_plan_item earlier_link
         join appointment earlier on earlier.organization_id = earlier_link.organization_id and earlier.id = earlier_link.appointment_id
@@ -497,18 +551,70 @@ export async function appointmentSessionsOf(
         sql`, `,
       )})
       and session_appointment.status in ('programada', 'confirmada')
+      and session_item.status not in ('realizado', 'cancelado')
       and not exists (select 1 from encounter signed where signed.organization_id = session_appointment.organization_id
         and signed.appointment_id = session_appointment.id and signed.status = 'finalizada')
     order by session_item.sort_order, session_item.created_at, session_item.id`)
   for (const row of rows) {
     const n = Number(row.done) + Number(row.before) + 1
     const m = Number(row.m)
+    const all = brings.get(row.appointment_id) ?? []
+    all.push({
+      planItemId: row.plan_item_id,
+      title: row.title,
+      serviceId: row.service_id,
+      minutes: row.minutes == null ? null : Number(row.minutes),
+    })
+    brings.set(row.appointment_id, all)
     if (!showsSession(n, m)) continue
     const list = out.get(row.appointment_id) ?? []
     list.push({ planItemId: row.plan_item_id, title: row.title, n, m })
     out.set(row.appointment_id, list)
   }
-  return out
+  return { sessions: out, brings }
+}
+
+/**
+ * Lo que lleva cada cita y si le alcanza el tiempo: lo de `appointmentLinesOf` más los minutos
+ * que suele pedir (su servicio y cada tratamiento sumado de otro servicio), la misma cuenta que
+ * «Sumar a su cita» (`usualMinutes`).
+ */
+async function appointmentLoadOf(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<
+    Pick<AppointmentItem, "id" | "serviceId" | "durationMin" | "startsAt" | "endsAt">
+  >,
+): Promise<{
+  sessions: Map<string, AppointmentSession[]>
+  brings: Map<string, Array<{ planItemId: string; title: string }>>
+  needs: Map<string, number>
+}> {
+  const lines = await appointmentLinesOf(
+    tx,
+    orgId,
+    items.map((item) => item.id),
+  )
+  const brings = new Map<string, Array<{ planItemId: string; title: string }>>()
+  const needs = new Map<string, number>()
+  for (const item of items) {
+    const all = lines.brings.get(item.id) ?? []
+    brings.set(
+      item.id,
+      all.map(({ planItemId, title }) => ({ planItemId, title })),
+    )
+    const own = all.find((row) => row.serviceId && row.serviceId === item.serviceId)
+    const extra = all
+      .filter((row) => row.serviceId !== item.serviceId)
+      .reduce((sum, row) => sum + (row.minutes ?? 0), 0)
+    if (extra <= 0) continue
+    const reserved = Math.round(
+      (new Date(item.endsAt).getTime() - new Date(item.startsAt).getTime()) / 60_000,
+    )
+    const usual = (own?.minutes ?? item.durationMin) + extra
+    if (usual > reserved) needs.set(item.id, usual)
+  }
+  return { sessions: lines.sessions, brings, needs }
 }
 
 /** Lo que el cajón de la cita dice de la persona y de dónde salió la cita. */
@@ -717,8 +823,12 @@ export async function listAppointments(
     .where(and(...conditions))
     .orderBy(asc(appointment.startsAt))
   const items = rows.map(toItem)
-  const sessions = await appointmentSessionsOf(tx, orgId, items.map((item) => item.id))
-  for (const item of items) item.sessions = sessions.get(item.id) ?? []
+  const what = await appointmentLoadOf(tx, orgId, items)
+  for (const item of items) {
+    item.sessions = what.sessions.get(item.id) ?? []
+    item.brings = what.brings.get(item.id) ?? []
+    item.needsMinutes = what.needs.get(item.id) ?? null
+  }
   return items
 }
 
@@ -1230,10 +1340,37 @@ export async function createAppointment(
     // Los controles que vienen en la misma cita («Reservar lo aceptado y el control»): la misma
     // operación que «Reservar el control» con esta cita (`scheduleFollowUp`), en la misma
     // transacción, así nunca queda la cita sin su control (QA del 8 nov, entrega 3).
+    const controlsLeftOut: Array<{ id: string; title: string; from: string }> = []
     if (input.followUpIds?.length) {
       // Import tardío: `follow-ups.ts` reserva sus citas con este mismo servicio.
       const { scheduleFollowUp } = await import("./follow-ups.js")
+      const zone = await branchZone(tx, orgId, resolved.id)
       for (const followUpId of [...new Set(input.followUpIds)]) {
+        // La corona se reserva sin esperar la ventana del control (decisión B3 del 10 nov): el
+        // control se suma a esta cita solo si su día cae en su ventana; si no, sigue por reservar.
+        const [control] = await tx
+          .select({
+            title: clinicalFollowUp.title,
+            dueAt: clinicalFollowUp.dueAt,
+            createdAt: clinicalFollowUp.createdAt,
+          })
+          .from(clinicalFollowUp)
+          .where(
+            and(
+              eq(clinicalFollowUp.organizationId, orgId),
+              eq(clinicalFollowUp.patientId, input.patientId),
+              eq(clinicalFollowUp.id, followUpId),
+            ),
+          )
+          .limit(1)
+        if (control && localDay(startsAt, zone) < localDay(controlWindowStart(control), zone)) {
+          controlsLeftOut.push({
+            id: followUpId,
+            title: control.title,
+            from: localDay(controlWindowStart(control), zone),
+          })
+          continue
+        }
         try {
           await scheduleFollowUp(tx, orgId, actorUserId, input.patientId, followUpId, { appointmentId: created.id })
         } catch (error) {
@@ -1248,7 +1385,8 @@ export async function createAppointment(
     }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, created.id)
-    return notice ? { ...item, notice } : item
+    const withLeftOut = controlsLeftOut.length ? { ...item, controlsLeftOut } : item
+    return notice ? { ...withLeftOut, notice } : withLeftOut
   } catch (error) {
     if (isExclusionViolation(error)) {
       throw appointmentConflict(exclusionTarget(error), roomName)
@@ -1624,6 +1762,168 @@ export async function setAppointmentPlanItems(
   return { ...(await getAppointment(tx, orgId, id)), usualMinutes, added, outsideService }
 }
 
+/** Una cita por venir que se reservó para lo que ya se hizo: queda sin objeto (QA del 10 nov, M1). */
+export interface FreedAppointment {
+  id: string
+  version: number
+  startsAt: Date
+  professionalName: string | null
+  /** Para qué se reservó: «Endodoncia posterior vital». */
+  wasFor: string
+}
+
+/**
+ * Las citas por venir y en pie de la persona que solo llevaban tratamientos ya realizados (la
+ * sesión 2 hecha antes, el mismo día de la 1): sin nada por hacer, recepción confirmaría una cita
+ * vacía. El cierre las ofrece liberar o usar para lo que sigue.
+ */
+export async function freedAppointmentsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  planItemIds: readonly string[],
+): Promise<FreedAppointment[]> {
+  const ids = [...new Set(planItemIds)]
+  if (ids.length === 0) return []
+  const rows = await tx.execute<{
+    id: string
+    version: number
+    starts_at: Date | string
+    professional_name: string | null
+    was_for: string
+  }>(sql`
+    select a.id, a.version, a.starts_at, u.name as professional_name,
+      string_agg(distinct item.title, ' y ') as was_for
+    from appointment a
+    join appointment_plan_item link on link.organization_id = a.organization_id and link.appointment_id = a.id
+    join treatment_plan_item item on item.organization_id = link.organization_id and item.id = link.plan_item_id
+    left join "user" u on u.id = a.professional_user_id
+    where a.organization_id = ${orgId} and a.patient_id = ${patientId}::uuid
+      and a.status in ('programada', 'confirmada') and a.starts_at > now()
+      and link.plan_item_id in (${sql.join(
+        ids.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})
+      and item.status = 'realizado'
+      and not exists (select 1 from appointment_plan_item other
+        join treatment_plan_item open_item on open_item.organization_id = other.organization_id and open_item.id = other.plan_item_id
+        where other.organization_id = a.organization_id and other.appointment_id = a.id
+          and open_item.status not in ('realizado', 'cancelado'))
+      and not exists (select 1 from clinical_follow_up f where f.organization_id = a.organization_id
+        and f.appointment_id = a.id and f.status = 'programado')
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id)
+    group by a.id, a.version, a.starts_at, u.name
+    order by a.starts_at`)
+  return rows.map((row) => ({
+    id: row.id,
+    version: Number(row.version),
+    startsAt: new Date(row.starts_at),
+    professionalName: row.professional_name,
+    wasFor: row.was_for,
+  }))
+}
+
+/**
+ * «Usarla para la corona»: la cita que quedó sin objeto pasa a llevar otro tratamiento aceptado,
+ * con su servicio (y su duración), en un solo paso. La misma operación para la pantalla y el
+ * agente; lo que no admite «Sumar a su cita» tampoco lo admite esta.
+ */
+export async function reuseAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  input: { expectedVersion: number; planItemId: string },
+): Promise<AppointmentItem> {
+  const current = await requireAppointment(tx, orgId, id, { lock: true })
+  const links = await tx
+    .select({ planItemId: appointmentPlanItem.planItemId })
+    .from(appointmentPlanItem)
+    .where(
+      and(eq(appointmentPlanItem.organizationId, orgId), eq(appointmentPlanItem.appointmentId, id)),
+    )
+  const [item] = await tx
+    .select({ serviceId: treatmentPlanItem.serviceId })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, current.patientId),
+        eq(treatmentPlanItem.id, input.planItemId),
+      ),
+    )
+    .limit(1)
+  if (!item) throw notFound("Tratamiento")
+  const changed = await setAppointmentPlanItems(tx, orgId, actorUserId, id, {
+    expectedVersion: input.expectedVersion,
+    add: [input.planItemId],
+    remove: links
+      .map((row) => row.planItemId)
+      .filter((planItemId) => planItemId !== input.planItemId),
+  })
+  if (item.serviceId && item.serviceId !== current.serviceId)
+    return updateAppointment(tx, orgId, actorUserId, id, {
+      expectedVersion: changed.version,
+      serviceId: item.serviceId,
+    })
+  return changed
+}
+
+/**
+ * «Vino» (decisión B1 del 10 nov): una cita pasada que nadie cerró y a la que la persona sí vino
+ * (a pagar, a recoger un papel, o la atendieron sin abrir la atención de la cita) queda atendida
+ * sin abrir otra atención. Es la excepción a «atendida solo al firmar su atención» (ADR 0032):
+ * lo dice una persona del equipo con `appointments.write`, queda en la actividad como
+ * `appointment.status_atendida` con `by: "vino"` y sin atención, y no registra nada clínico: el
+ * control que llevaba vuelve a pendiente y lo que traía de su plan sigue por hacer.
+ */
+export async function markAppointmentCame(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+): Promise<AppointmentItem> {
+  const current = await requireAppointment(tx, orgId, id, { lock: true })
+  if (current.status === "atendida") return getAppointment(tx, orgId, id)
+  if (current.status !== "programada" && current.status !== "confirmada")
+    throw conflict("APPOINTMENT_STATUS", "Solo se marca «Vino» en una cita que sigue en pie")
+  if (current.startsAt.getTime() > Date.now())
+    throw conflict("APPOINTMENT_NOT_YET", "Todavía no es su hora: cuando llegue, «Llegó»")
+  const linked = await linkedEncounter(tx, orgId, current.id)
+  if (linked)
+    throw conflict(
+      "APPOINTMENT_IN_ATTENTION",
+      linked.status === "borrador"
+        ? "La cita tiene una atención en curso: termínala y la cita queda atendida al firmar"
+        : "La cita ya tiene su atención",
+    )
+  // Antes que la cita: el control que llevaba vuelve a pendiente y suelta la cita.
+  await releaseFollowUps(tx, orgId, actorUserId, id, "atendida")
+  const at = new Date()
+  await tx
+    .update(appointment)
+    .set({
+      status: "atendida",
+      arrivedAt: current.arrivedAt ?? current.startsAt,
+      arrivedBy: current.arrivedBy ?? actorUserId,
+      version: current.version + 1,
+      updatedAt: at,
+    })
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
+  await audit(tx, orgId, actorUserId, "appointment.status_atendida", id, {
+    from: current.status,
+    by: "vino",
+    withoutEncounter: true,
+  })
+  // Vino: cuenta como la cita a la que asistió, igual que al firmar su atención.
+  if (!(await countRecoveredAppointment(tx, orgId, id, at)))
+    await countAgendaUpgrade(tx, orgId, id, at)
+  await cancelPendingForAppointment(tx, orgId, id, "cita atendida")
+  await invalidateAppointmentTokens(tx, orgId, id)
+  await notify(tx, { orgId, kind: "appointment.updated", at: at.toISOString() })
+  return getAppointment(tx, orgId, id)
+}
+
 /** Quién pidió cancelar: lo que recepción anota al liberar el hueco. */
 export const APPOINTMENT_CANCEL_REASONS = ["paciente", "clinica", "otro"] as const
 export type AppointmentCancelReason = (typeof APPOINTMENT_CANCEL_REASONS)[number]
@@ -1890,7 +2190,7 @@ async function releaseFollowUps(
   orgId: string,
   actorUserId: string | null,
   appointmentId: string,
-  next: "cancelada" | "no_asistio",
+  next: "cancelada" | "no_asistio" | "atendida",
 ): Promise<void> {
   const released = await tx
     .update(clinicalFollowUp)
@@ -1910,7 +2210,7 @@ async function releaseFollowUps(
       entity: "clinical_follow_up",
       entityId: row.id,
       action: "follow_up.unscheduled",
-      metadata: { patientId: row.patientId, appointmentId, by: next === "cancelada" ? "cita_cancelada" : "no_vino" },
+      metadata: { patientId: row.patientId, appointmentId, by: next === "cancelada" ? "cita_cancelada" : next === "atendida" ? "vino" : "no_vino" },
     })
   }
 }

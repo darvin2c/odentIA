@@ -2,6 +2,7 @@ import { canAccess } from "@odentia/auth/permissions"
 import { withOrgContext } from "@odentia/db"
 import {
   cancelFollowUp,
+  changeFollowUpDue,
   completeFollowUp,
   createFollowUp,
   listFollowUps,
@@ -55,6 +56,9 @@ const completeInput = z
   .strict()
 const reasonInput = z
   .object({ reason: z.string().trim().min(1, "Escribe el motivo de la cancelación.").max(2000) })
+  .strict()
+const dueInput = z
+  .object({ dueAt: z.string().trim().min(10, "Elige la fecha en el calendario.").max(40) })
   .strict()
 const listInput = z
   .object({ status: z.enum(["pendiente", "programado", "realizado", "cancelado"]).optional() })
@@ -132,6 +136,19 @@ export function createPatientFollowUpsRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         cancelFollowUp(tx, orgId, userId, params.data.id, params.data.followUpId, parsed.data),
+      ),
+    )
+  })
+  // Cambiar el plazo de un control pendiente (decisión B5 del 10 nov); el reservado se cambia moviendo la cita.
+  app.post("/:id/follow-ups/:followUpId/due", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const params = z.object({ id: z.uuid(), followUpId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = dueInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        changeFollowUpDue(tx, orgId, userId, params.data.id, params.data.followUpId, parsed.data),
       ),
     )
   })

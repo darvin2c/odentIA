@@ -97,12 +97,12 @@ export function EncounterHandoff({
         ? `Consentimiento por confirmar: ${consent.titleSnapshot}`
         : `Consentimiento sin firmar: ${consent.titleSnapshot}`,
       detail: consent.personSignedAt
-        ? "Lo firmó desde su enlace: falta que el profesional lo confirme."
+        ? "Lo firmó desde su enlace: se confirma en su atención en curso, con la persona delante."
         : "Debe firmarlo el paciente o su representante legal vigente.",
       tone: "warning",
       section: "documentos",
       pending: true,
-      action: consent.personSignedAt ? "Confirmar" : "Recabar firma",
+      action: consent.personSignedAt ? "Ver" : "Recabar firma",
     })
   for (const control of ownControls.filter((row) => row.status === "pendiente"))
     steps.push({

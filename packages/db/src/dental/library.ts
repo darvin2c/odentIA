@@ -8,7 +8,16 @@ import {
 } from "@odentia/dental"
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
-import { type CatalogLibrary, librarySessions, type ProcedureLists, seedProcedureCodes, splitHead, strictLines } from "../procedure-codes.js"
+import {
+  type CatalogLibrary,
+  libraryFollowUpRules,
+  librarySessions,
+  type ProcedureLists,
+  seedFollowUpRules,
+  seedProcedureCodes,
+  splitHead,
+  strictLines,
+} from "../procedure-codes.js"
 import { treatmentTemplate } from "../schema/clinical.js"
 
 /**
@@ -102,6 +111,7 @@ export const dentalLibrary: CatalogLibrary = {
 
     const scopeKeys = templates.map((t) => t.key)
     const sessions = librarySessions("biblioteca_sesiones.csv", templateKeys)
+    const followUpRules = libraryFollowUpRules("biblioteca_controles.csv", templateKeys)
     const anatomy = libraryAnatomy(
       "biblioteca_piezas.csv",
       new Map(templates.map((t) => [t.key, t.scope])),
@@ -196,6 +206,7 @@ export const dentalLibrary: CatalogLibrary = {
         if (active?.count !== templates.length) {
           throw new Error(`Conciliación falló (templates): ${active?.count} frente a ${templates.length}`)
         }
+        await seedFollowUpRules(tx, "dental", followUpRules)
       },
     }
   },

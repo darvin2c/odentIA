@@ -309,6 +309,22 @@ export function healsAtFollowUp(system: string | null | undefined, code: string 
   return /^K04\.[4-7]/.test(value)
 }
 
+/**
+ * Un diagnóstico de pulpa no vital (decisión B2 del 10 nov): con él, la endodoncia «vital» no
+ * corresponde y se ofrece la «no vital», sin frenar. CIE-10 K04.1 (necrosis), K04.5 a K04.8
+ * (periodontitis apical crónica, abscesos y quiste radicular, que presuponen la pulpa necrótica;
+ * también la del MINSA y la CIE-10-ES, que los subdividen) y CIE-11 DA09.1, DA09.3, DA09.6, DA09.71
+ * y DA09.8 con sus subcódigos. Fuera: la periodontitis apical aguda (K04.4, DA09.70), que puede
+ * venir con la pulpa viva (AAE, J Endod 2009;35:1634), y el absceso de la pulpa. Se reconoce por
+ * el código: las dos listas no comparten prefijos.
+ */
+export function isPulpNecrosis(code: string | null | undefined): boolean {
+  if (!code) return false
+  const value = code.trim().toUpperCase()
+  if (value.startsWith("DA09")) return /^DA09\.(1|3|6|71|8)/.test(value)
+  return /^K04\.[15-8]/.test(value)
+}
+
 /** Los diagnósticos pulpares de esa lista, o ninguno si no tiene atajos. */
 export function pulpDiagnosisChoices(system: DiagnosisSystemKey): readonly PulpDiagnosisChoice[] {
   return PULP_DIAGNOSES[system === "ICD-10-PE" ? "ICD-10" : system] ?? []
