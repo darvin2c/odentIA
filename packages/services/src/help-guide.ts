@@ -511,7 +511,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "clinica",
         label: "la historia clínica y la atención",
         about:
-          "Atender a un paciente: la atención y su firma, antecedentes y alergias, el odontograma, el examen, diagnósticos, lo realizado, la historia, las recetas, órdenes, consentimientos, imágenes y demás documentos, y el dictado.",
+          "Atender a un paciente: la atención y su firma, antecedentes y alergias, el examen, diagnósticos, lo realizado, la historia, las recetas, órdenes, consentimientos, imágenes y demás documentos, y el dictado.",
       },
       {
         id: "plan",
