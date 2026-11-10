@@ -202,8 +202,8 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "endodoncia",
     title: "Tratamiento de conductos (endodoncia)",
-    // La de la pieza permanente; la pulpectomía y la pulpotomía de un temporal van con la
-    // odontopediatría (QA del 10 nov, A1).
+    // La de la pieza permanente; la pulpectomía de un temporal tiene el suyo y la pulpotomía va
+    // con la odontopediatría (QA del 10 nov, A1 y M3).
     serviceFamilies: [
       "endodoncia-vital",
       "endodoncia-no-vital",
@@ -372,20 +372,57 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
     },
   },
   {
+    key: "pulpectomia",
+    title: "Pulpectomía en piezas temporales",
+    // La terapia pulpar total de un temporal tiene sus propios riesgos (la raíz que se reabsorbe,
+    // la permanente que se forma debajo): el de odontopediatría no los decía (QA del 10 nov, M3).
+    // Texto de la voz clínica de la mesa, según la guía de terapia pulpar de la AAPD; lo valida un
+    // odontopediatra de la clínica al revisarlo.
+    serviceFamilies: ["pulpectomia-deciduo"],
+    servicePrefixes: ["pulpectomia-"],
+    sections: {
+      procedure:
+        "Con anestesia local y la pieza aislada, se retira el nervio (pulpa) inflamado o infectado de la corona y de las raíces de la pieza temporal indicada, se limpian y desinfectan sus conductos y se rellenan con una pasta que se reabsorbe junto con la raíz cuando la pieza se cae sola. Después se restaura la pieza, muchas veces con una corona de acero. Puede hacerse en una o dos sesiones y se controla con radiografías hasta que la pieza se cambie.",
+      benefits: [
+        "Quitar el dolor y la infección",
+        "Conservar la pieza temporal hasta que salga la permanente, para masticar bien y guardarle su espacio",
+        "Evitar la extracción y el mantenedor de espacio",
+      ],
+      risks: [
+        "Molestias o dolor leve uno o dos días después",
+        "Adormecimiento del labio, la lengua o la mejilla por unas horas, con riesgo de que el menor se muerda",
+        "Que la restauración se despegue o la pieza se fracture si no queda bien cubierta",
+        "Que la infección no se cure o vuelva, con dolor, hinchazón o un absceso; entonces se repite el tratamiento o se extrae la pieza",
+        "Que la pieza temporal se caiga antes o después de lo normal, o que la permanente salga desviada",
+        "Que la pasta pase un poco más allá de la raíz; por lo general se reabsorbe sola",
+        "Manchas o defectos en el esmalte de la pieza permanente que viene debajo, sobre todo si la infección ya era grande antes de tratarla",
+        "Reacción al anestésico local, poco frecuente",
+      ],
+      alternatives: [
+        "Extraer la pieza y, si hace falta, colocar un mantenedor de espacio para que la permanente tenga su lugar",
+        "Pulpotomía (retirar solo el nervio de la corona), si al abrir la pieza el nervio de las raíces está sano",
+        "No tratar por ahora y controlar, con los riesgos que se explican abajo",
+      ],
+      consequences:
+        "La infección sigue y puede crecer: dolor, hinchazón de la cara, fiebre o un absceso que puede dañar la pieza permanente que se forma debajo. La pieza temporal suele perderse antes de tiempo y las vecinas pueden cerrar el espacio de la permanente.",
+      notes:
+        "Firma el representante legal vigente del menor. Avise a la clínica si el menor tiene fiebre, la cara hinchada o dolor que no cede con lo indicado.",
+    },
+  },
+  {
     key: "odontopediatria",
     title: "Atención odontopediátrica",
     // Toda terapia pulpar de un temporal pide consentimiento, firmado por su representante (QA
-    // del 10 nov, A1: la pulpectomía de la 75 de un niño de 7 años se firmaba sin él).
-    serviceFamilies: ["pulpectomia-deciduo", "pulpotomy"],
+    // del 10 nov, A1). La pulpectomía tiene el suyo (M3).
+    serviceFamilies: ["pulpotomy"],
     servicePrefixes: [
-      "pulpectomia-",
       "pulpotomia",
       "corona-de-acero-prefabricada-deciduo",
       "corona-de-acero-con-frente-estetico-deciduo",
     ],
     sections: {
       procedure:
-        "Tratamientos preventivos y restauradores en el menor (sellantes, flúor, restauraciones, pulpotomías, pulpectomías, coronas de acero o extracciones de piezas temporales), con manejo de conducta adaptado a su edad.",
+        "Tratamientos preventivos y restauradores en el menor (sellantes, flúor, restauraciones, pulpotomías, coronas de acero o extracciones de piezas temporales), con manejo de conducta adaptado a su edad.",
       benefits: [
         "Tratar la caries y prevenir nuevas lesiones",
         "Conservar el espacio para las piezas permanentes",

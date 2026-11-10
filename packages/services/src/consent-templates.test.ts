@@ -120,7 +120,7 @@ it("una clínica nace con lo sugerido activo, sin revisar y unido a sus servicio
   expect(await linkedKeys(orgId, later.id)).toEqual(["implante"])
 })
 
-it("se elige por la familia del tratamiento: la pulpectomía pide el de odontopediatría y la corona el suyo, no el de prótesis (QA del 10 nov, A1 y M2)", async () => {
+it("se elige por la familia del tratamiento: la pulpectomía pide el suyo (M3) y la corona el suyo, no el de prótesis (QA del 10 nov, A1 y M2)", async () => {
   const { orgId, run } = await newClinic()
   // Lo dental de la biblioteca se escribe en SQL: lo común no importa el esquema dental (ADR 0079).
   const withFamily = async (
@@ -144,7 +144,7 @@ it("se elige por la familia del tratamiento: la pulpectomía pide el de odontope
   const crown = await withFamily("Corona", "corona-de-porcelana-x-", { leaves: "crown" })
   const bridge = await service(orgId, "Puente", "puente-x-")
   await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
-  expect(await linkedKeys(orgId, pulpectomy.id)).toEqual(["odontopediatria"])
+  expect(await linkedKeys(orgId, pulpectomy.id)).toEqual(["pulpectomia"])
   expect(await linkedKeys(orgId, rootCanal.id)).toEqual(["endodoncia"])
   expect(await linkedKeys(orgId, crown.id)).toEqual(["corona"])
   expect(await linkedKeys(orgId, bridge.id)).toEqual(["protesis"])
@@ -317,10 +317,10 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
   })
   const rows = await run((tx) => listConsentTemplates(tx, orgId))
   const byKey = new Map(rows.map((row) => [row.key, row]))
-  // La corona sobre la propia pieza (entrega 10) no está en la 0028: la crea el worker como toda
-  // plantilla sugerida nueva (`ensureSuggestedConsentsEverywhere`).
+  // La corona sobre la propia pieza (entrega 10) y la pulpectomía (entrega 12) no están en la
+  // 0028: las crea el worker como toda plantilla sugerida nueva (`ensureSuggestedConsentsEverywhere`).
   expect(byKey.size).toBe(
-    SUGGESTED_CONSENT_TEMPLATES.filter((row) => row.key !== "corona").length + 1,
+    SUGGESTED_CONSENT_TEMPLATES.filter((row) => row.key !== "corona" && row.key !== "pulpectomia").length + 1,
   )
   expect(await linkedKeys(orgId, surgical.id)).toEqual(["mi-extraccion"])
   expect(byKey.get("implante")).toMatchObject({ title: "Mi implante", version: 1, status: "publicado" })
