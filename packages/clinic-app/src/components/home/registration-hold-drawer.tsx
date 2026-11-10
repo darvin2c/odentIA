@@ -131,7 +131,7 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
           ? `Listo: ${name} ya es paciente${count ? `, con ${plural(count, "cambio", "cambios")}` : ""}.`
           : count
             ? `Listo: ${count === 1 ? "se guardó 1 cambio" : `se guardaron ${count} cambios`} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
-            : `Listo: la ficha de ${name} queda como estaba.`
+            : `Listo: no se cambió ningún dato de ${name}.`
       // Su consentimiento de datos: si no quedó guardado, que se lo pidan en la clínica.
       const consent =
         result.data.consent === "pendiente"
@@ -139,7 +139,9 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
           : result.data.consent === "revocado"
             ? " Su consentimiento no se guardó: lo revocó después de registrarse."
             : ""
-      toast.success(`${message}${consent}`, { action: openPerson(result.data.personId) })
+      // Lo que declaró de su salud entra igual (si es la misma persona): se dice para que no parezca perdido.
+      const health = isSame && data?.health ? " Lo que declaró de su salud quedó en sus antecedentes para que el profesional lo revise." : ""
+      toast.success(`${message}${health}${consent}`, { action: openPerson(result.data.personId) })
       seen.current = null
       done()
     },
