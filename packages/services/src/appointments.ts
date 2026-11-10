@@ -533,8 +533,12 @@ async function appointmentLinesOf(
   }>(sql`
     select session_link.appointment_id, session_item.id as plan_item_id, session_item.title,
       session_item.planned_sessions as m, session_item.service_id,
-      (select s.duration_min from service_catalog s where s.organization_id = session_item.organization_id
-        and s.id = session_item.service_id) as minutes,
+      -- Un servicio sin duración cuenta lo que dura una cita de su sede, no cero: con cero, la
+      -- corona sumada no alargaba lo que pide la cita (QA del 10 nov, M5).
+      coalesce((select s.duration_min from service_catalog s where s.organization_id = session_item.organization_id
+        and s.id = session_item.service_id),
+        (select b.appointment_default_minutes from branch b where b.organization_id = session_appointment.organization_id
+          and b.id = session_appointment.branch_id)) as minutes,
       ${sessionsDoneSql(item, sql`session_appointment.id`)} as done,
       (select count(*)::int from appointment_plan_item earlier_link
         join appointment earlier on earlier.organization_id = earlier_link.organization_id and earlier.id = earlier_link.appointment_id
@@ -1822,7 +1826,15 @@ export async function setAppointmentPlanItems(
         .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, wanted)))
     : []
   const own = current.serviceId ? services.find((row) => row.serviceId === current.serviceId) : undefined
-  const extra = services.filter((row) => row.serviceId !== current.serviceId).reduce((sum, row) => sum + (row.minutes ?? 0), 0)
+  // Sin duración en su servicio, lo que dura una cita de la sede (M5): no cero.
+  const [site] = await tx
+    .select({ minutes: branch.appointmentDefaultMinutes })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.id, current.branchId)))
+    .limit(1)
+  const extra = services
+    .filter((row) => row.serviceId !== current.serviceId)
+    .reduce((sum, row) => sum + (row.minutes ?? site?.minutes ?? 0), 0)
   const usualMinutes = extra > 0 ? (own?.minutes ?? current.durationMin) + extra : null
   // Lo sumado cuyo servicio atiende otra especialidad, no la de quien tiene la cita.
   const outsideService: string[] = []

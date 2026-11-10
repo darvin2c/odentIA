@@ -31,7 +31,7 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { z } from "zod"
 import type { AgendaAppointment } from "../../lib/agenda"
@@ -587,7 +587,27 @@ export function BookingDrawer({
     staleTime: 60_000,
   })
   const service = serviceId ? serviceQuery.data?.data : undefined
-  const duration = service?.durationMin ?? defaultMinutes
+  // Lo marcado de varios servicios suma lo que suele durar cada uno: la sesión 2 de la endodoncia
+  // con la corona sumada no cabe en 30 minutos (QA del 10 nov, M5). Se puede acortar a mano.
+  const markedServices = [
+    ...new Set(
+      toSchedule
+        .filter((row) => markedIds.includes(row.id))
+        .map((row) => row.serviceId)
+        .filter((id): id is string => !!id),
+    ),
+  ]
+  const markedServiceQueries = useQueries({
+    queries: (markedServices.length > 1 ? markedServices : []).map((id) => ({
+      queryKey: ["services", "one", id],
+      queryFn: () => fetchService(id),
+      staleTime: 60_000,
+    })),
+  })
+  const summedMinutes = markedServiceQueries.every((query) => query.data)
+    ? markedServiceQueries.reduce((sum, query) => sum + (query.data?.data.durationMin ?? defaultMinutes), 0)
+    : 0
+  const duration = Math.max(service?.durationMin ?? defaultMinutes, summedMinutes)
 
   // ----- Cuándo -----
   const when = useWhen({
@@ -607,6 +627,12 @@ export function BookingDrawer({
     keepProfessional: Boolean(seed.keepProfessional && (seed.serviceId ?? "") === (serviceId ?? "")),
   })
   const { shown } = when
+  // Con un hueco ya elegido, el bloque crece a la suma al marcar otro servicio (no se acorta solo).
+  const shownMinutes = shown ? Math.round((Date.parse(shown.end) - Date.parse(shown.start)) / 60_000) : null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambia la suma.
+  React.useEffect(() => {
+    if (summedMinutes > 0 && shownMinutes !== null && shownMinutes < summedMinutes) when.resize(summedMinutes)
+  }, [summedMinutes])
   // Elegir antes de lo que dice la nota: se avisa, no se frena (la persona decide).
   const shownDay = shown ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(shown.start)) : null
   const beforeNote = Boolean(seed.notBefore && shownDay && shownDay < seed.notBefore)
