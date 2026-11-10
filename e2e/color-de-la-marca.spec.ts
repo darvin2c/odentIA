@@ -181,7 +181,8 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   // Tocar el letrero en la foto elige su color; la app sigue en naranja hasta «Usar este color».
   await fromPhoto.getByRole("img").click({ position: { x: 20, y: 20 } })
   await fromPhoto.getByRole("img").click()
-  await expect(fromPhoto.getByRole("button", { name: "Azul", exact: true })).toHaveAttribute("aria-pressed", "true")
+  // El color tocado se nombra aparte, para no confundirlo con uno sacado de la foto.
+  await expect(fromPhoto.getByRole("button", { name: "Azul, donde tocaste", exact: true })).toHaveAttribute("aria-pressed", "true")
   await expect(block.getByText("Aún no se guarda")).toBeVisible()
   expect(await token(page, "--primary-fill")).toBe("#cc4d0a")
   await testInfo.attach("de-una-foto", { body: await block.screenshot(), contentType: "image/png" })
