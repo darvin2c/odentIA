@@ -53,9 +53,9 @@ function since(iso: string): string {
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-/** «Iguales: nacimiento, celular y documento». */
+/** «Iguales: nacimiento, celular y documento» (en minúscula después de los dos puntos). */
 function listWords(labels: string[]): string {
-  const words = labels.map((label, index) => (index === 0 ? label : label.toLowerCase()))
+  const words = labels.map((label) => label.toLowerCase())
   return words.length > 1 ? `${words.slice(0, -1).join(", ")} y ${words.at(-1)}` : (words[0] ?? "")
 }
 
@@ -130,7 +130,7 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
         : !data?.ownerPatientId
           ? `Listo: ${name} ya es paciente${count ? `, con ${plural(count, "cambio", "cambios")}` : ""}.`
           : count
-            ? `Listo: se guardaron ${plural(count, "cambio", "cambios")} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
+            ? `Listo: ${count === 1 ? "se guardó 1 cambio" : `se guardaron ${count} cambios`} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
             : `Listo: la ficha de ${name} queda como estaba.`
       toast.success(message, { action: openPerson(result.data.personId) })
       seen.current = null
