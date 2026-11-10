@@ -81,11 +81,14 @@ export function HealthReviewNotice({
   })
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
-  // Lo que declaró en su registro en línea y nadie revisó todavía: se pide revisarlo aquí, donde se decide.
-  const declared = isHealthReviewPending(health)
-    ? [...health.conditions, ...health.medications].filter((row) => row.notes?.startsWith(DECLARED_ONLINE_NOTE)).map((row) => row.name)
-    : []
-  if (!canWrite || (!allergiesDue && unasked.length === 0 && declared.length === 0)) return null
+  // Lo que declaró la persona y nadie revisó todavía (lo dice el servidor): se pide revisarlo aquí, donde se
+  // decide. Se nombra lo que vino de su registro en línea; si no, lo que hay; si es solo su entrevista
+  // (un embarazo, una operación), se dice sin nombre.
+  const pending = isHealthReviewPending(health)
+  const rows = [...health.conditions, ...health.medications]
+  const online = rows.filter((row) => row.notes?.startsWith(DECLARED_ONLINE_NOTE)).map((row) => row.name)
+  const declared = pending ? (online.length ? online : rows.map((row) => row.name)) : []
+  if (!canWrite || (!allergiesDue && unasked.length === 0 && !pending)) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const asked = active.length > 0 || health.reviewStatus.allergies === "none"
   const first = patientName.trim().split(/\s+/)[0] ?? patientName
@@ -96,7 +99,7 @@ export function HealthReviewNotice({
   ].filter((topic): topic is string => topic !== null)
   const title =
     !allergiesDue && unasked.length === 0
-      ? `Revisa con ${first} lo que declaró en línea`
+      ? `Revisa con ${first} lo que declaró de su salud`
       : unasked.length === 0
       ? asked
         ? `Pregúntale a ${first} si tiene alergias nuevas`
@@ -172,11 +175,13 @@ export function HealthReviewNotice({
             </Button>
           </li>
         ) : null}
-        {declared.length > 0 ? (
+        {pending ? (
           <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
             <div className="flex min-w-0 flex-col gap-1">
-              <h3 className="text-sm font-medium">Lo que declaró en línea</h3>
-              <p className="text-sm text-muted-foreground">{listWords(declared)}. Confírmalo con {first} en sus antecedentes.</p>
+              <h3 className="text-sm font-medium">{online.length ? "Lo que declaró en línea" : "Lo que declaró"}</h3>
+              <p className="text-sm text-muted-foreground">
+                {declared.length ? `${listWords(declared)}.` : "Datos de su salud que nadie revisó todavía."} Confírmalo con {first} en sus antecedentes.
+              </p>
             </div>
             {openWide ? (
               <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>

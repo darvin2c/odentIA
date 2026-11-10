@@ -324,6 +324,29 @@ const FORBIDDEN_ANAMNESIS_TOP = [
   "diagnosticoCie10",
 ]
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value)
+
+/** Lo declarado encima de la entrevista guardada, campo por campo: un grupo no reemplaza al otro entero. */
+function mergeInterview(saved: Record<string, unknown>, said: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...saved }
+  for (const [key, value] of Object.entries(said)) {
+    out[key] = isPlainObject(out[key]) && isPlainObject(value) ? mergeInterview(out[key], value) : value
+  }
+  return out
+}
+
+/** Sin lo que ya no pertenece a la entrevista (`assertNewInterview`): sigue en las versiones de antes. */
+function withoutRetiredInterview(answers: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...answers }
+  for (const key of FORBIDDEN_ANAMNESIS_TOP) delete out[key]
+  if (isPlainObject(out.antecedentesPersonales)) {
+    const { enfermedades: _enfermedades, medicacionHabitual: _medicacion, ...rest } = out.antecedentesPersonales
+    out.antecedentesPersonales = rest
+  }
+  return out
+}
+
 function assertNewInterview(answers: Record<string, unknown>): Record<string, unknown> {
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
     throw validation("answers debe ser un objeto")
@@ -1007,8 +1030,11 @@ export async function addDeclaredHealth(
     addedMedications += 1
   }
 
-  // La entrevista (embarazo con su fecha, operaciones…): lo que dijo encima de lo que había, en una versión nueva.
-  const said = (await productHooks(tx, orgId)).interview.declared(declared, saidOn)
+  // La entrevista (embarazo con su fecha, operaciones…): lo que dijo encima de lo que había, campo por
+  // campo (nunca un grupo entero: las operaciones que anotó el profesional siguen), en una versión nueva
+  // validada como la del profesional. Lo que ya no se acepta en la entrevista queda en las versiones de antes.
+  const hooks = await productHooks(tx, orgId)
+  const said = hooks.interview.declared(declared, saidOn)
   let interview = false
   if (Object.keys(said).length) {
     const [latest] = await tx
@@ -1017,8 +1043,15 @@ export async function addDeclaredHealth(
       .where(and(eq(patientAnamnesis.patientId, patientId), eq(patientAnamnesis.organizationId, orgId)))
       .orderBy(desc(patientAnamnesis.version))
       .limit(1)
-    const answers = { ...((latest?.answers ?? {}) as Record<string, unknown>), ...said }
-    if (!latest || canonicalJson(latest.answers) !== canonicalJson(answers)) {
+    const merged = withoutRetiredInterview(mergeInterview((latest?.answers ?? {}) as Record<string, unknown>, said))
+    let answers: Record<string, unknown> | null = null
+    try {
+      answers = hooks.interview.check(assertNewInterview(merged), today)
+    } catch (error) {
+      // Lo que no pasa la entrevista del profesional no se guarda a medias: queda la versión de antes.
+      if (!(error instanceof ServiceError)) throw error
+    }
+    if (answers && (!latest || canonicalJson(latest.answers) !== canonicalJson(answers))) {
       await tx.insert(patientAnamnesis).values({ organizationId: orgId, patientId, version: (latest?.version ?? 0) + 1, answers, createdBy: actorUserId })
       interview = true
     }

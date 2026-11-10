@@ -2,6 +2,7 @@ import type { RegistrationAnswers } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { patientContact } from "@odentia/db/schema/clinical"
+import { automationConsent } from "@odentia/db/schema/automation"
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
 import { getCaseBrief } from "./agent-case-brief.js"
@@ -1692,7 +1693,7 @@ it("al decir que es la misma persona se guarda su consentimiento con el aviso qu
   await publish("org_a")
 })
 
-it("lo dejado sin el aviso (antes de guardarlo) o por otra persona no guarda consentimiento: se pide en la clínica", async () => {
+it("lo dejado sin el aviso (antes de guardarlo) no guarda consentimiento: se pide en la clínica", async () => {
   await seedActor()
   await publish("org_a")
   const hugo = await testPatient({ displayName: "Hugo Salas", givenNames: "Hugo", familyName: "Salas", docType: "DNI", docNumber: "44044260", docCountry: "PE", birthDate: ADULT_BIRTH })
@@ -1709,4 +1710,74 @@ it("lo dejado sin el aviso (antes de guardarlo) o por otra persona no guarda con
   const resolved = await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true, revision: view.revision }))
   expect(resolved.consent).toBe("pendiente")
   expect(await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", hugo.id))).toEqual([])
+})
+
+it("su entrevista declarada se suma campo por campo: lo que anotó el profesional sigue, y su salud queda por revisar", async () => {
+  await seedActor()
+  await publishAsking("org_a", { "personal.embarazo": "optional" })
+  const ines = await testPatient({ displayName: "Inés Vera", givenNames: "Inés", familyName: "Vera", docType: "DNI", docNumber: "44044270", docCountry: "PE", birthDate: ADULT_BIRTH, sex: "F" })
+  const before = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", ines.id))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    savePatientHealth(tx, "org_a", ACTOR, ines.id, {
+      expectedRevision: before.revision,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+      allergies: [],
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: 0, answers: { antecedentesPersonales: { cirugias: "Apendicectomía" } } },
+    }),
+  )
+  const result = await registerOnline({
+    demographics: { displayName: "Inés Vera", givenNames: "Inés", familyName: "Vera", docType: "DNI", docNumber: "44044270", birthDate: ADULT_BIRTH, sex: "F", phone: "+51987650270" },
+    respondent: "patient",
+    health: { ...emptyClinical(), medications: { state: "recorded", items: [{ name: "Losartán" }] }, personal: { embarazo: true, semanasEmbarazo: 20 } },
+    privacyAccepted: true,
+  })
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", result.held!.hold))
+  const [task] = await ownerDb.select().from(crmTask).where(and(eq(crmTask.contactId, ines.personId), eq(crmTask.kind, "registro_con_documento")))
+  const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
+  await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true, revision: view.revision }))
+  const after = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", ines.id))
+  expect(after.latestAnamnesis?.answers).toMatchObject({ antecedentesPersonales: { cirugias: "Apendicectomía", embarazo: true } })
+  expect(after.medications.map((row) => row.name)).toEqual(["Losartán"])
+  expect(after).toMatchObject({ reviewPending: true, reviewStatus: { medications: "recorded", conditions: "none" } })
+  await publishAsking("org_a", { "personal.embarazo": "hidden" })
+})
+
+it("quien registra a otra persona no da su consentimiento por ella, y un permiso que cambió después del registro no se pisa", async () => {
+  await seedActor()
+  await publish("org_a")
+  const jose = await testPatient({ displayName: "José Ríos", givenNames: "José", familyName: "Ríos", docType: "DNI", docNumber: "44044280", docCountry: "PE", birthDate: ADULT_BIRTH })
+  const forOther = await registerOnline({
+    demographics: { displayName: "José Ríos", givenNames: "José", familyName: "Ríos", docType: "DNI", docNumber: "44044280", birthDate: ADULT_BIRTH, phone: "+51987650280" },
+    respondent: "representative",
+    representative: { displayName: "Ana Ríos", relationship: "family", relationshipDetail: "Hermana", phone: "+51987650281" },
+    health: emptyClinical(),
+    privacyAccepted: true,
+  })
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", forOther.held!.hold))
+  const [task] = await ownerDb.select().from(crmTask).where(and(eq(crmTask.contactId, jose.personId), eq(crmTask.kind, "registro_con_documento")))
+  const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
+  const resolved = await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true, revision: view.revision }))
+  expect(resolved.consent).toBe("pendiente")
+  expect(await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", jose.id))).toEqual([])
+  expect(JSON.stringify(await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", jose.personId)))).toContain("Falta su consentimiento de datos")
+
+  // Él mismo, con novedades aceptadas en el formulario; pero después de registrarse dijo que no.
+  const self = await registerOnline({
+    demographics: { displayName: "José Ríos", givenNames: "José", familyName: "Ríos", docType: "DNI", docNumber: "44044280", birthDate: ADULT_BIRTH, phone: "+51987650282" },
+    respondent: "patient",
+    health: emptyClinical(),
+    privacyAccepted: true,
+    acceptsMessages: true,
+  })
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", self.held!.hold))
+  await ownerDb.insert(automationConsent).values({ organizationId: "org_a", contactId: jose.personId, purpose: "novedades", status: "revoked", source: "presencial" })
+  await ownerDb.execute(sql`update automation_consent set updated_at = now() + interval '1 minute' where contact_id = ${jose.personId}`)
+  const [second] = await ownerDb.select().from(crmTask).where(and(eq(crmTask.contactId, jose.personId), eq(crmTask.kind, "registro_con_documento"), eq(crmTask.status, "open")))
+  const secondView = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", second!.id))
+  const mine = await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, second!.id, { same: true, revision: secondView.revision }))
+  expect(mine.consent).toBe("guardado")
+  const [novedades] = await ownerDb.select().from(automationConsent).where(and(eq(automationConsent.contactId, jose.personId), eq(automationConsent.purpose, "novedades")))
+  expect(novedades).toMatchObject({ status: "revoked" })
 })

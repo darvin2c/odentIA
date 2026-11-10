@@ -56,7 +56,7 @@ import {
   whatsappNumbersOf,
 } from "./contacts.js"
 import { createContactNote } from "./crm-workspace.js"
-import { applyMessagePermissions } from "./data-consents.js"
+import { applyMessagePermissions, MESSAGE_PERMISSION_OF } from "./data-consents.js"
 import {
   fieldsError,
   issueFields,
@@ -241,9 +241,6 @@ function registrationPurposes(answers: RegistrationAnswers, config: Registration
 /** Lo que pasó con su consentimiento al decidir «¿Es la misma persona?». */
 export type HeldConsent = "guardado" | "ya_estaba" | "pendiente" | "revocado" | "no_aplica"
 
-/** El permiso de mensajes que guarda cada finalidad del registro. */
-const MESSAGE_PERMISSION_OF_PURPOSE: Record<string, string> = { recordatorios: "recordatorio", comunicaciones: "novedades" }
-
 /**
  * El consentimiento que dio en el registro en línea, guardado cuando recepción
  * decide (`resolveRegistrationHold`): el aviso que vio (no el de hoy), con la
@@ -274,17 +271,32 @@ async function recordHeldConsent(
     if (error instanceof ServiceError) return "pendiente"
     throw error
   }
-  const [revokedAfter] = await tx
+  // Lo vigente primero: si ya tiene ese aviso (o uno más nuevo), no se repite, aunque antes haya revocado otro.
+  const [current] = await tx
     .select({ id: patientDataConsent.id })
     .from(patientDataConsent)
     .where(
       and(
         eq(patientDataConsent.organizationId, orgId),
         eq(patientDataConsent.patientId, patientId),
-        gt(patientDataConsent.revokedAt, hold.createdAt),
+        isNull(patientDataConsent.revokedAt),
+        gte(patientDataConsent.noticeVersion, hold.noticeVersion),
       ),
     )
     .limit(1)
+  const [revokedAfter] = current
+    ? []
+    : await tx
+        .select({ id: patientDataConsent.id })
+        .from(patientDataConsent)
+        .where(
+          and(
+            eq(patientDataConsent.organizationId, orgId),
+            eq(patientDataConsent.patientId, patientId),
+            gt(patientDataConsent.revokedAt, hold.createdAt),
+          ),
+        )
+        .limit(1)
   if (revokedAfter) return "revocado"
   const config = await getPatientRegistrationConfig(tx, orgId)
   const { asked, purposes } = registrationPurposes(answers, config)
@@ -305,25 +317,12 @@ async function recordHeldConsent(
   )
   const keepsReminders = answers.acceptsReminders === true && (await consentStatusOf(tx, orgId, grantor.id, "recordatorio")) !== null
   const toApply = asked.filter(
-    (purpose) => !changedAfter.has(MESSAGE_PERMISSION_OF_PURPOSE[purpose] ?? purpose) && !(purpose === "recordatorios" && keepsReminders),
+    (purpose) => !changedAfter.has(MESSAGE_PERMISSION_OF[purpose] ?? purpose) && !(purpose === "recordatorios" && keepsReminders),
   )
   if (toApply.length > 0)
-    await applyMessagePermissions(tx, orgId, null, grantor.id, { accepted: purposes, asked: toApply, channel: "formulario_publico" })
-  // Si ya tenía vigente ese aviso (o uno más nuevo), no se repite.
-  const [current] = await tx
-    .select({ id: patientDataConsent.id })
-    .from(patientDataConsent)
-    .where(
-      and(
-        eq(patientDataConsent.organizationId, orgId),
-        eq(patientDataConsent.patientId, patientId),
-        isNull(patientDataConsent.revokedAt),
-        gte(patientDataConsent.noticeVersion, hold.noticeVersion),
-      ),
-    )
-    .limit(1)
+    await applyMessagePermissions(tx, orgId, null, grantor.id, { accepted: purposes, asked: toApply, channel: "formulario_publico", at: hold.createdAt })
   if (current) return "ya_estaba"
-  await tx.insert(patientDataConsent).values({
+  const [granted] = await tx.insert(patientDataConsent).values({
     organizationId: orgId,
     patientId,
     noticeVersion: hold.noticeVersion,
@@ -334,6 +333,15 @@ async function recordHeldConsent(
     channel: "formulario_publico",
     recordedBy: null,
     grantedAt: hold.createdAt,
+  }).returning({ id: patientDataConsent.id })
+  // El mismo rastro que deja dar un consentimiento en la clínica; quién decidió va en la auditoría de la decisión.
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: null,
+    action: "patient.data_consent_granted",
+    entity: "patient_data_consent",
+    entityId: granted!.id,
+    metadata: { patientId, purposes, noticeVersion: hold.noticeVersion, origin: "registration_hold" },
   })
   return "guardado"
 }
@@ -1877,6 +1885,20 @@ export async function resolveRegistrationHold(
   }
   // El consentimiento que dio en el formulario, con el aviso que vio y su fecha.
   const consent = await recordHeldConsent(tx, orgId, patientId, answers, hold)
+  // Lo que falta queda dicho en su página: el aviso flotante se va.
+  if (consent === "pendiente" || consent === "revocado")
+    await createContactNote(
+      tx,
+      orgId,
+      personId,
+      {
+        body:
+          consent === "pendiente"
+            ? "Falta su consentimiento de datos: el de su registro en línea no se pudo guardar (lo da la persona adulta o el representante legal de una menor). Pídeselo en la clínica."
+            : "Su consentimiento de datos del registro en línea no se guardó: lo revocó después de registrarse.",
+      },
+      { userId: actorUserId },
+    )
   await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.id, hold.id)))
   await settleTask(
     tx,

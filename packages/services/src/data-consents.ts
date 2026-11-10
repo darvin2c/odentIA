@@ -27,7 +27,7 @@ export const DATA_CONSENT_CHANNELS = ["presencial", "formulario_publico", "porta
 export type DataConsentRow = typeof patientDataConsent.$inferSelect
 
 /** Finalidad del consentimiento de datos → permiso de mensajes que concede. */
-const MESSAGE_PERMISSION_OF: Record<string, MessagePermissionKey> = {
+export const MESSAGE_PERMISSION_OF: Record<string, MessagePermissionKey> = {
   recordatorios: "recordatorio",
   // El único permiso de mensajes que se pregunta: novedades y promociones (ADR 0030).
   comunicaciones: "novedades",
@@ -51,7 +51,7 @@ export async function applyMessagePermissions(
   orgId: string,
   actorUserId: string | null,
   contactId: string,
-  input: { accepted: string[]; asked: string[]; channel: string },
+  input: { accepted: string[]; asked: string[]; channel: string; at?: Date },
 ): Promise<void> {
   const source = PERMISSION_SOURCE_OF[input.channel] ?? "presencial"
   for (const [dataPurpose, purpose] of Object.entries(MESSAGE_PERMISSION_OF)) {
@@ -60,6 +60,7 @@ export async function applyMessagePermissions(
       purpose,
       granted: input.accepted.includes(dataPurpose),
       source,
+      ...(input.at ? { at: input.at } : {}),
     })
   }
 }
