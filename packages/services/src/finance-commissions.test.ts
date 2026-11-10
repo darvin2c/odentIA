@@ -695,3 +695,44 @@ it("si la caja no alcanza, el pago de la comisión no sale de ella ni se registr
   const view = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
   expect(view.pendingCents).toBe(20000)
 })
+
+it("el pago de una comisión dice con qué se pagó: por transferencia no toca la caja; el efectivo sí (ADR 0167)", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Efectivo ${randomUUID()}`, typeCode: "10" }))
+  const transfer = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Transferencia ${randomUUID()}`, typeCode: "30" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 50000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 50000 }], requestId: randomUUID() }),
+  )
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 4000 }))
+  const inDrawer = async () => (await f.run((tx) => getCashState(tx, "org_a", { branchId }))).cashOnHandCents
+  const byTransfer = await f.run((tx) =>
+    payMonthCommission(tx, "org_a", f.actor, {
+      professionalUserId: f.actor,
+      ...currentPeriod(),
+      branchId,
+      fromCash: true,
+      paymentMethodId: transfer.id,
+      paymentReference: "889911",
+    }),
+  )
+  // El medio manda sobre la casilla: por transferencia no sale de la caja.
+  expect(byTransfer.expense).toMatchObject({ shiftId: null, methodName: transfer.name, methodTypeCode: "30", paymentReference: "889911" })
+  expect(await inDrawer()).toBe(50000)
+  await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, byTransfer.settlement.id, { reason: "Prueba" }))
+  const inCash = await f.run((tx) =>
+    payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...currentPeriod(), branchId, paymentMethodId: cash.id, paymentReference: "no va" }),
+  )
+  expect(inCash.expense).toMatchObject({ methodTypeCode: "10", paymentReference: null })
+  expect(inCash.expense?.shiftId).not.toBeNull()
+  expect(await inDrawer()).toBe(30000)
+})

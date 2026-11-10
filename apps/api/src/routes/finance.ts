@@ -51,6 +51,11 @@ import {
   updateRecurringExpense,
   correctExpense,
   getMonthExpenses,
+  expensesMonthCsv,
+  correctPayable,
+  listPayables,
+  notePayable,
+  voidPayable,
   listExpenseSuppliers,
   noteRecurringExpense,
   purchaseLookalikes,
@@ -529,23 +534,42 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
 
   // --- Gastos cortos (los proveedores quedan solo en Inventario) -------------------------
   // Gastos de un mes con su total por tipo (el mes es el de la clínica).
+  const monthQuery = z.object({
+    year: z.coerce.number().int().min(2000).max(2100),
+    month: z.coerce.number().int().min(1).max(12),
+    branchId: z.uuid().optional(),
+    q: z.string().max(200).optional(),
+    category: z.enum(EXPENSE_FILTER_TYPES).optional(),
+  })
   app.get("/expenses/month", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    const parsed = z
-      .object({
-        year: z.coerce.number().int().min(2000).max(2100),
-        month: z.coerce.number().int().min(1).max(12),
-        branchId: z.uuid().optional(),
-        q: z.string().max(200).optional(),
-        category: z.enum(EXPENSE_FILTER_TYPES).optional(),
-      })
-      .safeParse(c.req.query())
+    const parsed = monthQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         getMonthExpenses(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
       ),
     )
+  })
+
+  // La lista del mes para el contador, en CSV: las mismas filas que la pantalla.
+  app.get("/expenses/month/download", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    const parsed = monthQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const file = await withOrgContext(deps.db, orgId, (tx) =>
+        expensesMonthCsv(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
+      )
+      return c.body(file.body, 200, {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="${file.filename}"`,
+        "cache-control": "no-store",
+      })
+    } catch (error) {
+      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
+      throw error
+    }
   })
 
   app.get("/expenses", async (c) => {
@@ -621,18 +645,82 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
           })
           .strict()
           .optional(),
+        // El pago (o una parte) de una factura por pagar (ADR 0175).
+        payableId: z.uuid().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { repeat, ...expenseInput } = parsed.data
+    const { repeat, payableId, ...expenseInput } = parsed.data
+    if (repeat && payableId) return validationError(c, [{ code: "custom", path: ["payableId"], message: "Una factura no se repite" }])
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
         repeat
           ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat }, peopleOf(memberRole))
-          : createExpense(tx, orgId, userId, expenseInput, {}, peopleOf(memberRole)),
+          : createExpense(tx, orgId, userId, expenseInput, payableId ? { payableId } : {}, peopleOf(memberRole)),
       ),
     )
+  })
+
+  // --- Facturas por pagar (ADR 0175): la del laboratorio que se paga después -----------------
+  app.get("/payables", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    const parsed = z
+      .object({ branchId: z.uuid().optional(), patientId: z.uuid().optional(), open: z.enum(["1", "0"]).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { open, ...query } = parsed.data
+    // Las facturas de una paciente son el costo de su tratamiento: lo ve quien administra comisiones (ADR 0175).
+    if (query.patientId && !canAccess(memberRole, "commissions.write")) return forbid(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPayables(tx, orgId, { ...query, open: open === "1" })))
+  })
+
+  const payableInput = z
+    .object({
+      requestId: z.uuid().optional(),
+      branchId: z.uuid(),
+      category: z.string().max(60).optional(),
+      supplierId: z.uuid().nullish(),
+      supplierName: z.string().max(200).nullish(),
+      supplierTaxId: z.string().max(20).nullish(),
+      receiptType: z.string().max(20).nullish(),
+      receiptNumber: z.string().max(60).nullish(),
+      issuedOn: z.string().max(10).nullish(),
+      dueOn: z.string().max(10).nullish(),
+      currency: currency.optional(),
+      amountCents: cents,
+      patientId: z.uuid().nullish(),
+      planItemId: z.uuid().nullish(),
+      notes: z.string().max(2000).nullish(),
+    })
+    .strict()
+  app.post("/payables", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = payableInput
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => notePayable(tx, orgId, userId, parsed.data)))
+  })
+
+  app.post("/payables/:id/correct", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
+    const parsed = payableInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => correctPayable(tx, orgId, userId, c.req.param("id"), parsed.data)),
+    )
+  })
+
+  app.post("/payables/:id/void", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => voidPayable(tx, orgId, userId, c.req.param("id"), parsed.data)))
   })
 
   // --- Gastos que se repiten: lo por pagar del mes, pagar con un toque, «este mes no» ------------

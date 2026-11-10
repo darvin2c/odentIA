@@ -870,7 +870,7 @@ function groupSalaries<
  *
  * - `due`: lo por pagar de ese mes y, si es el mes en curso, lo vencido sin pagar
  *   de hasta 12 meses atrás («De octubre: Internet»). Lo vencido primero.
- * - `fixed`: «Lo fijo del mes», lo que cae en ese mes (lo de cada 6 meses o cada
+ * - `fixed`: lo que se repite y cae en el mes («Lo que se repite en <mes>»), lo que cae en ese mes (lo de cada 6 meses o cada
  *   año cuenta entero en su mes; no se reparte), sin lo marcado «este mes no». Lo
  *   pagado con el valor de su gasto; lo que falta, al cambio de hoy.
  * - `templates`: todo lo que sigue repitiéndose, también lo que no cae este mes.

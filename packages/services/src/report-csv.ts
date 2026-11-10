@@ -30,6 +30,9 @@ function field(value: CsvCell): string {
   if (value === null || value === undefined) return ""
   let text = typeof value === "boolean" ? (value ? "Sí" : "No") : String(value)
   if (typeof value === "string" && /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)) text = `'${text}`
+  // Un Excel que separa por «;» (Chile, Colombia, España) parte la celda ahí: lo que sigue tampoco
+  // puede empezar como fórmula.
+  if (typeof value === "string") text = text.replace(/([;\t])([=+\-@])/g, "$1'$2")
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 

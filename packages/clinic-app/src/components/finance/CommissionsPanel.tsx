@@ -83,6 +83,8 @@ import {
 import { useOrgMembers, usePermission } from "../../lib/crm"
 import { financeFormMessage } from "../../lib/finance"
 import { invalidateFinance, todayIn, useCashState } from "../../lib/finance-cash"
+import { CASH_TYPE_CODE, fetchPaymentMethods } from "../../lib/finance-collect"
+import { PaymentMethodButtons } from "./collect-drawer"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -1270,15 +1272,20 @@ function PayDrawer({
   }
   // Salir de la caja es mover efectivo: lo ofrece solo a quien registra gastos.
   const canUseCash = usePermission("finance.write") && detail.pendingCents > 0
+  // Los medios de la clínica, como al registrar un gasto: solo el efectivo sale de la caja (ADR 0167).
+  const methods = useQuery({ queryKey: ["org-payment-methods"], queryFn: fetchPaymentMethods, enabled: open && canUseCash })
+  const isCash = (id: string) => (methods.data?.data ?? []).find((method) => method.id === id)?.typeCode === CASH_TYPE_CODE
   const form = useAppForm({
-    defaultValues: { branchId: "", notes: "", fromCash: false },
+    defaultValues: { branchId: "", notes: "", method: "", reference: "" },
     validators: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
         if (pickBranch && !value.branchId) fields.branchId = "Elige la sede del gasto."
+        // Con qué se pagó, como en un gasto (ADR 0167).
+        if (canUseCash && !value.method) fields.method = "Elige con qué se pagó."
         // Mismo freno que en un gasto: el efectivo nunca queda negativo, y se dice qué hacer.
-        if (value.fromCash && cashState && cashState.cashOnHandCents < detail.pendingCents)
-          fields.fromCash = `En la caja solo hay ${formatMoney(cashState.cashOnHandCents, detail.currency, detail.locale)}: no alcanza para pagarlo con el efectivo. Si el dinero está en el cajón, ingrésalo a la caja con el botón de abajo. Si se pagó por transferencia, deja la casilla sin marcar.`
+        else if (isCash(value.method) && cashState && cashState.cashOnHandCents < detail.pendingCents)
+          fields.method = `En la caja solo hay ${formatMoney(cashState.cashOnHandCents, detail.currency, detail.locale)}: no alcanza para pagarlo con el efectivo. Si el dinero está en el cajón, ingrésalo a la caja con el botón de abajo; si no, elige con qué se pagó.`
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
@@ -1293,10 +1300,13 @@ function PayDrawer({
           currency: detail.currency,
           expectedCents: detail.pendingCents,
           ...(notes ? { notes } : {}),
-          ...(value.fromCash && canUseCash ? { fromCash: true } : {}),
+          ...(canUseCash && value.method ? { paymentMethodId: value.method } : {}),
+          ...(canUseCash && value.method && !isCash(value.method) && value.reference.trim()
+            ? { paymentReference: value.reference.trim() }
+            : {}),
         })
         refresh()
-        if (value.fromCash) invalidateFinance(queryClient)
+        if (isCash(value.method)) invalidateFinance(queryClient)
         // Se dice lo que el servidor pagó de verdad, no lo que mostraba la pantalla.
         toast.success(
           result.data.settlement.commissionCents === 0
@@ -1312,7 +1322,8 @@ function PayDrawer({
   })
   const surface = useFormSurface(form, { formMessage: financeFormMessage })
   const branchId = useStore(form.store, (state) => state.values.branchId)
-  const fromCash = useStore(form.store, (state) => state.values.fromCash)
+  const methodId = useStore(form.store, (state) => state.values.method)
+  const fromCash = isCash(methodId)
   const cashBranch = branchId || defaultBranch
   const cash = useCashState(cashBranch, open && canUseCash, detail.currency)
   const cashState = cash.data?.data ?? null
@@ -1326,7 +1337,7 @@ function PayDrawer({
   }, [open, defaultBranch, form])
   useEffect(() => {
     if (open) return
-    form.reset({ branchId: "", notes: "", fromCash: false })
+    form.reset({ branchId: "", notes: "", method: "", reference: "" })
   }, [open, form])
 
   const amount = formatMoney(detail.pendingCents, detail.currency, detail.locale)
@@ -1388,36 +1399,37 @@ function PayDrawer({
           </p>
         )}
         {canUseCash ? (
-          <form.AppField name="fromCash">
+          <form.AppField name="method">
             {(field) => (
-              <FormChoiceField
-                label={
-                  currencyNamed
-                    ? `Se pagó con el efectivo de la caja de ${currencyWord(detail.currency, detail.locale)}`
-                    : "Se pagó con el efectivo de la caja"
-                }
+              <field.Group
+                legend="¿Con qué se pagó?"
                 description={
-                  !fromCash
-                    ? "Déjala sin marcar si se pagó por transferencia u otro medio: no toca la caja."
-                    : cashAfter === null || cashAfter < 0
-                      ? "Se descuenta del efectivo que debe haber al cerrar."
-                      : `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${formatMoney(cashAfter, detail.currency, detail.locale)}.`
+                  !methodId
+                    ? undefined
+                    : !fromCash
+                      ? "No toca la caja."
+                      : cashAfter === null || cashAfter < 0
+                        ? `Sale del efectivo de la caja${currencyNamed ? ` de ${currencyWord(detail.currency, detail.locale)}` : ""}.`
+                        : `Sale del efectivo de la caja${currencyNamed ? ` de ${currencyWord(detail.currency, detail.locale)}` : ""}: queda en ${formatMoney(cashAfter, detail.currency, detail.locale)}.`
                 }
               >
                 {(control) => (
-                  <Checkbox
+                  <PaymentMethodButtons
                     id={control.id}
-                    aria-invalid={control.invalid || undefined}
+                    methods={methods.data?.data ?? []}
+                    value={field.state.value}
                     aria-describedby={control.describedBy}
-                    checked={field.state.value}
-                    onCheckedChange={(checked) => {
-                      field.handleChange(checked === true)
-                      control.onBlur()
-                    }}
+                    onBlur={control.onBlur}
+                    onChange={(next) => field.handleChange(next)}
                   />
                 )}
-              </FormChoiceField>
+              </field.Group>
             )}
+          </form.AppField>
+        ) : null}
+        {canUseCash && methodId && !fromCash ? (
+          <form.AppField name="reference">
+            {(field) => <field.TextField label="N.º de operación (opcional)" maxLength={60} autoComplete="off" inputClassName="sm:w-56" />}
           </form.AppField>
         ) : null}
         {canUseCash && fromCash && cashAfter !== null && cashAfter < 0 ? (
