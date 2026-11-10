@@ -1004,7 +1004,7 @@ export async function updateCharge(
 // --- Cobro atómico -----------------------------------------------------------------------
 
 /** La clave del cargo de un adelanto para un tratamiento (`advanceForBudgetItemId`), con la del cobro. */
-const ADVANCE_KEY = "adelanto:"
+export const ADVANCE_KEY = "adelanto:"
 
 /** Medio efectivo que acepta la clínica (catálogo de Configuración, congelado al cobrar). */
 const CASH_TYPE_CODE = "10"
@@ -3474,6 +3474,12 @@ export interface AccountPending {
   /** Producto vendido desde «Cobrar» y cuántas unidades (ADR 0067): ya salió de la sede. */
   productId: string | null
   productQuantity: number | null
+  /**
+   * Lo pagado de antemano con un adelanto «Para» este mismo tratamiento (su cargo aparte, ya
+   * pagado): con él se dice lo que costó de verdad, «Costó 900 · pagó 300 de adelanto · falta
+   * 600», y no los 600 que quedaron (QA del 10 nov, M7). `totalCents` y `paidCents` no lo suman.
+   */
+  advancePaidCents: number
 }
 
 /**
@@ -3682,6 +3688,13 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       )
     for (const row of rows) serviceByLine[row.id] = row.serviceId
   }
+  // Lo pagado por adelantado para cada tratamiento (su cargo «Adelanto: …»), en su moneda.
+  const advancePaidByLine: Record<string, number> = {}
+  for (const charge of liveCharges) {
+    if (!charge.planItemId || !charge.requestKey?.startsWith(ADVANCE_KEY)) continue
+    const key = `${charge.planItemId}:${charge.currency}`
+    advancePaidByLine[key] = (advancePaidByLine[key] ?? 0) + (appliedByCharge[charge.id] ?? 0)
+  }
   const pendiente: AccountPending[] = liveCharges
     .map((charge) => {
       const paid = appliedByCharge[charge.id] ?? 0
@@ -3716,6 +3729,10 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         promotionName: charge.promotionName,
         productId: charge.productId ?? null,
         productQuantity: charge.productQuantity ?? null,
+        advancePaidCents:
+          charge.planItemId && !charge.requestKey?.startsWith(ADVANCE_KEY)
+            ? (advancePaidByLine[`${charge.planItemId}:${charge.currency}`] ?? 0)
+            : 0,
       }
     })
     .filter((row) => row.saldoCents > 0)

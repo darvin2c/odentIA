@@ -425,6 +425,9 @@ export interface FinalizeBilling {
     currency: string | null
     status: "charged" | "skipped"
     reason: string | null
+    /** Con un adelanto para este tratamiento: lo acordado entero y lo adelantado. */
+    agreedCents?: number
+    advanceCents?: number
   }>
 }
 
@@ -3082,7 +3085,16 @@ export function EncounterEditor({
               <ul className="flex flex-col gap-1">
                 {chargedLines.map((line) => (
                   <li key={line.procedureId} className="flex items-baseline justify-between gap-3 text-sm">
-                    <span>{line.description}</span>
+                    <span>
+                      {line.description}
+                      {/* Con un adelanto, hoy se carga el resto: se dice lo que costó (QA del 10 nov, M7). */}
+                      {line.agreedCents && line.advanceCents && line.currency && orgLocale ? (
+                        <span className="block text-muted-foreground">
+                          Costó {formatMoney(line.agreedCents, line.currency, orgLocale)} ·{" "}
+                          {formatMoney(line.advanceCents, line.currency, orgLocale)} los dejó de adelanto
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="tabular-nums">
                       {line.currency && orgLocale && line.amountCents != null
                         ? formatMoney(line.amountCents, line.currency, orgLocale)

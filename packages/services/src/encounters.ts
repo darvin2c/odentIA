@@ -118,7 +118,7 @@ import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
 import { treatmentConsentStates } from "./consent-state.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
-import { createCharge } from "./payments.js"
+import { ADVANCE_KEY, createCharge } from "./payments.js"
 import {
   addPlanItem,
   createTreatmentPlan,
@@ -2013,6 +2013,12 @@ export interface FinalizeBillingLine {
   currency: string | null
   status: "charged" | "skipped"
   reason: SkippedCharge["reason"] | null
+  /**
+   * Con un adelanto «Para» este tratamiento: lo acordado entero y lo ya cargado como adelanto. El
+   * cierre dice «Costó 900 · 300 de adelanto» junto a los 600 de hoy (QA del 10 nov, M7).
+   */
+  agreedCents?: number
+  advanceCents?: number
 }
 
 /** Lo que llegaba a sus sesiones previstas y la firma no pudo terminar: sigue en curso. */
@@ -3238,6 +3244,7 @@ export async function finalizeEncounter(
           amountCents: patientCharge.amountCents,
           returnedCents: patientCharge.returnedCents,
           discountCents: patientCharge.discountCents,
+          requestKey: patientCharge.requestKey,
         })
         .from(patientCharge)
         .where(
@@ -3271,6 +3278,9 @@ export async function finalizeEncounter(
         commissionSessions: planned && planned.sessions > 1 ? planned.sessions : null,
       })
       charges.push(charge)
+      const advance = active
+        .filter((c) => c.requestKey?.startsWith(ADVANCE_KEY))
+        .reduce((sum, c) => sum + c.amountCents, 0)
       billingLines.push({
         procedureId: proc.id,
         description: charge.description,
@@ -3278,6 +3288,7 @@ export async function finalizeEncounter(
         currency: charge.currency,
         status: "charged",
         reason: null,
+        ...(advance > 0 ? { agreedCents: agreed, advanceCents: advance } : {}),
       })
       continue
     }
