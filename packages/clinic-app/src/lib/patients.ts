@@ -14,9 +14,24 @@ export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-"
 /** El consentimiento de un tratamiento: falta, preparado sin firmar, firmado por enlace sin confirmar o firmado. */
 export type TreatmentConsentState = "falta" | "sin_firmar" | "por_confirmar" | "firmado"
 
-/** «Falta su consentimiento», para decirlo junto al tratamiento; nada si está firmado. */
-export function treatmentConsentWords(state: TreatmentConsentState | null | undefined): string | null {
-  if (state === "falta") return "Falta preparar su consentimiento y firmarlo antes de hacerlo"
+/** «a», «a y b». */
+function titlesWords(titles: readonly string[]): string {
+  const quoted = titles.map((title) => `«${title}»`)
+  return quoted.length <= 1 ? (quoted[0] ?? "") : `${quoted.slice(0, -1).join(", ")} y ${quoted.at(-1)}`
+}
+
+/**
+ * «Falta su consentimiento», para decirlo junto al tratamiento; nada si está firmado. Si falta
+ * preparar alguno, dice cuál (`missing`): una exodoncia puede pedir el suyo y el de la anestesia.
+ */
+export function treatmentConsentWords(
+  state: TreatmentConsentState | null | undefined,
+  missing: readonly string[] = [],
+): string | null {
+  if (state === "falta")
+    return missing.length === 0
+      ? "Falta preparar su consentimiento y firmarlo antes de hacerlo"
+      : `Falta preparar ${missing.length === 1 ? "el consentimiento" : "los consentimientos"} ${titlesWords(missing)} y firmarlo${missing.length === 1 ? "" : "s"} antes de hacerlo`
   if (state === "sin_firmar") return "Su consentimiento está listo: falta firmarlo antes de hacerlo"
   if (state === "por_confirmar") return "Firmó su consentimiento en su enlace: confírmalo antes de hacerlo"
   if (state === "firmado") return "Consentimiento firmado"
@@ -541,6 +556,8 @@ export interface PlanItem {
   waitsFor?: { id: string; title: string } | null
   /** Su consentimiento, si su servicio lo pide (consentimientos, 10 nov). */
   consent?: TreatmentConsentState | null
+  /** Los consentimientos que faltan preparar, por su título (`treatmentConsentWords`). */
+  consentMissing?: string[]
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
@@ -666,6 +683,8 @@ export interface VisitTreatment {
   wait?: { days: number; sinceDays: number; from: string } | null
   /** Su consentimiento, si su servicio lo pide; va con el tratamiento, aunque se preparara en otra atención. */
   consent?: TreatmentConsentState | null
+  /** Los consentimientos que faltan preparar, por su título (`treatmentConsentWords`). */
+  consentMissing?: string[]
 }
 
 /** Un control con su ventana abierta: esta visita lo cumple si se marca. */

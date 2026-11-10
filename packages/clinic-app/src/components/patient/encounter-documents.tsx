@@ -41,7 +41,7 @@ import {
   consentLinkWords,
   SendToSignDialog,
 } from "./consent-link-actions"
-import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
+import { ConsentSigningScreen, PaperSignDrawer, useConsentSignerWord } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { DocumentOpenButton } from "./document-open-button"
 import {
@@ -325,7 +325,7 @@ export function EncounterDocumentsBlock({
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
   const firstDiagnosis = firstActive?.diagnosisCode
   const firstDiagnosisSystem = firstActive?.diagnosisSystem
-  const who = firstName(patient)
+  const who = useConsentSignerWord(patientId, firstName(patient))
 
   const startNew = (kind: NewDocumentKind) => {
     setMenuOpen(false)
@@ -492,12 +492,17 @@ export function EncounterDocumentsBlock({
                           onSelect: () => setSendingDoc(doc),
                         },
                       ]),
-                  {
-                    key: `phone-${doc.id}`,
-                    label: `Mostrar el código para firmarlo en su teléfono: ${doc.titleSnapshot}`,
-                    disabled,
-                    onSelect: () => setPhoneDoc(doc),
-                  },
+                  // Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), no se ofrece.
+                  ...(doc.phoneSignBlock
+                    ? []
+                    : [
+                        {
+                          key: `phone-${doc.id}`,
+                          label: `Mostrar el código para firmarlo en su teléfono: ${doc.titleSnapshot}`,
+                          disabled,
+                          onSelect: () => setPhoneDoc(doc),
+                        },
+                      ]),
                   {
                     key: `paper-${doc.id}`,
                     label: `Firmado en papel: ${doc.titleSnapshot}`,

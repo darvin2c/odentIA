@@ -80,6 +80,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "campana",
       "notificaciones",
       "marcar todo leído",
+      "avisos en el celular",
+      "notificaciones en el teléfono",
+      "instalar la app",
+      "app en el celular",
+      "sin conexión",
       "te lo pasó el agente",
       "no confirmó",
       "sala de espera",
@@ -98,6 +103,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Qué trae la campana?",
         a: "Lo que conviene saber y no pide trabajo: un consentimiento firmado, la caja que cerró con diferencia, una oportunidad ganada o perdida, un mensaje que WhatsApp aprobó. Abrir un aviso lo marca leído y «Marcar todo leído» los marca todos. Un aviso desaparece solo cuando su asunto se resuelve, y nunca te avisa de algo que hiciste tú. Lo que hay que hacer está en «Te espera».",
+      },
+      {
+        q: "¿Cómo recibo avisos en el celular o la computadora aunque no tenga la clínica abierta?",
+        a: "Abre la campana y prende «Recibir avisos en este equipo»; el navegador te pide permiso y llega un aviso de «Listo». Es de ese equipo y de esta clínica: si trabajas en otra, actívalo también ahí. Te avisa cuando alguien te escribe o el agente te pasa a alguien, solo en el horario de atención de la clínica (lo de la noche llega al abrir), y a cualquier hora si WhatsApp o el agente dejan de funcionar y tú lo ves en la campana. El aviso no dice el nombre de la persona ni lo que escribió: eso se ve al tocarlo, en la clínica. Leerlo en el celular no lo resuelve: sigue en «Te espera» hasta que alguien lo atiende. En iPhone, primero agrega la clínica a tu inicio desde Safari (Compartir › Agregar a inicio) y actívalo desde ese ícono. No lo actives en la tablet que le pasas al paciente. Al cerrar sesión en la clínica, ese equipo deja de recibir tus avisos de esa clínica.",
+      },
+      {
+        q: "¿Puedo instalar la clínica como una app?",
+        a: "Sí. En la campana, «Instalar en este equipo» aparece cuando el navegador lo permite (Chrome o Edge en la computadora y en Android); en iPhone, desde Safari con Compartir › Agregar a inicio. Queda un ícono con el nombre de tu clínica que abre en Inicio y sin la barra del navegador. Sigue necesitando internet: si se corta, arriba dice «Sin conexión»; lo que escribiste sigue ahí y lo que tocaste guardar se guarda solo cuando vuelve.",
       },
       {
         q: "¿Por qué aparece «No confirmó su cita»?",
@@ -566,7 +579,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo firma la persona su consentimiento?",
-        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si está en la clínica, «Firmar en su teléfono» muestra un código para que lo escanee (o «Copiar enlace» para pegarlo en su chat), sin enviarle ningún mensaje. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, la lee igual y la firma en la cita: la hoja se lo dice arriba. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención, aunque la atención sea de otro día: queda el día real y a quién informaste. Confírmalo con quien firmó delante; si vino otra persona, o si firmó hace meses, «Firmar de nuevo aquí» lo firma en la tablet y lo del enlace queda en su historia. El consentimiento va con su tratamiento: el Plan y «Hoy viene a…» dicen si falta, si falta firmarlo o si ya está, en cualquier atención donde se haga. Si cambias dónde se hace, el servicio o el diagnóstico, lo firmado deja de contar y se prepara con el texto nuevo. Siempre se dice el nivel real, al pie de la hoja: «Firma simple · en la clínica», «en papel» o «por enlace».",
+        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si está en la clínica, «Firmar en su teléfono» muestra un código para que lo escanee (o «Copiar enlace» para pegarlo en su chat), sin enviarle ningún mensaje. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, la lee igual y la firma en la cita: la hoja se lo dice arriba. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención, aunque la atención sea de otro día: queda el día real y a quién informaste. Confírmalo con quien firmó delante; si vino otra persona, o si firmó hace meses, «Firmar de nuevo aquí» lo firma en la tablet y lo del enlace queda en su historia. El consentimiento va con su tratamiento: el Plan y «Hoy viene a…» dicen si falta, si falta firmarlo o si ya está, en cualquier atención donde se haga. Si cambias dónde se hace, el servicio o el diagnóstico, lo firmado deja de contar y se prepara con el texto nuevo. Al pie de la hoja dice cómo se firma («Firma en la clínica», «Firma en papel» o «Firma por enlace») y que queda en la historia clínica con la fecha y la hora, sin advertencias; el PDF firmado dice el nivel real en letra chica: firma electrónica simple (en el Perú, Ley 27269), no firma digital. Si es menor, «Falta la firma de…» nombra a su representante; «Firmar en su teléfono» no se ofrece si su enlace no lo dejaría firmar (menor, sin fecha de nacimiento o sin su documento en la ficha).",
       },
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",

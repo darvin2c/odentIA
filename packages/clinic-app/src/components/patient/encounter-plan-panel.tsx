@@ -549,7 +549,7 @@ export function EncounterPlanPanel({
                               ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
                               : "",
                             // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
-                            treatmentConsentWords(item.consent) ?? "",
+                            treatmentConsentWords(item.consent, item.consentMissing) ?? "",
                           ]
                             .filter(Boolean)
                             .join(" · ")}

@@ -68,6 +68,8 @@ export interface VisitTreatment {
   after: { title: string; today: boolean } | null
   /** Su consentimiento, si su servicio lo pide (`treatmentConsentStates`); null si no lo pide o ya está firmado. */
   consent?: TreatmentConsentState | null
+  /** Los consentimientos que faltan preparar, por su título: la pantalla dice cuál. */
+  consentMissing?: string[]
   /**
    * Su servicio pide esperar entre sesiones y aún no se cumple (la regla de la reserva,
    * `nextSessionGapOf`): `days` los que pide, `sinceDays` los que pasaron desde la última
@@ -236,7 +238,8 @@ export async function encounterVisitOf(
           }
         : null,
       // Su consentimiento, aunque se preparara en otra atención: se firma antes de empezar.
-      consent: consents.get(item.id) ?? null,
+      consent: consents.get(item.id)?.state ?? null,
+      consentMissing: consents.get(item.id)?.missing ?? [],
     }
   })
   const due = await dueControlsOf(tx, orgId, row.professionalUserId, row, timezone)

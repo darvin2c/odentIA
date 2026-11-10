@@ -75,6 +75,7 @@ import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rem
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
+import { forgetDevicePushOnSignOut, registerAppWorker } from "../lib/pwa"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
 import { PLAN_PATH } from "../lib/billing"
@@ -167,6 +168,8 @@ export const Route = createFileRoute("/_org")({
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
     return { session, org: data, region, checkedAt: Date.now() }
   },
+  // Instalable solo con sesión: el portal, el registro y el chat del paciente comparten este origen.
+  head: () => ({ links: [{ rel: "manifest", href: "/app.webmanifest" }] }),
   component: OrgGate,
 })
 
@@ -338,6 +341,9 @@ function OrgLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  // La app en este equipo: tocar un aviso con la app abierta navega aquí, sin recargar.
+  useEffect(() => registerAppWorker((href) => void navigate({ href })), [navigate])
   // Una sola suscripción SSE para el layout: agenda, trabajo del agente y el número de «Inicio».
   useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_WORK_EVENTS, ...WAITING_EVENTS], (kind, data) => {
     if (WAITING_EVENTS.includes(kind)) {
@@ -430,6 +436,8 @@ function OrgLayout() {
       brandIcon={<Brand compact />}
       switcher={<OrgSwitcher />}
       onSignOut={async () => {
+        // Este equipo deja de recibir los avisos de quien sale.
+        await forgetDevicePushOnSignOut()
         await authClient.signOut()
         queryClient.clear()
         window.location.assign(panelUrl("/login"))

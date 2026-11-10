@@ -164,6 +164,9 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     S3_PUBLIC_URL: `${s3Endpoint}/${AVATARS_BUCKET}`,
     SECRETS_KEY: "b895edcf574a7ca79434e50769e9ded6daace1636bc40d71f1310c3f43c5982b",
     CHANNEL_VALIDATE_EXTERNAL: "false",
+    // Solo la clave pública (de prueba): la API ofrece los avisos en el equipo y el worker, sin la
+    // privada, no envía nada; los recorridos no dependen de los servicios de push reales.
+    VAPID_PUBLIC_KEY: "BB0iBDZOVrHVt4bObUS8eMh-r2xVGWcuZTrCesKVj3jhAkjSZjgujkmk-10o-yXgn9SWX-1dKPCrHQP2jEhW3wQ",
     // Sin consultar Have I Been Pwned: las pruebas no dependen de la red ni de sus claves de ejemplo.
     PASSWORD_BREACH_CHECK: "false",
     CHANNEL_SENDER_MODE: "mock",

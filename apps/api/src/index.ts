@@ -105,6 +105,7 @@ const app = createApp({
     timeoutMs: env.DECISIONS_TIMEOUT_MS,
   },
   metaSignup: metaSignupFromEnv(env),
+  vapidPublicKey: env.VAPID_PUBLIC_KEY,
   embedder: embedderFromEnv(env),
   // `fake`: el proveedor de demostración de dev y e2e (sin red); el entorno lo impide con canales reales.
   addressProviders: {

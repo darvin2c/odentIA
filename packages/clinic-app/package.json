@@ -37,6 +37,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pwa-icons": "node scripts/pwa-icons.mjs",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
@@ -72,6 +73,7 @@
     "@types/qrcode": "1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "sharp": "0.34.4",
     "typescript": "7.0.2",
     "vite": "8.3.0",
     "vitest": "^3.2.7"
