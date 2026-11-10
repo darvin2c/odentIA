@@ -8,7 +8,6 @@
 import { randomUUID } from "node:crypto"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { clinicalFollowUp, encounter, serviceCatalog, treatmentPlanItem, treatmentTemplate } from "@odentia/db/schema/clinical"
-import { dentalTemplateRule } from "@odentia/db/schema/dental"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -234,7 +233,10 @@ it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya n
     .insert(treatmentTemplate)
     .values({ key: `endo-espera-${randomUUID()}`, name: "Endodoncia de prueba", kind: "endodoncia", scope: "tooth" })
     .returning()
-  await ownerDb.insert(dentalTemplateRule).values({ templateId: template!.id, toothGroups: ["molar"], family: "endodoncia-vital" })
+  // Su familia de la biblioteca (lo dental se escribe en SQL: lo común no importa el esquema dental, ADR 0079).
+  await ownerDb.execute(
+    sql`insert into catalog.dental_template_rule (template_id, tooth_groups, family) values (${template!.id}, array['molar'], 'endodoncia-vital')`,
+  )
   await ownerDb.update(serviceCatalog).set({ templateId: template!.id, source: "template" }).where(eq(serviceCatalog.id, f.service.id))
   const endo = await acceptedTreatment(f, 2)
   await f.ready(f.encounter.id)
