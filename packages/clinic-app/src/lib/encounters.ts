@@ -413,6 +413,8 @@ export interface EncounterVoidPreview {
   blocked: boolean
   /** Lo entregado que se anula con ella: va tal cual al anular. */
   confirm: Array<{ id: string; status: string }>
+  /** Cambios de tratamiento hechos en ella: se deshacen y el anterior vuelve a como estaba. */
+  revisions?: Array<{ restored: string; replacement: string }>
 }
 
 /** Qué se lleva anular la atención, antes de confirmar (la misma regla del servidor al anular). */

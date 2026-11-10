@@ -123,8 +123,10 @@ import {
   addPlanItem,
   createTreatmentPlan,
   lockPlanItemForExecution,
+  revisionsOf,
   setPlanItemStatus,
   surfaceLimits,
+  undoRevisionsOf,
   updatePlanItemPlanning,
 } from "./plan.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
@@ -3819,11 +3821,19 @@ export async function getEncounterVoidPreview(
   encounterId: string,
   /** `seesCharges`: quien ve la caja (`finance.read`) lee qué tratamiento se cobró. */
   opts: { memberRole?: string; seesCharges?: boolean } = {},
-): Promise<EncounterVoidPreview> {
+): Promise<EncounterVoidPreview & { revisions: Array<{ restored: string; replacement: string }> }> {
   await requirePatient(tx, orgId, patientId)
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(row, actorUserId)
-  return encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, ...opts })
+  const preview = await encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, ...opts })
+  const revisions = await revisionsOf(tx, orgId, patientId, encounterId)
+  return {
+    ...preview,
+    revisions: revisions.map((revision) => ({
+      restored: revision.oldTooth ? `${revision.oldTitle} · ${revision.oldTooth}` : revision.oldTitle,
+      replacement: revision.newTitle,
+    })),
+  }
 }
 
 export async function voidEncounter(
@@ -3865,6 +3875,8 @@ export async function voidEncounter(
   for (const proc of procedures) {
     await voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, cascade, at)
   }
+  // Un cambio de tratamiento hecho en ella se deshace: el anterior vuelve a como estaba.
+  await undoRevisionsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   await tx
     .update(treatmentPlanItem)
     .set({ status: "cancelado", statusReason: cascade, updatedAt: at })
