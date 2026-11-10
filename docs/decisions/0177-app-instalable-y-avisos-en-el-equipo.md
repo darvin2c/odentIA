@@ -45,4 +45,4 @@ Hay dos restricciones:
 
 - `packages/services/src/push.ts`, `apps/worker/src/push.ts`, `apps/api/src/routes/push.ts`
 - `packages/clinic-app/src/lib/pwa.ts`, `components/device-notices.tsx`, `routes/public/app[.]webmanifest.ts`
-- Migraciones `0087` y `0088`; ADR 0063 (tabla cerrada al rol de la app) y 0084 (alarmas del agente).
+- Migraciones `0092` y `0093`; ADR 0063 (tabla cerrada al rol de la app) y 0084 (alarmas del agente).

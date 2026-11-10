@@ -71,7 +71,7 @@ test("la clínica se instala con su nombre y avisa en el equipo: activar, sin co
   await page.getByRole("button", { name: /^Avisos/ }).click()
   const toggle = avisosSwitch(page)
   await expect(toggle).not.toBeChecked()
-  await expect(page.getByText("El aviso no dice el nombre de la persona.", { exact: false })).toBeVisible()
+  await expect(page.getByText("Sin el nombre de la persona.", { exact: false })).toBeVisible()
   await testInfo.attach("campana-apagado-1440", { body: await page.screenshot(), contentType: "image/png" })
 
   await toggle.click()
