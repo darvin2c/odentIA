@@ -19,6 +19,7 @@ import {
   SupportMetricsSkeleton,
   SupportPageSkeleton,
 } from "../../components/skeletons/support"
+import { SupportHelpVideos } from "../../components/support-help-videos"
 import { caseReview, SupportCaseReview } from "../../components/support-review"
 import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
@@ -474,6 +475,8 @@ function SupportPage() {
           )}
         </section>
       ) : null}
+
+      {tab === "conocimiento" ? <SupportHelpVideos /> : null}
 
       {tab === "cola" ? (
         <div className="flex flex-col gap-3">
