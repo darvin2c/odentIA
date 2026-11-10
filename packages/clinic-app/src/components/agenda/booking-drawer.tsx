@@ -114,17 +114,25 @@ interface ReminderReach {
   name: string
   whatsapp: PhoneWhatsApp
   hasEmail: boolean
+  /** Por dónde le llegará de verdad; null: no le llega (la misma regla del servidor al enviarlo). */
+  via?: "whatsapp" | "correo" | null
+  /** Lo recibe otra persona por el paciente (su madre). */
+  forOther?: boolean
 }
 
-/** «Carmen no recibirá el recordatorio: aún no tiene WhatsApp»; nada si le llega por WhatsApp. */
-function reminderWords(reach: ReminderReach | null | undefined): string | null {
-  if (!reach || reach.whatsapp.state === "es_su_whatsapp") return null
-  const why = reach.whatsapp.state === "no_tiene" ? "su número no tiene WhatsApp" : "aún no tiene WhatsApp"
-  return reach.hasEmail
-    ? `${reach.name} recibirá el recordatorio por correo: ${why}.`
-    : `${reach.name} no recibirá el recordatorio: ${why}.`
+/**
+ * Lo que pasa con el recordatorio, con la regla con que de verdad sale (QA de la ficha del 10 nov,
+ * M3): «recibirá el recordatorio por correo» solo si la clínica lo envía; si no, recepción sabe que
+ * avisa ella. Nada si le llega por WhatsApp.
+ */
+export function reminderWords(reach: ReminderReach | null | undefined): string | null {
+  if (!reach) return null
+  const who = reach.forOther ? `${reach.name}, que recibe sus avisos,` : reach.name
+  const via = reach.via === undefined ? (reach.whatsapp.state === "es_su_whatsapp" ? "whatsapp" : reach.hasEmail ? "correo" : null) : reach.via
+  if (via === "whatsapp") return null
+  if (via === "correo") return `${who} recibirá el recordatorio por correo.`
+  return `${who} no recibirá el recordatorio automático: avísale tú un día antes.`
 }
-
 
 /** Lo que se escribe en «Nueva cita»; el «cuándo» va en `when` (ver `WhenFields`). */
 interface BookingValues {

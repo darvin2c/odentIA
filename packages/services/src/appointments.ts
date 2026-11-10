@@ -34,6 +34,7 @@ import { requireCanAttend } from "./attending.js"
 import {
   appointmentConfirmationPlan,
   type ConfirmationPlan,
+  appointmentRemindersVia,
   cancelPendingForAppointment,
   enqueueAppointmentNotice,
   invalidateAppointmentTokens,
@@ -758,19 +759,39 @@ export async function appointmentReminderReach(
   tx: Db,
   orgId: string,
   patientId: string,
-): Promise<{ name: string; whatsapp: PhoneWhatsApp; hasEmail: boolean } | null> {
+): Promise<{
+  name: string
+  whatsapp: PhoneWhatsApp
+  hasEmail: boolean
+  /** Por dónde le llegará de verdad (la línea, la recepción, su permiso y el canal conectado); null: no le llega. */
+  via: "whatsapp" | "correo" | null
+  /** Quien lo recibe no es el paciente (su madre, quien habla por él). */
+  forOther: boolean
+} | null> {
   const contactId = await preferredContact(tx, orgId, patientId)
   if (!contactId) return null
   const [person] = await tx
-    .select({ name: contact.displayName, givenNames: contact.givenNames, email: contact.email })
+    .select({ name: contact.displayName, email: contact.email, relationship: patientContact.relationship })
     .from(contact)
+    .leftJoin(
+      patientContact,
+      and(
+        eq(patientContact.contactId, contact.id),
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+      ),
+    )
     .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
     .limit(1)
   if (!person) return null
   return {
-    name: person.givenNames?.trim().split(/\s+/)[0] || person.name,
+    // El nombre entero: con el nombre de pila, el niño y su madre «QA» se confundían (QA del 10 nov, M3).
+    name: person.name,
     whatsapp: await phoneWhatsAppState(tx, orgId, contactId),
     hasEmail: !!person.email?.trim(),
+    // La misma regla con que salen (`appointmentRemindersVia`): no se promete un correo que la clínica no envía.
+    via: await appointmentRemindersVia(tx, orgId, contactId, patientId),
+    forOther: !!person.relationship && person.relationship !== "self",
   }
 }
 
