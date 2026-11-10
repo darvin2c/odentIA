@@ -37,6 +37,8 @@ export function FinalizedFreedAppointments({
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
   const [done, setDone] = useState<Record<string, "usada" | "liberada">>({})
+  // Lo que se le puso a cada cita: después de usarla, `next` ya no lo ofrece.
+  const [usedFor, setUsedFor] = useState<Record<string, string>>({})
   if (appointments.length === 0) return null
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(
     new Date(),
@@ -58,6 +60,7 @@ export function FinalizedFreedAppointments({
           body: JSON.stringify({ status: "cancelada", cancelReason: "clinica" }),
         })
       setDone((current) => ({ ...current, [appointment.id]: how }))
+      if (how === "usada" && next) setUsedFor((current) => ({ ...current, [appointment.id]: next.title }))
       onChanged(appointment.id, how)
       void invalidateAppointmentQueries(queryClient)
     } catch (cause) {
@@ -77,14 +80,14 @@ export function FinalizedFreedAppointments({
             {state ? (
               <p role="status">
                 {state === "usada"
-                  ? `Su cita ${when}${withWhom} ahora es para ${next?.title ?? "lo que sigue"}.`
+                  ? `Su cita ${when}${withWhom} ahora es para ${usedFor[appointment.id] ?? "lo que sigue"}.`
                   : `Su cita ${when}${withWhom} quedó liberada.`}
               </p>
             ) : (
               <>
                 <p>
                   Su cita {when}
-                  {withWhom} era para {appointment.wasFor}, que hoy quedó hecho.
+                  {withWhom} era para {appointment.wasFor}, que hoy se terminó.
                 </p>
                 {canBook ? (
                   <div className="flex flex-wrap gap-2">

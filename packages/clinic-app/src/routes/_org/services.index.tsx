@@ -2225,7 +2225,8 @@ function ServiceFollowUpFields({
           >
             Agregar control
           </Button>
-          {own && offer ? (
+          {/* Sin nada sugerido (lo propio, latidIA), «Volver a lo sugerido» sería vaciarlo: no se ofrece. */}
+          {own && offer && (suggestedGap || suggestedControls.length > 0) ? (
             <Button
               type="button"
               variant="ghost"

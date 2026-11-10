@@ -534,7 +534,9 @@ export function ClosingNextVisit({
           <p className="text-xs text-muted-foreground">
             {/* Lo de hoy terminó (la endodoncia): su control se indica ahora, si hace falta (segunda mesa del 9 nov). */}
             {continuing.every((visit) => visit.accepted)
-              ? "Lo de hoy queda terminado: si necesita su control, indícalo también."
+              ? controls.finishing?.length
+                ? "Lo de hoy queda terminado: si además necesita otro control, indícalo también."
+                : "Lo de hoy queda terminado: si necesita su control, indícalo también."
               : "El control se indica en la sesión en que termine."}{" "}
             <Button
               type="button"
@@ -557,7 +559,7 @@ export function ClosingNextVisit({
                   ? `Sigue pendiente su ${inSentence(known.control.title)} del ${controlDaySaid(dayOf(known.control.dueAt))}: recepción lo verá.`
                   : known.control.scheduledAt
                     ? `Vuelve el ${controlDaySaid(dayOf(known.control.scheduledAt))}, con su cita.`
-                    : `Vuelve el ${controlDaySaid(dayOf(known.control.dueAt))} · Para cambiarlo, en Plan y controles.`}
+                    : `Vuelve el ${controlDaySaid(dayOf(known.control.dueAt))}.`}
           </p>
         ) : (
           <>

@@ -2251,9 +2251,11 @@ const seedOffers: Array<{
     priceDisclosure: "exacto",
     leavesFinding: { condition: "root_canal_treatment", variant: "pulpectomy" },
   },
+  // De la biblioteca, para que pida su consentimiento («Corona sobre la propia pieza», QA antes de
+  // entregar de la entrega 10); el código del país viene de su tratamiento.
   {
     code: "CORONA",
-    officialCode: "D2740",
+    templateKey: "corona-de-porcelana",
     name: "Corona cerámica",
     specialty: "protesis",
     scope: "tooth",
