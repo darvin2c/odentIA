@@ -1899,7 +1899,9 @@ export function CollectDrawer({
                                   }
                                 }}
                               >
-                                Cobrar lo pendiente
+                                {/* Con la cifra: el cajón del adelanto no decía que además debía (QA de la ficha del 10 nov, U3). */}
+                                Cobrar lo que debe:{" "}
+                                {owedByCurrency.map((row) => formatMoney(row.cents, row.code, locale)).join(" y ")}
                               </Button>
                             ) : null
                           ) : (
