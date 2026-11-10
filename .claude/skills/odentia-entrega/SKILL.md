@@ -30,6 +30,7 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 
 | Qué llega | Mesa | Lienzo | QA antes de entregar |
 |---|---|---|---|
+| Una entrega que una ronda de `odentia-qa` dejó lista (acta y lienzo aprobados) | Sin mesa: ya la tuvo. Solo se comprueba que `main` no cambió lo que el acta da por hecho | Ya está | Las voces del acta |
 | Lienzo aprobado | Completa, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está | Las cinco voces |
 | Función nueva que cambia una pantalla o un recorrido | Completa | Si hay más de una forma razonable | Las cinco voces |
 | Función pequeña dentro de un patrón que ya existe, o mover algo de lugar | Corta: quien hace la tarea (el novato en su rol) y desarrollo | No | Novato, desarrollo y diseño UX |
@@ -122,7 +123,7 @@ Corregir lo real y repetir las pruebas de lo que cambió. Lo que se decide no co
 
 ### 7. La QA antes de entregar
 
-Siempre, también en un cambio chico o interno: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 7 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado, recorre cada caso del acta y marca su criterio; el PR los lista con su resultado. Después el moderador anota cómo rindió la mesa («La mesa aprende», en `mesa.md`).
+Siempre, también en un cambio chico o interno: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 8 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado, recorre cada caso del acta y marca su criterio; el PR los lista con su resultado. Después el moderador anota cómo rindió la mesa («La mesa aprende», en `mesa.md`).
 
 Quien implementa también sigue «Implementar y comprobar» de `odentia-ux` (entrada, acción, respuesta y recuperación; escritorio y 390 px; teclado; rechazo del servidor si toca permisos), pero eso no reemplaza a las voces: quien escribió el cambio no ve lo que dio por hecho.
 

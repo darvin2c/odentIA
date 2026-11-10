@@ -5,12 +5,12 @@ description: Recorrer odentIA, latidIA y vistIA como QA, en un navegador real y 
 
 # QA de odentIA, latidIA y vistIA
 
-Una ronda recorre un área en la app. Encuentra, confirma e informa, pero no corrige: cada arreglo va después por `odentia-entrega`, porque un QA que corrige de paso mezcla cambios y deja de mirar. Las rutas parten de la raíz del repositorio.
+Una ronda recorre un área en la app. Encuentra, confirma y **deja listo para programar**: por cada cosa que hay que corregir, la solución ya revisada por las voces, sus casos con criterio y el lienzo de las pantallas que cambian. No corrige: cada arreglo va después por `odentia-entrega`, porque un QA que corrige de paso mezcla cambios y deja de mirar. Pero una ronda que solo deja la lista de problemas no sirve: obliga a otra pasada antes de poder programar. Las rutas parten de la raíz del repositorio.
 
 Se corre de dos maneras:
 
-- **Ronda**, la que pide el usuario o la periódica: un área, en local o en una demo de producción, con informe en un lienzo privado. Son los apartados 1 a 6.
-- **Antes de entregar**, la que llama `odentia-entrega` con el cambio ya hecho y antes de pedir el sí: sobre la rama, en local. Usa las mismas voces y la misma confirmación, con lo que cambia en el apartado 7.
+- **Ronda**, la que pide el usuario o la periódica: un área, en local o en una demo de producción. Termina con el informe y el paquete para programar, en un lienzo privado. Son los apartados 1 a 7.
+- **Antes de entregar**, la que llama `odentia-entrega` con el cambio ya hecho y antes de pedir el sí: sobre la rama, en local. Usa las mismas voces y la misma confirmación, con lo que cambia en el apartado 8.
 
 Las voces y su método están en `references/voces.md`. Cómo se las convoca y se las conduce está en `references/mesa.md`: una ronda es la mesa sobre un área, sin cambio, y por eso también responde a «lanza la mesa sobre…». La voz clínica supervisa cada proceso con los catálogos `references/clinica/odontologia.md` (odentIA), `references/clinica/medicina.md` (latidIA), `references/clinica/optica.md` (vistIA) y `references/clinica/comunes.md` (lo que rodea a la atención en todos), y en cada revisión busca los flujos que los catálogos todavía no tienen.
 
@@ -78,7 +78,20 @@ Las voces se equivocan con seguridad, y una lista con falsas alarmas se deja de 
 4. Probarlo en el otro producto, si el código es común.
 5. Buscar si ya existe entre los issues abiertos.
 
-## 5. Informar
+## 5. Dejar listo para programar
+
+La ronda no termina al confirmar. Con lo confirmado, el moderador arma las entregas y las deja listas, siguiendo `references/mesa.md` desde «La propuesta»:
+
+1. **Agrupar en entregas.** Por causa raíz, no por hallazgo: lo que sale de la misma causa se corrige junto. Cada entrega es un PR que se puede unir solo. Entran los errores altos, los de seguridad y las causas raíz, y las mejoras de diseño UX que valgan lo que cuestan. Los medios y bajos sueltos se suman a la entrega de su causa o quedan en la lista, con el motivo. Se dice el orden y por qué.
+2. **La propuesta de cada entrega.** Qué se hace, en palabras de la persona, con lo que el confirmador encontró en el código. Si cambia una pantalla o un recorrido, diseño UX la arma con los pasos contados.
+3. **La segunda vuelta.** Desarrollo, el auditor y un novato nuevo recorren los casos con la propuesta puesta, y clínica si toca lo clínico. Aquí aparece lo que la propuesta rompe, lo que le falta y lo que es más grande de lo que parecía. Lo que resulte grande se separa en su propia entrega, y se dice.
+4. **El acta de cada entrega**, con el formato de `mesa.md`: lo que cambia, los casos con su criterio, el mismo dato en qué lugares, «En la Ayuda», lo que queda fuera y, si hay, lo que pide migración o un paso en producción.
+5. **El lienzo.** Si una entrega cambia una pantalla o un recorrido, sus tableros llevan el antes (captura real) y el después de cada pantalla, con la skill `odentia-ux`. No es opcional: el usuario decide viendo la pantalla, no leyéndola. Una entrega que no cambia nada visible no lleva tableros de pantalla.
+6. **Las decisiones.** Lo que depende del producto se le pregunta al usuario una vez, todo junto, cada cosa con su recomendación. Con su respuesta, las actas quedan cerradas.
+
+Con eso, `odentia-entrega` empieza a programar sin otra mesa: recibe el acta y el lienzo ya aprobados. Si la ronda no alcanzó a dejar lista una entrega, lo dice con lo que falta; no la presenta como lista.
+
+## 6. Informar
 
 Nada se hace público hasta que el usuario decida. Un error clínico también da pistas a quien lo lea, y quien clasifica qué es delicado es un agente que puede equivocarse.
 
@@ -93,21 +106,22 @@ Nada se hace público hasta que el usuario decida. Un error clínico también da
 - **Errores de la demo**, con su causa en la semilla.
 - **Descartadas**, para no volver a reportarlas: solo las falsas alarmas y lo que es a propósito y está bien, cada una con su motivo.
 - **Propuestas de diseño UX**, con el antes y el después en pasos y saltos. No se reproducen, pero se confirma que el permiso y el servicio que suponen existen.
+- **Listo para programar:** un grupo de tableros por entrega, en el orden en que se harían: el acta, el antes y el después de cada pantalla que cambia, y las decisiones que esperan, numeradas y con su recomendación. Es lo primero que ve el usuario después del resumen.
 - **Para el catálogo:** los procesos y comprobaciones clínicas que la ronda encontró y el catálogo no tiene, con el texto listo para sumarlo. Igual para el catálogo de cada una de las otras voces (`references/catalogos/`): flujos, comprobaciones y medidas nuevas, y lo que se le escapó a cada una.
 
 **`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, procesos clínicos por estado, cuántos solo vio la pantalla, tropiezos del entorno y, por voz, modelo, esfuerzo, tokens y hallazgos confirmados. Lleva también lo que pide «La mesa aprende» de `references/mesa.md`. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
 
-El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Nombra cada decisión que produce un problema y cómo debería ser. Lista qué sigue para corregir y qué candidatos a issue hay. Cierra con las decisiones que esperan del usuario, cada una como pregunta y con la opción sugerida. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
+El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Nombra cada decisión que produce un problema y cómo debería ser. Dice qué entregas quedaron listas para programar, en qué orden y qué resuelve cada una, y cuáles no se alcanzaron a dejar listas. Lista qué candidatos a issue hay. Cierra con las decisiones que esperan del usuario, cada una como pregunta y con la opción sugerida: con su respuesta se puede empezar a programar. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
 
 **Issue, solo con el sí:** uno por cada hallazgo aprobado, con las etiquetas `qa`, `bug` o `enhancement`, y su `área: …`. Lleva el texto del informe, sin capturas ni datos de personas, porque es público.
 
-## 6. Cerrar
+## 7. Cerrar
 
 Lo de «Para el catálogo» no se escribe en el repositorio durante la ronda: queda en el informe y lo suma la próxima entrega que toque esa área, o un PR propio si el usuario lo pide. Así el catálogo crece con cada ronda sin que la ronda cambie nada.
 
 Si la ronda creó una demo en producción, la elimina desde la administración (solo borra demos: ADR 0096, «Borrar demo») y después verifica que la eliminación sea completa: que la demo ya no aparece en la lista, que su dirección no abre y que su fila en `admin.saas_demo` ya no existe. Si la verificación falla, se informa tal cual, sin dar la ronda por cerrada. Cerrar las páginas del navegador que abrió la ronda. Si se encendió algo en local, apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben (`routeTree.gen.ts`). Los contenedores de otras sesiones no se tocan.
 
-## 7. Antes de entregar
+## 8. Antes de entregar
 
 Cuando la llama `odentia-entrega` (su etapa 7), con el cambio ya implementado, probado y revisado. Su trabajo es ver el cambio en la pantalla real, como lo usará la gente, antes de pedir el sí. Corre siempre, también en un cambio chico. Respecto de la ronda, cambia esto:
 
