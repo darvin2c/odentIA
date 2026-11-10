@@ -21,6 +21,7 @@ import { notePayable } from "./expense-payable.js"
 import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, receivePurchaseOrder } from "./inventory.js"
 import { defaultWarehouse } from "./inventory-stock.js"
 import { getOrgLocale } from "./locale.js"
+import { expenseReceiptTypes } from "@odentia/clinical"
 import { listPaymentMethods } from "./payment-methods.js"
 import { createPromotion } from "./promotions.js"
 import { addMonths, currentMonthIn, monthStart } from "./report-periods.js"
@@ -112,7 +113,9 @@ function localDay(date: Date, timezone: string): string {
 
 export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) {
   const { orgId, ownerUserId } = seed
-  const { timezone, currency, locale } = await getOrgLocale(tx, orgId)
+  const { timezone, currency, locale, countryCode } = await getOrgLocale(tx, orgId)
+  // La factura del país de la clínica: la de SUNAT en el Perú, la factura sin código en otro país.
+  const invoiceType = expenseReceiptTypes(countryCode).find((type) => type.asksTaxId)?.code ?? null
   const input = await readHistory(tx, seed, timezone)
   if (input.branches.length === 0 || input.professionals.length === 0) return { settlements: 0, orders: 0, budgets: 0 }
   const random = generator(20_261_103)
@@ -373,7 +376,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
         // Lo chico sale de la caja; lo demás, por transferencia, con su número de operación.
         paymentMethodId: (payment.fromCash ? cashMethod : transfer)?.id ?? null,
         ...(payment.fromCash ? {} : { paymentReference: String(400_000 + (payment.cents % 99_991)) }),
-        ...(payment.receipt?.startsWith("F") ? { receiptType: "01" } : {}),
+        ...(payment.receipt?.startsWith("F") && invoiceType ? { receiptType: invoiceType } : {}),
         receiptKind: payment.receipt?.startsWith("F") ? "Factura" : "Recibo",
         receiptNumber: payment.receipt ?? null,
       })
@@ -590,7 +593,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     branchId: main.id,
     category: "Laboratorio",
     ...lab,
-    receiptType: "01",
+    ...(invoiceType ? { receiptType: invoiceType } : {}),
     receiptNumber: "E001-512",
     issuedOn: dayOf(ago(2)),
     dueOn: endOfMonth >= dayOf(ago(2)) ? endOfMonth : null,
@@ -602,7 +605,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     branchId: main.id,
     category: "Laboratorio",
     ...lab,
-    receiptType: "01",
+    ...(invoiceType ? { receiptType: invoiceType } : {}),
     receiptNumber: "E001-498",
     issuedOn: dayOf(ago(20)),
     dueOn: dayOf(ago(5)),
@@ -623,7 +626,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       spentAt: ago(3, 16).toISOString(),
       paymentMethodId: transfer?.id ?? null,
       paymentReference: "771390",
-      receiptType: "01",
+      ...(invoiceType ? { receiptType: invoiceType } : {}),
       receiptNumber: "E001-498",
       ...lab,
     },
