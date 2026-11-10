@@ -1122,7 +1122,10 @@ export function CollectDrawer({
   useEffect(() => {
     if (!open || payerDefaulted.current || !payerByDefault) return
     payerDefaulted.current = true
-    if (!form.getFieldValue("payerContactId")) form.setFieldValue("payerContactId", payerByDefault)
+    // Sin tocar su estado: un valor por defecto no es un cambio, y cerrar no debe preguntar
+    // «¿Salir sin guardar?» (e2e de caja, ficha por rol).
+    if (!form.getFieldValue("payerContactId"))
+      form.setFieldValue("payerContactId", payerByDefault, { dontUpdateMeta: true })
   }, [open, payerByDefault, form])
 
   /** Promociones vigentes que incluyen el servicio del concepto, en la moneda de la clínica. */
