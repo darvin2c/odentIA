@@ -74,6 +74,7 @@ import {
   pathCountWord,
   usePlacePath,
 } from "./plan/plan-paths"
+import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
 
 const QUADRANT_LABELS: Record<string, string> = {
@@ -245,6 +246,7 @@ export function EncounterPlanPanel({
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
   const [changing, setChanging] = useState<string | null>(null)
+  const [revising, setRevising] = useState<PlanItem | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ itemId: string; message: string } | null>(null)
   const queryClient = useQueryClient()
@@ -321,9 +323,25 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
-  /** Las acciones de un renglón indicado hoy, mientras se pueda corregir. */
+  /**
+   * Las acciones de un renglón indicado hoy, mientras se pueda corregir. Lo ya respondido y abierto
+   * se cambia aquí mismo con la misma revisión de la ficha («Revisar indicación»), con su motivo
+   * (QA del 10 nov, M8): antes había que salir a la ficha.
+   */
   const rowActions = (item: PlanItem) =>
-    canWrite && !disabled && removableIds.has(item.id) ? (
+    canWrite && !disabled && !removableIds.has(item.id) && item.decisionStatus === "aceptado" &&
+    ["pendiente", "programado", "en_curso", "suspendido"].includes(item.status) ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-label={`Cambiar ${item.title}`}
+        disabled={removing !== null || switching !== null}
+        onClick={() => setRevising(item)}
+      >
+        Cambiar
+      </Button>
+    ) : canWrite && !disabled && removableIds.has(item.id) ? (
       <span className="flex gap-1">
         <Button
           type="button"
@@ -504,6 +522,21 @@ export function EncounterPlanPanel({
 
   return (
     <div className="flex flex-col gap-4">
+      {revising ? (
+        <ReviseDrawer
+          key={revising.id}
+          open
+          patientId={patientId}
+          itemId={revising.id}
+          encounterId={encounterId}
+          initialTooth={revising.toothNumber ?? null}
+          onClose={() => setRevising(null)}
+          onDone={() => {
+            setRevising(null)
+            void refreshPlan()
+          }}
+        />
+      ) : null}
       <BlockPart title="Lo que sigue por hacer">
         {itemsQuery.isPending || plansQuery.isPending ? (
           <LoadingState message="Cargando el plan…" />
