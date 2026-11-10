@@ -149,6 +149,17 @@ describe("textos de «Te espera»", () => {
       detail: "Desde el registro en línea hace 20 min",
       action: "Revisar",
     })
+    // Lo que escribió quedó guardado para decidir: por qué se parece y cuántos datos son distintos.
+    expect(waitingText({ ...held, held: true, match: "documento", differences: 3 }, context)).toEqual({
+      title: "Rosa Ochoa",
+      ask: "Se registró en línea: ¿es la misma persona? · 3 datos distintos",
+      detail: "Mismo documento · hace 20 min",
+      action: "Revisar",
+    })
+    expect(waitingText({ ...held, held: true, match: "celular", differences: 0 }, context)).toMatchObject({
+      ask: "Se registró en línea: ¿es la misma persona? · escribió lo mismo",
+      detail: "Mismo celular · hace 20 min",
+    })
     // El registro de un menor nombró como representante a alguien que ya estaba.
     const representative: WaitingRow = { ...duplicate, id: "t4", source: "representante", personId: "c2", personName: "Rosa Ochoa", patientName: "Sofía Ochoa", detail: "" }
     expect(waitingText(representative, context)).toMatchObject({ title: "Rosa Ochoa", ask: "¿Es representante de Sofía Ochoa?" })

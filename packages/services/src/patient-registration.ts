@@ -1,11 +1,11 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import {
   clinicalProfileFor,
+  composeDisplayName,
   DEFAULT_REGISTRATION_CONFIG,
   DOC_TYPES,
   demographicsSchema,
   documentIssuerCountry,
-  documentText,
   identityDocumentError,
   isMinor,
   isRealDate,
@@ -45,7 +45,7 @@ import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, eq, inArray, isNotNull, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
-import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
+import { addDeclaredAllergies, getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import {
   claimWhatsAppNumber,
   hasWhatsappNumber,
@@ -68,6 +68,7 @@ import { consentStatusOf } from "./message-permission.js"
 import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import {
   createPatient,
+  heldByDocument,
   type PatientRow,
   patientOrganizationToday,
   REGISTRATION_NOT_COMPLETED_TEXT,
@@ -79,11 +80,20 @@ import {
 import {
   createPerson,
   findPersonByDocument,
+  findRealPersonByDocument,
   setPersonArchived,
   updatePersonIdentity,
 } from "./people.js"
 import { grantResponsibility, isMinorOn } from "./responsibilities.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
+import {
+  type HoldGroup,
+  type RegistrationHoldRow,
+  registrationHoldPatch,
+  registrationHoldRevision,
+  registrationHoldRows,
+  replacedWords,
+} from "./registration-hold.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
 const UUID_RE =
@@ -1053,6 +1063,22 @@ export async function registerPatient(
     answers,
     privacyNotice: config.privacyNotice || null,
   }
+  const docType = demographics.docType || null
+  const documentOf = {
+    docType,
+    docNumber: demographics.docNumber || null,
+    docCountry: documentIssuerCountry(clinicalProfileFor(countryCode), docType, demographics.docCountry),
+  }
+  // Desde fuera, el documento manda sobre el celular: es lo que identifica a
+  // una persona. Si ya es de alguien, recepción decide con esa persona a la vista.
+  if (publicContext && !hasToken && documentOf.docNumber) {
+    const owner = await findRealPersonByDocument(tx, orgId, documentOf)
+    if (owner) {
+      const held = await heldByDocument(tx, orgId, owner, demographics)
+      held.hold.answers = answers
+      throw held
+    }
+  }
   // El registro en línea sin enlace (el código QR general): si es para sí misma
   // y escribió el celular de alguien que ya está, no se crea a nadie: queda
   // para que recepción decida si es la misma persona (nunca por el nombre).
@@ -1070,28 +1096,28 @@ export async function registerPatient(
     }
   }
   let created: PatientRow
+  const patientInput = {
+    ...demographics,
+    ...(isPublic ? {} : { registeredBranchId: input.registeredBranchId ?? null }),
+    ...(links.length ? { contacts: links } : {}),
+  }
   try {
-    created = await createPatient(
-      tx,
-      orgId,
-      actorUserId,
-      {
-        ...demographics,
-        ...(isPublic ? {} : { registeredBranchId: input.registeredBranchId ?? null }),
-        ...(links.length ? { contacts: links } : {}),
-      },
-      provenance,
-    )
+    // Desde fuera, en su punto de guardado: si choca al guardar, la transacción
+    // sigue viva para dejarle a recepción lo que escribió.
+    created = isPublic
+      ? await tx.transaction((inner) => createPatient(inner, orgId, actorUserId, patientInput, provenance))
+      : await createPatient(tx, orgId, actorUserId, patientInput, provenance)
   } catch (e) {
+    if (isPublic && e instanceof ServiceError && e.code === "DUPLICATE_DOCUMENT") {
+      // Chocó con el documento de alguien (lo guardaron a la vez): nunca se
+      // pierde en silencio, queda para recepción como cualquier coincidencia.
+      const owner = await findRealPersonByDocument(tx, orgId, documentOf)
+      if (!owner) throw notCompleted()
+      e = await heldByDocument(tx, orgId, owner, demographics)
+    }
+    if (isPublic && e instanceof ServiceError && e.code === "ALREADY_PATIENT") throw notCompleted()
     // Con sus respuestas, para que recepción decida con ellas.
     if (e instanceof RegistrationHeld && isPublic) e.hold.answers = answers
-    if (
-      isPublic &&
-      e instanceof ServiceError &&
-      (e.code === "DUPLICATE_DOCUMENT" || e.code === "ALREADY_PATIENT")
-    ) {
-      throw notCompleted()
-    }
     throw e
   }
 
@@ -1456,6 +1482,8 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
       ),
     )
     .limit(1)
+    // Si recepción la está decidiendo, se espera: lo nuevo no queda colgado de una tarea ya cerrada.
+    .for("update")
   const [usedToday] = open
     ? []
     : await tx
@@ -1481,7 +1509,7 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
   await tx.insert(registrationHold).values({ organizationId: orgId, taskId: task.id, match: hold.match, answers: hold.answers })
 }
 
-/** Quien ya está en la clínica con ese celular (su teléfono o su WhatsApp), o nulo. */
+/** Quien ya está en la clínica con ese celular (su teléfono o su WhatsApp), o nulo. Una persona de prueba no es nadie. */
 async function personByPhone(
   tx: Db,
   orgId: string,
@@ -1493,7 +1521,7 @@ async function personByPhone(
     select * from (select c.id, c.display_name as "displayName", c.created_at,
       (select p.id from patient p where p.organization_id = c.organization_id and p.person_id = c.id) as "patientId"
     from contact c
-    where c.organization_id = ${orgId} and c.is_active
+    where c.organization_id = ${orgId} and c.is_active and not c.is_test
       and (regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g') = ${digits}
         or exists (select 1 from contact_identity i where i.organization_id = c.organization_id and i.contact_id = c.id
           and i.channel = 'whatsapp' and regexp_replace(i.external_user_id, '[^0-9]', '', 'g') = ${digits}))) found
@@ -1502,7 +1530,7 @@ async function personByPhone(
   return rows[0] ?? null
 }
 
-/** Lo que declaró de su salud, en palabras («alergias: Látex; toma: Losartán»); nulo si no dijo nada. */
+/** Lo que declaró de su salud, en palabras («enfermedades: Asma; medicamentos: Losartán»); nulo si no dijo nada. */
 function declaredHealthWords(health: NonNullable<RegistrationAnswers["health"]>): string | null {
   const parts: string[] = []
   const group = (label: string, value: { state: string; items: Array<{ substance?: string; name?: string }> } | undefined) => {
@@ -1515,16 +1543,8 @@ function declaredHealthWords(health: NonNullable<RegistrationAnswers["health"]>)
   return parts.length ? parts.join("; ") : null
 }
 
-/** Una fila de «¿Es la misma persona?»: lo que escribió hoy al lado de lo que ya estaba. */
-export interface RegistrationHoldRow {
-  key: "givenNames" | "familyName" | "phone" | "birthDate" | "document" | "allergies"
-  label: string
-  /** Lo que escribió (nulo si no lo escribió). */
-  declared: string | null
-  /** Lo que ya estaba (nulo si no lo tiene). */
-  saved: string | null
-  same: boolean
-}
+export type { RegistrationHoldRow } from "./registration-hold.js"
+export { HOLD_GROUPS, type HoldGroup } from "./registration-hold.js"
 
 export interface RegistrationHoldView {
   taskId: string
@@ -1533,9 +1553,18 @@ export interface RegistrationHoldView {
   ownerName: string
   ownerPatientId: string | null
   createdAt: string
+  /** El nombre con que se registró hoy. */
+  declaredName: string
+  /** Cada dato que escribió, al lado de lo que ya estaba. */
   rows: RegistrationHoldRow[]
-  /** Los apellidos no coinciden: recepción elige cuáles quedan si es la misma persona. */
-  familyNameDiffers: boolean
+  /**
+   * Lo que declaró de su salud, para que recepción sepa adónde va: solo las
+   * alergias con su nombre (son las alertas que recepción puede ver); lo demás
+   * se dice sin detalle. Nulo si no declaró nada.
+   */
+  health: { allergies: string | null; more: boolean } | null
+  /** Huella de lo que se ve: guardar la devuelve y se rechaza si algo cambió. */
+  revision: string
 }
 
 async function lockedHold(tx: Db, orgId: string, taskId: string) {
@@ -1553,49 +1582,70 @@ async function lockedHold(tx: Db, orgId: string, taskId: string) {
   return { task: row.task, hold: row.hold, answers: shape.data, ownerId: row.task.contactId }
 }
 
-/** Lo que ya tiene la persona: su ficha si es paciente, si no su persona. */
+/**
+ * Lo que ya tiene la persona: su ficha si es paciente (con su contacto de
+ * emergencia, que es una persona vinculada), si no su persona.
+ */
 async function ownerNow(tx: Db, orgId: string, ownerId: string): Promise<{ values: Record<string, unknown>; patientId: string | null }> {
   const [own] = await tx
     .select({ id: patient.id })
     .from(patient)
     .where(and(eq(patient.organizationId, orgId), eq(patient.personId, ownerId)))
     .limit(1)
-  if (own) return { values: (await requirePatient(tx, orgId, own.id)) as unknown as Record<string, unknown>, patientId: own.id }
+  if (own) {
+    const values = { ...((await requirePatient(tx, orgId, own.id)) as unknown as Record<string, unknown>) }
+    const [emergency] = await tx
+      .select({
+        name: contact.displayName,
+        phone: contact.phone,
+        kinship: patientContact.kinship,
+        isPatient: sql<boolean>`exists (select 1 from patient p where p.organization_id = ${contact.organizationId} and p.person_id = ${contact.id})`,
+      })
+      .from(patientContact)
+      .innerJoin(contact, and(eq(contact.organizationId, patientContact.organizationId), eq(contact.id, patientContact.contactId)))
+      .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, own.id), eq(patientContact.isEmergency, true)))
+      .limit(1)
+    if (emergency)
+      Object.assign(values, {
+        emergencyContactName: emergency.name,
+        emergencyContactPhone: emergency.phone,
+        emergencyContactRelationship: emergency.kinship,
+        emergencyContactIsPatient: emergency.isPatient,
+      })
+    return { values, patientId: own.id }
+  }
   const [person] = await tx.select().from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId))).limit(1)
   if (!person) throw notFound("Persona")
   return { values: person as unknown as Record<string, unknown>, patientId: null }
 }
 
 const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null)
-const sameText = (a: string | null, b: string | null) => !!a && !!b && a.localeCompare(b, "es", { sensitivity: "base" }) === 0
+
+/** Las filas de lo que escribió frente a lo que ya tiene esa persona. */
+async function holdRowsOf(tx: Db, orgId: string, ownerId: string, answers: RegistrationAnswers) {
+  const owner = await ownerNow(tx, orgId, ownerId)
+  const rows = registrationHoldRows(answers, owner.values, {
+    profile: clinicalProfileFor(await findOrgCountry(tx, orgId)),
+    today: await patientOrganizationToday(tx, orgId),
+  })
+  return { owner, rows }
+}
+
+/** Cuántos datos de lo que escribió no coinciden con lo que ya tiene: lo dice su fila de «Te espera». */
+export async function registrationHoldDifferences(tx: Db, orgId: string, ownerId: string, answers: unknown): Promise<number | null> {
+  const shape = registrationAnswersSchema.safeParse(answers)
+  if (!shape.success) return null
+  const { rows } = await holdRowsOf(tx, orgId, ownerId, shape.data)
+  return rows.filter((row) => row.state !== "same").length
+}
 
 /** «¿Es la misma persona?»: lo que escribió hoy al lado de lo que ya estaba. */
 export async function getRegistrationHold(tx: Db, orgId: string, taskId: string): Promise<RegistrationHoldView> {
   const { task, hold, answers, ownerId } = await lockedHold(tx, orgId, taskId)
-  const owner = await ownerNow(tx, orgId, ownerId)
-  const d = answers.demographics as Record<string, unknown>
-  const docOf = (values: Record<string, unknown>) =>
-    text(values.docNumber) ? documentText(String(values.docType ?? ""), String(values.docNumber)) : null
-  const allergies = answers.health?.allergies
-  const declaredAllergies =
-    allergies?.state === "recorded"
-      ? allergies.items.map((item) => item.substance).join(", ") || "Sí"
-      : allergies?.state === "none"
-        ? "No"
-        : allergies?.state === "unknown"
-          ? "No sabe"
-          : null
-  const savedHealth = owner.patientId && (await getPatientHealth(tx, orgId, owner.patientId)).revision > 0
-  const rows: RegistrationHoldRow[] = [
-    { key: "givenNames", label: "Nombres", declared: text(d.givenNames), saved: text(owner.values.givenNames), same: false },
-    { key: "familyName", label: "Apellidos", declared: text(d.familyName), saved: text(owner.values.familyName), same: false },
-    { key: "phone", label: "Celular", declared: text(d.phone), saved: text(owner.values.phone), same: false },
-    { key: "birthDate", label: "Nacimiento", declared: text(d.birthDate), saved: text(owner.values.birthDate), same: false },
-    { key: "document", label: "Documento", declared: docOf(d), saved: docOf(owner.values), same: false },
-    { key: "allergies", label: "Alergias", declared: declaredAllergies, saved: savedHealth ? "Su salud ya está en su ficha" : null, same: false },
-  ]
-  for (const row of rows) row.same = sameText(row.declared, row.saved)
-  const family = rows[1]!
+  const { owner, rows } = await holdRowsOf(tx, orgId, ownerId, answers)
+  const health = answers.health
+  const allergies = health?.allergies?.state === "recorded" ? health.allergies.items.map((item) => item.substance).join(", ") : null
+  const more = !!health && !!declaredHealthWords({ ...health, allergies: undefined })
   return {
     taskId: task.id,
     match: hold.match as RegistrationHoldView["match"],
@@ -1603,66 +1653,80 @@ export async function getRegistrationHold(tx: Db, orgId: string, taskId: string)
     ownerName: text(owner.values.displayName) ?? "",
     ownerPatientId: owner.patientId,
     createdAt: hold.createdAt.toISOString(),
+    declaredName: text(answers.demographics.displayName) ?? "",
     rows,
-    familyNameDiffers: !!family.declared && !!family.saved && !family.same,
+    health: allergies || more ? { allergies, more } : null,
+    revision: registrationHoldRevision(hold.id, rows),
   }
 }
 
 /**
- * Lo que decide recepción en «¿Es la misma persona?». Si es la misma, su ficha
- * se completa con lo que faltaba (nada se borra; si los apellidos no
- * coinciden, quedan los que elige) y queda como paciente; si es otra, se
- * registra como nueva con lo que escribió (sin el documento, si era el de la
- * otra persona). Lo que escribió se borra al decidir.
+ * Lo que decide recepción en «¿Es la misma persona?», como quien acepta
+ * cambios: si es la misma, se guarda en su ficha solo lo que marcó (`apply`),
+ * lo que había antes queda en una nota de su persona y, si aún no era
+ * paciente, queda como paciente en su misma persona. El documento nunca se
+ * cambia desde aquí. Si es otra, se registra como nueva con lo que escribió
+ * (sin el documento, si era el de la otra persona). Lo que escribió se borra al
+ * decidir. `revision` es lo que tenía a la vista: si cambió, no se guarda nada.
  */
 export async function resolveRegistrationHold(
   tx: Db,
   orgId: string,
   actorUserId: string,
   taskId: string,
-  input: { same: boolean; familyName?: "saved" | "declared" },
-): Promise<{ patientId: string; personId: string }> {
+  input: { same: boolean; apply?: readonly HoldGroup[]; revision: string },
+): Promise<{ patientId: string; personId: string; applied: number }> {
   const { task, hold, answers, ownerId } = await lockedHold(tx, orgId, taskId)
   const declared = answers.demographics as Record<string, unknown>
+  // La persona no cambia entre lo que se compara y lo que se guarda.
+  await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId))).for("update")
+  const { owner, rows } = await holdRowsOf(tx, orgId, ownerId, answers)
+  if (input.revision !== registrationHoldRevision(hold.id, rows))
+    throw conflict("HOLD_CHANGED", "Algo cambió mientras lo revisabas: míralo de nuevo antes de guardar")
+  const savable = new Set(rows.filter((row) => row.key !== "document" && row.state !== "same" && !row.blocked).map((row) => row.key))
+  const apply = input.same ? [...new Set(input.apply ?? [])] : []
+  if (apply.some((key) => !savable.has(key))) throw validation("Ese dato no se puede guardar desde aquí")
   let patientId: string
   if (input.same) {
-    const owner = await ownerNow(tx, orgId, ownerId)
-    // Solo lo vacío; los apellidos, los que elige recepción.
-    const fill: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(declared)) {
-      if (key === "displayName" || value === null || value === undefined || value === "") continue
-      // El contacto de emergencia es una persona vinculada: en una ficha que ya existe se revisa en ella, no se declara otro.
-      if (owner.patientId && key.startsWith("emergencyContact")) continue
-      if (text(owner.values[key]) === null && owner.values[key] == null) fill[key] = value
-    }
-    if (input.familyName === "declared" && text(declared.familyName)) fill.familyName = declared.familyName
-    // Un nombre a medias (ADR 0130) no se completa con el de otro: va entero el que escribió, sin armar uno que nadie dio.
-    const halfName = !text(owner.values.givenNames) !== !text(owner.values.familyName)
-    if (halfName && input.familyName !== "saved" && text(declared.givenNames) && text(declared.familyName)) {
-      fill.givenNames = declared.givenNames
-      fill.familyName = declared.familyName
-    }
+    const patch = registrationHoldPatch(answers, apply)
+    // Es ella y estaba archivada: vuelve, como quien escribe estando archivada.
+    if (owner.values.isActive === false) await setPersonArchived(tx, orgId, { userId: actorUserId }, ownerId, false)
     if (owner.patientId) {
-      if (Object.keys(fill).length > 0) await updatePatient(tx, orgId, actorUserId, owner.patientId, fill)
+      if (apply.length > 0) await updatePatient(tx, orgId, actorUserId, owner.patientId, patch)
       patientId = owner.patientId
     } else {
-      // Aún no era paciente: queda como paciente en su misma persona, con lo que ya tenía más lo que faltaba.
+      // Aún no era paciente: queda como paciente en su misma persona, con lo que ya tenía más lo marcado.
       const kept = Object.fromEntries(
-        Object.entries(owner.values).filter(([key, value]) => key in declared && value !== null && value !== undefined && value !== ""),
+        Object.keys(demographicsSchema.shape)
+          .filter((key) => key !== "displayName" && owner.values[key] !== null && owner.values[key] !== undefined && owner.values[key] !== "")
+          .map((key) => [key, owner.values[key]]),
       )
+      const merged: Record<string, unknown> = { ...kept, ...patch }
       const created = await createPatient(tx, orgId, actorUserId, {
-        ...(declared as unknown as Parameters<typeof createPatient>[3]),
-        ...kept,
-        ...fill,
-        displayName: text(owner.values.displayName) ?? String(declared.displayName ?? ""),
+        ...(merged as Omit<Parameters<typeof createPatient>[3], "displayName">),
+        displayName:
+          composeDisplayName({ givenNames: text(merged.givenNames), familyName: text(merged.familyName) }) ||
+          (text(owner.values.displayName) ?? String(declared.displayName ?? "")),
         contacts: [{ contactId: ownerId, relationship: "self", isPreferred: true }],
       })
       patientId = created.id
     }
+    // Lo que había antes no se pierde: queda dicho en su persona.
+    const before = replacedWords(rows, apply)
+    if (before) await createContactNote(tx, orgId, ownerId, { body: `Guardado desde su registro en línea: ${before}.` }, { userId: actorUserId })
   } else {
-    // Otra persona: se registra con lo que escribió; el documento era de la otra, no se guarda.
+    // Otra persona: se registra con lo que escribió. Un documento que ya es de
+    // alguien (la de esta revisión u otra) no se guarda: nunca adopta a un tercero.
     const own = { ...declared }
-    if (hold.match === "documento") {
+    const docType = text(declared.docType)
+    const documentOwner = text(declared.docNumber)
+      ? await findRealPersonByDocument(tx, orgId, {
+          docType,
+          docNumber: text(declared.docNumber),
+          docCountry: documentIssuerCountry(clinicalProfileFor(await findOrgCountry(tx, orgId)), docType, text(declared.docCountry)),
+        })
+      : null
+    if (hold.match === "documento" || documentOwner) {
       delete own.docType
       delete own.docNumber
       delete own.docCountry
@@ -1670,40 +1734,56 @@ export async function resolveRegistrationHold(
     const created = await createPatient(tx, orgId, actorUserId, own as unknown as Parameters<typeof createPatient>[3])
     patientId = created.id
   }
-  // Su salud entra como declarada, solo si nadie la registró antes; si ya estaba,
-  // lo que declaró queda en una nota de su persona para revisarlo en sus antecedentes.
+  // Su salud entra como declarada, solo si nadie la registró antes. Si ya
+  // estaba, sus alergias se suman a Antecedentes sin confirmar (la receta
+  // avisa) y lo demás queda en una nota para revisarlo en sus antecedentes.
+  const personRow = await requirePatient(tx, orgId, patientId)
+  const personId = (personRow as unknown as { personId?: string }).personId ?? ownerId
   if (answers.health && (await getPatientHealth(tx, orgId, patientId)).revision === 0) {
     await initializeDeclaredPatientHealth(tx, orgId, patientId, answers.health, actorUserId)
   } else if (answers.health) {
-    const said = declaredHealthWords(answers.health)
-    const person = (await requirePatient(tx, orgId, patientId)) as unknown as { personId?: string }
-    if (said && person.personId) {
+    const allergies = answers.health.allergies?.state === "recorded" ? answers.health.allergies.items : []
+    await addDeclaredAllergies(
+      tx,
+      orgId,
+      actorUserId,
+      patientId,
+      allergies.map((item) => ({ substance: item.substance, reaction: item.reaction ?? null })),
+      { entity: "registration_hold", entityId: hold.id },
+    )
+    // Lo demás de su salud no va con detalle a las notas de su persona: las lee
+    // quien no ve la historia clínica. Queda dicho que hay algo que preguntarle.
+    if (declaredHealthWords({ ...answers.health, allergies: undefined })) {
       await createContactNote(
         tx,
         orgId,
-        person.personId,
-        { body: `Declaró por el código QR: ${said}. Su salud ya estaba en su ficha: revísalo en sus antecedentes.` },
+        personId,
+        { body: "Declaró en su registro en línea otros datos de su salud (enfermedades, medicamentos u otros): que el profesional se los pregunte en su próxima atención y actualice sus antecedentes." },
         { userId: actorUserId },
       )
     }
   }
-  const personRow = await requirePatient(tx, orgId, patientId)
   await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.id, hold.id)))
   await settleTask(
     tx,
     orgId,
     task.id,
-    input.same ? "Era la misma persona: se completó su ficha" : "Era otra persona: se registró como nueva",
+    input.same
+      ? apply.length > 0
+        ? "Era la misma persona: se guardaron los cambios marcados"
+        : "Era la misma persona: no se cambió ningún dato"
+      : "Era otra persona: se registró como nueva",
   )
+  // Qué se guardó y qué no, por su nombre: los valores quedan en la nota, no en la auditoría.
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
     action: "registration_hold.resolved",
     entity: "patient",
     entityId: patientId,
-    metadata: { same: input.same, match: hold.match },
+    metadata: { same: input.same, match: hold.match, applied: apply, notApplied: [...savable].filter((key) => !apply.includes(key as HoldGroup)) },
   })
-  return { patientId, personId: (personRow as unknown as { personId?: string }).personId ?? ownerId }
+  return { patientId, personId, applied: apply.length }
 }
 
 /** Motivo con que queda cerrada cada fila del registro en línea al descartarla. */
@@ -1715,14 +1795,17 @@ const DISCARD_REASON = {
 /**
  * Descarta en «Te espera» lo que dejó un registro en línea: «No es representante» en
  * «¿… es representante de …?» (no se vincula a nadie) o «Descartar» en
- * «Alguien se registró con el documento de…». La tarea queda cerrada con su
- * motivo, a nombre de quien la descarta; no cambia nada de las personas.
+ * «¿Es la misma persona?». La tarea queda cerrada con su motivo, a nombre de
+ * quien la descarta; no cambia nada de las personas. Lo que escribió quien se
+ * registró se borra con ella, y descartarlo es de quien puede guardarlo
+ * (`patients.write`): es la misma decisión.
  */
 export async function discardRegistrationTask(
   tx: Db,
   orgId: string,
   actorUserId: string,
   taskId: string,
+  options: { editsPeople: boolean } = { editsPeople: false },
 ): Promise<{ id: string }> {
   const [task] = await tx
     .select({ id: crmTask.id, kind: crmTask.kind, status: crmTask.status })
@@ -1737,6 +1820,10 @@ export async function discardRegistrationTask(
     .for("update")
   if (!task) throw notFound("Pendiente del registro en línea")
   if (task.status !== "open") throw conflict("ALREADY_REVIEWED", "Esto ya se revisó")
+  if (task.kind === "registro_con_documento") {
+    if (!options.editsPeople) throw new ServiceError("FORBIDDEN", 403, "Revisar un registro es de quien edita los datos de las personas")
+    await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.taskId, task.id)))
+  }
   await discardTask(tx, orgId, task.id, {
     userId: actorUserId,
     reason: DISCARD_REASON[task.kind as keyof typeof DISCARD_REASON],
