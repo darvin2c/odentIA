@@ -2893,11 +2893,14 @@ export function EncounterEditor({
             })()}
             canBook={canBook}
             // Su Plan, «Qué sigue» y sus citas cambian: lo de esta persona se vuelve a leer.
-            onChanged={() =>
-              void queryClient.invalidateQueries({
-                predicate: (query) => query.queryKey.includes(patientId),
-              })
-            }
+            onChanged={(_, how) => {
+              // Lo que ya va en esa cita no se ofrece otra vez (revisión antes de entregar).
+              if (how === "usada") {
+                const used = finalizedNext.find((session) => session.toBook && !session.booked)?.planItemId
+                if (used) setFinalizedNext((current) => current.filter((session) => session.planItemId !== used))
+              }
+              void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes(patientId) })
+            }}
           />
           {finalizedNext.length > 0 ? (
             <FinalizedNextSessions

@@ -383,11 +383,11 @@ function ClosingControlsLeft({
               </div>
               {editing ? (
                 <div className="flex flex-col gap-1">
-                  <label htmlFor={`${ids}-${control.afterDays}`} className="text-xs text-muted-foreground">
+                  <label htmlFor={`${ids}-${control.key.replace(/[^\w-]/g, "_")}`} className="text-xs text-muted-foreground">
                     Día del control
                   </label>
                   <DatePickerButton
-                    id={`${ids}-${control.afterDays}`}
+                    id={`${ids}-${control.key.replace(/[^\w-]/g, "_")}`}
                     className="w-56"
                     min={tomorrow}
                     openAt={day}

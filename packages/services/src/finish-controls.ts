@@ -16,7 +16,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, notInArray, sql } from "drizzle-orm"
 import { zonedTimeToUtc } from "./availability.js"
 import { findOrgLocale } from "./locale.js"
 import { productHooks } from "./products.js"
@@ -404,6 +404,31 @@ export async function applyFinishingControlChanges(
     if (!target) continue
     if ("remove" in change) {
       const at = new Date()
+      // Si el control lleva también tratamientos de otra atención (uno por fecha), sale solo lo de
+      // esta: se le quitan sus vínculos y el control sigue con los demás (revisión antes de entregar).
+      const others = await tx.execute<{ plan_item_id: string }>(sql`
+        select link.plan_item_id from clinical_follow_up_item link
+        where link.organization_id = ${orgId} and link.follow_up_id = ${target.id}
+          and not exists (select 1 from encounter_procedure today where today.organization_id = link.organization_id
+            and today.plan_item_id = link.plan_item_id and today.encounter_id = ${scope.encounterId} and today.voided_at is null)`)
+      if (others.length > 0) {
+        const keep = others.map((row) => row.plan_item_id)
+        await tx
+          .delete(clinicalFollowUpItem)
+          .where(
+            and(
+              eq(clinicalFollowUpItem.organizationId, orgId),
+              eq(clinicalFollowUpItem.followUpId, target.id),
+              notInArray(clinicalFollowUpItem.planItemId, keep),
+            ),
+          )
+        await tx
+          .update(clinicalFollowUp)
+          .set({ planItemId: keep[0]!, updatedAt: at })
+          .where(and(eq(clinicalFollowUp.organizationId, orgId), eq(clinicalFollowUp.id, target.id)))
+        await retitle(tx, orgId, target.id, base)
+        continue
+      }
       await tx
         .update(clinicalFollowUp)
         .set({

@@ -1013,13 +1013,21 @@ function followUpBody(
   value: OfferFormValues,
   offer: ServiceCatalogItem | null,
 ): { sessionGapDays?: number | null; finishControls?: FinishControl[] | null } {
-  if (value.followUpReset) return { sessionGapDays: null, finishControls: null }
-  const before = offer ? followUpValues(offer) : { sessionGapDays: "", finishControls: [] }
   const gap = value.sessionGapDays.trim() === "" ? 0 : Number(value.sessionGapDays.trim())
   const controls = value.finishControls.map((control) => ({
     afterDays: Number(control.afterDays.trim()),
     title: control.title.trim(),
   }))
+  if (value.followUpReset && offer) {
+    // Volvió a lo sugerido: si después cambió algo, vale lo que dejó escrito (revisión antes de entregar).
+    const suggested = followUpValues({ ...offer, ownSessionGapDays: null, ownFinishControls: null })
+    const same =
+      value.sessionGapDays.trim() === suggested.sessionGapDays &&
+      JSON.stringify(controls) ===
+        JSON.stringify(suggested.finishControls.map((row) => ({ afterDays: Number(row.afterDays), title: row.title })))
+    return same ? { sessionGapDays: null, finishControls: null } : { sessionGapDays: gap, finishControls: controls }
+  }
+  const before = offer ? followUpValues(offer) : { sessionGapDays: "", finishControls: [] }
   const sameControls =
     JSON.stringify(controls) ===
     JSON.stringify(
@@ -2205,12 +2213,12 @@ function ServiceFollowUpFields({
             size="sm"
             disabled={controls.length >= 6}
             onClick={() => {
+              // Un plazo libre: dos controles el mismo día serían el mismo control.
+              const taken = new Set(controls.map((row) => Number(row.afterDays)))
+              const days = [30, 90, 180, 365, 730].find((option) => !taken.has(option)) ?? 1
               form.setFieldValue("finishControls", [
                 ...controls,
-                {
-                  afterDays: "30",
-                  title: offer ? `Control de ${offer.name.toLowerCase()}` : "Control",
-                },
+                { afterDays: String(days), title: offer ? `Control de ${offer.name.toLowerCase()}` : "Control" },
               ])
               form.setFieldValue("followUpReset", false)
             }}

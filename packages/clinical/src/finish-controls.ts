@@ -40,6 +40,8 @@ export function parseFinishControls(raw: unknown): FinishControl[] {
     const title = typeof row.title === "string" ? row.title.trim().replace(/\s+/g, " ") : ""
     if (title.length < 3 || title.length > 120)
       throw new Error("Controles al terminar: cada uno con su nombre (3 a 120 letras)")
+    // « · » separa el nombre de sus piezas en el control que queda: no va en el nombre.
+    if (title.includes(" · ")) throw new Error("Controles al terminar: el nombre no lleva « · »")
     if (out.some((other) => other.afterDays === days))
       throw new Error("Controles al terminar: dos con el mismo plazo")
     out.push({ afterDays: days, title })

@@ -66,7 +66,6 @@ import {
 import { foldedWordsMatch } from "./search-text.js"
 import { attendingRule } from "./specialties.js"
 import {
-  appointmentServesControl,
   canBookAnother,
   controlWindowStart,
   sessionCountsOf,
@@ -1364,7 +1363,7 @@ export async function createAppointment(
             ),
           )
           .limit(1)
-        if (control && !appointmentServesControl(control, startsAt, zone)) {
+        if (control && localDay(startsAt, zone) < localDay(controlWindowStart(control), zone)) {
           controlsLeftOut.push({
             id: followUpId,
             title: control.title,
@@ -2211,7 +2210,7 @@ async function releaseFollowUps(
       entity: "clinical_follow_up",
       entityId: row.id,
       action: "follow_up.unscheduled",
-      metadata: { patientId: row.patientId, appointmentId, by: next === "cancelada" ? "cita_cancelada" : "no_vino" },
+      metadata: { patientId: row.patientId, appointmentId, by: next === "cancelada" ? "cita_cancelada" : next === "atendida" ? "vino" : "no_vino" },
     })
   }
 }

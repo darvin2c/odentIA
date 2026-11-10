@@ -901,6 +901,9 @@ export interface CreateServiceInput {
    * indicarlas, las de la biblioteca (o 1 si es propio).
    */
   usualSessions?: number | null
+  /** Días de espera entre sesiones y controles al terminar; sin ellos, los de la guía (ADR 0176). */
+  sessionGapDays?: number | null
+  finishControls?: FinishControl[] | null
   /** Cómo dice el precio el agente; por defecto «evaluacion». */
   priceDisclosure?: string | null
   evaluationServiceId?: string | null
@@ -964,6 +967,8 @@ export async function createService(
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
       ownUsualSessions: assertUsualSessions(input.usualSessions),
+      ownSessionGapDays: assertSessionGap(input.sessionGapDays),
+      ownFinishControls: assertFinishControls(input.finishControls),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(
         tx,
@@ -992,6 +997,8 @@ export async function createService(
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
       ownUsualSessions: assertUsualSessions(input.usualSessions),
+      ownSessionGapDays: assertSessionGap(input.sessionGapDays),
+      ownFinishControls: assertFinishControls(input.finishControls),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(
         tx,

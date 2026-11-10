@@ -390,7 +390,7 @@ async function continuingDiagnosis(
     : isNull(encounterDiagnosis.siteCode)
   /** El último diagnóstico activo, con tipo, de esa atención en el sitio del tratamiento. */
   const activeIn = async (fromEncounterId: string) => {
-    const [found] = await tx
+    const rows = await tx
       .select()
       .from(encounterDiagnosis)
       .innerJoin(
@@ -412,8 +412,9 @@ async function continuingDiagnosis(
         ),
       )
       .orderBy(desc(encounterDiagnosis.createdAt), desc(encounterDiagnosis.id))
-      .limit(1)
-    return found?.encounter_diagnosis ?? null
+    // El del propio tratamiento, si está; si no, el último de su sitio.
+    const own = item.diagnosisCode ? rows.find((row) => row.encounter_diagnosis.diagnosisCode === item.diagnosisCode) : undefined
+    return (own ?? rows[0])?.encounter_diagnosis ?? null
   }
   const record = async (diagnosis: typeof encounterDiagnosis.$inferSelect) => {
     if (!diagnosis.diagnosisType) return false
