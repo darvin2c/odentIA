@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   createTask,
   discardRegistrationTask,
+  HOLD_GROUPS,
   getRegistrationHold,
   resolveRegistrationHold,
   getTask,
@@ -203,11 +204,13 @@ export function createTasksRoute(deps: CrmDeps) {
 
   // «No es representante» y «Descartar» en «Te espera»: lo que dejó un registro en línea queda cerrado con su motivo (tasks.write).
   app.post("/:id/discard", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
+    // Descartar lo que escribió quien se registró es de quien podría guardarlo (lo decide el servicio por su clase).
+    const editsPeople = canAccess(memberRole, "patients.write")
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => discardRegistrationTask(tx, orgId, userId, params.data.id)),
+      withOrgContext(deps.db, orgId, (tx) => discardRegistrationTask(tx, orgId, userId, params.data.id, { editsPeople })),
     )
   })
 
@@ -229,7 +232,10 @@ export function createTasksRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "Revisar un registro es de quien edita los datos de las personas"), 403)
     }
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
-    const body = z.strictObject({ same: z.boolean(), familyName: z.enum(["saved", "declared"]).optional() }).safeParse(await c.req.json().catch(() => null))
+    // Lo marcado (`apply`) y la huella de lo que se vio (`revision`): si algo cambió, no se guarda.
+    const body = z
+      .strictObject({ same: z.boolean(), apply: z.array(z.enum(HOLD_GROUPS)).max(HOLD_GROUPS.length).optional(), revision: z.string().min(1).max(64) })
+      .safeParse(await c.req.json().catch(() => null))
     if (!params.success) return validationError(c, params.error.issues)
     if (!body.success) return validationError(c, body.error.issues)
     return runService(c, 200, () =>

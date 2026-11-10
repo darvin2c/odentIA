@@ -56,9 +56,10 @@ function PublicRegistrationPage() {
           <div className="flex flex-col gap-1.5">
             <h1 className="font-heading text-xl font-semibold">Registro recibido</h1>
             <p className="text-sm text-pretty text-muted-foreground">
+              {/* Lo mismo se registre por primera vez o ya estuviera: no revela a nadie quién es paciente. */}
               {done.forOther
-                ? `${done.org} ya tiene los datos de ${done.name}.`
-                : `Gracias, ${done.name}. ${done.org} ya tiene tus datos.`}{" "}
+                ? `${done.org} recibió los datos de ${done.name}. Si ya estaban en la clínica, recepción los revisa antes de guardarlos.`
+                : `Gracias, ${done.name}. ${done.org} recibió tus datos. Si ya te habías registrado antes, recepción los revisa antes de guardarlos.`}{" "}
               Este registro no reserva una cita.
             </p>
           </div>

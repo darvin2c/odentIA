@@ -191,6 +191,10 @@ export interface WaitingPossibleDuplicate {
    * «Revisar» abre «¿Es la misma persona?» para decidir con ello.
    */
   held?: boolean
+  /** `registro` guardado: por qué se parece (el mismo documento o el mismo celular). */
+  match?: "documento" | "celular"
+  /** `registro` guardado: cuántos datos de lo que escribió no coinciden con lo que ya tiene. */
+  differences?: number
 }
 
 /**
