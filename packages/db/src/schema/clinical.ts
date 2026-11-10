@@ -1612,6 +1612,12 @@ export const treatmentPlanItem = pgTable(
       (): AnyPgColumn => treatmentPlanItem.id,
     ),
     /**
+     * Cuándo cambió lo que su consentimiento describe (la pieza, el servicio o el diagnóstico,
+     * con «Cambiar»): lo firmado antes ya no cuenta y se firma el texto nuevo (consentimientos,
+     * 10 nov). El firmado no se toca: queda en la historia.
+     */
+    consentResetAt: timestamp("consent_reset_at", { withTimezone: true }),
+    /**
      * Decisión vigente. `no_elegida`: el tratamiento solo estaba en una opción
      * del presupuesto que la persona no eligió (decisión 13); no es un «no».
      */

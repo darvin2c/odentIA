@@ -13,6 +13,7 @@ import {
   serviceCatalog,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import { consentDocument, consentTemplateService } from "@odentia/db/schema/clinical-forms"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -24,12 +25,14 @@ import {
   setAppointmentPlanItems,
 } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import { createConsentDocument, createConsentTemplate, publishConsentTemplate } from "./clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
+import { treatmentConsentStates } from "./consent-state.js"
 import { bringTreatmentToEncounter } from "./encounter-visit.js"
-import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "./encounters.js"
+import { addEncounterProcedure, finalizeEncounter, getEncounterClosing, voidEncounter } from "./encounters.js"
 import { undoFinishControls } from "./finish-controls.js"
 import { changeFollowUpDue } from "./follow-ups.js"
-import { addPlanItem } from "./plan.js"
+import { addPlanItem, revisePlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -376,4 +379,47 @@ it("A2: «Continuar hoy» la corona no trae la pulpitis que la endodoncia resolv
     .where(and(eq(encounterDiagnosis.encounterId, today), isNull(encounterDiagnosis.voidedAt)))
   // La atención de hoy ya tenía el suyo (`ready`); la pulpitis resuelta no se suma.
   expect(added.filter((row) => row.diagnosisCode === "K04.0")).toHaveLength(0)
+})
+
+/** Un consentimiento publicado que pide el servicio del fixture. */
+async function serviceAsksConsent(f: Fixture) {
+  const draft = await f.run((tx) =>
+    createConsentTemplate(tx, "org_a", f.actor, {
+      key: `t-${randomUUID().slice(0, 8)}`,
+      title: "Endodoncia",
+      sections: { procedure: "Tratamiento de conductos.", benefits: ["Conservar la pieza"], risks: ["Dolor"], alternatives: ["Exodoncia"], consequences: "Puede avanzar." },
+    }),
+  )
+  const template = await f.run((tx) => publishConsentTemplate(tx, "org_a", f.actor, draft.id))
+  await ownerDb.insert(consentTemplateService).values({ organizationId: "org_a", templateKey: template.key, serviceId: f.service.id })
+  return template
+}
+
+it("consentimientos: el estado va con el tratamiento; «Cambiar» la pieza anula lo pendiente y anular otra atención no lo toca", async () => {
+  const f = await clinicalFixture()
+  const template = await serviceAsksConsent(f)
+  const item = await accepted(f, 46)
+  const state = async (id: string) => (await f.run((tx) => treatmentConsentStates(tx, "org_a", [id]))).get(id)
+  expect(await state(item.id)).toBe("falta")
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`,
+  )
+  // Preparado en otra atención, la de hoy: sigue al tratamiento.
+  const today = await attention(f)
+  const doc = await f.run((tx) =>
+    createConsentDocument(tx, "org_a", f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: today, planItemId: item.id, procedureRef: "Endodoncia de la pieza 46" }),
+  )
+  expect(await state(item.id)).toBe("sin_firmar")
+  // Anular la atención donde se preparó no anula el de un tratamiento que sigue.
+  await f.run((tx) => voidEncounter(tx, ...f.args, today, { reason: "Prueba" }))
+  const [kept] = await ownerDb.select({ status: consentDocument.status }).from(consentDocument).where(eq(consentDocument.id, doc.id))
+  expect(kept?.status).toBe("pendiente")
+  // «Cambiar» la pieza: el texto ya no es el suyo; se prepara otra vez.
+  const next = await attention(f)
+  const changed = await f.run((tx) =>
+    revisePlanItem(tx, ...f.args, item.id, { encounterId: next, reason: "Era la 36", serviceId: f.service.id, toothNumber: 36 }),
+  )
+  const [reset] = await ownerDb.select({ status: consentDocument.status }).from(consentDocument).where(eq(consentDocument.id, doc.id))
+  expect(reset?.status).not.toBe("pendiente")
+  expect(await state(changed.id)).toBe("falta")
 })

@@ -35,6 +35,7 @@ import { notFound, ServiceError } from "./errors.js"
 const conflict = (code: string, message: string): ServiceError =>
   new ServiceError(code, 409, message)
 
+import { type TreatmentConsentState, treatmentConsentStates } from "./consent-state.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { withSite } from "./product-hooks.js"
@@ -65,6 +66,8 @@ export interface VisitTreatment {
    * hoy» sigue, como segunda opción (entrega 8).
    */
   after: { title: string; today: boolean } | null
+  /** Su consentimiento, si su servicio lo pide (`treatmentConsentStates`); null si no lo pide o ya está firmado. */
+  consent?: TreatmentConsentState | null
   /**
    * Su servicio pide esperar entre sesiones y aún no se cumple (la regla de la reserva,
    * `nextSessionGapOf`): `days` los que pide, `sinceDays` los que pasaron desde la última
@@ -208,6 +211,7 @@ export async function encounterVisitOf(
     shown.filter((item) => Number(item.done_before) > 0 && !item.registered).map((item) => item.id),
   )
   const today = dayIn(new Date(), timezone)
+  const consents = await treatmentConsentStates(tx, orgId, shown.map((item) => item.id))
   const treatments = shown.map((item) => {
     const done = Number(item.done_before)
     const gap = gaps.get(item.id)
@@ -231,6 +235,8 @@ export async function encounterVisitOf(
             from: gap.from,
           }
         : null,
+      // Su consentimiento, aunque se preparara en otra atención: se firma antes de empezar.
+      consent: consents.get(item.id) ?? null,
     }
   })
   const due = await dueControlsOf(tx, orgId, row.professionalUserId, row, timezone)

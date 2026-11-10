@@ -2205,6 +2205,8 @@ export interface SignConsentInput {
   signatureData?: unknown
   /** La persona firmante confirmó haber comprendido la información. */
   comprehensionConfirmed: boolean
+  /** Lo firmó en su enlace y prefiere firmarlo de nuevo aquí: la firma del enlace queda en la historia. */
+  signAgain?: boolean
   /**
    * Trazo del profesional que informa (el actor). Opcional: confirma con su
    * perfil profesional, que ya es su firma (nombre y colegiatura), sin dibujar
@@ -2272,8 +2274,10 @@ export async function signConsentDocument(
   if (current.status !== "pendiente") {
     throw conflict("SIGNED", "El consentimiento ya no está pendiente")
   }
-  if (current.personSignedAt) {
-    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: infórmale y confírmalo en su atención")
+  // Lo firmado en su enlace se confirma; si la persona prefiere firmarlo de nuevo aquí, se firma en
+  // la clínica y la firma del enlace queda en la historia (consentimientos, 10 nov).
+  if (current.personSignedAt && input.signAgain !== true) {
+    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: confírmalo con la persona, o «Firmar de nuevo aquí»")
   }
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
@@ -2428,6 +2432,7 @@ export async function signConsentDocument(
   ])
   await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
     signerKind: input.signerKind,
+    ...(current.personSignedAt ? { againOverLink: current.personSignedAt.toISOString() } : {}),
     minor,
     witness: Boolean(witnessName),
     method,
@@ -2518,7 +2523,11 @@ export async function markConsentSentByLink(
   orgId: string,
   actorUserId: string,
   documentId: string,
-  options: { requestId?: string | null } = {},
+  /**
+   * `shown`: se le mostró en la clínica (código o enlace copiado) para firmarlo en su teléfono,
+   * sin enviarle ningún mensaje (consentimientos, 10 nov).
+   */
+  options: { requestId?: string | null; shown?: boolean } = {},
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -2557,8 +2566,9 @@ export async function markConsentSentByLink(
     fromStatus: "pendiente",
     toStatus: "enlace_enviado",
     actorUserId,
+    ...(options.shown ? { reason: "Se le mostró en la clínica para firmarlo en su teléfono, sin enviarle mensaje" } : {}),
   })
-  await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {
+  await audit(tx, orgId, actorUserId, options.shown ? "consent.shown_to_sign" : "consent.sent_to_sign", "consent_document", documentId, {
     ...(options.requestId ? { requestId: options.requestId } : {}),
   })
   return row
@@ -2757,12 +2767,10 @@ export async function confirmLinkSignedConsent(
   )
   if (attention.status !== "borrador")
     throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: confírmalo en su atención de hoy")
-  // Delante de la persona: una atención en borrador de hace semanas no sirve (S2). La de otro día
-  // de esta semana, que sigue abierta porque la persona volvió, sí: se confirma hoy y la constancia
-  // dice el día real (producción, 10 nov: el cierre quedaba trabado sin salida).
+  // Delante de la persona, en la atención abierta en curso, sea del día que sea: la fecha en que se
+  // abrió la atención no prueba quién está; la constancia dice el día real en que se confirmó y a
+  // quién se informó (consentimientos, 10 nov: el cierre quedaba trabado sin salida).
   const today = await attentionIsToday(tx, orgId, attention)
-  if (!today && !attentionIsRecent(attention))
-    throw conflict("ENCOUNTER_NOT_TODAY", "Esa atención es de hace más de una semana: confírmalo en su atención de hoy, con la persona delante")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const savedSignature = await currentDrawnSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -2790,7 +2798,9 @@ export async function confirmLinkSignedConsent(
       fromStatus: "pendiente",
       toStatus: "informado",
       actorUserId,
-      reason: `${informer.name} · ${informer.registration} · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}${
+      // A quién se informó: quien firmó (el paciente o su representante); si viene otra persona, no
+      // se confirma (la pantalla lo dice antes de confirmar).
+      reason: `${informer.name} · ${informer.registration} · informó a ${current.signerName} (${current.signerKind}) · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}${
         today ? "" : `, confirmado el ${await attentionDay(tx, orgId, now)} con la persona delante`
       }`,
       createdAt: now,
@@ -2835,11 +2845,6 @@ async function attentionIsToday(
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, attention.appointmentId)))
     .limit(1)
   return booked !== undefined && day(booked.startsAt) === today
-}
-
-/** La atención en borrador empezó en los últimos 7 días de la clínica: la persona volvió a terminarla. */
-function attentionIsRecent(attention: { startedAt: Date }): boolean {
-  return Date.now() - attention.startedAt.getTime() <= 7 * 86_400_000
 }
 
 /** «8 de noviembre de 2026», con el formato y la zona de la clínica: el día de la atención en la historia. */
@@ -3600,6 +3605,10 @@ export async function getEncounterConsentNeeds(
       diagnosisSystem: consentDocument.diagnosisSystem,
       templateId: consentDocument.templateId,
       personSignedAt: consentDocument.personSignedAt,
+      signedAt: consentDocument.signedAt,
+      // Lo firmado antes de «Cambiar» la pieza, el servicio o el diagnóstico ya no cuenta.
+      resetAt: sql<Date | null>`(select i.consent_reset_at from treatment_plan_item i
+        where i.organization_id = ${consentDocument.organizationId} and i.id = ${consentDocument.planItemId})`,
     })
     .from(consentDocument)
     .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
@@ -3614,6 +3623,12 @@ export async function getEncounterConsentNeeds(
       ),
     )
     .orderBy(asc(consentDocument.createdAt))
+    .then((rows) =>
+      rows.filter(
+        (doc) =>
+          !(doc.status === "firmado" && doc.resetAt && doc.signedAt && new Date(doc.signedAt) < new Date(doc.resetAt)),
+      ),
+    )
   const diagnoses = await tx
     .select({
       code: encounterDiagnosis.diagnosisCode,

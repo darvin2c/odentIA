@@ -3592,6 +3592,11 @@ async function voidEncounterPapers(
         eq(consentDocument.status, "pendiente"),
         // Lo que la persona ya firmó por su enlace espera al profesional, no se anula: es un acto suyo.
         isNull(consentDocument.personSignedAt),
+        // El de un tratamiento que sigue vigente no se anula con la atención: va con el tratamiento y
+        // se firma en la atención en que se haga (consentimientos, 10 nov).
+        sql`(${consentDocument.planItemId} is null or not exists (select 1 from treatment_plan_item vigente
+          where vigente.organization_id = ${consentDocument.organizationId} and vigente.id = ${consentDocument.planItemId}
+            and vigente.status not in ('cancelado', 'reemplazado')))`,
       ),
     )
     .returning({ id: consentDocument.id })

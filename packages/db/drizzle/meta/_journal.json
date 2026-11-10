@@ -631,6 +631,13 @@
       "when": 1794323242573,
       "tag": "0089_consentimiento_por_familia",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794323803537,
+      "tag": "0090_consentimiento_por_tratamiento",
+      "breakpoints": true
     }
   ]
 }
