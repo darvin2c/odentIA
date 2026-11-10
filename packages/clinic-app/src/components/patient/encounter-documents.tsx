@@ -22,6 +22,7 @@ import {
   fetchFormResponses,
   fetchFormTemplates,
   fetchOrders,
+  phoneSignBlockWords,
 } from "../../lib/clinical-forms"
 import {
   fetchPrescriptionDetail,
@@ -468,6 +469,12 @@ export function EncounterDocumentsBlock({
                   : `Faltan las firmas de ${who}`}
                 {docs.toSign.some((doc) => doc.linkSentAt) ? " · lo tiene en su enlace" : ""}
               </span>
+              {(() => {
+                const block = docs.toSign.find((doc) => doc.phoneSignBlock)?.phoneSignBlock
+                return block ? (
+                  <span className="text-xs text-muted-foreground">{phoneSignBlockWords(block, who, firstName(patient))}</span>
+                ) : null
+              })()}
             </div>
             <div className="flex items-center gap-1">
               <Button
@@ -481,7 +488,9 @@ export function EncounterDocumentsBlock({
               <RowActions
                 label="Otras formas de firmar"
                 items={docs.toSign.flatMap((doc) => [
-                  ...(doc.linkSentAt
+                  // Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), ni enviarlo
+                  // ni mostrar el código: la fila dice por qué (QA del 10 nov, M2).
+                  ...(doc.linkSentAt || doc.phoneSignBlock
                     ? []
                     : [
                         {
