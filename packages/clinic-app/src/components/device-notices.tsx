@@ -1,5 +1,6 @@
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
+import { getRouteApi } from "@tanstack/react-router"
 import { ChevronDown, Share } from "lucide-react"
 import { useCallback, useEffect, useId, useState, useSyncExternalStore } from "react"
 import { useReceptionName } from "../lib/agent-names"
@@ -22,9 +23,14 @@ import {
 
 /** Lo que llega, dicho una vez junto al interruptor. Sin nombres: se ve con el teléfono bloqueado. */
 const whatArrives = (agent: string) =>
-  `Te avisa aunque no tengas la clínica abierta: cuando alguien te escribe o ${agent} te pasa a alguien (en el horario de atención), y si WhatsApp o ${agent} dejan de funcionar. El aviso no dice el nombre de la persona. No lo actives en la tablet que le pasas al paciente.`
+  `Te llega aunque tengas la página cerrada: cuando alguien te escribe o ${agent} te pasa a alguien, en el horario de atención; si WhatsApp o ${agent} fallan, a cualquier hora. Sin el nombre de la persona.`
 
-type State = "cargando" | "apagado" | "activado" | "bloqueado" | "no-compatible" | "instalar-en-iphone" | "no-disponible"
+/** Va aparte para que se lea: la tablet que se le pasa al paciente mostraría los avisos encima. */
+const TABLET_ADVICE = "No lo actives en la tablet que le pasas al paciente."
+
+const orgRouteApi = getRouteApi("/_org")
+
+type State = "cargando" | "apagado" | "activado" | "bloqueado" | "no-compatible" | "instalar-en-iphone" | "no-disponible" | "sin-revisar"
 
 /**
  * «Recibir avisos en este equipo», arriba de «Avisos» (ADR 0177). Es de este
@@ -34,6 +40,7 @@ type State = "cargando" | "apagado" | "activado" | "bloqueado" | "no-compatible"
  */
 export function DeviceNotices() {
   const brand = appWords().name
+  const { org } = orgRouteApi.useRouteContext()
   const agent = useReceptionName()
   const [state, setState] = useState<State>("cargando")
   const [busy, setBusy] = useState<"activando" | "apagando" | null>(null)
@@ -53,17 +60,23 @@ export function DeviceNotices() {
   useEffect(() => {
     let alive = true
     const load = () =>
-      read().catch(() => {
-        if (!alive) return
-        setState("apagado")
-        setProblem("No pudimos revisar si este equipo recibe tus avisos. Revisa la conexión y abre otra vez los avisos.")
-      })
+      read()
+        .then(() => alive && setProblem(null))
+        .catch(() => {
+          if (!alive) return
+          // Sin saber cómo está, el interruptor no dice «apagado»: se revisa otra vez al volver la red.
+          setState("sin-revisar")
+          setProblem("No pudimos revisar si este equipo recibe tus avisos. Lo revisamos otra vez cuando vuelva la conexión.")
+        })
     void load()
     // Si la persona los permite en el navegador con la campana abierta, el interruptor se suelta solo.
     const stop = subscribePermission(() => void load())
+    const back = () => void load()
+    window.addEventListener("online", back)
     return () => {
       alive = false
       stop()
+      window.removeEventListener("online", back)
     }
   }, [read])
 
@@ -84,7 +97,7 @@ export function DeviceNotices() {
     } catch (error) {
       setProblem(
         error instanceof PushBlockedError
-          ? "Este navegador no deja recibir avisos aquí (pasa en una ventana privada o de invitado). Ábrelo en una ventana normal y vuelve a intentar."
+          ? "El navegador no dejó activar los avisos aquí. Pasa en una ventana privada o de invitado: ábrelo en una ventana normal y vuelve a intentar."
           : on
             ? "No pudimos activar los avisos. Revisa la conexión y vuelve a intentar."
             : "No pudimos apagar los avisos. Vuelve a intentar.",
@@ -99,7 +112,7 @@ export function DeviceNotices() {
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-3 sm:px-5">
       {state === "instalar-en-iphone" ? (
-        <IphoneInstall brand={brand} />
+        <IphoneInstall clinic={org.name} />
       ) : (
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
@@ -113,7 +126,7 @@ export function DeviceNotices() {
                   ? `Activado en este equipo. ${whatArrives(agent)}`
                   : state === "bloqueado"
                     ? isAppleMobile()
-                      ? `El equipo los tiene bloqueados. Ábrelos en Ajustes › Notificaciones › ${brand}.`
+                      ? `El equipo los tiene bloqueados. Ábrelos en Ajustes › Notificaciones › ${org.name}.`
                       : "El navegador los tiene bloqueados. Toca el ícono a la izquierda de la dirección › Notificaciones › Permitir."
                     : state === "no-compatible"
                       ? "Este navegador no puede recibir avisos. Usa Chrome, Edge o Safari actualizados."
@@ -121,6 +134,9 @@ export function DeviceNotices() {
                         ? `Los avisos en el equipo todavía no están disponibles en ${brand}.`
                         : whatArrives(agent)}
             </p>
+            {state === "apagado" || state === "activado" || state === "sin-revisar" ? (
+              <p className="mt-1 text-xs font-medium text-foreground">{TABLET_ADVICE}</p>
+            ) : null}
           </div>
           {state === "no-compatible" || state === "no-disponible" ? null : (
             <Switch
@@ -148,12 +164,13 @@ export function DeviceNotices() {
   )
 }
 
-/** En iPhone y iPad los avisos llegan solo a la app agregada al inicio desde Safari. */
-function IphoneInstall({ brand }: { brand: string }) {
+/** En iPhone y iPad los avisos llegan solo a la clínica agregada al inicio desde Safari. */
+function IphoneInstall({ clinic }: { clinic: string }) {
+  const device = /iPad/.test(navigator.userAgent) || !/iPhone|iPod/.test(navigator.userAgent) ? "iPad" : "iPhone"
   return (
     <Collapsible defaultOpen>
       <CollapsibleTrigger className="flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm font-semibold sm:min-h-8">
-        Para recibir avisos en el iPhone, agrégalo a tu inicio
+        Para recibir avisos en el {device}, agrégalo a tu inicio
         <ChevronDown aria-hidden className="size-4 shrink-0" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -163,7 +180,8 @@ function IphoneInstall({ brand }: { brand: string }) {
             Toca Compartir <Share aria-label="(el cuadrado con la flecha)" className="inline size-3.5 align-text-bottom" /> y
             luego «Agregar a inicio».
           </li>
-          <li>Abre {brand} desde el ícono, entra con tu cuenta y vuelve aquí para activar los avisos.</li>
+          <li>Abre «{clinic}» desde el ícono que agregaste, entra con tu cuenta y vuelve aquí para activar los avisos.</li>
+          <li>{TABLET_ADVICE}</li>
         </ol>
       </CollapsibleContent>
     </Collapsible>
