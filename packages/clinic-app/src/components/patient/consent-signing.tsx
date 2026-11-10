@@ -577,7 +577,9 @@ function SigningFlow({
                 professional={{
                   name: signAs.name,
                   detail: signAs.detail,
-                  note: "Falta su confirmación: lo confirma al terminar.",
+                  // Lo lee quien firma en la tablet: le dice qué pasa, no una tarea del profesional
+                  // (pendiente de la entrega 11).
+                  note: "Firma después de ti, con su perfil profesional.",
                 }}
                 signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
                 signatureNote={frame.data?.data.signatureNote ?? null}

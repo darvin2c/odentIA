@@ -81,7 +81,9 @@ export function NextUpCard({
   const steps = query.data?.data ?? []
   // «Ver la cita» de la próxima cita ya está arriba: la fila que diría lo mismo no lo repite.
   const shownAction = (step: (typeof steps)[number]) =>
-    step.action && !(step.action.appointmentId && step.action.appointmentId === upcomingId) ? step.action : null
+    step.action && (step.kind === "sin_objeto" || !(step.action.appointmentId && step.action.appointmentId === upcomingId))
+      ? step.action
+      : null
   // Sin color ni botón destacado: el principal es el de la cabecera, y el primero de la
   // lista puede no estar disponible (enviar sin WhatsApp ni correo; segunda mesa del 8 nov).
   return (

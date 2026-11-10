@@ -385,6 +385,7 @@ export function attentionOf(kind: PlanNextKind, lines: ReadonlySet<string>): Per
       return "persona"
     case "cerrar":
     case "sin_objeto":
+    case "suspendido":
     case "reservado":
     case "ninguno":
       return "nadie"

@@ -88,6 +88,7 @@ export type PlanNextKind =
   | "control"
   | "cerrar"
   | "sin_objeto"
+  | "suspendido"
   | "ninguno"
 
 export interface PlanNextAction {
@@ -1274,7 +1275,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
  * 7. El próximo control que queda (con cita, por venir o se cumple hoy).
  */
 function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep[] {
-  const steps = stepsOf(planPieces(facts, context, can))
+  const steps = [...stepsOf(planPieces(facts, context, can)), ...suspendedSteps(facts)]
   // Una cita que ya pasó y que nadie cerró va primero en la lista de la ficha: decir si vino
   // registra lo que se hizo o devuelve lo que llevaba a «por reservar» (QA de la ficha del 8 nov).
   // Solo a quien ve la agenda; la frase única no la dice (es de la ficha, no del plan).
@@ -1360,10 +1361,22 @@ function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
  * cuando es lo único que se ve (el Plan, la fila de Pacientes, lo que lee el
  * agente). Sin consultas: decide con lo cargado.
  */
+/** Lo suspendido, en una fila cada uno, con su motivo. */
+function suspendedSteps(facts: PlanFacts): PlanNextStep[] {
+  return facts.items
+    .filter((item) => item.status === "suspendido")
+    .map((item) => ({
+      kind: "suspendido" as const,
+      text: `Suspendido: ${item.title}`,
+      detail: [item.statusReason?.trim() || null, "se retoma desde su Plan"].filter(Boolean).join(" · "),
+      action: null,
+    }))
+}
+
 function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
   const p = planPieces(facts, context, can)
   const [first] = stepsOf(p)
-  if (!first) return NOTHING
+  if (!first) return suspendedSteps(facts)[0] ?? NOTHING
   // La sesión de lo empezado gana a lo aceptado sin empezar: lo aceptado sigue «por agendar» (la
   // lista lo ofrece en su fila).
   if (first.kind === "continuar" && p.toStart.length > 0)
