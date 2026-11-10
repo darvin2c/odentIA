@@ -1,3 +1,4 @@
+import { canAccess, canAccessAny, canAttend } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { encounter, patient } from "@odentia/db/schema/clinical"
@@ -7,42 +8,53 @@ import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { countOverdueControls, getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { countOpenHandoffs, type HandoffScope, listHandoffs, openHandoffPeopleSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
-import { checkEncounterClosing } from "./encounters.js"
-import { alsoAuditWords, AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent, leadAuditCount, leadAuditIndex } from "./audit-words.js"
+import {
+  AUDIT_AREA_LABELS,
+  AUDIT_AREAS,
+  type AuditArea,
+  alsoAuditWords,
+  auditSubjectsOf,
+  describeAuditEvent,
+  leadAuditCount,
+  leadAuditIndex,
+} from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
+import { checkEncounterClosing, encounterHasRecords } from "./encounters.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
+import { windowOpen } from "./message-window.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { registrationHoldDifferences } from "./patient-registration.js"
+import { productDictation, productHooks } from "./products.js"
 import { upcomingWork } from "./report-finance.js"
 import { patientsToSchedule } from "./to-schedule.js"
-import { windowOpen } from "./message-window.js"
+import { taskAreasOfRole } from "./tasks.js"
 import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
   composeWaiting,
   WAITING_LIMITS,
+  type WaitingAcceptedUnbooked,
   type WaitingBudgets,
   type WaitingCase,
+  type WaitingOverdueControls,
   type WaitingPerson,
-  type WaitingStaleEncounter,
-  type WaitingStillOpen,
   type WaitingPortalReentry,
   type WaitingPossibleDuplicate,
   type WaitingRegistrationDone,
+  type WaitingStaleEncounter,
+  type WaitingStillOpen,
   type WaitingTask,
-  type WaitingUnconfirmed,
   type WaitingUnclosed,
-  type WaitingAcceptedUnbooked,
-  type WaitingOverdueControls,
+  type WaitingUnconfirmed,
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { productDictation } from "./products.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -78,6 +90,34 @@ export interface WorkspaceAccess {
    * día sin cerrar llegan a «Te espera».
    */
   attends?: boolean
+}
+
+/**
+ * Lo que ve un rol en Inicio: la misma regla para la API y para los avisos en
+ * el equipo que envía el worker (ninguno la copia).
+ */
+export function workspaceAccessFor(role: string): WorkspaceAccess {
+  return {
+    patients: canAccess(role, "patients.read"), appointments: canAccess(role, "appointments.read"),
+    conversations: canAccess(role, "conversations.read"), tasks: canAccess(role, "tasks.read"),
+    finance: canAccess(role, "finance.read"), clinical: canAccess(role, "clinical.read"),
+    // Lo que el agente dejó en manos del equipo lo ve quien supervisa o quien
+    // decide; la configuración y el proveedor siguen en `agent.write`.
+    crm: canAccess(role, "crm.read"), agent: canAccessAny(role, ["agent.read", "agent.decide"]),
+    allTasks: canAccess(role, "tasks.all"),
+    // Las tareas sin responsable de un área llegan a quien trabaja en ella (la misma regla que Tareas).
+    taskAreas: taskAreasOfRole(role),
+    configure: canAccess(role, "settings.write"),
+    // El odontólogo ve solo su propio día, no la agenda de la sede.
+    ownAppointments: role === "clinician",
+    // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
+    // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
+    attends: canAttend(role),
+    // El presupuesto que nadie envió es de quien habla con la persona: envía y lleva el CRM (decisión 4).
+    sendsBudgets: canAccess(role, "budgets.send") && canAccess(role, "crm.read"),
+    // Caja responde desde aquí los temas de pagos que le pasa Sofi (decisión 3 del pulido).
+    topics: canAccess(role, "conversations.topics"),
+  }
 }
 
 /**
@@ -321,6 +361,8 @@ export interface WorkspaceAppointment {
   encounter: { id: string; startedAt: string; professionalUserId: string; professionalName: string } | null
   /** La siguiente cita en pie que aún no llega; a lo sumo una. */
   next: boolean
+  /** Lo que llevaba y ya se terminó, si no le queda nada: la cita quedó sin objeto (QA del 10 nov, M1). */
+  doneFor?: string | null
 }
 
 /**
@@ -471,8 +513,21 @@ async function workspaceToday(
     branch: own || !branch ? null : { id: branch.id, name: branch.name },
     timezone: zone,
     summary,
-    appointments: shown.map(({ open: _open, ...row }) => ({ ...row, next: row.id === nextId })),
+    appointments: await withDoneFor(
+      tx,
+      orgId,
+      shown.map(({ open: _open, ...row }) => ({ ...row, next: row.id === nextId })),
+    ),
   }
+}
+
+/** La cita de hoy para lo que ya se terminó lo dice en Inicio, con la regla de la Agenda. */
+async function withDoneFor(tx: Db, orgId: string, rows: WorkspaceAppointment[]): Promise<WorkspaceAppointment[]> {
+  const live = rows.filter((row) => row.visit === "por_confirmar" || row.visit === "confirmada")
+  if (live.length === 0) return rows
+  const { appointmentsDoneForOf } = await import("./appointments.js")
+  const done = await appointmentsDoneForOf(tx, orgId, live.map((row) => ({ id: row.id, serviceId: null })))
+  return rows.map((row) => (done.doneFor.has(row.id) ? { ...row, doneFor: done.doneFor.get(row.id)! } : row))
 }
 
 /**
@@ -497,7 +552,15 @@ async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, tim
   const items: WaitingStaleEncounter[] = []
   for (const { row, patientName, personId } of rows) {
     const closing = await checkEncounterClosing(tx, orgId, userId, row)
-    items.push({ id: row.id, patientId: row.patientId, personId, patientName, startedAt: row.startedAt.toISOString(), missing: closing.missing })
+    items.push({
+      id: row.id,
+      patientId: row.patientId,
+      personId,
+      patientName,
+      startedAt: row.startedAt.toISOString(),
+      missing: closing.missing,
+      empty: !(await encounterHasRecords(tx, orgId, row)),
+    })
   }
   return items
 }
@@ -643,6 +706,24 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
  * dirige lo vea en «Te espera». Cada persona cuenta una vez, como su fila.
  */
 export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<number> {
+  const sources = waitingPeopleSources(orgId, userId, access)
+  if (sources.length === 0) return 0
+  const [row] = await tx.execute<{ people: number }>(sql`select count(distinct person)::int as people from (${sql.join(sources, sql` union all `)}) waiting`)
+  return row?.people ?? 0
+}
+
+/**
+ * Quiénes esperan a quien mira (los que cuenta `countWorkspaceWaiting`, con
+ * la misma regla): los avisos en el equipo avisan cuando aparece alguien nuevo.
+ */
+export async function listWorkspaceWaitingPeople(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<string[]> {
+  const sources = waitingPeopleSources(orgId, userId, access)
+  if (sources.length === 0) return []
+  const rows = await tx.execute<{ person: string }>(sql`select distinct person from (${sql.join(sources, sql` union all `)}) waiting order by person`)
+  return rows.map((row) => row.person)
+}
+
+function waitingPeopleSources(orgId: string, userId: string, access: WorkspaceAccess): SQL[] {
   const sources: SQL[] = []
   // Sin ver los casos del agente, los que le pasaron; caja, además, los pagos sin tomar.
   if (access.agent) sources.push(openHandoffPeopleSql(orgId, waitingCaseScope(userId, false, {})))
@@ -653,9 +734,7 @@ export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: strin
     const conv = sql.raw("c")
     sources.push(sql`select c.contact_id::text as person from conversation c where ${pendingConversationsWhere(orgId, access.agent ? null : userId)} and (${unansweredSql(conv)} or ${lastIsFailedOutSql(conv)})`)
   }
-  if (sources.length === 0) return 0
-  const [row] = await tx.execute<{ people: number }>(sql`select count(distinct person)::int as people from (${sql.join(sources, sql` union all `)}) waiting`)
-  return row?.people ?? 0
+  return sources
 }
 
 /**
@@ -743,7 +822,8 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string, professi
  * de la clínica (la cifra «No tienen cita» de Reportes › Finanzas).
  */
 async function acceptedUnbookedOf(tx: Db, orgId: string): Promise<WaitingAcceptedUnbooked | null> {
-  const patients = (await patientsToSchedule(tx, orgId)).length
+  const patients = (await patientsToSchedule(tx, orgId, (await productHooks(tx, orgId)).planPhases))
+    .length
   if (patients === 0) return null
   const { currency } = await getOrgLocale(tx, orgId)
   const work = await upcomingWork(tx, orgId, currency, new Date())
@@ -850,13 +930,17 @@ async function waitingSystemTasks(
     createdAt: string
     grantId: string | null
     held: boolean
+    holdMatch: "documento" | "celular" | null
+    holdAnswers: unknown
   }>(sql`
     select t.id, t.kind, t.patient_id as "patientId", pp.id as "patientPersonId", pp.display_name as "patientName",
       t.contact_id as "contactId", ct.display_name as "contactName", t.reason, ${iso(sql`t.created_at`)} as "createdAt",
       (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
         and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId",
-      exists (select 1 from registration_hold h where h.organization_id = t.organization_id and h.task_id = t.id) as held
+      hold.match is not null as held, hold.match as "holdMatch", hold.answers as "holdAnswers"
     from task t
+    left join lateral (select h.match, h.answers from registration_hold h
+      where h.organization_id = t.organization_id and h.task_id = t.id limit 1) hold on true
     left join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
     left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
@@ -869,28 +953,35 @@ async function waitingSystemTasks(
     registro_con_documento: "registro",
     confirmar_representante: "representante",
   }
+  const duplicates: WaitingPossibleDuplicate[] = []
+  for (const row of rows) {
+    const source = SOURCE[row.kind]
+    if (!source) continue
+    // En «registro» la fila es de quien tenía el documento (con ficha o sin ella).
+    const name = source === "registro" ? (row.contactName ?? row.patientName) : row.patientName
+    if (!name || (source !== "registro" && !row.patientId)) continue
+    // Lo que escribió y aún espera: por qué se parece y cuántos datos son distintos.
+    const held =
+      source === "registro" && row.held && row.contactId
+        ? {
+            match: row.holdMatch ?? undefined,
+            differences: (await registrationHoldDifferences(tx, orgId, row.contactId, row.holdAnswers)) ?? undefined,
+          }
+        : {}
+    duplicates.push({
+      id: row.id,
+      source,
+      patientId: row.patientId,
+      personId: source === "enlace" ? row.patientPersonId : row.contactId,
+      patientName: name,
+      personName: source === "representante" ? row.contactName : null,
+      detail: row.reason ?? "",
+      createdAt: row.createdAt,
+      ...(source === "registro" ? { held: row.held, ...held } : {}),
+    })
+  }
   return {
-    duplicates: rows
-      .flatMap((row): WaitingPossibleDuplicate[] => {
-        const source = SOURCE[row.kind]
-        if (!source) return []
-        // En «registro» la fila es de quien tenía el documento (con ficha o sin ella).
-        const name = source === "registro" ? (row.contactName ?? row.patientName) : row.patientName
-        if (!name || (source !== "registro" && !row.patientId)) return []
-        return [
-          {
-            id: row.id,
-            source,
-            patientId: row.patientId,
-            personId: source === "enlace" ? row.patientPersonId : row.contactId,
-            patientName: name,
-            personName: source === "representante" ? row.contactName : null,
-            detail: row.reason ?? "",
-            createdAt: row.createdAt,
-            ...(source === "registro" ? { held: row.held } : {}),
-          },
-        ]
-      }),
+    duplicates,
     reentries: rows
       .filter((row) => row.kind === "volver_al_portal" && row.patientId)
       .map((row) => ({

@@ -95,6 +95,41 @@ export function documentText(docType: string | null | undefined, docNumber: stri
 }
 
 /**
+ * El documento escrito en una sola línea («DNI 45678912», «CE 001234567»,
+ * «Pasaporte AB1234567» o, en Perú, solo los 8 números del DNI), como tipo y
+ * número para guardarlo en la persona. Solo tipos que ofrece el país de la
+ * clínica; si no se reconoce el tipo, null: no se adivina (lo usa la firma del
+ * consentimiento, que lo pide así cuando la ficha de quien firma no lo tiene).
+ */
+export function typedIdentityDocument(
+  text: string | null | undefined,
+  countryCode: string | null | undefined,
+): { docType: IdentityDocType; docNumber: string } | null {
+  const clean = text?.trim().replace(/\s+/g, " ")
+  if (!clean) return null
+  const offered = clinicalProfileFor(countryCode).documentTypes.map((item) => item.code)
+  const fold = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/[.\s]/g, "")
+      .toUpperCase()
+  const labelled = /^(.+?)\s*[:\s-]\s*([A-Za-z0-9][A-Za-z0-9 .-]*)$/u.exec(clean)
+  if (labelled) {
+    const said = fold(labelled[1] ?? "")
+    const type = offered.find(
+      (code) => code !== "OTRO" && (fold(code) === said || fold(DOC_TYPE_LABELS[code]) === said),
+    )
+    if (type)
+      return { docType: type, docNumber: (labelled[2] ?? "").replace(/[\s.-]/g, "").toUpperCase() }
+  }
+  const digits = clean.replace(/[\s.-]/g, "")
+  if (offered.includes("DNI") && /^\d{8}$/.test(digits))
+    return { docType: "DNI", docNumber: digits }
+  return null
+}
+
+/**
  * Estado civil con HL7 v3 MaritalStatus (`http://terminology.hl7.org/CodeSystem/v3-MaritalStatus`):
  * S soltero, M casado, T pareja de hecho (Domestic partner), L separado
  * (Legally Separated), D divorciado y W viudo. El perfil del país puede
@@ -376,6 +411,17 @@ export function phoneFormatError(countryCode?: string | null): string {
   return profile
     ? `Ingresa el teléfono con código de país (+${profile.callingCode}…) o ${profile.hint}`
     : "Ingresa el teléfono con su código de país, empezando por «+»"
+}
+
+/**
+ * Un número que el regulador reserva para ficción y pruebas: no es de nadie y
+ * ningún mensaje le llega. Hoy, el del Reino Unido: Ofcom reserva los móviles
+ * 07700 900000 a 07700 900999, en E.164 +44 7700 900000 a +44 7700 900999 (los
+ * de la demo). Es la misma regla que el campo de teléfono de la pantalla
+ * (`isFictionalPhone` de `ui-patterns`, que no puede importar este paquete).
+ */
+export function isFictionalPhone(e164: string | null | undefined): boolean {
+  return !!e164 && /^\+447700900\d{3}$/.test(e164)
 }
 
 /**

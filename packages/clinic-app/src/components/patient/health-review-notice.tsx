@@ -1,3 +1,4 @@
+import { DECLARED_ONLINE_NOTE, KINSHIP_LABELS } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -9,6 +10,7 @@ import { clinicToday } from "../../lib/inventory"
 import {
   markAllergiesReviewedApi,
   markHealthDeniedApi,
+  type PatientContactLink,
   type PatientHealth,
   unaskedHealthGroups,
 } from "../../lib/patients"
@@ -19,6 +21,23 @@ import { useOpenWide } from "./wide-section"
 function listWords(items: string[]): string {
   if (items.length <= 1) return items[0] ?? ""
   return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
+}
+
+/**
+ * A quién se le pregunta cuando la persona tiene representante (QA del 10 nov, B11): «su padre
+ * (Luis Ríos)», como lo dice la ficha. El preferido primero; el parentesco, el de HL7 si se
+ * conoce o el escrito al vincularlo. Sin representante vigente, null: se le pregunta a ella.
+ */
+export function askWhom(contacts: readonly PatientContactLink[]): string | null {
+  const [guardian] = contacts
+    .filter((contact) => contact.isActive && contact.relationship === "guardian")
+    .sort((a, b) => Number(b.isPreferred) - Number(a.isPreferred))
+  if (!guardian) return null
+  const kin =
+    guardian.kinship && guardian.kinship in KINSHIP_LABELS
+      ? KINSHIP_LABELS[guardian.kinship as keyof typeof KINSHIP_LABELS]
+      : guardian.relationshipDetail?.trim()
+  return `su ${(kin || "representante").toLocaleLowerCase("es")} (${guardian.displayName})`
 }
 
 /**
@@ -38,11 +57,14 @@ export function HealthReviewNotice({
   patientName,
   health,
   disabled = false,
+  askTo = null,
 }: {
   patientId: string
   patientName: string
   health: PatientHealth
   disabled?: boolean
+  /** Con representante, a quién se le pregunta (`askWhom`): «su padre (Luis Ríos)». */
+  askTo?: string | null
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -79,17 +101,28 @@ export function HealthReviewNotice({
   })
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
-  if (!canWrite || (!allergiesDue && unasked.length === 0)) return null
+  // Lo que declaró la persona y nadie revisó todavía (lo dice el servidor): se pide revisarlo aquí, donde se
+  // decide. Se nombra lo que vino de su registro en línea; si no, lo que hay; si es solo su entrevista
+  // (un embarazo, una operación), se dice sin nombre.
+  // Solo lo que dice el servidor (sabe si lo anotó un clínico o lo declaró la persona): sin el dato, no se pide.
+  const pending = health.reviewPending === true
+  const rows = [...health.conditions, ...health.medications]
+  const online = rows.filter((row) => row.notes?.startsWith(DECLARED_ONLINE_NOTE)).map((row) => row.name)
+  const declared = pending ? (online.length ? online : rows.map((row) => row.name)) : []
+  if (!canWrite || (!allergiesDue && unasked.length === 0 && !pending)) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const asked = active.length > 0 || health.reviewStatus.allergies === "none"
-  const first = patientName.trim().split(/\s+/)[0] ?? patientName
+  // Con representante (un niño), se le pregunta a él, como lo dice la ficha; si no, a la persona.
+  const first = askTo ?? patientName.trim().split(/\s+/)[0] ?? patientName
   const topics = [
     allergiesDue ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
     unasked.includes("conditions") ? "sus enfermedades" : null,
     unasked.includes("medications") ? "su medicación" : null,
   ].filter((topic): topic is string => topic !== null)
   const title =
-    unasked.length === 0
+    !allergiesDue && unasked.length === 0
+      ? `Revisa con ${first} lo que declaró de su salud`
+      : unasked.length === 0
       ? asked
         ? `Pregúntale a ${first} si tiene alergias nuevas`
         : `Pregúntale a ${first} si tiene alergias`
@@ -162,6 +195,21 @@ export function HealthReviewNotice({
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => denied.mutate("medications")}>
               {denied.isPending && denied.variables === "medications" ? "Guardando…" : "No toma medicación"}
             </Button>
+          </li>
+        ) : null}
+        {pending ? (
+          <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-col gap-1">
+              <h3 className="text-sm font-medium">{online.length ? "Lo que declaró en línea" : "Lo que declaró"}</h3>
+              <p className="text-sm text-muted-foreground">
+                {declared.length ? `${listWords(declared)}.` : "Datos de su salud que nadie revisó todavía."} Confírmalo con {first} en sus antecedentes.
+              </p>
+            </div>
+            {openWide ? (
+              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
+                Revisar antecedentes
+              </Button>
+            ) : null}
           </li>
         ) : null}
       </ul>

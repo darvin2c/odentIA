@@ -11,6 +11,33 @@ import type { EncounterDiagnosis } from "./encounters"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
+/** El consentimiento de un tratamiento: falta, preparado sin firmar, firmado por enlace sin confirmar o firmado. */
+export type TreatmentConsentState = "falta" | "sin_firmar" | "por_confirmar" | "firmado"
+
+/** «a», «a y b». */
+function titlesWords(titles: readonly string[]): string {
+  const quoted = titles.map((title) => `«${title}»`)
+  return quoted.length <= 1 ? (quoted[0] ?? "") : `${quoted.slice(0, -1).join(", ")} y ${quoted.at(-1)}`
+}
+
+/**
+ * «Falta su consentimiento», para decirlo junto al tratamiento; nada si está firmado. Si falta
+ * preparar alguno, dice cuál (`missing`): una exodoncia puede pedir el suyo y el de la anestesia.
+ */
+export function treatmentConsentWords(
+  state: TreatmentConsentState | null | undefined,
+  missing: readonly string[] = [],
+): string | null {
+  if (state === "falta")
+    return missing.length === 0
+      ? "Falta preparar su consentimiento y firmarlo antes de hacerlo"
+      : `Falta preparar ${missing.length === 1 ? "el consentimiento" : "los consentimientos"} ${titlesWords(missing)} y firmarlo${missing.length === 1 ? "" : "s"} antes de hacerlo`
+  if (state === "sin_firmar") return "Su consentimiento está listo: falta firmarlo antes de hacerlo"
+  if (state === "por_confirmar") return "Firmó su consentimiento en su enlace: confírmalo antes de hacerlo"
+  if (state === "firmado") return "Consentimiento firmado"
+  return null
+}
+
 export interface Patient {
   id: string
   organizationId?: string
@@ -525,6 +552,12 @@ export interface PlanItem {
   offeredCurrency?: string | null
   /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»), como lo dice el servidor. */
   diagnosisName?: string | null
+  /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia): lo dice el servidor. */
+  waitsFor?: { id: string; title: string } | null
+  /** Su consentimiento, si su servicio lo pide (consentimientos, 10 nov). */
+  consent?: TreatmentConsentState | null
+  /** Los consentimientos que faltan preparar, por su título (`treatmentConsentWords`). */
+  consentMissing?: string[]
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
@@ -644,6 +677,14 @@ export interface VisitTreatment {
   registered: boolean
   /** Lo trae la cita de esta atención: no se saca desde aquí. */
   broughtByAppointment: boolean
+  /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia); `today`: ese se hace hoy. */
+  after?: { title: string; today: boolean } | null
+  /** Su servicio pide esperar entre sesiones y aún no se cumple: `sinceDays` desde la última (0 = hoy). */
+  wait?: { days: number; sinceDays: number; from: string } | null
+  /** Su consentimiento, si su servicio lo pide; va con el tratamiento, aunque se preparara en otra atención. */
+  consent?: TreatmentConsentState | null
+  /** Los consentimientos que faltan preparar, por su título (`treatmentConsentWords`). */
+  consentMissing?: string[]
 }
 
 /** Un control con su ventana abierta: esta visita lo cumple si se marca. */
@@ -654,6 +695,8 @@ export interface VisitControl {
   overdue: boolean
   byName: string | null
   chosen: boolean
+  /** Reservado en la cita de esta atención: se cumple al firmar, sin elegirlo. */
+  byAppointment?: boolean
 }
 
 export interface EncounterVisit {
@@ -804,6 +847,8 @@ export interface TreatmentJourneySummary {
   nextFollowUp: { id: string; title: string; status: string; dueAt: string } | null
   /** null cuando el tratamiento está cerrado y no admite más trabajo. */
   nextAction: TreatmentNextAction | null
+  /** La cita por venir que ya lo lleva, si tiene. */
+  nextAppointmentAt?: string | null
   balances: TreatmentBalance[]
 }
 
@@ -1100,6 +1145,11 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   return apiFetch<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
+}
+
+/** De lo que falta, lo suyo: lo que pide su enlace (el documento de su representante no lo completa ella). */
+export function ownGaps<T extends { key: string }>(gaps: readonly T[]): T[] {
+  return gaps.filter((gap) => gap.key !== "representativeDoc")
 }
 
 /**

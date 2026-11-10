@@ -122,5 +122,5 @@ function AccessTable({ rows, isFetching }: { rows: AccessItem[]; isFetching: boo
     [],
   )
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
-  return <DataTable table={table} isFetching={isFetching} refreshMessage="Actualizando consultas…" />
+  return <DataTable table={table} isFetching={isFetching} refreshMessage="Actualizando consultas…" inCard />
 }

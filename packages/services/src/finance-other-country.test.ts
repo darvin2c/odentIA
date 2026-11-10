@@ -95,7 +95,7 @@ it("otra clínica, otro país: cobra, emite el ticket, anula y cierra sin nada p
   const ticket = await c.run((tx) => buildTicketSnapshot(tx, c.orgId, c.patientId, paid.ticket.id))
   expect(ticket.org).toMatchObject({ currency: "CLP", locale: "es-CL", timezone: "America/Santiago" })
   expect(ticket.lines).toEqual([
-    { description: "Limpieza dental", amountCents: 45000, ofCents: null, promotion: null },
+    { description: "Limpieza dental", amountCents: 45000, ofCents: null, completes: true, promotion: null },
   ])
   expect(ticket.methods.map((method) => method.amountCents)).toEqual([20000, 25000])
   expect(ticket.issuerName).toBe("Camila Rojas")
@@ -183,7 +183,7 @@ it("el ticket impreso no cambia aunque después cambien la clínica o su frase a
   const before = await c.run((tx) => buildTicketSnapshot(tx, c.orgId, c.patientId, paid.ticket.id))
   // Cobro parcial: el ticket dice cuánto se pagó, de cuánto, y cuánto queda.
   expect(before.lines).toEqual([
-    { description: "Control", amountCents: 10000, ofCents: 30000, promotion: null },
+    { description: "Control", amountCents: 10000, ofCents: 30000, completes: false, promotion: null },
   ])
   expect(before.remainingCents).toBe(20000)
 

@@ -33,16 +33,14 @@ import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
-import { personHeaderRules } from "../../lib/screen-rules"
-import { label } from "../../lib/glossary"
-import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { label } from "../../lib/glossary"
 import { clinicToday } from "../../lib/inventory"
 import { useOrgLocale } from "../../lib/locale"
+import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import {
   ageFrom,
   fetchPatientHealth,
-  filiationGapsText,
   hcLabel,
   isCurrentMedication,
   type PatientFull,
@@ -50,6 +48,7 @@ import {
   type PatientSummary,
 } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
+import { personHeaderRules } from "../../lib/screen-rules"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
 import { useOpenRecordPanel } from "../person/record-panel"
@@ -58,6 +57,7 @@ import { WriteToPersonDialog } from "../write-to-person"
 import { CollectButton } from "./collect-flow"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
+import { StaleEncounterNotice } from "./stale-encounter"
 import { UpcomingLine, usePersonUpcoming } from "./next-up"
 import { PatientAvatar } from "./patient-avatar"
 import { useOpenWide } from "./wide-section"
@@ -81,7 +81,8 @@ export function clinicalAlerts(
     .map((a) => ({
       id: a.id,
       label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${allergyName(a)}${a.severity === "desconocida" ? "" : ` (${label("alergia", a.severity).toLowerCase()})`}`,
-      tone: "secondary" as const,
+      // Toda alergia alerta al menos como una enfermedad (QA de la ficha del 10 nov, B1).
+      tone: "warning" as const,
     }))
   const conditions = detail.activeConditions.map((c) => ({
     id: c.id,
@@ -631,6 +632,8 @@ export function PersonHeader({
         people={writeTargets}
         onOpened={(conversationId, target) => openPanel?.({ conversationId, name: target.displayName })}
       />
+      {/* La atención que quedó abierta de otro día: qué hacer con ella, sin frenar (10 nov). */}
+      {patient && !person.archived ? <StaleEncounterNotice patientId={patient.id} /> : null}
     </header>
   )
 }

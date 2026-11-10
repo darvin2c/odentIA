@@ -22,7 +22,7 @@ import {
   fetchFormResponses,
   fetchFormTemplates,
   fetchOrders,
-  sendConsentByLink,
+  phoneSignBlockWords,
 } from "../../lib/clinical-forms"
 import {
   fetchPrescriptionDetail,
@@ -36,8 +36,13 @@ import { fetchMedicalLeaves } from "../../lib/medical-leaves"
 import type { Encounter, EncounterDetail, PatientFull, PlanItem } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { RecetasPanel } from "./clinical-panels"
-import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
-import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
+import {
+  ConsentLinkActions,
+  ConsentPhoneDrawer,
+  consentLinkWords,
+  SendToSignDialog,
+} from "./consent-link-actions"
+import { ConsentSigningScreen, PaperSignDrawer, useConsentSignerWord } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { DocumentOpenButton } from "./document-open-button"
 import {
@@ -146,9 +151,13 @@ export function useEncounterDocuments(
     queryFn: () => fetchMedicalLeaves(patientId),
     enabled: canRead && productUi().documents.medicalLeave,
   })
+  // Los de esta atención y los de los tratamientos que se hacen hoy, aunque se prepararan en otra:
+  // el pendiente va con el tratamiento (consentimientos, 10 nov).
+  const neededDocs = new Set((needs.data?.data ?? []).flatMap((need) => (need.documentId ? [need.documentId] : [])))
   const ownConsents = (consents.data?.data ?? []).filter(
     (doc) =>
-      doc.encounterId === encounterId && (doc.status === "pendiente" || doc.status === "firmado"),
+      (doc.encounterId === encounterId || neededDocs.has(doc.id)) &&
+      (doc.status === "pendiente" || doc.status === "firmado"),
   )
   // El PDF de un consentimiento firmado y la foto de una hoja en papel ya están
   // en su consentimiento: no salen dos veces.
@@ -251,6 +260,8 @@ export function EncounterDocumentsBlock({
   const [creating, setCreating] = useState<NewDocumentKind | null>(null)
   const [signing, setSigning] = useState<ConsentDocument[] | null>(null)
   const [paper, setPaper] = useState<ConsentDocument | null>(null)
+  const [sendingDoc, setSendingDoc] = useState<ConsentDocument | null>(null)
+  const [phoneDoc, setPhoneDoc] = useState<ConsentDocument | null>(null)
   const [viewing, setViewing] = useState<ViewedPaper | null>(null)
   const [openForm, setOpenForm] = useState<string | null>(null)
   const [paperFor, setPaperFor] = useState<ConsentNeed | null>(null)
@@ -315,7 +326,7 @@ export function EncounterDocumentsBlock({
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
   const firstDiagnosis = firstActive?.diagnosisCode
   const firstDiagnosisSystem = firstActive?.diagnosisSystem
-  const who = firstName(patient)
+  const who = useConsentSignerWord(patientId, firstName(patient))
 
   const startNew = (kind: NewDocumentKind) => {
     setMenuOpen(false)
@@ -456,7 +467,14 @@ export function EncounterDocumentsBlock({
                 {pendingTitles.length === 1
                   ? `Falta la firma de ${who}`
                   : `Faltan las firmas de ${who}`}
+                {docs.toSign.some((doc) => doc.linkSentAt) ? " · lo tiene en su enlace" : ""}
               </span>
+              {(() => {
+                const block = docs.toSign.find((doc) => doc.phoneSignBlock)?.phoneSignBlock
+                return block ? (
+                  <span className="text-xs text-muted-foreground">{phoneSignBlockWords(block, who, firstName(patient))}</span>
+                ) : null
+              })()}
             </div>
             <div className="flex items-center gap-1">
               <Button
@@ -470,26 +488,28 @@ export function EncounterDocumentsBlock({
               <RowActions
                 label="Otras formas de firmar"
                 items={docs.toSign.flatMap((doc) => [
-                  ...(doc.linkSentAt
+                  // Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), ni enviarlo
+                  // ni mostrar el código: la fila dice por qué (QA del 10 nov, M2).
+                  ...(doc.linkSentAt || doc.phoneSignBlock
                     ? []
                     : [
                         {
                           key: `link-${doc.id}`,
                           label: `Enviar para firmar desde su teléfono: ${doc.titleSnapshot}`,
                           disabled,
-                          onSelect: () =>
-                            void sendConsentByLink(doc.id, crypto.randomUUID())
-                              .then(() => {
-                                toast.success("Se lo enviamos: aparece en «Su enlace»")
-                                return refresh()
-                              })
-                              .catch((error: unknown) =>
-                                toast.error(
-                                  error instanceof ApiError
-                                    ? (error.shape.message ?? "No se pudo enviar")
-                                    : "No se pudo enviar",
-                                ),
-                              ),
+                          // Con su confirmación, como en la ficha: dice qué le llega.
+                          onSelect: () => setSendingDoc(doc),
+                        },
+                      ]),
+                  // Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), no se ofrece.
+                  ...(doc.phoneSignBlock
+                    ? []
+                    : [
+                        {
+                          key: `phone-${doc.id}`,
+                          label: `Mostrar el código para firmarlo en su teléfono: ${doc.titleSnapshot}`,
+                          disabled,
+                          onSelect: () => setPhoneDoc(doc),
                         },
                       ]),
                   {
@@ -510,7 +530,9 @@ export function EncounterDocumentsBlock({
         ) : null}
         {/* Lo que se le envió a firmar desde su enlace: espera su firma o tu confirmación. */}
         {docs.pendingSignatures
-          .filter((doc) => doc.linkSentAt || doc.personSignedAt)
+          // Lo que solo tiene en su enlace y se pide hoy sigue en «Firmar ahora» (arriba): aquí, lo
+          // que ya firmó allí y lo que tiene en su enlace sin pedirse hoy.
+          .filter((doc) => doc.personSignedAt || (doc.linkSentAt && !docs.toSign.includes(doc)))
           .map((doc) => (
             <li
               key={`enlace-${doc.id}`}
@@ -766,6 +788,8 @@ export function EncounterDocumentsBlock({
         onClose={() => setSigning(null)}
         onSigned={refresh}
       />
+      <SendToSignDialog document={sendingDoc} onClose={() => setSendingDoc(null)} onSent={refresh} />
+      <ConsentPhoneDrawer document={phoneDoc} onClose={() => setPhoneDoc(null)} onShown={refresh} />
       <PaperSignDrawer
         open={paper !== null}
         document={paper}

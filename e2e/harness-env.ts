@@ -20,12 +20,23 @@ export type HarnessRuntime = {
   stateDir: string
   baseDomain: string
   proxyPort: number
-  appPorts: { api: number; panel: number; platform: number; admin: number; latidiaPanel?: number; latidia?: number }
+  appPorts: {
+    api: number
+    panel: number
+    platform: number
+    admin: number
+    latidiaPanel?: number
+    latidia?: number
+    vistiaPanel?: number
+    vistia?: number
+  }
   /**
    * El dominio de latidIA en esta ejecución (`latidia.<tld>`; decisión 9 del
    * issue 229). Solo cuando corren sus recorridos: su panel y su app son otro build.
    */
   medicalDomain?: string
+  /** El dominio de vistIA (`vistia.<tld>`, ADR 0169), como el de latidIA: solo cuando corren sus recorridos. */
+  opticalDomain?: string
   postgres?: { host: string; port: number }
   storage?: { host: string; port: number }
   mailpit?: { host: string; httpPort: number; smtpPort: number }
@@ -153,6 +164,9 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     S3_PUBLIC_URL: `${s3Endpoint}/${AVATARS_BUCKET}`,
     SECRETS_KEY: "b895edcf574a7ca79434e50769e9ded6daace1636bc40d71f1310c3f43c5982b",
     CHANNEL_VALIDATE_EXTERNAL: "false",
+    // Solo la clave pública (de prueba): la API ofrece los avisos en el equipo y el worker, sin la
+    // privada, no envía nada; los recorridos no dependen de los servicios de push reales.
+    VAPID_PUBLIC_KEY: "BB0iBDZOVrHVt4bObUS8eMh-r2xVGWcuZTrCesKVj3jhAkjSZjgujkmk-10o-yXgn9SWX-1dKPCrHQP2jEhW3wQ",
     // Sin consultar Have I Been Pwned: las pruebas no dependen de la red ni de sus claves de ejemplo.
     PASSWORD_BREACH_CHECK: "false",
     CHANNEL_SENDER_MODE: "mock",
@@ -181,6 +195,15 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
           E2E_MEDICAL_DOMAIN: runtime.medicalDomain,
         }
       : {}),
+    ...(runtime.opticalDomain
+      ? {
+          // Y vistIA en el suyo, igual que latidIA.
+          OPTICAL_DOMAIN: runtime.opticalDomain,
+          VITE_DENTAL_DOMAIN: runtime.baseDomain,
+          VITE_OPTICAL_DOMAIN: runtime.opticalDomain,
+          E2E_OPTICAL_DOMAIN: runtime.opticalDomain,
+        }
+      : {}),
   }
 }
 
@@ -194,5 +217,15 @@ export function latidiaBuildEnv(runtime: HarnessRuntime): Record<string, string>
     VITE_PRODUCT: "medical",
     VITE_BASE_DOMAIN: runtime.medicalDomain,
     VITE_API_URL: `https://api.${runtime.medicalDomain}:${runtime.proxyPort}`,
+  }
+}
+
+/** Lo mismo para el panel y la app de vistIA (`VITE_PRODUCT=optical`, como en el despliegue). */
+export function vistiaBuildEnv(runtime: HarnessRuntime): Record<string, string> {
+  if (!runtime.opticalDomain) throw new Error("Esta ejecución no levanta vistIA.")
+  return {
+    VITE_PRODUCT: "optical",
+    VITE_BASE_DOMAIN: runtime.opticalDomain,
+    VITE_API_URL: `https://api.${runtime.opticalDomain}:${runtime.proxyPort}`,
   }
 }

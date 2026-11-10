@@ -13,10 +13,10 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { canAccess, seesBilling } from "@odentia/auth/permissions"
-import { productWords } from "@odentia/clinical"
+import { brandEmailColors, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { reportDigest, reportDigestSend } from "@odentia/db/schema/reports"
-import { type MailBrand, mailBrandName, renderEmail, type MailTemplate } from "@odentia/mail"
+import { type MailAccent, type MailBrand, mailBrandName, renderEmail, type MailTemplate } from "@odentia/mail"
 import { and, eq, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminSettings } from "./agent-admin.js"
 import { collectedNetMany } from "./finance.js"
@@ -205,8 +205,15 @@ export async function composeReportDigest(
   deps: { secretsKey: Buffer; now?: Date },
 ): Promise<ReportDigestComposed> {
   const now = deps.now ?? new Date()
-  const [person] = await tx.execute<{ role: string; email: string | null; name: string; slug: string; clinic: string }>(sql`
-    select m.role, u.email, u.name, o.slug, coalesce(op.trade_name, o.name) as clinic
+  const [person] = await tx.execute<{
+    role: string
+    email: string | null
+    name: string
+    slug: string
+    clinic: string
+    brand_color: string | null
+  }>(sql`
+    select m.role, u.email, u.name, o.slug, coalesce(op.trade_name, o.name) as clinic, op.brand_color
     from member m
     join "user" u on u.id = m.user_id
     join organization o on o.id = m.organization_id
@@ -286,6 +293,8 @@ export async function composeReportDigest(
     reportsUrl: origin ? `${origin}/reports?period=${encodeURIComponent(period)}` : null,
     stopUrl: origin ? `${origin}/resumen-lunes/baja/${reportDigestToken(deps.secretsKey, orgId, userId)}` : null,
     brand: productWords(await orgProduct(tx, orgId)).brand,
+    // El botón en el color de la clínica (ADR 0162): el resumen es de ella para su equipo.
+    ...(person.brand_color ? { accent: brandEmailColors(person.brand_color) } : {}),
   })
   return { to: person.email, mail }
 }
@@ -304,6 +313,8 @@ export interface ReportDigestEmailInput {
   stopUrl: string | null
   /** La marca de la clínica (issue 229); sin ella, odentIA. */
   brand?: MailBrand
+  /** El color que eligió la clínica, si eligió uno. */
+  accent?: MailAccent
 }
 
 /** El correo del resumen del lunes (tablero A4), con el molde común: cifras, lo que cambió, la recomendación y el botón. */
@@ -311,6 +322,7 @@ export function reportDigestEmail(input: ReportDigestEmailInput): MailTemplate {
   const things = input.changes.length + (input.recommendation ? 1 : 0)
   return renderEmail({
     brand: input.brand,
+    ...(input.accent ? { accent: input.accent } : {}),
     subject: `Tu semana: ${input.collected} cobrados${things > 0 ? ` y ${things} ${things === 1 ? "cosa" : "cosas"} que mirar` : ""}`,
     preview: `Así fue la semana ${input.week} en ${input.clinic}.`,
     eyebrow: input.clinic,

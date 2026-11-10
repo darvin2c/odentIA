@@ -14,6 +14,9 @@ import { orgSlugFromHostname, requestHostname } from "./host"
 
 export interface ClinicAppearance {
   brandColor: string | null
+  /** El nombre y el producto de la clínica: la app instalada se llama como ella (`app.webmanifest`). */
+  name?: string | null
+  product?: string | null
 }
 
 /** Una página no espera al color: pasado este rato sale con el del producto. */
@@ -37,7 +40,7 @@ export async function loadClinicAppearance(): Promise<ClinicAppearance> {
       cache: "no-store",
       signal: AbortSignal.timeout(APPEARANCE_TIMEOUT_MS),
     })
-    const appearance = { brandColor: data.brandColor ?? null }
+    const appearance = { brandColor: data.brandColor ?? null, name: data.name ?? null, product: data.product ?? null }
     if (browser) known = appearance
     return appearance
   } catch {

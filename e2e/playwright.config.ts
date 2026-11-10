@@ -21,7 +21,9 @@ export default defineConfig({
     // en movimiento, ocupa la CPU entera: con movimiento reducido queda quieta.
     // La opción del navegador alcanza también a los contextos creados a mano.
     reducedMotion: "reduce",
-    launchOptions: { args: ["--force-prefers-reduced-motion"] },
+    // El certificado del proxy es de la corrida: `ignoreHTTPSErrors` no alcanza al service
+    // worker (la app instalable, ADR 0177), que Chrome no registra con un certificado propio.
+    launchOptions: { args: ["--force-prefers-reduced-motion", "--ignore-certificate-errors"] },
   },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
 })

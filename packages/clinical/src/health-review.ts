@@ -75,3 +75,11 @@ export function healthReviewPending(
     (!!answers && Object.keys(answers).length > 0)
   )
 }
+
+/**
+ * El comienzo de la nota de una enfermedad o un medicamento que la persona
+ * declaró en su registro en línea cuando su ficha ya tenía antecedentes: así
+ * lo reconoce la atención para pedir que se revise. Lo escribe el servidor
+ * (`addDeclaredHealth`) y lo lee la pantalla: se cambian juntos.
+ */
+export const DECLARED_ONLINE_NOTE = "Lo declaró en su registro en línea"

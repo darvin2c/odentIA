@@ -71,6 +71,17 @@ export interface ClosingResolvable {
   planItemIds: string[]
   label: string
   site: string | null
+  /** Sana en su control (la periodontitis apical): se propone sin marcar. */
+  followUp?: boolean
+}
+
+/**
+ * Si el diagnóstico sigue activo al firmar. `keep` guarda lo que quien firma tocó: lo propuesto
+ * marcado que desmarcó y, en lo que sana en su control, lo que marcó.
+ */
+export function keepsDiagnosis(found: ClosingResolvable, keep: ReadonlySet<string>): boolean {
+  const touched = found.diagnosisIds.some((id) => keep.has(id))
+  return found.followUp ? !touched : touched
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión. */
@@ -106,7 +117,8 @@ export interface NextSession {
   title: string
   serviceId: string | null
   booked: BookedSession | null
-  toBook: { n: number; m: number } | null
+  /** `from`: desde qué día conviene (la espera de su servicio, `gapDays`), si no es mañana. */
+  toBook: { n: number; m: number; from?: string; gapDays?: number } | null
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */
@@ -137,12 +149,39 @@ export interface ClosingControls {
   /** Los meses de «En N meses» del producto. */
   recallMonths: number
   /** Los controles reservados en la cita de esta atención: se cumplen al firmarla. */
-  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null }>
+  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null; byName?: string | null }>
   /** El día de cada atajo («2026-11-14»), en la zona de la clínica. */
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
   next: ClosingNextControl | null
+  /** Los controles que dejarán los tratamientos que terminan al firmar: se cambian o se quitan aquí. */
+  finishing?: FinishingControl[]
+  /** Los controles que ya tiene abiertos, salvo el de la cita de hoy. */
+  open?: ClosingOpenControl[]
+  /** Lo que falta hacer sin cita, si hoy no se hizo nada: la vuelta es para eso, sin control aparte. */
+  returnsTo?: string[]
 }
+
+/** Un control que va a quedar al firmar, por el servicio de lo que termina hoy. */
+export interface FinishingControl {
+  key: string
+  title: string
+  /** `YYYY-MM-DD`, en la zona de la clínica. */
+  dueDay: string
+  afterDays: number
+}
+
+/** Un control abierto de la persona: pendiente o con su cita. */
+export interface ClosingOpenControl {
+  id: string
+  title: string
+  dueAt: string
+  status: string
+  scheduledAt: string | null
+}
+
+/** Lo que quien firma cambió de un control que va a quedar. */
+export type FinishingControlChange = { key: string; dueDay: string } | { key: string; remove: true }
 
 /** Cuánto de un producto, en su unidad de uso («2 guantes»). */
 export interface MaterialQuantity {
@@ -170,8 +209,11 @@ export interface FinalizedMaterials {
 
 /** Lo que el cierre hizo con los controles: el que indicó «¿Cuándo vuelve?» y los que cumplió. */
 export interface FinalizedControls {
-  next: { id: string; title: string; dueAt: string } | null
+  /** `joinsNext`: va en la misma cita que lo aceptado que «Reservar» ofrece, desde `from` (`YYYY-MM-DD`). */
+  next: { id: string; title: string; dueAt: string; joinsNext?: { from: string } } | null
   fulfilled: Array<{ id: string; title: string }>
+  /** «En 1 semana» para lo que falta hacer, sin control aparte. */
+  returnsTo?: { day: string; titles: string[] } | null
 }
 
 /** «6 may 2027», o «3 may» si es de este año: un día civil (`yyyy-MM-dd`), sin corrimiento de zona. */
@@ -196,7 +238,18 @@ export function finalizedControlsWords(controls: FinalizedControls, now = new Da
   const words: string[] = []
   if (controls.next) {
     const day = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(controls.next.dueAt))
-    words.push(`Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`)
+    // Si va en la misma cita que lo aceptado, «Reservar su próxima cita» ya lo trae: no se manda a recepción.
+    words.push(
+      controls.next.joinsNext
+        ? `${controls.next.title} (toca el ${controlDaySaid(day, now)}): «Reservar su próxima cita» lo trae en la misma cita.`
+        : `Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`,
+    )
+  }
+  if (controls.returnsTo) {
+    // «En 1 semana» con lo aceptado por hacer: vuelve para eso, sin control aparte (QA del 10 nov, M6).
+    const titles = controls.returnsTo.titles.map((title) => title.charAt(0).toLowerCase() + title.slice(1))
+    const what = titles.length <= 1 ? (titles[0] ?? "") : `${titles.slice(0, -1).join(", ")} y ${titles.at(-1)}`
+    words.push(`Vuelve hacia el ${controlDaySaid(controls.returnsTo.day, now)} para ${what} · recepción lo verá en «Qué sigue».`)
   }
   if (controls.fulfilled.length > 0) {
     const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")
@@ -370,6 +423,8 @@ export interface EncounterVoidPreview {
   blocked: boolean
   /** Lo entregado que se anula con ella: va tal cual al anular. */
   confirm: Array<{ id: string; status: string }>
+  /** Cambios de tratamiento hechos en ella: se deshacen y el anterior vuelve a como estaba. */
+  revisions?: Array<{ restored: string; replacement: string }>
 }
 
 /** Qué se lleva anular la atención, antes de confirmar (la misma regla del servidor al anular). */
@@ -384,6 +439,26 @@ export function voidEncounterApi(
   budgets: ReadonlyArray<{ id: string; status: string }> = [],
 ) {
   return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason, budgets })
+}
+
+/** La atención en curso de un paciente, sin nada de su historia: cuál, de quién, de qué día y si está vacía. */
+export interface OpenEncounterRef {
+  id: string
+  professionalUserId: string
+  startedAt: string
+  /** Empezó hoy, en el día de la clínica. */
+  today: boolean
+  /** Sin nada registrado: se descarta de un toque. */
+  empty: boolean
+}
+
+export function fetchOpenEncounter(patientId: string) {
+  return apiFetch<{ data: OpenEncounterRef | null }>(`${base(patientId)}/open-encounter`)
+}
+
+/** «Descartar»: una atención en borrador sin nada registrado se borra, sin motivo. */
+export function discardEncounterApi(patientId: string, encounterId: string) {
+  return post<{ discarded: true; appointmentId: string | null }>(`${base(patientId)}/encounters/${encounterId}/discard`)
 }
 
 export function takeOverEncounterApi(patientId: string, encounterId: string) {

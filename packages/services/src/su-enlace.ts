@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import {
   CONSENT_DECLARATION,
   clinicalProfileFor,
-  consentSignatureNote,
+  CONSENT_SIGNATURE_NOTES,
   diagnosisCodeLabel,
   documentIssuerCountry,
   documentText,
@@ -27,7 +27,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { adminRuntime, appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
@@ -43,7 +43,6 @@ import {
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName } from "./automation-routing.js"
 import {
-  PERSONAL_LINK_TTL_DAYS,
   appointmentView,
   type BookingLinkAppointment,
   type BookingLinkBranch,
@@ -56,6 +55,7 @@ import {
   issuePersonalLink,
   linkContactFirstName,
   linkExpired,
+  PERSONAL_LINK_TTL_DAYS,
   patientFirstNameOf,
   type ResolvedPersonalLink,
   requireLinkDecider,
@@ -82,9 +82,9 @@ import {
   signConsentByLink,
 } from "./clinical-forms.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
+import { createContactNote } from "./crm-workspace.js"
 import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { chartNumber } from "./document-kit.js"
-import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
@@ -111,6 +111,8 @@ import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-ques
 import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
+import { productHooks } from "./products.js"
+import { waitingItemIds } from "./to-schedule.js"
 
 /**
  * Lo que tiene pendiente cada persona en «Su enlace» (decisión 8; ADR 0037):
@@ -683,6 +685,7 @@ function fieldsFor(missing: MissingPersonDatum[]): Set<DataField> {
       allowed.add("insuranceScheme")
       allowed.add("insurerName")
       allowed.add("affiliationNumber")
+    } else if (item.key === "representativeDoc") {
     } else {
       allowed.add(item.key)
     }
@@ -1299,12 +1302,25 @@ export async function decidePersonalLinkBudget(
     )
   }
   const context = await portalBudgetContext(tx, orgId, [budgetId], true)
+  // Lo común aceptado está en cada camino: cada tratamiento una vez.
+  const accepted = result.budget.items
+    .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
+    .filter(
+      (line, index, all) =>
+        all.findIndex((other) => other.planItemId === line.planItemId) === index,
+    )
+  // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia) no se
+  // reserva junto: se ofrece cuando lo de antes termine, como en «Qué sigue» (entrega 8).
+  const waiting = await waitingItemIds(
+    tx,
+    orgId,
+    accepted.map((line) => line.planItemId),
+    (await productHooks(tx, orgId)).planPhases,
+  )
   return {
     budget: toPortalBudget(result.budget, context),
-    // Lo común aceptado está en cada camino: cada tratamiento una vez.
-    toSchedule: result.budget.items
-      .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
-      .filter((line, index, all) => all.findIndex((other) => other.planItemId === line.planItemId) === index)
+    toSchedule: accepted
+      .filter((line) => !waiting.has(line.planItemId))
       .map((line) => ({ planItemId: line.planItemId, title: line.title })),
   }
 }
@@ -1393,11 +1409,6 @@ export async function getPersonalLinkConsent(
     .innerJoin(contact, joinPatientPerson())
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, doc.patientId)))
     .limit(1)
-  const [profile] = await tx
-    .select({ country: orgProfile.countryCode })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
   const diagnosisTitle = (await consentDiagnosisTitles(tx, [doc])).get(doc.id)
   const diagnosisCode = doc.diagnosisCode ? diagnosisCodeLabel(doc.diagnosisSystem, doc.diagnosisCode) : null
   return {
@@ -1409,7 +1420,7 @@ export async function getPersonalLinkConsent(
     body: doc.bodySnapshot,
     declaration: doc.declarationSnapshot ?? CONSENT_DECLARATION,
     signatureWords: CONSENT_SIGNATURE_WORDS.enlace,
-    signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+    signatureNote: CONSENT_SIGNATURE_NOTES.enlace,
     clinic: await loadDocumentLetterhead(tx, orgId),
     patient: { name: person?.name ?? "", chartNumber: person ? chartNumber(person.patientNumber) : "" },
     minor: await patientIsMinor(tx, orgId, doc.patientId),
@@ -2028,6 +2039,28 @@ export interface PersonalLinkShown {
 }
 
 /**
+ * Por qué no puede firmar desde su teléfono quien recibe su enlace (`serviceRecipient`), con la
+ * regla de la firma a distancia (`remoteSignBlock`): «Firmar en su teléfono» no se ofrece si su
+ * enlace no lo dejaría firmar (entrega 11). `sin-destinatario`: no hay a quién mostrárselo.
+ */
+export async function consentPhoneSignBlock(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<RemoteSignBlock | "sin-destinatario" | null> {
+  const recipient = await serviceRecipient(tx, orgId, patientId).catch((e: unknown) => {
+    if (e instanceof ServiceError) return null
+    throw e
+  })
+  if (!recipient) return "sin-destinatario"
+  // Un representante cuyo vínculo se quitó sigue en sus responsabilidades: no hay a quién.
+  return remoteSignBlock(tx, orgId, patientId, recipient.contactId).catch((e: unknown) => {
+    if (e instanceof ServiceError) return "sin-destinatario" as const
+    throw e
+  })
+}
+
+/**
  * «Su enlace» para mostrarlo en la clínica como código QR: quien decide por el
  * paciente lo escanea con su celular delante de recepción y completa sus datos
  * mientras espera. No se envía nada: el enlace es el mismo que se le enviaría
@@ -2039,6 +2072,8 @@ export async function showPersonalLink(
   actorUserId: string,
   patientId: string,
   deps: { secretsKey: Buffer },
+  /** El consentimiento que abre para leerlo y firmarlo en su teléfono (`abre=firma`). */
+  consentId?: string | null,
 ): Promise<PersonalLinkShown> {
   const recipient = await serviceRecipient(tx, orgId, patientId)
   const link = await issuePersonalLink(
@@ -2048,7 +2083,9 @@ export async function showPersonalLink(
     { contactId: recipient.contactId, patientId, createdBy: actorUserId, booking: false },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token, "pendientes")
+  const url = consentId
+    ? await personalLinkUrl(tx, orgId, link.token, "firma", consentId)
+    : await personalLinkUrl(tx, orgId, link.token, "pendientes")
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -2058,6 +2095,7 @@ export async function showPersonalLink(
     entityId: patientId,
     metadata: {
       patientId,
+      ...(consentId ? { consentId } : {}),
       recipientContactId: recipient.contactId,
       recipientName: recipient.displayName,
     },

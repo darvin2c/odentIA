@@ -575,7 +575,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
       const commissions = await fig("comisiones")
       return {
         respuesta: `odentIA no emite facturas y solo conoce los gastos que registras y las comisiones. Este mes van ${show(spent)} de gastos y ${show(commissions)} de comisiones: cobrar al menos ${show(spent, (spent.total.value ?? 0) + (commissions.total.value ?? 0))} cubriría lo registrado, sin contar lo que no se anotó.`,
-        criterio: "Trampa a medias: no hay costos fijos ni facturas. Se ofrece gastos registrados + comisiones del mes como referencia.",
+        criterio: "Trampa a medias: no emite facturas, y lo por pagar no está en sus datos. Se ofrece gastos pagados + comisiones del mes como referencia.",
         datos: { gastos: spent.total, comisiones: commissions.total },
       }
     },

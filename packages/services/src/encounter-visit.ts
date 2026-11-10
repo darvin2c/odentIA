@@ -12,6 +12,7 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
+  clinicalFollowUp,
   encounter,
   encounterDiagnosis,
   encounterPlanItem,
@@ -33,11 +34,14 @@ import { notFound, ServiceError } from "./errors.js"
 
 const conflict = (code: string, message: string): ServiceError =>
   new ServiceError(code, 409, message)
+
+import { type TreatmentConsentState, treatmentConsentStates } from "./consent-state.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { TO_SCHEDULE_STATUSES } from "./to-schedule.js"
+import { nextSessionGapOf } from "./session-gap.js"
+import { goesBeforeSql, planItemSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy. */
 export interface VisitTreatment {
@@ -56,6 +60,23 @@ export interface VisitTreatment {
   registered: boolean
   /** Lo trae la cita de esta atención: «Hoy no» no lo saca (el cierre avisa si no se hizo). */
   broughtByAppointment: boolean
+  /**
+   * Va después de otro tratamiento de la misma pieza (`waitingFor`, la regla de «Qué sigue»): la
+   * corona tras la endodoncia. `today`: lo de antes se hace en esta atención. Es un aviso: «Hacerla
+   * hoy» sigue, como segunda opción (entrega 8).
+   */
+  after: { title: string; today: boolean } | null
+  /** Su consentimiento, si su servicio lo pide (`treatmentConsentStates`); null si no lo pide o ya está firmado. */
+  consent?: TreatmentConsentState | null
+  /** Los consentimientos que faltan preparar, por su título: la pantalla dice cuál. */
+  consentMissing?: string[]
+  /**
+   * Su servicio pide esperar entre sesiones y aún no se cumple (la regla de la reserva,
+   * `nextSessionGapOf`): `days` los que pide, `sinceDays` los que pasaron desde la última
+   * sesión (0 = hoy) y `from` desde qué día convendría. Es un aviso, no un freno: «Continuar hoy»
+   * sigue (QA del 10 nov, B6). Null si no espera nada o ya se cumplió.
+   */
+  wait: { days: number; sinceDays: number; from: string } | null
 }
 
 /** Un control con su ventana abierta: esta visita puede cumplirlo. */
@@ -69,6 +90,11 @@ export interface VisitControl {
   byName: string | null
   /** Se eligió al empezar («Viene a su control»): se cumple al firmar. */
   chosen: boolean
+  /**
+   * Reservado en la cita de esta atención: viene a él y se cumple al firmar, sin elegirlo. Se sigue
+   * viendo después de usar la cita como motivo (QA del 9 nov, repaso 3).
+   */
+  byAppointment?: boolean
 }
 
 export interface EncounterVisit {
@@ -103,6 +129,21 @@ function linkableSql(orgId: string, patientId: string, budgetRequired: boolean) 
     }`
 }
 
+/** `YYYY-MM-DD` en la zona de la clínica. */
+function dayIn(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(date)
+}
+
+/** Días de `from` a `to` (`YYYY-MM-DD`). */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
+}
+
 /** «Hoy viene a…» de un borrador. Una atención firmada o anulada no lo tiene. */
 export async function encounterVisitOf(
   tx: Db,
@@ -110,7 +151,8 @@ export async function encounterVisitOf(
   row: EncounterRow,
 ): Promise<EncounterVisit | null> {
   if (row.status !== "borrador") return null
-  const { site, budgetRequired } = await productHooks(tx, orgId)
+  const { site, budgetRequired, planPhases } = await productHooks(tx, orgId)
+  const goesBefore = goesBeforeSql(planItemSql("i"), planItemSql("before_item"), planPhases)
   const rows = await tx.execute<{
     id: string
     title: string
@@ -122,6 +164,8 @@ export async function encounterVisitOf(
     linked: boolean
     registered: boolean
     by_appointment: boolean
+    after_title: string | null
+    after_today: boolean | null
   }>(sql`
     select i.id, i.title, i.site_system, i.site_code, i.status, i.planned_sessions as m,
       (select count(distinct done_procedure.encounter_id)::int from encounter_procedure done_procedure
@@ -139,7 +183,13 @@ export async function encounterVisitOf(
           ? sql`exists (select 1 from appointment_plan_item brought where brought.organization_id = i.organization_id
         and brought.plan_item_id = i.id and brought.appointment_id = ${row.appointmentId})`
           : sql`false`
-      } as by_appointment
+      } as by_appointment,
+      (select before_item.title from treatment_plan_item before_item where ${goesBefore}
+        order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_title,
+      (select exists (select 1 from encounter_plan_item today_before where today_before.organization_id = before_item.organization_id
+        and today_before.plan_item_id = before_item.id and today_before.encounter_id = ${row.id})
+        from treatment_plan_item before_item where ${goesBefore}
+        order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_today
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
       ${
@@ -150,8 +200,23 @@ export async function encounterVisitOf(
         where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))`
       }
     order by linked desc, (i.status = 'en_curso') desc, i.sort_order, i.created_at, i.id`)
-  const treatments = rows.slice(0, VISIT_TREATMENTS).map((item) => {
+  // Lo que va después de otro, al final (salvo que ya se eligió para hoy): primero lo que toca.
+  const place = (item: (typeof rows)[number]) => (item.linked ? 0 : item.after_title ? 2 : 1)
+  const ordered = [...rows].sort((x, y) => place(x) - place(y))
+  const { timezone } = await findOrgLocale(tx, orgId)
+  // La espera entre sesiones de lo que ya empezó y aún no se registra hoy (B6): la misma regla
+  // con que la reserva busca la próxima sesión.
+  const shown = ordered.slice(0, VISIT_TREATMENTS)
+  const gaps = await nextSessionGapOf(
+    tx,
+    orgId,
+    shown.filter((item) => Number(item.done_before) > 0 && !item.registered).map((item) => item.id),
+  )
+  const today = dayIn(new Date(), timezone)
+  const consents = await treatmentConsentStates(tx, orgId, shown.map((item) => item.id))
+  const treatments = shown.map((item) => {
     const done = Number(item.done_before)
+    const gap = gaps.get(item.id)
     return {
       planItemId: item.id,
       title: item.title,
@@ -162,13 +227,48 @@ export async function encounterVisitOf(
       linked: Boolean(item.linked),
       registered: Boolean(item.registered),
       broughtByAppointment: Boolean(item.by_appointment),
+      after: item.after_title
+        ? { title: item.after_title, today: Boolean(item.after_today) }
+        : null,
+      wait: gap
+        ? {
+            days: gap.days,
+            sinceDays: Math.max(0, gap.days - daysBetween(today, gap.from)),
+            from: gap.from,
+          }
+        : null,
+      // Su consentimiento, aunque se preparara en otra atención: se firma antes de empezar.
+      consent: consents.get(item.id)?.state ?? null,
+      consentMissing: consents.get(item.id)?.missing ?? [],
     }
   })
-  const { timezone } = await findOrgLocale(tx, orgId)
   const due = await dueControlsOf(tx, orgId, row.professionalUserId, row, timezone)
+  // El control reservado en la cita de hoy no está «por cumplir» (ya tiene cita): es a lo que viene.
+  const booked = row.appointmentId
+    ? await tx
+        .select({
+          id: clinicalFollowUp.id,
+          title: clinicalFollowUp.title,
+          dueAt: clinicalFollowUp.dueAt,
+          originProfessionalUserId: encounter.professionalUserId,
+        })
+        .from(clinicalFollowUp)
+        .leftJoin(
+          encounter,
+          and(eq(encounter.id, clinicalFollowUp.originEncounterId), eq(encounter.organizationId, clinicalFollowUp.organizationId)),
+        )
+        .where(
+          and(
+            eq(clinicalFollowUp.organizationId, orgId),
+            eq(clinicalFollowUp.patientId, row.patientId),
+            eq(clinicalFollowUp.status, "programado"),
+            eq(clinicalFollowUp.appointmentId, row.appointmentId),
+          ),
+        )
+    : []
   const others = [
     ...new Set(
-      due.flatMap((control) =>
+      [...due, ...booked].flatMap((control) =>
         control.originProfessionalUserId &&
         control.originProfessionalUserId !== row.professionalUserId
           ? [control.originProfessionalUserId]
@@ -187,7 +287,7 @@ export async function encounterVisitOf(
       )
     : new Map<string, string>()
   const now = Date.now()
-  const [booked] = row.appointmentId
+  const [next] = row.appointmentId
     ? []
     : await tx.execute<{ startsAt: Date; serviceName: string | null }>(sql`
       select starts_at as "startsAt", service_name as "serviceName" from appointment
@@ -195,10 +295,22 @@ export async function encounterVisitOf(
         and starts_at > now() and not is_test
       order by starts_at limit 1`)
   return {
-    booked: booked ? { startsAt: new Date(booked.startsAt), serviceName: booked.serviceName } : null,
+    booked: next ? { startsAt: new Date(next.startsAt), serviceName: next.serviceName } : null,
     treatments,
     moreTreatments: Math.max(0, rows.length - treatments.length),
-    controls: due.map((control) => ({
+    controls: [
+      ...booked.map((control) => ({
+        id: control.id,
+        title: control.title,
+        dueAt: control.dueAt,
+        overdue: control.dueAt.getTime() < now,
+        byName: control.originProfessionalUserId
+          ? (names.get(control.originProfessionalUserId) ?? null)
+          : null,
+        chosen: true,
+        byAppointment: true,
+      })),
+      ...due.map((control) => ({
       id: control.id,
       title: control.title,
       dueAt: control.dueAt,
@@ -208,6 +320,7 @@ export async function encounterVisitOf(
         : null,
       chosen: control.chosen,
     })),
+    ],
   }
 }
 
@@ -262,9 +375,12 @@ function continuesWords(title: string, tooth: number | null): string {
 }
 
 /**
- * El diagnóstico que sigue con el tratamiento: el suyo con el tipo de la última
- * vez (la misma propuesta que «Usar»), o el de la atención donde se indicó en
- * su mismo sitio, con su tipo. Sin uno de los dos, nada: el clínico lo elige.
+ * El diagnóstico que sigue con el tratamiento, nunca uno ya resuelto (QA del 10 nov, A2: la
+ * corona después de la endodoncia traía la pulpitis que la endodoncia había resuelto):
+ * 1. el de su sesión anterior, en su mismo sitio y aún activo;
+ * 2. el suyo, con el tipo de la última vez (la misma propuesta que «Usar»), si sigue activo;
+ * 3. el de la atención donde se indicó, en su mismo sitio y aún activo.
+ * Sin ninguno, nada: el clínico lo elige.
  */
 async function continuingDiagnosis(
   tx: Db,
@@ -275,7 +391,96 @@ async function continuingDiagnosis(
   item: typeof treatmentPlanItem.$inferSelect,
 ): Promise<boolean> {
   const { site } = await productHooks(tx, orgId)
+  const sameSite = item.siteCode
+    ? and(
+        eq(encounterDiagnosis.siteSystem, item.siteSystem ?? ""),
+        eq(encounterDiagnosis.siteCode, item.siteCode),
+      )
+    : isNull(encounterDiagnosis.siteCode)
+  /** El último diagnóstico activo, con tipo, de esa atención en el sitio del tratamiento. */
+  const activeIn = async (fromEncounterId: string) => {
+    const rows = await tx
+      .select()
+      .from(encounterDiagnosis)
+      .innerJoin(
+        encounter,
+        and(
+          eq(encounter.id, encounterDiagnosis.encounterId),
+          eq(encounter.organizationId, encounterDiagnosis.organizationId),
+        ),
+      )
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.encounterId, fromEncounterId),
+          isNull(encounterDiagnosis.voidedAt),
+          isNotNull(encounterDiagnosis.diagnosisType),
+          eq(encounterDiagnosis.status, "activo"),
+          sql`${encounter.status} <> 'anulada'`,
+          sameSite,
+        ),
+      )
+      .orderBy(desc(encounterDiagnosis.createdAt), desc(encounterDiagnosis.id))
+    // El del propio tratamiento, si está; si no, el último de su sitio.
+    const own = item.diagnosisCode ? rows.find((row) => row.encounter_diagnosis.diagnosisCode === item.diagnosisCode) : undefined
+    return (own ?? rows[0])?.encounter_diagnosis ?? null
+  }
+  const record = async (diagnosis: typeof encounterDiagnosis.$inferSelect) => {
+    if (!diagnosis.diagnosisType) return false
+    await recordEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
+      diagnosisCode: diagnosis.diagnosisCode,
+      diagnosisSystem: diagnosis.diagnosisSystem,
+      diagnosisType: diagnosis.diagnosisType,
+      ...siteInput(withSite(site, diagnosis)),
+    })
+    return true
+  }
+  // 1. La sesión anterior de este mismo tratamiento (otra atención, no anulada).
+  const previous = await tx.execute<{ encounter_id: string }>(sql`
+    select done.encounter_id from encounter_procedure done
+    join encounter e on e.organization_id = done.organization_id and e.id = done.encounter_id
+    where done.organization_id = ${orgId} and done.plan_item_id = ${item.id}
+      and done.voided_at is null and done.encounter_id <> ${encounterId} and e.status <> 'anulada'
+    order by done.created_at desc, done.id desc
+    limit 1`)
+  const previousEncounterId = previous[0]?.encounter_id
+  if (previousEncounterId) {
+    const found = await activeIn(previousEncounterId)
+    if (found) return record(found)
+  }
   if (item.diagnosisCode) {
+    // Ya resuelto en ese sitio (y sin ninguno activo): no se trae (A2).
+    const [stillActive] = await tx
+      .select({ id: encounterDiagnosis.id })
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.patientId, patientId),
+          eq(encounterDiagnosis.diagnosisCode, item.diagnosisCode),
+          isNull(encounterDiagnosis.voidedAt),
+          eq(encounterDiagnosis.status, "activo"),
+          sameSite,
+        ),
+      )
+      .limit(1)
+    const [resolved] = stillActive
+      ? []
+      : await tx
+          .select({ id: encounterDiagnosis.id })
+          .from(encounterDiagnosis)
+          .where(
+            and(
+              eq(encounterDiagnosis.organizationId, orgId),
+              eq(encounterDiagnosis.patientId, patientId),
+              eq(encounterDiagnosis.diagnosisCode, item.diagnosisCode),
+              isNull(encounterDiagnosis.voidedAt),
+              eq(encounterDiagnosis.status, "resuelto"),
+              sameSite,
+            ),
+          )
+          .limit(1)
+    if (resolved) return false
     const suggestions = await getDiagnosisSuggestions(tx, orgId, { patientId, encounterId })
     const where = withSite(site, item)
     const proposal = suggestions.proposed.find(
@@ -294,43 +499,8 @@ async function continuingDiagnosis(
     return true
   }
   if (!item.sourceEncounterId || item.sourceEncounterId === encounterId) return false
-  const [found] = await tx
-    .select()
-    .from(encounterDiagnosis)
-    .innerJoin(
-      encounter,
-      and(
-        eq(encounter.id, encounterDiagnosis.encounterId),
-        eq(encounter.organizationId, encounterDiagnosis.organizationId),
-      ),
-    )
-    .where(
-      and(
-        eq(encounterDiagnosis.organizationId, orgId),
-        eq(encounterDiagnosis.encounterId, item.sourceEncounterId),
-        isNull(encounterDiagnosis.voidedAt),
-        isNotNull(encounterDiagnosis.diagnosisType),
-        sql`${encounter.status} <> 'anulada'`,
-        item.siteCode
-          ? and(
-              eq(encounterDiagnosis.siteSystem, item.siteSystem ?? ""),
-              eq(encounterDiagnosis.siteCode, item.siteCode),
-            )
-          : isNull(encounterDiagnosis.siteCode),
-      ),
-    )
-    .orderBy(desc(encounterDiagnosis.createdAt), desc(encounterDiagnosis.id))
-    .limit(1)
-  const diagnosis = found?.encounter_diagnosis
-  if (!diagnosis?.diagnosisType) return false
-  const fields = withSite(site, diagnosis)
-  await recordEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
-    diagnosisCode: diagnosis.diagnosisCode,
-    diagnosisSystem: diagnosis.diagnosisSystem,
-    diagnosisType: diagnosis.diagnosisType,
-    ...siteInput(fields),
-  })
-  return true
+  const found = await activeIn(item.sourceEncounterId)
+  return found ? record(found) : false
 }
 
 /**

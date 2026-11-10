@@ -83,6 +83,8 @@ export type WaitingRow =
       startedAt: string
       /** Lo que falta para cerrarla (`reason`, `diagnosis`, `evolution`, `signature`). */
       missing: string[]
+      /** Sin nada registrado: se descarta de un toque. */
+      empty?: boolean
     }
   | {
       kind: "case"
@@ -201,6 +203,10 @@ export type WaitingRow =
       createdAt: string
       /** `registro`: hay lo que escribió para decidir en «¿Es la misma persona?». */
       held?: boolean
+      /** `registro` guardado: por qué se parece. */
+      match?: "documento" | "celular"
+      /** `registro` guardado: cuántos datos de lo que escribió no coinciden con lo que ya tiene. */
+      differences?: number
     }
   /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
@@ -259,6 +265,8 @@ export interface WorkspaceAppointment {
   encounter: { id: string; startedAt: string; professionalUserId: string; professionalName: string } | null
   /** La siguiente que aún no llega. */
   next: boolean
+  /** Lo que llevaba y ya se terminó: la cita quedó sin objeto. */
+  doneFor?: string | null
 }
 /** Cuántas citas hay hoy: en sala, en atención, atendidas y por venir (las que aún no llegan). */
 export interface WorkspaceTodaySummary {

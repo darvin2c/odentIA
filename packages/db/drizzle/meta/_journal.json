@@ -547,6 +547,125 @@
       "when": 1794248187830,
       "tag": "0077_vistia_opticas",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794248214084,
+      "tag": "0078_receta_de_lentes",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794248231382,
+      "tag": "0079_pedidos",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794248249486,
+      "tag": "0080_pedido_listo",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1794248263571,
+      "tag": "0081_venta_de_mostrador",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794253982873,
+      "tag": "0082_anatomia_de_la_biblioteca",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794253986044,
+      "tag": "0083_argos_espera_a_otro",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794262432828,
+      "tag": "0084_factura_por_pagar",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794262445836,
+      "tag": "0085_factura_por_pagar_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794275895229,
+      "tag": "0086_registro_guarda_su_aviso",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794323237178,
+      "tag": "0087_controles_configurables",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794323239852,
+      "tag": "0088_controles_configurables_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794323242573,
+      "tag": "0089_consentimiento_por_familia",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794323803537,
+      "tag": "0090_consentimiento_por_tratamiento",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1794325900036,
+      "tag": "0091_descartar_atencion_vacia",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1794331834113,
+      "tag": "0092_app_instalable_avisos",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1794331837148,
+      "tag": "0093_app_instalable_avisos_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1794339915167,
+      "tag": "0094_controles_que_faltan",
+      "breakpoints": true
     }
   ]
 }

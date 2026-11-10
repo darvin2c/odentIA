@@ -4,7 +4,7 @@ import {
   CONSENT_SECTION_LABELS,
   type ConsentSections,
   clinicalProfileFor,
-  consentSignatureNote,
+  signatureKindWords,
   diagnosisCodeLabel,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -190,7 +190,9 @@ export async function renderConsentPdf(
           ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }]
           : []),
         { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
-        { text: "Firmado electrónicamente" },
+        // En papel, «Firmado electrónicamente» al lado de «Firmado a mano en papel» se leía como que
+        // la persona firmó de las dos formas (pendiente de la entrega 11): el profesional lo confirmó.
+        { text: method === "papel" ? "Lo confirmó con su perfil profesional" : "Firmado electrónicamente" },
       ]
   const signatures = [
     { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
@@ -263,18 +265,21 @@ export async function renderConsentPdf(
   kit.gap(16)
   kit.rule()
   kit.gap(8)
-  const words = CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica
-  const note = consentSignatureNote(clinicalProfileFor(data.establishment?.country).signatureLaw)
+  // El nivel de la firma va aquí, en letra discreta, y no en la pantalla al firmar (entrega 11).
+  // La firma en papel es manuscrita: no se llama firma electrónica (la línea de quien firma ya dice que su foto queda en Documentos).
+  const kind = signatureKindWords(clinicalProfileFor(data.establishment?.country).signatureLaw)
+  const channel = method === "enlace" ? "por enlace" : "en la clínica"
+  const words = method === "papel" ? `${signerHeading === "Paciente" ? "El paciente" : "Su representante"} firmó a mano en papel` : `${kind} · ${channel}`
   const qrSize = CHECK_QR_SIZE
-  // Con QR, el código y sus tres textos no se separan de página.
+  // Con QR, el código y sus textos no se separan de página.
   const needed = 44 + (checkUrl ? 26 : 0)
   kit.ensure(needed)
   const top = kit.y
   const textWidth = checkUrl ? kit.width - qrSize - 15 : kit.width
   kit.text(words, { size: SIZE.second, face: "sansSemi", width: textWidth })
-  kit.text(note, { size: SIZE.label, tone: "gray", width: textWidth, leading: 1.4 })
   if (checkUrl) {
-    kit.text("Escanee el código para comprobar que sigue vigente.", {
+    // La página del código dice si sigue vigente y compara el PDF con su huella (`document-check.ts`).
+    kit.text("Escanee el código para comprobar que sigue vigente y que este documento no cambió.", {
       size: SIZE.label,
       tone: "gray",
       width: textWidth,

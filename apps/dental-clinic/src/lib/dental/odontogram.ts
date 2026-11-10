@@ -6,6 +6,7 @@
  */
 
 import { apiFetch } from "@odentia/clinic-app/lib/api"
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import type { SiteFinding } from "@odentia/clinic-app/lib/patients"
 import {
   activeFindingsAsOf,
@@ -39,6 +40,32 @@ export interface OdontogramEntry extends SiteFinding {
   resolvedAt?: string | null
   /** Lo tratado queda dibujado: el tratamiento completado que dejó este hallazgo. */
   leftByPlanItemId?: string | null
+}
+
+/**
+ * La fila plegada de la atención con lo registrado antes: «Evolución · 1
+ * registro anterior (9 nov)» o «Evolución · 3 registros anteriores (el
+ * último, 9 nov)», con el día de la clínica.
+ */
+export function earlierEvolutionWords(
+  entries: ReadonlyArray<Pick<OdontogramEntry, "createdAt">>,
+): string {
+  const latest = entries.reduce<string | null>(
+    (last, entry) =>
+      entry.createdAt && (!last || entry.createdAt > last) ? entry.createdAt : last,
+    null,
+  )
+  const day = latest
+    ? new Date(latest)
+        .toLocaleDateString(activeOrgLocale() ?? "es", {
+          day: "numeric",
+          month: "short",
+          timeZone: activeOrgTimeZone(),
+        })
+        .replace(".", "")
+    : null
+  if (entries.length === 1) return `Evolución · 1 registro anterior${day ? ` (${day})` : ""}`
+  return `Evolución · ${entries.length} registros anteriores${day ? ` (el último, ${day})` : ""}`
 }
 
 export type ToothState = {
@@ -124,6 +151,8 @@ export interface PrintEstablishment {
   /** Con una sola sede, su nombre y su teléfono. */
   branchName?: string | null
   phone?: string | null
+  /** La línea del membrete y las iniciales; sin color (o firmada antes de tenerlo), gris. */
+  brandInk?: string | null
 }
 
 function base(patientId: string): string {

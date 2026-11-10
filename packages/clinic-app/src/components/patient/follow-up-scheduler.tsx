@@ -2,6 +2,7 @@ import { Button } from "@odentia/ui"
 import {
   FormDrawer,
   LoadingState,
+  minutesToInstant,
   scheduleToneAt,
   SubmitButton,
   submitErrorMessage,
@@ -14,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import {
   type AgendaAppointment,
+  type AgendaAvailability,
   type AgendaResources,
   invalidateAppointmentQueries,
 } from "../../lib/agenda"
@@ -29,12 +31,59 @@ import {
 import { usePermission } from "../../lib/crm"
 import type { ServiceCatalogItem } from "../../lib/services"
 import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
-import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
+import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
 import { ServiceSelect } from "../service-select"
 
 /** Hasta cuántos días después de su fecha se miran las citas en pie para ofrecer «Usar esa cita». */
 const STANDING_DAYS = 90
 const DAY_MS = 86_400_000
+
+/** Cuántos días desde que toca el control se busca la primera hora libre que se propone. */
+const PROPOSAL_DAYS = 28
+const SNAP_MS = 15 * 60_000
+
+/** Lo que se propone al abrir: el día y, si lo tiene libre, quien lo indicó. */
+export interface ControlProposal {
+  /** Día (AAAA-MM-DD, en la zona de la sede) de la primera hora libre. */
+  date: string
+  /** Quien lo indicó, si atiende en la sede y tiene hora libre en el plazo; si no, cualquiera. */
+  professionalUserId: string | null
+}
+
+/**
+ * El día y con quién se abre «Programar control» (QA del 10 nov, B4 y B5): la primera hora
+ * libre desde que toca el control, nunca un día en que nadie atiende ni una hora que ya pasó.
+ * `free` ya viene sin lo pasado y solo con quien tiene horario en la sede. Primero quien lo
+ * indicó, si tiene hora en el plazo; si no tiene horario aquí o no le queda nada, cualquiera.
+ * Sin nada libre en el plazo, null: se abre como antes, en el día que toca.
+ */
+export function proposeControlSlot(
+  availability: Pick<AgendaAvailability, "free" | "professionals" | "timeZone">,
+  options: { indicatedBy: string | null; durationMin: number },
+): ControlProposal | null {
+  const minutes = options.durationMin * 60_000
+  const slots = availability.free
+    .map((item) => ({
+      who: item.professionalUserId,
+      // Como la agenda: el bloque arranca en el siguiente cuarto de hora.
+      start: Math.ceil(Date.parse(item.startsAt) / SNAP_MS) * SNAP_MS,
+      end: Date.parse(item.endsAt),
+    }))
+    .filter((item) => item.end - item.start >= SNAP_MS)
+    .sort((a, b) => a.start - b.start)
+  const first = (rows: typeof slots) =>
+    rows.find((item) => item.end - item.start >= minutes) ?? rows[0] ?? null
+  const attends =
+    options.indicatedBy !== null &&
+    availability.professionals.some((item) => item.id === options.indicatedBy)
+  const own = attends ? first(slots.filter((item) => item.who === options.indicatedBy)) : null
+  const pick = own ?? first(slots)
+  if (!pick) return null
+  return {
+    date: zonedDateOf(new Date(pick.start).toISOString(), availability.timeZone),
+    professionalUserId: own ? options.indicatedBy : null,
+  }
+}
 
 /** Quién reserva: el clínico desde la ficha clínica o quien agenda desde la coordinación. */
 export type FollowUpSchedulerScope = "clinical" | "coordination"
@@ -70,16 +119,55 @@ export function FollowUpScheduler({
       apiFetch<{ data: AgendaResources }>(`/api/agenda/resources${sede ? `?branchId=${encodeURIComponent(sede)}` : ""}`),
     enabled: canSchedule,
   })
-  if (canSchedule && resources.data)
+  // La primera hora libre desde que toca el control, antes de abrir el «cuándo» (QA del 10 nov,
+  // B4 y B5): sin esto se abría en el día del control aunque fuera domingo, o hoy con horas pasadas.
+  const loaded = resources.data?.data
+  const [span] = useState(() => {
+    const now = Date.now()
+    const from = Math.max(now, Date.parse(control.dueAt) || now)
+    return { now, from }
+  })
+  const proposalQuery = useQuery({
+    queryKey: [
+      "agenda-availability",
+      "control-proposal",
+      loaded?.branchId ?? null,
+      control.id,
+      span.from,
+    ],
+    queryFn: () => {
+      const tz = loaded!.timeZone
+      // Desde el comienzo del día en que toca (o desde ahora, si ya pasó): lo pasado no viene libre.
+      const from = minutesToInstant(zonedDateOf(new Date(span.from).toISOString(), tz), 0, tz)
+      const to = new Date(
+        Math.max(Date.parse(from), span.now) + PROPOSAL_DAYS * DAY_MS,
+      ).toISOString()
+      const params = new URLSearchParams({ branchId: loaded!.branchId, from, to })
+      return apiFetch<{ data: AgendaAvailability }>(`/api/agenda/availability?${params}`)
+    },
+    enabled: canSchedule && loaded !== undefined,
+    staleTime: 30_000,
+  })
+  if (canSchedule && loaded && (proposalQuery.data || proposalQuery.isError)) {
+    const indicatedBy =
+      loaded.professionals.find((item) => item.id === control.originProfessionalUserId)?.id ?? null
+    const proposal = proposalQuery.data
+      ? proposeControlSlot(proposalQuery.data.data, {
+          indicatedBy,
+          durationMin: loaded.defaultDurationMin,
+        })
+      : null
     return (
       <ScheduleForm
         patientId={patientId}
         control={control}
-        resources={resources.data.data}
+        resources={loaded}
         onClose={onClose}
         scope={scope}
+        proposal={proposal}
       />
     )
+  }
   return (
     <FormDrawer
       open
@@ -122,12 +210,15 @@ function ScheduleForm({
   resources,
   onClose,
   scope,
+  proposal,
 }: {
   patientId: string
   control: SchedulableControl
   resources: AgendaResources
   onClose: () => void
   scope: FollowUpSchedulerScope
+  /** La primera hora libre desde que toca; null si no se pudo saber o no hay ninguna en el plazo. */
+  proposal: ControlProposal | null
 }) {
   const client = useQueryClient()
   const timeZone = resources.timeZone
@@ -137,6 +228,9 @@ function ScheduleForm({
   const [service, setService] = useState<ServiceCatalogItem | null>(null)
   // «Usar esa cita» es un botón por cita, no el formulario: su rechazo va junto a esa cita.
   const [useError, setUseError] = useState<{ appointmentId: string; message: string } | null>(null)
+  const origin = resources.professionals.find((item) => item.id === control.originProfessionalUserId) ?? null
+  // Con propuesta, quien lo indicó solo si tiene hora libre; sin ella, como antes.
+  const indicatedBy = proposal ? (proposal.professionalUserId === origin?.id ? origin : null) : origin
   const toneOf = useMemo(() => {
     const index = new Map(resources.professionals.map((item, at) => [item.id, at]))
     return (id: string) => scheduleToneAt(index.get(id) ?? 0)
@@ -148,10 +242,13 @@ function ScheduleForm({
     now,
     toneOf,
     duration: service?.durationMin ?? resources.defaultDurationMin,
-    // Se abre en el día en que toca el control, si aún no pasó.
-    date: zonedDateOf(control.dueAt, timeZone),
+    // Se abre en la primera hora libre desde que toca el control; sin ella, en el día en que toca.
+    date: proposal?.date ?? zonedDateOf(control.dueAt, timeZone),
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: service?.id || undefined,
+    // Primero quien lo indicó, si atiende en esta sede: el control lo suele hacer quien lo pidió
+    // (QA del 9 nov, repaso 3: proponía a otro). Se cambia a «Cualquiera» con un toque.
+    ...(indicatedBy ? { professionalUserId: indicatedBy.id, professionalLabel: indicatedBy.label } : {}),
   })
   // Si ya tiene una cita en pie desde que el control toca (su ventana), se ofrece usarla en vez
   // de reservar otra, en cualquier sede: esa visita lo cumple (ADR 0152).
@@ -216,6 +313,8 @@ function ScheduleForm({
           serviceId: service?.id || undefined,
           startsAt: target.start,
           endsAt: target.end,
+          // Fuera del horario de quien lo indicó, como en «Nueva cita»: lo avisado se reserva igual.
+          ...exceptionFlags(when.exception),
         },
       })
     },

@@ -5,12 +5,14 @@
  * hace hoy; «Quitar» corrige lo indicado hoy sin ensuciar el Plan; y el
  * presupuesto se dice en una línea honesta.
  */
-import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
+
 import { randomUUID } from "node:crypto"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   createConsentTemplate,
   getEncounterConsentNeeds,
@@ -18,6 +20,7 @@ import {
   publishConsentTemplate,
   setConsentTemplateServices,
 } from "./clinical-forms.js"
+import { clinicalFixture } from "./clinical-test-fixture.js"
 import { removeIndicatedFromEncounter } from "./encounter-plan-remove.js"
 import {
   bringTreatmentToEncounter,
@@ -72,6 +75,37 @@ async function secondVisit(f: Fixture): Promise<string> {
   return row!.id
 }
 
+it("«Hoy viene a…» dice que la corona va después de la endodoncia en curso de su pieza, y la deja como segunda opción (entrega 8)", async () => {
+  const f = await clinicalFixture()
+  await f.ready(f.encounter.id)
+  const endo = await accepted(f, 2)
+  const corona = await accepted(f, 1)
+  // La endodoncia y la corona en la 46, cada una en su fase; la sesión 1 de la endodoncia ya se hizo.
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "basica" })
+    .where(eq(treatmentPlanItem.id, endo.id))
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "rehabilitadora" })
+    .where(eq(treatmentPlanItem.id, corona.id))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  const today = await secondVisit(f)
+  const visit = (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))).visit
+  // Antes: «Corona · Aceptado, sin empezar [Hacerla hoy]», sin decir que va después.
+  expect(visit?.treatments.map((row) => [row.planItemId, row.after])).toEqual([
+    [endo.id, null],
+    [corona.id, { title: endo.title, today: false }],
+  ])
+  // Traída la endodoncia a hoy, la corona dice que va después de lo de hoy.
+  await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, endo.id))
+  const again = (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))).visit
+  expect(again?.treatments.find((row) => row.planItemId === corona.id)?.after).toEqual({
+    title: endo.title,
+    today: true,
+  })
+})
+
 it("sin cita, la sesión 2 viene a la atención: «Continuar hoy» la trae con motivo y diagnóstico, y cuenta la de hoy", async () => {
   const f = await clinicalFixture()
   await f.ready(f.encounter.id)
@@ -121,6 +155,26 @@ it("sin cita, la sesión 2 viene a la atención: «Continuar hoy» la trae con m
   ).rejects.toMatchObject({
     code: "SESSION_REGISTERED",
   })
+})
+
+it("la sesión 2 el mismo día de la 1 avisa la espera de su servicio, con sus días, y «Continuar hoy» sigue (QA del 10 nov, B6)", async () => {
+  const f = await clinicalFixture()
+  await f.ready(f.encounter.id)
+  const item = await accepted(f, 2)
+  await ownerDb.execute(
+    sql`update service_catalog set session_gap_days = 7 where id = ${f.service.id}`,
+  )
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  const today = await secondVisit(f)
+  const detail = () => f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect((await detail()).visit?.treatments[0]).toMatchObject({
+    started: true,
+    wait: { days: 7, sinceDays: 0 },
+  })
+  // Avisa, no frena: se trae igual y, registrada la de hoy, ya no hay nada que esperar.
+  await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, item.id))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, today, { planItemId: item.id }))
+  expect((await detail()).visit?.treatments[0]).toMatchObject({ registered: true, wait: null })
 })
 
 it("«Hoy no» saca lo traído y el motivo escrito no se pisa", async () => {
@@ -312,4 +366,58 @@ it("«Hacerla hoy» de lo que aún no empezó no arrastra el diagnóstico de otr
   const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
   expect(detail.encounter.reason).toBeNull()
   expect(detail.diagnoses).toEqual([])
+})
+
+it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cuál se cumple (QA del 9 nov, repaso 3)", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}` })
+    .returning()
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" })
+    .returning()
+  const startsAt = new Date()
+  const [visitAt] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      reason: "Limpieza y control",
+    })
+    .returning()
+  // El control lo indicó la atención de antes y quedó reservado en la cita de hoy.
+  const [control] = await ownerDb
+    .insert(clinicalFollowUp)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      kind: "mantenimiento",
+      title: "Limpieza y control",
+      dueAt: new Date(Date.now() - 30 * 86_400_000),
+      status: "programado",
+      appointmentId: visitAt!.id,
+      originEncounterId: f.encounter.id,
+    })
+    .returning()
+  const today = await secondVisit(f)
+  await ownerDb.update(encounter).set({ appointmentId: visitAt!.id }).where(eq(encounter.id, today))
+  const visit = (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))).visit
+  expect(visit?.controls).toEqual([
+    expect.objectContaining({ id: control!.id, chosen: true, byAppointment: true }),
+  ])
+  const closing = await f.run((tx) =>
+    getEncounterClosing(tx, "org_a", f.actor, f.patient.id, today),
+  )
+  expect(closing.controls.byAppointment).toEqual([
+    expect.objectContaining({ id: control!.id, title: "Limpieza y control" }),
+  ])
 })

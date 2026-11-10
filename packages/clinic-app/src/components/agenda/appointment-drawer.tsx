@@ -44,6 +44,8 @@ import {
   type AppointmentContext,
   type AppointmentStatus,
   appointmentSessionsText,
+  appointmentShortWords,
+  doneForWords,
   professionalSaid,
   visitLabel,
   visitState,
@@ -53,9 +55,12 @@ import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
+import { fetchPlanNextSteps } from "../../lib/budgets"
+import { appointmentWhat } from "../../lib/patient-appointments"
 import { attendWord } from "../../lib/patient-overview"
 import { filiationGapsText, type PatientFull } from "../../lib/patients"
 import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
+import { FreedAppointmentButtons } from "../patient/freed-appointments"
 import { CoordinationControls } from "../patient/plan/plan-coordination"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
@@ -201,13 +206,29 @@ function RealAppointmentDrawer({
 
   // ----- Cancelar -----
   const setStatus = useMutation({
-    mutationFn: (input: { status: AppointmentStatus; cancelReason?: CancelReason; cancelNote?: string; via?: ConfirmVia }) =>
-      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
+    mutationFn: (input: {
+      status: AppointmentStatus
+      cancelReason?: CancelReason
+      cancelNote?: string
+      via?: ConfirmVia
+    }) =>
+      // «Vino»: la cita pasada queda atendida sin abrir otra atención (decisión B1 del 10 nov).
+      input.status === "atendida"
+        ? apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/came`, {
+            method: "POST",
+            body: "{}",
+          })
+        : apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
+            method: "POST",
+            body: JSON.stringify(input),
+          }),
     onSuccess: async (result) => {
-      if (result.data.status === "confirmada" || result.data.status === "no_asistio") announceVisitStatus(result.data)
+      if (
+        result.data.status === "confirmada" ||
+        result.data.status === "no_asistio" ||
+        result.data.status === "atendida"
+      )
+        announceVisitStatus(result.data)
       else
         toast.success(STATUS_DONE[result.data.status], {
           description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
@@ -532,8 +553,13 @@ function RealAppointmentDrawer({
                 </span>
               ) : null}
 
-              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. */}
-              {canWrite && before && isToday ? (
+              {/* Para lo que ya se terminó: se dice y se ofrece usarla o liberarla (QA del 10 nov, M1). */}
+              {active && appointment.doneFor && !appointment.encounter ? (
+                <DoneForNotice appointment={appointment} canWrite={canWrite} />
+              ) : null}
+              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. Ya pasada, «Llegó» no aplica:
+                  queda «Vino» (QA de la ficha del 10 nov, U4). */}
+              {canWrite && before && isToday && !unclosed ? (
                 <SubmitButton
                   className="h-11"
                   disabled={busy}
@@ -543,7 +569,8 @@ function RealAppointmentDrawer({
                   Llegó
                 </SubmitButton>
               ) : null}
-              {canWrite && appointment.visit === "por_confirmar" && !started ? (
+              {/* Para lo que ya se terminó no se confirma: primero usarla o liberarla (QA antes de entregar). */}
+              {canWrite && appointment.visit === "por_confirmar" && !started && !appointment.doneFor ? (
                 // Se anota cómo confirmó: queda en la actividad de la cita.
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -587,8 +614,23 @@ function RealAppointmentDrawer({
                   No vino
                 </SubmitButton>
               ) : null}
-              {unclosed && canWrite && !canAttend ? (
-                <p className="text-sm text-muted-foreground">Si vino, la registra {appointment.professionalName}: también le aparece en Inicio.</p>
+              {/* «Vino» sin abrir otra atención: vino a pagar, a recoger algo, o ya lo atendieron (B1). */}
+              {unclosed && canWrite ? (
+                <SubmitButton
+                  variant="outline"
+                  className="h-11 bg-card"
+                  disabled={busy}
+                  pending={setStatus.isPending && setStatus.variables?.status === "atendida"}
+                  onClick={() => changeStatus("atendida")}
+                >
+                  Vino
+                </SubmitButton>
+              ) : null}
+              {unclosed && canWrite ? (
+                <p className="text-sm text-muted-foreground">
+                  «Vino» la deja atendida sin abrir otra atención; lo que se le hizo lo registra{" "}
+                  {canAttend ? "quien la atendió" : appointment.professionalName}.
+                </p>
               ) : null}
 
               {/* Llegó: «Atender» para quien atiende y «Deshacer» mientras no empiece la atención. */}
@@ -668,7 +710,15 @@ function RealAppointmentDrawer({
                   </span>
                 </DetailField>
               ) : null}
-              <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
+              <DetailField label="Servicio">
+                {appointmentWhat({ ...appointment, reason: null }) ?? "Sin servicio"}
+                {/* Lo sumado que no cabe en lo reservado: se dice aquí, con «Reprogramar» al pie (QA del 10 nov, M3). */}
+                {appointmentShortWords(appointment) ? (
+                  <span className="block text-sm font-semibold text-warning">
+                    {appointmentShortWords(appointment)}.
+                  </span>
+                ) : null}
+              </DetailField>
               {/* Lo que viene a hacer de un tratamiento de varias sesiones: «Endodoncia · sesión 2 de 2». */}
               {appointment.sessions?.length ? (
                 <DetailField label={appointment.sessions.length === 1 ? "Sesión" : "Sesiones"}>
@@ -832,5 +882,41 @@ function RealAppointmentDrawer({
         </div>
       </ConfirmDialog>
     </>
+  )
+}
+
+/** «Era para la corona, que ya se terminó»: con «Usarla para…» y «Liberarla», como «Qué sigue». */
+function DoneForNotice({
+  appointment,
+  canWrite,
+}: {
+  appointment: AgendaAppointment
+  canWrite: boolean
+}): React.JSX.Element {
+  const steps = useQuery({
+    queryKey: ["plan-next", appointment.patientId, "lista"],
+    queryFn: () => fetchPlanNextSteps(appointment.patientId),
+    enabled: canWrite,
+  })
+  const step = steps.data?.data.find(
+    (row) => row.kind === "sin_objeto" && row.action?.appointmentId === appointment.id,
+  )
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+      <p>
+        Esta cita {doneForWords(appointment)}: no tiene nada que hacer.
+        {canWrite ? "" : " Recepción la verá para usarla o liberarla."}
+      </p>
+      {canWrite ? (
+        <div className="flex flex-wrap gap-2">
+          <FreedAppointmentButtons
+            appointmentId={appointment.id}
+            version={appointment.version}
+            startsAt={appointment.startsAt}
+            reuse={step?.action?.reuse ?? null}
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }

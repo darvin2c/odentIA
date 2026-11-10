@@ -10,8 +10,9 @@ import {
   clinicalOrderPatientId,
   confirmLinkSignedConsent,
   consentDocumentPatientId,
-  markConsentSentByLink,
   sendConsentToSign,
+  showPersonalLink,
+  consentPhoneSignBlock,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -20,29 +21,22 @@ import {
   createSpecialty,
   discardFormResponse,
   finalizeFormResponse,
+  findOrgCountry,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
-  keepIssuedPaper,
   getConsentPrint,
   getConsentSheetFrame,
   getEncounterConsentNeeds,
   getOrderPrint,
   getOwnProfessionalProfile,
   getProfessionalProfile,
+  keepIssuedPaper,
   listClinicalOrders,
   listConsentDocuments,
   listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
   listConsentTemplates,
-  findOrgCountry,
-  loadDocumentClinic,
-  markConsentTemplateReviewed,
-  parseConsentDraft,
-  renderConsentPreviewPdf,
-  saveConsentTemplate,
-  ServiceError,
-  setConsentTemplateActive,
   listFormAddenda,
   listFormResponses,
   listFormTemplates,
@@ -51,10 +45,18 @@ import {
   listSpecialties,
   listSpecialtiesOverview,
   listSpecialtyProfessionals,
+  loadDocumentClinic,
+  markConsentSentByLink,
+  markConsentTemplateReviewed,
+  parseConsentDraft,
   prepareEncounterConsents,
   publishConsentTemplate,
   publishFormTemplate,
+  renderConsentPreviewPdf,
   revokeConsentDocument,
+  ServiceError,
+  saveConsentTemplate,
+  setConsentTemplateActive,
   setConsentTemplateServices,
   setProfessionalProfile,
   setProfessionalSpecialties,
@@ -313,6 +315,8 @@ const consentSign = z
     comprehensionConfirmed: z.literal(true, {
       message: "La persona firmante debe confirmar que comprendió la información",
     }),
+    // Lo firmó en su enlace y lo firma de nuevo aquí.
+    signAgain: z.boolean().optional(),
     // El profesional confirma con su perfil: el trazo es opcional.
     professionalSignature: z.unknown().optional(),
     witness: z
@@ -1010,9 +1014,14 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
     const patientId = query.patientId
     const response = await runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listConsentDocuments(tx, orgId, { patientId, status: query.status }),
-      ),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const rows = await listConsentDocuments(tx, orgId, { patientId, status: query.status })
+        // «Firmar en su teléfono» solo si su enlace lo dejaría firmar (entrega 11).
+        const phoneSignBlock = rows.some((row) => row.status === "pendiente" && !row.personSignedAt)
+          ? await consentPhoneSignBlock(tx, orgId, patientId)
+          : null
+        return rows.map((row) => ({ ...row, phoneSignBlock }))
+      }),
     )
     if (response.status === 200)
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
@@ -1043,9 +1052,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
         signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
-      // el PDF se reintenta con POST …/pdf (no se repite la firma).
+      // el PDF se reintenta con POST …/pdf (no se repite la firma). El aviso del
+      // documento del representante (si no quedó en su ficha) va con la respuesta.
       try {
-        return await generateConsentPdf(orgId, userId, signed.id)
+        const withPdf = await generateConsentPdf(orgId, userId, signed.id)
+        return signed.signerDocNotice
+          ? { ...withPdf, signerDocNotice: signed.signerDocNotice }
+          : withPdf
       } catch (e) {
         console.error("consent pdf", e)
         return signed
@@ -1072,6 +1085,23 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
           { patientId: consent.patientId, consentId: consent.id, requestId: parsed.data.requestId ?? null },
           { secretsKey: deps.secretsKey },
         )
+      }),
+    )
+  })
+
+  // Para leerlo y firmarlo en su teléfono sin enviarle nada: su enlace, que abre la hoja, para
+  // mostrarlo como código o copiarlo (consentimientos, 10 nov). No sale ningún mensaje.
+  app.post("/consents/:id/show-link", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para preparar consentimientos")
+    }
+    c.header("Cache-Control", "no-store")
+    c.header("Referrer-Policy", "no-referrer")
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { shown: true })
+        return showPersonalLink(tx, orgId, userId, consent.patientId, { secretsKey: deps.secretsKey }, consent.id)
       }),
     )
   })

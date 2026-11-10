@@ -367,11 +367,12 @@ it("lo del camino que no eligió no pide consentimiento ni cuenta por ejecutar, 
   const summary = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
   expect(summary.pendingConsents.map((row) => row.title)).toEqual(["Endodoncia"])
   expect(await toExecute()).toBe(4)
-  // El cierre tampoco pide la exodoncia.
+  // El cierre no pide la exodoncia, ni la endodoncia mientras no se registre como hecha hoy: se firma
+  // antes de hacerla y el cierre solo pregunta por lo hecho sin firma (consentimientos, 10 nov).
   const closing = await f.run((tx) =>
     getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id),
   )
-  expect(closing.consents.map((need) => need.title)).toEqual(["Endodoncia"])
+  expect(closing.consents.map((need) => need.title)).toEqual([])
   // Recepción no la ve como un tratamiento abierto.
   const coordination = await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))
   expect(JSON.stringify(coordination)).not.toContain(exodoncia.id)

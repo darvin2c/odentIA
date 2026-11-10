@@ -1,18 +1,15 @@
-import { budgetStateText, isLeftOut, isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
+import { canAttend } from "@odentia/auth/permissions"
 import {
-  type AssembledBudget,
-  assembleEncounterBudget,
-  readBillingModes,
-  removeBudgetItems,
-} from "./budgets.js"
-import {
-  checkEncounterVoidBudgets,
-  type EncounterVoidPreview,
-  encounterVoidBudgets,
-  settleEncounterVoidBudgets,
-} from "./encounter-void-budgets.js"
+  budgetStateText,
+  isLeftOut,
+  isLocalAnestheticName,
+  parseVitals,
+  sumByCurrency,
+  vitalsErrors,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
+import { member, user } from "@odentia/db/schema/auth"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
@@ -26,58 +23,113 @@ import {
   patient,
   patientCharge,
   prescription,
+  serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlan,
-  serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { member, user } from "@odentia/db/schema/auth"
-import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
+import {
+  clinicalOrder,
+  consentDocument,
+  consentEvent,
+  medicalLeave,
+} from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { canAttend } from "@odentia/auth/permissions"
-import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
-import { appointmentSessionsOf, markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
-import { type HealthGap, healthGapsOf, listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm"
 import { acceptedBudgetLines } from "./agreed-lines.js"
-import { assertAttending } from "./encounter-attending.js"
-import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
+import {
+  appointmentSessionsOf,
+  type FreedAppointment,
+  freedAppointmentsOf,
+  markArrivedOnAttend,
+  notifyAppointmentChanged,
+  setAppointmentStatus,
+} from "./appointments.js"
+import { zonedTimeToUtc } from "./availability.js"
+import {
+  type AssembledBudget,
+  assembleEncounterBudget,
+  readBillingModes,
+  removeBudgetItems,
+} from "./budgets.js"
+import {
+  type HealthGap,
+  healthGapsOf,
+  listEncounterDocuments,
+  type PatientDocumentWithContext,
+} from "./clinical.js"
+import {
+  type ConsentNeed,
+  cancelDerivationTask,
+  getEncounterConsentNeeds,
+} from "./clinical-forms.js"
+import {
+  type ClosingResolvable,
+  resolvableDiagnosesOf,
+  resolveDiagnosesOnSign,
+} from "./closing-diagnoses.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { assertAttending } from "./encounter-attending.js"
+import { removableFromEncounter } from "./encounter-plan-remove.js"
+import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
+import {
+  checkEncounterVoidBudgets,
+  type EncounterVoidPreview,
+  encounterVoidBudgets,
+  settleEncounterVoidBudgets,
+} from "./encounter-void-budgets.js"
 import {
   branchNotFound,
   invalidField,
+  isForeignKeyViolation,
   isUniqueViolation,
   notFound,
   ServiceError,
   validation,
 } from "./errors.js"
+import {
+  applyFinishingControlChanges,
+  createFinishControls,
+  type FinishingControl,
+  type FinishingControlChange,
+  finishingControlsOf,
+  undoFinishControls,
+} from "./finish-controls.js"
 import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
-import { zonedTimeToUtc } from "./availability.js"
-import { controlWindowOpenSql, dayKeyIn } from "./to-schedule.js"
+import { treatmentConsentStates } from "./consent-state.js"
+import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
-import { createCharge } from "./payments.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
+import { ADVANCE_KEY, createCharge } from "./payments.js"
 import {
   addPlanItem,
   createTreatmentPlan,
   lockPlanItemForExecution,
+  revisionsOf,
   setPlanItemStatus,
   surfaceLimits,
+  undoRevisionsOf,
   updatePlanItemPlanning,
 } from "./plan.js"
-import { canBookAnother, LIVE_APPOINTMENT_STATUSES, sessionCountsOf, sessionsDoneSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
-import { requireServiceForIndication } from "./service-catalog.js"
-import { findOrgLocale, orgClinicalProfile } from "./locale.js"
-import {
-  type ClosingMaterials,
-  closingMaterialsOf,
-  type DiscountedMaterials,
-  discountEncounterMaterials,
-} from "./service-materials.js"
-import { countConsultationAction } from "./saas-actions.js"
 import {
   type ProductParts,
   type ProductSite,
@@ -87,9 +139,29 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
-import { removableFromEncounter } from "./encounter-plan-remove.js"
-import { type ClosingResolvable, resolvableDiagnosesOf, resolveDiagnosesOnSign } from "./closing-diagnoses.js"
+import { nextSessionGapOf } from "./session-gap.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
+import { countConsultationAction } from "./saas-actions.js"
+import { requireServiceForIndication } from "./service-catalog.js"
+import {
+  type ClosingMaterials,
+  closingMaterialsOf,
+  type DiscountedMaterials,
+  discountEncounterMaterials,
+} from "./service-materials.js"
+import {
+  canBookAnother,
+  controlWindowOpenSql,
+  controlWindowStart,
+  dayKeyIn,
+  goesBeforeSql,
+  LIVE_APPOINTMENT_STATUSES,
+  pairsWithAccepted,
+  planItemSql,
+  sessionCountsOf,
+  sessionsDoneSql,
+  TO_SCHEDULE_STATUSES,
+} from "./to-schedule.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
@@ -509,15 +581,26 @@ async function joinOpenDraft(
   return joined
 }
 
-/** Borrador abierto de un paciente, sin nada de la historia: cuál es y quién lo lleva. */
+/** El borrador abierto de un paciente, sin nada de su historia. */
+export interface OpenEncounterRef {
+  id: string
+  professionalUserId: string
+  startedAt: Date
+  /** Empezó hoy, en el día de la clínica: si no, la app pregunta qué hacer con ella. */
+  today: boolean
+  /** Sin nada registrado: se descarta de un toque, sin motivo. */
+  empty: boolean
+}
+
+/** Borrador abierto de un paciente, sin nada de la historia: cuál es, quién lo lleva, de qué día y si está vacío. */
 export async function getOpenEncounterRef(
   tx: Db,
   orgId: string,
   patientId: string,
-): Promise<{ id: string; professionalUserId: string } | null> {
+): Promise<OpenEncounterRef | null> {
   await requirePatient(tx, orgId, patientId)
   const [row] = await tx
-    .select({ id: encounter.id, professionalUserId: encounter.professionalUserId })
+    .select()
     .from(encounter)
     .where(
       and(
@@ -527,7 +610,106 @@ export async function getOpenEncounterRef(
       ),
     )
     .limit(1)
-  return row ?? null
+  if (!row) return null
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+  return {
+    id: row.id,
+    professionalUserId: row.professionalUserId,
+    startedAt: row.startedAt,
+    today: day(row.startedAt) === day(new Date()),
+    empty: !(await encounterHasRecords(tx, orgId, row)),
+  }
+}
+
+/**
+ * Si la atención tiene algo registrado: lo escrito de la consulta (relato, examen, signos,
+ * evolución, indicaciones, pronóstico), hallazgos, diagnósticos, procedimientos, documentos
+ * (consentimientos, recetas, órdenes, descansos, formularios, archivos), lo indicado en el
+ * Plan, controles, materiales o cobros (que salen de sus procedimientos). El motivo no cuenta:
+ * suele venir de la cita. Lo que no está aquí lo frena igual la base al descartar.
+ */
+export async function encounterHasRecords(
+  tx: Db,
+  orgId: string,
+  row: Pick<
+    EncounterRow,
+    "id" | "presentIllness" | "illnessDuration" | "vitals" | "evolution" | "indications" | "prognosis" | "examination"
+  >,
+): Promise<boolean> {
+  const written = [row.presentIllness, row.illnessDuration, row.evolution, row.indications, row.prognosis]
+  if (written.some((text) => typeof text === "string" && text.trim().length > 0)) return true
+  const filled = (value: unknown): boolean =>
+    value !== null &&
+    value !== undefined &&
+    (typeof value !== "object" || Object.values(value as Record<string, unknown>).some((item) => filled(item))) &&
+    !(typeof value === "string" && value.trim() === "")
+  if (filled(row.vitals) || filled(row.examination)) return true
+  const [found] = await tx.execute<{ any: boolean }>(sql`
+    select (
+      exists (select 1 from encounter_procedure where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from encounter_diagnosis where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_note where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_form_response where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_order where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from consent_document where organization_id = ${orgId}
+        and (encounter_id = ${row.id} or informed_encounter_id = ${row.id}))
+      or exists (select 1 from medical_leave where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from patient_document_context where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from prescription where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from stock_movement where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from treatment_plan where organization_id = ${orgId} and origin_encounter_id = ${row.id})
+      or exists (select 1 from treatment_plan_item where organization_id = ${orgId} and source_encounter_id = ${row.id})
+      or exists (select 1 from clinical_follow_up where organization_id = ${orgId}
+        and (origin_encounter_id = ${row.id} or completed_encounter_id = ${row.id}))
+      or exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id})
+    ) as any`)
+  return found?.any === true
+}
+
+/**
+ * «Descartar» (10 nov): una atención en borrador sin nada registrado se borra de un toque, sin
+ * motivo. No queda en la Historia (no hay nada que contar); queda el evento de auditoría. Con
+ * algo registrado se cierra o se anula con su motivo, como siempre. La base solo deja borrar
+ * borradores, y lo que la nombra con contenido clínico frena el borrado (sus FK no se propagan).
+ */
+export async function discardEmptyEncounter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<{ discarded: true; appointmentId: string | null }> {
+  await requirePatient(tx, orgId, patientId)
+  const locked = await lockEncounter(tx, orgId, patientId, encounterId)
+  assertOpenDraft(locked, actorUserId)
+  const notEmpty = () =>
+    conflict("ENCOUNTER_NOT_EMPTY", "Tiene algo registrado: termínala o anúlala con su motivo")
+  if (await encounterHasRecords(tx, orgId, locked)) throw notEmpty()
+  try {
+    await tx.transaction(async (inner) => {
+      await inner
+        .delete(encounter)
+        .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.status, "borrador")))
+    })
+  } catch (error) {
+    // Algo la nombra (FK sin propagar): no está vacía.
+    if (isForeignKeyViolation(error)) throw notEmpty()
+    throw error
+  }
+  await audit(tx, orgId, actorUserId, "encounter.discarded", "encounter", encounterId, {
+    patientId,
+    startedAt: locked.startedAt.toISOString(),
+    professionalUserId: locked.professionalUserId,
+    appointmentId: locked.appointmentId,
+    ...(locked.reason ? { hadReason: true } : {}),
+  })
+  // La Agenda deja de decir «En atención»; la llegada se conserva, como al anular.
+  if (locked.appointmentId) await notifyAppointmentChanged(tx, orgId)
+  return { discarded: true, appointmentId: locked.appointmentId }
 }
 
 export async function createEncounter(
@@ -991,10 +1173,14 @@ export async function getEncounterDetail(
     row.status === "borrador"
       ? await removableFromEncounter(tx, orgId, encounterId, row.professionalUserId)
       : new Set<string>()
+  // El consentimiento va con el tratamiento: el Plan de la atención también lo dice.
+  const consents = await treatmentConsentStates(tx, orgId, [...attention.keys()])
   const withProgress = <T extends { id: string }>(item: T) => ({
     ...item,
     sessionsDone: counts.get(item.id)?.done ?? 0,
     removable: removable.has(item.id),
+    consent: consents.get(item.id)?.state ?? null,
+    consentMissing: consents.get(item.id)?.missing ?? [],
   })
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),
@@ -1658,8 +1844,10 @@ export async function addEncounterProcedure(
         procedureId: row.id,
         plannedSessions: acceptedPlannedSessions,
       })
-      if (done)
+      if (done) {
         await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+        await createFinishControls(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+      }
     } else if (item && (item.status === "pendiente" || item.status === "programado")) {
       await setPlanItemStatus(tx, orgId, actorUserId, patientId, planItemIdParam, {
         status: "en_curso",
@@ -1716,8 +1904,10 @@ export async function addEncounterProcedure(
     // El servicio directo de una sesión nace realizado: lo que su producto hace con
     // un tratamiento realizado (odentIA: lo tratado queda dibujado). El de varias se
     // dibuja al terminarlo.
-    if (directDone)
+    if (directDone) {
       await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+      await createFinishControls(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+    }
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -1823,6 +2013,12 @@ export interface FinalizeBillingLine {
   currency: string | null
   status: "charged" | "skipped"
   reason: SkippedCharge["reason"] | null
+  /**
+   * Con un adelanto «Para» este tratamiento: lo acordado entero y lo ya cargado como adelanto. El
+   * cierre dice «Costó 900 · 300 de adelanto» junto a los 600 de hoy (QA del 10 nov, M7).
+   */
+  agreedCents?: number
+  advanceCents?: number
 }
 
 /** Lo que llegaba a sus sesiones previstas y la firma no pudo terminar: sigue en curso. */
@@ -1841,10 +2037,26 @@ export interface FinalizeEncounterBase {
   /** Lo que se iba a terminar al firmar (ADR 0161) y quedó en curso, con su motivo. */
   keptOpen: SessionKeptOpen[]
   /**
+   * Lo que va después de lo que sigue en curso y ya tiene su cita (la corona reservada mientras la
+   * endodoncia pide otra sesión): el cierre lo avisa para revisar esa cita (repaso del 9 nov).
+   */
+  bookedAfter: BookedAfter[]
+  /**
+   * Lo aceptado de la misma pieza que va después de lo que sigue en curso y aún no tiene cita (la
+   * corona mientras la endodoncia pide la sesión 2): «Atención finalizada» lo dice para que no se
+   * pierda, sin ofrecer reservarlo todavía (pendiente de la entrega 8).
+   */
+  waitingAfter: Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>
+  /**
    * Lo trabajado hoy que sigue en curso, con su próxima sesión: la cita que ya la
    * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
    */
   nextSessions: NextSession[]
+  /**
+   * Las citas por venir que se reservaron para lo que hoy quedó hecho (la sesión 2 hecha antes):
+   * «Atención finalizada» ofrece liberarlas o usarlas para lo que sigue (QA del 10 nov, M1).
+   */
+  freedAppointments: FreedAppointment[]
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
@@ -1873,8 +2085,15 @@ export interface FinalizeEncounterBase {
    * «¿Cuándo vuelve?» y los que esta visita cumplió.
    */
   controls: {
-    next: { id: string; title: string; dueAt: Date } | null
+    /**
+     * El control indicado al firmar. `joinsNext`: va en la misma cita que lo aceptado que se ofrece
+     * reservar (la corona con el control de su endodoncia, `pairsWithAccepted`), desde `from`
+     * (`YYYY-MM-DD`, el día en que abre su ventana), como en «Qué sigue».
+     */
+    next: { id: string; title: string; dueAt: Date; joinsNext?: { from: string } } | null
     fulfilled: Array<{ id: string; title: string }>
+    /** «En 1 semana» para lo que falta hacer, sin control aparte. */
+    returnsTo: { day: string; titles: string[] } | null
   }
 }
 
@@ -1989,8 +2208,74 @@ export interface NextSession {
   /** Con qué servicio se abre «Nueva cita». */
   serviceId: string | null
   booked: BookedSession | null
-  /** La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no le falta. */
-  toBook: { n: number; m: number } | null
+  /**
+   * La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no
+   * le falta. `from`: desde qué día conviene (`nextSessionFromOf`), si no es mañana.
+   */
+  toBook: { n: number; m: number; from?: string; gapDays?: number } | null
+}
+
+/** Lo aceptado que va después de otro tratamiento sin terminar y ya tiene su cita. */
+export interface BookedAfter {
+  planItemId: string
+  title: string
+  /** Lo que va antes y sigue en curso. */
+  beforeTitle: string
+  startsAt: Date
+  professionalName: string | null
+}
+
+/**
+ * De lo que sigue en curso (`beforeIds`), lo que va después (`goesBeforeSql`) y ya tiene una cita
+ * por venir antes de la próxima sesión de lo de antes (o sin ella): la primera de cada uno.
+ */
+export async function bookedAfterOf(
+  tx: Db,
+  orgId: string,
+  beforeIds: readonly string[],
+): Promise<BookedAfter[]> {
+  if (beforeIds.length === 0) return []
+  const { planPhases } = await productHooks(tx, orgId)
+  const later = planItemSql("later")
+  const rows = await tx.execute<{
+    id: string
+    title: string
+    before_title: string
+    starts_at: Date | string
+    professional_name: string | null
+  }>(sql`
+    select distinct on (later.id) later.id, later.title, before_item.title as before_title, a.starts_at, u.name as professional_name
+    from treatment_plan_item later
+    join treatment_plan_item before_item on ${goesBeforeSql(later, planItemSql("before_item"), planPhases)}
+    join appointment_plan_item carried on carried.organization_id = later.organization_id and carried.plan_item_id = later.id
+    join appointment a on a.organization_id = carried.organization_id and a.id = carried.appointment_id
+      and a.status in (${sql.join(
+        LIVE_APPOINTMENT_STATUSES.map((status) => sql`${status}`),
+        sql`, `,
+      )}) and a.starts_at > now()
+    left join "user" u on u.id = a.professional_user_id
+    where later.organization_id = ${orgId} and later.decision_status = 'aceptado'
+      and before_item.id in (${sql.join(
+        beforeIds.map((id) => sql`${id}`),
+        sql`, `,
+      )})
+      -- Si su próxima sesión ya tiene cita antes (o en la misma cita), no hay nada que revisar.
+      and not exists (select 1 from appointment_plan_item next_session
+        join appointment b on b.organization_id = next_session.organization_id and b.id = next_session.appointment_id
+        where next_session.organization_id = before_item.organization_id and next_session.plan_item_id = before_item.id
+          and b.status in (${sql.join(
+            LIVE_APPOINTMENT_STATUSES.map((status) => sql`${status}`),
+            sql`, `,
+          )})
+          and b.starts_at > now() and b.starts_at <= a.starts_at)
+    order by later.id, a.starts_at`)
+  return rows.map((row) => ({
+    planItemId: row.id,
+    title: row.title,
+    beforeTitle: row.before_title,
+    startsAt: new Date(row.starts_at),
+    professionalName: row.professional_name,
+  }))
 }
 
 /**
@@ -2060,6 +2345,7 @@ export async function nextSessionsOf(
       firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt, professionalUserId: row.professionalUserId })
   }
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
+  const fromOf = await nextSessionGapOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
   const out: NextSession[] = []
   for (const item of items) {
     const id = item.id
@@ -2067,7 +2353,15 @@ export async function nextSessionsOf(
     const first = firstOf.get(id)
     const session = first ? sessionsOf.get(first.appointmentId)?.find((row) => row.planItemId === id) : undefined
     const booked = first ? { ...first, n: session?.n ?? count.done + 1, m: session?.m ?? item.plannedSessions } : null
-    const toBook = !booked && canBookAnother(item, count) ? { n: count.done + count.booked + 1, m: item.plannedSessions } : null
+    const from = fromOf.get(id)
+    const toBook =
+      !booked && canBookAnother(item, count)
+        ? {
+            n: count.done + count.booked + 1,
+            m: item.plannedSessions,
+            ...(from ? { from: from.from, gapDays: from.days } : {}),
+          }
+        : null
     if (booked || toBook) out.push({ planItemId: id, title: item.title, serviceId: item.serviceId, booked, toBook })
   }
   return out
@@ -2216,6 +2510,8 @@ export interface ClosingAppointmentControl {
   id: string
   title: string
   repeatEveryMonths: number | null
+  /** Quien lo indicó, si no es quien atiende hoy. */
+  byName: string | null
 }
 
 export interface ClosingControls {
@@ -2227,6 +2523,30 @@ export interface ClosingControls {
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
   next: ClosingNextControl | null
+  /**
+   * Los controles que dejan los tratamientos que terminan al firmar (B5 del 10 nov), por su
+   * servicio: el cierre los muestra y quien firma los cambia o los quita para esta persona
+   * (`FinalizeEncounterInput.finishControlChanges`).
+   */
+  finishing: FinishingControl[]
+  /** Los controles que ya tiene abiertos (sin el de la cita de hoy): lo que va a quedar. */
+  open: ClosingOpenControl[]
+  /**
+   * Lo que falta hacer y no tiene cita (lo aceptado, o lo indicado hoy), cuando hoy no se hizo
+   * nada: «¿Cuándo vuelve? En 1 semana» es para eso, no un control de mantenimiento aparte (QA del
+   * 10 nov, M6 y B7). Firmar con una fecha no crea el control: lo que sigue es reservarlo.
+   */
+  returnsTo: string[]
+}
+
+/** Un control abierto de la persona, como lo dice el cierre: pendiente o con su cita. */
+export interface ClosingOpenControl {
+  id: string
+  title: string
+  dueAt: Date
+  status: string
+  /** La hora de su cita, si la tiene en pie: se cambia moviendo la cita. */
+  scheduledAt: Date | null
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -2275,8 +2595,9 @@ export async function checkEncounterClosing(
       throw e
     missing.push("signature")
   }
+  // Solo lo de lo que se hizo hoy: lo indicado o traído para otro día se firma cuando se haga.
   const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
-    (need) => need.status !== "firmado",
+    (need) => need.status !== "firmado" && need.doneToday,
   )
   const materials = await closingMaterialsOf(tx, orgId, row)
   const health = {
@@ -2285,7 +2606,28 @@ export async function checkEncounterClosing(
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
-  const controls = await closingControlsOf(tx, orgId, actorUserId, row)
+  // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
+  // control: se muestra con lo que termina al firmar, para cambiarlo o quitarlo igual (QA antes de
+  // entregar); no como uno que ya tenía.
+  const doneToday = await tx.execute<{ id: string; plan_item_id: string }>(sql`
+    select f.id, link.plan_item_id from clinical_follow_up f
+    join clinical_follow_up_item link on link.organization_id = f.organization_id and link.follow_up_id = f.id
+    join encounter_procedure today on today.organization_id = link.organization_id and today.plan_item_id = link.plan_item_id
+      and today.encounter_id = ${row.id} and today.voided_at is null
+    where f.organization_id = ${orgId} and f.patient_id = ${row.patientId}
+      and f.finish_after_days is not null and f.status = 'pendiente'`)
+  const fromToday = new Set(doneToday.map((link) => link.id))
+  const base = await closingControlsOf(tx, orgId, actorUserId, row)
+  const controls = {
+    ...base,
+    open: base.open.filter((control) => !fromToday.has(control.id)),
+    finishing: await finishingControlsOf(tx, orgId, [
+      ...new Set([
+        ...sessions.finishing.map((session) => session.planItemId).filter((id) => !keepOpenPlanItemIds.includes(id)),
+        ...doneToday.map((link) => link.plan_item_id),
+      ]),
+    ]),
+  }
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,
     patientId: row.patientId,
@@ -2363,7 +2705,7 @@ async function closingControlsOf(
   orgId: string,
   actorUserId: string,
   row: EncounterRow,
-): Promise<ClosingControls> {
+): Promise<Omit<ClosingControls, "finishing">> {
   const { timezone } = await findOrgLocale(tx, orgId)
   const { recallMonths } = await productHooks(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
@@ -2378,8 +2720,13 @@ async function closingControlsOf(
       originEncounterId: clinicalFollowUp.originEncounterId,
       appointmentId: clinicalFollowUp.appointmentId,
       repeatEveryMonths: clinicalFollowUp.repeatEveryMonths,
+      kind: clinicalFollowUp.kind,
       startsAt: appointment.startsAt,
       appointmentStatus: appointment.status,
+      // Quien lo indicó: el cierre dice qué control se cumple y de quién (QA del 9 nov, repaso 3).
+      originProfessionalName: sql<string | null>`(select u."name" from ${encounter} e join ${user} u on u."id" = e."professional_user_id"
+        where e."id" = ${clinicalFollowUp.originEncounterId} and e."organization_id" = ${clinicalFollowUp.organizationId}
+          and e."professional_user_id" is distinct from ${row.professionalUserId})`,
     })
     .from(clinicalFollowUp)
     .leftJoin(
@@ -2398,12 +2745,39 @@ async function closingControlsOf(
   const byAppointment = open.filter(
     (control) => row.appointmentId !== null && control.status === "programado" && control.appointmentId === row.appointmentId,
   )
-  const first = open.find((control) => !dueIds.has(control.id) && !byAppointment.includes(control))
+  // Un control de tratamiento lejano (el radiográfico de la endodoncia, al año) no dice cuándo
+  // vuelve: más allá del recordatorio de la clínica, «¿Cuándo vuelve?» se sigue preguntando
+  // (revisión antes de entregar: si no, nadie podía indicar la limpieza de los 6 meses en un año).
+  const recallDay = addMonthsToDay(today, recallMonths)
+  const farTreatmentControl = (control: (typeof open)[number]) =>
+    control.kind === "tratamiento" && control.status === "pendiente" && dayKeyIn(control.dueAt, timezone) > recallDay
+  const first = open.find(
+    (control) => !dueIds.has(control.id) && !byAppointment.includes(control) && !farTreatmentControl(control),
+  )
   return {
     recallMonths,
-    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths }) => ({ id, title, repeatEveryMonths })),
+    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths, originProfessionalName }) => ({
+      id,
+      title,
+      repeatEveryMonths,
+      byName: originProfessionalName ?? null,
+    })),
     shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
     due,
+    open: open
+      .filter((control) => !byAppointment.includes(control))
+      .map((control) => ({
+        id: control.id,
+        title: control.title,
+        dueAt: control.dueAt,
+        status: control.status,
+        scheduledAt:
+          control.startsAt &&
+          control.appointmentStatus &&
+          ["programada", "confirmada"].includes(control.appointmentStatus)
+            ? control.startsAt
+            : null,
+      })),
     next: first
       ? {
           id: first.id,
@@ -2417,7 +2791,26 @@ async function closingControlsOf(
           own: first.originEncounterId === row.id,
         }
       : null,
+    returnsTo: await returnsToOf(tx, orgId, row),
   }
+}
+
+/** Lo que falta hacer, sin cita, si hoy no se registró ningún procedimiento (`ClosingControls.returnsTo`). */
+async function returnsToOf(tx: Db, orgId: string, row: EncounterRow): Promise<string[]> {
+  const rows = await tx.execute<{ title: string }>(sql`
+    select item.title from treatment_plan_item item
+    where item.organization_id = ${orgId} and item.patient_id = ${row.patientId}
+      and item.status in ('pendiente', 'programado')
+      and (item.decision_status = 'aceptado' or (item.decision_status = 'pendiente' and item.source_encounter_id = ${row.id}))
+      and not exists (select 1 from encounter_procedure today where today.organization_id = item.organization_id
+        and today.encounter_id = ${row.id} and today.voided_at is null)
+      and not exists (select 1 from appointment_plan_item link
+        join appointment a on a.organization_id = link.organization_id and a.id = link.appointment_id
+        where link.organization_id = item.organization_id and link.plan_item_id = item.id
+          and a.status in ('programada', 'confirmada') and a.starts_at > now())
+    order by item.sort_order, item.created_at, item.id
+    limit 4`)
+  return [...new Set(rows.map((item) => item.title))]
 }
 
 /** La hora a la que se anota el día de un control, como «Indicar control» en la pantalla. */
@@ -2559,6 +2952,11 @@ export interface FinalizeEncounterInput {
    * pantalla mostró marcados: quedan resueltos con su tratamiento. Sin él, ninguno.
    */
   resolveDiagnosisIds?: string[]
+  /**
+   * Lo que quien firma cambió de los controles que dejan los tratamientos de hoy
+   * (`closing.controls.finishing`, por su `key`): otro día o quitarlo, solo para esta persona.
+   */
+  finishControlChanges?: FinishingControlChange[]
 }
 
 /**
@@ -2695,6 +3093,8 @@ export async function finalizeEncounter(
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
   const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  // Los controles que dejó lo terminado, como quedaron en el cierre (otro día, o quitados).
+  await applyFinishingControlChanges(tx, { orgId, actorUserId, patientId, encounterId }, input.finishControlChanges ?? [])
   // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
   await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], now)
   const procedures = await tx
@@ -2715,8 +3115,13 @@ export async function finalizeEncounter(
     fulfilling.some((control) => control.repeatEveryMonths) ||
     closing.controls.byAppointment.some((control) => control.repeatEveryMonths)
   const stays = closing.controls.due.some((control) => control.mine && !fulfilling.includes(control))
+  // Sin nada hecho hoy y con algo por hacer sin cita, la vuelta es para eso: no un control aparte
+  // (M6 y B7). «En N meses» sigue siendo el mantenimiento.
+  // Solo una vuelta corta (hasta «En 1 mes»): más lejos es un control, como siempre (revisión de la entrega 12).
+  const returnsToPlan =
+    nextDay !== null && nextDay <= closing.controls.shortcuts.month && closing.controls.returnsTo.length > 0
   const nextControl =
-    nextDay !== null && !closing.controls.next && !repeats && !stays
+    nextDay !== null && !closing.controls.next && !repeats && !stays && !returnsToPlan
       ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
       : null
   const [row] = await tx
@@ -2871,6 +3276,7 @@ export async function finalizeEncounter(
           amountCents: patientCharge.amountCents,
           returnedCents: patientCharge.returnedCents,
           discountCents: patientCharge.discountCents,
+          requestKey: patientCharge.requestKey,
         })
         .from(patientCharge)
         .where(
@@ -2904,6 +3310,9 @@ export async function finalizeEncounter(
         commissionSessions: planned && planned.sessions > 1 ? planned.sessions : null,
       })
       charges.push(charge)
+      const advance = active
+        .filter((c) => c.requestKey?.startsWith(ADVANCE_KEY))
+        .reduce((sum, c) => sum + c.amountCents, 0)
       billingLines.push({
         procedureId: proc.id,
         description: charge.description,
@@ -2911,6 +3320,7 @@ export async function finalizeEncounter(
         currency: charge.currency,
         status: "charged",
         reason: null,
+        ...(advance > 0 ? { agreedCents: agreed, advanceCents: advance } : {}),
       })
       continue
     }
@@ -2955,6 +3365,12 @@ export async function finalizeEncounter(
   // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras terminar la
   // endodoncia): «Reservar» lo deja con su cita ahí mismo. Mientras algo sigue, no: la corona
   // no va en la cita de la sesión 2 (QA del 9 nov).
+  // Lo que va después de lo que sigue en curso y ya tiene su cita: el cierre lo avisa.
+  const bookedAfter = await bookedAfterOf(
+    tx,
+    orgId,
+    continuingNext.map((session) => session.planItemId),
+  )
   const nextSessions = continuingNext.length
     ? continuingNext
     : await nextSessionsOf(tx, orgId, closing.sessions.accepted.map((session) => session.planItemId), row.appointmentId ?? null)
@@ -2983,7 +3399,9 @@ export async function finalizeEncounter(
     // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
     nextControl: nextControl
       ? "fecha"
-      : input.nextControl && "none" in input.nextControl
+      : returnsToPlan
+        ? "vuelve_a_lo_por_hacer"
+        : input.nextControl && "none" in input.nextControl
         ? "no_hace_falta"
         : closing.controls.next || repeats || stays
           ? "ya_tenia"
@@ -2997,6 +3415,8 @@ export async function finalizeEncounter(
               ? "aceptado_por_empezar"
               : "sin_indicar",
     controlsFulfilled: fulfilled.length,
+    // El día que se dijo y para qué: no queda en un control (M6).
+    ...(returnsToPlan ? { returnsTo: { day: nextDay, titles: closing.controls.returnsTo } } : {}),
   })
   // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
   // borrador de la persona o nace uno. No se envía solo.
@@ -3009,8 +3429,47 @@ export async function finalizeEncounter(
     skippedCharges,
     budget,
     materials,
-    controls: { next: nextControl, fulfilled },
+    controls: {
+      next:
+        nextControl &&
+        continuingNext.length === 0 &&
+        nextSessions.some((session) => session.toBook !== null) &&
+        pairsWithAccepted({ dueAt: nextControl.dueAt, createdAt: now })
+          ? {
+              ...nextControl,
+              joinsNext: {
+                from: dayKeyIn(
+                  controlWindowStart({ dueAt: nextControl.dueAt, createdAt: now }),
+                  timezone,
+                ),
+              },
+            }
+          : nextControl,
+      fulfilled,
+      // «En 1 semana» para lo que falta hacer: el día que se dijo y para qué, sin control (M6).
+      returnsTo: returnsToPlan && nextDay ? { day: nextDay, titles: closing.controls.returnsTo } : null,
+    },
     keptOpen,
+    bookedAfter,
+    freedAppointments: await freedAppointmentsOf(
+      tx,
+      orgId,
+      patientId,
+      [...closing.sessions.finishing, ...closing.sessions.continuing].map(
+        (session) => session.planItemId,
+      ),
+    ),
+    waitingAfter:
+      continuingNext.length > 0
+        ? closing.sessions.accepted
+            .filter((session) => !session.booked && !bookedAfter.some((row) => row.planItemId === session.planItemId))
+            .map((session) => ({
+              planItemId: session.planItemId,
+              title: session.title,
+              ...(session.place ? { place: session.place } : {}),
+              beforeTitle: continuingNext[0]!.title,
+            }))
+        : [],
     nextSessions,
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,
@@ -3183,8 +3642,10 @@ async function voidProcedureRow(
           .where(eq(treatmentPlanItem.id, item.id))
       }
       // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
-      if (direct || item.status === "realizado")
+      if (direct || item.status === "realizado") {
         await (await productHooks(tx, orgId)).treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+        await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
+      }
     }
   }
   await audit(
@@ -3298,6 +3759,11 @@ async function voidEncounterPapers(
         eq(consentDocument.status, "pendiente"),
         // Lo que la persona ya firmó por su enlace espera al profesional, no se anula: es un acto suyo.
         isNull(consentDocument.personSignedAt),
+        // El de un tratamiento que sigue vigente no se anula con la atención: va con el tratamiento y
+        // se firma en la atención en que se haga (consentimientos, 10 nov).
+        sql`(${consentDocument.planItemId} is null or not exists (select 1 from treatment_plan_item vigente
+          where vigente.organization_id = ${consentDocument.organizationId} and vigente.id = ${consentDocument.planItemId}
+            and vigente.status not in ('cancelado', 'reemplazado')))`,
       ),
     )
     .returning({ id: consentDocument.id })
@@ -3378,6 +3844,7 @@ async function undoCompletionsOf(
       encounterId,
     })
     await hooks.treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+    await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
   }
 }
 
@@ -3403,11 +3870,19 @@ export async function getEncounterVoidPreview(
   encounterId: string,
   /** `seesCharges`: quien ve la caja (`finance.read`) lee qué tratamiento se cobró. */
   opts: { memberRole?: string; seesCharges?: boolean } = {},
-): Promise<EncounterVoidPreview> {
+): Promise<EncounterVoidPreview & { revisions: Array<{ restored: string; replacement: string }> }> {
   await requirePatient(tx, orgId, patientId)
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(row, actorUserId)
-  return encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, ...opts })
+  const preview = await encounterVoidBudgets(tx, orgId, patientId, encounterId, { actorUserId, ...opts })
+  const revisions = await revisionsOf(tx, orgId, patientId, encounterId)
+  return {
+    ...preview,
+    revisions: revisions.map((revision) => ({
+      restored: revision.oldTooth ? `${revision.oldTitle} · ${revision.oldTooth}` : revision.oldTitle,
+      replacement: revision.newTitle,
+    })),
+  }
 }
 
 export async function voidEncounter(
@@ -3449,6 +3924,8 @@ export async function voidEncounter(
   for (const proc of procedures) {
     await voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, cascade, at)
   }
+  // Un cambio de tratamiento hecho en ella se deshace: el anterior vuelve a como estaba.
+  await undoRevisionsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   await tx
     .update(treatmentPlanItem)
     .set({ status: "cancelado", statusReason: cascade, updatedAt: at })

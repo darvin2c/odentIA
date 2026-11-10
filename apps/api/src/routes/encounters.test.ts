@@ -1121,7 +1121,7 @@ it("encounters: cierre guiado por requisitos, diagnósticos anulables, anulació
   // Lo que el diálogo muestra antes de confirmar: sin presupuesto, nada más que anular.
   const preview = await app.request(`/patients/${patientId}/encounters/${encounterId}/void-preview`)
   expect(preview.status).toBe(200)
-  expect(((await preview.json()) as { data: unknown }).data).toEqual({ budgets: [], blocked: false, confirm: [] })
+  expect(((await preview.json()) as { data: unknown }).data).toEqual({ budgets: [], blocked: false, confirm: [], revisions: [] })
   const badBudgets = await app.request(`/patients/${patientId}/encounters/${encounterId}/void`, {
     method: "POST",
     headers: { "content-type": "application/json" },

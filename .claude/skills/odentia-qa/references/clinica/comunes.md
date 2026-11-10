@@ -25,6 +25,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] Un formulario clínico propio se publica en versiones y lo respondido no cambia.
 - [ ] La lista de diagnósticos de la clínica (CIE-10 del MINSA o CIE-11) se elige y no mezcla códigos.
 - [ ] Lo que se pregunta al registrar coincide con lo que la clínica pidió.
+- [ ] La lista de diagnósticos de la clínica trae los códigos que propone el odontograma (la caries con exposición pulpar, K02.5, en la CIE-10).
 
 **Ya falló:** la demo solo tenía «Endodoncia anterior vital» activa y se ofrecía para un molar.
 **Fuentes:** ADR 0039, 0069, 0093, 0117, 0141 y 0164.
@@ -39,6 +40,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] La cita usa la unidad o el consultorio correcto y avisa si está ocupado, sin frenar (ADR 0121; las excepciones las decide el equipo, nunca Sofi).
 - [ ] Una cita de sesión 2 no se ofrece el mismo día de la sesión 1 si el tratamiento pide espera.
 - [ ] Al firmar, la cita queda atendida y lo que sigue queda reservado o pendiente, sin perderse (ADR 0113).
+- [ ] Si una sesión se hace antes de su cita, el cierre ofrece liberar esa cita o usarla para lo que sigue.
 
 **Ya falló:** «¿Vino?» abría «Por confirmar» (PR 551); la grilla no mostraba qué unidad estaba libre (8 nov).
 **Fuentes:** ADR 0002, 0032, 0081, 0113, 0121 y 0128.
@@ -211,8 +213,27 @@ No tiene camino en el código.
 - [ ] Corregir deja el rastro de todo lo que cambió, incluido el comprobante.
 - [ ] El pago a un especialista que no está en planilla (recibo por honorarios) dice a quién y su RUC, y no se suma dos veces con su comisión.
 - [ ] Gastos y Reportes dicen la misma cifra por tipo y por sede.
+- [ ] Del lado de lo que cobra la clínica: con deuda abierta, un adelanto sin «Para» lo avisa y ofrece cobrarlo a lo que debe; todo ticket dice cuánto le falta pagar y cuánto le queda a favor, y la lista de Cobros no suma como dinero lo que solo usó saldo a favor.
+- [ ] En caja, el cobro de un menor lo paga por defecto su representante.
 
 **Fuentes:** ADR 0061, 0150, 0151 y 0167. SUNAT: tabla 10 de comprobantes, RUC de 11 dígitos con verificador y el registro de compras (verificar los artículos antes de citarlos).
+
+## P-COM-21 Avisos en el equipo de cada persona
+
+**Dónde:** el interruptor «Recibir avisos en este equipo» en la campana (`packages/clinic-app/src/components/device-notices.tsx`), el envío del worker (`apps/worker/src/push.ts`, `packages/services/src/push.ts`) y la tabla `push_subscription`.
+
+- [ ] La pantalla bloqueada no muestra nombre, motivo, texto del mensaje, consentimiento ni resultado: solo la clínica y qué pasó.
+- [ ] Llega a quien le toca con la regla de Inicio: el clínico, solo lo suyo; con el permiso de ese momento.
+- [ ] Fuera del horario de la clínica no avisa lo de «Te espera»; lo de la noche llega al abrir.
+- [ ] Leer el aviso no resuelve nada: sigue en «Te espera» hasta que alguien lo atiende.
+- [ ] Nada aparece sobre la firma o el registro en la tablet que se le pasa al paciente (hoy: no se activa ahí, lo dice la ayuda).
+- [ ] Quien cierra sesión o deja la clínica deja de recibirlos en ese equipo.
+
+**Fuentes:** ADR 0177 y 0084. Ley 29733 de datos personales y su reglamento (datos sensibles de salud; verificar artículos), Ley 26842 (reserva del acto médico; verificar el artículo).
+
+## P-COM-22 Guardia de urgencias de la clínica
+
+- [ ] Una alarma de un paciente fuera de horario tiene un destinatario explícito, o queda dicho que nadie la verá hasta que la clínica abra (hoy no existe la guardia: lo de la noche llega al abrir).
 
 ---
 
@@ -233,3 +254,4 @@ No tiene camino en el código.
 | CC11 | El paciente rechaza la exodoncia indicada y se va con la pieza infectada. | 13, 14 | Constancia del rechazo con los riesgos explicados; aviso si no vuelve. |
 | CC12 | La familia avisa que el paciente falleció. | 16 | Se marca; no salen más mensajes; la historia queda. |
 | CC13 | Fin de mes en una clínica de dos sedes: se paga la luz por otro importe, la factura del laboratorio y los honorarios del endodoncista visitante; se corrige un RUC mal escrito y se le entrega la lista al contador. | 20 | Todo con su comprobante y RUC; la corrección dice qué cambió; la lista se descarga; Gastos y Reportes cuadran. |
+| CC14 | A las 22:30 una paciente escribe «se me hinchó la cara y no puedo tragar» tres días después de una exodoncia, mientras otra paciente firma en la tablet de la unidad. | 09, 21, 22 | La paciente recibe el número de emergencias; el aviso al equipo no lleva su nombre y llega al abrir (no hay guardia); la tablet no muestra nada. |

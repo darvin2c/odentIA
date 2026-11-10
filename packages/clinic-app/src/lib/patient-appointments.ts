@@ -129,9 +129,33 @@ export function appointmentLine(
   return [
     here ? `Hoy ${hourLabel(dayMinutesIn(appointment.startsAt, timeZone))}` : appointmentWhen(appointment),
     here ? visitLabel(appointment, { now: now.toISOString(), timeZone }) : null,
-    appointment.serviceName ?? appointment.reason,
+    appointmentWhat(appointment),
     appointment.professionalName,
   ]
     .filter(Boolean)
     .join(" · ")
+}
+
+/**
+ * A qué viene: su servicio y lo que se le sumó después («Sumar a su cita», repaso del 9 nov: la
+ * cabecera solo decía el servicio). «Corona metal-cerámica y Control» o «… y 2 más».
+ */
+export function appointmentWhat(
+  appointment: Pick<AgendaAppointment, "serviceName" | "reason" | "sessions" | "brings" | "serviceDone" | "doneFor">,
+): string | null {
+  // Sin nada por hacer, dice para qué era (QA del 10 nov, M1); su servicio ya terminado no se
+  // nombra como lo que viene a hacer (B4: «Endodoncia y Corona» con la endodoncia hecha).
+  if (appointment.doneFor) return `era para ${appointment.doneFor}, que ya se terminó`
+  const main = appointment.serviceDone ? null : (appointment.serviceName ?? appointment.reason)
+  // También lo de una sola sesión que se le sumó (la resina a su consulta, QA del 10 nov, M3).
+  const others = [
+    ...new Set(
+      [...(appointment.sessions ?? []), ...(appointment.brings ?? [])].map((session) =>
+        session.title.trim(),
+      ),
+    ),
+  ].filter((title) => !main || title.toLowerCase() !== main.trim().toLowerCase())
+  const all = [main, ...others].filter((title): title is string => !!title)
+  if (all.length <= 2) return all.join(" y ") || null
+  return `${all[0]} y ${all.length - 1} más`
 }

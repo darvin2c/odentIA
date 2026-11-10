@@ -66,7 +66,7 @@ const PRODUCT = {
     platform: "la plataforma para ópticas",
     sites: "Sedes y salas de examen",
     rooms: "Salas de examen de cada sede: cuántas hay y cómo las identifican (por ejemplo, «Sala 1»).",
-    roles: "recepción, optometría, caja o administración",
+    roles: "recepción, optometría, ventas, taller, caja o administración",
     // El optómetra es tecnólogo médico: se colegia en el Colegio Tecnológico Médico del Perú.
     clinicians: "los optómetras",
     college: "CTMP",

@@ -744,7 +744,7 @@ export function fetchTreatmentPlanDetail(
 
 /** «Qué sigue» del plan: frase y botón que decide el servidor. */
 export interface PlanNextStep {
-  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "cerrar" | "ninguno"
+  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "reservado" | "control" | "cerrar" | "sin_objeto" | "suspendido" | "ninguno"
   text: string
   detail: string | null
   action: {
@@ -761,6 +761,10 @@ export interface PlanNextStep {
     note?: string
     /** «Sumar a su cita del 10 nov»: la cita que ya tiene. */
     join?: { appointmentId: string; label: string }
+    /** La cita sin objeto: su versión y lo aceptado que podría ir en ella. */
+    appointmentVersion?: number
+    appointmentStartsAt?: string
+    reuse?: { planItemId: string; title: string }
   } | null
   /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
   alsoToSchedule?: string[]

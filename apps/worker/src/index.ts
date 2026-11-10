@@ -34,6 +34,7 @@ import { consumeInbound } from "./inbound.js"
 import { runLegalNoticesTick } from "./legal-notices.js"
 import { tickMailboxes } from "./mailboxes.js"
 import { consumeOutbound } from "./outbound.js"
+import { runPushTick, webPushSender } from "./push.js"
 import { runReportDigestTick } from "./report-digests.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
@@ -413,6 +414,21 @@ queues.push({
   },
 })
 
+// Avisos en el equipo (push web): «Te espera» con la clínica abierta y el servicio cortado. Sin claves VAPID no se envía.
+if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) {
+  const sender = webPushSender({ publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: env.VAPID_SUBJECT })
+  let nextPushPoll = 0
+  queues.push({
+    name: "push_notices",
+    poll: async () => {
+      if (Date.now() < nextPushPoll) return false
+      nextPushPoll = Date.now() + 20_000
+      const result = await runPushTick({ ownerDb, appDb: db, sender })
+      return result.sent > 0
+    },
+  })
+} else console.log("worker: sin claves VAPID; los avisos en el equipo no se envían")
+
 // Producción: sin un backup verificado en 26 horas, o si el último falló, Soporte recibe el caso.
 if (env.NODE_ENV === "production") {
   const watchingSince = new Date()
@@ -464,9 +480,13 @@ async function consume(own: QueueDef[]): Promise<void> {
 // respondía a pedazos. En la auditoría del ADR 0104, un tercio de los entrantes
 // esperó 5 s o más. Cada cola sigue con un solo lector: una corrida a la vez.
 const isAgentRun = (queue: QueueDef) => queue.name === "agent_runs"
+// Los avisos en el equipo también: esperan a servicios de push de afuera, y uno lento
+// no puede atrasar los mensajes de WhatsApp.
+const isPush = (queue: QueueDef) => queue.name === "push_notices"
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 await Promise.all([
-  consume(queues.filter((queue) => !isAgentRun(queue))),
+  consume(queues.filter((queue) => !isAgentRun(queue) && !isPush(queue))),
   consume(queues.filter(isAgentRun)),
+  consume(queues.filter(isPush)),
 ])
 process.exit(0)

@@ -85,6 +85,7 @@ export async function seedTwoCurrencies(
     (method) => method.typeCode === "10",
   )
   if (!cash) throw new Error("Falta el efectivo de la clínica demo")
+  const transfer = (await listPaymentMethods(tx, orgId, { activeOnly: true })).find((method) => method.typeCode === "30") ?? null
 
   // Debe USD 200 y paga con S/ 750: el pago cruzado, y le queda la deuda al día.
   const crown = await createCharge(tx, orgId, ownerUserId, veronica.id, {
@@ -145,13 +146,21 @@ export async function seedTwoCurrencies(
     amountCents: 12_000,
     currency: "USD",
     exchangeRate: "3.75",
+    // Un laboratorio factura con su RUC y se le paga por transferencia (ADR 0167).
+    paymentMethodId: transfer?.id ?? null,
+    paymentReference: "771204",
+    receiptType: "01",
+    receiptNumber: "E001-318",
+    supplierName: "Laboratorio Dental Andino S.A.C.",
+    supplierTaxId: "20512345671",
   })
 
   // Una compra en dólares, recibida y pagada en parte con soles: el cambio sale de lo pagado.
   const seller = await createSupplier(tx, orgId, ownerUserId, {
     name: "Implantes del Pacífico S.A.C.",
     docType: "RUC",
-    docNumber: "20601234567",
+    // Un RUC que pasa el dígito de control y no es el de la clínica.
+    docNumber: "20555666773",
   })
   const implant = await createProduct(tx, orgId, ownerUserId, {
     sku: "IMP-TITANIO",
@@ -180,5 +189,9 @@ export async function seedTwoCurrencies(
     amountCents: 30_000,
     tenderCents: 112_800,
     tenderCurrency: "PEN",
+    paymentMethodId: transfer?.id ?? null,
+    paymentReference: "771355",
+    receiptType: "01",
+    receiptNumber: "F001-2077",
   })
 }

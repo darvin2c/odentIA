@@ -216,42 +216,35 @@ export const ConditionRows = withForm({
                     />
                   )}
                 </form.AppField>
-                <div className="flex flex-col gap-1">
-                  <form.AppField name={`conditions[${index}].diagnosisCode`}>
-                    {(field) => (
-                      <field.Control id={fid(`con-dx-${row.key}`)} label="Código de diagnóstico (opcional)">
-                        {(control) => (
-                          <DiagnosisSearch
-                            id={control.id}
-                            invalid={control.invalid}
-                            aria-describedby={control.describedBy}
-                            onBlur={control.onBlur}
-                            value={field.state.value}
-                            system={row.diagnosisSystem}
-                            onChange={(code, _description, system) => {
-                              field.handleChange(code)
-                              form.setFieldValue(`conditions[${index}].diagnosisSystem`, system)
-                            }}
-                            disabled={readOnly}
-                          />
-                        )}
-                      </field.Control>
-                    )}
-                  </form.AppField>
-                  {row.diagnosisCode ? (
-                    <button
-                      type="button"
-                      className="self-start text-xs text-muted-foreground underline underline-offset-4"
-                      disabled={readOnly}
-                      onClick={() => {
-                        form.setFieldValue(`conditions[${index}].diagnosisCode`, "")
-                        form.setFieldValue(`conditions[${index}].diagnosisSystem`, null)
-                      }}
+                {/* «Quitar código» lo trae el buscador, junto al código elegido: no se repite
+                    debajo (repaso final de la ficha, B6). */}
+                <form.AppField name={`conditions[${index}].diagnosisCode`}>
+                  {(field) => (
+                    <field.Control
+                      id={fid(`con-dx-${row.key}`)}
+                      label="Código de diagnóstico (opcional)"
                     >
-                      Quitar el código {row.diagnosisCode}
-                    </button>
-                  ) : null}
-                </div>
+                      {(control) => (
+                        <DiagnosisSearch
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          value={field.state.value}
+                          system={row.diagnosisSystem}
+                          onChange={(code, description, system) => {
+                            field.handleChange(code)
+                            form.setFieldValue(`conditions[${index}].diagnosisSystem`, system)
+                            // El nombre vacío toma el del código; lo escrito no se pisa (QA de la ficha del 10 nov, B3).
+                            if (code && description && !form.getFieldValue(`conditions[${index}].name`)?.trim())
+                              form.setFieldValue(`conditions[${index}].name`, description.slice(0, HEALTH_NAME_MAX))
+                          }}
+                          disabled={readOnly}
+                        />
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
                 <form.AppField name={`conditions[${index}].status`}>
                   {(field) => (
                     <field.SelectField

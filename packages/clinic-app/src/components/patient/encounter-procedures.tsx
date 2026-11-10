@@ -1,4 +1,4 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, formatMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -23,21 +23,20 @@ import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { voidProcedureApi } from "../../lib/encounters"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { useOrgProfile } from "../../lib/org"
 import {
-  type EncounterDetail,
   agreedPriceOf,
+  type EncounterDetail,
   type PlanItem,
   type ProcedureItem,
   planStatusLabel,
 } from "../../lib/patients"
-import { formatMoney } from "@odentia/clinical"
-import { useOrgProfile } from "../../lib/org"
-import { type ServiceCatalogItem } from "../../lib/services"
-import { DiagnosisSearch } from "./diagnosis-search"
-import { ServicePicker } from "./service-picker"
+import type { ServiceCatalogItem } from "../../lib/services"
 import { type PlaceWithParts, productUi } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
-import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { DiagnosisSearch } from "./diagnosis-search"
+import { ServicePicker } from "./service-picker"
 
 const NO_PLAN = "__sin-plan__"
 const NO_SITE: PlaceWithParts = { toothNumber: null, surfaces: [] }
@@ -162,6 +161,48 @@ function earlierWords(earlier: EarlierTreatment): string {
   return `Ya se registró «${earlier.title}${tooth}» el ${day}`
 }
 
+/** «Otro servicio del catálogo»: va al final de la lista (segundo repaso del 9 nov). */
+const OTHER_SERVICE = "Otro servicio del catálogo"
+
+/**
+ * Qué trae puesto «Registrar lo de hoy» y en qué orden se ofrece lo del plan
+ * (segundo repaso del 9 nov: arrancaba en el catálogo con la endodoncia recién
+ * indicada). Primero lo que trajo esta atención (su cita, «Continuar hoy»),
+ * después lo indicado hoy y después lo demás; lo que va después de otro
+ * tratamiento de la misma pieza (`waitsFor`, la regla de «Qué sigue»: la
+ * corona tras la endodoncia) va al final y nunca viene puesto. Viene puesto el
+ * único de la primera tanda que tenga algo para hacer hoy: aceptado, o indicado
+ * hoy (se acepta al hacerlo), y sin su sesión de hoy. Si hay dos, no se adivina.
+ */
+export function sessionChoices(
+  items: readonly PlanItem[],
+  context: {
+    encounterId: string
+    brought: ReadonlySet<string>
+    doneToday: ReadonlySet<string | null>
+  },
+): { ordered: PlanItem[]; preset: PlanItem | null } {
+  const indicatedToday = (item: PlanItem) => item.sourceEncounterId === context.encounterId
+  const tier = (item: PlanItem) =>
+    item.waitsFor ? 3 : context.brought.has(item.id) ? 0 : indicatedToday(item) ? 1 : 2
+  const ordered = items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => tier(a.item) - tier(b.item) || a.index - b.index)
+    .map(({ item }) => item)
+  const doable = ordered.filter(
+    (item) =>
+      !item.waitsFor &&
+      !context.doneToday.has(item.id) &&
+      (item.decision === "aceptado" || (item.decision === "pendiente" && indicatedToday(item))),
+  )
+  for (const level of [0, 1, 2]) {
+    const here = doable.filter((item) => tier(item) === level)
+    if (here.length > 1) return { ordered, preset: null }
+    if (here.length === 1) return { ordered, preset: here[0] ?? null }
+  }
+  return { ordered, preset: null }
+}
+
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
   // Lo que se cobra al hacerlo: el acordado si lo aceptó.
   const agreed = agreedPriceOf(item)
@@ -178,7 +219,8 @@ function planOptionLabel(item: PlanItem, locale: string | undefined): string {
         ? "pieza por definir"
         : "general"
   const accepts = item.decision === "pendiente" ? " · se acepta al hacerlo" : ""
-  return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}${accepts}`
+  const after = item.waitsFor ? ` · va después de ${item.waitsFor.title}` : ""
+  return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}${accepts}${after}`
 }
 
 /**
@@ -219,6 +261,8 @@ export function EncounterProcedures({
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(autoOpen && !disabled)
   const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
+  /** Lo que vino puesto al abrir: el cajón lo dice mientras siga elegido. */
+  const [presetId, setPresetId] = useState<string | null>(null)
 
   const encounter = detail.encounter
   // Solo el borrador admite registrar o anular actos.
@@ -352,18 +396,29 @@ export function EncounterProcedures({
   const tooth = values.site.toothNumber
   // Al elegir pieza solo caben sus ítems más los generales (sin pieza); el
   // servidor no exige coincidencia, así que los generales siempre aplican.
+  const doneToday = new Set(
+    detail.procedures
+      .filter((procedure) => !procedure.voidedAt)
+      .map((procedure) => procedure.planItemId),
+  )
+  const choices = sessionChoices(openItems, {
+    encounterId: encounter.id,
+    brought: new Set(detail.plannedItems.map((planned) => planned.id)),
+    doneToday,
+  })
   const visiblePlans =
     tooth == null
-      ? openItems
-      : openItems.filter((item) => item.toothNumber == null || item.toothNumber === tooth)
+      ? choices.ordered
+      : choices.ordered.filter((item) => item.toothNumber == null || item.toothNumber === tooth)
   const selectedPlan = values.planItemId ? (planById[values.planItemId] ?? null) : null
   const options =
     selectedPlan && !visiblePlans.some((item) => item.id === selectedPlan.id)
       ? [...visiblePlans, selectedPlan]
       : visiblePlans
 
-  const planItems: Record<string, string> = { [NO_PLAN]: "Seleccionar otro servicio del catálogo" }
+  const planItems: Record<string, string> = {}
   for (const item of options) planItems[item.id] = planOptionLabel(item, orgLocale)
+  planItems[NO_PLAN] = OTHER_SERVICE
 
   // El ámbito del servicio decide qué sitio pide: pieza, superficies,
   // cuadrante, arcada o nada (general). El acto libre admite pieza opcional.
@@ -417,6 +472,7 @@ export function EncounterProcedures({
     if (!prefillPlanItemId || !canWrite || finalized || !planById[prefillPlanItemId]) return
     form.reset()
     onPlanChange(prefillPlanItemId)
+    setPresetId(prefillPlanItemId)
     setOpen(true)
     onPrefillUsed?.()
   }, [prefillPlanItemId, planQuery.data])
@@ -426,7 +482,20 @@ export function EncounterProcedures({
     // en el drawer y no se pierde la selección del catálogo/presupuesto.
     if (surface.isSubmitting) return
     form.reset()
+    setPresetId(null)
     setOpen(false)
+  }
+
+  // La nota de la sesión es la «Evolución» de la atención (la mesa del 9 nov): el cajón se cierra
+  // sin perder lo elegido y el foco va a ella.
+  const goToEvolution = () => {
+    if (surface.isSubmitting) return
+    setOpen(false)
+    window.setTimeout(() => {
+      const evolution = document.querySelector<HTMLElement>('textarea[id$="-evolution"]')
+      evolution?.scrollIntoView({ block: "center" })
+      evolution?.focus()
+    }, 0)
   }
 
   return (
@@ -504,14 +573,14 @@ export function EncounterProcedures({
               variant="outline"
               disabled={!canOpen}
               onClick={() => {
-                // Viene puesto lo aceptado o en curso que trajo esta atención (su cita, «Continuar
-                // hoy») y aún no tiene su sesión de hoy, si es uno solo; si no, lo aceptado sin
-                // sesión de hoy, si es uno solo. El catálogo sigue a un toque (QA del 9 nov).
-                const doneToday = new Set(detail.procedures.filter((procedure) => !procedure.voidedAt).map((procedure) => procedure.planItemId))
-                const open = openItems.filter((item) => item.decision === "aceptado" && !doneToday.has(item.id))
-                const brought = open.filter((item) => detail.plannedItems.some((planned) => planned.id === item.id))
-                const only = brought.length === 1 ? brought[0] : brought.length === 0 && open.length === 1 ? open[0] : undefined
-                if (only && !values.planItemId && !values.service && !values.freeMode) onPlanChange(only.id)
+                // Viene puesto lo que se hace hoy (`sessionChoices`): lo que trajo esta atención o lo
+                // indicado hoy, si es uno solo, nunca lo que va después de otro de la misma pieza. Lo
+                // elegido antes de ir a Evolución se conserva. El catálogo sigue a un toque.
+                const only = choices.preset
+                if (only && !values.planItemId && !values.service && !values.freeMode) {
+                  onPlanChange(only.id)
+                  setPresetId(only.id)
+                }
                 setOpen(true)
               }}
             >
@@ -527,9 +596,11 @@ export function EncounterProcedures({
             onClose={handleClose}
             title="Registrar procedimiento"
             description={
-              productUi().plan.budgetRequired
-                ? "Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
-                : "Elige un tratamiento indicado, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
+              presetId && values.planItemId === presetId
+                ? "Viene puesto lo que sigue hoy; si hiciste otra cosa, cámbialo."
+                : productUi().plan.budgetRequired
+                  ? "Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
+                  : "Elige un tratamiento indicado, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
             }
             submitLabel="Registrar procedimiento"
           >
@@ -583,14 +654,12 @@ export function EncounterProcedures({
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value={NO_PLAN}>
-                                  Seleccionar otro servicio del catálogo
-                                </SelectItem>
                                 {options.map((item) => (
                                   <SelectItem key={item.id} value={item.id}>
                                     {planOptionLabel(item, orgLocale)}
                                   </SelectItem>
                                 ))}
+                                <SelectItem value={NO_PLAN}>{OTHER_SERVICE}</SelectItem>
                               </SelectContent>
                             </Select>
                           )}
@@ -818,6 +887,19 @@ export function EncounterProcedures({
                   </field.Control>
                 )}
               </form.AppField>
+              <p className="text-xs text-muted-foreground">
+                La nota de la sesión va en Evolución.{" "}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  className="h-auto p-0 text-xs"
+                  disabled={surface.isSubmitting}
+                  onClick={goToEvolution}
+                >
+                  Ir a Evolución
+                </Button>
+              </p>
             </div>
           </FormDrawer>
         )}

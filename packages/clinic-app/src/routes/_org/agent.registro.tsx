@@ -366,7 +366,7 @@ function AgentSupervisionPage() {
         {runsQuery.isPending ? <AgentRunsSkeleton /> : runsQuery.isError ? <div role="alert"><p>No pudimos cargar las ejecuciones.</p><Button variant="outline" onClick={() => void runsQuery.refetch()}>Volver a intentar</Button></div> : runs.length === 0 ? (
           <EmptyState title="Sin ejecuciones" description="Aún no hay actividad registrada." />
         ) : (
-          <DataTable table={runsTable} />
+          <DataTable table={runsTable} inCard />
         )}
       </div>
       {stats && stats.byRoute.some((row) => row.path !== "sin_camino") ? (

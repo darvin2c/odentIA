@@ -6,6 +6,7 @@ import {
   ExpandableText,
   ErrorState,
   FilterBar,
+  ListSearchScope,
   PageHeader,
   PageShell,
   RowActions,
@@ -27,6 +28,7 @@ import { agentCaseRow } from "../../lib/agent"
 import { ADMIN_NAME, useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { TASK_AREA_LABEL, type TaskItem, useCan, useMemberName, usePermission } from "../../lib/crm"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { tasksFilters, tasksPrimary } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 
@@ -76,7 +78,8 @@ function TasksPage() {
   const canWrite = usePermission("tasks.write")
   const canAll = usePermission("tasks.all")
   const canReadCrm = usePermission("crm.read")
-  const listSearch = useListSearch()
+  // Lo buscado (el nombre de una persona) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const viewParam = listSearch.get("vista")
   const view = VIEWS.find((item) => item.value === viewParam) ?? VIEWS[0]
   const wholeClinic = canAll && listSearch.get("alcance") === "clinica"
@@ -299,15 +302,17 @@ function TasksPage() {
             ))}
           </TabsList>
         </Tabs>
-        <FilterBar
-          filters={tasksFilters(can)}
-          sortOptions={view.api === "hechas" ? [] : [
-            { value: "vence", label: "Vence primero" },
-            { value: "recientes", label: "Más recientes" },
-          ]}
-          searchPlaceholder="Buscar por tarea, persona u oportunidad" searchLabel="Buscar en tareas"
-          searchPending={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage && filtered}
-        />
+        <ListSearchScope value={listSearch}>
+          <FilterBar
+            filters={tasksFilters(can)}
+            sortOptions={view.api === "hechas" ? [] : [
+              { value: "vence", label: "Vence primero" },
+              { value: "recientes", label: "Más recientes" },
+            ]}
+            searchPlaceholder="Buscar por tarea, persona u oportunidad" searchLabel="Buscar en tareas"
+            searchPending={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage && filtered}
+          />
+        </ListSearchScope>
       </div>
       {tasksQuery.isLoading && tasks.length === 0 ? (
         <SkeletonRegion message="Cargando tareas…">

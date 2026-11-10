@@ -10,7 +10,7 @@ import {
   groupDayMovements,
   voidedCashNote,
 } from "./finance-cash"
-import { accountBalances, accountBalanceTitle, amountHelpText, sentence } from "./finance-collect"
+import { accountBalances, accountBalanceTitle, amountHelpText, partialSplitWords, sentence } from "./finance-collect"
 import { cashCollectedText, type WorkspaceCash } from "./workspace"
 const movement = (over: Partial<DayMovement>): DayMovement => ({
   id: "m1",
@@ -203,4 +203,24 @@ describe("lo devuelto de comisiones que se anuló, en Caja", () => {
     expect(voidedCashNote([voided], "USD", money)).toBeNull()
     expect(voidedCashNote(undefined, "PEN", money)).toBeNull()
   })
+})
+
+it("un pago parcial de varios conceptos dice a cuál va, lo más antiguo primero (QA del 9 nov, repaso 3)", () => {
+  const items = [
+    { description: "Consulta", saldoCents: 5000 },
+    { description: "Endodoncia", saldoCents: 45000 },
+  ]
+  const spaced = (text: string) => text.replace(/ /g, " ")
+  expect(spaced(partialSplitWords(items, 20000, "PEN", "es-PE") ?? "")).toBe(
+    "Va primero a lo más antiguo: Consulta S/ 50.00 · Endodoncia S/ 150.00.",
+  )
+  // Todo, nada o un solo concepto: no hay reparto que decir.
+  expect(partialSplitWords(items, 50000, "PEN", "es-PE")).toBeNull()
+  expect(partialSplitWords(items, 0, "PEN", "es-PE")).toBeNull()
+  expect(partialSplitWords(items.slice(0, 1), 2000, "PEN", "es-PE")).toBeNull()
+  // Lo que tiene a favor se usa primero: 100 nuevos y 50 a favor.
+  expect(spaced(partialSplitWords(items, 10000, "PEN", "es-PE", 5000) ?? "")).toBe(
+    "Con lo que tiene a favor, va primero a lo más antiguo: Consulta S/ 50.00 · Endodoncia S/ 100.00.",
+  )
+  expect(partialSplitWords(items, 45000, "PEN", "es-PE", 5000)).toBeNull()
 })

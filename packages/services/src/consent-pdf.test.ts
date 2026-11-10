@@ -137,6 +137,47 @@ it("firmado: la firma guardada del profesional sale dibujada y el papel sigue di
   expect(withoutSignature?.lines.at(-1)?.text).toBe("Firmado electrónicamente")
 })
 
+it("el pie dice el nivel de la firma en letra discreta, y en papel no la llama electrónica (entrega 11)", async () => {
+  const text = vi.spyOn(DocumentKit.prototype, "text")
+  const consent = (signatureMethod: string, country: string | null) =>
+    ({
+      document: {
+        status: "firmado",
+        titleSnapshot: "Exodoncia",
+        procedureRef: null,
+        sectionsSnapshot: base,
+        bodySnapshot: "",
+        diagnosisCode: null,
+        declarationSnapshot: "He leído y comprendido la información.",
+        signatureMethod,
+        signerKind: "paciente",
+        signerName: "Rosa Rojas",
+        signerDoc: null,
+        signatureData: null,
+        signedAt: new Date("2026-10-30T15:00:00Z"),
+        informerName: "Ana Torres",
+        informedAt: new Date("2026-10-30T15:00:00Z"),
+      },
+      patient: { displayName: "Rosa Rojas", docType: null, docNumber: null, patientNumber: 7 },
+      diagnosisDescription: null,
+      establishment: country ? { country } : null,
+    }) as never
+  const written = () => text.mock.calls.map(([words]) => String(words))
+  await renderConsentPdf(consent("clinica", "PE"), clinic, { checkUrl: "https://example.com/comprobar/x" })
+  expect(written()).toContain("Firma electrónica simple (Ley 27269) · en la clínica")
+  expect(written()).toContain("Escanee el código para comprobar que sigue vigente y que este documento no cambió.")
+  expect(written().join(" ")).not.toMatch(/no constituye|firma digital/)
+  text.mockClear()
+  await renderConsentPdf(consent("enlace", null), clinic)
+  expect(written()).toContain("Firma electrónica simple · por enlace")
+  text.mockClear()
+  await renderConsentPdf(consent("papel", "PE"), clinic)
+  expect(written()).toContain("El paciente firmó a mano en papel")
+  // Ni «electrónica» al lado de lo firmado en papel (pendiente de la entrega 11).
+  expect(written().join(" ")).not.toMatch(/electrónica simple|Firmado electrónicamente/)
+  expect(written()).toContain("Lo confirmó con su perfil profesional")
+})
+
 it("lo que se calcula de antemano es lo que de verdad ocupa", async () => {
   const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title: "Prueba", docLabel: "Prueba", patientLabel: "Rosa" })
   const declaration = { title: "Declaración", body: "He leído y comprendido la información." }

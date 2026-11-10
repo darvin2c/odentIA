@@ -19,14 +19,15 @@ import {
   findEarlierTreatment,
   getEncounterClosing,
 } from "./encounters.js"
-import { getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
+import { getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import {
   canBookAnother,
   canBookAnotherSql,
   isToSchedule,
   patientsToSchedule,
+  planItemSql,
   sessionCountsOf,
   toScheduleSql,
 } from "./to-schedule.js"
@@ -36,6 +37,8 @@ setupTestDb()
 
 const DAY = 86_400_000
 const all = () => true
+/** Las fases del plan de odentIA, en su orden (`productHooks(...).planPhases` de una clínica dental). */
+const PHASES = ["urgencia", "basica", "quirurgica", "rehabilitadora", "mantenimiento"]
 type Fixture = Awaited<ReturnType<typeof clinicalFixture>>
 
 /** Un tratamiento aceptado de `sessions` sesiones previstas, con su presupuesto aceptado. */
@@ -161,7 +164,7 @@ it("D3: «puede llevar otra cita» es otra regla; «aceptó y no tiene cita» no
     )
     const [sqlRow] = await f.run((tx) =>
       tx.execute<{ to_schedule: boolean; another: boolean }>(sql`select
-        ${toScheduleSql({ id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` })} as to_schedule,
+        ${toScheduleSql(planItemSql("i"), PHASES)} as to_schedule,
         ${canBookAnotherSql({ id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status`, plannedSessions: sql`i.planned_sessions` })} as another
         from treatment_plan_item i where i.id = ${item.id}`),
     )
@@ -173,14 +176,22 @@ it("D3: «puede llevar otra cita» es otra regla; «aceptó y no tiene cita» no
   expect(await rules()).toEqual({ toSchedule: true, another: true, sessionsLeft: 2, nextSession: { n: 1, m: 2 }, coordinationToSchedule: true })
   await book(1, { planItemIds: [item.id] })
   // Con la primera cita ya no «falta agendar» (Inicio, Pacientes, Argos), pero le falta la segunda.
-  expect(await rules()).toEqual({ toSchedule: false, another: true, sessionsLeft: 1, nextSession: { n: 2, m: 2 }, coordinationToSchedule: false })
-  expect(await f.run((tx) => patientsToSchedule(tx, "org_a"))).not.toContain(f.patient.id)
+  expect(await rules()).toEqual({
+    toSchedule: false,
+    another: true,
+    sessionsLeft: 1,
+    nextSession: { n: 2, m: 2 },
+    coordinationToSchedule: false,
+  })
+  expect(await f.run((tx) => patientsToSchedule(tx, "org_a", PHASES))).not.toContain(f.patient.id)
   const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  // «Qué sigue» no pide la sesión 2 antes de hacer la 1, que ya tiene cita: dice cuándo es y que la
+  // 2 se reserva en esa cita (QA del 9 nov, repaso 3). La agenda sí deja llevarla (`another`).
   expect(next).toMatchObject({
-    kind: "continuar",
-    text: "Falta la cita de la próxima sesión: Tratamiento propio · sesión 2 de 2",
-    // El botón dice qué reserva (QA del 8 nov).
-    action: { label: "Reservar la sesión 2", planItemIds: [item.id] },
+    kind: "reservado",
+    text: expect.stringMatching(/^Tratamiento propio · sesión 1 de 2: /),
+    detail: "Con su cita · la sesión 2 se reserva en esa cita",
+    action: null,
   })
   expect((await f.run((tx) => planNextStepsOf(tx, "org_a", [f.patient.id], all))).get(f.patient.id)).toEqual(next)
 

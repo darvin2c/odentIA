@@ -43,6 +43,7 @@ import {
   formatDayLongLocale,
   formatTimeShortLocale,
   returnPdfPath,
+  ticketPartyOf,
   voidTicketApi,
 } from "../../lib/finance-collect"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
@@ -64,8 +65,12 @@ export function ticketDisplayNumber(number: number): string {
   return String(number).padStart(6, "0")
 }
 
-/** PDF del servidor para un ticket: sin `paper` sale en la térmica configurada. */
-export function ticketPdfPath(patientId: string, ticketId: string): string {
+/**
+ * PDF del servidor para un ticket: sin `paper` sale en la térmica configurada. El de
+ * una venta de mostrador (ADR 0173), sin ficha, sale de Finanzas.
+ */
+export function ticketPdfPath(patientId: string | null, ticketId: string): string {
+  if (patientId === null) return `/api/finance/counter-sales/${ticketId}/pdf`
   const params = new URLSearchParams({ documentType: "ticket", documentId: ticketId })
   return `/api/patients/${patientId}/financial-document-pdf?${params}`
 }
@@ -164,6 +169,7 @@ export function TicketView({
 }): React.JSX.Element {
   const canWrite = usePermission("finance.write")
   const canAdmin = usePermission("finance.admin")
+  const seesPeople = usePermission("crm.read")
   const [voidOpen, setVoidOpen] = useState(false)
   const [printing, setPrinting] = useState(false)
   const [printError, setPrintError] = useState<string | null>(null)
@@ -180,6 +186,9 @@ export function TicketView({
   const second = useOrgSecondCurrency()
 
   const snapshot = ticket.snapshot
+  // Una venta de mostrador (ADR 0173): sin ficha ni cuenta, a una persona, a un nombre o a nadie.
+  const counter = ticket.patientId === null
+  const party = ticketPartyOf(snapshot)
   const currency = ticket.currency
   // Formato y zona con que se emitió; los de hoy solo si el ticket no los congeló.
   const format = snapshot.clinic?.locale || locale
@@ -215,7 +224,7 @@ export function TicketView({
   const canVoid = canWrite && (!closedAfter || canAdmin) && !hasReturns
   const number = ticketDisplayNumber(ticket.ticketNumber)
 
-  const person = snapshot.patient?.displayName || patientName
+  const person = counter ? party.name : snapshot.patient?.displayName || patientName
   const document = snapshot.patient?.docNumber
     ? documentText(snapshot.patient.docType, snapshot.patient.docNumber)
     : null
@@ -237,7 +246,15 @@ export function TicketView({
     (sum, line) => sum + (line.appliedCents ?? line.amountCents),
     0,
   )
-  const stillOwed = snapshot.remainingCents ?? remainingCents
+  // Todo lo que le falta de su cuenta, si el ticket lo guardó; si no (tickets de antes), lo de estos conceptos.
+  const accountKnown = snapshot.accountDueCents !== undefined
+  // Una sola cifra, como su cuenta: lo que tiene a favor paga primero su próximo cobro, así que lo
+  // que falta ya lo descuenta (verificación de la entrega 9: el ticket decía 180 y la cuenta 150).
+  const owedGross = snapshot.accountDueCents ?? snapshot.remainingCents ?? remainingCents
+  const creditGross = snapshot.accountCreditCents ?? 0
+  const stillOwed = Math.max(0, owedGross - creditGross)
+  const creditLeft = Math.max(0, creditGross - owedGross)
+  const creditCounted = Math.min(owedGross, creditGross)
   const untaxedNote = snapshot.taxes ? ticketUntaxedNote(snapshot.taxes) : null
   // Lo que deshace anular: los productos vuelven a la sede, los servicios quedan por cobrar.
   const productLines = returnLines.filter(
@@ -270,8 +287,8 @@ export function TicketView({
   // Cuánto debe la persona después del cobro: la cuenta, no solo estos conceptos.
   const account = useQuery({
     queryKey: ["patient-account3", ticket.patientId],
-    queryFn: () => fetchPatientAccount3(ticket.patientId),
-    enabled: mode === "collected" && !voided,
+    queryFn: () => fetchPatientAccount3(ticket.patientId ?? ""),
+    enabled: mode === "collected" && !voided && !counter,
     staleTime: 30_000,
   })
   const owed = account.data
@@ -386,8 +403,10 @@ export function TicketView({
             <Check className="size-5" aria-hidden />
           </span>
           <div className="flex min-w-0 flex-col">
-            <p className="font-heading text-base font-semibold">Cobro registrado</p>
-            {owed === null ? (
+            <p className="font-heading text-base font-semibold">
+              {counter ? "Venta registrada" : "Cobro registrado"}
+            </p>
+            {counter ? null : owed === null ? (
               account.isError ? null : (
                 <Skeleton className="mt-1 h-4 w-40" />
               )
@@ -445,7 +464,13 @@ export function TicketView({
           </p>
         ) : null}
         <div className="flex flex-col gap-0.5">
-          <p className="break-words">Paciente: {person}</p>
+          {party.label === null ? (
+            <p className="break-words font-semibold">{person}</p>
+          ) : (
+            <p className="break-words">
+              {counter ? party.label : "Paciente"}: {person}
+            </p>
+          )}
           {document ? <p className="text-muted-foreground">{document}</p> : null}
           {payerName && payerName !== person ? (
             <p className="break-words">Pagó: {payerName}</p>
@@ -462,7 +487,8 @@ export function TicketView({
                 <Row label={line.description} value={plain(paid)} />
                 {paid < line.amountCents ? (
                   <span className="text-xs text-muted-foreground">
-                    Paga una parte: cuesta {plain(line.amountCents)}
+                    {line.leftCents === 0 ? "Con esto queda pagado" : "Paga una parte"}: cuesta{" "}
+                    {plain(line.amountCents)}
                   </span>
                 ) : null}
                 {line.promotion ? (
@@ -533,7 +559,7 @@ export function TicketView({
                 onClick={() => {
                   setReturnPdfBusy(item.id)
                   setPrintError(null)
-                  void openServerPdf(returnPdfPath(ticket.patientId, item.id))
+                  void openServerPdf(returnPdfPath(ticket.patientId, item.id, ticket.id))
                     .catch((err: unknown) => setPrintError(financeErrorMessage(err)))
                     .finally(() => setReturnPdfBusy(null))
                 }}
@@ -545,10 +571,14 @@ export function TicketView({
             </div>
           ))}
         </div>
-        {conceptLines.length > 0 && stillOwed > 0 ? (
-          // Lo que falta del tratamiento, aparte del pago y solo si falta algo.
+        {(accountKnown || conceptLines.length > 0) && (stillOwed > 0 || creditLeft > 0) ? (
+          // Cómo queda su cuenta, aparte del pago: también en el ticket de un adelanto (QA del 9 nov, repaso 3).
           <div className="flex flex-col gap-0.5 rounded-md border bg-muted/40 px-3 py-2">
-            <Row label="Le falta pagar" value={money(stillOwed)} strong />
+            {stillOwed > 0 ? <Row label="Le falta pagar" value={money(stillOwed)} strong /> : null}
+            {stillOwed > 0 && creditCounted > 0 ? (
+              <span className="text-xs text-muted-foreground">Ya descuenta {money(creditCounted)} que tiene a favor.</span>
+            ) : null}
+            {creditLeft > 0 ? <Row label="Le queda a favor" value={money(creditLeft)} /> : null}
             {(snapshot.pending ?? []).map((item) => (
               <span key={item.chargeId} className="text-xs text-muted-foreground">
                 {item.description}: pagó {plain(item.amountCents - item.remainingCents)} de{" "}
@@ -577,7 +607,8 @@ export function TicketView({
         ) : null}
         {canWrite || onDone ? (
           <div className="flex flex-wrap gap-2">
-            {canWrite ? (
+            {/* Enviar es a las personas de una ficha: el de una venta de mostrador se imprime. */}
+            {canWrite && ticket.patientId !== null ? (
               <SendFinancialDocument
                 className="min-w-0 flex-1"
                 patientId={ticket.patientId}
@@ -620,7 +651,7 @@ export function TicketView({
 
       {!inAccount || (!voided && (canVoid || canReturn)) ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-          {!inAccount ? (
+          {!inAccount && ticket.patientId !== null ? (
             <Link
               to="/patients/$patientId"
               params={{ patientId: ticket.patientId }}
@@ -631,6 +662,18 @@ export function TicketView({
               )}
             >
               Abrir la cuenta de {person}
+            </Link>
+          ) : !inAccount && ticket.buyerContactId && seesPeople ? (
+            // Quien compró en el mostrador no tiene cuenta: se abre su página.
+            <Link
+              to="/people/$personId"
+              params={{ personId: ticket.buyerContactId }}
+              className={cn(
+                buttonVariants({ variant: "link" }),
+                "h-auto min-w-0 whitespace-normal px-0 text-left",
+              )}
+            >
+              Abrir la página de {person}
             </Link>
           ) : (
             <span />
@@ -785,8 +828,8 @@ export function TicketView({
             </p>
           ) : null}
           <p className="text-sm text-muted-foreground">
-            Anular es para un error al cobrar. Si el paciente devuelve algo o pide su dinero, usa
-            «Devolver».
+            Anular es para un error al cobrar. Si {counter ? "" : "el paciente "}devuelve algo o pide
+            su dinero, usa «Devolver».
           </p>
           <voidForm.AppField name="reason">
             {(field) => <field.TextareaField label="Motivo" rows={3} maxLength={MAX_VOID_REASON} />}

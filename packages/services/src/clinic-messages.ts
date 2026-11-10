@@ -57,6 +57,8 @@ import {
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
   DOCUMENT_READY_MESSAGE_KEY,
+  ORDER_MESSAGE_KEYS,
+  ORDER_READY_MESSAGE_KEY,
   NOTICE_PURPOSE,
   REMINDER_CONFIRMED_KEY,
   REMINDER_PENDING_KEY,
@@ -81,7 +83,7 @@ import {
 import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
 import { fieldPath, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, orgProduct } from "./locale.js"
-import { productHooks } from "./products.js"
+import { productHooks, worksWithOrders } from "./products.js"
 import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
 import { nextOpportuneFrom } from "./opportune-hours.js"
 import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
@@ -231,6 +233,7 @@ function catalogTitle(key: CatalogMessageKey): string {
   if (key === ANSWER_READY_MESSAGE_KEY) return "Ver respuesta"
   if (key === LINK_RECEIVED_MESSAGE_KEY) return "Recibido desde su enlace"
   if (key === DOCUMENT_READY_MESSAGE_KEY) return "Documento listo"
+  if (key === ORDER_READY_MESSAGE_KEY) return "Pedido listo"
   return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
@@ -253,7 +256,8 @@ function catalogDef(
             key === CONSENT_TO_SIGN_MESSAGE_KEY ||
             key === ANSWER_READY_MESSAGE_KEY ||
             key === LINK_RECEIVED_MESSAGE_KEY ||
-            key === DOCUMENT_READY_MESSAGE_KEY
+            key === DOCUMENT_READY_MESSAGE_KEY ||
+            key === ORDER_READY_MESSAGE_KEY
           ? "plan"
           : "agente",
     title: catalogTitle(key),
@@ -403,7 +407,10 @@ async function loadMessages(
     .orderBy(asc(clinicMessageVersion.number))
   const versionsOf = (id: string) => versions.filter((version) => version.messageId === id)
   const product = await orgProduct(tx, orgId)
-  const defs: MessageDef[] = CATALOG_MESSAGE_KEYS.map((key) => {
+  // Lo del pedido solo en el producto que trabaja con pedidos: los demás no lo piden ni lo ven.
+  const defs: MessageDef[] = CATALOG_MESSAGE_KEYS.filter(
+    (key) => worksWithOrders(product) || !ORDER_MESSAGE_KEYS.includes(key),
+  ).map((key) => {
     const row = rows.find((item) => item.key === key) ?? null
     return catalogDef(key, row, row ? versionsOf(row.id) : [], product)
   })
@@ -1098,6 +1105,8 @@ function meanwhileOf(
     return "Mientras tanto el documento sale con su PDF a quien escribió en las últimas 24 horas; a los demás, por correo o impreso."
   if (def.id === LINK_RECEIVED_MESSAGE_KEY)
     return "Mientras tanto se le agradece por el chat solo a quien escribió en las últimas 24 horas; a los demás se lo confirma la página de su enlace."
+  if (def.id === ORDER_READY_MESSAGE_KEY)
+    return "Mientras tanto el aviso sale escrito a quien escribió en las últimas 24 horas, o por correo; si no, el pedido lo dice para que lo llamen."
   if (def.origin === "plan")
     return "Mientras tanto el presupuesto sale con su PDF a quien escribió en las últimas 24 horas, o por correo."
   if (def.origin !== "agente") return "Mientras tanto no se ofrece en la Bandeja."
@@ -1172,6 +1181,8 @@ function itemOf(
           ? "Cuando alguien del equipo envía una receta, una orden, un descanso, una hoja de atención, un consentimiento firmado o un comprobante y la persona lleva más de 24 horas sin escribir: le llega con el PDF."
         : def.id === LINK_RECEIVED_MESSAGE_KEY
           ? "Cuando la persona completa algo desde su enlace y lleva más de 24 horas sin escribir, con Sofi encendida. Uno al día, aunque complete varias cosas."
+        : def.id === ORDER_READY_MESSAGE_KEY
+          ? "Cuando alguien del equipo marca «Listo» un pedido: le avisa que puede recogerlo."
         : def.origin === "plan"
           ? "Al entregar un presupuesto: desde Plan, al cerrar la atención o cuando la persona lo pide por el chat."
           : null,

@@ -3,7 +3,9 @@ import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { canAccess, ORG_ROLES, type Permission } from "@odentia/auth/permissions"
 import { describe, expect, it } from "vitest"
-import { HELP_TOPICS, helpSmallTalk, helpTopicForScreen, helpWritePermissions } from "./help-guide.js"
+import { CLINICAL_PRODUCTS } from "@odentia/clinical"
+import { HELP_TOPICS, helpSmallTalk, helpTopicForScreen, helpWritePermissions, PRODUCT_ONLY_SCREENS } from "./help-guide.js"
+import { helpTopicsFor } from "./products.js"
 import { describeHelpSearch, helpBanks, measureHelpBank } from "./help-guide-suite.js"
 
 /**
@@ -42,8 +44,16 @@ describe("la guía coincide con el código", () => {
     const treeText = read(`apps/${app}/src/routeTree.gen.ts`)
     const screens = [...treeText.matchAll(/id: '\/_org\/[^']*'\s+path: '[^']*'\s+fullPath: '([^']+)'/g)].map((match) => (match[1] ?? "").replace(/\/$/, ""))
     expect(screens.length).toBeGreaterThan(30)
-    const orphan = screens.filter((path) => !helpTopicForScreen(path))
+    const orphan = screens.filter((path) => !helpTopicForScreen(path) && !PRODUCT_ONLY_SCREENS.includes(path))
     expect(orphan).toEqual([])
+  })
+
+  it("lo que solo muestra un producto tiene su tema en la guía de ese producto", () => {
+    for (const path of PRODUCT_ONLY_SCREENS) {
+      const owners = CLINICAL_PRODUCTS.filter((product) => helpTopicsFor(product).some((topic) => topic.path === path))
+      expect(owners.length, path).toBeGreaterThan(0)
+      expect(HELP_TOPICS.some((topic) => topic.path === path), `${path} no va en la guía de odentIA`).toBe(false)
+    }
   })
 
   it("toda entrada del menú y de Configuración tiene su tema, con el mismo nombre", () => {
@@ -52,7 +62,9 @@ describe("la guía coincide con el código", () => {
     const menu = [...entries(read("packages/clinic-app/src/routes/_org.tsx")), ...entries(read("packages/clinic-app/src/routes/_org/settings.tsx"))]
     expect(menu.length).toBeGreaterThan(20)
     for (const item of menu) {
-      const topic = HELP_TOPICS.find((candidate) => candidate.path === item.to)
+      // Lo que solo muestra un producto se busca en su guía.
+      const topics = PRODUCT_ONLY_SCREENS.includes(item.to) ? CLINICAL_PRODUCTS.flatMap((product) => helpTopicsFor(product)) : HELP_TOPICS
+      const topic = topics.find((candidate) => candidate.path === item.to)
       expect(topic, `Falta el tema de ${item.label} (${item.to})`).toBeTruthy()
       // La entrada «Configuración» del menú lleva a su primera sección: vale el nombre de la sección o el del grupo.
       expect([topic?.title, topic?.menuLabel, topic?.parent], item.to).toContain(item.label)

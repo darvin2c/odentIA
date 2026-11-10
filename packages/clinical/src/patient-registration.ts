@@ -1,5 +1,5 @@
-import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { z } from "zod"
+import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { CLINICAL_PRODUCTS, type ClinicalProduct } from "./products.js"
 import {
   type ClinicalCountryProfile,
@@ -14,8 +14,8 @@ import {
 import {
   DOC_TYPE_LABELS,
   EDUCATION_LEVELS,
-  identityDocumentError,
   ISO_COUNTRY_RE,
+  identityDocumentError,
   KINSHIP,
   MARITAL_STATUSES,
   normalizePhone,
@@ -438,13 +438,25 @@ export function contactCoveredByRepresentative(key: RegistrationFieldKey, repres
   return representativeContact && (key === "phone" || key === "email")
 }
 
-/** Un dato que le falta a la persona para atenderla, con su nombre en pantalla. */
+/**
+ * Un dato que le falta a la persona para atenderla, con su nombre en pantalla.
+ * `representativeDoc` no es de ella: un menor cuyo representante legal no tiene
+ * documento (lo pide la firma de su consentimiento). Solo lo ve el equipo: su
+ * enlace no lo pide (`getStaffMissingData` en los servicios).
+ */
 export interface MissingPersonDatum {
   key:
     | "givenNames" | "familyName" | "birthDate" | "phone" | "docType" | "docNumber"
     | "sex" | "nationality" | "birthPlace" | "email" | "address" | "emergencyContactName" | "emergencyContactPhone"
     | "insuranceType"
+    | "representativeDoc"
   label: string
+}
+
+/** Lo que falta de su representante legal, dicho como un dato más de «Faltan datos». */
+export const REPRESENTATIVE_DOC_GAP: MissingPersonDatum = {
+  key: "representativeDoc",
+  label: "Documento de su representante",
 }
 
 /**
@@ -595,11 +607,11 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     }
     if (!data.demographics.phone && !data.demographics.email && !representativeContact) errors["demographics.phone"] = "Escribe un teléfono o un correo"
   } else if (context.scope === "essentials") {
-    // Lo mínimo que registra el equipo al reservar: nombres, apellidos y, si se
-    // conoce, el teléfono (a quien escribe ya se le conocen sus canales; a quien
-    // llega por la Agenda el servicio le exige el teléfono). Como en el enlace
-    // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
-    // pendiente (`pendingRegistrationFields`).
+    // Lo mínimo que registra el equipo: nombres, apellidos y, si lo tiene, el
+    // teléfono (a quien escribe ya se le conocen sus canales; quien llega sin
+    // celular se registra igual y la pantalla avisa que no le llegarán sus
+    // avisos). Como en el enlace de reserva, lo que la clínica exige y aquí no
+    // se pide no bloquea: queda pendiente (`pendingRegistrationFields`).
     essentialIdentityErrors(data, errors, (key) => (ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key))
   } else if (config.version > 0) {
     // Alta interna: lo que la clínica configuró como obligatorio también lo es

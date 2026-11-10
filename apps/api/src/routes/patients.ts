@@ -1,14 +1,15 @@
+import type { PlatformLlm } from "@odentia/agent"
 import {
-  SEX_CODES,
   BLOOD_GROUPS,
-  DOC_TYPES,
   DICOM_DOCUMENT_MAX_BYTES,
+  DOC_TYPES,
   DOCUMENT_FORMATS,
   demographicsSchema,
   documentMaxBytes,
   REPORT_STATUSES,
   registrationAnswersSchema,
   registrationContactInputSchema,
+  SEX_CODES,
   sniffDocumentMime,
 } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
@@ -17,91 +18,92 @@ import {
   addEncounterAddendum,
   addEncounterDiagnosis,
   addEncounterProcedure,
-  findEarlierTreatment,
   addPatientAllergy,
   addPlanItem,
   addPlanItemsBatch,
+  assembleEncounterBudget,
+  bringTreatmentToEncounter,
   type ClinicalAccessResource,
+  chooseVisitControl,
   codePatientAllergy,
   correctEncounterMaterial,
   createEncounter,
   createTreatmentPlan,
+  documentPortalState,
+  ENCOUNTER_TEXT_FIELDS,
   finalizeEncounter,
-  keepIssuedPaper,
+  findEarlierTreatment,
   findPatientDuplicates,
   getAnamnesisVersion,
   getEncounterClosing,
   getEncounterDetail,
   getEncounterMaterials,
+  getEncounterVoidPreview,
   getLatestAnamnesis,
   getOpenEncounterRef,
+  discardEmptyEncounter,
   getPatient,
-  getPatientMissingData,
   getPatientDocument,
   getPatientHealth,
   getPatientSummary,
-  getTimeline,
   getPlanNextStep,
   getPlanNextSteps,
+  getStaffMissingData,
+  getTimeline,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
+  keepIssuedPaper,
+  leaveTreatmentFromEncounter,
   listAnamnesisVersions,
   listClinicalAccess,
   listClinicalNotes,
   listDataConsents,
   listEncounters,
   listPatientDiagnoses,
-  listPatientVitals,
   listPatientDocuments,
   listPatients,
+  listPatientVitals,
   listPlanItems,
   listTreatmentPlans,
+  makeImageThumbnail,
   markAllergiesReviewed,
   markHealthDenied,
+  operationBodySchema,
+  operationBodyShape,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
+  recordLockState,
   registerPatient,
-  makeImageThumbnail,
   registerPatientDocument,
-  retirePatientDocument,
-  setDocumentPortalVisibility,
-  documentPortalState,
-  setDocumentReportStatus,
+  removeIndicatedFromEncounter,
   removePatientAllergy,
+  removePatientAvatar,
   removePatientContact,
+  reopenPlanItemForSession,
   requirePatient,
   restorePatientAllergy,
+  retirePatientDocument,
   revokeDataConsent,
   ServiceError,
   savePatientHealth,
   scheduleFollowUpFromCoordination,
   setDiagnosisStatus,
-  removePatientAvatar,
+  setDocumentPortalVisibility,
+  setDocumentReportStatus,
   setPatientAvatar,
   setPatientContact,
   setPlanItemStatus,
   TIMELINE_TYPES,
   takeOverEncounter,
-  operationBodySchema,
-  operationBodyShape,
-  ENCOUNTER_TEXT_FIELDS,
   type UpdateEncounterDraftPatch,
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
-  reopenPlanItemForSession,
   updatePlanItemPlanning,
-  getEncounterVoidPreview,
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
-  recordLockState,
-  bringTreatmentToEncounter,
-  chooseVisitControl,
-  leaveTreatmentFromEncounter,
-  removeIndicatedFromEncounter,
-  assembleEncounterBudget,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -109,20 +111,19 @@ import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { canonicalUuid, personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
-import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
-import { createPatientBudgetsRoute } from "./patient-budgets.js"
-import { createImagingStudiesRoute } from "./imaging-studies.js"
-import { createPatientDocumentContextRoute } from "./patient-document-context.js"
-import type { PlatformLlm } from "@odentia/agent"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"
-import { patientProductRoutes } from "./products.js"
-import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
-import { createPatientPaymentsRoute } from "./patient-payments.js"
-import { createPatientMedicalLeavesRoute } from "./patient-medical-leaves.js"
-import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
+import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
+import { createImagingStudiesRoute } from "./imaging-studies.js"
+import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createPatientDataRequestsRoute } from "./patient-data-requests.js"
+import { createPatientDocumentContextRoute } from "./patient-document-context.js"
+import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
+import { createPatientMedicalLeavesRoute } from "./patient-medical-leaves.js"
+import { createPatientPaymentsRoute } from "./patient-payments.js"
+import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
 import { createPatientTreatmentsRoute } from "./patient-treatments.js"
+import { patientProductRoutes } from "./products.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -386,6 +387,7 @@ const planPatchInput = z
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
+    plannedSessions: z.number().int().min(1).max(60).nullish(),
     encounterId: z.uuid(),
     status: z
       .enum([
@@ -439,6 +441,21 @@ const finalizeInput = z
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
     // Los diagnósticos que el cierre proponía resolver y quien firma dejó marcados.
     resolveDiagnosisIds: z.array(z.uuid()).max(100).optional(),
+    // Los controles que dejan los tratamientos de hoy, como quedaron en el cierre: otro día o quitarlo.
+    finishControlChanges: z
+      .array(
+        z.union([
+          z
+            .object({
+              key: z.string().max(200),
+              dueDay: z.iso.date({ error: "Elige un día del calendario" }),
+            })
+            .strict(),
+          z.object({ key: z.string().max(200), remove: z.literal(true) }).strict(),
+        ]),
+      )
+      .max(20)
+      .optional(),
     // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
     nextControl: z
       .union([
@@ -527,6 +544,8 @@ const CLINICAL_SUBPATHS = [
   "/prescriptions",
   // El descanso médico (issue 229).
   "/medical-leaves",
+  // La receta de lentes de vistIA (ADR 0170).
+  "/lens-prescriptions",
   "/follow-ups",
   "/documents",
   "/imaging/studies",
@@ -588,6 +607,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/follow-ups", "controles"],
   ["/prescriptions", "recetas"],
   ["/medical-leaves", "descansos"],
+  ["/lens-prescriptions", "recetas"],
   ["/documents", "documentos"],
   ["/imaging/studies", "documentos"],
   ["/record", "descarga"],
@@ -607,6 +627,9 @@ const coordinationScheduleInput = z.union([
           startsAt: z.iso.datetime({ offset: true }),
           endsAt: z.iso.datetime({ offset: true }).optional(),
           durationMin: z.number().int().positive().optional(),
+          // Fuera de su horario u ocupado, solo si la pantalla lo avisó (como en «Nueva cita»).
+          outsideSchedule: z.literal(true).optional(),
+          overrideBusy: z.literal(true).optional(),
         })
         .strict(),
     })
@@ -829,7 +852,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         const base = await getPatient(tx, orgId, c.req.param("id"))
         const full = {
           ...base,
-          missingData: canEdit ? await getPatientMissingData(tx, orgId, c.req.param("id")) : null,
+          missingData: canEdit ? await getStaffMissingData(tx, orgId, c.req.param("id")) : null,
         }
         // Con lo clínico va también si se le preguntó por alergias: la atención lo dice (revisión del 9 nov).
         if (clinical)
@@ -1629,6 +1652,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           parsed.data,
           { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
+      ),
+    )
+  })
+  // «Descartar»: la atención en borrador sin nada registrado se borra sin motivo; queda su auditoría.
+  app.post("/:id/encounters/:encounterId/discard", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para descartar atenciones"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        discardEmptyEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
       ),
     )
   })

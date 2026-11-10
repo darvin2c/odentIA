@@ -31,7 +31,7 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { z } from "zod"
 import type { AgendaAppointment } from "../../lib/agenda"
@@ -45,8 +45,16 @@ import { appWords } from "../../lib/product-words"
 import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
-import { whenSaid } from "./shared"
-import { type AgendaException, EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
+import { dayShort, whenSaid } from "./shared"
+import {
+  type AgendaException,
+  EMPTY_WHEN,
+  exceptionFlags,
+  useWhen,
+  WHEN_FIELD_MAP,
+  WhenFields,
+  type WhenValues,
+} from "./when"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -106,17 +114,25 @@ interface ReminderReach {
   name: string
   whatsapp: PhoneWhatsApp
   hasEmail: boolean
+  /** Por dónde le llegará de verdad; null: no le llega (la misma regla del servidor al enviarlo). */
+  via?: "whatsapp" | "correo" | null
+  /** Lo recibe otra persona por el paciente (su madre). */
+  forOther?: boolean
 }
 
-/** «Carmen no recibirá el recordatorio: aún no tiene WhatsApp»; nada si le llega por WhatsApp. */
-function reminderWords(reach: ReminderReach | null | undefined): string | null {
-  if (!reach || reach.whatsapp.state === "es_su_whatsapp") return null
-  const why = reach.whatsapp.state === "no_tiene" ? "su número no tiene WhatsApp" : "aún no tiene WhatsApp"
-  return reach.hasEmail
-    ? `${reach.name} recibirá el recordatorio por correo: ${why}.`
-    : `${reach.name} no recibirá el recordatorio: ${why}.`
+/**
+ * Lo que pasa con el recordatorio, con la regla con que de verdad sale (QA de la ficha del 10 nov,
+ * M3): «recibirá el recordatorio por correo» solo si la clínica lo envía; si no, recepción sabe que
+ * avisa ella. Nada si le llega por WhatsApp.
+ */
+export function reminderWords(reach: ReminderReach | null | undefined): string | null {
+  if (!reach) return null
+  const who = reach.forOther ? `${reach.name}, que recibe sus avisos,` : reach.name
+  const via = reach.via === undefined ? (reach.whatsapp.state === "es_su_whatsapp" ? "whatsapp" : reach.hasEmail ? "correo" : null) : reach.via
+  if (via === "whatsapp") return null
+  if (via === "correo") return `${who} recibirá el recordatorio por correo.`
+  return `${who} no recibirá el recordatorio automático: avísale tú un día antes.`
 }
-
 
 /** Lo que se escribe en «Nueva cita»; el «cuándo» va en `when` (ver `WhenFields`). */
 interface BookingValues {
@@ -295,7 +311,8 @@ export function BookingDrawer({
           method: "POST",
           body: JSON.stringify({ tipo, recibir, source: "telefono" }),
         })
-      if (remindersByWhatsApp) await permission("recordatorio", true)
+      // Sin teléfono no se le prometió nada por WhatsApp: no se anota.
+      if (remindersByWhatsApp && value.phone) await permission("recordatorio", true)
       if (value.generalConsent !== null) await permission("novedades", value.generalConsent)
     })().catch(() => {
       consentNote.current = "No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes."
@@ -305,7 +322,7 @@ export function BookingDrawer({
     return registered.data
   }
 
-  // Quien registra escribe nombres y apellidos (y su teléfono si es alguien nuevo); quien elige, elige.
+  // Quien registra escribe nombres y apellidos (y su teléfono, si lo tiene); quien elige, elige.
   const schema = z.object({
     patientId: registering ? z.string() : z.string().min(1, "Elige un paciente."),
     givenNames: registering
@@ -314,13 +331,9 @@ export function BookingDrawer({
     surname: registering
       ? z.string().trim().min(1, "Escribe los apellidos.").max(200, "Escribe los apellidos en 200 caracteres o menos.")
       : z.string(),
-    phone:
-      registering && !seed.person
-        ? z
-            .string()
-            .nullable()
-            .refine((phone) => Boolean(phone), "Escribe su teléfono: por ahí le llegan los avisos de la cita.")
-        : z.string().nullable(),
+    // Sin teléfono también se reserva (una urgencia, alguien sin celular): el campo avisa que
+    // no le llegarán los avisos de la cita, sin frenar. Un número a medias lo dice el campo.
+    phone: z.string().nullable(),
     // A quien se registra se le pregunta por novedades: sin su respuesta no se guarda.
     generalConsent: registering
       ? z
@@ -393,6 +406,11 @@ export function BookingDrawer({
         for (const note of [whatsappNote.current, consentNote.current]) {
           if (note) toast.warning(note, { duration: Number.POSITIVE_INFINITY, closeButton: true })
         }
+        // El control pedido en esta cita que no se sumó: su día no cae en su ventana (decisión B3).
+        for (const control of result.data.controlsLeftOut ?? [])
+          toast.info(
+            `${control.title} no va en esta cita: se puede hacer desde el ${dayShort(control.from)}. Queda por reservar.`,
+          )
         await onSaved(result.data)
       } catch (cause) {
         // Si alguien tomó el hueco, lo libre se vuelve a pedir.
@@ -429,10 +447,19 @@ export function BookingDrawer({
   // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
   // Uno solo de varias sesiones dice cuál sería esta cita: «Endodoncia · sesión 2 de 2».
   const toScheduleRows = React.useMemo(() => {
-    const rows = new Map<string, { key: string; title: string; ids: string[]; session: string | null }>()
+    const rows = new Map<
+      string,
+      { key: string; title: string; ids: string[]; session: string | null; after: string | null }
+    >()
     for (const item of toSchedule) {
       const key = `${item.serviceId ?? ""}|${item.title}`
-      const row = rows.get(key) ?? { key, title: item.title, ids: [], session: null }
+      const row = rows.get(key) ?? {
+        key,
+        title: item.title,
+        ids: [],
+        session: null,
+        after: item.after ?? null,
+      }
       row.ids.push(item.id)
       const next = item.nextSession
       row.session = row.ids.length === 1 && next && showsSession(next.n, next.m) ? sessionWords(next.n, next.m) : null
@@ -560,7 +587,27 @@ export function BookingDrawer({
     staleTime: 60_000,
   })
   const service = serviceId ? serviceQuery.data?.data : undefined
-  const duration = service?.durationMin ?? defaultMinutes
+  // Lo marcado de varios servicios suma lo que suele durar cada uno: la sesión 2 de la endodoncia
+  // con la corona sumada no cabe en 30 minutos (QA del 10 nov, M5). Se puede acortar a mano.
+  const markedServices = [
+    ...new Set(
+      toSchedule
+        .filter((row) => markedIds.includes(row.id))
+        .map((row) => row.serviceId)
+        .filter((id): id is string => !!id),
+    ),
+  ]
+  const markedServiceQueries = useQueries({
+    queries: (markedServices.length > 1 ? markedServices : []).map((id) => ({
+      queryKey: ["services", "one", id],
+      queryFn: () => fetchService(id),
+      staleTime: 60_000,
+    })),
+  })
+  const summedMinutes = markedServiceQueries.every((query) => query.data)
+    ? markedServiceQueries.reduce((sum, query) => sum + (query.data?.data.durationMin ?? defaultMinutes), 0)
+    : 0
+  const duration = Math.max(service?.durationMin ?? defaultMinutes, summedMinutes)
 
   // ----- Cuándo -----
   const when = useWhen({
@@ -580,6 +627,12 @@ export function BookingDrawer({
     keepProfessional: Boolean(seed.keepProfessional && (seed.serviceId ?? "") === (serviceId ?? "")),
   })
   const { shown } = when
+  // Con un hueco ya elegido, el bloque crece a la suma al marcar otro servicio (no se acorta solo).
+  const shownMinutes = shown ? Math.round((Date.parse(shown.end) - Date.parse(shown.start)) / 60_000) : null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambia la suma.
+  React.useEffect(() => {
+    if (summedMinutes > 0 && shownMinutes !== null && shownMinutes < summedMinutes) when.resize(summedMinutes)
+  }, [summedMinutes])
   // Elegir antes de lo que dice la nota: se avisa, no se frena (la persona decide).
   const shownDay = shown ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(shown.start)) : null
   const beforeNote = Boolean(seed.notBefore && shownDay && shownDay < seed.notBefore)
@@ -704,6 +757,11 @@ export function BookingDrawer({
                     id="cita-nuevo-telefono"
                     label="Teléfono"
                     defaultCountry={normalizeCountry(profile.data?.countryCode)}
+                    description={
+                      seed.person || field.state.value
+                        ? undefined
+                        : "Sin teléfono no le llegan los avisos de la cita; puedes agregarlo después."
+                    }
                   />
                 )}
               </form.AppField>
@@ -734,10 +792,13 @@ export function BookingDrawer({
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
               {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. Solo si saldrán. */}
+              {/* Sin teléfono no hay nada que decirle: lo avisa el campo. */}
               {remindersByWhatsApp ? (
-                <p className="text-xs text-muted-foreground">
-                  Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
-                </p>
+                seed.person || values.phone ? (
+                  <p className="text-xs text-muted-foreground">
+                    Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
+                  </p>
+                ) : null
               ) : remindersQuery.isSuccess ? (
                 <p className="text-xs text-muted-foreground">
                   Esta clínica no envía hoy los recordatorios por WhatsApp: no se lo prometas.
@@ -840,9 +901,16 @@ export function BookingDrawer({
                       }
                     />
                     <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
-                      {row.title}
-                      {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
-                      {row.session ? ` · ${row.session}` : ""}
+                      {/* Un solo bloque de texto: la etiqueta es flex y partía «va después» en otra columna. */}
+                      <span>
+                        {row.title}
+                        {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
+                        {row.session ? ` · ${row.session}` : ""}
+                        {/* Lo dice como «Qué sigue»: marcarlo igual es decisión de quien reserva (entrega 8). */}
+                        {row.after ? (
+                          <span className="text-muted-foreground">{` · va después de ${row.after}`}</span>
+                        ) : null}
+                      </span>
                     </FieldLabel>
                   </Field>
                 ))}

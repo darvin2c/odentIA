@@ -73,7 +73,7 @@ import { seedAcceptedProgress } from "./seed-reports-progress.js"
 import { demoPromotionsOf, seedOperation, seedPromotions } from "./seed-operation.js"
 import { seedRepliesRuns, seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
-import { fromTemplates } from "./service-catalog.js"
+import { fromTemplates, updateService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 
 /**
@@ -85,6 +85,14 @@ const CLINICIAN_HONORIFIC: Record<ClinicalProduct, Record<"F" | "M", string>> = 
   medical: { F: "Dra.", M: "Dr." },
   optical: { F: "Lic.", M: "Lic." },
 }
+
+/**
+ * Quien atiende el mostrador de la demo: recepción; en una óptica, Ventas, que
+ * también vende y cobra (ADR 0171). Su usuario es el mismo (`…recepcion`).
+ */
+const DEMO_DESK_ROLE: Record<ClinicalProduct, "reception" | "sales"> = { dental: "reception", medical: "reception", optical: "sales" }
+/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0171). */
+const DEMO_HAS_WORKSHOP: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
 
 /** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */
 const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio", optical: "Sala de examen" }
@@ -98,8 +106,8 @@ const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: 
  * algo que mostrar. Todo corre con la conexión owner del worker y en una sola
  * transacción: una demo nunca queda a medias. Nada sale a una persona: su
  * WhatsApp queda desconectado (no recibe ni envía, y así lo dice), los
- * teléfonos son del rango de ficción +44 7700 900000–900999 y los correos,
- * de example.com.
+ * teléfonos son del rango de ficción, de +44 7700 900000 a 900799 (el resto
+ * queda para la QA), y los correos, de example.com.
  *
  * La demo cuenta una clínica coherente: cada servicio lo atiende quien tiene
  * su especialidad y a quien le corresponde por edad y sexo, cada cobro tiene
@@ -115,12 +123,27 @@ const HORIZON_DAYS = 14
 /**
  * Los teléfonos de la demo son del rango que Ofcom reserva para la ficción
  * (+44 7700 900000 a 900999): nunca son de una persona real, aunque la clínica
- * sea de Perú, Colombia o México. El último es el de la clínica; los otros
- * 999, de quienes escriben por WhatsApp.
+ * sea de Perú, Colombia o México. Las semillas usan solo de 900000 a 900799:
+ * de 900800 a 900999 queda libre para lo que crea la QA, que así no choca con
+ * un contacto de la demo (QA del 10 nov, D1). El 900799 es el de la clínica;
+ * los otros 799, de quienes escriben por WhatsApp. Un número de WhatsApp es de
+ * una sola persona en la clínica: si escriben más, los demás quedan sin número
+ * antes que repetir uno o salir del tramo.
  */
 const FICTION_PHONE_PREFIX = "447700900"
-const DEMO_CLINIC_PHONE = `+${FICTION_PHONE_PREFIX}999`
-const FICTION_PHONES = 999
+/** El último número del tramo de las semillas: después empieza el de la QA. */
+const SEED_PHONE_LAST = 799
+
+/** Los números de la demo, sin el «+»: el de la clínica y, en orden, los de quienes escriben. */
+export function demoFictionPhones(): { clinic: string; writers: string[] } {
+  const number = (n: number): string => `${FICTION_PHONE_PREFIX}${String(n).padStart(3, "0")}`
+  return {
+    clinic: number(SEED_PHONE_LAST),
+    writers: Array.from({ length: SEED_PHONE_LAST }, (_, n) => number(n)),
+  }
+}
+
+const DEMO_CLINIC_PHONE = `+${demoFictionPhones().clinic}`
 const MORNING = [9, 10, 11, 12]
 const AFTERNOON = [14, 15, 16, 17]
 
@@ -364,7 +387,7 @@ export async function buildDemo(
   const terms = { termsVersion: LEGAL.terms.version, termsAcceptedAt: now }
   const people: Array<{
     id: string
-    role: "clinician" | "reception" | "cashier"
+    role: "clinician" | "reception" | "cashier" | "sales" | "workshop"
     sex: "F" | "M"
     given: string
     family: string
@@ -381,11 +404,19 @@ export async function buildDemo(
   }
   people.push({
     id: `${prefix}recepcion`,
-    role: "reception",
+    role: DEMO_DESK_ROLE[demo.product],
     sex: "F",
     given: random.pick(country.given.F),
     family: random.pick(country.surnames),
   })
+  if (DEMO_HAS_WORKSHOP[demo.product])
+    people.push({
+      id: `${prefix}taller`,
+      role: "workshop",
+      sex: "M",
+      given: random.pick(country.given.M),
+      family: random.pick(country.surnames),
+    })
   if (demo.size !== "pequeno")
     people.push({
       id: `${prefix}caja`,
@@ -551,8 +582,8 @@ export async function buildDemo(
     if (recipe.specialty && !teamSpecialties.includes(recipe.specialty)) continue
     // Una prestación que el país no codifica no se ofrece: se salta sin deshacer las demás.
     await tx
-      .transaction((inner) =>
-        fromTemplates(inner, orgId, demo.presenterUserId, [
+      .transaction(async (inner) => {
+        const { created } = await fromTemplates(inner, orgId, demo.presenterUserId, [
           {
             templateId,
             priceCents: demoPriceCents(recipe.price, country),
@@ -560,8 +591,12 @@ export async function buildDemo(
           },
           // Como los agrega la pantalla de la biblioteca: «Precio exacto». Sin
           // indicarlo, Sofi decía que la consulta «se define tras una evaluación».
-        ], { priceDisclosure: "exacto" }),
-      )
+        ], { priceDisclosure: "exacto" })
+        // Sus sesiones habituales, como las cambia la clínica en su tarifario.
+        if (recipe.usualSessions)
+          for (const row of created)
+            await updateService(inner, orgId, demo.presenterUserId, row.id, { usualSessions: recipe.usualSessions })
+      })
       .catch(() => undefined)
   }
   const services = await demoServices(tx, orgId, kind, teamSpecialties)
@@ -720,6 +755,8 @@ export async function buildDemo(
   // Con su historia armada, el WhatsApp de la demo queda desconectado: no tiene un número
   // de verdad, así que no dice «Conectado» ni intenta enviar (la Bandeja lo dice al escribir).
   await setConnectionStatus(tx, orgId, connection.id, "disabled")
+  // Lo propio del producto sobre la historia ya armada (vistIA: las recetas de lentes).
+  await (await productHooks(tx, orgId)).demoBuilt?.(tx, orgId)
   await step(DEMO_BUILD_STEPS, "listo")
   return { organizationId: orgId, historyThrough: through, slug }
 }
@@ -1225,6 +1262,7 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
  * teléfono, como una ficha vieja. Sus conversaciones de WhatsApp quedan con ese número.
  */
 async function giveDemoPhones(tx: Db, orgId: string): Promise<void> {
+  const writers = demoFictionPhones().writers.map((wa) => sql`${wa}`)
   await tx.execute(sql`
     with writers as (
       select coalesce(g.contact_id, p.person_id) as contact_id, max(a.starts_at) as last_visit
@@ -1250,12 +1288,11 @@ async function giveDemoPhones(tx: Db, orgId: string): Promise<void> {
         and k.phone is null and k.record_locked_at is null and not k.is_test
         and not exists (select 1 from contact_identity i where i.organization_id = k.organization_id and i.contact_id = k.id and i.channel = 'whatsapp')
     ), free as (
-      select ${FICTION_PHONE_PREFIX}::text || lpad(s::text, 3, '0') as wa, row_number() over (order by s) as n
-      from generate_series(0, ${FICTION_PHONES - 1}::int) s
+      select f.wa, row_number() over (order by f.position) as n
+      from unnest(array[${sql.join(writers, sql`, `)}]::text[]) with ordinality as f(wa, position)
       where not exists (select 1 from contact_identity i where i.organization_id = ${orgId} and i.channel = 'whatsapp'
-          and i.external_user_id = ${FICTION_PHONE_PREFIX}::text || lpad(s::text, 3, '0'))
-        and not exists (select 1 from contact c where c.organization_id = ${orgId}
-          and c.phone = '+' || ${FICTION_PHONE_PREFIX}::text || lpad(s::text, 3, '0'))
+          and i.external_user_id = f.wa)
+        and not exists (select 1 from contact c where c.organization_id = ${orgId} and c.phone = '+' || f.wa)
     ), given as (
       update contact c set phone = '+' || f.wa
       from wanted w join free f on f.n = w.n
@@ -1619,6 +1656,8 @@ export async function advanceDemo(
   const at = now.toISOString()
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
+  // Lo que el producto agrega a lo cerrado anoche (vistIA: la receta de cada examen firmado).
+  await (await productHooks(tx, demo.organizationId)).demoBuilt?.(tx, demo.organizationId, now)
   // Lo cobrado de ayer ya está en su caja: recepción la cierra.
   await closeDemoCash(tx, ctx, today)
   const through = addDays(today, HORIZON_DAYS)

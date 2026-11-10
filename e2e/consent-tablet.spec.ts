@@ -81,8 +81,11 @@ test("firma en la tablet: lee la hoja del papel, firma donde va su firma y el pr
   await expect(sheet.getByText(/^He leído y comprendido la información/)).toBeVisible()
   await expect(sheet.getByRole("heading", { name: "Paciente", exact: true })).toBeVisible()
   // Lo del profesional se dice pendiente, y el nivel de firma va al pie de la hoja.
-  await expect(sheet.getByText("Falta su confirmación: lo confirma al terminar.")).toBeVisible()
-  await expect(sheet.getByText("Firma simple · en la clínica")).toBeVisible()
+  await expect(sheet.getByText("Firma después de ti, con su perfil profesional.")).toBeVisible()
+  await expect(sheet.getByText("Firma en la clínica")).toBeVisible()
+  // Al pie, lo que pasa con su firma, sin advertencias legales (entrega 11).
+  await expect(sheet.getByText(/Tu firma queda en la historia clínica, con la fecha y la hora/)).toBeVisible()
+  await expect(sheet.getByText(/firma digital certificada/)).toHaveCount(0)
   await sheet.getByRole("img", { name: "Firma de Rosa Mamani" }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: info.outputPath("1-hoja-tablet-firma.png") })
 

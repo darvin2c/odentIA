@@ -79,7 +79,7 @@ export interface ConsentSheetProps {
   signer?: { heading: string; name: string; detail?: string | null; children?: ReactNode }
   /** Lo que falta del profesional: se dice como pendiente, nunca como firmado. */
   professional?: { name?: string | null; detail?: string | null; note: string }
-  /** «Firma simple · en la clínica» y la nota de su alcance, al pie como en el papel. */
+  /** «Firma en la clínica» y lo que pasa con su firma, al pie como en el papel. */
   signatureWords?: string | null
   signatureNote?: string | null
   /** Letra grande para leer en la tablet. */

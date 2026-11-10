@@ -5,25 +5,25 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import { useReceptionName } from "../../lib/agent-names"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
 import { type TaskItem, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useOrgProfile } from "../../lib/org"
 import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patients"
-import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
+import { filiationGapsText, isHealthReviewPending, ownGaps } from "../../lib/patients"
 import { usePersonArchived } from "../../lib/person-archived"
-import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { dueWords, isOverdue } from "../crm/crm-helpers"
 import { TaskDrawer } from "../crm/task-drawer"
+import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 import { useCollectFlow } from "./collect-flow"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
+import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { PersonalLinkActions } from "./send-personal-link"
 import { useOpenWide, type WideTarget } from "./wide-section"
-import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 
 interface Pending {
   id: string
@@ -294,9 +294,13 @@ export function PatientPendingCard({
               Completar
             </Button>
           )
-          // Su enlace: enviarlo, o copiarlo y mostrar su código cuando no se puede enviar.
-          return gaps.length > 0 ? (
-            <PersonalLinkActions patientId={patientId} missing={filiationGapsText(gaps)} leading={complete} />
+          // Su enlace: enviarlo, o copiarlo y mostrar su código cuando no se puede enviar. Solo lo suyo.
+          return ownGaps(gaps).length > 0 ? (
+            <PersonalLinkActions
+              patientId={patientId}
+              missing={filiationGapsText(ownGaps(gaps))}
+              leading={complete}
+            />
           ) : (
             <span className="flex flex-wrap gap-2">{complete}</span>
           )

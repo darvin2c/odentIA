@@ -316,7 +316,7 @@ function yourDecision(
   kit.heading("Su decisión", { size: SIZE.h2small, before: 0, after: 6 })
 
   if (snap.decisionWords) {
-    const { text, by, at, notedBy, signature, signatureNote, signedAt, signedAll } = snap.decisionWords
+    const { text, by, at, notedBy, signature, signatureNote, signatureKind, signedAt, signedAll } = snap.decisionWords
     kit.panel({
       body: [text, by, notedBy ? `lo anotó ${notedBy}` : null, at ? dayTimeWords(at, zone) : null]
         .filter(Boolean)
@@ -337,7 +337,7 @@ function yourDecision(
         budgetAnswerText(line.decision),
       ]),
     })
-    if (signature) signedDecision(kit, signature, signedAt ?? at, zone, signatureNote, signedAll)
+    if (signature) signedDecision(kit, signature, signedAt ?? at, zone, signatureNote, signatureKind, signedAll)
     return
   }
 
@@ -464,6 +464,8 @@ function signedDecision(
   at: Date | null,
   zone: BudgetSnapshot["org"],
   note: string | null,
+  /** «Firma electrónica simple (Ley 27269)», en la línea de quien firma; null si la nota ya lo dice. */
+  kind: string | null,
   signedAll: boolean,
 ) {
   kit.ensure(130)
@@ -490,7 +492,10 @@ function signedDecision(
     [
       signature.signerKind === "representante" ? "Representante legal" : "Paciente",
       at ? `firmó en la clínica, ${dayTimeWords(at, zone)}` : "firmó en la clínica",
-    ].join(" · "),
+      kind ? kind.charAt(0).toLocaleLowerCase("es") + kind.slice(1) : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
     { size: SIZE.second, tone: "gray", width: half, leading: 1.4 },
   )
   if (note) {

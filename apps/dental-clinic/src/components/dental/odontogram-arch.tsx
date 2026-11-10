@@ -1,5 +1,6 @@
-import { Fragment, type RefObject, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, type RefObject, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { archLayout, archNeighbor, type ArchRows } from "@odentia/dental/odontogram-arch"
+import { Button } from "@odentia/ui"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { ToothSVG } from "./tooth-svg"
 
@@ -178,6 +179,103 @@ export function OdontogramArch({
           </Fragment>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * Bajo este ancho el selector muestra una arcada a la vez: con las dos juntas,
+ * a menos de unos 334 px las piezas quedan por debajo de 24 × 24 px (WCAG
+ * 2.5.8); con una sola, a 278 px miden unos 42 × 35.
+ */
+const PICKER_SPLIT_BELOW = 380
+
+/**
+ * El arco para elegir piezas en un formulario (indicar un tratamiento, el
+ * diagnóstico, un documento). Si cabe, las dos arcadas; si no (el celular), una
+ * a la vez con «Superior» e «Inferior», como el odontograma de la ficha. Cada
+ * botón dice cuántas piezas de su arcada están elegidas, sin depender del
+ * color, y la vista pasa a la arcada de la pieza que se acaba de elegir (por
+ * ejemplo, escrita con su número).
+ */
+export function OdontogramArchPicker({
+  teeth,
+  selected,
+  disabled = false,
+  onToggle,
+}: {
+  teeth: ArchRows
+  selected: number[]
+  disabled?: boolean
+  onToggle: (tooth: number, additive: boolean) => void
+}): React.JSX.Element {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [narrow, setNarrow] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = (): void => {
+      // Dentro de un panel plegado mide 0: no cambia nada.
+      if (el.clientWidth === 0) return
+      setNarrow(el.clientWidth < PICKER_SPLIT_BELOW)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  const archOf = (tooth: number): "upper" | "lower" | null =>
+    teeth.upper.includes(tooth) ? "upper" : teeth.lower.includes(tooth) ? "lower" : null
+  const [arch, setArch] = useState<"upper" | "lower">(
+    () => selected.map(archOf).find((value) => value !== null) ?? "upper",
+  )
+  // La última pieza que se agregó manda la vista: elegida en la otra arcada, se ve.
+  const before = useRef(selected)
+  const selectedKey = selected.join(",")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: basta con saber si cambió la selección.
+  useEffect(() => {
+    const added = selected.filter((tooth) => !before.current.includes(tooth))
+    before.current = selected
+    const last = added.at(-1)
+    const next = last === undefined ? null : archOf(last)
+    if (next) setArch(next)
+  }, [selectedKey])
+
+  return (
+    <div ref={ref} className="flex w-full min-w-0 flex-col gap-2">
+      {narrow ? (
+        <fieldset className="m-0 flex min-w-0 gap-2 border-0 p-0" aria-label="Arcada">
+          {(
+            [
+              ["upper", "Superior", teeth.upper],
+              ["lower", "Inferior", teeth.lower],
+            ] as const
+          ).map(([value, label, row]) => {
+            const chosen = row.filter((tooth) => selected.includes(tooth)).length
+            return (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                className="min-h-11 flex-1"
+                variant={arch === value ? "default" : "outline"}
+                aria-pressed={arch === value}
+                onClick={() => setArch(value)}
+              >
+                {chosen > 0 ? `${label} · ${chosen} ${chosen === 1 ? "elegida" : "elegidas"}` : label}
+              </Button>
+            )
+          })}
+        </fieldset>
+      ) : null}
+      <OdontogramArch
+        {...(narrow ? { single: arch } : {})}
+        teeth={teeth}
+        entriesOf={() => []}
+        selected={selected}
+        disabled={disabled}
+        onToggle={onToggle}
+      />
     </div>
   )
 }

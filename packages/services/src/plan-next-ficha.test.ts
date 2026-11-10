@@ -4,8 +4,16 @@
  * aceptado a la cita que ya tiene, la corona y el control de su endodoncia en
  * una fila, y seguir un presupuesto que no contesta.
  */
-import { appointmentPlanItem, clinicalFollowUp } from "@odentia/db/schema/clinical"
-import { treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { randomUUID } from "node:crypto"
+import { user } from "@odentia/db/schema/auth"
+import { professionalSchedule } from "@odentia/db/schema/availability"
+import {
+  appointmentPlanItem,
+  clinicalFollowUp,
+  serviceCatalog,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
+import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { crmTask } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -122,6 +130,8 @@ it("lo aceptado se suma a la cita que ya tiene, sin otra visita, y se deshace", 
     setAppointmentPlanItems(tx, "org_a", f.actor, visit.id, { expectedVersion: visit.version, add: [resina.id] }),
   )
   expect(joined.version).toBe(visit.version + 1)
+  // Quien tiene la cita atiende ese servicio (o nadie lo tiene asignado): nada que avisar.
+  expect(joined.outsideService).toEqual([])
   expect((await steps(f)).some((step) => step.kind === "agendar")).toBe(false)
   // Con la versión vieja, no: otro la cambió.
   await expect(
@@ -139,6 +149,52 @@ it("lo aceptado se suma a la cita que ya tiene, sin otra visita, y se deshace", 
     f.run((tx) => setAppointmentPlanItems(tx, "org_a", f.actor, visit.id, { expectedVersion: fresh.version, add: [resina.id] })),
   ).rejects.toMatchObject({ code: "ITEM_SCHEDULED" })
   expect(other.id).not.toBe(visit.id)
+})
+
+it("«Sumar a su cita» con quien no atiende ese servicio lo dice, sin frenarlo (entrega 8)", async () => {
+  const f = await clinicalFixture()
+  const resina = await item(f, "Resina", { tooth: "15", phase: "basica" })
+  const visit = await book(f, new Date(Date.now() + 3 * DAY), [])
+  // La resina es de Restauradora, que en esa sede atiende otra persona con horario.
+  const [specialty] = await ownerDb
+    .insert(orgSpecialty)
+    .values({ organizationId: "org_a", key: "restauradora", name: "Restauradora" })
+    .returning()
+  await ownerDb
+    .update(serviceCatalog)
+    .set({ specialtyId: specialty!.id })
+    .where(eq(serviceCatalog.id, f.service.id))
+  const other = `otra-${randomUUID()}`
+  await ownerDb
+    .insert(user)
+    .values({ id: other, name: "Dra. Otra", email: `${other}@test.local`, emailVerified: true })
+  await ownerDb
+    .insert(professionalSpecialty)
+    .values({ organizationId: "org_a", specialtyId: specialty!.id, userId: other })
+  await ownerDb
+    .insert(professionalSchedule)
+    .values({
+      organizationId: "org_a",
+      branchId: visit.branchId,
+      professionalUserId: other,
+      weekday: 1,
+      startMin: 540,
+      endMin: 780,
+      validFrom: "2020-01-01",
+    })
+  const joined = await f.run((tx) =>
+    setAppointmentPlanItems(tx, "org_a", f.actor, visit.id, {
+      expectedVersion: visit.version,
+      add: [resina.id],
+    }),
+  )
+  // Antes se sumaba en silencio: ahora la pantalla lo avisa con su nombre, y la cita lo lleva igual.
+  expect(joined.outsideService).toEqual(["Resina"])
+  const links = await ownerDb
+    .select()
+    .from(appointmentPlanItem)
+    .where(eq(appointmentPlanItem.appointmentId, visit.id))
+  expect(links.map((row) => row.planItemId)).toEqual([resina.id])
 })
 
 it("la corona y el control de la endodoncia de la misma pieza: una fila, primero, desde que el control se puede hacer", async () => {
@@ -159,7 +215,13 @@ it("la corona y el control de la endodoncia de la misma pieza: una fila, primero
   expect(first).toMatchObject({
     kind: "agendar",
     text: "Falta su cita: lo aceptado y el control",
-    action: { label: "Reservar lo aceptado y el control", planItemIds: [corona.id], followUpIds: [control.id], date: expect.any(String) },
+    // La corona no espera la ventana del control (decisión B3): sin fecha forzada, con la nota del control.
+    action: {
+      label: "Reservar lo aceptado y el control",
+      planItemIds: [corona.id],
+      followUpIds: [control.id],
+      note: expect.stringMatching(/se suma a esta cita si es desde el/),
+    },
   })
   // Lo de otra pieza no se atrasa por el control: va en su fila.
   expect(second).toMatchObject({ kind: "agendar", action: { planItemIds: [resina.id] } })

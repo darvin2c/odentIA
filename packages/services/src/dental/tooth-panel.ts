@@ -7,13 +7,15 @@
  * (`addOdontogramEntries`, `addEncounterDiagnosis`, `addPlanItem`): aquí no
  * hay otra regla de hallazgos, diagnósticos ni planes.
  */
-import { findingDefinition, type FindingDetails, isValidTooth } from "@odentia/dental"
+import { isDiagnosisSystem, normalizeDiagnosisCode } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { addOdontogramEntries } from "./odontogram.js"
+import { type FindingDetails, findingDefinition, isValidTooth } from "@odentia/dental"
+import { findDiagnosisCode, findingDiagnosisCode, orgDiagnosisSystem } from "../diagnosis-codes.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { invalidField } from "../errors.js"
 import { addPlanItem } from "../plan.js"
 import { requireServiceForIndication } from "../service-catalog.js"
+import { addOdontogramEntries } from "./odontogram.js"
 
 export interface RegisterToothFindingInput {
   /** Atención en borrador de quien registra. */
@@ -32,6 +34,52 @@ export interface RegisterToothFindingInput {
   diagnosis?: { diagnosisCode: string; diagnosisSystem?: string | null; diagnosisType: string } | null
   /** Tratamiento por pieza o por superficies que se agrega al plan abierto. */
   treatment?: { serviceId: string; detail?: string | null; plannedSessions?: number } | null
+}
+
+/**
+ * El código que guarda el hallazgo: el suyo, nunca el de otro diagnóstico
+ * elegido junto (segundo repaso del 9 nov, N8: la caries CDP de la 46 quedaba
+ * rotulada «Lesión de caries dental · DA09.0», el código de la pulpitis). Si
+ * lo elegido es de la misma categoría que el que propone el hallazgo (otra
+ * caries: K02.1 en vez de K02.5), vale lo elegido; si es de otra (la pulpitis,
+ * K04/DA09), el hallazgo lleva el suyo (`findingDiagnosisCode`, por su
+ * profundidad) si está en la lista de la clínica, o ninguno. Un hallazgo que
+ * no propone código (una restauración) lleva lo elegido, como siempre. Lo
+ * elegido sigue siendo el diagnóstico de la atención y el del tratamiento.
+ */
+async function findingCodeOf(
+  tx: Db,
+  orgId: string,
+  input: Pick<RegisterToothFindingInput, "condition" | "details" | "diagnosis">,
+): Promise<{
+  diagnosisCode: string | null
+  diagnosisSystem: string | null
+  otherCategory?: boolean
+}> {
+  const chosen = input.diagnosis
+  const code = chosen?.diagnosisCode?.trim()
+  if (!chosen || !code) return { diagnosisCode: null, diagnosisSystem: null }
+  const asChosen = {
+    diagnosisCode: chosen.diagnosisCode,
+    diagnosisSystem: chosen.diagnosisSystem ?? null,
+  }
+  const system = chosen.diagnosisSystem?.trim() || (await orgDiagnosisSystem(tx, orgId))
+  // Una lista que no existe la rechaza el registro del hallazgo, con su mensaje.
+  if (!isDiagnosisSystem(system)) return asChosen
+  const variant = input.details?.variant
+  const own = findingDiagnosisCode(
+    system,
+    input.condition,
+    typeof variant === "string" ? variant : null,
+  )
+  if (!own) return asChosen
+  const category = (value: string) => normalizeDiagnosisCode(system, value).split(".")[0]
+  if (category(own) === category(code)) return asChosen
+  const found = await findDiagnosisCode(tx, system, own)
+  // Lo elegido es de otra categoría (la pulpitis o la periodontitis apical junto a una caries).
+  return found
+    ? { diagnosisCode: found.code, diagnosisSystem: system, otherCategory: true }
+    : { diagnosisCode: null, diagnosisSystem: null, otherCategory: true }
 }
 
 /**
@@ -65,6 +113,10 @@ export async function registerToothFinding(
       `«${service.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles» de la atención`,
     )
   const targets = group ? [teeth[0]!] : teeth
+  const { otherCategory, ...findingCode } = await findingCodeOf(tx, orgId, input)
+  // La pulpitis elegida en el panel de una caries OD es de la pieza, no de sus caras (QA del
+  // 10 nov, B9: quedaba «46 · Distal, Oclusal», y la periodontitis apical también).
+  const diagnosisSurfaces = otherCategory ? [] : surfaces
   const entries = []
   const diagnoses = []
   const planItems = []
@@ -81,8 +133,8 @@ export async function registerToothFinding(
         surfaces,
         details: group ? { ...(input.details ?? {}), relatedTeeth: teeth } : input.details,
         note: input.note ?? null,
-        diagnosisCode: input.diagnosis?.diagnosisCode ?? null,
-        diagnosisSystem: input.diagnosis?.diagnosisSystem ?? null,
+        // El del hallazgo, no el del diagnóstico elegido junto (`findingCodeOf`).
+        ...findingCode,
       },
       { diagnosisField: "diagnosis.diagnosisCode" },
     )
@@ -94,7 +146,7 @@ export async function registerToothFinding(
           diagnosisSystem: input.diagnosis.diagnosisSystem ?? null,
           diagnosisType: input.diagnosis.diagnosisType,
           toothNumber,
-          surfaces,
+          surfaces: diagnosisSurfaces,
         }),
       )
     }

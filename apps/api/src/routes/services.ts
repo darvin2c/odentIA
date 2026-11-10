@@ -138,6 +138,11 @@ const createInput = z
     durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).nullish(),
     usualSessions: serviceUsualSessions.nullish(),
+    sessionGapDays: z.number().int().nullish(),
+    finishControls: z
+      .array(z.object({ afterDays: z.number().int(), title: z.string().max(200) }).strict())
+      .max(20)
+      .nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
     evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
@@ -163,6 +168,12 @@ const patchInput = z
     durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).optional(),
     usualSessions: serviceUsualSessions.nullish(),
+    // Espera y controles al terminar (decisión B5): los valida el servicio; null vuelve a lo sugerido.
+    sessionGapDays: z.number().int().nullish(),
+    finishControls: z
+      .array(z.object({ afterDays: z.number().int(), title: z.string().max(200) }).strict())
+      .max(20)
+      .nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
     evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
@@ -566,6 +577,8 @@ export function createServicesRoute(deps: CrmDeps) {
           durationMin: parsed.data.durationMin,
           billingMode: parsed.data.billingMode,
           usualSessions: parsed.data.usualSessions,
+          sessionGapDays: parsed.data.sessionGapDays,
+          finishControls: parsed.data.finishControls,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,
@@ -599,6 +612,8 @@ export function createServicesRoute(deps: CrmDeps) {
           durationMin: parsed.data.durationMin,
           billingMode: parsed.data.billingMode,
           usualSessions: parsed.data.usualSessions,
+          sessionGapDays: parsed.data.sessionGapDays,
+          finishControls: parsed.data.finishControls,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,

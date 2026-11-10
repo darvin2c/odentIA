@@ -32,8 +32,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { removeIndicatedApi } from "../../lib/encounters"
-import { groupFindings } from "../../lib/site-findings"
 import {
   budgetNumberLabel,
   commonPlanItemIds,
@@ -44,9 +42,17 @@ import {
   totalsOf,
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
+import { reviseTreatmentApi } from "../../lib/clinical-journey"
+import { removeIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
-import { type PlanItem, planStatusLabel, quotedPriceOf } from "../../lib/patients"
-import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
+import {
+  fetchService,
+  fetchServices,
+  type ServiceCatalogItem,
+  TREATMENT_SCOPE_LABELS,
+} from "../../lib/services"
+import { groupFindings } from "../../lib/site-findings"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -68,6 +74,7 @@ import {
   pathCountWord,
   usePlacePath,
 } from "./plan/plan-paths"
+import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
 
 const QUADRANT_LABELS: Record<string, string> = {
@@ -133,9 +140,14 @@ function indicationErrors(value: IndicationValues, editing?: PlanItem): Record<s
   if (value.scope === "quadrant" && !value.quadrant) fields.quadrant = "Elige el cuadrante."
   if (value.scope === "arch" && !value.arch) fields.arch = "Elige la arcada."
   const sessions = value.sessions.trim()
-  if (value.service && sessions !== "" && !(/^\d{1,2}$/.test(sessions) && Number(sessions) >= 1 && Number(sessions) <= 60))
+  if ((value.service || editing) && sessions !== "" && !(/^\d{1,2}$/.test(sessions) && Number(sessions) >= 1 && Number(sessions) <= 60))
     fields.sessions = "Escribe un número de sesiones entre 1 y 60."
   return fields
+}
+
+/** Sin ninguna sesión hecha, «Cambiar» todavía puede corregir las previstas. */
+function editableSessions(item: PlanItem): boolean {
+  return (item.status === "pendiente" || item.status === "programado") && !item.sessionsDone
 }
 
 /** El servidor nombra el dato como en el cuerpo de la petición. */
@@ -221,21 +233,170 @@ export function EncounterPlanPanel({
     // La opción que no eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
     .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
+  // Lo que va después de otro de la misma pieza (la corona tras la endodoncia en curso) baja a
+  // continuación de él, aunque se indicara hoy: la regla de «Qué sigue» (QA del 9 nov, repaso 3).
+  for (const item of [...brief]) {
+    const blocker = item.waitsFor ? brief.findIndex((other) => other.id === item.waitsFor?.id) : -1
+    const at = brief.findIndex((other) => other.id === item.id)
+    if (blocker > at) {
+      brief.splice(at, 1)
+      brief.splice(blocker, 0, item)
+    }
+  }
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
   const [changing, setChanging] = useState<string | null>(null)
+  const [revising, setRevising] = useState<PlanItem | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ itemId: string; message: string } | null>(null)
   const queryClient = useQueryClient()
+  const refreshPlan = async () => {
+    await Promise.all(
+      [
+        "treatment-plans",
+        "treatment-plan",
+        "plan-items",
+        "patient-summary",
+        "plan-next",
+        "budget",
+        "budgets",
+      ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+    )
+    await onChanged()
+  }
+  /**
+   * «Deshacer» de «Quitar» (QA del 10 nov, B12): quitar no se deshace en el servidor (lo quitado
+   * queda cancelado en la auditoría), así que se vuelve a indicar con lo mismo, por la misma
+   * operación de «Indicar»: servicio, sitio, hallazgo, diagnóstico, detalle y sesiones. Vuelve
+   * con el precio de la tarifa y sin la opción del presupuesto en que estaba.
+   */
+  const indicateAgain = async (item: PlanItem) => {
+    if (!item.serviceId) return
+    const body: Record<string, unknown> = {
+      serviceId: item.serviceId,
+      sourceEncounterId: encounterId,
+      detail: item.detail,
+      diagnosisCode: item.diagnosisCode ?? null,
+      odontogramEntryId: item.odontogramEntryId ?? null,
+      ...(item.plannedSessions != null ? { plannedSessions: item.plannedSessions } : {}),
+    }
+    if (item.toothNumber != null) body.toothNumber = item.toothNumber
+    if (item.toothNumber != null && item.surfaces.length > 0) body.surfaces = item.surfaces
+    if (item.quadrant != null) body.quadrant = item.quadrant
+    if (item.arch) body.arch = item.arch
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await apiFetch(`/api/patients/${patientId}/plan/items`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      })
+      await refreshPlan()
+      toast.success(`${item.title} vuelve a estar indicado`)
+    } catch (err) {
+      toast.error(submitErrorMessage(err))
+    } finally {
+      onPendingChange(false)
+    }
+  }
   /** «Quitar»: sale del plan y de su presupuesto en borrador (el servidor dice si aún se puede). */
   const remove = async (itemId: string) => {
     if (removing) return
+    const removed = brief.find((item) => item.id === itemId) ?? null
     setRemoving(itemId)
     setRowError(null)
     onPendingChange(true)
     try {
       await beforeWrite()
       await removeIndicatedApi(patientId, encounterId, itemId)
+      await refreshPlan()
+      // Un clic lo quitaba sin vuelta atrás: el aviso ofrece «Deshacer», como al quitar una alergia.
+      toast.success(removed ? `Quitado: ${removed.title}` : "Quitado", {
+        ...(removed?.serviceId
+          ? { action: { label: "Deshacer", onClick: () => void indicateAgain(removed) } }
+          : {}),
+      })
+    } catch (err) {
+      setRowError({ itemId, message: submitErrorMessage(err) })
+    } finally {
+      setRemoving(null)
+      onPendingChange(false)
+    }
+  }
+  /**
+   * Las acciones de un renglón indicado hoy, mientras se pueda corregir. Lo ya respondido y abierto
+   * se cambia aquí mismo con la misma revisión de la ficha («Revisar indicación»), con su motivo
+   * (QA del 10 nov, M8): antes había que salir a la ficha.
+   */
+  const rowActions = (item: PlanItem) =>
+    canWrite && !disabled && !removableIds.has(item.id) && item.decisionStatus === "aceptado" &&
+    ["pendiente", "programado", "en_curso", "suspendido"].includes(item.status) ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-label={`Cambiar ${item.title}`}
+        disabled={removing !== null || switching !== null}
+        onClick={() => setRevising(item)}
+      >
+        Cambiar
+      </Button>
+    ) : canWrite && !disabled && removableIds.has(item.id) ? (
+      <span className="flex gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-expanded={changing === item.id}
+          aria-label={`Cambiar ${item.title}`}
+          disabled={removing !== null || switching !== null}
+          onClick={() => setChanging((current) => (current === item.id ? null : item.id))}
+        >
+          Cambiar
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-label={`Quitar ${item.title}`}
+          disabled={removing !== null || switching !== null}
+          onClick={() => void remove(item.id)}
+        >
+          {removing === item.id ? "Quitando…" : "Quitar"}
+        </Button>
+      </span>
+    ) : null
+  // La endodoncia anterior indicada hoy en la 46 (entrega 8, punto 1): el aviso queda en su fila
+  // hasta que se cambie. Lo dice el producto con la anatomía de cada servicio; aquí solo se pinta.
+  const toothFit = productUi().services.toothFit
+  const fitIds = [
+    ...new Set(
+      indicatedItems.flatMap((item) =>
+        item.serviceId && item.toothNumber != null ? [item.serviceId] : [],
+      ),
+    ),
+  ]
+    .sort()
+    .slice(0, 100)
+  const fitServices = useQuery({
+    queryKey: ["services", "ids", fitIds],
+    queryFn: () => fetchServices({ ids: fitIds, limit: fitIds.length }),
+    enabled: toothFit !== null && fitIds.length > 0,
+    staleTime: 30_000,
+  }).data?.data
+  const [switching, setSwitching] = useState<string | null>(null)
+  /** «Usar Endodoncia posterior vital»: la misma operación que «Cambiar» el tratamiento del renglón. */
+  const switchService = async (item: PlanItem, serviceId: string) => {
+    if (switching || removing) return
+    setSwitching(item.id)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await apiFetch(`/api/patients/${patientId}/plan/items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ encounterId, serviceId }),
+      })
       await Promise.all(
         [
           "treatment-plans",
@@ -249,39 +410,76 @@ export function EncounterPlanPanel({
       )
       await onChanged()
     } catch (err) {
-      setRowError({ itemId, message: submitErrorMessage(err) })
+      setRowError({ itemId: item.id, message: submitErrorMessage(err) })
     } finally {
-      setRemoving(null)
+      setSwitching(null)
       onPendingChange(false)
     }
   }
-  /** Las acciones de un renglón indicado hoy, mientras se pueda corregir. */
-  const rowActions = (item: PlanItem) =>
-    canWrite && !disabled && removableIds.has(item.id) ? (
-      <span className="flex gap-1">
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          aria-expanded={changing === item.id}
-          aria-label={`Cambiar ${item.title}`}
-          disabled={removing !== null}
-          onClick={() => setChanging((current) => (current === item.id ? null : item.id))}
-        >
-          Cambiar
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          aria-label={`Quitar ${item.title}`}
-          disabled={removing !== null}
-          onClick={() => void remove(item.id)}
-        >
-          {removing === item.id ? "Quitando…" : "Quitar"}
-        </Button>
-      </span>
-    ) : null
+  /**
+   * Una línea ya aceptada no se corrige en su lugar (el paciente aceptó ese servicio y ese precio):
+   * se reemplaza por el hermano, con el motivo de la pieza, y el nuevo queda por responder.
+   */
+  const replaceAccepted = async (item: PlanItem, sibling: { id: string; name: string }) => {
+    if (switching || removing) return
+    setSwitching(item.id)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await reviseTreatmentApi(patientId, item.id, {
+        encounterId,
+        serviceId: sibling.id,
+        reason: `La pieza ${item.toothNumber} no es para «${item.title}»: se cambia por «${sibling.name}».`,
+        toothNumber: item.toothNumber,
+        surfaces: item.surfaces.length > 0 ? item.surfaces : null,
+        detail: item.detail,
+        diagnosisCode: item.diagnosisCode,
+        diagnosisSystem: item.diagnosisSystem ?? null,
+      })
+      await Promise.all(
+        ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next", "budget", "budgets"].map(
+          (key) => queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+        ),
+      )
+      await onChanged()
+    } catch (err) {
+      setRowError({ itemId: item.id, message: submitErrorMessage(err) })
+    } finally {
+      setSwitching(null)
+      onPendingChange(false)
+    }
+  }
+  const fitNotice = (item: PlanItem) => {
+    if (!toothFit || !today.has(item.id) || item.toothNumber == null || changing === item.id)
+      return null
+    // Sin su servicio a la vista (recién cambiado, aún cargando) el aviso sigue montado sin anatomía:
+    // así dice «Ahora es …» y conserva el foco tras «Usar …».
+    const service = fitServices?.find((candidate) => candidate.id === item.serviceId)
+    // Se cambia mientras quien atiende aún puede cambiar el renglón (lo decide el servidor).
+    const editable = canWrite && !disabled && removableIds.has(item.id)
+    // Aceptada y sin empezar: se reemplaza (el nuevo precio lo vuelve a responder el paciente).
+    const replaceable =
+      canWrite && !disabled && !editable && item.decisionStatus === "aceptado" && !item.sessionsDone &&
+      (item.status === "pendiente" || item.status === "programado")
+    return (
+      <div className="basis-full">
+        <toothFit.Notice
+          service={{ name: item.title, toothAnatomy: service?.toothAnatomy ?? null }}
+          place={item.toothNumber}
+          diagnosisCode={item.diagnosisCode}
+          pending={switching !== null || removing !== null}
+          onUse={
+            editable
+              ? (sibling) => void switchService(item, sibling.id)
+              : replaceable
+                ? (sibling) => void replaceAccepted(item, sibling)
+                : undefined
+          }
+        />
+      </div>
+    )
+  }
   const changeForm = (item: PlanItem) =>
     changing === item.id ? (
       <div className="basis-full">
@@ -324,6 +522,21 @@ export function EncounterPlanPanel({
 
   return (
     <div className="flex flex-col gap-4">
+      {revising ? (
+        <ReviseDrawer
+          key={revising.id}
+          open
+          patientId={patientId}
+          itemId={revising.id}
+          encounterId={encounterId}
+          initialTooth={revising.toothNumber ?? null}
+          onClose={() => setRevising(null)}
+          onDone={() => {
+            setRevising(null)
+            void refreshPlan()
+          }}
+        />
+      ) : null}
       <BlockPart title="Lo que sigue por hacer">
         {itemsQuery.isPending || plansQuery.isPending ? (
           <LoadingState message="Cargando el plan…" />
@@ -336,10 +549,13 @@ export function EncounterPlanPanel({
             {rows.length > 0 ? (
               <ul className="flex flex-col divide-y">
                 {rows.map((item) => {
-                  const question =
-                    canPlace && !dismissed.has(item.id)
-                      ? pathQuestion(item, brief, today, pathGroups)
-                      : null
+                  // Sin responder «¿otro camino o va también?» no se sabe si va después de lo otro de
+                  // la pieza: la exodoncia que es otro camino no «va después de la endodoncia» (QA del
+                  // 10 nov, B2). Se calla hasta responder, también para quien no puede responderlo.
+                  const unanswered = !dismissed.has(item.id)
+                    ? pathQuestion(item, brief, today, pathGroups)
+                    : null
+                  const question = canPlace ? unanswered : null
                   const error = placeError?.itemId === item.id ? placeError.message : null
                   return (
                     <li
@@ -358,10 +574,15 @@ export function EncounterPlanPanel({
                         <span className="text-xs text-muted-foreground">
                           {[
                             treatmentSiteLabel(item),
+                            item.waitsFor && !unanswered
+                              ? `va después de ${item.waitsFor.title}`
+                              : "",
                             // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
                             quotedPriceOf(item).priceCents != null && orgLocale
                               ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
                               : "",
+                            // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
+                            treatmentConsentWords(item.consent, item.consentMissing) ?? "",
                           ]
                             .filter(Boolean)
                             .join(" · ")}
@@ -379,6 +600,7 @@ export function EncounterPlanPanel({
                         )}
                         {rowActions(item)}
                       </span>
+                      {fitNotice(item)}
                       {changeForm(item)}
                       {rowError?.itemId === item.id ? (
                         <p role="alert" className="basis-full text-sm text-destructive">
@@ -424,6 +646,7 @@ export function EncounterPlanPanel({
                 onPlace={placeIn}
                 rowActions={rowActions}
                 changeForm={changeForm}
+                fitNotice={fitNotice}
               />
             ))}
           </>
@@ -607,6 +830,7 @@ function PathsBox({
   onPlace,
   rowActions,
   changeForm,
+  fitNotice,
 }: {
   patientId: string
   group: PlanPathGroup
@@ -621,6 +845,8 @@ function PathsBox({
   /** «Cambiar» y «Quitar» del renglón indicado hoy, y su formulario abierto. */
   rowActions: (item: PlanItem) => React.ReactNode
   changeForm: (item: PlanItem) => React.ReactNode
+  /** El aviso de la pieza equivocada de lo indicado hoy. */
+  fitNotice: (item: PlanItem) => React.ReactNode
 }): React.JSX.Element {
   const count = pathCountWord(group.pathCount)
   // El total de cada opción es el del presupuesto (con lo que va en todas, descuentos y su
@@ -709,6 +935,7 @@ function PathsBox({
                           </span>
                         ) : null}
                         {first ? rowActions(item) : null}
+                        {first ? fitNotice(item) : null}
                         {first ? changeForm(item) : null}
                         {movable ? (
                           <ChoiceSelect
@@ -959,6 +1186,8 @@ function IndicationForm({
         odontogramEntryId: editing.odontogramEntryId ?? "",
         detail: editing.detail ?? "",
         diagnosisCode: editing.diagnosisCode ?? "",
+        // Las que ya tiene; al elegir otro servicio, las habituales del nuevo (como al indicar).
+        sessions: editing.plannedSessions != null ? String(editing.plannedSessions) : "",
       }
     : { ...EMPTY_INDICATION, ...defaults }
   const form = useAppForm({
@@ -984,6 +1213,11 @@ function IndicationForm({
             : {}),
           ...(value.service && value.service.id !== editing.serviceId ? { serviceId: value.service.id } : {}),
         }
+        // Las sesiones van si cambiaron o si cambió el servicio: sin ellas, el servidor pone las
+        // habituales del nuevo, que son las que el formulario ya mostró.
+        const sessions = value.sessions.trim()
+        if (editableSessions(editing) && sessions !== "" && (Number(sessions) !== editing.plannedSessions || patch.serviceId))
+          patch.plannedSessions = Number(sessions)
         const tooth = value.teeth[0] ?? null
         if ((value.scope === "tooth" || value.scope === "surfaces") && tooth !== editing.toothNumber)
           patch.toothNumber = tooth
@@ -1068,10 +1302,49 @@ function IndicationForm({
   const tooth = useStore(form.store, (state) => state.values.teeth[0] ?? null)
   const entryId = useStore(form.store, (state) => state.values.odontogramEntryId)
   const service = useStore(form.store, (state) => state.values.service)
+  const chosenDiagnosis = useStore(form.store, (state) => state.values.diagnosisCode)
+  const toothFit = productUi().services.toothFit
+  // Al cambiar sin elegir otro servicio, el aviso de la pieza mira el que ya tiene: mover la
+  // endodoncia anterior a la 46 también avisa.
+  const editingService = useQuery({
+    queryKey: ["services", "one", editing?.serviceId ?? null],
+    queryFn: () => fetchService(editing!.serviceId!),
+    enabled: toothFit !== null && !!editing?.serviceId,
+    staleTime: 30_000,
+  }).data?.data
+  const fitService = service ?? editingService ?? null
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  /** «Usar Endodoncia posterior vital»: cambia el servicio elegido, con sus sesiones habituales. */
+  const switchToSibling = async (serviceId: string) => {
+    setSwitching(true)
+    setSwitchError(null)
+    try {
+      const { data } = await fetchService(serviceId)
+      form.setFieldValue("service", data)
+      if (data.scope) form.setFieldValue("scope", data.scope)
+      form.setFieldValue("sessions", String(data.usualSessions ?? 1))
+    } catch (err) {
+      setSwitchError(submitErrorMessage(err))
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   const vigentes = productUi().useFindings(patientId, canRead)
   // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
   const findings = vigentes.filter((entry) => tooth != null && entry.toothNumber === tooth)
+  /**
+   * Las caras del hallazgo que motiva, para un servicio por caras: la resina de una caries M-O
+   * nace con mesial y oclusal marcadas (QA del 9 nov, repaso 3). Solo si aún no se marcó ninguna.
+   */
+  const fillSurfacesFrom = (entryId: string, nextScope: string) => {
+    if (nextScope !== "surfaces" || !entryId || form.getFieldValue("surfaces").length > 0) return
+    const group = groupFindings(findings).find((candidate) => candidate.ids.includes(entryId))
+    const valid = form.getFieldValue("teeth")[0] != null ? (site?.partsOf(form.getFieldValue("teeth")[0]!) ?? []).map(String) : []
+    const surfaces = (group?.surfaces ?? []).map(String).filter((surface) => valid.includes(surface))
+    if (surfaces.length > 0) form.setFieldValue("surfaces", surfaces)
+  }
 
   const blocked = disabled || pending
   /** Elegir la pieza en el dibujo; con una ya puesta, se ofrece «Cambiar». */
@@ -1151,7 +1424,17 @@ function IndicationForm({
           </form.AppField>
         )}
         {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && !editing && (
-          <form.AppField name="odontogramEntryId">
+          <form.AppField
+            name="odontogramEntryId"
+            listeners={{
+              onChange: ({ value }) => {
+                // Otro hallazgo, otras caras: las que trae ese.
+                if (form.getFieldValue("scope") !== "surfaces") return
+                form.setFieldValue("surfaces", [])
+                fillSurfacesFrom(value, "surfaces")
+              },
+            }}
+          >
             {(field) => (
               <field.SelectField
                 id={`${uid}-finding`}
@@ -1249,9 +1532,12 @@ function IndicationForm({
                 onBlur={control.onBlur}
                 value={field.state.value?.id ?? ""}
                 disabled={blocked}
+                // Lo que encaja en la pieza, primero (la endodoncia posterior en la 46).
+                place={scope === "tooth" || scope === "surfaces" ? tooth : null}
                 onChange={(next) => {
                   field.handleChange(next)
                   if (next.scope) form.setFieldValue("scope", next.scope)
+                  fillSurfacesFrom(form.getFieldValue("odontogramEntryId"), next.scope ?? form.getFieldValue("scope"))
                   // Nace con las sesiones habituales del servicio; aquí se cambian si este paciente necesita otras.
                   form.setFieldValue("sessions", String(next.usualSessions ?? 1))
                 }}
@@ -1269,7 +1555,24 @@ function IndicationForm({
             : ""}
         </p>
       ) : null}
-      {service && !editing ? (
+      {/* Justo debajo de lo elegido: la endodoncia anterior en la 46 avisa y ofrece la que encaja. */}
+      {fitService && toothFit && tooth != null && (scope === "tooth" || scope === "surfaces") ? (
+        <toothFit.Notice
+          service={fitService}
+          place={tooth}
+          diagnosisCode={chosenDiagnosis || null}
+          pending={blocked || switching}
+          onUse={(sibling) => void switchToSibling(sibling.id)}
+        />
+      ) : null}
+      {switchError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {switchError}
+        </p>
+      ) : null}
+      {/* «Cambiar» las pide igual que «Indicar»: una endodoncia cambiada desde una exodoncia no llega
+          al cierre como «1 de 1» (QA del 9 nov, repaso 3). Ya empezado, se cambian desde el Plan. */}
+      {(editing ? editableSessions(editing) : service) ? (
         <form.AppField name="sessions">
           {(field) => (
             <field.TextField

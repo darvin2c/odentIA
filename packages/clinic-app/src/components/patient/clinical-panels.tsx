@@ -39,6 +39,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { fetchMyProfessionalProfile } from "../../lib/encounters"
 import {
   cancelFollowUpApi,
+  changeFollowUpDueApi,
   completeFollowUpApi,
   createFollowUpApi,
   createPrescriptionApi,
@@ -233,6 +234,8 @@ export function ControlesPanel({
   const [scheduling, setScheduling] = useState<FollowUp | null>(null)
   const [completing, setCompleting] = useState<FollowUp | null>(null)
   const [cancelling, setCancelling] = useState<FollowUp | null>(null)
+  // «Cambiar fecha» de un control pendiente, solo para esta persona (decisión B5 del 10 nov).
+  const [moving, setMoving] = useState<FollowUp | null>(null)
   // «Dejar de repetir» es un botón suelto, no un formulario: su error va junto a la lista.
   const [repeatError, setRepeatError] = useState<string | null>(null)
 
@@ -330,6 +333,28 @@ export function ControlesPanel({
     },
   })
   const cancelSurface = useFormSurface(cancelForm)
+
+  const moveMutation = useMutation({
+    mutationFn: (input: { followUpId: string; dueAt: string }) =>
+      changeFollowUpDueApi(patientId, input.followUpId, { dueAt: input.dueAt }),
+  })
+  const moveForm = useAppForm({
+    defaultValues: { dueDay: "" },
+    validators: {
+      onSubmit: z.object({
+        dueDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Elige el día en el calendario."),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      if (!moving) return
+      await moveMutation.mutateAsync({ followUpId: moving.id, dueAt: value.dueDay })
+      toast.success("Listo: el control queda para ese día.")
+      setMoving(null)
+      moveForm.reset({ dueDay: "" })
+      invalidate()
+    },
+  })
+  const moveSurface = useFormSurface(moveForm, { fieldMap: { dueAt: "dueDay" } })
 
   const ofItem = (list.data?.data ?? []).filter((row) => !itemId || row.planItemId === itemId)
   // Dentro de la atención: los suyos y, aparte, los que ya tiene abiertos de otras.
@@ -490,6 +515,19 @@ export function ControlesPanel({
                           }}
                         >
                           Dejar de repetir
+                        </Button>
+                      ) : null}
+                      {row.status === "pendiente" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            moveForm.reset({ dueDay: "" })
+                            setMoving(row)
+                          }}
+                        >
+                          Cambiar fecha
                         </Button>
                       ) : null}
                       <Button
@@ -700,6 +738,39 @@ export function ControlesPanel({
         <cancelForm.AppField name="reason">
           {(field) => <field.TextareaField label="Motivo" maxLength={MAX_TEXT} />}
         </cancelForm.AppField>
+      </FormDrawer>
+
+      <FormDrawer
+        {...moveSurface}
+        dock={false}
+        open={moving != null}
+        title="Cambiar la fecha del control"
+        description={
+          moving
+            ? `${moving.title}: hoy queda para el ${formatDate(moving.dueAt)}. El cambio vale solo para esta persona; lo que sugiere su servicio no cambia.`
+            : undefined
+        }
+        submitLabel="Guardar la fecha"
+        onClose={() => {
+          if (!moveSurface.isSubmitting) setMoving(null)
+        }}
+      >
+        <moveForm.AppField name="dueDay">
+          {(field) => (
+            <field.Control label="Nueva fecha">
+              {(control) => (
+                <DatePickerButton
+                  {...control.props}
+                  className="w-56"
+                  min={regionToday()}
+                  openAt={moving ? moving.dueAt.slice(0, 10) : undefined}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </field.Control>
+          )}
+        </moveForm.AppField>
       </FormDrawer>
     </div>
   )

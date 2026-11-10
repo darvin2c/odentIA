@@ -188,6 +188,20 @@ test("la hoja del odontograma firmado lleva la firma que regía, o la línea par
   await gotoHydrated(page, sheet(withIt.id))
   await expect(page.getByText("DNI: 41223344", { exact: true })).toBeVisible()
   await expect(page.getByText("99887766")).toHaveCount(0)
+
+  // El color de la marca va en la línea del membrete, y se congela al firmar: la hoja firmada
+  // antes de elegirlo sigue en gris; la firmada después lo lleva (ADR 0162).
+  const line = () => page.locator(".odontogram-sheet header").first().evaluate((el) => getComputedStyle(el).borderBottomColor)
+  const gray = await line()
+  await call(page, "PUT", "/api/org-profile/brand-color", org.slug, { color: "#ea580c" })
+  await gotoHydrated(page, sheet(withIt.id))
+  await expect(page.getByText(/^Firmado electrónicamente/)).toBeVisible()
+  expect(await line()).toBe(gray)
+  const colored = await sign()
+  await gotoHydrated(page, sheet(colored.id))
+  await expect(page.getByText(/^Firmado electrónicamente/)).toBeVisible()
+  expect(await line()).not.toBe(gray)
+  expect(await line()).not.toBe("rgb(234, 88, 12)")
 })
 
 test("el servidor rechaza una firma mal formada y no entrega las firmas en la lista del equipo", async ({ owner }) => {

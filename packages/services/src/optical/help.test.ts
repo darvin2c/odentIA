@@ -44,7 +44,41 @@ function codeText(): string {
  * Lo que solo la guía de vistIA cita. Lo demás ya lo cita la de odentIA, que
  * `help-guide.test.ts` compara con las pantallas.
  */
-const OWN_QUOTED = ["Control anual de la vista", "En 1 año", "Preparar presupuesto"]
+const OWN_QUOTED = [
+  "Control anual de la vista",
+  "En 1 año",
+  "Preparar presupuesto",
+  // El examen de la vista y la receta de lentes (entrega 3).
+  "Examen de la vista",
+  "Receta de lentes",
+  "Recetas de lentes",
+  "Emitir receta de anteojos",
+  "Emitir receta de lentes de contacto",
+  "Transcribir receta externa",
+  "Sin verificar",
+  "La revisé: verificar",
+  "Anteriores",
+  // El pedido de lentes (entrega 4).
+  "Vender lentes",
+  "Vender con esta receta",
+  "Sin adelanto",
+  "Atrasados",
+  "Enviado al laboratorio",
+  "Llegó del laboratorio",
+  "Revisado: está listo",
+  "Entregar",
+  "Marcar listo",
+  "Rehacer",
+  "Cambiar rol",
+  // «Tus lentes están listos» (entrega 5).
+  "Tus lentes ya están listos para recoger",
+  "Aviso de que está listo",
+  "Enviar el aviso",
+  "Enviarlo otra vez",
+  "Tus pedidos",
+  "Tu cuenta",
+  "Emitir otra desde su examen",
+]
 
 /** La Ayuda de vistIA: las mismas pantallas, con lo que tiene una óptica. */
 describe("la guía de vistIA", () => {
@@ -68,7 +102,6 @@ describe("la guía de vistIA", () => {
       /descanso/i,
       /signos vitales|examen físico/i,
       /\bASA\b|anest/i,
-      /receta de lentes|pedido de lentes/i,
     ]) {
       expect(text).not.toMatch(word)
     }
@@ -83,7 +116,12 @@ describe("la guía de vistIA", () => {
   })
 
   it("lleva las mismas pantallas y responde lo suyo", () => {
-    expect(OPTICAL_HELP_TOPICS.map((topic) => [topic.id, topic.path])).toEqual(HELP_TOPICS.map((topic) => [topic.id, topic.path]))
+    // Las de siempre, en su orden, y al final las que solo tiene una óptica.
+    expect(OPTICAL_HELP_TOPICS.slice(0, HELP_TOPICS.length).map((topic) => [topic.id, topic.path])).toEqual(
+      HELP_TOPICS.map((topic) => [topic.id, topic.path]),
+    )
+    expect(OPTICAL_HELP_TOPICS.slice(HELP_TOPICS.length).map((topic) => [topic.id, topic.path])).toEqual([["pedidos", "/orders"]])
+    expect(helpTopicForScreen("/orders", OPTICAL_HELP_TOPICS)?.id).toBe("pedidos")
     expect(helpTopicForScreen("/patients/123", OPTICAL_HELP_TOPICS)?.id).toBe("pacientes")
     const answer = (question: string) => matchHelpTopics(question, OPTICAL_HELP_TOPICS)[0]?.faq?.a ?? ""
     expect(answer("¿Quién es Ariadna?")).toContain("guía virtual de vistIA")

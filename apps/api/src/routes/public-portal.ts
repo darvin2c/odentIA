@@ -6,6 +6,7 @@ import {
   decidePortalBudget,
   exchangePortalToken,
   getPortalAccount,
+  listPortalOrders,
   getPortalAppointmentCalendar,
   getPortalQuestionnaire,
   getPortalAppointments,
@@ -357,6 +358,8 @@ export function createPublicPortalRoute(deps: {
   })
 
   app.get("/account", async (c) => portalCall(c, (tx, ctx) => getPortalAccount(tx, ctx)))
+  // Sus pedidos (ADR 0172): van con «Su cuenta».
+  app.get("/orders", async (c) => portalCall(c, (tx, ctx) => listPortalOrders(tx, ctx)))
 
   // Cuestionario previo a la cita: lo responde quien tiene la sesión.
   app.get("/questionnaire", async (c) => portalCall(c, (tx, ctx) => getPortalQuestionnaire(tx, ctx)))

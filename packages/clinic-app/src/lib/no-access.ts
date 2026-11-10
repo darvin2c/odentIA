@@ -16,6 +16,7 @@ const SECTION_NAMES: Record<string, string> = {
   commissions: "Comisiones",
   finance: "Finanzas",
   inventory: "Inventario",
+  orders: "Pedidos",
   reports: "Reportes",
   agent: "Agente",
   settings: "Configuración",

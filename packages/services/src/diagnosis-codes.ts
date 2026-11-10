@@ -33,6 +33,7 @@ import {
   encounter,
   encounterDiagnosis,
   encounterPlanItem,
+  patientCondition,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
@@ -194,6 +195,19 @@ export async function searchDiagnosisCodes(
   const terms = normalizeSearchText(q).split(" ").filter(Boolean).slice(0, 8)
   if (terms.length === 0) return []
   const code = normalizeDiagnosisCode(system, q.trim())
+  // Lo que la clínica ya usa (sus diagnósticos y los antecedentes de sus pacientes), con su
+  // categoría: «hipertension» daba primero la hipertensión intracraneal (8D60) por orden de código
+  // y la de todos los días quedaba debajo (repaso final de la ficha del 10 nov, B5). Es la misma
+  // fuente de «los más usados» (`getDiagnosisSuggestions`); no hay otra lista de uso común.
+  const used = sql<number>`(select count(*) from (
+      select ${encounterDiagnosis.diagnosisCode} as used_code from ${encounterDiagnosis}
+        where ${encounterDiagnosis.organizationId} = ${orgId} and ${encounterDiagnosis.diagnosisSystem} = ${system}
+          and ${encounterDiagnosis.voidedAt} is null
+      union all
+      select ${patientCondition.diagnosisCode} as used_code from ${patientCondition}
+        where ${patientCondition.organizationId} = ${orgId} and ${patientCondition.diagnosisSystem} = ${system}
+          and ${patientCondition.diagnosisCode} is not null
+    ) as clinic_used where starts_with(clinic_used.used_code, ${diagnosisCatalog.code}))`
   const rows = await tx
     .select({
       code: diagnosisCatalog.code,
@@ -213,6 +227,7 @@ export async function searchDiagnosisCodes(
     .orderBy(
       desc(sql`${diagnosisCatalog.code} = ${code}`),
       desc(sql`starts_with(${diagnosisCatalog.code}, ${code})`),
+      desc(used),
       // Lo odontológico primero (ADR 0079: lo dice el producto, no la lista).
       desc(preferred ? sql`${diagnosisCatalog.code} ~ ${preferred}` : sql`false`),
       asc(diagnosisCatalog.code),

@@ -14,6 +14,13 @@
  * cada ronda corre con el mismo `CASOS=<archivo>`. Una ronda que se cortó se
  * termina con `INDICES=<los que faltan>` en la misma carpeta.
  *
+ * `PRODUCTO` es odentia, latidia o vistia. La óptica de vistIA la arma «Crear demo»
+ * en la semilla, con id propio: se usa la última que quedó lista.
+ *
+ * Con `PEDIDOS=1` (vistIA), cada caso es de un paciente de la demo con un pedido de
+ * lentes en curso o listo, que escribe por su WhatsApp para saber de sus lentes:
+ * mide `ver_pedidos` (ADR 0172). Cada conversación dice si Sofi lo leyó.
+ *
  * Con `VUELVE=1` al inventarlos, todos los casos son de quien vuelve: un paciente
  * que escribe por el WhatsApp donde ya conversó otras veces, con un hilo largo de
  * antes (avisos y atenciones cerradas) que queda en el archivo con el caso.
@@ -32,14 +39,51 @@ import { and, asc, eq, gt } from "drizzle-orm"
 const env = process.env
 const KEY = secretsKeyFromEnv(env.SECRETS_KEY)
 const OUT = env.AUDIT_OUT ?? "auditoria-masiva"
-const PRODUCT = (env.PRODUCTO ?? "odentia") as "odentia" | "latidia"
+type AuditProduct = "odentia" | "latidia" | "vistia"
+const PRODUCT = (env.PRODUCTO ?? "odentia") as AuditProduct
 const TOTAL = Number(env.N ?? 10)
 const PARALLEL = Number(env.PARALELO ?? 4)
 const ownerDb = createOwnerDb(env.DATABASE_URL!)
 const appDb = createAppDb(env.APP_DATABASE_URL!)
-const ORG = PRODUCT === "odentia" ? "seed-org-dental-smile" : "seed-org-consultorio-san-martin"
-const OWNER = PRODUCT === "odentia" ? "seed-user-ana" : "seed-user-vela"
-const CLINIC = PRODUCT === "odentia" ? "Dental Smile, una clínica dental de Lima con sedes en Miraflores y San Isidro" : "Consultorio San Martín, un consultorio médico de Lima (medicina general, pediatría, ginecología, medicina interna)"
+/** Dónde conversa Sofi en cada producto: su demo de la semilla. Sin id fijo, la busca `demoOrg`. */
+const DEMOS: Record<AuditProduct, { org: string | null; owner: string | null; clinic: string }> = {
+  odentia: {
+    org: "seed-org-dental-smile",
+    owner: "seed-user-ana",
+    clinic: "Dental Smile, una clínica dental de Lima con sedes en Miraflores y San Isidro",
+  },
+  latidia: {
+    org: "seed-org-consultorio-san-martin",
+    owner: "seed-user-vela",
+    clinic: "Consultorio San Martín, un consultorio médico de Lima (medicina general, pediatría, ginecología, medicina interna)",
+  },
+  vistia: {
+    org: null,
+    owner: null,
+    clinic: "Óptica Clara Miraflores, una óptica de Lima que examina la vista y vende lentes (monturas, lunas, lentes de contacto y de sol)",
+  },
+}
+const DEMO = DEMOS[PRODUCT]
+if (!DEMO) throw new Error(`PRODUCTO es odentia, latidia o vistia, no «${PRODUCT}»`)
+
+/** La óptica de la semilla («Crear demo», ADR 0096) y su dueño: la última que quedó lista. */
+async function demoOrg(): Promise<{ org: string; owner: string }> {
+  const [row] = await ownerDb.execute<{ org: string; owner: string | null }>(
+    `select d.organization_id as org,
+        (select m.user_id from member m where m.organization_id = d.organization_id and m.role = 'owner' order by m.created_at limit 1) as owner
+       from saas_demo d where d.product = 'optical' and d.status = 'lista' and d.organization_id is not null
+      order by d.ready_at desc nulls last limit 1` as never,
+  )
+  if (!row?.org || !row.owner) throw new Error("No hay una óptica de demo lista: corre la semilla (pnpm --filter @odentia/services seed:dev)")
+  return { org: row.org, owner: row.owner }
+}
+const found = DEMO.org && DEMO.owner ? { org: DEMO.org, owner: DEMO.owner } : await demoOrg()
+const ORG: string = found.org
+const OWNER: string = found.owner
+const CLINIC = DEMO.clinic
+/** Casos de quien pregunta por sus lentes (vistIA). */
+const ORDERS = env.PEDIDOS === "1"
+if (ORDERS && PRODUCT !== "vistia") throw new Error("PEDIDOS=1 es de vistIA: solo la óptica trabaja con pedidos")
 
 const model = (effort: "low" | "medium") =>
   new ChatOpenAI({ model: "gpt-6-luna", apiKey: env.LLM_OPENAI_API_KEY, useResponsesApi: true, timeout: 120_000, maxRetries: 2, modelKwargs: { reasoning: { effort } } })
@@ -138,9 +182,11 @@ async function invent(channel: Channel, known: string | null, returning = false)
       known ? `Es ${known}, que ya es paciente de la clínica${returning ? " y otras veces ya le escribió por este mismo WhatsApp" : ""}.` : "Es alguien que la clínica no conoce."
     }
 ${
-      Math.random() < 0.7
-        ? "Escribe por uno de los motivos más frecuentes por los que la gente le escribe a una clínica así; tú eliges cuál y sus detalles."
-        : "Escribe por un motivo poco frecuente pero real (un trámite, un reclamo, algo que no es de la clínica, una situación rara)."
+      ORDERS && known
+        ? "Encargó lentes en la óptica y escribe para saber de ellos: si ya están listos, para cuándo, dónde los recoge o cuánto le falta pagar; tú eliges qué pregunta y sus detalles, sin inventar el número del pedido."
+        : Math.random() < 0.7
+          ? "Escribe por uno de los motivos más frecuentes por los que la gente le escribe a una clínica así; tú eliges cuál y sus detalles."
+          : "Escribe por un motivo poco frecuente pero real (un trámite, un reclamo, algo que no es de la clínica, una situación rara)."
     } Puede ser para sí o para otra persona. Cómo escribe: ${style}.${
       returning
         ? `
@@ -250,6 +296,13 @@ async function caseFor(index: number): Promise<AuditCase | null> {
       if (made) return { channel: "whatsapp_conocido", known: known.name, persona: made.persona, previous: made.previous }
     }
     return null
+  }
+  if (ORDERS) {
+    // Quien tiene el pedido escribe desde el WhatsApp que la óptica ya conoce.
+    const known = knownPatients[index % Math.max(knownPatients.length, 1)]
+    if (!known) return null
+    const made = await invent("whatsapp_conocido", known.name)
+    return made ? { channel: "whatsapp_conocido", known: known.name, persona: made.persona } : null
   }
   const roll = Math.random()
   const channel: Channel = roll < 0.45 ? "whatsapp_nuevo" : roll < 0.7 ? "web" : "whatsapp_conocido"
@@ -413,9 +466,29 @@ async function converse(index: number) {
            from agent_run_ledger where conversation_id = '${conversationId}'` as never,
       )
     : []
-  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, previous: previous.length, conversationId, transcript, verdict, cost: cost ?? null }
+  // Si el camino que se mide corrió: cuántas respuestas de Sofi leyeron los pedidos.
+  const [orders] = conversationId
+    ? await ownerDb.execute<{ n: number }>(
+        `select count(*)::int as n from agent_answer_trace where conversation_id = '${conversationId}' and basis @> '[{"label": "Pedidos del paciente"}]'::jsonb` as never,
+      )
+    : []
+  const result = {
+    product: PRODUCT,
+    index,
+    channel: realChannel,
+    known: known?.name ?? null,
+    persona,
+    previous: previous.length,
+    conversationId,
+    transcript,
+    verdict,
+    cost: cost ?? null,
+    ordersRead: orders?.n ?? 0,
+  }
   writeFileSync(join(OUT, `${String(index).padStart(3, "0")}.json`), JSON.stringify(result, null, 2))
-  console.log(`[${index}] ${realChannel} · ${persona.por_que_escribe.slice(0, 60)} → ${verdict?.cumple ? "cumple" : "NO cumple"}`)
+  console.log(
+    `[${index}] ${realChannel} · ${persona.por_que_escribe.slice(0, 60)} → ${verdict?.cumple ? "cumple" : "NO cumple"}${ORDERS ? ` · leyó pedidos: ${orders?.n ? "sí" : "no"}` : ""}`,
+  )
 }
 
 /** Lo que de verdad quedó en la base: el juez no puede adivinar si un pase o una cita existen. */
@@ -534,9 +607,15 @@ async function setup() {
     `select c.id as contact_id, c.display_name as name,
         (select ci.external_user_id from contact_identity ci where ci.contact_id = c.id and ci.channel = 'whatsapp' limit 1) as external_user_id
        from patient p join contact c on c.id = p.person_id
-      where p.organization_id = '${ORG}' and not c.is_test order by random() limit 40` as never,
+      where p.organization_id = '${ORG}' and not c.is_test${
+        ORDERS
+          ? ` and exists (select 1 from job_order o where o.organization_id = p.organization_id and o.patient_id = p.id
+                 and o.status in ('por_enviar', 'en_laboratorio', 'por_revisar', 'listo'))`
+          : ""
+      } order by random() limit 40` as never,
   )
   for (const row of rows) knownPatients.push(await withWhatsApp(row))
+  if (ORDERS && knownPatients.length === 0) throw new Error("La óptica de la demo no tiene pacientes con un pedido en curso o listo")
 }
 
 mkdirSync(OUT, { recursive: true })

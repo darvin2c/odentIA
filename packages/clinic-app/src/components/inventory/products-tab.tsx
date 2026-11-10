@@ -260,7 +260,7 @@ export function ProductsTab() {
   return (
     <div className="flex flex-col gap-3">
       {nothingYet ? null : (
-        <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
+        <div className="flex flex-wrap items-center gap-2">
           <SearchInput
             label="Buscar en productos"
             placeholder="Buscar por nombre o código"

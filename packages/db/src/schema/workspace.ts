@@ -31,6 +31,33 @@ export const workspaceNotification = pgTable("workspace_notification", {
 ])
 
 /**
+ * Un equipo que recibe los avisos de una persona en una clínica (push web,
+ * RFC 8030/8291). Cada clínica es su propio origen, así que la suscripción es
+ * de esa clínica; el permiso y la membresía se vuelven a mirar al enviar.
+ * El worker anota lo que ya avisó antes de enviar: un envío dudoso no se repite.
+ */
+export const pushSubscription = pgTable("push_subscription", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: orgFk("organization_id"),
+  userId: text("user_id").notNull().references(() => user.id),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Cuándo salió el aviso de «Listo»: nulo, todavía por enviar. */
+  welcomedAt: timestamp("welcomed_at", { withTimezone: true }),
+  /** Las personas de «Te espera» ya avisadas: se avisa cuando aparece otra. */
+  waitingSeen: text("waiting_seen").array().notNull().default(sql`'{}'::text[]`),
+  /** El último aviso de «Te espera»: entre uno y otro pasan unos minutos. */
+  waitingPushedAt: timestamp("waiting_pushed_at", { withTimezone: true }),
+  /** Los avisos del servicio creados después de esto todavía no salieron a este equipo. */
+  noticesSince: timestamp("notices_since", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex("push_subscription_endpoint_uidx").on(table.organizationId, table.endpoint),
+  index("push_subscription_user_idx").on(table.organizationId, table.userId),
+])
+
+/**
  * Consulta a la Ayuda de odentIA. No guarda lo que se preguntó: solo la
  * pantalla, el tema y la pregunta frecuente que respondió (textos de la guía),
  * cómo se decidió y si sirvió. Con eso se sabe qué falta en la guía sin leer lo

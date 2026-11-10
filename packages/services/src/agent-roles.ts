@@ -180,6 +180,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "confirmar_propuesta",
       "ver_contexto_paciente",
       "ver_resumen_paciente",
+      // Solo donde el producto trabaja con pedidos (ADR 0172).
+      "ver_pedidos",
       "leer_contexto_comercial",
       "ver_otros_canales",
     ],

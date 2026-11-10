@@ -72,13 +72,14 @@ import { MoreHorizontal, Plus, X } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
-import { BranchSwitcher } from "../branch-switcher"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { collectFormMessage, financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
-  acceptedTotalsKey,
   type AccountPendingItem,
+  acceptedTotalsKey,
+  amountHelpText,
+  partialSplitWords,
   CASH_TYPE_CODE,
   type CollectInput,
   type CollectResultBody,
@@ -92,24 +93,25 @@ import {
   fetchPaymentMethods,
   fetchSaleProducts,
   formatAmountPlain,
+  pendingCostWords,
   type PaymentMethodOption,
   type ProductCharge,
   type PromotionItem,
   type PromotionOption,
-  amountHelpText,
   rateAuthorWords,
-  treatmentLineName,
-  sentence,
   type SaleProduct,
+  sentence,
+  treatmentLineName,
   voidChargeApi,
 } from "../../lib/finance-collect"
 import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
 import { orgSecondCurrency, useOrgProfile } from "../../lib/org"
 import { currencyChoices } from "../../lib/product-words"
+import { productUi } from "../../product/product-ui"
+import { BranchSwitcher } from "../branch-switcher"
 import { ChoiceButtons } from "../choice-buttons"
 import { PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
-import { productUi } from "../../product/product-ui"
 import { RateFarNote, RateField } from "./rate-input"
 
 /** Lo más que se vende de un producto en un concepto (el tope del servidor). */
@@ -562,6 +564,10 @@ interface ConceptJob {
 /** Lo que el servidor llama distinto en los bloques de un concepto. */
 const CONCEPT_FIELDS = { amountCents: "amount" }
 
+
+/** El adelanto que quedó escrito para después de cobrar lo que debe, por persona (solo en esta pestaña). */
+const carriedAdvance = new Map<string, { amount: string; advanceFor: string; debtCurrency: string; payCurrency: string }>()
+
 export function CollectDrawer({
   patientId,
   patientName,
@@ -624,6 +630,16 @@ export function CollectDrawer({
     debtCurrency: string
     payCurrency: string
   } | null>(null)
+  /**
+   * El importe parcial de lo pendiente escrito antes de ir a «Cobrar un adelanto»: vuelve escrito
+   * al volver (repaso del 9 nov, N3: 250 volvía a 450 y el botón cobraba 450 sin que se notara).
+   */
+  const [pendingDraft, setPendingDraft] = useState<{
+    amount: string
+    debtCurrency: string
+    payCurrency: string
+    chargeIds: string[]
+  } | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [adding, setAdding] = useState(false)
   const [addingProduct, setAddingProduct] = useState(false)
@@ -666,6 +682,9 @@ export function CollectDrawer({
       void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
       void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
       requestId.current = crypto.randomUUID()
+      // El adelanto que quedó escrito para después («va en un cobro aparte») vuelve al abrir el
+      // próximo cobro de esta persona: no se pierde al cerrar (QA antes de entregar, entrega 9).
+      if (advanceDraft && !form.state.values.advance) carriedAdvance.set(id, advanceDraft)
       onCollected(result, id)
       onClose()
     },
@@ -768,7 +787,11 @@ export function CollectDrawer({
     form.reset()
     setSelectInit(false)
     setAmountTouched(false)
-    setAdvanceDraft(null)
+    // Lo que se dejó para «Cobrar un adelanto» en el cobro anterior de esta persona vuelve escrito.
+    const carried = patientId ? carriedAdvance.get(patientId) : undefined
+    if (patientId) carriedAdvance.delete(patientId)
+    setAdvanceDraft(carried ?? null)
+    setPendingDraft(null)
     setEditor(null)
     setAdding(false)
     setAddingProduct(false)
@@ -853,6 +876,8 @@ export function CollectDrawer({
       }),
     [data, orgCurrencies],
   )
+  /** Lo que debe en la moneda del adelanto: sin «Para», ese dinero no lo pagaría. */
+  const owedInDebt = owedByCurrency.find((row) => row.code === debt) ?? null
   const otherCurrencyCount = useMemo(
     () =>
       (data?.pendiente ?? []).filter(
@@ -941,6 +966,8 @@ export function CollectDrawer({
     form.setFieldValue("amount", "")
     form.setFieldValue("payments", [])
     setAmountTouched(false)
+    // Lo escrito para lo pendiente era de otra moneda o de otro cobro: no vuelve.
+    setPendingDraft(null)
   }
 
   /** Otra moneda de deuda: lo marcado es lo de ella. */
@@ -997,6 +1024,7 @@ export function CollectDrawer({
     const target = advanceTargets.find((row) => row.budgetItemId === presetAdvanceFor)
     if (!target) return
     presetDone.current = true
+    setPendingDraft(null)
     form.setFieldValue("advance", true)
     form.setFieldValue("advanceFor", target.budgetItemId)
     form.setFieldValue("amount", "")
@@ -1075,6 +1103,32 @@ export function CollectDrawer({
     }
     return [...seen.entries()].map(([contactId, value]) => ({ contactId, ...value }))
   }, [responsibilities.data])
+
+  // En un menor (con su representante legal vigente) paga por defecto quien responde por él: su
+  // responsable económico o, si no hay, su representante (QA del 10 nov, M3: el ticket salía a
+  // nombre del niño). Solo si nadie eligió todavía; «Cambiar» sigue ofreciendo al paciente.
+  const payerByDefault = useMemo(() => {
+    const current = (responsibilities.data?.data ?? []).filter((row) => row.isCurrent)
+    if (!current.some((row) => row.kind === "representante_legal")) return null
+    return (
+      current.find((row) => row.kind === "responsable_economico")?.contactId ??
+      current.find((row) => row.kind === "representante_legal")?.contactId ??
+      null
+    )
+  }, [responsibilities.data])
+  const payerDefaulted = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se repone al cerrar y con cada paciente.
+  useEffect(() => {
+    payerDefaulted.current = false
+  }, [open, effectiveId])
+  useEffect(() => {
+    if (!open || payerDefaulted.current || !payerByDefault) return
+    payerDefaulted.current = true
+    // Sin tocar su estado: un valor por defecto no es un cambio, y cerrar no debe preguntar
+    // «¿Salir sin guardar?» (e2e de caja, ficha por rol).
+    if (!form.getFieldValue("payerContactId"))
+      form.setFieldValue("payerContactId", payerByDefault, { dontUpdateMeta: true })
+  }, [open, payerByDefault, form])
 
   /** Promociones vigentes que incluyen el servicio del concepto, en la moneda de la clínica. */
   const offersFor = (item: AccountPendingItem): Array<{ promo: PromotionOption; price: PromotionItem }> => {
@@ -1291,6 +1345,17 @@ export function CollectDrawer({
     locale,
     owesOther: owedByCurrency.some((row) => row.code !== debt),
   })
+  // Un pago parcial de varios conceptos dice a cuál va, antes de cobrar.
+  const splitHelp =
+    values.advance || pay !== debt
+      ? null
+      : partialSplitWords(
+          pending.filter((item) => values.chargeIds.includes(item.chargeId)),
+          figures.cancels,
+          debt,
+          locale,
+          favor,
+        )
   const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
   const rateHelp = !second
     ? ""
@@ -1540,11 +1605,57 @@ export function CollectDrawer({
                               }}
                             />
                           ) : null}
-                          <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                            {chosenTarget
-                              ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
-                              : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
-                          </p>
+                          {!chosenTarget && owedInDebt && owedInDebt.cents > favor ? (
+                            // Con deuda, un adelanto suelto la dejaba igual y la ficha mostraba tres cifras
+                            // (QA del 9 nov, repaso 3): se avisa y se ofrece pagar lo que debe, sin frenar.
+                            <div role="status" className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+                              <p>
+                                Debe {formatMoney(owedInDebt.cents - favor, owedInDebt.code, locale)}. Este adelanto no
+                                paga esa deuda: queda a favor, aparte, hasta su próximo cobro.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="self-start"
+                                disabled={busy}
+                                onClick={() => {
+                                  // Lo escrito va a lo que debe, empezando por lo más antiguo. Lo que pase de lo que
+                                  // debe no cabe en ese cobro: queda escrito como adelanto, para después.
+                                  const written = form.state.values.amount.trim()
+                                  const writtenCents = written ? parseMoneyOrNull(written, debt, locale) : null
+                                  const owedCents = Math.max(0, owedInDebt.cents - favor)
+                                  form.setFieldValue("advance", false)
+                                  form.setFieldValue("advanceFor", "")
+                                  form.setFieldValue("chargeIds", owedInDebt.ids)
+                                  setPendingDraft(null)
+                                  if (writtenCents !== null && writtenCents > owedCents && owedCents > 0) {
+                                    setAdvanceDraft({
+                                      amount: formatMoneyInput(writtenCents - owedCents, debt, locale),
+                                      advanceFor: "",
+                                      debtCurrency: form.state.values.debtCurrency,
+                                      payCurrency: form.state.values.payCurrency,
+                                    })
+                                    form.setFieldValue("amount", formatMoneyInput(owedCents, debt, locale))
+                                    setAmountTouched(true)
+                                  } else {
+                                    setAdvanceDraft(null)
+                                    if (written) {
+                                      form.setFieldValue("amount", written)
+                                      setAmountTouched(true)
+                                    } else setAmountTouched(false)
+                                  }
+                                }}
+                              >
+                                Mejor, a lo que debe
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                              {chosenTarget
+                                ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
+                                : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
+                            </p>
+                          )}
                           {second !== null && !values.advanceFor ? (
                             <div className="flex flex-col gap-1.5">
                               <span id={`${uid}-a-cuenta`} className="text-sm font-medium">
@@ -1619,10 +1730,9 @@ export function CollectDrawer({
                                           {saleDeductionWords(sold.quantity, sold.branchName)}
                                         </span>
                                       ) : null}
-                                      {item.paidCents > 0 ? (
+                                      {item.paidCents > 0 || (item.advancePaidCents ?? 0) > 0 ? (
                                         <span className="block text-xs text-muted-foreground">
-                                          Costó {formatAmountPlain(item.totalCents, debt, locale)} ·
-                                          pagó {formatAmountPlain(item.paidCents, debt, locale)}
+                                          {pendingCostWords(item, (cents) => formatAmountPlain(cents, debt, locale))}
                                         </span>
                                       ) : null}
                                       {!editable && item.promotionName ? (
@@ -1771,13 +1881,27 @@ export function CollectDrawer({
                                       payCurrency: form.state.values.payCurrency,
                                     })
                                   form.setFieldValue("advance", false)
-                                  setAmountTouched(false)
-                                  // Lo pendiente está en otra moneda: el cobro va a ella.
-                                  if (pending.length === 0)
-                                    chooseDebt(owedByCurrency[0]?.code ?? debt)
+                                  // Lo que había escrito de lo pendiente vuelve con su moneda y lo marcado;
+                                  // si no, sigue a lo marcado.
+                                  const draft = pendingDraft
+                                  setPendingDraft(null)
+                                  if (draft) {
+                                    form.setFieldValue("debtCurrency", draft.debtCurrency)
+                                    form.setFieldValue("payCurrency", draft.payCurrency)
+                                    form.setFieldValue("chargeIds", draft.chargeIds)
+                                    form.setFieldValue("amount", draft.amount)
+                                    setAmountTouched(true)
+                                  } else {
+                                    setAmountTouched(false)
+                                    // Lo pendiente está en otra moneda: el cobro va a ella.
+                                    if (pending.length === 0)
+                                      chooseDebt(owedByCurrency[0]?.code ?? debt)
+                                  }
                                 }}
                               >
-                                Cobrar lo pendiente
+                                {/* Con la cifra: el cajón del adelanto no decía que además debía (QA de la ficha del 10 nov, U3). */}
+                                Cobrar lo que debe:{" "}
+                                {owedByCurrency.map((row) => formatMoney(row.cents, row.code, locale)).join(" y ")}
                               </Button>
                             ) : null
                           ) : (
@@ -1788,6 +1912,17 @@ export function CollectDrawer({
                               disabled={busy}
                               onClick={() => {
                                 closeInline()
+                                // Un importe escrito a mano para lo pendiente se guarda para la vuelta.
+                                setPendingDraft(
+                                  amountTouched
+                                    ? {
+                                        amount: form.state.values.amount,
+                                        debtCurrency: form.state.values.debtCurrency,
+                                        payCurrency: form.state.values.payCurrency,
+                                        chargeIds: form.state.values.chargeIds,
+                                      }
+                                    : null,
+                                )
                                 form.setFieldValue("advance", true)
                                 // Lo que ya había escrito del adelanto vuelve, con su «Para».
                                 form.setFieldValue("amount", advanceDraft?.amount ?? "")
@@ -1910,7 +2045,11 @@ export function CollectDrawer({
                 ) : null}
                 <form.AppField name="amount">
                   {(field) => (
-                    <field.Control label="Importe" id={`${uid}-importe`} description={amountHelp}>
+                    <field.Control
+                      label="Importe"
+                      id={`${uid}-importe`}
+                      description={splitHelp ? `${amountHelp} ${splitHelp}` : amountHelp}
+                    >
                       {(control) => (
                         <MoneyInput
                           id={control.id}

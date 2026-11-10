@@ -167,7 +167,7 @@ Pendiente fuera del código, como con latidIA:
    y `app.`, como en latidIA).
 2. Google OAuth: la dirección de vuelta `https://api.vistia20.com/api/auth/callback/google`.
 3. Meta: el dominio `https://app.vistia20.com/` en la app de «Conectar con Facebook», y la
-   plantilla `vistia_invitar_a_volver_v1` cuando una óptica conecte su WhatsApp.
+   plantillas `vistia_invitar_a_volver_v1` y `vistia_lentes_listos_v1` («Tus lentes están listos», ADR 0172) cuando una óptica conecte su WhatsApp.
 4. R2: `https://*.vistia20.com` en el CORS del bucket de adjuntos.
 5. Correo: `hola@` y `privacidad@vistia20.com` (Email Routing) y el remitente.
 6. Administración: «Plan vistIA» y «Fundadores vistIA», empezando con los precios de los de
@@ -360,6 +360,12 @@ contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el cor
 `SUPPORT_INBOX_EMAIL` es el buzón de soporte de odentIA: el worker le envía
 «Caso nuevo» y «La clínica respondió», con el botón a Soporte en `ADMIN_URL`.
 Vacío, esos avisos quedan pendientes y el caso sigue en la bandeja de Soporte.
+
+`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT` (`mailto:` de odentIA) son
+las claves de los avisos en el equipo (ADR 0177): la API sirve la pública y el worker
+envía con el par. Son una sola para los tres productos y se generan una vez
+(`npx web-push generate-vapid-keys`); cambiarlas deja sin avisos a todos los equipos
+suscritos hasta que cada persona los vuelva a activar. Vacías, no se ofrecen.
 
 ## CI y despliegue automático
 

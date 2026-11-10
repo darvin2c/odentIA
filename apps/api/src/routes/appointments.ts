@@ -4,7 +4,6 @@ import {
   appointmentReminderReach,
   newPersonRemindersVia,
   createAppointment,
-  operationBodySchema,
   createRoom,
   createScheduleBlock,
   deleteScheduleBlock,
@@ -12,24 +11,27 @@ import {
   getAppointment,
   getAppointmentContext,
   getBranchHours,
-  getPatientMissingData,
-  requirePatient,
   getProfessionalSchedule,
+  getStaffMissingData,
   listAppointments,
   listRooms,
-  roomNotFound,
-  roomWord,
-  ServiceError,
   listScheduleBlocks,
   listScheduleResources,
   listTeamAttendance,
+  markAppointmentCame,
   moveAppointment,
+  operationBodySchema,
+  requirePatient,
+  reuseAppointment,
+  roomNotFound,
+  roomWord,
+  ServiceError,
   searchAgendaPatients,
   setAppointmentArrival,
+  setAppointmentPlanItems,
   setAppointmentStatus,
   setBranchDefaultDuration,
   setProfessionalSchedule,
-  setAppointmentPlanItems,
   updateAppointment,
   updateRoom,
 } from "@odentia/services"
@@ -469,7 +471,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
         const { patientId } = await getAppointment(tx, orgId, c.req.param("id"))
         return {
           ...context,
-          missingData: canEditPerson ? await getPatientMissingData(tx, orgId, patientId) : null,
+          missingData: canEditPerson ? await getStaffMissingData(tx, orgId, patientId) : null,
           // «atenderlo» o «atenderla»: la frase concuerda con el paciente.
           patientSex: canEditPerson ? (await requirePatient(tx, orgId, patientId)).sex : null,
         }
@@ -502,6 +504,40 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         setAppointmentPlanItems(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // «Vino»: la cita pasada que nadie cerró queda atendida sin abrir otra atención (decisión B1).
+  app.post("/:id/came", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el estado de citas"),
+        403,
+      )
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markAppointmentCame(tx, orgId, userId, c.req.param("id")),
+      ),
+    )
+  })
+
+  // «Usarla para la corona»: la cita que quedó sin objeto lleva otro tratamiento aceptado (QA del 10 nov, M1).
+  app.post("/:id/reuse", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar citas"), 403)
+    }
+    const parsed = z
+      .object({ expectedVersion: z.number().int().min(0), planItemId: z.uuid() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reuseAppointment(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
     )
   })

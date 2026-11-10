@@ -334,6 +334,38 @@ describe("la categoría manda y los retomar piden el sí", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId, { name: "con_logo", language: "es", params: 1, category: "utility", contactId: null })),
     ).rejects.toThrow("lleva un encabezado con datos o con un archivo")
   })
+
+  it("con un teléfono en su ficha y sin WhatsApp ni correo, dice por qué ese teléfono no sirve", async () => {
+    const c = await clinic()
+    const spec = AUTOMATION_MESSAGES.aviso_cita_reservada
+    // Alguien con teléfono declarado que nadie marcó como su WhatsApp (ADR 0027).
+    const declared = async (name: string, phone: string) => {
+      const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
+      const [link] = await ownerDb
+        .select({ contactId: patientContact.contactId })
+        .from(patientContact)
+        .where(and(eq(patientContact.organizationId, c.orgId), eq(patientContact.patientId, row!.id)))
+      await ownerDb.update(contact).set({ phone }).where(eq(contact.id, link!.contactId))
+      return link!.contactId
+    }
+    const notYet = await declared("Aún no es su WhatsApp", "+51987000411")
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, notYet, spec))).toEqual({
+      cause: "sin_destino",
+      detail: "Su teléfono aún no es su WhatsApp (se marca en sus Datos) y no tiene correo registrado",
+    })
+    // Su número ya es el WhatsApp de otra persona: no se mueve ni se confunde con ella.
+    const owner = await person(c, "Dueño del número")
+    await ownerDb.insert(contactIdentity).values({ organizationId: c.orgId, contactId: owner.contactId, channel: "whatsapp", externalUserId: "wa:51987000412" })
+    const shared = await declared("Con el número de otro", "+51987000412")
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, shared, spec))).toMatchObject({
+      detail: "Su teléfono es el WhatsApp de otra persona de la clínica y no tiene correo registrado",
+    })
+    // Un número del rango de ficción no le llega a nadie: se dice así, no «no tiene WhatsApp».
+    const fiction = await declared("Con número de prueba", "+447700900881")
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, fiction, spec))).toMatchObject({
+      detail: "Su número es de prueba (a ese número no le llega ningún mensaje) y no tiene correo registrado",
+    })
+  })
 })
 
 describe("el agente no elige plantillas: retoma el sistema", () => {

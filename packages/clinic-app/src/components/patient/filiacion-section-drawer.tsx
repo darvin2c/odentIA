@@ -21,11 +21,13 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { staffAddressSource } from "../../lib/address-suggestions"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useClinicalProfile } from "../../lib/org"
-import type { PersonPage } from "../../lib/people"
+import { attendWord } from "../../lib/patient-overview"
+import { filiationGapsText, type Patient } from "../../lib/patients"
+import type { PersonListItem, PersonPage } from "../../lib/people"
 import {
   countryChoices,
   documentChoices,
@@ -35,13 +37,11 @@ import {
   insuranceFromChoice,
   maritalChoices,
 } from "../../lib/person-data"
-import { filiationGapsText, type Patient } from "../../lib/patients"
 import { AddressStreetField } from "../address/address-street-field"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
 import { placeErrors } from "./form-errors"
 import { PersonalLinkActions } from "./send-personal-link"
-import { attendWord } from "../../lib/patient-overview"
 
 type FieldKind =
   | { kind: "text"; max: number; wide?: boolean }
@@ -195,6 +195,8 @@ const COMPLETE_FIELDS: Record<MissingPersonDatum["key"], Array<SectionField["key
   emergencyContactName: ["emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone"],
   emergencyContactPhone: ["emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone"],
   insuranceType: ["insuranceType", "insurerName", "affiliationNumber"],
+  // Es de su representante: se escribe en la ficha de esa persona o al firmar su consentimiento.
+  representativeDoc: [],
 }
 
 /**
@@ -232,6 +234,61 @@ function initialValues(source: Partial<Record<string, unknown>>, fields: Section
       const raw = f.type.kind === "insurance" ? insuranceChoiceOf(source.insuranceType as string, source.insuranceScheme as string) : source[f.key]
       return [f.key, typeof raw === "string" ? raw : ""]
     }),
+  )
+}
+
+/**
+ * El número que se escribe ya es de otra persona de la clínica: se dice, con la misma búsqueda
+ * del registro (por sus últimos 8 dígitos), y se puede abrir su página (repaso final de la
+ * ficha del 10 nov, B8). No frena: en una familia se comparte el teléfono.
+ */
+function SharedPhoneNote({
+  phone,
+  self,
+}: {
+  phone: string
+  self: { personId?: string; patientId?: string }
+}) {
+  const digits = phone.replace(/\D/g, "")
+  const probe = digits.length >= 8 ? digits.slice(-8) : ""
+  const [asked, setAsked] = useState(probe)
+  useEffect(() => {
+    const timer = setTimeout(() => setAsked(probe), 350)
+    return () => clearTimeout(timer)
+  }, [probe])
+  const found = useQuery({
+    queryKey: ["people", "shared-phone", asked],
+    queryFn: () =>
+      apiFetch<{ data: PersonListItem[] }>(
+        `/api/people?${new URLSearchParams({ ver: "todos", limit: "4", q: asked })}`,
+      ),
+    enabled: asked !== "",
+    retry: false,
+  })
+  const others = (found.data?.data ?? []).filter(
+    (row) =>
+      row.id !== self.personId &&
+      (!self.patientId || row.patient?.id !== self.patientId) &&
+      (row.phone ?? "").replace(/\D/g, "").endsWith(asked),
+  )
+  if (asked === "" || others.length === 0) return null
+  return (
+    <span className="text-warning" role="status">
+      Este número también es de{" "}
+      {others.map((row, index) => (
+        <span key={row.id}>
+          {index > 0 ? (index === others.length - 1 ? " y " : ", ") : null}
+          <Link
+            to="/people/$personId"
+            params={{ personId: row.id }}
+            className="font-medium underline"
+          >
+            {row.displayName}
+          </Link>
+        </span>
+      ))}
+      . Si es de su familia, guárdalo igual.
+    </span>
   )
 }
 
@@ -411,6 +468,10 @@ export function FiliacionSectionDrawer({
   const description = completing
     ? `Solo lo que falta para ${attendWord(patient?.sex ?? person?.sex)}. Al guardar, los apellidos quedan confirmados.`
     : sections[section].description
+  const representativeDocMissing = (missing ?? []).some(
+    (datum) => datum.key === "representativeDoc",
+  )
+  const ownMissing = (missing ?? []).filter((datum) => datum.key !== "representativeDoc")
   // Apellidos a la vista en «Completar», aunque no falten.
   const namesInView = completing && !wanted?.has("givenNames") && !wanted?.has("familyName")
   return (
@@ -429,9 +490,15 @@ export function FiliacionSectionDrawer({
             <Badge variant="warning">
               {missing?.length === 1 ? "Falta 1" : `Faltan ${missing?.length ?? 0}`}
             </Badge>
-            {/* O que lo complete ella desde su teléfono, con «Su enlace» (decisión 8). */}
-            {patient && missing && missing.length > 0 ? (
-              <PersonalLinkActions patientId={patient.id} missing={filiationGapsText(missing)} />
+            {/* O que lo complete ella desde su teléfono, con «Su enlace» (decisión 8): lo suyo, no lo de su representante. */}
+            {patient && ownMissing.length > 0 ? (
+              <PersonalLinkActions patientId={patient.id} missing={filiationGapsText(ownMissing)} />
+            ) : null}
+            {representativeDocMissing ? (
+              <p className="text-sm text-muted-foreground">
+                Falta el documento de su representante: se escribe en la ficha de esa persona o al
+                firmar su consentimiento, y queda guardado ahí.
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -460,6 +527,12 @@ export function FiliacionSectionDrawer({
           const hint =
             item.key === "docNumber" && duplicateOf && (values.docNumber ?? "").trim() === duplicateOf.docNumber ? (
               <OpenDuplicate docType={duplicateOf.docType} docNumber={duplicateOf.docNumber} />
+            ) : item.key === "phone" && (values.phone ?? "") !== (original.phone ?? "") ? (
+              // Al cambiarlo, si ese número ya es de otra persona se dice (como en el registro).
+              <SharedPhoneNote
+                phone={values.phone ?? ""}
+                self={{ personId: person?.id, patientId: patient?.id }}
+              />
             ) : (
               item.hint
             )
@@ -546,8 +619,10 @@ export function FiliacionSectionDrawer({
             </form.AppField>
           )
         })}
-        {completing && fields.length === 0 ? (
-          <p className="text-sm text-muted-foreground sm:col-span-2">No le falta nada para {attendWord(patient?.sex ?? person?.sex)}.</p>
+        {completing && fields.length === 0 && !representativeDocMissing ? (
+          <p className="text-sm text-muted-foreground sm:col-span-2">
+            No le falta nada para {attendWord(patient?.sex ?? person?.sex)}.
+          </p>
         ) : null}
       </div>
     </FormDrawer>

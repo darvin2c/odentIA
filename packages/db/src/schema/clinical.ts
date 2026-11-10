@@ -1,6 +1,7 @@
 import type {
   BloodGroup,
   ContactRelationship,
+  FinishControl,
   PatientGuide,
   ProcedureCodingSnapshot,
   RegistrationAnswers,
@@ -1135,6 +1136,16 @@ export const treatmentTemplate = catalogSchema.table(
      * versión: no cambia qué es el tratamiento.
      */
     usualSessions: smallint("usual_sessions").notNull().default(1),
+    /**
+     * Días que la guía clínica deja entre una sesión y la siguiente (la endodoncia con
+     * medicación, 7); nula, ninguna. Como las sesiones habituales: no sube la versión.
+     */
+    sessionGapDays: smallint("session_gap_days"),
+    /** Los controles que deja al terminar, según la guía (`FinishControl`); vacío, ninguno. */
+    finishControls: jsonb("finish_controls")
+      .$type<FinishControl[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
     /**
@@ -1148,6 +1159,14 @@ export const treatmentTemplate = catalogSchema.table(
     uniqueIndex("treatment_template_key_uidx").on(table.key),
     check("treatment_template_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check("treatment_template_usual_sessions_check", sql`${table.usualSessions} BETWEEN 1 AND 60`),
+    check(
+      "treatment_template_session_gap_check",
+      sql`${table.sessionGapDays} IS NULL OR ${table.sessionGapDays} BETWEEN 1 AND 120`,
+    ),
+    check(
+      "treatment_template_finish_controls_check",
+      sql`jsonb_typeof(${table.finishControls}) = 'array'`,
+    ),
   ],
 )
 
@@ -1247,6 +1266,16 @@ export const serviceCatalog = pgTable(
      */
     ownUsualSessions: smallint("usual_sessions"),
     /**
+     * Días de espera entre sesiones que puso la clínica (decisión B5 del 10 nov): nula es
+     * «la de la biblioteca», 0 es «sin espera». Se lee con `sessionGapSql`.
+     */
+    ownSessionGapDays: smallint("session_gap_days"),
+    /**
+     * Los controles que deja al terminar, de la clínica: nula es «los de la biblioteca» y
+     * vacío, «ninguno». Se lee con `finishControlsSql`.
+     */
+    ownFinishControls: jsonb("finish_controls").$type<FinishControl[]>(),
+    /**
      * Cómo dice el precio el agente (`PRICE_DISCLOSURES`). Solo cambia lo que
      * se le dice a una persona: caja y presupuesto usan siempre la tarifa.
      * Un servicio nuevo nace «solo con evaluación».
@@ -1297,6 +1326,14 @@ export const serviceCatalog = pgTable(
     check(
       "service_catalog_usual_sessions_check",
       sql`${table.ownUsualSessions} IS NULL OR ${table.ownUsualSessions} BETWEEN 1 AND 60`,
+    ),
+    check(
+      "service_catalog_session_gap_check",
+      sql`${table.ownSessionGapDays} IS NULL OR ${table.ownSessionGapDays} BETWEEN 0 AND 120`,
+    ),
+    check(
+      "service_catalog_finish_controls_check",
+      sql`${table.ownFinishControls} IS NULL OR jsonb_typeof(${table.ownFinishControls}) = 'array'`,
     ),
     check(
       "service_catalog_price_disclosure_check",
@@ -1413,7 +1450,7 @@ export interface BudgetDecisionSignature {
   declaration: string
   /** Lo que aceptó al firmar: lo que se responda después no queda bajo esta firma. */
   accepted: string[]
-  /** El alcance de la firma («Firma electrónica simple…»), como se leyó al firmar. */
+  /** Lo que leyó al pie al firmar, tal como se leyó (desde la entrega 11, `BUDGET_SIGNATURE_NOTE`; antes, «Firma electrónica simple…»). */
   note: string
 }
 
@@ -1574,6 +1611,12 @@ export const treatmentPlanItem = pgTable(
     supersedesItemId: uuid("supersedes_item_id").references(
       (): AnyPgColumn => treatmentPlanItem.id,
     ),
+    /**
+     * Cuándo cambió lo que su consentimiento describe (la pieza, el servicio o el diagnóstico,
+     * con «Cambiar»): lo firmado antes ya no cuenta y se firma el texto nuevo (consentimientos,
+     * 10 nov). El firmado no se toca: queda en la historia.
+     */
+    consentResetAt: timestamp("consent_reset_at", { withTimezone: true }),
     /**
      * Decisión vigente. `no_elegida`: el tratamiento solo estaba en una opción
      * del presupuesto que la persona no eligió (decisión 13); no es un «no».
@@ -2070,6 +2113,11 @@ export const clinicalFollowUp = pgTable(
     repeatEveryMonths: smallint("repeat_every_months"),
     /** El control de la serie que lo dejó indicado; uno solo por control. */
     repeatsFromId: uuid("repeats_from_id").references((): AnyPgColumn => clinicalFollowUp.id),
+    /**
+     * El control que dejó un tratamiento al terminar, por su servicio (`finish_controls`): a
+     * cuántos días. Con él se juntan los del mismo día (decisión B4) y se retira al deshacer.
+     */
+    finishAfterDays: smallint("finish_after_days"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -2095,6 +2143,11 @@ export const clinicalFollowUp = pgTable(
       sql`${table.status} <> 'programado' OR ${table.appointmentId} IS NOT NULL`,
     ),
     index("clinical_follow_up_org_patient_idx").on(table.organizationId, table.patientId),
+    uniqueIndex("clinical_follow_up_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
+    ),
     index("clinical_follow_up_item_idx").on(table.organizationId, table.planItemId),
     index("clinical_follow_up_due_idx").on(table.organizationId, table.dueAt),
     check("clinical_follow_up_kind_check", sql`${table.kind} IN ('tratamiento','mantenimiento')`),
@@ -2106,6 +2159,44 @@ export const clinicalFollowUp = pgTable(
       "clinical_follow_up_treatment_check",
       sql`${table.kind} <> 'tratamiento' OR ${table.planItemId} IS NOT NULL`,
     ),
+  ],
+)
+
+/**
+ * Los tratamientos que cumple un control (decisión B4 del 10 nov): el radiográfico del año
+ * es uno por fecha aunque terminen dos endodoncias, y nombra todas sus piezas. El primero
+ * sigue en `clinical_follow_up.plan_item_id`; aquí van todos, también ese.
+ */
+export const clinicalFollowUpItem = pgTable(
+  "clinical_follow_up_item",
+  {
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    followUpId: uuid("follow_up_id").notNull(),
+    planItemId: uuid("plan_item_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.followUpId, table.planItemId] }),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.followUpId],
+      foreignColumns: [
+        clinicalFollowUp.organizationId,
+        clinicalFollowUp.patientId,
+        clinicalFollowUp.id,
+      ],
+      name: "clinical_follow_up_item_follow_up_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.planItemId],
+      foreignColumns: [
+        treatmentPlanItem.organizationId,
+        treatmentPlanItem.patientId,
+        treatmentPlanItem.id,
+      ],
+      name: "clinical_follow_up_item_plan_item_fk",
+    }),
+    index("clinical_follow_up_item_plan_item_idx").on(table.organizationId, table.planItemId),
   ],
 )
 
@@ -2286,9 +2377,11 @@ export const patientCharge = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /**
+     * Nulo solo en una venta de mostrador (ADR 0173): un producto que se cobra
+     * sin ficha, a un contacto, a un nombre o a nadie. Nunca un tratamiento.
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
     planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
     budgetItemId: uuid("budget_item_id").references(() => treatmentBudgetItem.id),
     encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
@@ -2393,6 +2486,11 @@ export const patientCharge = pgTable(
       "patient_charge_product_check",
       sql`(${table.productId} IS NULL) = (${table.productQuantity} IS NULL) AND (${table.productQuantity} IS NULL OR ${table.productQuantity} BETWEEN 1 AND 9999)`,
     ),
+    // Sin ficha solo se vende un producto: nada clínico ni del plan (ADR 0173).
+    check(
+      "patient_charge_counter_check",
+      sql`${table.patientId} IS NOT NULL OR (${table.productId} IS NOT NULL AND ${table.planItemId} IS NULL AND ${table.budgetItemId} IS NULL AND ${table.encounterProcedureId} IS NULL AND ${table.promotionId} IS NULL AND ${table.commissionSessions} IS NULL)`,
+    ),
   ],
 )
 
@@ -2401,9 +2499,8 @@ export const patientPayment = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /** Nulo solo en el pago de una venta de mostrador, siempre con su ticket (ADR 0173). */
+    patientId: uuid("patient_id").references(() => patient.id),
     /** Ticket del cobro atómico (un ticket agrupa un pago por medio). */
     ticketId: uuid("ticket_id").references(() => paymentTicket.id),
     branchId: uuid("branch_id").references(() => branch.id),
@@ -2466,6 +2563,7 @@ export const patientPayment = pgTable(
       "patient_payment_method_type_check",
       sql`${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1')`,
     ),
+    check("patient_payment_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.ticketId} IS NOT NULL`),
   ],
 )
 
@@ -2474,9 +2572,8 @@ export const patientPaymentApplication = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /** Nulo solo dentro de una venta de mostrador (ADR 0173). */
+    patientId: uuid("patient_id").references(() => patient.id),
     paymentId: uuid("payment_id")
       .notNull()
       .references(() => patientPayment.id),
@@ -2505,6 +2602,7 @@ export const patientPaymentApplication = pgTable(
     index("payment_application_payment_idx").on(table.organizationId, table.paymentId),
     index("payment_application_charge_idx").on(table.organizationId, table.chargeId),
     check("payment_application_amount_check", sql`${table.amountCents} > 0`),
+    check("payment_application_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.ticketId} IS NOT NULL`),
   ],
 )
 
@@ -2513,9 +2611,11 @@ export const patientPaymentRefund = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /**
+     * Nulo solo al devolver una venta de mostrador: sin cuenta no hay saldo a
+     * favor que devolver, así que sale siempre de una devolución (ADR 0173).
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
     paymentId: uuid("payment_id")
       .notNull()
       .references(() => patientPayment.id),
@@ -2553,6 +2653,7 @@ export const patientPaymentRefund = pgTable(
       "payment_refund_tender_check",
       sql`${table.tenderCents} IS NULL OR ${table.tenderCents} >= 0`,
     ),
+    check("payment_refund_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.returnId} IS NOT NULL`),
   ],
 )
 
@@ -2562,9 +2663,16 @@ export const paymentTicket = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /**
+     * Nulo en una venta de mostrador (ADR 0173): productos cobrados sin abrir
+     * una historia. Entonces quien compra es un contacto (`buyerContactId`), un
+     * nombre escrito (`buyerName`) o nadie («Venta de mostrador»).
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
+    /** La persona que compró en el mostrador, si se eligió (cualquier contacto, no solo pacientes). */
+    buyerContactId: uuid("buyer_contact_id"),
+    /** El nombre que se escribió en una venta de mostrador, si no se eligió a nadie. */
+    buyerName: text("buyer_name"),
     branchId: uuid("branch_id")
       .notNull()
       .references(() => branch.id),
@@ -2601,6 +2709,25 @@ export const paymentTicket = pgTable(
       "payment_ticket_change_currency_check",
       sql`${table.changeCurrency} IS NULL OR ${table.changeCurrency} ~ '^[A-Z]{3}$'`,
     ),
+    foreignKey({
+      name: "payment_ticket_buyer_contact_fk",
+      columns: [table.organizationId, table.buyerContactId],
+      foreignColumns: [contact.organizationId, contact.id],
+    }),
+    // Lo que compró una persona en el mostrador (y si es solo un contacto o ya hizo algo).
+    index("payment_ticket_org_buyer_idx")
+      .on(table.organizationId, table.buyerContactId)
+      .where(sql`${table.buyerContactId} IS NOT NULL`),
+    // Venta de mostrador (ADR 0173): sin ficha no hay saldo a favor que usar ni quién
+    // pague por el paciente; quien compra es un contacto o un nombre, nunca los dos.
+    check(
+      "payment_ticket_counter_check",
+      sql`(${table.patientId} IS NOT NULL AND ${table.buyerContactId} IS NULL AND ${table.buyerName} IS NULL) OR (${table.patientId} IS NULL AND ${table.creditAppliedCents} = 0 AND ${table.payerContactId} IS NULL AND (${table.buyerContactId} IS NULL OR ${table.buyerName} IS NULL))`,
+    ),
+    check(
+      "payment_ticket_buyer_name_check",
+      sql`${table.buyerName} IS NULL OR (${table.buyerName} = btrim(${table.buyerName}) AND char_length(${table.buyerName}) BETWEEN 1 AND 200)`,
+    ),
   ],
 )
 
@@ -2624,9 +2751,8 @@ export const paymentReturn = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id),
+    /** Nulo al devolver una venta de mostrador: entonces siempre se le paga (ADR 0173). */
+    patientId: uuid("patient_id").references(() => patient.id),
     /** El ticket del que sale: sigue valiendo, con la devolución anotada. */
     ticketId: uuid("ticket_id").notNull(),
     /** Sede donde se devolvió: de su caja sale el dinero. */
@@ -2657,6 +2783,7 @@ export const paymentReturn = pgTable(
     index("payment_return_org_patient_idx").on(table.organizationId, table.patientId),
     check("payment_return_total_check", sql`${table.totalCents} > 0`),
     check("payment_return_outcome_check", sql`${table.outcome} IN ('pagado','a_favor')`),
+    check("payment_return_counter_check", sql`${table.patientId} IS NOT NULL OR ${table.outcome} = 'pagado'`),
     check(
       "payment_return_method_check",
       sql`(${table.outcome} = 'pagado') = (${table.methodName} IS NOT NULL) AND (${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1'))`,

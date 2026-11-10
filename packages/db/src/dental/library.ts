@@ -1,7 +1,23 @@
-import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
+import {
+  type Dentition,
+  isToothGroup,
+  type ToothGroup,
+  TREATMENT_KIND_KEYS,
+  TREATMENT_SCOPES,
+  validateLeavesFinding,
+} from "@odentia/dental"
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
-import { type CatalogLibrary, librarySessions, type ProcedureLists, seedProcedureCodes, splitHead, strictLines } from "../procedure-codes.js"
+import {
+  type CatalogLibrary,
+  libraryFollowUpRules,
+  librarySessions,
+  type ProcedureLists,
+  seedFollowUpRules,
+  seedProcedureCodes,
+  splitHead,
+  strictLines,
+} from "../procedure-codes.js"
 import { treatmentTemplate } from "../schema/clinical.js"
 
 /**
@@ -10,7 +26,8 @@ import { treatmentTemplate } from "../schema/clinical.js"
  * la pieza, si van en «Más usados» y si son la variante de una norma que solo
  * se ofrece donde tiene código; `seeds/biblioteca_codigos.csv`, el código de
  * cada uno en cada lista; `seeds/biblioteca_sesiones.csv`, las sesiones
- * habituales de los que suelen llevar más de una (ADR 0164). Lo que ya no está queda inactivo (las plantillas
+ * habituales de los que suelen llevar más de una (ADR 0164); `seeds/biblioteca_piezas.csv`,
+ * para qué piezas es cada uno que lo dice en su nombre (`libraryAnatomy`). Lo que ya no está queda inactivo (las plantillas
  * `cpms:` de antes); las filas se conservan para los servicios que las usan.
  */
 export const dentalLibrary: CatalogLibrary = {
@@ -94,6 +111,11 @@ export const dentalLibrary: CatalogLibrary = {
 
     const scopeKeys = templates.map((t) => t.key)
     const sessions = librarySessions("biblioteca_sesiones.csv", templateKeys)
+    const followUpRules = libraryFollowUpRules("biblioteca_controles.csv", templateKeys)
+    const anatomy = libraryAnatomy(
+      "biblioteca_piezas.csv",
+      new Map(templates.map((t) => [t.key, t.scope])),
+    )
     return {
       keys: scopeKeys,
       templates: templates.length,
@@ -102,6 +124,10 @@ export const dentalLibrary: CatalogLibrary = {
         for (const t of templates) {
           // Lo dental del tratamiento (caras y lo que deja en la pieza) va en
           // `dental_template_rule` (ADR 0079); cambiarlo también sube la versión.
+          // Su anatomía (para qué piezas es) va en la misma fila pero no entra en
+          // la comparación: como las sesiones habituales, es una ayuda al indicar
+          // y cambiarla no sube la versión.
+          const pieces = anatomy.get(t.key) ?? null
           const rule = sql`row(${t.min}::int, ${t.max}::int, ${t.leaves?.condition ?? null}::text, ${t.leaves?.variant ?? null}::text)::text`
           const storedRule = sql`coalesce((select row(r."surface_count_min", r."surface_count_max", r."leaves_condition", r."leaves_variant")::text
             from "dental_template_rule" r where r."template_id" = "treatment_template"."id"), row(null::int, null::int, null::text, null::text)::text)`
@@ -125,19 +151,28 @@ export const dentalLibrary: CatalogLibrary = {
                 (excluded."name", excluded."specialty", excluded."scope", ${rule})
               )::int`,
           )
-          if (t.min === null && t.max === null && !t.leaves) {
+          // La fila se conserva si tiene caras, lo que deja o solo su anatomía.
+          if (t.min === null && t.max === null && !t.leaves && !pieces) {
             await tx.execute(
               sql`delete from "dental_template_rule" where "template_id" = (select "id" from "treatment_template" where "key" = ${t.key})`,
             )
           } else {
+            // El arreglo va como literal de PostgreSQL: el `sql` de drizzle abriría uno de JS en varios parámetros.
+            const groups = pieces ? `{${pieces.groups.join(",")}}` : null
             await tx.execute(
-              sql`insert into "dental_template_rule" ("template_id", "surface_count_min", "surface_count_max", "leaves_condition", "leaves_variant")
-              select "id", ${t.min}, ${t.max}, ${t.leaves?.condition ?? null}, ${t.leaves?.variant ?? null} from "treatment_template" where "key" = ${t.key}
+              sql`insert into "dental_template_rule"
+                ("template_id", "surface_count_min", "surface_count_max", "leaves_condition", "leaves_variant", "tooth_groups", "dentition", "family")
+              select "id", ${t.min}, ${t.max}, ${t.leaves?.condition ?? null}, ${t.leaves?.variant ?? null},
+                ${groups}::text[], ${pieces?.dentition ?? null}, ${pieces?.family ?? null}
+              from "treatment_template" where "key" = ${t.key}
               on conflict ("template_id") do update set
                 "surface_count_min" = excluded."surface_count_min",
                 "surface_count_max" = excluded."surface_count_max",
                 "leaves_condition" = excluded."leaves_condition",
-                "leaves_variant" = excluded."leaves_variant"`,
+                "leaves_variant" = excluded."leaves_variant",
+                "tooth_groups" = excluded."tooth_groups",
+                "dentition" = excluded."dentition",
+                "family" = excluded."family"`,
             )
           }
         }
@@ -171,9 +206,60 @@ export const dentalLibrary: CatalogLibrary = {
         if (active?.count !== templates.length) {
           throw new Error(`Conciliación falló (templates): ${active?.count} frente a ${templates.length}`)
         }
+        await seedFollowUpRules(tx, "dental", followUpRules)
       },
     }
   },
+}
+
+/** Para qué piezas es un tratamiento de la biblioteca (`dental_template_rule`). */
+export interface LibraryAnatomy {
+  groups: ToothGroup[]
+  dentition: Dentition | null
+  family: string
+}
+
+const CSV_DENTITION: Record<string, Dentition | null> = {
+  "": null,
+  permanente: "permanent",
+  temporal: "deciduous",
+}
+
+/**
+ * La anatomía de la biblioteca: `<archivo>` con `template_key,groups,dentition,family`,
+ * solo los tratamientos que dicen en su nombre para qué piezas son (endodoncia
+ * anterior, bicúspide o posterior; resinas anterior o posterior; pulpectomía de
+ * deciduos). Los grupos van separados por `;` (`premolar;molar`), la dentición
+ * es `permanente`, `temporal` o vacía (las dos) y la familia une a los hermanos
+ * que se ofrecen uno por otro. Es explícita: «posterior» son los molares en una
+ * endodoncia y premolares y molares en una resina. Fail closed: una clave que
+ * no es de la biblioteca o no es de una pieza, un grupo o una dentición que no
+ * existen, o una clave repetida fallan antes de tocar la base.
+ */
+export function libraryAnatomy(
+  file: string,
+  scopes: ReadonlyMap<string, string>,
+): Map<string, LibraryAnatomy> {
+  const anatomy = new Map<string, LibraryAnatomy>()
+  for (const line of strictLines(file, "template_key,groups,dentition,family")) {
+    const [key, groupsRaw, dentitionRaw, family] = splitHead(line, 4)
+    const scope = key ? scopes.get(key) : undefined
+    if (!key || !scope)
+      throw new Error(`Anatomía de un tratamiento que no está en ${file}: ${line}`)
+    if (scope !== "tooth" && scope !== "surfaces")
+      throw new Error(`Anatomía de un tratamiento que no es de una pieza en ${file}: ${line}`)
+    const groups = (groupsRaw ?? "").split(";")
+    if (!groups.every(isToothGroup) || new Set(groups).size !== groups.length) {
+      throw new Error(`Grupos de piezas inválidos en ${file}: ${line}`)
+    }
+    if (!Object.hasOwn(CSV_DENTITION, dentitionRaw ?? ""))
+      throw new Error(`Dentición inválida en ${file}: ${line}`)
+    if (!family || !/^[a-z0-9-]+$/.test(family))
+      throw new Error(`Familia inválida en ${file}: ${line}`)
+    if (anatomy.has(key)) throw new Error(`Anatomía repetida en ${file}: ${key}`)
+    anatomy.set(key, { groups, dentition: CSV_DENTITION[dentitionRaw ?? ""] ?? null, family })
+  }
+  return anatomy
 }
 
 /** El catálogo de odentIA entero: las listas oficiales y su biblioteca, en una transacción. */

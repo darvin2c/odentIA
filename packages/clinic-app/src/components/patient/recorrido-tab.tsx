@@ -867,8 +867,11 @@ function reviseSchema(hasSite: boolean) {
     })
 }
 
-/** Revisar la indicación: la anterior queda reemplazada por la nueva. */
-function ReviseDrawer({
+/**
+ * Revisar la indicación: la anterior queda reemplazada por la nueva. La misma desde la ficha y desde
+ * el «Cambiar» de lo aceptado en la atención (QA del 10 nov, M8).
+ */
+export function ReviseDrawer({
   open,
   patientId,
   itemId,
@@ -937,7 +940,7 @@ function ReviseDrawer({
       {...surface}
       open={open}
       title="Revisar indicación"
-      description="La indicación anterior queda reemplazada y sus sesiones se conservan en la historia."
+      description="La indicación anterior queda reemplazada y sus sesiones se conservan en la historia. Lo nuevo pide su respuesta y su consentimiento otra vez."
       submitLabel="Registrar la revisión"
       onClose={() => {
         if (!surface.isSubmitting) onClose()

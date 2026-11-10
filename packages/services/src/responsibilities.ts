@@ -60,6 +60,16 @@ export async function patientAge(
   return { today, birthDate, adultSince, isMinor: adultSince !== null && adultSince > today }
 }
 
+/** Es menor de edad el día `today` (AAAA-MM-DD), con la regla de `patientAge`. Sin fecha, no. */
+export function isMinorOn(birthDate: string | Date | null | undefined, today: string): boolean {
+  if (!birthDate) return false
+  const day =
+    birthDate instanceof Date
+      ? birthDate.toISOString().slice(0, 10)
+      : String(birthDate).slice(0, 10)
+  return adulthoodDay(day) > today
+}
+
 /** Es menor de edad hoy, en la zona horaria de la clínica. La pantalla recibe esto del servidor. */
 export async function patientIsMinor(tx: Db, orgId: string, patientId: string): Promise<boolean> {
   return (await patientAge(tx, orgId, patientId)).isMinor

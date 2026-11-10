@@ -4,7 +4,7 @@ import { call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
-/** Los quince apartados de quien es dueña: el nombre de la lista es el título de su página. */
+/** Los dieciséis apartados de quien es dueña: el nombre de la lista es el título de su página. */
 const SECTIONS: Array<[string, string]> = [
   ["Datos de la clínica", "/settings"],
   ["Sedes", "/settings/branches"],
@@ -16,6 +16,7 @@ const SECTIONS: Array<[string, string]> = [
   ["Registro de pacientes", "/settings/patient-registration"],
   ["Portal del paciente", "/settings/patient-access"],
   ["Medios de pago y ticket", "/settings/payment-methods"],
+  ["Comisiones por profesional", "/settings/commissions"],
   ["Etapas de venta", "/settings/pipelines"],
   // Solo para quien ve Facturación (ADR 0065); la dueña la ve.
   ["Plan y pagos", "/settings/plan"],
@@ -75,6 +76,7 @@ test("configuración: lista por grupos, cada apartado con su nombre y direccione
   ])
   await expect(nav.getByRole("group", { name: "Ventas y cobros", exact: true }).getByRole("link")).toHaveText([
     "Medios de pago y ticket",
+    "Comisiones por profesional",
     "Etapas de venta",
   ])
 

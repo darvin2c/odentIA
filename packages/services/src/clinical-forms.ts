@@ -1,17 +1,22 @@
-import { type Db, withOrgContext } from "@odentia/db"
+import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import {
+  BUDGET_SIGN_DECLARATION,
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   type ConsentSections,
-  BUDGET_SIGN_DECLARATION,
-  clinicalProfileFor,
+  consentSectionsToText,
+  BUDGET_SIGNATURE_NOTE,
+  CONSENT_SIGNATURE_NOTES,
+  documentText,
   isLeftOut,
   LEFT_OUT_DECISIONS,
-  consentSectionsToText,
-  consentSignatureNote,
   normalizeDrugText,
   parseConsentSections,
+  type SuggestedConsentTemplate,
+  typedIdentityDocument,
 } from "@odentia/clinical"
+import { type Db, withOrgContext } from "@odentia/db"
+import { member, user } from "@odentia/db/schema/auth"
 import {
   diagnosisCatalog,
   encounter,
@@ -36,33 +41,44 @@ import {
   orgSpecialty,
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
-import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import { appointment } from "@odentia/db/schema/agenda"
-import { member, user } from "@odentia/db/schema/auth"
 import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
-import { foldedWordsMatch } from "./search-text.js"
 import { findOrgLocale } from "./locale.js"
-import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
-import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { requireCanAttend } from "./attending.js"
-import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
+import { assertAttending } from "./encounter-attending.js"
+import {
+  fieldsError,
+  invalidField,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
+import { findOrgCountry } from "./locale.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
+import { updatePersonIdentity } from "./people.js"
+import type { ProductSite, SiteColumns } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 import {
   assertStrokes,
   currentDrawnSignature,
   drawnSignatureAt,
   requireProfessionalSignature,
 } from "./professional-profiles.js"
-import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
+import {
+  patientIsMinor,
+  requireDecisionContact,
+  requireLinkedActiveContact,
+} from "./responsibilities.js"
+import { foldedWordsMatch } from "./search-text.js"
 import { createTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import type { ProductSite, SiteColumns } from "./product-hooks.js"
-import { productHooks } from "./products.js"
-import { assertAttending } from "./encounter-attending.js"
 
 /** El «dónde» del producto de la clínica (odentIA: piezas). */
 const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
@@ -1928,6 +1944,20 @@ export async function markConsentTemplateReviewed(
   return row
 }
 
+/** Si un tratamiento de la biblioteca pide ese consentimiento sugerido: por su familia o por su clave. */
+export function suggestedConsentFits(
+  suggestion: Pick<
+    SuggestedConsentTemplate,
+    "servicePrefixes" | "serviceFamilies" | "exceptPrefixes"
+  >,
+  libraryKey: string,
+  families: readonly string[],
+): boolean {
+  if (suggestion.exceptPrefixes?.some((prefix) => libraryKey.startsWith(prefix))) return false
+  if (families.some((family) => suggestion.serviceFamilies?.includes(family))) return true
+  return suggestion.servicePrefixes?.some((prefix) => libraryKey.startsWith(prefix)) ?? false
+}
+
 /**
  * Une servicios de la biblioteca a los consentimientos sugeridos que los piden
  * (`servicePrefixes`). Solo agrega: nunca quita lo que la clínica decidió, y un
@@ -1940,12 +1970,19 @@ export async function linkServicesToSuggestedConsents(
   only: { serviceIds?: string[]; templateKeys?: string[] } = {},
 ): Promise<void> {
   if (only.serviceIds?.length === 0 || only.templateKeys?.length === 0) return
-  const suggestions = (await productHooks(tx, orgId)).consentSuggestions.filter(
-    (suggestion) => suggestion.servicePrefixes?.length && (!only.templateKeys || only.templateKeys.includes(suggestion.key)),
+  const hooks = await productHooks(tx, orgId)
+  const suggestions = hooks.consentSuggestions.filter(
+    (suggestion) =>
+      (suggestion.servicePrefixes?.length || suggestion.serviceFamilies?.length) &&
+      (!only.templateKeys || only.templateKeys.includes(suggestion.key)),
   )
   if (suggestions.length === 0) return
   const services = await tx
-    .select({ id: serviceCatalog.id, libraryKey: treatmentTemplate.key })
+    .select({
+      id: serviceCatalog.id,
+      libraryKey: treatmentTemplate.key,
+      templateId: treatmentTemplate.id,
+    })
     .from(serviceCatalog)
     .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
     .where(
@@ -1961,11 +1998,22 @@ export async function linkServicesToSuggestedConsents(
     .from(consentTemplate)
     .where(eq(consentTemplate.organizationId, orgId))
   const keys = new Set(owned.map((row) => row.key))
+  const families = hooks.treatmentFamiliesOf
+    ? await hooks.treatmentFamiliesOf(tx, [
+        ...new Set(services.map((service) => service.templateId)),
+      ])
+    : new Map<string, string[]>()
   const links = suggestions
     .filter((suggestion) => keys.has(suggestion.key))
     .flatMap((suggestion) =>
       services
-        .filter((service) => suggestion.servicePrefixes?.some((prefix) => service.libraryKey.startsWith(prefix)))
+        .filter((service) =>
+          suggestedConsentFits(
+            suggestion,
+            service.libraryKey,
+            families.get(service.templateId) ?? [],
+          ),
+        )
         .map((service) => ({
           organizationId: orgId,
           templateKey: suggestion.key,
@@ -2003,6 +2051,15 @@ export async function ensureClinicConsents(
     created.push(await publishConsentTemplate(tx, orgId, actorUserId, draft.id))
   }
   await linkServicesToSuggestedConsents(tx, orgId, actorUserId, { templateKeys: created.map((row) => row.key) })
+  // La pulpectomía llega con su propio consentimiento (QA del 10 nov, M3): el vínculo con el de
+  // odontopediatría que puso la migración 0089 (sin autor) se quita solo donde ya pide el suyo, en
+  // el mismo paso, para que nunca quede sin ninguno. Lo que unió una persona no se toca.
+  if (created.some((row) => row.key === "pulpectomia"))
+    await tx.execute(sql`
+      delete from consent_template_service old
+      where old.organization_id = ${orgId} and old.template_key = 'odontopediatria' and old.created_by is null
+        and exists (select 1 from consent_template_service own where own.organization_id = old.organization_id
+          and own.template_key = 'pulpectomia' and own.service_id = old.service_id)`)
   return created
 }
 
@@ -2157,6 +2214,8 @@ export interface SignConsentInput {
   signatureData?: unknown
   /** La persona firmante confirmó haber comprendido la información. */
   comprehensionConfirmed: boolean
+  /** Lo firmó en su enlace y prefiere firmarlo de nuevo aquí: la firma del enlace queda en la historia. */
+  signAgain?: boolean
   /**
    * Trazo del profesional que informa (el actor). Opcional: confirma con su
    * perfil profesional, que ya es su firma (nombre y colegiatura), sin dibujar
@@ -2172,11 +2231,15 @@ export interface SignConsentInput {
   paperDocumentId?: string | null
 }
 
-/** Nivel real de la firma, siempre a la vista. */
+/**
+ * Cómo firmó, siempre a la vista: en la clínica, en papel o por enlace. El nivel legal de la
+ * firma («Firma electrónica simple», `signatureKindWords`) va en el PDF, no como advertencia
+ * al firmar (entrega 11).
+ */
 export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", string> = {
-  clinica: "Firma simple · en la clínica",
-  papel: "Firma simple · en papel",
-  enlace: "Firma simple · por enlace",
+  clinica: "Firma en la clínica",
+  papel: "Firma en papel",
+  enlace: "Firma por enlace",
 }
 
 /** `field`: el nombre del trazo en el cuerpo, para decir el rechazo junto a su recuadro. */
@@ -2213,7 +2276,7 @@ export async function signConsentDocument(
   actorUserId: string,
   documentId: string,
   input: SignConsentInput,
-): Promise<ConsentDocumentRow> {
+): Promise<ConsentDocumentRow & { signerDocNotice?: string }> {
   const [current] = await tx
     .select()
     .from(consentDocument)
@@ -2224,8 +2287,10 @@ export async function signConsentDocument(
   if (current.status !== "pendiente") {
     throw conflict("SIGNED", "El consentimiento ya no está pendiente")
   }
-  if (current.personSignedAt) {
-    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: infórmale y confírmalo en su atención")
+  // Lo firmado en su enlace se confirma; si la persona prefiere firmarlo de nuevo aquí, se firma en
+  // la clínica y la firma del enlace queda en la historia (consentimientos, 10 nov).
+  if (current.personSignedAt && input.signAgain !== true) {
+    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: confírmalo con la persona, o «Firmar de nuevo aquí»")
   }
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
@@ -2270,6 +2335,18 @@ export async function signConsentDocument(
       "Representante legal"
     if (!signerDoc) throw invalidField("signerDoc", "El representante necesita documento de identidad")
   }
+  const keptDocument =
+    input.signerKind === "representante"
+      ? await keepSignerDocument(
+          tx,
+          orgId,
+          actorUserId,
+          input.signerContactId,
+          signerName,
+          verified,
+          input.signerDoc,
+        )
+      : { saved: false, notice: null }
   const method = input.method ?? "clinica"
   if (method !== "clinica" && method !== "papel")
     throw validation("Método de firma inválido: en la clínica o en papel")
@@ -2368,9 +2445,12 @@ export async function signConsentDocument(
   ])
   await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
     signerKind: input.signerKind,
+    ...(current.personSignedAt ? { againOverLink: current.personSignedAt.toISOString() } : {}),
     minor,
     witness: Boolean(witnessName),
     method,
+    // El documento del representante, escrito al firmar, quedó en su ficha (`contact.updated`).
+    ...(keptDocument.saved ? { signerDocSaved: true } : {}),
   })
   // Si quien recabó la firma no es el autor, se avisa al autor del documento.
   if (row.authorUserId && row.authorUserId !== actorUserId) {
@@ -2382,7 +2462,62 @@ export async function signConsentDocument(
       actorUserId,
     })
   }
-  return row
+  return keptDocument.notice ? { ...row, signerDocNotice: keptDocument.notice } : row
+}
+
+/**
+ * El documento que se escribe al firmar como representante, porque su ficha no
+ * lo tenía (se registró sin él, PR 558): queda en su persona, la misma de todas
+ * partes (ADR 0001), con el rastro de quién lo escribió (`updatePersonIdentity`
+ * deja `contact.updated` con quien firma la atención). Si ya tiene otro, no se
+ * cambia y se avisa; si no se entiende el tipo o no pasa la regla del país, el
+ * consentimiento lo lleva igual (como siempre) y se avisa que no quedó en la
+ * ficha. Nada de esto frena la firma.
+ */
+async function keepSignerDocument(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  contactId: string,
+  name: string,
+  stored: { docType: string | null; docNumber: string | null },
+  written: string | null | undefined,
+): Promise<{ saved: boolean; notice: string | null }> {
+  const typed = written?.trim()
+  if (!typed) return { saved: false, notice: null }
+  const parsed = typedIdentityDocument(typed, await findOrgCountry(tx, orgId))
+  if (stored.docNumber) {
+    if (sameDocument(parsed?.docNumber ?? typed, stored.docNumber))
+      return { saved: false, notice: null }
+    return {
+      saved: false,
+      notice: `La ficha de ${name} ya tiene ${documentText(stored.docType, stored.docNumber)}: firmó con ese y el que escribiste no se guardó.`,
+    }
+  }
+  const notSaved = (why: string) => ({
+    saved: false,
+    notice: `El documento quedó en el consentimiento, pero no en la ficha de ${name}: ${why}`,
+  })
+  if (!parsed) return notSaved("escribe el tipo y el número en su ficha (p. ej. «DNI 45678912»).")
+  try {
+    // En su propio punto de guardado: si no pasa (otro ya lo tiene, no cumple la regla), la firma sigue.
+    await tx.transaction((inner) =>
+      // Solo si sigue sin documento: otra sesión que lo guardó entre tanto no se pisa (`STALE_DATA`).
+      updatePersonIdentity(
+        inner as Db,
+        orgId,
+        { userId: actorUserId },
+        contactId,
+        { docType: parsed.docType, docNumber: parsed.docNumber },
+        { docNumber: null },
+      ),
+    )
+    return { saved: true, notice: null }
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    const said = Object.values(error.fields ?? {})[0] ?? error.message
+    return notSaved(/[.!?]$/.test(said) ? said : `${said}.`)
+  }
 }
 
 /** Un documento escrito por la persona, comparado sin espacios, puntos ni guiones. */
@@ -2401,7 +2536,11 @@ export async function markConsentSentByLink(
   orgId: string,
   actorUserId: string,
   documentId: string,
-  options: { requestId?: string | null } = {},
+  /**
+   * `shown`: se le mostró en la clínica (código o enlace copiado) para firmarlo en su teléfono,
+   * sin enviarle ningún mensaje (consentimientos, 10 nov).
+   */
+  options: { requestId?: string | null; shown?: boolean } = {},
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -2440,8 +2579,9 @@ export async function markConsentSentByLink(
     fromStatus: "pendiente",
     toStatus: "enlace_enviado",
     actorUserId,
+    ...(options.shown ? { reason: "Se le mostró en la clínica para firmarlo en su teléfono, sin enviarle mensaje" } : {}),
   })
-  await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {
+  await audit(tx, orgId, actorUserId, options.shown ? "consent.shown_to_sign" : "consent.sent_to_sign", "consent_document", documentId, {
     ...(options.requestId ? { requestId: options.requestId } : {}),
   })
   return row
@@ -2640,9 +2780,10 @@ export async function confirmLinkSignedConsent(
   )
   if (attention.status !== "borrador")
     throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: confírmalo en su atención de hoy")
-  // Delante de la persona: una atención en borrador de hace semanas no sirve (S2).
-  if (!(await attentionIsToday(tx, orgId, attention)))
-    throw conflict("ENCOUNTER_NOT_TODAY", "Esa atención no es de hoy: confírmalo en su atención de hoy, con la persona delante")
+  // Delante de la persona, en la atención abierta en curso, sea del día que sea: la fecha en que se
+  // abrió la atención no prueba quién está; la constancia dice el día real en que se confirmó y a
+  // quién se informó (consentimientos, 10 nov: el cierre quedaba trabado sin salida).
+  const today = await attentionIsToday(tx, orgId, attention)
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const savedSignature = await currentDrawnSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -2670,7 +2811,11 @@ export async function confirmLinkSignedConsent(
       fromStatus: "pendiente",
       toStatus: "informado",
       actorUserId,
-      reason: `${informer.name} · ${informer.registration} · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}`,
+      // A quién se informó: quien firmó (el paciente o su representante); si viene otra persona, no
+      // se confirma (la pantalla lo dice antes de confirmar).
+      reason: `${informer.name} · ${informer.registration} · informó a ${current.signerName} (${current.signerKind}) · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}${
+        today ? "" : `, confirmado el ${await attentionDay(tx, orgId, now)} con la persona delante`
+      }`,
       createdAt: now,
     },
     {
@@ -3064,16 +3209,13 @@ export async function consentDiagnosisTitles(
 export async function getConsentSheetFrame(
   tx: Db,
   orgId: string,
-): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
-  const [profile] = await tx
-    .select({ country: orgProfile.countryCode })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
+): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string; linkSignatureNote: string }> {
   return {
     clinic: await loadDocumentLetterhead(tx, orgId),
     declaration: CONSENT_DECLARATION,
-    signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+    // Lo que lee al pie quien firma en la tablet, y en su enlace (la vista previa de Configuración).
+    signatureNote: CONSENT_SIGNATURE_NOTES.clinica,
+    linkSignatureNote: CONSENT_SIGNATURE_NOTES.enlace,
   }
 }
 
@@ -3086,7 +3228,11 @@ export async function getBudgetSignFrame(
   tx: Db,
   orgId: string,
 ): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
-  return { ...(await getConsentSheetFrame(tx, orgId)), declaration: BUDGET_SIGN_DECLARATION }
+  return {
+    clinic: await loadDocumentLetterhead(tx, orgId),
+    declaration: BUDGET_SIGN_DECLARATION,
+    signatureNote: BUDGET_SIGNATURE_NOTE,
+  }
 }
 
 export async function listConsentDocuments(
@@ -3280,6 +3426,11 @@ export interface ConsentNeed {
   diagnosisSystem: string | null
   /** Nombres de los servicios de la atención que lo piden; vacío en uno preparado a mano. */
   services: string[]
+  /**
+   * Lo pide algo que se hizo hoy (un procedimiento registrado en esta atención). Solo eso se pide
+   * al cerrar: lo traído y no hecho, o preparado para otro día, se firma el día que se haga.
+   */
+  doneToday: boolean
 }
 
 interface NeedSource {
@@ -3294,6 +3445,8 @@ interface NeedSource {
   whereShort: string | null
   planItemId: string | null
   diagnosis: { code: string; system: string | null } | null
+  /** Viene de un procedimiento registrado hoy, no de algo traído o indicado. */
+  done: boolean
 }
 
 /**
@@ -3406,6 +3559,7 @@ export async function getEncounterConsentNeeds(
       whereShort: site.words(proc, "short"),
       planItemId: proc.planItemId,
       diagnosis: proc.diagnosisCode ? { code: proc.diagnosisCode, system: proc.diagnosisSystem } : null,
+      done: true,
     })
   }
   for (const item of indicated) {
@@ -3421,6 +3575,7 @@ export async function getEncounterConsentNeeds(
       whereShort: site.words(item, "short"),
       planItemId: item.id,
       diagnosis: item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null,
+      done: false,
     })
   }
   const serviceIds = [...new Set(sources.map((source) => source.serviceId))]
@@ -3464,6 +3619,10 @@ export async function getEncounterConsentNeeds(
       diagnosisSystem: consentDocument.diagnosisSystem,
       templateId: consentDocument.templateId,
       personSignedAt: consentDocument.personSignedAt,
+      signedAt: consentDocument.signedAt,
+      // Lo firmado antes de «Cambiar» la pieza, el servicio o el diagnóstico ya no cuenta.
+      resetAt: sql<Date | null>`(select i.consent_reset_at from treatment_plan_item i
+        where i.organization_id = ${consentDocument.organizationId} and i.id = ${consentDocument.planItemId})`,
     })
     .from(consentDocument)
     .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
@@ -3478,6 +3637,12 @@ export async function getEncounterConsentNeeds(
       ),
     )
     .orderBy(asc(consentDocument.createdAt))
+    .then((rows) =>
+      rows.filter(
+        (doc) =>
+          !(doc.status === "firmado" && doc.resetAt && doc.signedAt && new Date(doc.signedAt) < new Date(doc.resetAt)),
+      ),
+    )
   const diagnoses = await tx
     .select({
       code: encounterDiagnosis.diagnosisCode,
@@ -3547,6 +3712,7 @@ export async function getEncounterConsentNeeds(
             diagnosisSystem: diagnosisFor(first)?.system ?? null,
           }),
       services: [...new Set(mine.map((source) => source.serviceName))],
+      doneToday: mine.some((source) => source.done),
     })
   }
   // Los pendientes que se prepararon a mano en esta atención también faltan al cerrar.
@@ -3570,6 +3736,7 @@ export async function getEncounterConsentNeeds(
       diagnosisCode: doc.diagnosisCode,
       diagnosisSystem: doc.diagnosisSystem,
       services: [],
+      doneToday: doc.planItemId ? sources.some((source) => source.done && source.planItemId === doc.planItemId) : false,
     })
   }
   return needs.sort((a, b) => NEED_RANK[a.status] - NEED_RANK[b.status])

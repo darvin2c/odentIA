@@ -54,6 +54,7 @@ import { z } from "zod"
 import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
 import { canAccess, canAccessAny, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
+import { searchFromHeader } from "./lib/search-header.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
 import { lockedRecordGuard } from "./lib/record-lock.js"
 import { createAccountRoute } from "./routes/account.js"
@@ -91,6 +92,7 @@ import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createHelpRoute } from "./routes/help.js"
 import { runService, validationError } from "./routes/helpers.js"
 import { createInventoryRoute } from "./routes/inventory.js"
+import { createOrdersRoute } from "./routes/orders.js"
 import { createLegalRoute } from "./routes/legal.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
@@ -128,6 +130,7 @@ import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webc
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
+import { createPushRoute } from "./routes/push.js"
 
 export interface AppDeps {
   auth: Auth
@@ -137,6 +140,8 @@ export interface AppDeps {
    * Las rutas clínicas siguen usando db + withOrgContext, nunca esta conexión.
    */
   ownerDb: Db
+  /** La clave pública VAPID de los avisos en el equipo; sin ella no se ofrecen. */
+  vapidPublicKey?: string
   /** Clave AES-256-GCM para configs de conexión (SECRETS_KEY). */
   secretsKey: Buffer
   storage: Storage
@@ -359,6 +364,8 @@ export function createApp(deps: AppDeps) {
   const app = new Hono()
 
   app.use("*", requestId())
+  // Lo buscado llega en una cabecera, no en la dirección (QA de la ficha del 10 nov, M4).
+  app.use("*", searchFromHeader())
   app.use(
     "*",
     cors({
@@ -685,7 +692,9 @@ export function createApp(deps: AppDeps) {
       isWebhook(c) ||
       c.req.method === "GET" ||
       c.req.method === "HEAD" ||
-      c.req.path.startsWith("/api/help/")
+      c.req.path.startsWith("/api/help/") ||
+      // Apagar los avisos en este equipo (también al cerrar sesión) vale siempre.
+      (c.req.method === "DELETE" && c.req.path === "/api/push/subscriptions")
     )
       return next()
     return requireSaasAccess(db, "operar")(c, next)
@@ -1126,9 +1135,11 @@ export function createApp(deps: AppDeps) {
   guarded.route("/search", createSearchRoute({ ...crmDeps, embedder: deps.embedder }))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
+  guarded.route("/push", createPushRoute({ ...crmDeps, vapidPublicKey: deps.vapidPublicKey }))
   guarded.route("/legal", createLegalRoute(crmDeps))
   guarded.route("/reports", createReportsRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
+  guarded.route("/orders", createOrdersRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route(
     "/help",

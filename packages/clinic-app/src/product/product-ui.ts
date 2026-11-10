@@ -16,7 +16,9 @@ import type {
   DictationSuggestion,
 } from "../components/patient/dictation-session"
 import type { ClosingCheck } from "../lib/encounters"
+import type { PatientAreaId } from "../lib/patient-areas"
 import type { EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "../lib/patients"
+import type { ServiceToothAnatomy, ToothAnatomySibling } from "../lib/services"
 
 /**
  * Lo que cada producto aporta a las pantallas comunes (ADR 0079): la ficha, la
@@ -71,6 +73,35 @@ export interface ProductUi {
   summary: ProductSummaryUi
   /** La receta: su lista y lo que revisa además de las alergias. */
   prescribing: ProductPrescribingUi
+  /**
+   * Los pedidos al taller o al laboratorio (ADR 0171; vistIA: los lentes). Sin
+   * ellos, la clínica no vende con pedido: «Pedidos» no está en el menú.
+   */
+  orders?: ProductOrdersUi
+}
+
+/** Lo que puede llevar un pedido: los mismos tipos que el servidor (`JOB_ORDER_LINE_KINDS`). */
+export type OrderLineKind = "montura" | "lunas" | "contacto" | "otro"
+
+/** Cómo vende el producto con pedido: sus palabras, lo que lleva y lo que se mide. */
+export interface ProductOrdersUi {
+  /** La acción de vender (vistIA: «Vender lentes»): el botón de la página y el título del cajón. */
+  sellLabel: string
+  /**
+   * Lo que se agrega a una venta, en el orden en que se ofrece. `fromInventory`:
+   * se busca entre lo que se vende y toma su nombre y su precio; si no, se
+   * escribe qué es y su precio.
+   */
+  lineKinds: ReadonlyArray<{ kind: OrderLineKind; label: string; fromInventory: boolean }>
+  /** Las medidas para montar (vistIA: la altura de cada ojo), opcionales, cada una en su unidad. */
+  fitting: ReadonlyArray<{ key: string; label: string; unit: string }>
+  /** Un ejemplo de qué es el pedido y de quién lo hace, para sus campos. */
+  titlePlaceholder: string
+  makerPlaceholder: string
+  /** Cómo se llama lo que se copia en el pedido (vistIA: «Receta»). */
+  referenceLabel: string
+  /** La copia guardada en el pedido, en líneas para leerla (vistIA: un ojo por línea); sin él, no se muestra. */
+  prescriptionLines?(snapshot: Record<string, unknown>): string[]
 }
 
 /**
@@ -333,6 +364,40 @@ export interface ProductServicesUi {
   kinds: ReadonlyArray<{ key: string; name: string }>
   /** Lo que deja el servicio al completarse (odentIA: «Deja en la pieza»); null si el producto no lo registra. */
   leaves: ProductLeavesUi | null
+  /**
+   * El aviso cuando un servicio es para otro grupo de piezas (odentIA: la
+   * endodoncia anterior en la 46), con el hermano que encaja; null si el
+   * producto no tiene anatomía.
+   */
+  toothFit: ProductToothFitUi | null
+}
+
+export interface ProductToothFitUi {
+  /**
+   * Avisa, sin frenar, si el servicio no es para ese lugar; si encaja o no
+   * tiene anatomía no pinta nada. Con `onUse`, ofrece el hermano que encaja.
+   */
+  Notice(props: ToothFitNoticeProps): ReactNode
+  /**
+   * Al buscar un servicio para un lugar, su orden: menor va antes (lo que encaja primero,
+   * lo que no tiene anatomía después y lo de otro grupo al final). Solo ordena.
+   */
+  rank(anatomy: ServiceToothAnatomy | null | undefined, place: number): number
+  /** El hermano que encaja en el lugar cuando el servicio no encaja; null si encaja o no hay. */
+  sibling(
+    anatomy: ServiceToothAnatomy | null | undefined,
+    place: number,
+  ): ToothAnatomySibling | null
+}
+
+export interface ToothFitNoticeProps {
+  service: { name: string; toothAnatomy?: ServiceToothAnatomy | null }
+  place: number
+  /** Cambiar al hermano que encaja; sin él solo se avisa. */
+  onUse?: (sibling: ToothAnatomySibling) => void
+  /** El diagnóstico del tratamiento: con necrosis, la endodoncia vital ofrece la no vital (B2). */
+  diagnosisCode?: string | null
+  pending?: boolean
 }
 
 export interface ProductLeavesUi {
@@ -394,10 +459,17 @@ export interface ProductDictationUi {
   corrections: { change: string; remove: string }
 }
 
-/** Una sección de Clínica que aporta el producto (odentIA: Odontograma y Periodontograma). */
+/** Una sección de la página que aporta el producto (odentIA: Odontograma y Periodontograma). */
 export interface ProductRecordSection {
   id: string
   label: string
+  /**
+   * La pestaña donde va y quién la ve. Sin ellos es clínica: en Clínica, después
+   * de Antecedentes, para quien lee la historia. Otra pestaña (vistIA: sus
+   * pedidos, en Cobros) la pone al final de las suyas.
+   */
+  area?: PatientAreaId
+  permission?: string | readonly string[]
   /** Va debajo de otra sección del producto: no suma una pestaña, se elige dentro de ella. */
   parent?: string
   /** Necesita la ficha cargada: la página la pide antes de mostrarla. */
@@ -538,7 +610,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
       budgetRequired: true,
       repeatingControls: false,
     },
-    services: { kinds: [], leaves: null },
+    services: { kinds: [], leaves: null, toothFit: null },
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },
     documents: {
       kind: null,

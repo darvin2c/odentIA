@@ -3,6 +3,7 @@ import { branch } from "@odentia/db/schema/org"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { addEncounterProcedure, finalizeEncounter } from "./encounters.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { acceptedTreatmentTotals, collectCharge, getAccountSummary, returnFromTicket, voidTicket } from "./payments.js"
 import { addPlanItem } from "./plan.js"
@@ -138,4 +139,28 @@ it("anular el ticket del adelanto lo deshace entero, y no se devuelve por partes
   const [totals] = await f.run((tx) => acceptedTreatmentTotals(tx, "org_a", f.patient.id))
   expect(totals).toMatchObject({ paidCents: 0, remainingCents: 120000, owingCents: 0 })
   expect(totals?.lines[0]?.toChargeCents).toBe(120000)
+})
+
+it("M7: con un adelanto, el cierre y la cuenta dicen lo que costó entero, no solo el resto (QA del 10 nov)", async () => {
+  const { f, cash, branchId, line } = await acceptedTreatment()
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      advanceCents: 30000,
+      advanceForBudgetItemId: line.id,
+      payments: [{ paymentMethodId: cash.id, amountCents: 30000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: line.planItemId }))
+  const done = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const charged = done.billing.lines.find((row) => row.status === "charged")
+  // Hoy se carga el resto, y la línea dice lo acordado y lo adelantado.
+  expect(charged).toMatchObject({ amountCents: 90000, agreedCents: 120000, advanceCents: 30000 })
+  const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.pendiente).toHaveLength(1)
+  expect(account.pendiente[0]).toMatchObject({ totalCents: 90000, paidCents: 0, saldoCents: 90000, advancePaidCents: 30000 })
+  // Nada se cobra dos veces: lo que debe es el resto.
+  expect(account.byCurrency[0]).toMatchObject({ saldo: 90000 })
 })

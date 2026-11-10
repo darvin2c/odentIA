@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
 import { encounter, patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
-import { consentDocument } from "@odentia/db/schema/clinical-forms"
+import { consentDocument, consentEvent } from "@odentia/db/schema/clinical-forms"
 import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
@@ -41,6 +41,7 @@ import {
   confirmLinkSignedConsent,
   createConsentDocument,
   listLinkSignedToConfirm,
+  signConsentDocument,
   createConsentTemplate,
   createFormTemplate,
   listConsentDocuments,
@@ -70,6 +71,7 @@ import {
   resendPersonalLink,
   sendConsentToSign,
   sendPersonalLink,
+  showPersonalLink,
   signPersonalLinkConsent,
   submitPersonalLinkData,
   submitPersonalLinkQuestionnaire,
@@ -471,8 +473,8 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     procedureRef: "Exodoncia de la pieza 38",
     diagnosis: "CIE-10 MINSA · K02.1 · Caries de la dentina",
     declaration: expect.stringMatching(/^He leído y comprendido/),
-    signatureWords: "Firma simple · por enlace",
-    signatureNote: expect.stringMatching(/^Firma electrónica simple/),
+    signatureWords: "Firma por enlace",
+    signatureNote: expect.stringMatching(/^Tu firma queda en la historia clínica/),
     patient: { name: "Lucía Fernández", chartNumber: expect.stringMatching(/^HC-\d{6}$/) },
     signer: { name: "Lucía Fernández", asRepresentative: false, documentLabel: "DNI" },
     minor: false,
@@ -527,16 +529,22 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     code: "CONFIRM_IN_ENCOUNTER",
     message: "Recarga la página: ahora se confirma dentro de su atención",
   })
-  // Una atención en borrador de hace semanas no sirve: se confirma con la persona delante, hoy (S2).
-  const [stale] = await ownerDb
-    .insert(encounter)
-    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Control", startedAt: new Date(Date.now() - 21 * 86_400_000) })
-    .returning({ id: encounter.id })
-  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: stale!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_NOT_TODAY" })
-  await ownerDb.delete(encounter).where(eq(encounter.id, stale!.id))
+  // Firmar en la tablet lo que ya firmó en su enlace pide decirlo: «Firmar de nuevo aquí».
+  await expect(
+    f.run((tx) =>
+      signConsentDocument(tx, ORG, f.actor, consent.id, {
+        signerKind: "paciente",
+        signerContactId: lucia.personId,
+        comprehensionConfirmed: true,
+        signatureData: { strokes: [[[0, 0], [10, 10]]] },
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "LINK_SIGNED" })
+  // La atención abierta en curso sirve sea del día que sea (aquí, de hace tres semanas): la
+  // constancia dice el día real y a quién se informó (consentimientos, 10 nov).
   const [attention] = await ownerDb
     .insert(encounter)
-    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia" })
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia", startedAt: new Date(Date.now() - 21 * 86_400_000) })
     .returning({ id: encounter.id })
   // La atención lo muestra arriba al abrirla, aunque se haya enviado desde Documentos: quién firmó, su documento abreviado, cuándo y qué.
   expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([
@@ -559,7 +567,7 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([])
   // La historia dice en qué atención.
   const history = await f.run((tx) => listConsentEvents(tx, ORG, consent.id))
-  expect(history.find((event) => event.toStatus === "informado")?.reason).toMatch(/en la atención del /)
+  expect(history.find((event) => event.toStatus === "informado")?.reason).toMatch(/informó a .+ \(paciente\) · en la atención del .+, confirmado el .+ con la persona delante/)
   expect(await pendingInSummary()).toBeUndefined()
 })
 
@@ -1209,6 +1217,32 @@ it("«Firma tu consentimiento»: abre directo la hoja, no dice nada clínico y, 
     await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, later.id))
     const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId }, { secretsKey: KEY }))
     expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).consents.map((row) => row.id)).toEqual([later.id, ana.consentId])
+  } finally {
+    configurePublicLinks(null)
+  }
+})
+
+it("«Firmar en su teléfono»: el código abre la hoja y queda en su enlace, sin enviarle ningún mensaje", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    const lucia = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId, { shown: true }))
+    const shown = await f.run((tx) => showPersonalLink(tx, ORG, f.actor, lucia.patientId, { secretsKey: KEY }, lucia.consentId))
+    expect(shown.url).toContain(`/pendientes?abre=firma&id=${lucia.consentId}&token=`)
+    const token = new URL(shown.url).searchParams.get("token")!
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, token))).consents.map((row) => row.id)).toEqual([lucia.consentId])
+    // No sale nada por su chat; la historia dice que se le mostró.
+    const out = await ownerDb
+      .select({ id: message.id })
+      .from(message)
+      .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out")))
+    expect(out).toEqual([])
+    const [event] = await ownerDb
+      .select({ reason: consentEvent.reason })
+      .from(consentEvent)
+      .where(and(eq(consentEvent.documentId, lucia.consentId), eq(consentEvent.toStatus, "enlace_enviado")))
+    expect(event?.reason).toMatch(/sin enviarle mensaje/)
   } finally {
     configurePublicLinks(null)
   }

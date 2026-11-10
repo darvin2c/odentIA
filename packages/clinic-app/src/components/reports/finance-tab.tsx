@@ -842,7 +842,7 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
           </p>
         ) : null}
         <p className="text-[13px] text-muted-foreground">
-          La barra de cada profesional mide lo que se cobró más lo que atendió sin cobrar, a la misma escala. «Se cobró» incluye lo cobrado en el periodo de atenciones anteriores. Los porcentajes se cambian en Finanzas › Comisiones, y pagar también se hace allí: el pago queda como gasto de comisiones, separado de los sueldos.
+          La barra de cada profesional mide lo que se cobró más lo que atendió sin cobrar, a la misma escala. «Se cobró» incluye lo cobrado en el periodo de atenciones anteriores. La comisión de cada profesional se fija en Configuración › Comisiones por profesional y se paga en Finanzas › Comisiones: el pago queda como gasto de comisiones, separado de los sueldos.
         </p>
       </>
     )
@@ -958,8 +958,9 @@ function PayablesCard({ data }: { data: ReportFinance }) {
   const canInventory = usePermission("inventory.read")
   const { commissions, purchases, salesTax } = data.payables
   const fixed = data.payables.fixed ?? { cents: 0, count: 0 }
+  const invoices = data.payables.invoices ?? { cents: 0, count: 0, overdueCents: 0 }
   const taxName = data.taxName ?? "Impuesto"
-  const total = commissions.cents + purchases.cents + salesTax.cents + fixed.cents
+  const total = commissions.cents + purchases.cents + salesTax.cents + fixed.cents + invoices.cents
   const daysSince = purchases.oldestReceivedAt ? Math.max(0, Math.floor((new Date(data.period.end).getTime() - new Date(purchases.oldestReceivedAt).getTime()) / 86_400_000)) : null
   return (
     <ReportCard title="Lo que debes">
@@ -973,7 +974,8 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             { key: "comisiones", label: "Comisiones", value: commissions.cents, tone: "series-2" },
             { key: "compras", label: "Compras", value: purchases.cents, tone: "series-3" },
             ...(salesTax.cents > 0 ? [{ key: "impuesto", label: taxName, value: salesTax.cents, tone: "muted" as const }] : []),
-            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Gastos fijos", value: fixed.cents, tone: "series-1" as const }] : []),
+            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Lo que se repite", value: fixed.cents, tone: "series-1" as const }] : []),
+            ...(invoices.cents > 0 ? [{ key: "facturas", label: "Facturas", value: invoices.cents, tone: "muted" as const }] : []),
           ]}
         />
       ) : null}
@@ -1010,10 +1012,26 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             ) : null}
           </span>
         </li>
+        {invoices.cents > 0 ? (
+          <li className="flex min-w-0 flex-col">
+            <span className="flex justify-between gap-2">
+              <strong>Facturas por pagar</strong>
+              <strong className="tabular-nums">{invoices.byCurrency ? amountsWords(invoices.byCurrency, locale) : money(invoices.cents)}</strong>
+            </span>
+            <span className="text-[13px] text-muted-foreground">
+              {invoices.byCurrency ? `En total, unos ${money(invoices.cents)} al cambio de hoy. ` : ""}
+              {invoices.count === 1 ? "1 factura" : `${invoices.count} facturas`}
+              {invoices.overdueCents > 0 ? `, ${money(invoices.overdueCents)} vencido` : ""} ·{" "}
+              <Link to="/finance" search={{ tab: "gastos" }} className="font-bold text-primary-soft-foreground">
+                Pagar en Gastos
+              </Link>
+            </span>
+          </li>
+        ) : null}
         {fixed.cents > 0 ? (
           <li className="flex min-w-0 flex-col">
             <span className="flex justify-between gap-2">
-              <strong>Gastos fijos vencidos</strong>
+              <strong>Lo que se repite, vencido</strong>
               <strong className="tabular-nums">{money(fixed.cents)}</strong>
             </span>
             <span className="text-[13px] text-muted-foreground">

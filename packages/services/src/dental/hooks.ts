@@ -7,7 +7,12 @@ import {
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { encounterPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import {
+  clinicalFollowUp,
+  encounterPlanItem,
+  serviceCatalog,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import {
   dentalTemplateRule,
   odontogramAssessment,
@@ -282,6 +287,7 @@ export const dentalHooks: ProductHooks = {
     tx,
     { orgId, actorUserId, patientId, encounterId, planItemId, reason, at },
   ) {
+    // Los controles que dejó al terminar los retira `undoFinishControls`, en lo común (B5).
     await voidLeftFindings(tx, orgId, actorUserId, patientId, encounterId, planItemId, reason, at)
   },
 
@@ -332,6 +338,25 @@ export const dentalHooks: ProductHooks = {
 
   planPhases: TREATMENT_PHASES,
   phaseFor: (kind) => phaseForKind(kind),
+  async treatmentFamiliesOf(tx, templateIds) {
+    if (templateIds.length === 0) return new Map()
+    const rows = await tx
+      .select({
+        templateId: dentalTemplateRule.templateId,
+        leaves: dentalTemplateRule.leavesCondition,
+        family: dentalTemplateRule.family,
+      })
+      .from(dentalTemplateRule)
+      .where(inArray(dentalTemplateRule.templateId, [...templateIds]))
+    return new Map(
+      rows.map((row) => [
+        row.templateId,
+        [row.leaves, row.family].filter((tag): tag is string => !!tag),
+      ]),
+    )
+  },
+  // Una consulta, una evaluación o una radiografía no piden «Falta otra sesión».
+  oneOffKinds: ["diagnostico"],
   phaseWords: (phase) =>
     TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
 

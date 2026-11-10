@@ -15,7 +15,7 @@ import { allergyTitle } from "../../lib/allergies"
 import { clinicToday } from "../../lib/inventory"
 import { asaLabel, type Encounter, fetchPatientHealth, isCurrentMedication, type PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
-import { HealthReviewNotice } from "./health-review-notice"
+import { askWhom, HealthReviewNotice } from "./health-review-notice"
 
 /** Respuesta en palabras: «Sí», la lista unida o el texto tal cual. */
 function answerText(value: unknown): string {
@@ -144,6 +144,7 @@ export function EncounterHealthReview({
       patientName={patient.patient.displayName}
       health={health.data.data}
       disabled={disabled}
+      askTo={askWhom(patient.contacts)}
     />
   )
 }

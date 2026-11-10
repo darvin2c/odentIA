@@ -384,6 +384,9 @@ export function attentionOf(kind: PlanNextKind, lines: ReadonlySet<string>): Per
     case "continuar":
       return "persona"
     case "cerrar":
+    case "sin_objeto":
+    case "suspendido":
+    case "reservado":
     case "ninguno":
       return "nadie"
   }
@@ -1064,6 +1067,62 @@ export async function findPersonByDocument(
     )
     .limit(1)
   return row?.id ?? null
+}
+
+/**
+ * Quien ya tiene ese documento, visto desde fuera de la clínica (el registro
+ * en línea, un enlace): un documento guardado sin su país emisor, como los de
+ * las fichas de antes, es el mismo documento; una persona de prueba nunca es
+ * nadie (ADR 0094). Con los dos, el guardado sin país pierde.
+ */
+export async function findRealPersonByDocument(
+  tx: Db,
+  orgId: string,
+  doc: { docType?: string | null; docNumber?: string | null; docCountry?: string | null },
+): Promise<string | null> {
+  if (!doc.docNumber) return null
+  const [row] = await tx
+    .select({ id: contact.id })
+    .from(contact)
+    .where(
+      and(
+        eq(contact.organizationId, orgId),
+        eq(contact.docNumber, doc.docNumber),
+        doc.docType ? eq(contact.docType, doc.docType) : sql`${contact.docType} is null`,
+        doc.docCountry ? sql`(${contact.docCountry} = ${doc.docCountry} or ${contact.docCountry} is null)` : sql`${contact.docCountry} is null`,
+        sql`not ${contact.isTest}`,
+      ),
+    )
+    .orderBy(sql`${contact.docCountry} is null`)
+    .limit(1)
+  return row?.id ?? null
+}
+
+/**
+ * Un documento guardado en una persona de prueba no es de nadie (ADR 0094):
+ * cuando una persona real lo trae, la prueba lo suelta, para que no le impida
+ * registrarse ni la confunda con ella. Nunca a la propia persona que se registra.
+ */
+export async function releaseTestDocument(
+  tx: Db,
+  orgId: string,
+  doc: { docType?: string | null; docNumber?: string | null; docCountry?: string | null },
+  exceptContactId?: string | null,
+): Promise<void> {
+  if (!doc.docNumber) return
+  await tx
+    .update(contact)
+    .set({ docType: null, docNumber: null, docCountry: null })
+    .where(
+      and(
+        eq(contact.organizationId, orgId),
+        eq(contact.isTest, true),
+        eq(contact.docNumber, doc.docNumber),
+        doc.docType ? eq(contact.docType, doc.docType) : sql`${contact.docType} is null`,
+        doc.docCountry ? eq(contact.docCountry, doc.docCountry) : sql`${contact.docCountry} is null`,
+        ...(exceptContactId ? [sql`${contact.id} <> ${exceptContactId}`] : []),
+      ),
+    )
 }
 
 /**

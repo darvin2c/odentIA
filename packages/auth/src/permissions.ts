@@ -38,11 +38,23 @@
  * Rol o permiso desconocido siempre deniega, incluso para owner/admin.
  */
 
-import { type ClinicalProduct, productWords } from "@odentia/clinical";
+import { BASE_PRODUCT, type ClinicalProduct, productWords } from "@odentia/clinical";
 
 /** Roles de membresía de la organización. */
-export const ORG_ROLES = ["owner", "admin", "reception", "clinician", "cashier", "member"] as const;
+export const ORG_ROLES = ["owner", "admin", "reception", "clinician", "cashier", "sales", "workshop", "member"] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
+
+/**
+ * Los roles de cada producto (ADR 0171): Ventas y Taller son de vistIA, donde
+ * quien vende también cobra y agenda, y el taller solo ve los pedidos. Un mapa
+ * completo, así un producto nuevo dice los suyos.
+ */
+const BASE_ROLES: readonly OrgRole[] = ["owner", "admin", "reception", "clinician", "cashier", "member"];
+export const PRODUCT_ROLES: Record<ClinicalProduct, readonly OrgRole[]> = {
+  dental: BASE_ROLES,
+  medical: BASE_ROLES,
+  optical: ["owner", "admin", "reception", "clinician", "cashier", "sales", "workshop", "member"],
+};
 
 /** Dominios con permisos `.read`/`.write`. */
 export const PERMISSION_DOMAINS = [
@@ -60,6 +72,8 @@ export const PERMISSION_DOMAINS = [
   "settings",
   "audit",
   "agent",
+  // El pedido al taller o al laboratorio (ADR 0171).
+  "orders",
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 export type Permission =
@@ -76,7 +90,9 @@ export type Permission =
   | "tasks.all"
   | "catalog.read"
   | "inventory.stock"
-  | "inventory.receive";
+  | "inventory.receive"
+  | "clinical.prescription"
+  | "orders.prescription";
 
 /** Etiquetas en español para la UI de miembros. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
@@ -85,6 +101,8 @@ export const ROLE_LABELS: Record<OrgRole, string> = {
   reception: "Recepción",
   clinician: "Odontólogo",
   cashier: "Caja",
+  sales: "Ventas",
+  workshop: "Taller",
   member: "Miembro",
 };
 
@@ -104,6 +122,9 @@ export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
     "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve el presupuesto como lo recibe la persona, lo envía, anota su respuesta y agenda lo aceptado, sin cambiar precios. Ve las alergias del paciente y sube la tomografía que trae. En Inventario ve lo que hay sin precios, recibe lo que llega y registra lo que se usa fuera de una atención. No ve la historia clínica, la caja ni la configuración del agente.",
   clinician: "Pacientes, historia clínica, presupuestos de lo que indicó, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
   cashier: "Ve a los pacientes, lleva la caja, registra la respuesta a los presupuestos y ve las tareas. Sin historia clínica ni agenda.",
+  sales:
+    "Atiende el mostrador: registra a los clientes, lleva la agenda, las conversaciones y las tareas, vende y cobra, ve el inventario con precios y los pedidos, y ve la receta de lentes vigente sin el resto de la historia clínica.",
+  workshop: "Ve los pedidos con sus medidas y marca cómo van. Nada más de la clínica.",
   member: "Acceso mínimo: solo ve las tareas.",
 };
 
@@ -127,6 +148,10 @@ const ALL_PERMISSIONS: Permission[] = [
   "catalog.read",
   "inventory.stock",
   "inventory.receive",
+  // La receta de lentes vigente, sin el resto de la historia (Ventas en vistIA).
+  "clinical.prescription",
+  // La copia de la receta en el pedido, para hacerlo (Taller en vistIA, ADR 0171).
+  "orders.prescription",
 ];
 
 /**
@@ -161,6 +186,8 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     // registra lo que se usa fuera de una atención. Pedir, contar y ajustar no.
     "inventory.stock",
     "inventory.receive",
+    // Ve cómo va el pedido de una persona («¿ya están mis lentes?»), sin cobrarlo.
+    "orders.read",
   ],
   clinician: [
     "patients.read",
@@ -179,6 +206,8 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "conversations.topics",
     "tasks.read",
     "tasks.write",
+    // Ve el pedido que se hizo con su receta y cómo va.
+    "orders.read",
   ],
   cashier: [
     "patients.read",
@@ -192,7 +221,41 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "tasks.write",
     // Responde los temas de pagos que le pasa Sofi, desde Inicio, sin ver la Bandeja (decisión 3 del pulido).
     "conversations.topics",
+    // Ve los pedidos y entrega lo que está listo, con el cobro del saldo.
+    "orders.read",
+    "orders.write",
   ],
+  // Ventas (vistIA): recepción y caja juntas, con el inventario con precios, los
+  // pedidos y la receta de lentes vigente; nunca la historia clínica.
+  sales: [
+    "patients.read",
+    "patients.write",
+    "appointments.read",
+    "appointments.write",
+    "crm.read",
+    "crm.write",
+    "conversations.read",
+    "conversations.write",
+    "conversations.topics",
+    "tasks.read",
+    "tasks.write",
+    "agent.decide",
+    "clinical.alerts",
+    "clinical.prescription",
+    "catalog.read",
+    "finance.read",
+    "finance.write",
+    "budgets.read",
+    "budgets.send",
+    "budgets.decide",
+    "inventory.read",
+    "inventory.stock",
+    "inventory.receive",
+    "orders.read",
+    "orders.write",
+  ],
+  // Taller (vistIA): los pedidos con sus medidas y cómo van; nada más.
+  workshop: ["orders.read", "orders.write", "orders.prescription", "tasks.read", "tasks.write"],
   member: ["tasks.read"],
 };
 
@@ -215,7 +278,9 @@ function isPermission(permission: string): permission is Permission {
     permission === "tasks.all" ||
     permission === "catalog.read" ||
     permission === "inventory.stock" ||
-    permission === "inventory.receive"
+    permission === "inventory.receive" ||
+    permission === "clinical.prescription" ||
+    permission === "orders.prescription"
   ) return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;
@@ -270,11 +335,12 @@ export function seesBilling(role: string): boolean {
   return normalized === "owner" || normalized === "admin";
 }
 
-/** Roles que `memberRole` puede asignar a otros (sin escalada propia). */
-export function assignableRoles(memberRole: string): OrgRole[] {
+/** Roles que `memberRole` puede asignar a otros (sin escalada propia), entre los del producto de la clínica. */
+export function assignableRoles(memberRole: string, product: ClinicalProduct = BASE_PRODUCT): OrgRole[] {
   const normalized = normalizeRole(memberRole);
-  if (normalized === "owner") return [...ORG_ROLES];
-  if (normalized === "admin") return ORG_ROLES.filter((role) => role !== "owner");
+  const roles = PRODUCT_ROLES[product];
+  if (normalized === "owner") return [...roles];
+  if (normalized === "admin") return roles.filter((role) => role !== "owner");
   return [];
 }
 
@@ -313,9 +379,14 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // Con precios (`inventory.read`) o sin ellos (`inventory.stock`, recepción).
   { prefix: "/inventory", permissions: ["inventory.read", "inventory.stock"] },
   { prefix: "/reports", permissions: ["reports.read"] },
+  // Los pedidos al taller o al laboratorio (ADR 0171).
+  { prefix: "/orders", permissions: ["orders.read"] },
   // Regla específica antes de la genérica: la auditoría vive bajo Configuración
   // pero la consulta quien tiene `audit.read`.
   { prefix: "/settings/audit", permissions: ["audit.read"] },
+  // Regla específica antes de la genérica: la comisión de cada profesional la
+  // fija quien administra las comisiones, no quien configura la clínica.
+  { prefix: "/settings/commissions", permissions: ["commissions.write"] },
   // Regla específica antes de la genérica: las aprobaciones operativas las
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/pendientes", permissions: ["agent.read", "agent.decide"] },

@@ -30,11 +30,14 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 
 | Qué llega | Mesa | Lienzo | QA antes de entregar |
 |---|---|---|---|
-| Lienzo aprobado | Las cinco voces, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está | Las cinco voces |
-| Función nueva que cambia una pantalla o un recorrido | Las cinco voces | Si hay más de una forma razonable | Las cinco voces |
-| Función pequeña dentro de un patrón que ya existe | Diseño UX, novato y auditor | No | Novato, desarrollo y diseño UX |
-| Error | Solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No | Desarrollo y las voces a las que afecte |
-| Cambio interno, sin efecto visible | Ninguna | No | Desarrollo |
+| Una entrega que una ronda de `odentia-qa` dejó lista (acta y lienzo aprobados) | Sin mesa: ya la tuvo. Solo se comprueba que `main` no cambió lo que el acta da por hecho | Ya está | Las voces del acta |
+| Lienzo aprobado | Completa, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está | Las cinco voces |
+| Función nueva que cambia una pantalla o un recorrido | Completa | Si hay más de una forma razonable | Las cinco voces |
+| Función pequeña dentro de un patrón que ya existe, o mover algo de lugar | Corta: quien hace la tarea (el novato en su rol) y desarrollo | No | Novato, desarrollo y diseño UX |
+| Error | Corta, solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No | Desarrollo y las voces a las que afecte |
+| Cambio interno, sin efecto visible | Sin mesa | No | Desarrollo |
+
+Los tamaños de la mesa están en `.claude/skills/odentia-qa/references/mesa.md`. Cualquier cambio sube de tamaño si toca dinero, firmas, datos clínicos o permisos, o si lo va a ver otro rol.
 
 Las voces son las de `.claude/skills/odentia-qa/references/voces.md`. Clínica entra siempre que el cambio toque datos o decisiones clínicas, en la mesa y en la QA, con el catálogo de procesos de su producto.
 
@@ -46,22 +49,18 @@ Cada etapa aplica solo si el cambio la necesita; la que se salta se dice en el P
 
 ### 1. La mesa
 
-Las voces de `odentia-qa` critican el cambio por separado, antes de dibujar o programar, cada una con su método «en la mesa» de `.claude/skills/odentia-qa/references/voces.md`. Sirve para encontrar a tiempo lo que sería caro corregir después, no para aprobar: una voz simulada no es una clínica real, y lo que diga la mesa nunca se presenta como evidencia. Para buscar errores en código ya escrito, la mesa no rinde más que un solo revisor: eso es la etapa 6.
+Las voces de `odentia-qa` recorren el cambio antes de dibujar o programar. El proceso entero está en `.claude/skills/odentia-qa/references/mesa.md` y se sigue desde ahí; el método de cada voz, en `voces.md`. Sirve para encontrar a tiempo lo que sería caro corregir después, no para aprobar: una voz simulada no es una clínica real, y lo que diga la mesa nunca se presenta como evidencia. Para buscar errores en código ya escrito, la mesa no rinde más que un solo revisor: eso es la etapa 6.
 
-1. **Ficha.** Cada voz recibe la suya (actor, tarea y resultado observable; de dónde viene; a qué producto afecta; lo ya decidido, que no se reabre) y su apartado del archivo de voces entero, con «Para todas», no un resumen. Clínica recibe además el catálogo de su producto, `comunes.md` y la lista de procesos que el cambio toca, y barre el cambio buscando flujos que el catálogo no tiene. El novato recibe solo lo que vería la persona.
-2. **Cada voz es un subagente aparte**, sin ver a las otras. Hay un tope de subagentes a la vez: si la mesa corre junto a otros trabajos largos, se lanzan las voces cuando haya lugar, sin reemplazarlas escribiéndolas seguidas.
-3. **Reunir.** Lo que las voces afirman del código y los permisos se comprueba en el código, porque pueden equivocarse con mucha seguridad. Si dos voces chocan (clínica pide un campo que el novato quitaría), hay una sola ronda de respuesta entre esas dos. Se decide en este orden: seguridad clínica y permisos primero, después lo más simple que cumpla. Un problema real pesa más que uno hipotético. Lo que siga dependiendo del producto va al usuario, con una recomendación.
-4. **El acta.** Se le muestra al usuario, en lo posible en menos de 8 líneas, y va como tablero si hay lienzo y en «Decisiones y límites que quedan» del PR:
+En corto:
 
-```markdown
-**La mesa**
-- **Se queda:** …
-- **Se quita:** … (por qué)
-- **Cambia:** …
-- **Procesos clínicos que toca:** … (con lo que mejora o se rompe en cada uno)
-- **Por confirmar con una clínica real:** …
-- **Para tu decisión:** … (solo si hay; con recomendación)
-```
+1. **El moderador** es esta sesión. Lee el código del área, recorre el caso principal en la pantalla de hoy, decide el tamaño de la mesa (sin mesa, corta o completa) y el modelo de cada voz, guarda los pendientes conocidos y arma una ficha neutra por voz.
+2. **Primera vuelta, el problema:** quienes viven la tarea la recorren en la pantalla de hoy, con sus propios casos. Sale el banco de casos.
+3. **La propuesta:** diseño UX arma una o dos formas de resolverlo, o es el lienzo.
+4. **Segunda vuelta:** cada voz recorre los casos con la propuesta puesta y contesta su pregunta. Nadie opina sin caso.
+5. **Comprobar y cruzar:** lo que se afirma del código se comprueba; dos voces que chocan se leen una vez; se cruza con los pendientes guardados. Lo que dependa del producto va al usuario, con una recomendación.
+6. **El acta**, con el formato de `mesa.md`: lo que se queda, se quita y cambia, y los casos con su criterio. Se le muestra al usuario, va como tablero si hay lienzo y en «Decisiones y límites que quedan» del PR.
+
+No se programa hasta cerrar el acta. Implementar sigue sus puntos, y la QA antes de entregar recorre sus casos.
 
 ### 2. El lienzo
 
@@ -91,7 +90,7 @@ Lo que va en el mismo cambio:
 
 | Si cambia | Va junto |
 |---|---|
-| Una pantalla, un botón o un permiso | La guía de Ariadna (`packages/services/src/help-guide.ts` y su variante médica) |
+| Una pantalla, un botón o un permiso | La guía de la Ayuda (`packages/services/src/help-guide.ts` y el `help.ts` de cada producto), con lo que el acta dice en «En la Ayuda». La QA antes de entregar le pregunta y comprueba la respuesta |
 | Una pantalla o entidad nueva | La demo (`seed-demo.ts`, o `seed-common.ts` si sirve a los dos) |
 | Una composición compartida | Su story |
 | Tablas o reglas de la base | `pnpm db:generate` o una migración nueva, con su `GRANT` y RLS (`packages/db/AGENTS.md`) |
@@ -124,7 +123,7 @@ Corregir lo real y repetir las pruebas de lo que cambió. Lo que se decide no co
 
 ### 7. La QA antes de entregar
 
-Siempre, también en un cambio chico o interno: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 7 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado.
+Siempre, también en un cambio chico o interno: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 8 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado, recorre cada caso del acta y marca su criterio; el PR los lista con su resultado. Después el moderador anota cómo rindió la mesa («La mesa aprende», en `mesa.md`).
 
 Quien implementa también sigue «Implementar y comprobar» de `odentia-ux` (entrada, acción, respuesta y recuperación; escritorio y 390 px; teclado; rechazo del servidor si toca permisos), pero eso no reemplaza a las voces: quien escribió el cambio no ve lo que dio por hecho.
 
@@ -141,7 +140,7 @@ Si no se pudo abrir la pantalla, la QA lo dice y el PR lo lleva como límite. Un
 
 Aplica si cambia lo que un agente lee o puede hacer: prompt, herramientas, camino o modelo. Se mide al final, sobre el código ya revisado y pasado por la QA, porque cuesta y cualquier cambio posterior lo invalida. Si solo cambia cuándo corre o algo a su alrededor, se juzga por sus pruebas y el PR explica por qué.
 
-- Sofi: auditoría al azar con `packages/agent/src/auditoria-masiva.ts`, con los mismos casos contra `main` y en los dos productos, y las dos versiones calificadas por un solo juez.
+- Sofi: auditoría al azar con `packages/agent/src/auditoria-masiva.ts`, con los mismos casos contra `main` y en cada producto que cambia (`PRODUCTO=odentia|latidia|vistia`; los pedidos de vistIA, con `PEDIDOS=1`), y las dos versiones calificadas por un solo juez.
 - Argos, Clío, el modelo de decisión y Ariadna: el `eval:*` o banco que nombra la regla en `packages/agent/AGENTS.md` o `packages/services/AGENTS.md`.
 - Antes de gastar, comprobar que la medición puede ver este error. El juez de la auditoría, por ejemplo, no juzga horarios: un error de horarios se mide con casos propios, y la auditoría solo dice si el cambio hace daño.
 - Comprobar que el camino cambiado corrió, con una línea que lo cuente. Si no corrió, la medición no dice nada.
@@ -161,7 +160,7 @@ Título: `tipo(scope): lo que cambia para la persona`. Cuerpo en palabras simple
 ## Al desplegar
 ```
 
-«Cómo se probó» dice lo ejecutado y lo que no, con el resumen de la QA antes de entregar. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa o la QA como prueba de que una clínica real lo encuentre fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
+«Cómo se probó» dice lo ejecutado y lo que no, con el resumen de la QA antes de entregar y lo que contestó la Ayuda sobre lo nuevo. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa o la QA como prueba de que una clínica real lo encuentre fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
 
 Esperar el CI con `gh pr checks --watch`. Si falla, leer el registro y corregir la causa.
 
@@ -178,6 +177,7 @@ Con todo verde, enviar este resumen y esperar:
 - **Se quitó:** <lo que la mesa o la simplificación sacaron>
 - **Se comprobó:** <pruebas, CI>
 - **La QA:** <voces que entraron, qué encontró, qué se corrigió y qué verificó en pantalla; estado de los procesos clínicos que toca>
+- **La Ayuda:** <qué se le preguntó y si contestó bien, o por qué no aplica>
 - **No se comprobó:** <lo que falta, sin suavizar>
 - **Agentes:** <resultado frente a la versión anterior, o por qué no aplica>
 - **Al desplegar:** <migración y pasos a mano, o nada>

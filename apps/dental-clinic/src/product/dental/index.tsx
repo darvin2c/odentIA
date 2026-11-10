@@ -1,5 +1,13 @@
+import type {
+  PrescribingRulesUi,
+  ProductSiteUi,
+  ProductUi,
+} from "@odentia/clinic-app/product/product-ui"
 import { DENTAL_IMAGING_TYPES, DENTAL_MEDICATION_CATALOG } from "@odentia/clinical"
 import {
+  anatomyFitRank,
+  anatomyFits,
+  anatomySibling,
   conditionLabel,
   dentalProfileFor,
   FDI_ADULT,
@@ -7,21 +15,26 @@ import {
   isValidTooth,
   surfaceLabel,
   surfacesForTooth,
-  toothForPatient,
   TREATMENT_KINDS,
   TREATMENT_PHASE_LABELS,
   TREATMENT_PHASES,
   type TreatmentPhase,
+  toothForPatient,
   variantLabel,
 } from "@odentia/dental"
 import { FindingChoices, PlanSiteChoices } from "../../components/dental/dictation-finding-choices"
 import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
+import {
+  OdontogramLoading,
+  OdontogramSkeleton,
+  PeriodontogramLoading,
+  PeriodontogramSkeleton,
+} from "../../components/dental/odontogram-skeleton"
 import { useSignedOdontogramPapers } from "../../components/dental/signed-odontogram-papers"
+import { ToothFitNotice, toothAnatomyOf } from "../../components/dental/tooth-fit-notice"
 import { useActiveFindings } from "../../lib/dental/use-odontogram"
-import type { PrescribingRulesUi, ProductSiteUi, ProductUi } from "@odentia/clinic-app/product/product-ui"
 import { dentalEncounter } from "./encounter"
 import { dentalHealth } from "./health"
-import { OdontogramLoading, OdontogramSkeleton, PeriodontogramLoading, PeriodontogramSkeleton } from "../../components/dental/odontogram-skeleton"
 import { lazyPart } from "./lazy-part"
 
 const OdontogramaTab = lazyPart(() => import("../../components/dental/odontograma-tab").then((m) => m.OdontogramaTab), <OdontogramLoading />)
@@ -162,6 +175,20 @@ export const dentalUi: ProductUi = {
       body: leavesFindingBody,
       words: ({ condition, variant }) =>
         [conditionLabel(condition), variantLabel(condition, variant)].filter(Boolean).join(" · "),
+    },
+    // La endodoncia anterior en la 46: se avisa y se ofrece la posterior (entrega 8 de la atención).
+    // Al buscar en una pieza, primero lo que encaja (QA del 10 nov, B3); solo ordena.
+    toothFit: {
+      Notice: (props) => <ToothFitNotice {...props} />,
+      rank: (anatomy, place) => anatomyFitRank(anatomy ? toothAnatomyOf(anatomy) : null, place),
+      sibling: (anatomy, place) => {
+        const own = anatomy ? toothAnatomyOf(anatomy) : null
+        if (!anatomy || !own || own.groups.length === 0 || anatomyFits(own, place)) return null
+        return anatomySibling(
+          place,
+          anatomy.siblings.map((sibling) => ({ ...sibling, ...toothAnatomyOf(sibling) })),
+        )
+      },
     },
   },
   // El odontograma firmado (solo en Perú; ADR 0036): un hecho de la historia y de la atención que lo firmó.

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './../../../packages/clinic-app/src/routes/public/index'
 import { Route as DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport } from './../../../packages/clinic-app/src/routes/_org'
+import { Route as AppChar91DotChar93webmanifestRouteImport } from './../../../packages/clinic-app/src/routes/public/app[.]webmanifest'
 import { Route as AvisoRouteImport } from './../../../packages/clinic-app/src/routes/public/aviso'
 import { Route as PendientesRouteImport } from './../../../packages/clinic-app/src/routes/public/pendientes'
 import { Route as PortalRouteImport } from './../../../packages/clinic-app/src/routes/public/portal'
@@ -24,6 +25,7 @@ import { Route as HomeRouteImport } from './../../../packages/clinic-app/src/rou
 import { Route as InboxRouteImport } from './../../../packages/clinic-app/src/routes/_org/inbox'
 import { Route as InventoryRouteImport } from './../../../packages/clinic-app/src/routes/_org/inventory'
 import { Route as MembersRouteImport } from './../../../packages/clinic-app/src/routes/_org/members'
+import { Route as OrdersRouteImport } from './../../../packages/clinic-app/src/routes/_org/orders'
 import { Route as PipelineRouteImport } from './../../../packages/clinic-app/src/routes/_org/pipeline'
 import { Route as ReportsRouteImport } from './../../../packages/clinic-app/src/routes/_org/reports'
 import { Route as ServicesRouteImport } from './../../../packages/clinic-app/src/routes/_org/services'
@@ -63,6 +65,7 @@ import { Route as SettingsDotauditRouteImport } from './../../../packages/clinic
 import { Route as SettingsDotavailabilityRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.availability'
 import { Route as SettingsDotbranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.branches'
 import { Route as SettingsDotchannelsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.channels'
+import { Route as SettingsDotcommissionsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.commissions'
 import { Route as SettingsDotdataProtectionRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.data-protection'
 import { Route as SettingsDotformsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.forms'
 import { Route as SettingsDotmailRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.mail'
@@ -95,6 +98,12 @@ const IndexRoute = IndexRouteImport.update({
 const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute =
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport.update({
     id: '/_org',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AppChar91DotChar93webmanifestRoute =
+  AppChar91DotChar93webmanifestRouteImport.update({
+    id: '/app.webmanifest',
+    path: '/app.webmanifest',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AvisoRoute = AvisoRouteImport.update({
@@ -167,6 +176,12 @@ const InventoryRoute = InventoryRouteImport.update({
 const MembersRoute = MembersRouteImport.update({
   id: '/members',
   path: '/members',
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
+} as any)
+const OrdersRoute = OrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
   getParentRoute: () =>
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
@@ -391,6 +406,11 @@ const SettingsDotchannelsRoute = SettingsDotchannelsRouteImport.update({
   path: '/channels',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsDotcommissionsRoute = SettingsDotcommissionsRouteImport.update({
+  id: '/commissions',
+  path: '/commissions',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsDotdataProtectionRoute =
   SettingsDotdataProtectionRouteImport.update({
     id: '/data-protection',
@@ -527,6 +547,7 @@ const PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app.webmanifest': typeof AppChar91DotChar93webmanifestRoute
   '/aviso': typeof AvisoRoute
   '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
@@ -540,6 +561,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/inventory': typeof InventoryRoute
   '/members': typeof MembersRoute
+  '/orders': typeof OrdersRoute
   '/pipeline': typeof PipelineRoute
   '/reports': typeof ReportsRoute
   '/services': typeof ServicesRouteWithChildren
@@ -573,6 +595,7 @@ export interface FileRoutesByFullPath {
   '/settings/availability': typeof SettingsDotavailabilityRoute
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
+  '/settings/commissions': typeof SettingsDotcommissionsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
@@ -605,6 +628,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app.webmanifest': typeof AppChar91DotChar93webmanifestRoute
   '/aviso': typeof AvisoRoute
   '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
@@ -618,6 +642,7 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/inventory': typeof InventoryRoute
   '/members': typeof MembersRoute
+  '/orders': typeof OrdersRoute
   '/pipeline': typeof PipelineRoute
   '/reports': typeof ReportsRoute
   '/tasks': typeof TasksRoute
@@ -649,6 +674,7 @@ export interface FileRoutesByTo {
   '/settings/availability': typeof SettingsDotavailabilityRoute
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
+  '/settings/commissions': typeof SettingsDotcommissionsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
@@ -683,6 +709,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_org': typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
+  '/app.webmanifest': typeof AppChar91DotChar93webmanifestRoute
   '/aviso': typeof AvisoRoute
   '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
@@ -696,6 +723,7 @@ export interface FileRoutesById {
   '/_org/inbox': typeof InboxRoute
   '/_org/inventory': typeof InventoryRoute
   '/_org/members': typeof MembersRoute
+  '/_org/orders': typeof OrdersRoute
   '/_org/pipeline': typeof PipelineRoute
   '/_org/reports': typeof ReportsRoute
   '/_org/services': typeof ServicesRouteWithChildren
@@ -729,6 +757,7 @@ export interface FileRoutesById {
   '/_org/settings/availability': typeof SettingsDotavailabilityRoute
   '/_org/settings/branches': typeof SettingsDotbranchesRoute
   '/_org/settings/channels': typeof SettingsDotchannelsRoute
+  '/_org/settings/commissions': typeof SettingsDotcommissionsRoute
   '/_org/settings/data-protection': typeof SettingsDotdataProtectionRoute
   '/_org/settings/forms': typeof SettingsDotformsRoute
   '/_org/settings/mail': typeof SettingsDotmailRoute
@@ -763,6 +792,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app.webmanifest'
     | '/aviso'
     | '/pendientes'
     | '/portal'
@@ -776,6 +806,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
+    | '/orders'
     | '/pipeline'
     | '/reports'
     | '/services'
@@ -809,6 +840,7 @@ export interface FileRouteTypes {
     | '/settings/availability'
     | '/settings/branches'
     | '/settings/channels'
+    | '/settings/commissions'
     | '/settings/data-protection'
     | '/settings/forms'
     | '/settings/mail'
@@ -841,6 +873,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/app.webmanifest'
     | '/aviso'
     | '/pendientes'
     | '/portal'
@@ -854,6 +887,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
+    | '/orders'
     | '/pipeline'
     | '/reports'
     | '/tasks'
@@ -885,6 +919,7 @@ export interface FileRouteTypes {
     | '/settings/availability'
     | '/settings/branches'
     | '/settings/channels'
+    | '/settings/commissions'
     | '/settings/data-protection'
     | '/settings/forms'
     | '/settings/mail'
@@ -918,6 +953,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_org'
+    | '/app.webmanifest'
     | '/aviso'
     | '/pendientes'
     | '/portal'
@@ -931,6 +967,7 @@ export interface FileRouteTypes {
     | '/_org/inbox'
     | '/_org/inventory'
     | '/_org/members'
+    | '/_org/orders'
     | '/_org/pipeline'
     | '/_org/reports'
     | '/_org/services'
@@ -964,6 +1001,7 @@ export interface FileRouteTypes {
     | '/_org/settings/availability'
     | '/_org/settings/branches'
     | '/_org/settings/channels'
+    | '/_org/settings/commissions'
     | '/_org/settings/data-protection'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
@@ -998,6 +1036,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
+  AppChar91DotChar93webmanifestRoute: typeof AppChar91DotChar93webmanifestRoute
   AvisoRoute: typeof AvisoRoute
   PendientesRoute: typeof PendientesRoute
   PortalRoute: typeof PortalRoute
@@ -1026,6 +1065,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app.webmanifest': {
+      id: '/app.webmanifest'
+      path: '/app.webmanifest'
+      fullPath: '/app.webmanifest'
+      preLoaderRoute: typeof AppChar91DotChar93webmanifestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/aviso': {
@@ -1117,6 +1163,13 @@ declare module '@tanstack/react-router' {
       path: '/members'
       fullPath: '/members'
       preLoaderRoute: typeof MembersRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
+    }
+    '/_org/orders': {
+      id: '/_org/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/pipeline': {
@@ -1392,6 +1445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDotchannelsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/_org/settings/commissions': {
+      id: '/_org/settings/commissions'
+      path: '/commissions'
+      fullPath: '/settings/commissions'
+      preLoaderRoute: typeof SettingsDotcommissionsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_org/settings/data-protection': {
       id: '/_org/settings/data-protection'
       path: '/data-protection'
@@ -1578,6 +1638,7 @@ interface SettingsRouteChildren {
   SettingsDotavailabilityRoute: typeof SettingsDotavailabilityRoute
   SettingsDotbranchesRoute: typeof SettingsDotbranchesRoute
   SettingsDotchannelsRoute: typeof SettingsDotchannelsRoute
+  SettingsDotcommissionsRoute: typeof SettingsDotcommissionsRoute
   SettingsDotdataProtectionRoute: typeof SettingsDotdataProtectionRoute
   SettingsDotformsRoute: typeof SettingsDotformsRoute
   SettingsDotmailRoute: typeof SettingsDotmailRoute
@@ -1602,6 +1663,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDotavailabilityRoute: SettingsDotavailabilityRoute,
   SettingsDotbranchesRoute: SettingsDotbranchesRoute,
   SettingsDotchannelsRoute: SettingsDotchannelsRoute,
+  SettingsDotcommissionsRoute: SettingsDotcommissionsRoute,
   SettingsDotdataProtectionRoute: SettingsDotdataProtectionRoute,
   SettingsDotformsRoute: SettingsDotformsRoute,
   SettingsDotmailRoute: SettingsDotmailRoute,
@@ -1665,6 +1727,7 @@ interface DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren {
   InboxRoute: typeof InboxRoute
   InventoryRoute: typeof InventoryRoute
   MembersRoute: typeof MembersRoute
+  OrdersRoute: typeof OrdersRoute
   PipelineRoute: typeof PipelineRoute
   ReportsRoute: typeof ReportsRoute
   ServicesRoute: typeof ServicesRouteWithChildren
@@ -1701,6 +1764,7 @@ const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren: DotDot
     InboxRoute: InboxRoute,
     InventoryRoute: InventoryRoute,
     MembersRoute: MembersRoute,
+    OrdersRoute: OrdersRoute,
     PipelineRoute: PipelineRoute,
     ReportsRoute: ReportsRoute,
     ServicesRoute: ServicesRouteWithChildren,
@@ -1736,6 +1800,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute:
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren,
+  AppChar91DotChar93webmanifestRoute: AppChar91DotChar93webmanifestRoute,
   AvisoRoute: AvisoRoute,
   PendientesRoute: PendientesRoute,
   PortalRoute: PortalRoute,

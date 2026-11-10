@@ -20,9 +20,11 @@
     "./lib/new-version": "./src/lib/new-version.ts",
     "./lib/clinical-journey": "./src/lib/clinical-journey.ts",
     "./lib/crm": "./src/lib/crm.ts",
+    "./lib/encounter-documents": "./src/lib/encounter-documents.ts",
     "./lib/encounters": "./src/lib/encounters.ts",
     "./lib/locale": "./src/lib/locale.ts",
     "./lib/org": "./src/lib/org.ts",
+    "./lib/orders": "./src/lib/orders.ts",
     "./lib/patient-areas": "./src/lib/patient-areas.ts",
     "./lib/patients": "./src/lib/patients.ts",
     "./lib/query-client": "./src/lib/query-client.ts",
@@ -35,6 +37,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pwa-icons": "node scripts/pwa-icons.mjs",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
@@ -70,6 +73,7 @@
     "@types/qrcode": "1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "sharp": "0.34.4",
     "typescript": "7.0.2",
     "vite": "8.3.0",
     "vitest": "^3.2.7"

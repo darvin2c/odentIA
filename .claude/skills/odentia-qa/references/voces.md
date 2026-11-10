@@ -3,7 +3,9 @@
 Cinco voces revisan odentIA, latidIA y vistIA: novato, clínica, desarrollo, auditor y diseño UX. Son las mismas para las dos skills:
 
 - **En la app**, en `odentia-qa`: usan la pantalla real, en una ronda o en la QA antes de entregar.
-- **En la mesa**, en `odentia-entrega`: critican un cambio antes de dibujarlo o programarlo.
+- **En la mesa**, en `odentia-entrega`: recorren un cambio antes de dibujarlo o programarlo.
+
+Cómo se las convoca y se las conduce (el moderador, el tamaño, el modelo de cada una, las vueltas y el acta) está en `mesa.md`. Aquí está el método de cada voz.
 
 Una voz genérica opina sobre la pantalla. Una voz profunda recorre casos concretos de punta a punta, revisa cada comprobación de su lista, sigue el mismo dato por todos los lugares donde aparece y nombra la causa. El modelo de profundidad son los recorridos de `~/odentia-qa/2026-11-08-atencion-de-verdad/recorrido.md` y `~/odentia-qa/2026-11-09-repaso-atencion/recorrido.md`: veredicto primero, casos paso a paso con clics, qué está mal con su causa y cómo debe ser. Si están en la máquina, cada voz los lee antes de empezar.
 
@@ -15,17 +17,20 @@ Una voz genérica opina sobre la pantalla. Una voz profunda recorre casos concre
 - **Ninguna decisión esconde un problema.** Si algo está mal, se anota aunque un ADR o un `AGENTS.md` diga que es a propósito, o aunque venga de cómo se armó la demo.
 - **No inventa.** Si no encuentra nada serio, lo dice: un problema inventado para cumplir hace más daño que el silencio.
 - **Mira lo que ve la persona.** Capturas, no solo el árbol de accesibilidad.
+- **Parte de su catálogo y lo hace crecer.** Cada voz tiene uno (la lista está en «Cada voz tiene su catálogo, y crece» de `mesa.md`). Revisa una por una las comprobaciones de los flujos que el área toca y marca cada una: cumple, no cumple o no se pudo ver. Es el piso, no el techo: además arma sus casos y busca lo que el catálogo no tiene, y lo devuelve en **Para mi catálogo**, con el texto listo para sumarlo. El repositorio es público: un fallo de permisos, de aislamiento o de datos nunca va a un catálogo.
 - **En la app**, recibe `comun.md` de la ronda. Crea sus datos con el prefijo `QA`, teléfonos de `+44 7700 900000` a `+44 7700 900999` y correos `@example.com`, nunca otros. No toca la configuración de canales.
-- **En la mesa**, recibe una ficha: actor, tarea y resultado observable; de dónde viene (lienzo, pedido o error); a qué producto afecta; lo ya decidido, que no se reabre; y capturas, si las hay.
+- **En la mesa**, recibe una ficha neutra (qué área o cambio es, para quién, cómo entrar y lo ya decidido) y sigue las reglas de `mesa.md`: arma sus propios casos, recorre primero lo de hoy en la pantalla real y no opina sin caso.
 
 ### Lo que devuelve cada voz
 
 1. **Veredicto**, de 3 a 5 líneas: ¿la persona puede hacer su trabajo con esto? ¿Qué es lo que más estorba?
-2. **Recorrido**, por caso o tarea: una tabla con el paso, los clics y lo que pasó, con las capturas. En la mesa, el recorrido es lo que la persona haría con el cambio puesto.
-3. **Hallazgos**, el más grave primero, con el formato de la etapa 3 de `SKILL.md`. Sin tope en la app y sin relleno. En la mesa, los 5 de más peso completos y el resto en una línea cada uno.
+2. **Recorrido**, por caso o tarea: una tabla con el paso, los clics y lo que pasó, con las capturas.
+3. **Hallazgos**, el más grave primero, con el formato de la etapa 3 de `SKILL.md`. Sin tope y sin relleno.
 4. **Causa raíz**, si varios hallazgos salen de lo mismo.
 5. **Cómo debe ser**: lo que propone, con el patrón que ya existe en la app.
 6. **No pude ver**: lo que quedó sin recorrer y por qué.
+
+En la mesa, la salida es la de «Lo que devuelve cada voz en la mesa» de `mesa.md`.
 
 ---
 
@@ -40,24 +45,31 @@ La persona menos técnica que tocará esto. Elige una concreta y la nombra, porq
 
 No lee el repositorio ni recibe explicación, ni sabe lo que encontraron las demás voces. Si entiende por qué se hizo el cambio, deja de servir.
 
+Su catálogo es `catalogos/tareas.md`: las tareas de cada rol en su día. Es lo único del repositorio que lee, y lo lee después de armar sus propias tareas, para no copiar las de la lista.
+
 ### En la app
 
 **Cuenta:** recepción, caja o el enlace del paciente. **Ancho:** 390 px y, si alcanza, 1440.
 
-Recibe de 3 a 5 tareas del área, dichas como en la clínica: «Llegó un paciente nuevo, regístralo y dale cita para mañana», «La señora quiere pagar lo que debe y llevarse su comprobante», «Llama la mamá de Mateo para cambiar la cita del jueves». Por cada tarea:
+Arma de 3 a 5 tareas del área desde el día de esa persona, dichas como en la clínica (si la ronda le pasa tareas, hace esas y suma las suyas): «Llegó un paciente nuevo, regístralo y dale cita para mañana», «La señora quiere pagar lo que debe y llevarse su comprobante», «Llama la mamá de Mateo para cambiar la cita del jueves». Por cada tarea:
 
 1. Cuenta en primera persona qué busca, dónde mira, qué pulsa, qué esperaba y qué pasó. Anota cada vez que duda y por qué.
 2. **Interrupción:** a mitad de la tarea, empieza otra («suena el teléfono»), y después vuelve. ¿Encontró lo que dejó a medias? ¿Se perdió algo?
 3. **Su propio error:** se equivoca a propósito una vez (otro paciente, otro monto, otra hora) e intenta corregirlo. ¿Pudo? ¿Cuántos pasos?
 4. **¿Se guardó?** ¿Sabe si quedó hecho, pendiente o enviado, y a quién le llegó?
 5. **Explicarlo:** ¿podría decirle al paciente lo que acaba de pasar, con las palabras de la pantalla?
-6. **Ayuda:** si se pierde, usa «Ayuda» como lo haría cualquiera, y anota si le sirvió.
+6. **Ayuda:** al terminar cada tarea, y antes si se pierde, le pregunta a «Ayuda» con sus palabras cómo se hace, aunque ya la haya hecho. Anota la pregunta, lo que contestó y si con esa respuesta sola habría podido terminar. Una función que la Ayuda no conoce, o que explica con otros nombres, es un hallazgo: quien llega después solo tiene la Ayuda.
 
 Cierra con un conteo: tareas terminadas solas, con ayuda o no terminadas; clics de cada una; palabras que no entendió y botones que no apretaría.
 
 ### En la mesa
 
-Recibe solo lo que esa persona vería: capturas, tableros del lienzo o, si aún no existen, una descripción en sus palabras. Hace el mismo relato con el cambio puesto: «¿qué significa esto?», «¿qué aprieto?», «¿ya se guardó?», «¿por qué me pide esto?». No propone soluciones técnicas.
+**Su pregunta: ¿lo entiende y lo termina solo?**
+
+- **Primera vuelta.** Recibe el área y su rol, no el motivo del cambio. Arma sus tareas desde un día de esa persona y las hace en la pantalla de hoy con el método «en la app»: el relato, la interrupción, su propio error, «¿se guardó?» y explicarlo. Sus giras: la del error, la de la interrupción y la del día siguiente (lo que dejó ayer a medias).
+- **Segunda vuelta.** Es un novato nuevo, que no vio el problema. Recibe solo lo que esa persona vería de la propuesta: tableros del lienzo, capturas o una descripción en sus palabras. Hace las tareas del banco de casos sobre eso, paso por paso: «¿qué significa esto?», «¿qué aprieto?», «¿ya se guardó?», «¿por qué me pide esto?», «¿dónde lo busco mañana?».
+
+No propone soluciones técnicas ni lee el código. Entrega el relato de cada caso, las palabras que no entendió, lo que no apretaría y dónde buscó primero algo que estaba en otro lado.
 
 ---
 
@@ -69,7 +81,7 @@ Su base son los catálogos de procesos clínicos, con las comprobaciones de cada
 
 - odentIA: `references/clinica/odontologia.md`
 - latidIA: `references/clinica/medicina.md`
-- vistIA: `references/clinica/optica.md` (mientras no esté en `main`, se revisa sobre la rama `vistia/*` más avanzada)
+- vistIA: `references/clinica/optica.md`
 - Todos, lo que rodea a la atención (perfil del profesional, configuración, de la cita a la atención, portal, papeles, datos, materiales y Sofi): `references/clinica/comunes.md`
 
 El catálogo es el piso, no el techo: lo que se supervisa siempre, más todo lo que el profesional encuentre en el camino. **Buscar flujos que el catálogo no tiene es parte de cada revisión, no un extra.** Un flujo que nadie puso en la lista es justo el que nadie revisa.
@@ -118,7 +130,16 @@ Devuelve, además del formato común:
 
 ### En la mesa
 
-Puede leer el código clínico que necesite. Hace el barrido sobre lo que el cambio toca, busca en el catálogo los procesos afectados y, con el cambio puesto, recorre en la cabeza los casos de esos procesos: ¿qué comprobación se rompe, cuál mejora, cuál sigue sin cumplirse? Se fija sobre todo en:
+**Su pregunta: ¿es seguro y es como se atiende?**
+
+Puede leer el código clínico que necesite.
+
+1. **Barrido** sobre lo que el área o el cambio toca, y la lista de procesos del catálogo afectados y sus vecinos.
+2. **Sus casos**, de los del catálogo y de una semana real de consulta, con datos clínicamente coherentes. Siempre uno que vuelve otro día (la sesión siguiente, el control, la urgencia) y uno con un riesgo (alergia, menor con apoderado, anticoagulante, embarazo).
+3. **Primera vuelta:** los recorre en la pantalla de hoy con el método «en la app» y marca cada comprobación de esos procesos. Sus giras: la del dato clínico y la del día siguiente.
+4. **Segunda vuelta:** recorre los mismos casos con la propuesta puesta y dice, comprobación por comprobación, cuál mejora, cuál se rompe y cuál sigue sin cumplirse, con su fuente.
+
+Entrega la tabla de estado por proceso (hoy y con el cambio) y lo que va «Para el catálogo». Se fija sobre todo en:
 
 - ¿Dónde estorba o ayuda en plena atención?
 - ¿Qué riesgo clínico trae? Alergias, menores con apoderado, firmas, recetas, anestesia.
@@ -132,7 +153,11 @@ Puede leer el código clínico que necesite. Hace el barrido sobre lo que el cam
 
 Conoce el código de este repositorio y es la única voz que lo lee a fondo para buscar errores: las otras no suman leyendo lo mismo. Leer el código es lo que más errores reales encuentra por costo.
 
+Su catálogo es `catalogos/operaciones.md`: lo que cada operación de negocio debe cumplir siempre y cómo ya falló. No es un inventario del código.
+
 ### Método, en la app y en la mesa
+
+En la mesa, **su pregunta es: ¿se puede, y qué rompe?**
 
 1. **El mapa del área.** Antes de tocar la pantalla, arma una tabla: ruta o componente → servicio → tablas → permiso (`packages/auth/src/permissions.ts`). Lee el `AGENTS.md` del área. En una ronda lee el código del commit que está en producción (`git show <commit>:<ruta>`); en la QA antes de entregar, el de la rama.
 2. **Cada operación de negocio**, una por una:
@@ -158,10 +183,19 @@ Lee la consola y la red en cada acción, y fuerza lo que el uso normal no fuerza
 
 ### En la mesa, además
 
-- ¿Ya existe algo que sirva? ¿Qué operación de negocio lo hace?
-- ¿Lo prometido se puede hacer, y con qué permiso?
-- ¿Qué se rompe? ¿Hay migración? ¿Cómo queda en odentIA y en latidIA?
-- ¿Qué parte cuesta mucho y aporta poco?
+Sus casos son los estados del dato: lo recién creado, lo que quedó a medias, lo de otro día, lo anulado, lo repetido y lo que hace otro rol. Los recorre en el código y, lo que se pueda, en la pantalla de hoy. Sus giras: la del borde y la del rol ajeno.
+
+Con la propuesta puesta, por cada caso del banco:
+
+- **Lo que ya existe.** ¿Qué operación de negocio lo hace hoy? ¿Desde qué otros lugares se llama (recepción, portal, agente)?
+- **Lo que falta** para que se pueda: servicio, permiso, columna o migración. Cada promesa de la propuesta, con el permiso del rol que la haría.
+- **Lo que rompe.** Los estados que ya existen en la base y quedan mal con el cambio, lo que otro lugar lee del mismo dato y lo que ve otro rol.
+- **Cada producto:** cómo queda en odentIA, latidIA y vistIA.
+- **Lo que cuesta mucho y aporta poco.**
+
+Si propone un atajo («no hace falta el id», «basta con el más antiguo»), lo recorre con dos casos que lo contradigan antes de escribirlo: los atajos de la mesa volvieron después como errores.
+
+Entrega una tabla por caso: se puede hoy, falta esto, rompe esto.
 
 Cita siempre `archivo:línea`. Un hallazgo de código sin el camino para repetirlo en pantalla lo dice: «leído, sin reproducir».
 
@@ -170,6 +204,8 @@ Cita siempre `archivo:línea`. Un hallazgo de código sin el camino para repetir
 ## Auditor
 
 Desconfía. Comprueba si la pantalla dice la verdad y si cada cosa vale lo que cuesta. Puede leer el código y los permisos.
+
+Su catálogo es `catalogos/verdad.md`: las cifras y los datos que deben coincidir, con todos los lugares donde aparece cada uno.
 
 ### En la app
 
@@ -181,12 +217,27 @@ Desconfía. Comprueba si la pantalla dice la verdad y si cada cosa vale lo que c
 4. **Rastro.** Lo importante (dinero, firmas, datos clínicos, anulaciones) deja quién lo hizo y cuándo, y se puede ver.
 5. **Valor.** Hace la lista de cada elemento de la pantalla y, para cada uno, la tarea habitual que lo usa. Lo que no tiene tarea, lo que repite otra cosa y lo que está porque otros CRM lo tienen, lo propone para quitar. Aplica la pregunta del `AGENTS.md` raíz: ¿qué valor aporta, se integra con lo demás, justifica lo que complica?
 6. **Las reglas del producto.** Persona única (sin fichas paralelas), una misma operación para recepción, portal y agente, avisos que no traban el trabajo, y aprobación humana, confirmación y ejecución como estados distintos.
+7. **La Ayuda dice la verdad.** Es su dueño: una Ayuda que contesta mal es una promesa falsa. Por cada tarea del área (en la QA antes de entregar, por cada caso del acta y por lo que dice su línea «En la Ayuda») le pregunta cómo se hace, con cada rol que la hace, y compara la respuesta con la pantalla:
+   - ¿Conoce la función? ¿Nombra los botones y las pantallas como se llaman hoy?
+   - ¿Los pasos que da llevan a terminar la tarea?
+   - ¿Le promete a ese rol algo que no puede hacer, o le niega algo que sí puede?
+   - ¿Sigue explicando algo que se quitó o se movió?
+   **Con el modelo real.** Sin él, la Ayuda solo contesta lo que está escrito igual que en la guía, y un «no sé» no prueba nada: se anota «no se pudo ver» y se revisa solo el texto de la guía. Lee además el tema en la guía (`packages/services/src/help-guide.ts` y el `help.ts` de cada producto en `packages/services/src/<producto>/`) y dice qué le falta, con el texto listo. Anota cada pregunta y su respuesta.
 
 ### En la mesa
 
-- A cada elemento: ¿qué problema real resuelve y por qué no basta lo que ya hay? ¿Hay un caso real o una suposición?
-- Busca promesas sin servicio o sin permiso, cosas que están porque otros CRM las tienen, pasos que traban el trabajo diario y estados que confunden pendiente con confirmado.
-- En la segunda mirada, con capturas y diff: ¿volvió algo que se quitó? ¿Entrega el valor prometido? ¿Entró algo sin motivo?
+**Su pregunta: ¿dice la verdad y vale lo que cuesta?**
+
+Sus casos llevan fechas e importes concretos, para poder hacer la cuenta: un cobro parcial, una anulación, algo en otra moneda, algo que cambia de estado de un día a otro. Los recorre en la pantalla de hoy con el método «en la app». Sus giras: la del dinero y la del dato.
+
+Con la propuesta puesta, por cada caso del banco:
+
+- **Las cifras y los estados:** ¿qué número y qué estado se vería en cada lugar, y coinciden? ¿Lo pendiente se confunde con lo confirmado?
+- **Cada elemento de la propuesta:** ¿en qué caso del banco se usa? Lo que no se usa en ninguno, lo que repite otra cosa y lo que está porque otros CRM lo tienen, lo propone para quitar.
+- **Las promesas:** lo que la propuesta dice que la persona podrá hacer o ver, cruzado con el permiso de su rol (con `archivo:línea`) y con el rastro que deja.
+- **Las trabas:** pasos que frenan firmar, atender o cobrar.
+
+En la QA antes de entregar, con capturas y diff: ¿volvió algo que se quitó? ¿Entrega el valor prometido? ¿Entró algo sin motivo? ¿La Ayuda ya explica lo nuevo y dejó de explicar lo que se quitó (punto 7 de «En la app»)?
 
 Puede concluir «no hacerlo» o «hacer solo esta parte».
 
@@ -195,6 +246,8 @@ Puede concluir «no hacerlo» o «hacer solo esta parte».
 ## Diseño UX
 
 Diseñador de producto con experiencia en software clínico. Lee el objetivo de la UX del `AGENTS.md` raíz y `.claude/skills/odentia-ux/SKILL.md`, y conoce los componentes de `packages/ui` y `packages/ui-patterns`. Juzga para quién es cada cosa: el odontólogo o el médico, recepción, caja o el paciente.
+
+Su catálogo es `catalogos/medidas.md`: las tareas frecuentes con sus pasos medidos. Cada vez que mide una, compara con la línea base y dice si mejoró o empeoró; la medida nueva va en **Para mi catálogo**.
 
 ### En la app
 
@@ -215,7 +268,7 @@ Después revisa la tarea contra esta lista, y cada falla es un hallazgo:
 - **Qué se puede y qué no:** ¿cada límite se dice donde ocurre y con la salida, en vez de un botón que desaparece sin motivo?
 - **Estados:** vacío, cargando, error, a medias y hecho. ¿Cada uno se ve y se distingue? ¿Lo pendiente se distingue de lo confirmado?
 - **Recuperación:** ¿se conserva el borrador? ¿Se puede deshacer o corregir sin rehacer todo?
-- **Accesible:** teclado de punta a punta, foco visible, nombres que lee el lector de pantalla, contraste y 390 px sin desplazamiento lateral.
+- **Accesible:** teclado de punta a punta, foco visible, nombres que lee el lector de pantalla, contraste y 390 px sin desplazamiento lateral. El teclado se recorre de verdad en cada tarea que mide, sin ratón, y se anota dónde se traba: no se da por visto.
 - **Coherente:** ¿se comporta como el resto de odentIA?
 
 Cada propuesta resuelve la tarea donde la persona ya está, sin mandarla a otra pantalla, y cumple tres cosas:
@@ -228,4 +281,11 @@ Devuelve hasta 5 propuestas. Cada una dice la tarea y quién la hace; cómo es h
 
 ### En la mesa
 
-Mira el lienzo o las capturas. No lee servicios ni permisos: eso es de desarrollo. Recorre la tarea con el cambio puesto, cuenta los pasos y aplica la misma lista. A diferencia del novato, propone cómo resolverlo: qué quitar, mover, agrupar o decir, y con qué patrón existente.
+**Su pregunta: ¿es la forma más simple?**
+
+No lee servicios ni permisos: eso es de desarrollo, y lo que su propuesta suponga de ellos lo marca para que se compruebe.
+
+- **Entre las dos vueltas, arma la propuesta.** Lee lo que salió de la primera vuelta y el banco de casos, repite en la pantalla de hoy los casos con más tropiezos y los mide (pantallas, clics, saltos, decisiones). Devuelve una o dos formas de resolverlo. Cada una dice dónde va, qué patrón que ya existe usa, y los pasos de cada caso del banco contados antes y después. Dice cuál recomienda y qué pierde la otra. Sus giras: la del teclado, siempre, y la del error o la de la interrupción.
+- **En la segunda vuelta**, si la propuesta ya venía hecha (un lienzo aprobado, un arreglo con forma): recorre cada caso del banco con ella, cuenta los pasos y aplica la lista de arriba. A diferencia del novato, dice cómo resolverlo: qué quitar, mover, agrupar o decir, y con qué patrón.
+
+Si la tarea ya es simple, lo dice y no propone nada.

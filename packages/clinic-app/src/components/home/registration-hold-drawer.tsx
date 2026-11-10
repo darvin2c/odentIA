@@ -1,17 +1,22 @@
-import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from "@odentia/ui"
-import { DetailDrawer, internationalText, submitErrorMessage } from "@odentia/ui-patterns"
+import { Button, Checkbox, toast } from "@odentia/ui"
+import { DetailDrawer, internationalText, PageNotice, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
+import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { ChoiceButtons } from "../choice-buttons"
 
 interface HoldRow {
-  key: "givenNames" | "familyName" | "phone" | "birthDate" | "document" | "allergies"
+  key: string
   label: string
+  format: "text" | "phone" | "date"
   declared: string | null
   saved: string | null
-  same: boolean
+  state: "same" | "new" | "changed"
+  /** Si no se puede guardar desde aquí, por qué (el servidor lo decide). */
+  blocked: string | null
+  /** Viene marcado: lo decide el servidor. */
+  checked: boolean
 }
 
 interface HoldView {
@@ -21,21 +26,23 @@ interface HoldView {
   ownerName: string
   ownerPatientId: string | null
   createdAt: string
+  declaredName: string
   rows: HoldRow[]
-  familyNameDiffers: boolean
+  health: { allergies: string | null; more: boolean } | null
+  revision: string
 }
 
 /** Cada dato como se lee en la clínica: el celular con su prefijo y la fecha con su mes. */
 function shown(row: HoldRow, value: string | null): string {
   if (!value) return "—"
-  if (row.key === "phone") return internationalText(value)
-  if (row.key === "birthDate") {
+  if (row.format === "phone") return internationalText(value)
+  if (row.format === "date" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return new Date(`${value}T12:00:00`).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", year: "numeric" })
   }
   return value
 }
 
-/** «Hace 3 min», en palabras, para decir cuándo se registró. */
+/** «hace 3 min», en palabras, para decir cuándo se registró. */
 function since(iso: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
   if (minutes < 1) return "hace un momento"
@@ -44,44 +51,131 @@ function since(iso: string): string {
   return hours < 24 ? `hace ${hours} h` : `hace ${Math.round(hours / 24)} d`
 }
 
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+
+/** «Iguales: nacimiento, celular y documento» (en minúscula después de los dos puntos). */
+function listWords(labels: string[]): string {
+  const words = labels.map((label) => label.toLowerCase())
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} y ${words.at(-1)}` : (words[0] ?? "")
+}
+
 /**
- * «¿Es la misma persona?» (fase 4 del lienzo «Su enlace y el código QR»): lo
- * que escribió hoy quien se registró por el código QR, al lado de lo que ya
- * estaba. Se parecen por el mismo celular o documento, nunca solo por el
- * nombre; nada se une sin que recepción lo diga. Si los apellidos no
- * coinciden, se elige cuáles quedan.
+ * «¿Es la misma persona?»: lo que escribió en el registro en línea quien se
+ * parece a alguien que ya está en la clínica (el mismo documento o el mismo
+ * celular, nunca solo el nombre), dato por dato, como quien revisa cambios
+ * antes de aceptarlos. Lo que se marca se guarda en su ficha y lo de antes
+ * queda en una nota; quién es y por dónde se le escribe vienen sin marcar
+ * (lo decide el servidor). Nada se guarda sin que recepción lo diga.
  */
 export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | null; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [familyName, setFamilyName] = useState<"saved" | "declared">("saved")
+  const navigate = useNavigate()
+  const hintId = useId()
   const hold = useQuery({
     queryKey: ["registration-hold", taskId],
     queryFn: () => apiFetch<{ data: HoldView }>(`/api/tasks/${taskId}/registration`),
     enabled: !!taskId,
     retry: false,
-  })
-  const decide = useMutation({
-    mutationFn: (same: boolean) =>
-      apiFetch<{ data: { patientId: string } }>(`/api/tasks/${taskId}/registration`, {
-        method: "POST",
-        body: JSON.stringify(same && data?.familyNameDiffers ? { same, familyName } : { same }),
-      }),
-    onSuccess: (_result, same) => {
-      toast.success(same ? `Listo: se completó la ficha de ${data?.ownerName ?? "la persona"}.` : "Listo: se registró como una persona nueva.")
-      void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
-      onClose()
-    },
+    // Volver de otra pestaña no cambia lo que se está revisando: solo se vuelve a pedir si guardar lo rechaza.
+    refetchOnWindowFocus: false,
   })
   const data = hold.data?.data
-  const family = data?.rows.find((row) => row.key === "familyName")
-  const why = data?.match === "documento" ? "el mismo documento" : "el mismo celular"
+  // Lo marcado nace de lo que propone el servidor. Si lo que se ve cambia, lo que
+  // recepción ya eligió se conserva en las filas que siguen iguales y se avisa.
+  const [marked, setMarked] = useState<ReadonlySet<string>>(new Set())
+  const [changed, setChanged] = useState(false)
+  const seen = useRef<{ revision: string; rows: HoldRow[]; marked: ReadonlySet<string> } | null>(null)
+  useEffect(() => {
+    if (!data) return
+    const before = seen.current
+    const next = new Set<string>()
+    for (const row of data.rows) {
+      const old = before?.rows.find((item) => item.key === row.key)
+      const kept = old && old.declared === row.declared && old.saved === row.saved && old.blocked === row.blocked
+      if (kept ? before?.marked.has(row.key) : row.checked) next.add(row.key)
+    }
+    setChanged(!!before && before.revision !== data.revision)
+    setMarked(next)
+  }, [data?.revision])
+  useEffect(() => {
+    if (data) seen.current = { revision: data.revision, rows: data.rows, marked }
+  }, [data, marked])
+
+  const differing = data?.rows.filter((row) => row.state !== "same") ?? []
+  const isSavable = (row: HoldRow) => row.key !== "document" && !row.blocked
+  const savable = differing.filter(isSavable)
+  const same = data?.rows.filter((row) => row.state === "same") ?? []
+  const apply = savable.filter((row) => marked.has(row.key))
+  const careful = savable.some((row) => !row.checked)
+  const already = !!data?.ownerPatientId
+
+  const done = () => {
+    void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
+    onClose()
+  }
+  const openPerson = (personId: string) => ({ label: "Ver su ficha", onClick: () => void navigate({ to: "/people/$personId", params: { personId } }) })
+  const decide = useMutation({
+    mutationFn: (isSame: boolean) =>
+      apiFetch<{ data: { patientId: string; personId: string; applied: number; consent?: string } }>(`/api/tasks/${taskId}/registration`, {
+        method: "POST",
+        body: JSON.stringify(isSame ? { same: true, apply: apply.map((row) => row.key), revision: data?.revision } : { same: false, revision: data?.revision }),
+      }),
+    onSuccess: (result, isSame) => {
+      // Si se guardó su nombre, se la nombra con el nuevo.
+      const name = (apply.some((row) => row.key === "names") ? data?.declaredName : data?.ownerName) ?? "la persona"
+      const count = apply.length
+      const replaced = apply.some((row) => row.state === "changed")
+      const message = !isSame
+        ? "Listo: se registró como una persona nueva."
+        : !data?.ownerPatientId
+          ? `Listo: ${name} ya es paciente${count ? `, con ${plural(count, "cambio", "cambios")}` : ""}.`
+          : count
+            ? `Listo: ${count === 1 ? "se guardó 1 cambio" : `se guardaron ${count} cambios`} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
+            : `Listo: no se cambió ningún dato de ${name}.`
+      // Su consentimiento de datos: si no quedó guardado, que se lo pidan en la clínica.
+      const consent =
+        result.data.consent === "pendiente"
+          ? " Pídele su consentimiento de datos en la clínica: no quedó guardado."
+          : result.data.consent === "revocado"
+            ? " Su consentimiento no se guardó: lo revocó después de registrarse."
+            : ""
+      // Lo que declaró de su salud entra igual (si es la misma persona): se dice para que no parezca perdido.
+      const health = isSame && data?.health ? " Lo que declaró de su salud quedó en sus antecedentes para que el profesional lo revise." : ""
+      toast.success(`${message}${health}${consent}`, { action: openPerson(result.data.personId) })
+      seen.current = null
+      done()
+    },
+    onError: (error) => {
+      // Algo cambió mientras se revisaba: se vuelve a mostrar lo de ahora.
+      if (error instanceof ApiError && error.shape.code === "HOLD_CHANGED") void hold.refetch()
+    },
+  })
+  const discard = useMutation({
+    mutationFn: () => apiFetch(`/api/tasks/${taskId}/discard`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: () => {
+      toast.success("Se descartó: no cambió ninguna ficha.")
+      done()
+    },
+  })
+  const busy = decide.isPending || discard.isPending
   const problem = decide.error
     ? submitErrorMessage(decide.error)
-    : hold.isError
-      ? hold.error instanceof ApiError
-        ? (hold.error.shape.message ?? "No se pudo abrir.")
-        : "No se pudo abrir. Revisa tu conexión."
-      : null
+    : discard.error
+      ? submitErrorMessage(discard.error)
+      : hold.isError
+        ? hold.error instanceof ApiError
+          ? (hold.error.shape.message ?? "No se pudo abrir.")
+          : "No se pudo abrir. Revisa tu conexión."
+        : null
+  const why = data?.match === "documento" ? "el mismo documento" : "el mismo celular"
+  const toggle = (key: string) =>
+    setMarked((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
   return (
     <DetailDrawer
       open={!!taskId}
@@ -89,21 +183,30 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
       title="¿Es la misma persona?"
       description={
         data
-          ? `Se registró por el código QR ${since(data.createdAt)} y se parece a alguien que ya está en la clínica.`
-          : "Se registró por el código QR y se parece a alguien que ya está en la clínica."
+          ? `Se registró en línea ${since(data.createdAt)} como ${data.declaredName} y tiene ${why} que ${data.ownerName}, que ya está en la clínica.`
+          : "Se registró en línea y se parece a alguien que ya está en la clínica."
       }
       isLoading={hold.isPending && !!taskId}
-      isSubmitting={decide.isPending}
+      isSubmitting={busy}
       error={problem}
       showClose={false}
       actions={
         data ? (
           <>
-            <Button type="button" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate(false)}>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => discard.mutate()}>
+              Descartar
+            </Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => decide.mutate(false)}>
               Es otra persona
             </Button>
-            <Button type="button" disabled={decide.isPending} onClick={() => decide.mutate(true)}>
-              Es la misma persona
+            <Button type="button" disabled={busy} onClick={() => decide.mutate(true)}>
+              {already
+                ? apply.length
+                  ? `Sí, guardar ${plural(apply.length, "cambio", "cambios")}`
+                  : "Sí, sin cambios"
+                : apply.length
+                  ? `Sí, registrarla con ${plural(apply.length, "cambio", "cambios")}`
+                  : "Sí, registrarla sin cambios"}
             </Button>
           </>
         ) : null
@@ -111,53 +214,82 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
     >
       {data ? (
         <div className="flex flex-col gap-5">
-          <div className="overflow-hidden rounded-2xl border bg-card">
-            <Table className="table-fixed">
-              <caption className="sr-only">Lo que escribió hoy y lo que ya estaba</caption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="h-auto w-[6.5rem] px-4 py-2 text-xs text-muted-foreground">
-                    <span className="sr-only">Dato</span>
-                  </TableHead>
-                  <TableHead className="h-auto px-2 py-2 text-xs whitespace-normal text-muted-foreground">Escribió hoy</TableHead>
-                  <TableHead className="h-auto px-2 py-2 pr-4 text-xs whitespace-normal text-muted-foreground">{data.ownerName} · ya está</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.rows.map((row) => (
-                  <TableRow key={row.key}>
-                    <TableHead scope="row" className="h-auto px-4 py-2.5 font-normal text-muted-foreground">
-                      {row.label}
-                    </TableHead>
-                    <TableCell className="px-2 py-2.5 break-words whitespace-normal">{shown(row, row.declared)}</TableCell>
-                    <TableCell className={cn("px-2 py-2.5 pr-4 break-words whitespace-normal", !row.saved && "text-muted-foreground")}>
-                      {row.saved ? shown(row, row.saved) : row.key === "allergies" ? "No preguntado" : "—"}
-                      {row.same ? <span className="text-xs font-medium text-primary"> · igual</span> : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <p className="text-sm text-muted-foreground">Se parecen por {why}. Nunca se une solo por el nombre.</p>
-          {data.familyNameDiffers && family ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Los apellidos no coinciden: ¿cuáles quedan?</p>
-              <ChoiceButtons
-                aria-label="Apellidos que quedan"
-                value={familyName}
-                options={[
-                  { value: "saved", label: `«${family.saved}», el que ya está` },
-                  { value: "declared", label: `«${family.declared}», el nuevo` },
-                ]}
-                onChange={setFamilyName}
-                columns={2}
-              />
-            </div>
+          {changed ? (
+            <PageNotice tone="alarma" label="Cambió">
+              Algo cambió mientras lo revisabas: mira de nuevo lo marcado antes de guardar.
+            </PageNotice>
           ) : null}
+          {differing.length ? (
+            <fieldset aria-describedby={careful ? hintId : undefined} className="flex flex-col gap-2">
+              <legend className="text-sm font-medium">
+                {plural(differing.length, "dato distinto", "datos distintos")}
+                {savable.length ? ": marca lo que quieres guardar en su ficha" : ""}
+              </legend>
+              {careful ? (
+                <p id={hintId} className="text-sm text-muted-foreground">
+                  Quién es y por dónde se le escribe vienen sin marcar: márcalos solo si comprobaste que es la misma persona.
+                </p>
+              ) : null}
+              <ul className="divide-y rounded-2xl border bg-card">
+                {differing.map((row) => {
+                  const lines = (
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="text-muted-foreground">
+                        {row.label}
+                        {row.state === "new" ? " · nuevo" : ""}
+                      </span>
+                      <span className="break-words font-medium">{shown(row, row.declared)}</span>
+                      {row.state === "changed" ? (
+                        <span className="break-words text-muted-foreground">Antes: {shown(row, row.saved)}</span>
+                      ) : null}
+                      {!isSavable(row) ? (
+                        <span className="text-muted-foreground">{row.blocked ?? "No se cambia desde aquí."}</span>
+                      ) : null}
+                    </span>
+                  )
+                  return (
+                    <li key={row.key}>
+                      {isSavable(row) ? (
+                        <label className="flex min-h-11 cursor-pointer items-start gap-3 px-4 py-3 text-sm">
+                          <Checkbox className="mt-0.5" checked={marked.has(row.key)} disabled={busy} onCheckedChange={() => toggle(row.key)} />
+                          {lines}
+                        </label>
+                      ) : (
+                        <div className="flex items-start gap-3 py-3 pr-4 pl-11 text-sm">{lines}</div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </fieldset>
+          ) : (
+            <p className="text-sm">Escribió lo mismo que ya tiene{already ? " su ficha" : " guardado"}.</p>
+          )}
+
+          {same.length ? (
+            <details className="text-sm text-muted-foreground">
+              <summary className="min-h-11 cursor-pointer content-center sm:min-h-8">Iguales: {listWords(same.map((row) => row.label))}</summary>
+              <ul className="mt-1 flex flex-col gap-1">
+                {same.map((row) => (
+                  <li key={row.key}>
+                    {row.label}: <span className="text-foreground">{shown(row, row.saved)}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+
+          {data.health ? (
+            <p className="text-sm">
+              Su salud: declaró{" "}
+              {data.health.allergies ? `alergia a ${data.health.allergies}${data.health.more ? " y otros datos" : ""}` : "algunos datos"}. Si es la
+              misma persona, va a sus antecedentes para que el profesional lo revise, aunque no guardes ningún cambio.
+            </p>
+          ) : null}
+
           <p className="rounded-2xl bg-muted/60 p-4 text-sm">
-            Si es la misma persona, su ficha se completa con lo que faltaba y queda como paciente. Nada se borra. Si es otra, se registra como
-            nueva{data.match === "documento" ? ", sin ese documento" : ""}.
+            «Es otra persona» la registra aparte{data.match === "documento" ? ", sin ese documento" : ""}. «Descartar» borra lo que escribió sin
+            cambiar ninguna ficha.
           </p>
         </div>
       ) : null}

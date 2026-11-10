@@ -16,18 +16,24 @@
  * - «Te deben» por antigüedad es la regla del saldo vencido (`report-debts.ts`):
  *   cada persona cuenta entera en el tramo de su concepto sin pagar más antiguo.
  */
-import { fixedOwedAt } from "./expense-recurring.js"
 import type { Db } from "@odentia/db"
-import { sql, type SQL } from "drizzle-orm"
+import { type SQL, sql } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
-import { commissionLiveIn, collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
+import { fixedOwedAt } from "./expense-recurring.js"
+import { payablesOwedAt } from "./expense-payable.js"
+import { collectedNetMany, commissionLiveIn, EXPENSE_CATEGORIES } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
+import { productHooks } from "./products.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
-import { firstVisitSql } from "./report-visits.js"
-import { toScheduleSql } from "./to-schedule.js"
-import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
+import {
+  addMonths,
+  currentMonthIn,
+  lastMonths,
+  monthStart,
+  type ReportBucket,
+} from "./report-periods.js"
 import {
   at,
   bySpan,
@@ -53,6 +59,8 @@ import {
   todayValueCents,
   todayValueSql,
 } from "./report-value.js"
+import { firstVisitSql } from "./report-visits.js"
+import { planItemSql, toScheduleSql } from "./to-schedule.js"
 
 // --- Comisiones -------------------------------------------------------------------------
 
@@ -549,11 +557,8 @@ export function purchasesDueOf(
 // --- Lo que viene y cuánto vale un paciente ---------------------------------------------
 
 /** «Aceptó y no tiene cita» (`toScheduleSql`) sobre el tratamiento `pi` de una línea, de una persona activa. */
-function lineToScheduleSql(now: Date): SQL {
-  return sql`(${toScheduleSql(
-    { id: sql`pi.id`, organizationId: sql`pi.organization_id`, status: sql`pi.status`, decisionStatus: sql`pi.decision_status` },
-    at(now),
-  )} and exists (select 1 from patient lp join contact lc on lc.organization_id = lp.organization_id and lc.id = lp.person_id
+function lineToScheduleSql(now: Date, phases: readonly string[]): SQL {
+  return sql`(${toScheduleSql(planItemSql("pi"), phases, at(now))} and exists (select 1 from patient lp join contact lc on lc.organization_id = lp.organization_id and lc.id = lp.person_id
     where lp.organization_id = pi.organization_id and lp.id = pi.patient_id and lc.is_active and not lc.is_test))`
 }
 
@@ -565,6 +570,7 @@ function lineToScheduleSql(now: Date): SQL {
  * otra moneda va al cambio de hoy y `byCurrency` dice cuánto es en cada una.
  */
 export async function upcomingWork(tx: Db, orgId: string, currency: string, now: Date) {
+  const { planPhases } = await productHooks(tx, orgId)
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
   const rows = await tx.execute<{
     currency: string | null
@@ -577,7 +583,7 @@ export async function upcomingWork(tx: Db, orgId: string, currency: string, now:
     with pending as (
       select b.patient_id, i.currency::text as currency,
         i.price_cents::bigint * ${budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })} as cents,
-        ${lineToScheduleSql(now)} as unbooked
+        ${lineToScheduleSql(now, planPhases)} as unbooked
       from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
@@ -878,6 +884,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const [owedCommissions, owedNow] = await commissionsOwedMany(tx, orgId, [window.end, now], { currency, branchId })
   // Lo fijo vencido sin pagar al cierre (gastos que se repiten).
   const fixedOwed = await fixedOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId })
+  // Las facturas por pagar (ADR 0175): lo que se debía al cierre.
+  const invoicesOwed = await payablesOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId, money: scope.money, timezone: scope.timezone })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingAdjustmentsValued(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
@@ -970,6 +978,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
       salesTax: { cents: Math.max(0, taxOf(0)) },
       /** Gastos que se repiten, vencidos y sin pagar. */
       fixed: fixedOwed,
+      /** Facturas por pagar (la del laboratorio): lo que falta pagar y lo vencido. */
+      invoices: invoicesOwed,
       purchases: purchasesDueOf(unpaid, scope.money),
     },
     missing: await missingExpenses(tx, orgId, scope),
@@ -1433,7 +1443,7 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
           join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
           where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
             and i.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency})
-            and ${lineToScheduleSql(now)}
+            and ${lineToScheduleSql(now, (await productHooks(tx, orgId)).planPhases)}
           group by b.patient_id, i.currency
         )
         select case when x.currency = ${scope.currency} then x.patient_id::text else x.patient_id::text || ':' || x.currency end as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,

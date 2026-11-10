@@ -1,4 +1,4 @@
-import { currencyFractionDigits, type PatientGuide } from "@odentia/clinical"
+import { currencyFractionDigits, type FinishControl, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { appWords } from "./product-words"
 import { amountFromCents } from "./workspace"
@@ -25,12 +25,24 @@ export interface ServiceCatalogItem {
   usualSessions: number
   /** Las que puso la clínica; null = las que sugiere la biblioteca. */
   ownUsualSessions?: number | null
+  /** Días de espera entre sesiones de la clínica; null = los de la guía (`librarySessionGapDays`). */
+  ownSessionGapDays?: number | null
+  librarySessionGapDays?: number | null
+  /** Los controles al terminar de la clínica; null = los de la guía (`libraryFinishControls`). */
+  ownFinishControls?: FinishControl[] | null
+  libraryFinishControls?: FinishControl[] | null
   /** Cómo dice el precio el agente; caja y presupuesto usan siempre la tarifa. */
   priceDisclosure: PriceDisclosure
   /** La evaluación que ofrece el agente cuando el precio no es exacto. */
   evaluationServiceId: string | null
   /** Qué deja en la pieza al completarse (lo tratado queda dibujado); null = nada. */
   leavesFinding: LeavesFindingBody | null
+  /**
+   * Para qué piezas es, si su tratamiento de la biblioteca lo dice, con los
+   * servicios activos de su familia (odentIA). Llega en la lista y al pedir uno
+   * por id; null en un servicio propio, que nunca avisa.
+   */
+  toothAnatomy?: ServiceToothAnatomy | null
   /** Código propio en la lista del país (ADR 0069); uno de la biblioteca usa el de su tratamiento. */
   procedureSystem: string | null
   procedureCode: string | null
@@ -74,6 +86,30 @@ export interface OfficialCoding {
 export interface ServiceCodeList {
   system: string
   required: boolean
+}
+
+/**
+ * Para qué piezas es un servicio (contrato de `toothAnatomy`): los grupos del
+ * producto (odentIA: `anterior`, `premolar`, `molar`), la dentición (null = las
+ * dos) y su familia. Qué significan lo decide el producto, no esta pantalla.
+ */
+export interface ServiceToothAnatomy {
+  groups: string[]
+  dentition: string | null
+  family: string
+  /** Los servicios activos de la clínica de la misma familia: lo que se puede ofrecer en su lugar. */
+  siblings: ToothAnatomySibling[]
+  /** De una endodoncia vital, las no vitales activas: el aviso las ofrece con un diagnóstico de necrosis. */
+  nonVital?: ToothAnatomySibling[]
+}
+
+export interface ToothAnatomySibling {
+  id: string
+  name: string
+  priceCents: number | null
+  currency: string
+  groups: string[]
+  dentition: string | null
 }
 
 /** Lo que un servicio deja en la pieza: el hallazgo y, si corresponde, su variante. */
@@ -260,6 +296,10 @@ export interface UpdateServiceBody {
   billingMode?: "treatment" | "session"
   /** Sesiones habituales; null vuelve a las de la biblioteca. */
   usualSessions?: number | null
+  /** Días de espera entre sesiones (0 = sin espera); null vuelve a los de la guía. */
+  sessionGapDays?: number | null
+  /** Controles al terminar (`[]` = ninguno); null vuelve a los de la guía. */
+  finishControls?: FinishControl[] | null
   priceDisclosure?: PriceDisclosure
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null

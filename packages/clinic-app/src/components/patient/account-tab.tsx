@@ -46,6 +46,7 @@ import { apiFetch } from "../../lib/api"
 import { useActiveBranch } from "../../lib/active-branch"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
+import { expenseCategoryLabel, fetchPayables } from "../../lib/finance-cash"
 import {
   acceptedTotalsKey,
   CASH_TYPE_CODE,
@@ -64,6 +65,7 @@ import {
   useOrgFinanceProfile,
   accountBalances,
   accountBalanceTitle,
+  pendingCostWords,
   type AccountCobro,
   type CollectResultBody,
   type RefundResult,
@@ -184,6 +186,14 @@ export function AccountTab({
   // Lo aceptado, lo pagado y lo que falta de cada presupuesto (QA de la ficha del 8 nov):
   // caja lo veía en Plan, a otro clic. Pide caja y presupuesto a la vez.
   const canBudgets = usePermission("budgets.read")
+  // El costo del laboratorio junto a lo cobrado lo ve quien administra comisiones (ADR 0175).
+  const canCosts = usePermission("commissions.write")
+  const labInvoices = useQuery({
+    queryKey: ["finance-payables", "patient", patientId],
+    queryFn: () => fetchPayables({ patientId }),
+    enabled: canCosts && canRead,
+    staleTime: 30_000,
+  })
   const acceptedTotals = useQuery({
     queryKey: acceptedTotalsKey(patientId),
     queryFn: () => fetchAcceptedTotals(patientId),
@@ -486,8 +496,11 @@ export function AccountTab({
                   [
                     ["Debe", balance.porCobrar],
                     ["A favor", balance.aFavor],
-                    ["Saldo", balance.saldo],
-                  ] as const
+                    // «Saldo» no decía de quién (QA del 9 nov, repaso 3): lo que falta, o lo que le queda.
+                    balance.aFavor > balance.porCobrar
+                      ? ["Le queda a favor", balance.aFavor - balance.porCobrar]
+                      : ["Falta pagar", balance.saldo],
+                  ] satisfies Array<readonly [string, number]>
                 ).map(([label, cents]) => (
                   <div key={label} className="min-w-0">
                     <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -497,6 +510,11 @@ export function AccountTab({
                   </div>
                 ))}
               </dl>
+              {balance.porCobrar > 0 && balance.aFavor > 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Lo que tiene a favor paga primero su próximo cobro; también puedes usarlo ya en lo que debe.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -609,6 +627,36 @@ export function AccountTab({
                       </div>
                     ))}
                   </dl>
+                  {/* El laboratorio de cada tratamiento, junto a lo acordado de ese tratamiento (ADR 0175). */}
+                  {group.lines.map((line) => {
+                    const all = (labInvoices.data?.data.payables ?? []).filter((row) => row.planItemId === line.planItemId)
+                    if (all.length === 0) return null
+                    const same = all.filter((row) => row.currency === group.currency)
+                    const foreign = all.filter((row) => row.currency !== group.currency)
+                    const cost = same.reduce((sum, row) => sum + row.amountCents, 0)
+                    const owed = all.reduce((sum, row) => sum + row.dueCents, 0)
+                    const kinds = new Set(all.map((row) => row.category))
+                    const label = kinds.size === 1 ? expenseCategoryLabel(all[0]?.category ?? "").toLocaleLowerCase("es") : "facturas"
+                    const costWords = [
+                      ...(cost > 0 ? [money(cost, group.currency)] : []),
+                      ...[...new Set(foreign.map((row) => row.currency))].map((unit) =>
+                        money(foreign.filter((row) => row.currency === unit).reduce((sum, row) => sum + row.amountCents, 0), unit),
+                      ),
+                    ].join(" y ")
+                    return (
+                      <p key={line.planItemId} className="text-sm">
+                        {treatmentLineName(line, placeName)}: {label} <span className="font-semibold tabular-nums">{costWords}</span>
+                        {owed > 0 ? ", aún no se le paga todo al laboratorio" : ", ya pagado al laboratorio"}.
+                        {cost > 0 && foreign.length === 0 ? (
+                          <>
+                            {" "}
+                            De lo acordado ({money(line.agreedCents, group.currency)}), quedan{" "}
+                            <span className="font-semibold tabular-nums">{money(line.agreedCents - cost, group.currency)}</span>.
+                          </>
+                        ) : null}
+                      </p>
+                    )
+                  })}
                   {/* «Falta» junta lo ya hecho sin pagar (en Pendiente) y lo que aún no se hace (segunda mesa). */}
                   {group.remainingCents > 0 ? (
                     <p className="text-sm text-muted-foreground">
@@ -657,8 +705,7 @@ export function AccountTab({
                       : ""}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Costó {plain(item.totalCents, item.currency)} · pagó{" "}
-                    {plain(item.paidCents, item.currency)}
+                    {pendingCostWords(item, (cents) => plain(cents, item.currency))}
                     {item.since ? ` · desde el ${formatDayLongLocale(item.since, locale, timeZone)}` : ""}
                   </p>
                   {item.promotionName ? (
@@ -721,7 +768,12 @@ export function AccountTab({
                     <p className="break-words text-sm text-muted-foreground">
                       {row.status === "anulado"
                         ? `Motivo: ${row.voidReason ?? "sin motivo registrado"}`
-                        : [paidWith || (row.creditAppliedCents > 0 ? "Saldo a favor" : ""), concepts]
+                        : [
+                            paidWith,
+                            // Lo usado de su saldo a favor no es dinero que entró (QA del 9 nov, repaso 3).
+                            row.creditAppliedCents > 0 ? `${paidWith ? "usó" : "Usó"} ${money(row.creditAppliedCents, row.currency)} a favor` : "",
+                            concepts,
+                          ]
                             .filter(Boolean)
                             .join(" · ")}
                     </p>
@@ -737,7 +789,7 @@ export function AccountTab({
                       row.status === "anulado" && "text-muted-foreground line-through",
                     )}
                   >
-                    {money(row.totalCents > 0 ? row.totalCents : row.creditAppliedCents, row.currency)}
+                    {money(row.totalCents, row.currency)}
                   </span>
                   <Button variant="outline" size="sm" onClick={() => setViewTicket(row)}>
                     Ver ticket

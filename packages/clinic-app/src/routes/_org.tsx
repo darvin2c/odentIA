@@ -44,6 +44,7 @@ import {
   KeyRound,
   ListTodo,
   Package,
+  PackageCheck,
   Percent,
   Settings,
   Smile,
@@ -74,6 +75,9 @@ import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rem
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
+import { forgetDevicePushOnSignOut, registerAppWorker, syncThemeColor } from "../lib/pwa"
+import { CANVAS_DARK, CANVAS_LIGHT } from "../lib/web-manifest"
+import { NavigationProgress } from "../components/navigation-progress"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
 import { PLAN_PATH } from "../lib/billing"
@@ -166,6 +170,15 @@ export const Route = createFileRoute("/_org")({
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
     return { session, org: data, region, checkedAt: Date.now() }
   },
+  // Instalable solo con sesión: el portal, el registro y el chat del paciente comparten este origen.
+  head: () => ({
+    links: [{ rel: "manifest", href: "/app.webmanifest" }],
+    // Las barras del teléfono del color del fondo desde el primer pintado; después las sigue `syncThemeColor`.
+    meta: [
+      { name: "theme-color", content: CANVAS_LIGHT, media: "(prefers-color-scheme: light)" },
+      { name: "theme-color", content: CANVAS_DARK, media: "(prefers-color-scheme: dark)" },
+    ],
+  }),
   component: OrgGate,
 })
 
@@ -187,8 +200,12 @@ const clinicAgreement = {
 
 /** `unlessPermission`: la entrada sobra para quien ya llega a lo mismo por otra pantalla. */
 type NavChild = AppShellNavItem & { permission?: string; permissionsAny?: string[]; unlessPermission?: string }
+/**
+ * `shown`: la entrada es de una parte del producto (`productUi()`), que se pregunta al
+ * dibujar el menú: al cargar este módulo la app todavía no declaró su producto.
+ */
 type NavDefinition =
-  | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; children?: undefined })
+  | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; shown?: () => boolean; children?: undefined })
   | (Omit<AppShellNavGroup, "children"> & {
       permission?: string
       permissionsAny?: string[]
@@ -202,6 +219,8 @@ const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
+  // Solo donde el producto vende con pedido al taller o al laboratorio (vistIA, ADR 0171).
+  { label: "Pedidos", to: "/orders", icon: PackageCheck, permission: "orders.read", shown: () => Boolean(productUi().orders) },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   // El agente es una sola entrada, junto al trabajo diario; sus secciones
   // (resumen, aprender, conocimiento) son pestañas de página. Es de quien lo
@@ -331,6 +350,10 @@ function OrgLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  // La app en este equipo: tocar un aviso con la app abierta navega aquí, sin recargar.
+  useEffect(() => registerAppWorker((href) => void navigate({ href })), [navigate])
+  useEffect(() => syncThemeColor(), [])
   // Una sola suscripción SSE para el layout: agenda, trabajo del agente y el número de «Inicio».
   useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_WORK_EVENTS, ...WAITING_EVENTS], (kind, data) => {
     if (WAITING_EVENTS.includes(kind)) {
@@ -368,7 +391,8 @@ function OrgLayout() {
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
     const selfVisible =
       (!item.permission || canAccess(role, item.permission)) &&
-      (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
+      (!item.permissionsAny || canAccessAny(role, item.permissionsAny)) &&
+      (item.children || !item.shown || item.shown())
     if (!item.children) return selfVisible ? [withNavState(item)] : []
     const children = item.children
       .filter(
@@ -422,11 +446,14 @@ function OrgLayout() {
       brandIcon={<Brand compact />}
       switcher={<OrgSwitcher />}
       onSignOut={async () => {
+        // Este equipo deja de recibir los avisos de quien sale.
+        await forgetDevicePushOnSignOut()
         await authClient.signOut()
         queryClient.clear()
         window.location.assign(panelUrl("/login"))
       }}
     >
+      <NavigationProgress />
       <SideDockProvider draftGuard={PageDraftGuard}>
         <NoticesColumnProvider notices={(frame) => <NoticesPanel {...frame} />}>
           <GlobalSearchProvider orgId={org.id} screens={searchScreens}>

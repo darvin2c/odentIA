@@ -41,6 +41,9 @@ const EVERYDAY_WORDS: Record<string, readonly string[]> = {
   encias: ["periodoncia", "raspado"],
   chequeo: ["consulta", "control", "evaluacion"],
   revision: ["consulta", "control", "evaluacion"],
+  // «evaluación» no encontraba la consulta al reservar (repaso final de la ficha del 10 nov, B10).
+  evaluacion: ["consulta"],
+  valoracion: ["consulta", "evaluacion"],
 }
 
 /** El catálogo de odentIA: los tipos de su biblioteca y las especialidades odontológicas de cada país (ADR 0069). */

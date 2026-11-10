@@ -212,6 +212,27 @@ const DENTAL_INVENTORY: DemoKindRecipe["inventory"] = {
       { sku: "INS-ANESTESIA-LIDO", quantity: 2 },
       { sku: "INS-ALGODON-ROLLO", quantity: 4 },
     ],
+    // Sin pulpa vital la anestesia suele hacer menos falta: una sola carpule.
+    "endodoncia-posterior-no-vital": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "endodoncia-anterior-no-vital": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "pulpectomia-posterior-deciduo": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "pulpectomia-anterior-deciduo": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
     "radiografia-periapical": [{ sku: "INS-PELICULA-RX", quantity: 1 }],
     "fluor-barniz": [
       { sku: "INS-GUANTE-NITRILO", quantity: 2 },
@@ -409,8 +430,46 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       { template: "exodoncia-simple", price: 150, durationMin: 45, weight: 8, perUnit: true },
       // La de molar es la más frecuente; la anterior, para incisivos y caninos (QA del 8 nov: solo
       // estaba la anterior y una endodoncia de la 36 salía como «anterior»).
-      { template: "endodoncia-posterior-vital", price: 650, durationMin: 90, weight: 4 },
+      // Como la semilla manual: la de molar, en dos sesiones habituales (la biblioteca sugiere una).
+      {
+        template: "endodoncia-posterior-vital",
+        price: 650,
+        durationMin: 90,
+        weight: 4,
+        usualSessions: 2,
+      },
       { template: "endodoncia-anterior-vital", price: 450, durationMin: 90, weight: 2 },
+      // La necrosis (no vital) también llega: sin ella, quien atiende una pieza necrótica en la demo
+      // solo tenía la vital (QA del 9 nov, repaso 3); con medicación entre sesiones, en dos. La
+      // pulpectomía es la de una temporal, anterior o posterior, y solo a quien aún las tiene.
+      {
+        template: "endodoncia-posterior-no-vital",
+        price: 700,
+        durationMin: 90,
+        weight: 2,
+        usualSessions: 2,
+      },
+      {
+        template: "endodoncia-anterior-no-vital",
+        price: 500,
+        durationMin: 90,
+        weight: 1,
+        usualSessions: 2,
+      },
+      {
+        template: "pulpectomia-posterior-deciduo",
+        price: 280,
+        durationMin: 60,
+        weight: 1,
+        who: { maxAge: 12 },
+      },
+      {
+        template: "pulpectomia-anterior-deciduo",
+        price: 250,
+        durationMin: 60,
+        weight: 1,
+        who: { maxAge: 12 },
+      },
       { template: "corona-metal-ceramica-metal-base", price: 900, durationMin: 60, weight: 5 },
       { template: "blanqueamiento-externo-por-arcada", price: 600, durationMin: 60, weight: 4 },
       { template: "radiografia-periapical", price: 30, durationMin: 10, weight: 6, perUnit: true },
@@ -649,6 +708,9 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
         perUnit: true,
       },
       { template: "pulpotomia", price: 250, durationMin: 45, weight: 6 },
+      // Cuando la pulpa de la temporal ya no se salva: la endodoncia del niño.
+      { template: "pulpectomia-posterior-deciduo", price: 280, durationMin: 60, weight: 3 },
+      { template: "pulpectomia-anterior-deciduo", price: 250, durationMin: 60, weight: 1 },
       { template: "corona-de-acero-prefabricada-deciduo", price: 220, durationMin: 40, weight: 4 },
       { template: "exodoncia-simple", price: 120, durationMin: 30, weight: 5, perUnit: true },
     ],

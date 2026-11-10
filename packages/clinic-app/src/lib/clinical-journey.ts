@@ -13,7 +13,6 @@ import type { AppointmentStatus } from "./agenda"
 import { apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
-import { appWords } from "./product-words"
 import type {
   Encounter,
   PatientDocument,
@@ -23,6 +22,7 @@ import type {
   TreatmentNextAction,
   TreatmentPlan,
 } from "./patients"
+import { appWords } from "./product-words"
 
 const base = (patientId: string) => `/api/patients/${patientId}`
 
@@ -116,6 +116,8 @@ export interface FollowUp {
   planItemId: string | null
   encounterProcedureId: string | null
   originEncounterId: string | null
+  /** Quien lo indicó: la reserva lo propone primero. */
+  originProfessionalUserId?: string | null
   kind: string
   title: string
   instructions: string | null
@@ -188,6 +190,8 @@ export type ScheduleFollowUpBody =
         startsAt: string
         endsAt?: string
         durationMin?: number
+        outsideSchedule?: true
+        overrideBusy?: true
       }
     }
 
@@ -234,7 +238,18 @@ export function scheduleFollowUpApi(
 /** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
 export type SchedulableControl = Pick<
   FollowUp,
-  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom" | "overdue" | "servedBy"
+  | "id"
+  | "patientId"
+  | "title"
+  | "dueAt"
+  | "status"
+  | "appointment"
+  | "legacyScheduledAt"
+  | "branchId"
+  | "windowFrom"
+  | "overdue"
+  | "servedBy"
+  | "originProfessionalUserId"
 >
 
 /**
@@ -291,6 +306,10 @@ export interface TreatmentCoordination {
     toSchedule: boolean
     sessionsLeft: number
     nextSession: { n: number; m: number }
+    /** Va después de otro tratamiento de su pieza que sigue sin terminar: su título. */
+    after?: string | null
+    /** Cuenta en «Por agendar» y en Reportes: sin cita y sin esperar a otro que ya tiene la suya. */
+    unbooked?: boolean
   }>
 }
 
@@ -339,6 +358,18 @@ export function cancelFollowUpApi(
   body: { reason: string },
 ): Promise<{ data: FollowUp }> {
   return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+/** Otro día para un control pendiente (`YYYY-MM-DD`); el reservado se cambia moviendo su cita. */
+export function changeFollowUpDueApi(
+  patientId: string,
+  followUpId: string,
+  body: { dueAt: string },
+): Promise<{ data: FollowUp }> {
+  return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/due`, {
     method: "POST",
     body: JSON.stringify(body),
   })

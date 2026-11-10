@@ -31,6 +31,7 @@ import { PURCHASE_STATUS_WORDS } from "./purchase-balance.js"
 import { personSearchCondition } from "./person-search.js"
 import { digitsContain, foldedStartsWith, foldedWordsMatch, foldText, referenceNumber, searchDigits, searchWords, serviceWordsMatch } from "./search-text.js"
 import { pageTasks, taskAreasOfRole } from "./tasks.js"
+import { COUNTER_SALE_LABEL } from "./ticket-party.js"
 
 /** Tipos que se pueden quitar con el filtro de la ventana. */
 export const SEARCH_TYPES = [
@@ -126,6 +127,8 @@ export type SearchOwnerKind =
   | "respuesta"
   | "gasto"
   | "tarea"
+  /** El ticket de una venta de mostrador (ADR 0173): no es de nadie, es su propia fila. */
+  | "comprobante"
 
 export interface SearchOwner {
   key: string
@@ -493,6 +496,37 @@ export async function searchEverything(
       order by at desc limit ${PER_TYPE}`)
     for (const row of budgets) addToPerson(String(row.person_id), budgetItem(row, true))
   }
+  // Una venta de mostrador (ADR 0173) no es de ninguna ficha: se busca por su número o por quien
+  // compró (el contacto elegido o el nombre escrito) y es su propia fila, abierta en Cobros.
+  const counterTickets =
+    can("finance.read") && on("dinero") && (docNumber != null || !digits)
+      ? await rows(sql`
+      select t.id, t.ticket_number, t.total_cents, t.currency, t.created_at, t.branch_id,
+        case when bc.record_locked_at is null then coalesce(bc.display_name, t.buyer_name) end as buyer
+      from payment_ticket t
+      left join contact bc on bc.organization_id = t.organization_id and bc.id = t.buyer_contact_id
+      where t.organization_id = ${orgId} and t.patient_id is null and t.voided_at is null
+        and ${docNumber != null ? sql`t.ticket_number = ${docNumber}` : sql`bc.record_locked_at is null and ${foldedWordsMatch([sql`t.buyer_name`, sql`bc.display_name`], q)}`}
+      order by t.created_at desc limit ${PER_TYPE}`)
+      : []
+  for (const row of counterTickets) {
+    const amount = { cents: num(row.total_cents), currency: String(row.currency) }
+    addOwner({
+      key: `comprobante:${row.id}`,
+      kind: "comprobante",
+      type: "dinero",
+      id: String(row.id),
+      title: `Ticket N.º ${String(row.ticket_number).padStart(6, "0")}`,
+      badge: COUNTER_SALE_LABEL,
+      detail: str(row.buyer),
+      matched: true,
+      target: { screen: "ticket", ticketId: String(row.id), branchId: String(row.branch_id) },
+      items: [],
+      more: 0,
+      amount,
+      at: iso(row.created_at),
+    })
+  }
   if (seesPeople && can("finance.read") && on("dinero") && docNumber != null) {
     const tickets = await rows(sql`
       select t.id, t.ticket_number, t.total_cents, t.currency, t.created_at, t.branch_id, p.person_id
@@ -824,8 +858,10 @@ export async function searchEverything(
       const read = readOf.get(itemKey(item))
       if (read) reads.set(`${read.patientId}:${read.resource}`, read)
     }
+  // El ticket de una venta de mostrador encontrado por quien compró también es el nombre de una persona.
   const personal =
-    result.some((owner) => owner.kind === "persona" && owner.matched) || readOf.size > 0
+    result.some((owner) => (owner.kind === "persona" || (owner.kind === "comprobante" && owner.detail !== null)) && owner.matched) ||
+    readOf.size > 0
   return { owners: result, clinicalReads: [...reads.values()], personal }
 }
 

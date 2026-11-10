@@ -284,7 +284,14 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   const postFresh = (role: string, phone: string | null) =>
     buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: fresh(phone) })
   expect((await postFresh("clinician", "+51987111222")).status).toBe(403)
-  expect((await postFresh("reception", null)).status).toBe(400)
+  // Sin celular también se registra (un urgente sin teléfono, QA del 9 nov, repaso 3): la identidad
+  // nunca se decide por el teléfono, así que no nace una ficha paralela.
+  const noPhone = await buildApp("reception").request("/patients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...registrationBody("Rosa Quispe", { givenNames: "Rosa", familyName: "Quispe" }), scope: "essentials" }),
+  })
+  expect(noPhone.status).toBe(201)
   const agenda = await postFresh("reception", "+51987111222")
   expect(agenda.status).toBe(201)
   const agendaId = ((await agenda.json()) as { data: { id: string } }).data.id
@@ -680,7 +687,10 @@ it("atención en curso: solo cuál es y quién la lleva, para quien atiende y si
   const before = await log()
   const open = await professional.request(path)
   expect(open.status).toBe(200)
-  expect(await open.json()).toEqual({ data: { id: draft.id, professionalUserId: "u-1" } })
+  // De qué día y si está vacía (para preguntar qué hacer con la de otro día), nada de su historia.
+  expect(await open.json()).toEqual({
+    data: { id: draft.id, professionalUserId: "u-1", startedAt: expect.any(String), today: true, empty: true },
+  })
   // No es una lectura de la historia: no deja traza en la bitácora.
   expect(await log()).toBe(before)
 })

@@ -6,12 +6,13 @@
  * (motivo, diagnóstico que sigue, el tratamiento en «Realizado hoy»); nada se da
  * por hecho: la sesión cuenta al registrarla y el control se cumple al firmar.
  */
+import { gapWords } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useState } from "react"
 import { bringTreatmentApi, chooseVisitControlApi, leaveTreatmentApi } from "../../lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import type { EncounterVisit, VisitControl, VisitTreatment } from "../../lib/patients"
+import { type EncounterVisit, treatmentConsentWords, type VisitControl, type VisitTreatment } from "../../lib/patients"
 
 /** «4 may», en la zona de la clínica. */
 function shortDay(iso: string): string {
@@ -35,6 +36,19 @@ export function visitTreatmentWords(item: VisitTreatment): string {
     .join(" · ")
 }
 
+/**
+ * La espera entre sesiones que aún no se cumple (QA del 10 nov, B6), con los días que pide su
+ * servicio: «La sesión anterior fue hoy: la medicación suele dejarse una semana.». Avisa y no
+ * traba: «Continuar hoy» sigue. Null si no hay espera pendiente.
+ */
+export function visitWaitWords(item: Pick<VisitTreatment, "wait">): string | null {
+  const wait = item.wait
+  if (!wait) return null
+  const when =
+    wait.sinceDays === 0 ? "hoy" : wait.sinceDays === 1 ? "ayer" : `hace ${wait.sinceDays} días`
+  return `La sesión anterior fue ${when}: la medicación suele dejarse ${gapWords(wait.days)}.`
+}
+
 /** «vencido el 4 may · lo indicó Dr. Hugo». */
 function controlWords(control: VisitControl): string {
   return [
@@ -54,6 +68,7 @@ export function EncounterVisitStrip({
   encounterId,
   visit,
   offeredReason,
+  bookedReason,
   onUseReason,
   reasonEmpty,
   onUrgency,
@@ -67,6 +82,8 @@ export function EncounterVisitStrip({
   visit: EncounterVisit | null | undefined
   /** El motivo que trae la cita, mientras no haya otro. */
   offeredReason: string | null
+  /** El de la cita aunque ya se usó: lo usado sigue a la vista (QA del 9 nov, repaso 3). */
+  bookedReason?: string | null
   onUseReason: () => void
   reasonEmpty: boolean
   /** «Es una urgencia»: deja el motivo listo para escribir. */
@@ -81,7 +98,9 @@ export function EncounterVisitStrip({
   const [error, setError] = useState<string | null>(null)
   const treatments = visit?.treatments ?? []
   const controls = visit?.controls ?? []
-  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason
+  // Ya usado como motivo, «Su cita» sigue a la vista, sin botón.
+  const usedReason = !offeredReason && bookedReason?.trim() ? bookedReason.trim() : null
+  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason && !usedReason
 
   const run = async (key: string, write: () => Promise<unknown>) => {
     if (busy) return
@@ -135,6 +154,14 @@ export function EncounterVisitStrip({
         </p>
       ) : (
         <ul className="flex flex-col divide-y text-sm">
+          {usedReason ? (
+            <li className={row}>
+              <span className="min-w-0">
+                <span className="text-muted-foreground">Su cita: </span>«{usedReason}»
+                <span className="block text-xs text-muted-foreground">Ya es el motivo de hoy</span>
+              </span>
+            </li>
+          ) : null}
           {offeredReason ? (
             <li className={row}>
               <span className="min-w-0">
@@ -176,8 +203,20 @@ export function EncounterVisitStrip({
                         ? "Está en «Realizado hoy»: ahí registras su sesión cuando la hagas"
                         : item.started
                           ? "En curso"
-                          : "Aceptado, sin empezar"}
+                          : item.after
+                            ? // La misma regla de «Qué sigue»: avisa, y «Hacerla hoy» queda como segunda opción.
+                              `Aceptado · va después de terminar ${item.after.title}${item.after.today ? ", que se hace hoy" : ""}`
+                            : "Aceptado, sin empezar"}
                   </span>
+                  {!item.registered && visitWaitWords(item) ? (
+                    <span className="text-xs text-warning">{visitWaitWords(item)}</span>
+                  ) : null}
+                  {/* El consentimiento va con el tratamiento: se firma antes de empezar, en Documentos. */}
+                  {!item.registered && treatmentConsentWords(item.consent, item.consentMissing) ? (
+                    <span className={item.consent === "firmado" ? "text-xs text-muted-foreground" : "text-xs text-warning"}>
+                      {treatmentConsentWords(item.consent, item.consentMissing)}
+                    </span>
+                  ) : null}
                 </span>
                 {item.registered ? null : item.linked ? (
                   <span className="flex flex-wrap gap-2">
@@ -240,10 +279,14 @@ export function EncounterVisitStrip({
                   }
                 >
                   {controlWords(control)}
-                  {control.chosen ? " · viene a este control: se cumple al firmar" : ""}
+                  {control.byAppointment
+                    ? " · su cita de hoy es este control: se cumple al firmar"
+                    : control.chosen
+                      ? " · viene a este control: se cumple al firmar"
+                      : ""}
                 </span>
               </span>
-              {control.chosen ? (
+              {control.byAppointment ? null : control.chosen ? (
                 <Button
                   type="button"
                   size="sm"

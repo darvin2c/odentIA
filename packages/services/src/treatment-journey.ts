@@ -10,13 +10,14 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { and, asc, desc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm"
 import { listPatientDocuments } from "./clinical.js"
 import { withPlanItemParts } from "./plan.js"
 import type { ProductParts } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { notFound } from "./errors.js"
 import { getPatientAccount } from "./payments.js"
+import { carriedAtOf } from "./plan-next.js"
 import { requirePatient } from "./patients.js"
 
 export type TreatmentNextAction =
@@ -123,6 +124,9 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
+  // La cita por venir que ya lleva cada uno: el Plan dice «Sesión 1: mar 10 nov» en vez de
+  // «Iniciar la primera sesión» (QA del 9 nov, repaso 3).
+  const carried = await carriedAtOf(tx, orgId, [patientId])
   // Resumen clínico: estado y próxima acción de cada tratamiento, sin saldos.
   // La caja se consulta con `finance.read` en la cuenta del paciente.
   return rows.map((row) => {
@@ -142,6 +146,7 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       lastSession,
       nextFollowUp,
       nextAction,
+      nextAppointmentAt: carried.get(row.item.id) ?? null,
     }
   })
 }
@@ -233,7 +238,8 @@ export async function getTreatmentJourney(
   const replacedBy = await tx
     .select()
     .from(treatmentPlanItem)
-    .where(and(scope, eq(treatmentPlanItem.supersedesItemId, item.id)))
+    // Un reemplazo que se deshizo al anular su atención ya no lo reemplaza (QA antes de entregar, entrega 12).
+    .where(and(scope, eq(treatmentPlanItem.supersedesItemId, item.id), ne(treatmentPlanItem.status, "cancelado")))
   const budgetLines = await tx
     .select({ budget: treatmentBudget, line: treatmentBudgetItem })
     .from(treatmentBudgetItem)

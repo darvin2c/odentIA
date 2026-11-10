@@ -124,8 +124,36 @@ export interface ConsentTemplate {
   updatedAt: string
 }
 
+/**
+ * Por qué no se ofrece firmar desde su teléfono, para decirlo donde se ocultó (QA del 10 nov, M2):
+ * «Para firmar desde su teléfono falta la fecha de nacimiento de Ana».
+ */
+export function phoneSignBlockWords(
+  block: NonNullable<ConsentDocument["phoneSignBlock"]>,
+  /** Quien firma: «Ana» o «su madre, Rosa». */
+  who: string,
+  /** El paciente, de quien es la fecha de nacimiento. */
+  patient: string,
+): string {
+  switch (block) {
+    case "sin-fecha":
+      return `Para firmar desde su teléfono falta la fecha de nacimiento de ${patient}: complétala en Datos.`
+    case "sin-documento":
+      return `Para firmar desde su teléfono falta el documento de ${who}: complétalo en Datos.`
+    case "menor":
+      return `No se firma desde el teléfono: ${patient} es menor de edad y firma su representante.`
+    case "sin-destinatario":
+      return "No se firma desde el teléfono: no tiene a quién enviárselo (un celular o su representante)."
+  }
+}
+
 export interface ConsentDocument {
   id: string
+  /**
+   * En la lista del paciente: por qué su enlace no lo dejaría firmar desde el teléfono
+   * (`remoteSignBlock`); entonces no se ofrece «Firmar en su teléfono». Null si puede.
+   */
+  phoneSignBlock?: "menor" | "sin-fecha" | "sin-documento" | "sin-destinatario" | null
   organizationId: string
   templateId: string
   templateVersion: number
@@ -238,11 +266,14 @@ export interface ConsentLetterhead {
   brandInk?: string | null
 }
 
-/** Lo fijo de la hoja que se firma: el membrete, la declaración que se guarda y la nota del nivel de firma. */
+/** Lo fijo de la hoja que se firma: el membrete, la declaración que se guarda y lo que dice el pie sobre la firma. */
 export interface ConsentSheetFrame {
   clinic: ConsentLetterhead
   declaration: string
+  /** Al pie, en la tablet. */
   signatureNote: string
+  /** Al pie, en su enlace (la vista previa de Configuración); no viene en el del presupuesto. */
+  linkSignatureNote?: string
 }
 
 export function fetchConsentSheetFrame(): Promise<{ data: ConsentSheetFrame }> {
@@ -507,9 +538,12 @@ export function signConsent(
     method?: "clinica" | "papel"
     /** En papel: la foto de la hoja firmada, ya en Documentos. */
     paperDocumentId?: string | null
+    /** Lo firmó en su enlace y lo firma de nuevo aquí: la firma del enlace queda en la historia. */
+    signAgain?: boolean
   },
 ) {
-  return post<ConsentDocument>(`${BASE}/consents/${id}/sign`, body)
+  // `signerDocNotice`: el documento escrito del representante no quedó en su ficha (por qué).
+  return post<ConsentDocument & { signerDocNotice?: string }>(`${BASE}/consents/${id}/sign`, body)
 }
 
 export function revokeConsent(
@@ -617,11 +651,15 @@ export const ORDER_STATUS_LABELS: Record<ClinicalOrder["status"], string> = {
   cancelado: "Cancelada",
 }
 
-/** Nivel real de la firma, siempre a la vista. */
+/**
+ * Cómo firmó, siempre a la vista: en la clínica, en papel o por enlace. El nivel legal de la
+ * firma («Firma electrónica simple», `signatureKindWords`) va en el PDF, no como advertencia
+ * al firmar (entrega 11).
+ */
 export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", string> = {
-  clinica: "Firma simple · en la clínica",
-  papel: "Firma simple · en papel",
-  enlace: "Firma simple · por enlace",
+  clinica: "Firma en la clínica",
+  papel: "Firma en papel",
+  enlace: "Firma por enlace",
 }
 
 export function consentSignatureWords(
@@ -653,6 +691,16 @@ export async function sendConsentByLink(
     method: "POST",
     body: JSON.stringify({ requestId }),
   })
+}
+
+/**
+ * Su enlace que abre el consentimiento, para mostrarlo como código o copiarlo: la persona lo
+ * lee y lo firma en su teléfono, sin que la clínica le envíe ningún mensaje.
+ */
+export async function showConsentLink(
+  consentId: string,
+): Promise<{ data: { url: string; expiresAt: string; recipientName: string } }> {
+  return apiFetch(`${BASE}/consents/${consentId}/show-link`, { method: "POST", body: "{}" })
 }
 
 /**

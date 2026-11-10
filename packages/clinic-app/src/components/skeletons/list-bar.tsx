@@ -85,7 +85,7 @@ export function FilterBarShell({
   sort?: boolean
 }) {
   return (
-    <div className="flex rounded-md bg-card p-3">
+    <div className="flex">
       <div className="-m-1 hidden w-full min-w-0 items-center gap-2 overflow-hidden p-1 md:flex">
         {searchLabel ? <SearchShell placeholder={searchLabel} /> : null}
         {filters.map((filter) => (

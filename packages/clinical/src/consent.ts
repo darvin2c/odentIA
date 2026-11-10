@@ -41,12 +41,41 @@ export const CONSENT_DECLARATION =
   "He leído y comprendido la información, pude hacer preguntas y fueron respondidas. Autorizo el procedimiento descrito y sé que puedo revocar este consentimiento antes de que se realice."
 
 /**
- * Lo que dice el documento sobre su firma: es simple, y no es la firma
- * digital certificada que reconoce la ley de firmas del país
- * (`ClinicalCountryProfile.signatureLaw`), si tiene una (#47).
+ * Lo que lee quien firma al pie de la hoja (entrega 11): qué pasa con su firma, corto y
+ * cierto, sin advertencias. Cada frase la cumple el sistema: firmado en la clínica, el
+ * consentimiento se guarda como PDF en Documentos del paciente con quién firmó y cuándo
+ * (`generateConsentPdf`); por enlace queda pendiente hasta que el profesional lo confirma, y
+ * recién ahí se guarda, por eso el enlace lo dice. La copia la ve en su enlace o se la envía
+ * el equipo. No dice «sin cambios» (eso lo prueban la huella y el QR del PDF) ni insinúa firma
+ * digital: el nivel legal va en el PDF (`signatureKindWords`), no como advertencia al firmar.
+ * «La historia clínica», sin «su»: quien firma puede ser el representante. De tú, como el resto
+ * de la hoja que lee quien firma («Firma aquí con el dedo»).
  */
-export function consentSignatureNote(signatureLaw: string | null): string {
-  return `Firma electrónica simple: firmas manuscritas capturadas como evidencia; no constituyen firma digital certificada${signatureLaw ? ` (${signatureLaw})` : ""}.`
+export const CONSENT_SIGNATURE_NOTES = {
+  clinica: "Tu firma queda en la historia clínica, con la fecha y la hora. Puedes pedir una copia cuando quieras.",
+  enlace:
+    "Tu firma queda en la historia clínica, con la fecha y la hora, cuando el profesional la confirme contigo. Puedes pedir una copia cuando quieras.",
+} as const satisfies Record<"clinica" | "enlace", string>
+
+/**
+ * Al pie del presupuesto que se firma en la tablet: se guardan la firma, el nombre, lo que
+ * aceptó y la fecha y hora (`BudgetDecisionSignature`). Se guarda con la firma, tal como se leyó.
+ */
+export const BUDGET_SIGNATURE_NOTE = "Tu respuesta queda guardada con la fecha y la hora de tu firma."
+
+/**
+ * El nivel de la firma dibujada, para el PDF en letra discreta: firma electrónica simple, con
+ * la ley de firmas del país (`ClinicalCountryProfile.signatureLaw`) si tiene una (#47). En el
+ * Perú, la Ley 27269 (art. 1) reconoce la firma electrónica; la presunción de autenticidad del
+ * DS 052-2008-PCM es solo de la firma digital, que esto no es. No va en la firma en papel.
+ */
+export function signatureKindWords(signatureLaw: string | null): string {
+  return `Firma electrónica simple${signatureLaw ? ` (${signatureLaw})` : ""}`
+}
+
+/** La nota que se guardaba antes de la entrega 11 ya nombra el nivel de la firma: no se repite. */
+export function noteNamesSignatureKind(note: string | null): boolean {
+  return note?.startsWith("Firma electrónica simple") ?? false
 }
 
 function cleanText(value: unknown, label: string, min: number, max: number): string {
@@ -108,6 +137,18 @@ export interface SuggestedConsentTemplate {
    * dentro de otros y pedirlo en cada uno solo agregaría firmas.
    */
   servicePrefixes?: readonly string[]
+  /**
+   * La familia del tratamiento en la biblioteca que lo pide (odentIA: lo que deja en la pieza,
+   * `leaves_condition` de `seeds/biblioteca.csv`: «root_canal_treatment», «crown»…). Se elige
+   * por lo que el tratamiento es, no por cómo empieza su clave: con el prefijo, la pulpectomía
+   * quedaba sin consentimiento y la corona caía en el de prótesis (QA del 10 nov, A1 y M2).
+   * La clave (`servicePrefixes`) queda para lo que la biblioteca no dice y para los productos
+   * sin familias. odentIA da de cada tratamiento lo que deja en la pieza y su familia de
+   * `seeds/biblioteca_piezas.csv` («pulpectomia-deciduo»).
+   */
+  serviceFamilies?: readonly string[]
+  /** Claves que no lo piden aunque su familia sí (la corona de acero de un temporal). */
+  exceptPrefixes?: readonly string[]
 }
 
 /** Plantillas sugeridas por procedimiento: cada clínica nace con ellas activas. */
@@ -137,6 +178,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "exodoncia",
     title: "Exodoncia simple o quirúrgica",
+    serviceFamilies: ["missing_tooth"],
     servicePrefixes: ["exodoncia-"],
     sections: {
       procedure:
@@ -160,6 +202,14 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "endodoncia",
     title: "Tratamiento de conductos (endodoncia)",
+    // La de la pieza permanente; la pulpectomía de un temporal tiene el suyo y la pulpotomía va
+    // con la odontopediatría (QA del 10 nov, A1 y M3).
+    serviceFamilies: [
+      "endodoncia-vital",
+      "endodoncia-no-vital",
+      "endodoncia-bicuspide-raices",
+      "retratamiento",
+    ],
     servicePrefixes: ["endodoncia-", "retratamiento-de-endodoncia-"],
     sections: {
       procedure:
@@ -198,6 +248,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "implante",
     title: "Implante dental",
+    serviceFamilies: ["implant"],
     servicePrefixes: ["colocacion-de-implante-"],
     sections: {
       procedure:
@@ -255,7 +306,20 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "protesis",
     title: "Prótesis dental",
-    servicePrefixes: ["corona-de-", "corona-metal-", "protesis-completa-", "protesis-parcial-", "puente-"],
+    // Para reponer piezas ausentes, también la corona sobre un implante; la corona sobre la
+    // propia pieza tiene el suyo («corona»).
+    servicePrefixes: [
+      "protesis-completa-",
+      "protesis-parcial-",
+      "protesis-inmediata-",
+      "puente-",
+      "corona-de-metal-colado-sobre-pilar-",
+      "corona-de-metal-sobre-implante",
+      "corona-de-porcelana-sobre-pilar",
+      "corona-de-titanio-sobre-pilar",
+      "corona-metal-ceramica-sobre-pilar-",
+      "corona-retenedora-sobre-pilar",
+    ],
     sections: {
       procedure:
         "Preparación de piezas, toma de impresiones y adaptación de una prótesis fija o removible para reponer piezas ausentes.",
@@ -270,11 +334,95 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
     },
   },
   {
-    key: "odontopediatria",
-    title: "Atención odontopediátrica",
+    key: "corona",
+    title: "Corona sobre la propia pieza",
+    // Lo que deja una corona o un perno-muñón en la pieza; la de acrílico indirecta no lo dice
+    // en la biblioteca y va por su clave.
+    serviceFamilies: ["crown", "post_and_core"],
+    servicePrefixes: [
+      "corona-de-acrilico-indirecta",
+      "3-4-de-corona-",
+      "poste-prefabricado-y-nucleo",
+      "reconstruccion-de-munon",
+    ],
+    exceptPrefixes: [
+      "corona-de-acero-prefabricada-deciduo",
+      "corona-de-acero-con-frente-estetico-deciduo",
+    ],
     sections: {
       procedure:
-        "Tratamientos preventivos y restauradores en el menor (sellantes, flúor, restauraciones, pulpotomías o extracciones de piezas temporales), con manejo de conducta adaptado a su edad.",
+        "Tallado de la pieza indicada con anestesia local, toma de impresiones o escaneo, colocación de una corona provisional y, en otra sesión, cementado de la corona definitiva que la cubre. Si la pieza está muy destruida puede necesitar antes un perno y muñón.",
+      benefits: [
+        "Proteger la pieza debilitada o tratada de conductos frente a una fractura",
+        "Recuperar su forma, su función y su estética",
+      ],
+      risks: [
+        "Sensibilidad de la pieza tallada, por lo general temporal",
+        "Molestias o despegado de la corona provisional",
+        "Inflamación de la encía alrededor de la corona",
+        "Fractura de la pieza o de la corona, o que la corona se despegue y haya que cementarla de nuevo",
+        "En una pieza con nervio, que necesite después un tratamiento de conductos",
+      ],
+      alternatives: [
+        "Incrustación (onlay) o restauración directa con resina, si queda suficiente pieza",
+        "No colocar corona y controlar la pieza, con riesgo de fractura",
+      ],
+      consequences:
+        "Fractura de la pieza debilitada, que puede obligar a extraerla, y pérdida de su función.",
+    },
+  },
+  {
+    key: "pulpectomia",
+    title: "Pulpectomía en piezas temporales",
+    // La terapia pulpar total de un temporal tiene sus propios riesgos (la raíz que se reabsorbe,
+    // la permanente que se forma debajo): el de odontopediatría no los decía (QA del 10 nov, M3).
+    // Texto de la voz clínica de la mesa, según la guía de terapia pulpar de la AAPD; lo valida un
+    // odontopediatra de la clínica al revisarlo.
+    serviceFamilies: ["pulpectomia-deciduo"],
+    servicePrefixes: ["pulpectomia-"],
+    sections: {
+      procedure:
+        "Con anestesia local y la pieza aislada, se retira el nervio (pulpa) inflamado o infectado de la corona y de las raíces de la pieza temporal indicada, se limpian y desinfectan sus conductos y se rellenan con una pasta que se reabsorbe junto con la raíz cuando la pieza se cae sola. Después se restaura la pieza, muchas veces con una corona de acero. Puede hacerse en una o dos sesiones y se controla con radiografías hasta que la pieza se cambie.",
+      benefits: [
+        "Quitar el dolor y la infección",
+        "Conservar la pieza temporal hasta que salga la permanente, para masticar bien y guardarle su espacio",
+        "Evitar la extracción y el mantenedor de espacio",
+      ],
+      risks: [
+        "Molestias o dolor leve uno o dos días después",
+        "Adormecimiento del labio, la lengua o la mejilla por unas horas, con riesgo de que el menor se muerda",
+        "Que la restauración se despegue o la pieza se fracture si no queda bien cubierta",
+        "Que la infección no se cure o vuelva, con dolor, hinchazón o un absceso; entonces se repite el tratamiento o se extrae la pieza",
+        "Que la pieza temporal se caiga antes o después de lo normal, o que la permanente salga desviada",
+        "Que la pasta pase un poco más allá de la raíz; por lo general se reabsorbe sola",
+        "Manchas o defectos en el esmalte de la pieza permanente que viene debajo, sobre todo si la infección ya era grande antes de tratarla",
+        "Reacción al anestésico local, poco frecuente",
+      ],
+      alternatives: [
+        "Extraer la pieza y, si hace falta, colocar un mantenedor de espacio para que la permanente tenga su lugar",
+        "Pulpotomía (retirar solo el nervio de la corona), si al abrir la pieza el nervio de las raíces está sano",
+        "No tratar por ahora y controlar, con los riesgos que se explican abajo",
+      ],
+      consequences:
+        "La infección sigue y puede crecer: dolor, hinchazón de la cara, fiebre o un absceso que puede dañar la pieza permanente que se forma debajo. La pieza temporal suele perderse antes de tiempo y las vecinas pueden cerrar el espacio de la permanente.",
+      notes:
+        "Firma el representante legal vigente del menor. Avise a la clínica si el menor tiene fiebre, la cara hinchada o dolor que no cede con lo indicado.",
+    },
+  },
+  {
+    key: "odontopediatria",
+    title: "Atención odontopediátrica",
+    // Toda terapia pulpar de un temporal pide consentimiento, firmado por su representante (QA
+    // del 10 nov, A1). La pulpectomía tiene el suyo (M3).
+    serviceFamilies: ["pulpotomy"],
+    servicePrefixes: [
+      "pulpotomia",
+      "corona-de-acero-prefabricada-deciduo",
+      "corona-de-acero-con-frente-estetico-deciduo",
+    ],
+    sections: {
+      procedure:
+        "Tratamientos preventivos y restauradores en el menor (sellantes, flúor, restauraciones, pulpotomías, coronas de acero o extracciones de piezas temporales), con manejo de conducta adaptado a su edad.",
       benefits: [
         "Tratar la caries y prevenir nuevas lesiones",
         "Conservar el espacio para las piezas permanentes",

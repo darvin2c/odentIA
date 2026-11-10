@@ -1,46 +1,52 @@
+import { DiagnosisPicker } from "@odentia/clinic-app/components/patient/diagnosis-picker"
+import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
+import { ServicePicker } from "@odentia/clinic-app/components/patient/service-picker"
+import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
+import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
+import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
+import { useDiagnosisSystem, useOrgProfile } from "@odentia/clinic-app/lib/org"
 import {
-  diagnosisCodeLabel,
-  formatMoney,
-  isLeftOut,
-} from "@odentia/clinical"
+  DIAGNOSIS_TYPE_LABELS,
+  type PatientDocument,
+  type PlanItem,
+  planStatusLabel,
+  toothTypeLabel,
+} from "@odentia/clinic-app/lib/patients"
+import { fetchService, type ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
+import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
+import { diagnosisCodeLabel, formatMoney, isLeftOut, pulpDiagnosisChoices } from "@odentia/clinical"
 import {
   surfaceLabel as clinicalSurfaceLabel,
+  dentitionOf,
+  type FindingDefinition,
   type FindingDetails,
   type FindingField,
-  type FindingDefinition,
   type FindingInput,
   type FindingScope,
   findingDefinition,
   findingIssues,
+  isValidTooth,
   surfacesForTooth,
+  toothGroupOf,
   toothNameOf,
   toothTypeOf,
 } from "@odentia/dental"
+import { Badge, Button, Checkbox, Field, FieldLabel } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  Checkbox,
-  Field,
-  FieldLabel,
-} from "@odentia/ui"
-import { FormDrawer, FormPanel, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+  FormDrawer,
+  FormPanel,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
-import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
-import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
-import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
-import { useOrgProfile } from "@odentia/clinic-app/lib/org"
-import { DIAGNOSIS_TYPE_LABELS, type PatientDocument, type PlanItem, planStatusLabel, toothTypeLabel } from "@odentia/clinic-app/lib/patients"
-import { type OdontogramEntry } from "../../lib/dental/odontogram"
-import type { ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
+import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
-import { DiagnosisPicker } from "@odentia/clinic-app/components/patient/diagnosis-picker"
-import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
-import { ServicePicker } from "@odentia/clinic-app/components/patient/service-picker"
+import { ToothFitNotice } from "./tooth-fit-notice"
 import { ToothHistory } from "./tooth-history"
 import { ToothSVG } from "./tooth-svg"
 
@@ -517,6 +523,34 @@ export function ToothDrawer({
   const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS })
   const draft = useStore(form.store, (state) => state.values)
 
+  // Una pieza por grupo: la 36 y la 46 dicen lo mismo. Con grupos distintos se avisa por cada
+  // uno y no se ofrece cambiar, porque el otro servicio no serviría para todas.
+  const fitTeeth = useMemo(() => {
+    const byGroup = new Map<string, number>()
+    for (const place of teeth) {
+      if (!isValidTooth(place)) continue
+      const key = `${toothGroupOf(place)}:${dentitionOf(place)}`
+      if (!byGroup.has(key)) byGroup.set(key, place)
+    }
+    return [...byGroup.values()]
+  }, [teeth])
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  /** «Usar Endodoncia posterior vital»: cambia el servicio elegido, con sus sesiones habituales. */
+  const switchToSibling = async (serviceId: string) => {
+    setSwitching(true)
+    setSwitchError(null)
+    try {
+      const { data } = await fetchService(serviceId)
+      form.setFieldValue("treatService", data)
+      form.setFieldValue("treatSessions", String(data.usualSessions ?? 1))
+    } catch (err) {
+      setSwitchError(submitErrorMessage(err))
+    } finally {
+      setSwitching(false)
+    }
+  }
+
   const voidForm = useAppForm({
     defaultValues: EMPTY_VOID,
     validators: { onSubmit: voidSchema },
@@ -555,6 +589,8 @@ export function ToothDrawer({
 
   const busy = surface.isSubmitting || voidSurface.isSubmitting
   const fieldDisabled = !canMutate || disabled || busy
+  const diagnosisList = useDiagnosisSystem()
+  const pulpChoices = pulpDiagnosisChoices(diagnosisList.key)
 
   const { condition, drawing, surfaces } = draft
   const layout = findingLayout(draft, multi, allowedSurfaces.length > 0)
@@ -1138,7 +1174,49 @@ export function ToothDrawer({
                 )}
               </form.AppField>
             </div>
-            <p className="text-xs text-muted-foreground">Cuenta como diagnóstico de esta atención</p>
+            <p className="text-xs text-muted-foreground">
+              Cuenta como diagnóstico de esta atención
+            </p>
+            {/* Caries con la pulpa comprometida: se propone la caries; lo pulpar se decide por vitalidad
+                y síntomas, a un toque y sin marcar (segundo repaso del 9 nov, N8). */}
+            {condition === "caries" && draft.variant === "pulpal_involvement" ? (
+              <div className="flex flex-col gap-2">
+                <p id={`${uid}-pulpar`} className="text-xs text-muted-foreground">
+                  {pulpChoices.length > 0
+                    ? "Diagnóstico pulpar (evalúa vitalidad):"
+                    : "Diagnóstico pulpar (evalúa vitalidad): pulpitis, necrosis pulpar o periodontitis apical, en el buscador."}
+                </p>
+                {pulpChoices.length > 0 ? (
+                  <div
+                    role="group"
+                    aria-labelledby={`${uid}-pulpar`}
+                    className="flex flex-wrap gap-1.5"
+                  >
+                    {pulpChoices.map((choice) => {
+                      const chosen = draft.diagnosisCode === choice.code
+                      return (
+                        <Button
+                          key={choice.code}
+                          type="button"
+                          size="sm"
+                          variant={chosen ? "default" : "outline"}
+                          aria-pressed={chosen}
+                          disabled={fieldDisabled}
+                          className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left"
+                          onClick={() => {
+                            form.setFieldValue("diagnosisCode", choice.code)
+                            form.setFieldValue("diagnosisSystem", diagnosisList.key)
+                            form.setFieldValue("diagnosisDescription", choice.title)
+                          }}
+                        >
+                          {choice.label}
+                        </Button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <section aria-label="Tratamiento" className="flex flex-col gap-3 border-t pt-4 sm:col-span-2">
@@ -1152,6 +1230,8 @@ export function ToothDrawer({
                       aria-describedby={control.describedBy}
                       onBlur={control.onBlur}
                       value={field.state.value?.id ?? ""}
+                      // Lo que encaja en la pieza, primero (la endodoncia posterior en la 46).
+                      place={multi ? null : (tooth ?? null)}
                       onChange={(service) => {
                         field.handleChange(service)
                         // Nace con las sesiones habituales del servicio, como en «Indicar un tratamiento»:
@@ -1187,6 +1267,28 @@ export function ToothDrawer({
                   Quitar
                 </Button>
               </div>
+            ) : null}
+            {/* La endodoncia anterior en la 46: se dice aquí, debajo de lo elegido, y se ofrece la que encaja. */}
+            {draft.treatService
+              ? fitTeeth.map((place) => (
+                  <ToothFitNotice
+                    key={place}
+                    service={draft.treatService!}
+                    place={place}
+                    diagnosisCode={draft.diagnosisCode || null}
+                    pending={switching || fieldDisabled}
+                    onUse={
+                      fitTeeth.length === 1
+                        ? (sibling) => void switchToSibling(sibling.id)
+                        : undefined
+                    }
+                  />
+                ))
+              : null}
+            {switchError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {switchError}
+              </p>
             ) : null}
             <p className="text-xs text-muted-foreground">
               {draft.treatService
