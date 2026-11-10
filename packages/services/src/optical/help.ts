@@ -1,4 +1,4 @@
-import { HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import { HELP_TOPICS, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en vistIA ----------
@@ -540,4 +540,4 @@ const OPTICAL_ONLY_TOPICS: readonly HelpTopic[] = [
 ]
 
 /** La guía de la Ayuda en vistIA: las pantallas de siempre, con lo de una óptica, y las suyas. */
-export const OPTICAL_HELP_TOPICS: readonly HelpTopic[] = [...HELP_TOPICS.map(opticalTopic), ...OPTICAL_ONLY_TOPICS]
+export const OPTICAL_HELP_TOPICS: readonly HelpTopic[] = [...SHARED_HELP_TOPICS.map(opticalTopic), ...OPTICAL_ONLY_TOPICS]

@@ -1,4 +1,4 @@
-import { HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import { HELP_TOPICS, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en latidIA (issue 229, entrega 11) ----------
@@ -232,4 +232,4 @@ function medicalTopic(topic: HelpTopic): HelpTopic {
   return EDITS[topic.id]?.(worded) ?? worded
 }
 
-export const MEDICAL_HELP_TOPICS: readonly HelpTopic[] = HELP_TOPICS.map(medicalTopic)
+export const MEDICAL_HELP_TOPICS: readonly HelpTopic[] = SHARED_HELP_TOPICS.map(medicalTopic)

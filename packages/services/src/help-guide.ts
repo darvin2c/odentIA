@@ -2364,6 +2364,11 @@ function withMore(topics: readonly HelpTopic[], more: readonly HelpMore[]): read
 
 export const HELP_TOPICS: readonly HelpTopic[] = withMore(BASE_TOPICS, HELP_MORE)
 
+/** La guía sin lo que es solo de odentIA (`own`): de aquí parten las guías de los demás productos. */
+export const SHARED_HELP_TOPICS: readonly HelpTopic[] = HELP_TOPICS.map((topic) =>
+  topic.faqs?.some((faq) => faq.own) ? { ...topic, faqs: topic.faqs.filter((faq) => !faq.own) } : topic,
+)
+
 /**
  * Cada función recibe la guía del producto de la clínica (`productHelpTopics`;
  * latidIA tiene la suya, issue 229). Sin ella, la de odentIA.
