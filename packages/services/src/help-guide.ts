@@ -70,6 +70,19 @@ export interface HelpTopic {
   faqs?: HelpFaq[]
   /** Permiso que hace falta para cambiar cosas ahí (basta uno); ausente = basta con poder verla. */
   writePermission?: string | readonly string[]
+  /**
+   * Las categorías en que se reparte un tema muy grande, para que Jev busque en
+   * una parte y no en todo (`help.v2`). La primera es la del párrafo de la
+   * pantalla y la de toda pregunta que no diga la suya (`HelpFaq.area`).
+   */
+  areas?: readonly HelpTopicArea[]
+}
+
+/** Una categoría dentro de un tema: su nombre fijo, cómo se le dice y de qué trata. */
+export interface HelpTopicArea {
+  id: string
+  label: string
+  about: string
 }
 
 const SETTINGS = "Configuración"
