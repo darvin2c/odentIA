@@ -538,7 +538,10 @@ describe("la respuesta en consulta y la firma de quien decide", () => {
     const later = await words()
     expect(later).toMatchObject({ text: "Aceptó por su enlace", signedAll: false })
     expect(later?.signature?.accepted).toEqual(["Tratamiento propio"])
-    expect(later?.signature?.note).toMatch(/Firma electrónica simple/)
+    // Lo que leyó al firmar, y el papel suma el nivel de la firma, que la nota no dice.
+    expect(later?.signature?.note).toBe("Su respuesta queda guardada con la fecha y la hora de su firma.")
+    expect(later?.signatureNote).toBe(later?.signature?.note)
+    expect(later?.signatureKind).toMatch(/^Firma electrónica simple/)
   })
 
   it("la firma de la demo es una firma válida", () => {

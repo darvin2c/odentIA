@@ -5,7 +5,9 @@ import {
   budgetStateText,
   clinicalProfileFor,
   type ConsentSections,
-  consentSignatureNote,
+  BUDGET_SIGNATURE_NOTE,
+  noteNamesSignatureKind,
+  signatureKindWords,
   diagnosisCodeLabel,
   isClinicalProduct,
   type PatientGuide,
@@ -2822,18 +2824,13 @@ async function budgetSignatureOf(
     .from(patient)
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
-  const [profile] = await tx
-    .select({ country: orgProfile.countryCode })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
   return {
     strokes,
     signerName: args.representative.displayName,
     signerKind: own?.personId === args.representative.id ? "paciente" : "representante",
     declaration: BUDGET_SIGN_DECLARATION,
     accepted: args.accepted,
-    note: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+    note: BUDGET_SIGNATURE_NOTE,
   }
 }
 
@@ -3743,8 +3740,13 @@ export interface BudgetPrintPayload {
     signedAt: Date | null
     /** La firma cubre la respuesta de hoy; si no, solo lo que aceptó al firmar (`signature.accepted`). */
     signedAll: boolean
-    /** Con firma: su alcance («Firma electrónica simple…»), como se leyó al firmar. */
+    /** Con firma: lo que leyó al pie al firmar, tal como se guardó; null si no se guardó. */
     signatureNote: string | null
+    /**
+     * Con firma: su nivel para el papel, en letra discreta («Firma electrónica simple (Ley
+     * 27269)», `signatureKindWords`); null si la nota guardada ya lo dice (las de antes).
+     */
+    signatureKind: string | null
   } | null
   /** Su enlace vivo, si ya tiene uno; generar uno no es algo que haga un papel. */
   personalLinkUrl: string | null
@@ -3896,7 +3898,7 @@ function decisionWordsOf(
   deciderName: string | null,
   notedByName: string | null,
   signature: BudgetDecisionSignature | null,
-  signatureNote: string,
+  signatureKind: string,
 ): BudgetPrintPayload["decisionWords"] {
   if (
     !budget.decidedAt ||
@@ -3924,12 +3926,20 @@ function decisionWordsOf(
       signature,
       signedAt: budget.decisionSignedAt,
       signedAll: true,
-      signatureNote: signature.note ?? signatureNote,
+      // Lo que leyó, nunca el texto de hoy: una firma sin nota guardada no la lleva.
+      signatureNote: signature.note ?? null,
+      signatureKind: noteNamesSignatureKind(signature.note) ? null : signatureKind,
     }
   }
   const signed = signature
-    ? { signature, signedAt: budget.decisionSignedAt, signedAll: false, signatureNote: signature.note ?? signatureNote }
-    : { signature: null, signedAt: null, signedAll: false, signatureNote: null }
+    ? {
+        signature,
+        signedAt: budget.decisionSignedAt,
+        signedAll: false,
+        signatureNote: signature.note ?? null,
+        signatureKind: noteNamesSignatureKind(signature.note) ? null : signatureKind,
+      }
+    : { signature: null, signedAt: null, signedAll: false, signatureNote: null, signatureKind: null }
   // Anotado por el equipo: no se dice «en la clínica», que pudo ser por teléfono.
   if (budget.decidedVia === "clinica") {
     const decides = budget.acceptedByName ?? deciderName
@@ -4240,7 +4250,7 @@ export async function getBudgetPrintPayload(
       decider?.name ?? null,
       decisionRow?.notedBy ?? null,
       decisionRow?.signature ?? null,
-      consentSignatureNote(clinicalProfileFor(profile.countryCode).signatureLaw),
+      signatureKindWords(clinicalProfileFor(profile.countryCode).signatureLaw),
     ),
     personalLinkUrl: personalLinkUrlOf,
   }

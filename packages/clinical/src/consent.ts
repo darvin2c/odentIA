@@ -41,12 +41,40 @@ export const CONSENT_DECLARATION =
   "He leído y comprendido la información, pude hacer preguntas y fueron respondidas. Autorizo el procedimiento descrito y sé que puedo revocar este consentimiento antes de que se realice."
 
 /**
- * Lo que dice el documento sobre su firma: es simple, y no es la firma
- * digital certificada que reconoce la ley de firmas del país
- * (`ClinicalCountryProfile.signatureLaw`), si tiene una (#47).
+ * Lo que lee quien firma al pie de la hoja (entrega 11): qué pasa con su firma, corto y
+ * cierto, sin advertencias. Cada frase la cumple el sistema: firmado en la clínica, el
+ * consentimiento se guarda como PDF en Documentos del paciente con quién firmó y cuándo
+ * (`generateConsentPdf`); por enlace queda pendiente hasta que el profesional lo confirma, y
+ * recién ahí se guarda, por eso el enlace lo dice. La copia la ve en su enlace o se la envía
+ * el equipo. No dice «sin cambios» (eso lo prueban la huella y el QR del PDF) ni insinúa firma
+ * digital: el nivel legal va en el PDF (`signatureKindWords`), no como advertencia al firmar.
+ * «La historia clínica», sin «su»: quien firma puede ser el representante.
  */
-export function consentSignatureNote(signatureLaw: string | null): string {
-  return `Firma electrónica simple: firmas manuscritas capturadas como evidencia; no constituyen firma digital certificada${signatureLaw ? ` (${signatureLaw})` : ""}.`
+export const CONSENT_SIGNATURE_NOTES = {
+  clinica: "Queda en la historia clínica, con la fecha y la hora de su firma. Puede pedir una copia cuando quiera.",
+  enlace:
+    "Tu firma queda en la historia clínica, con la fecha y la hora, cuando el profesional la confirme contigo. Puedes pedir una copia cuando quieras.",
+} as const satisfies Record<"clinica" | "enlace", string>
+
+/**
+ * Al pie del presupuesto que se firma en la tablet: se guardan la firma, el nombre, lo que
+ * aceptó y la fecha y hora (`BudgetDecisionSignature`). Se guarda con la firma, tal como se leyó.
+ */
+export const BUDGET_SIGNATURE_NOTE = "Su respuesta queda guardada con la fecha y la hora de su firma."
+
+/**
+ * El nivel de la firma dibujada, para el PDF en letra discreta: firma electrónica simple, con
+ * la ley de firmas del país (`ClinicalCountryProfile.signatureLaw`) si tiene una (#47). En el
+ * Perú, la Ley 27269 (art. 1) reconoce la firma electrónica; la presunción de autenticidad del
+ * DS 052-2008-PCM es solo de la firma digital, que esto no es. No va en la firma en papel.
+ */
+export function signatureKindWords(signatureLaw: string | null): string {
+  return `Firma electrónica simple${signatureLaw ? ` (${signatureLaw})` : ""}`
+}
+
+/** La nota que se guardaba antes de la entrega 11 ya nombra el nivel de la firma: no se repite. */
+export function noteNamesSignatureKind(note: string | null): boolean {
+  return note?.startsWith("Firma electrónica simple") ?? false
 }
 
 function cleanText(value: unknown, label: string, min: number, max: number): string {
