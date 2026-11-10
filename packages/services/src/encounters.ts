@@ -1177,7 +1177,8 @@ export async function getEncounterDetail(
     ...item,
     sessionsDone: counts.get(item.id)?.done ?? 0,
     removable: removable.has(item.id),
-    consent: consents.get(item.id) ?? null,
+    consent: consents.get(item.id)?.state ?? null,
+    consentMissing: consents.get(item.id)?.missing ?? [],
   })
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),

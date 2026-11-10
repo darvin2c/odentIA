@@ -73,7 +73,10 @@ export function ConsentLinkActions({
             {/* Pudo solo mostrarse con el código: no se dice «otra vez». */}
             {document.linkSentAt ? "Enviarlo por mensaje" : "Enviar para firmar"}
           </Button>
-          <ConsentPhoneButton document={document} size={size} onShown={onChanged} />
+          {/* Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), no se ofrece. */}
+          {document.phoneSignBlock ? null : (
+            <ConsentPhoneButton document={document} size={size} onShown={onChanged} />
+          )}
         </>
       )}
       {error && !asking ? (
@@ -84,7 +87,12 @@ export function ConsentLinkActions({
       <ConfirmDialog
         open={asking}
         title="Enviar para firmar"
-        description={`Le llega «${document.titleSnapshot}» para leerlo y firmarlo desde su teléfono, escribiendo su documento. Después lo confirmas tú en su atención, antes de empezar.`}
+        description={
+          document.phoneSignBlock
+            ? // Su enlace no lo deja firmar (menor, sin fecha de nacimiento o sin documento): lo lee y lo firma en la cita.
+              `Le llega «${document.titleSnapshot}» para leerlo antes de su cita; lo firma en la clínica, porque su enlace no lo deja firmar desde el teléfono.`
+            : `Le llega «${document.titleSnapshot}» para leerlo y firmarlo desde su teléfono, escribiendo su documento. Después lo confirmas tú en su atención, antes de empezar.`
+        }
         error={send.error ? submitErrorMessage(send.error) : null}
         confirmLabel="Enviar"
         variant="default"

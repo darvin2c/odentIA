@@ -415,7 +415,7 @@ function ConsentPreviewDrawer({ draft, onClose }: { draft: ConsentPreviewDraft; 
               }}
               professional={{ note: "Falta su confirmación: lo confirma el profesional en la clínica." }}
               signatureWords={CONSENT_SIGNATURE_WORDS.enlace}
-              signatureNote={frame.data?.data.signatureNote ?? null}
+              signatureNote={frame.data?.data.linkSignatureNote ?? null}
             />
           </div>
         </TabsContent>

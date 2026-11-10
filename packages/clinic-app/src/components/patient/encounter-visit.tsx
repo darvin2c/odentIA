@@ -212,9 +212,9 @@ export function EncounterVisitStrip({
                     <span className="text-xs text-warning">{visitWaitWords(item)}</span>
                   ) : null}
                   {/* El consentimiento va con el tratamiento: se firma antes de empezar, en Documentos. */}
-                  {!item.registered && treatmentConsentWords(item.consent) ? (
+                  {!item.registered && treatmentConsentWords(item.consent, item.consentMissing) ? (
                     <span className={item.consent === "firmado" ? "text-xs text-muted-foreground" : "text-xs text-warning"}>
-                      {treatmentConsentWords(item.consent)}
+                      {treatmentConsentWords(item.consent, item.consentMissing)}
                     </span>
                   ) : null}
                 </span>

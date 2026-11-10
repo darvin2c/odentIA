@@ -1113,6 +1113,7 @@ export function EncounterClosingDialog({
   onKeepDiagnosis,
   children,
   nextVisit = null,
+  mayCharge = true,
   healthGaps = [],
   onCompleteHealth,
 }: {
@@ -1165,6 +1166,11 @@ export function EncounterClosingDialog({
   children?: React.ReactNode
   /** «¿Cuándo vuelve?», justo encima de firmar. */
   nextVisit?: React.ReactNode
+  /**
+   * Si algo de hoy puede cargarse a su cuenta al firmar (un procedimiento con precio o de su
+   * plan). Sin eso, el cierre no promete «lo que se cargó hoy» (entrega 11).
+   */
+  mayCharge?: boolean
   /** Lo que falta saber de su salud, como lo dice el servidor (odentIA también cuenta la ASA). */
   healthGaps?: HealthGap[]
   /** «Completar en Antecedentes» desde la línea de anestesia. */
@@ -1310,11 +1316,15 @@ export function EncounterClosingDialog({
                   {blockedReason}
                 </p>
               ) : null}
-              <p className="text-xs text-muted-foreground">
-                {seesFinance
-                  ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
-                  : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
-              </p>
+              {mayCharge || seesFinance ? (
+                <p className="text-xs text-muted-foreground">
+                  {!mayCharge
+                    ? "Después: lo que debe, para avisar a caja."
+                    : seesFinance
+                      ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
+                      : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
+                </p>
+              ) : null}
               {nextVisit}
             </div>
           </ScrollArea>
