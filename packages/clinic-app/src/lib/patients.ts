@@ -658,6 +658,8 @@ export interface VisitControl {
   overdue: boolean
   byName: string | null
   chosen: boolean
+  /** Reservado en la cita de esta atención: se cumple al firmar, sin elegirlo. */
+  byAppointment?: boolean
 }
 
 export interface EncounterVisit {
@@ -808,6 +810,8 @@ export interface TreatmentJourneySummary {
   nextFollowUp: { id: string; title: string; status: string; dueAt: string } | null
   /** null cuando el tratamiento está cerrado y no admite más trabajo. */
   nextAction: TreatmentNextAction | null
+  /** La cita por venir que ya lo lleva, si tiene. */
+  nextAppointmentAt?: string | null
   balances: TreatmentBalance[]
 }
 

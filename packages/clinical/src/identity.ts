@@ -414,6 +414,17 @@ export function phoneFormatError(countryCode?: string | null): string {
 }
 
 /**
+ * Un número que el regulador reserva para ficción y pruebas: no es de nadie y
+ * ningún mensaje le llega. Hoy, el del Reino Unido: Ofcom reserva los móviles
+ * 07700 900000 a 07700 900999, en E.164 +44 7700 900000 a +44 7700 900999 (los
+ * de la demo). Es la misma regla que el campo de teléfono de la pantalla
+ * (`isFictionalPhone` de `ui-patterns`, que no puede importar este paquete).
+ */
+export function isFictionalPhone(e164: string | null | undefined): boolean {
+  return !!e164 && /^\+447700900\d{3}$/.test(e164)
+}
+
+/**
  * Por qué un número del país de la clínica no puede ser su WhatsApp, o null si
  * puede. El E.164 admite cualquier largo de 8 a 15 dígitos, así que un celular
  * con un dígito de menos (`+5199215437`) pasa como número y Meta lo rechaza en

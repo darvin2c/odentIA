@@ -246,7 +246,15 @@ export function TicketView({
     (sum, line) => sum + (line.appliedCents ?? line.amountCents),
     0,
   )
-  const stillOwed = snapshot.remainingCents ?? remainingCents
+  // Todo lo que le falta de su cuenta, si el ticket lo guardó; si no (tickets de antes), lo de estos conceptos.
+  const accountKnown = snapshot.accountDueCents !== undefined
+  // Una sola cifra, como su cuenta: lo que tiene a favor paga primero su próximo cobro, así que lo
+  // que falta ya lo descuenta (verificación de la entrega 9: el ticket decía 180 y la cuenta 150).
+  const owedGross = snapshot.accountDueCents ?? snapshot.remainingCents ?? remainingCents
+  const creditGross = snapshot.accountCreditCents ?? 0
+  const stillOwed = Math.max(0, owedGross - creditGross)
+  const creditLeft = Math.max(0, creditGross - owedGross)
+  const creditCounted = Math.min(owedGross, creditGross)
   const untaxedNote = snapshot.taxes ? ticketUntaxedNote(snapshot.taxes) : null
   // Lo que deshace anular: los productos vuelven a la sede, los servicios quedan por cobrar.
   const productLines = returnLines.filter(
@@ -562,10 +570,14 @@ export function TicketView({
             </div>
           ))}
         </div>
-        {conceptLines.length > 0 && stillOwed > 0 ? (
-          // Lo que falta del tratamiento, aparte del pago y solo si falta algo.
+        {(accountKnown || conceptLines.length > 0) && (stillOwed > 0 || creditLeft > 0) ? (
+          // Cómo queda su cuenta, aparte del pago: también en el ticket de un adelanto (QA del 9 nov, repaso 3).
           <div className="flex flex-col gap-0.5 rounded-md border bg-muted/40 px-3 py-2">
-            <Row label="Le falta pagar" value={money(stillOwed)} strong />
+            {stillOwed > 0 ? <Row label="Le falta pagar" value={money(stillOwed)} strong /> : null}
+            {stillOwed > 0 && creditCounted > 0 ? (
+              <span className="text-xs text-muted-foreground">Ya descuenta {money(creditCounted)} que tiene a favor.</span>
+            ) : null}
+            {creditLeft > 0 ? <Row label="Le queda a favor" value={money(creditLeft)} /> : null}
             {(snapshot.pending ?? []).map((item) => (
               <span key={item.chargeId} className="text-xs text-muted-foreground">
                 {item.description}: pagó {plain(item.amountCents - item.remainingCents)} de{" "}

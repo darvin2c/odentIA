@@ -252,7 +252,7 @@ it("el control reservado en la cita que se atiende se cumple con ella y se pregu
     const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, attending.id))
     // No es «el próximo»: lo cumple esta firma.
     expect(closing.controls.next).toBeNull()
-    expect(closing.controls.byAppointment).toEqual([{ id: reserved.id, title: reserved.title, repeatEveryMonths }])
+    expect(closing.controls.byAppointment).toEqual([{ id: reserved.id, title: reserved.title, repeatEveryMonths, byName: null }])
     const signed = await f.run((tx) =>
       finalizeEncounter(tx, ...f.args, attending.id, { followUpIds: [], nextControl: { dueAt: closing.controls.shortcuts.recall } }),
     )

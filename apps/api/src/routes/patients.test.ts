@@ -284,7 +284,14 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   const postFresh = (role: string, phone: string | null) =>
     buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: fresh(phone) })
   expect((await postFresh("clinician", "+51987111222")).status).toBe(403)
-  expect((await postFresh("reception", null)).status).toBe(400)
+  // Sin celular también se registra (un urgente sin teléfono, QA del 9 nov, repaso 3): la identidad
+  // nunca se decide por el teléfono, así que no nace una ficha paralela.
+  const noPhone = await buildApp("reception").request("/patients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...registrationBody("Rosa Quispe", { givenNames: "Rosa", familyName: "Quispe" }), scope: "essentials" }),
+  })
+  expect(noPhone.status).toBe(201)
   const agenda = await postFresh("reception", "+51987111222")
   expect(agenda.status).toBe(201)
   const agendaId = ((await agenda.json()) as { data: { id: string } }).data.id

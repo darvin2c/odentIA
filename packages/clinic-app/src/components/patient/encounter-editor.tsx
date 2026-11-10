@@ -64,6 +64,7 @@ import {
   fetchEncounterClosing,
   controlDaySaid,
   finalizedControlsWords,
+  keepsDiagnosis,
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
@@ -451,7 +452,7 @@ function resolveDiagnosesBody(
   keep: ReadonlySet<string>,
 ): { resolveDiagnosisIds?: string[] } {
   const ids = resolvingOnSign(resolvable ?? [], sessions, answers)
-    .filter((found) => !found.diagnosisIds.some((id) => keep.has(id)))
+    .filter((found) => !keepsDiagnosis(found, keep))
     .flatMap((found) => found.diagnosisIds)
   return ids.length ? { resolveDiagnosisIds: ids } : {}
 }
@@ -568,10 +569,19 @@ export function EncounterEditor({
   >([])
   /** Lo que va después de lo que sigue en curso y ya tiene su cita (la corona reservada): se avisa. */
   const [finalizedBookedAfter, setFinalizedBookedAfter] = useState<FinalizedBookedAfter[]>([])
+  /** Lo que va después de lo que sigue en curso y aún no tiene cita: se dice para que no se pierda. */
+  const [finalizedWaiting, setFinalizedWaiting] = useState<Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>>([])
   /** Lo que sigue en curso tras firmar, con su próxima sesión: «Reservar la sesión 2» ahí mismo. */
   const [finalizedNext, setFinalizedNext] = useState<NextSession[]>([])
   /** Los tratamientos con que se abrió «Nueva cita» desde «Atención finalizada». */
   const [bookingNext, setBookingNext] = useState<string[] | null>(null)
+  /** Desde qué día conviene la sesión que se reserva desde el cierre (la endodoncia, una semana). */
+  const gapFrom =
+    bookingNext
+      ?.map((id) => finalizedNext.find((session) => session.planItemId === id)?.toBook?.from)
+      .filter((day): day is string => !!day)
+      .sort()
+      .at(-1) ?? null
   /** Lo reservado ahí mismo: recibe el foco para que el lector y el teclado lo sepan. */
   const nextSessionsRef = useRef<HTMLUListElement>(null)
   /** «Después» del presupuesto con una sesión por reservar: solo pliega el presupuesto. */
@@ -1167,6 +1177,7 @@ export function EncounterEditor({
     setFinalizedControls(null)
     setFinalizedKeptOpen([])
     setFinalizedBookedAfter([])
+    setFinalizedWaiting([])
     setFinalizedNext([])
     setBookingNext(null)
     setBudgetLater(false)
@@ -1247,6 +1258,7 @@ export function EncounterEditor({
           controls?: FinalizedControls
           keptOpen?: Array<{ planItemId: string; title: string; reason: string }>
           bookedAfter?: FinalizedBookedAfter[]
+          waitingAfter?: Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>
           nextSessions?: NextSession[]
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
@@ -1279,6 +1291,7 @@ export function EncounterEditor({
       setFinalizedControls(result.data.controls ?? null)
       setFinalizedKeptOpen(result.data.keptOpen ?? [])
       setFinalizedBookedAfter(result.data.bookedAfter ?? [])
+      setFinalizedWaiting(result.data.waitingAfter ?? [])
       setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedBilling(result.data.billing)
       // «Debe en total» cuenta lo que este cierre acaba de cargar.
@@ -1454,6 +1467,11 @@ export function EncounterEditor({
   )
   // Lo indicado hoy que sigue en pie (lo quitado queda cancelado y no cuenta).
   const liveIndicated = detail.indicatedItems.filter((item) => item.status !== "cancelado")
+  // Lo indicado para otro día: lo que se indicó y se hizo hoy (la consulta, la profilaxis, la
+  // sesión 1 de la endodoncia) ya cuenta en «Realizado hoy» y no es «indicado» (QA del 9 nov, repaso 3).
+  const openIndicated = liveIndicated.filter(
+    (item) => !detail.procedures.some((procedure) => procedure.planItemId === item.id && !procedure.voidedAt),
+  )
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1514,7 +1532,7 @@ export function EncounterEditor({
       summary:
         [
           // Sin lo quitado: el contador dice lo que sigue indicado (QA del 9 nov).
-          liveIndicated.length > 0 ? `${counted(liveIndicated.length, "indicado", "indicados")} hoy` : "",
+          openIndicated.length > 0 ? `${counted(openIndicated.length, "indicado", "indicados")} hoy` : "",
           pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
           followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]
@@ -2276,6 +2294,7 @@ export function EncounterEditor({
                 encounterId={encounterId}
                 visit={detail.visit}
                 offeredReason={offeredReason}
+                bookedReason={detail.bookedReason}
                 onUseReason={takeOfferedReason}
                 reasonEmpty={reason.trim() === ""}
                 onUrgency={() => {
@@ -2861,10 +2880,16 @@ export function EncounterEditor({
                 // proponía «Reservar hoy a las 11:30»); hoy queda a una flecha. Con el control de lo
                 // que terminó hoy en la misma cita (la corona y el control de su endodoncia, como en
                 // «Qué sigue»), desde que ese control se puede hacer (repaso del 9 nov, N6).
+                // Y no antes de lo que su tratamiento deja entre sesiones: la endodoncia con medicación,
+                // una semana (QA del 9 nov, repaso 3).
                 date: [
                   addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
                   finalizedControls?.next?.joinsNext?.from ?? "",
-                ].sort()[1]!,
+                  gapFrom ?? "",
+                ].sort().at(-1)!,
+                ...(gapFrom && !finalizedControls?.next?.joinsNext
+                  ? { note: "Entre sesiones se deja actuar la medicación: se busca hora desde una semana después de hoy." }
+                  : {}),
                 ...(finalizedControls?.next?.joinsNext
                   ? {
                       followUpIds: [finalizedControls.next.id],
@@ -2957,6 +2982,17 @@ export function EncounterEditor({
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
+          ) : null}
+          {/* La corona sin cita mientras la endodoncia pide otra sesión: no se pierde; se reserva cuando
+              termine lo de antes (pendiente de la entrega 8). */}
+          {finalizedWaiting.length > 0 ? (
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {finalizedWaiting.map((row) => (
+                <li key={row.planItemId}>
+                  {`${row.title}${row.place ? ` · ${row.place}` : ""}: aceptada y sin cita. Se reserva al terminar ${row.beforeTitle}; recepción la verá en «Qué sigue».`}
+                </li>
+              ))}
+            </ul>
           ) : null}
           {/* La corona ya reservada mientras la endodoncia pide otra sesión: revisar esa cita (repaso
               del 9 nov). Avisa sin frenar; quien atiende decide si esa cita sirve para la sesión. */}

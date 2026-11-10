@@ -11,6 +11,7 @@
  * resina), solo si cubre todas las del diagnóstico: una resina O no resuelve
  * una caries OD.
  */
+import { healsAtFollowUp } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -28,6 +29,11 @@ export interface ClosingResolvable {
   label: string
   /** «pieza 46». */
   site: string | null
+  /**
+   * Sana en su control, no al terminar (la periodontitis apical): el cierre lo muestra sin marcar
+   * y quien firma lo marca si ya sanó (QA del 9 nov, repaso 3).
+   */
+  followUp: boolean
 }
 
 interface Row extends Record<string, unknown> {
@@ -92,6 +98,7 @@ export async function resolvableDiagnosesOf(
       diagnosisIds: [row.id],
       planItemIds: [row.plan_item_id],
       label: namedDiagnosis(titles, row.diagnosis_system, row.diagnosis_code),
+      followUp: healsAtFollowUp(row.diagnosis_system, row.diagnosis_code),
       site: site.words(
         { siteSystem: row.site_system, siteCode: row.site_code, siteQualifiers: row.site_qualifiers ?? [] },
         "short",

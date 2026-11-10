@@ -24,7 +24,17 @@ function whenWords(iso: string): string {
 function dayWords(iso: string): string {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return iso
-  return at.toLocaleDateString(activeOrgLocale(), { timeZone: activeOrgTimeZone(), day: "numeric", month: "short" }).replace(".", "")
+  // De otro año, con su año: el control radiográfico al año parecía tocar hoy (verificación de la entrega 9).
+  const yearOf = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone(), year: "numeric" }).format(date)
+  const otherYear = yearOf(at) !== yearOf(new Date())
+  return at
+    .toLocaleDateString(activeOrgLocale(), {
+      timeZone: activeOrgTimeZone(),
+      day: "numeric",
+      month: "short",
+      ...(otherYear ? { year: "numeric" } : {}),
+    })
+    .replace(".", "")
 }
 
 /** «endodoncia, prótesis y corona»: los nombres en una frase. */
@@ -244,7 +254,12 @@ export function EncounterHistoryCard({
       <div className="flex flex-col gap-3">
         {diagnoses.length > 0 ? (
           <Part label={diagnoses.length === 1 ? "Diagnóstico" : "Diagnósticos"}>
-            <p className="text-sm">{diagnoses.join(" · ")}</p>
+            {/* Uno por línea: «· resuelto» es de su diagnóstico, no de todos (verificación de la entrega 9). */}
+            {diagnoses.map((diagnosis) => (
+              <p key={diagnosis} className="text-sm">
+                {diagnosis}
+              </p>
+            ))}
           </Part>
         ) : null}
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}

@@ -117,3 +117,23 @@ it("el servicio trae la anatomía de su tratamiento y sus hermanos activos; uno 
   // Un servicio propio, sin biblioteca, nunca avisa.
   expect(listed.data.find((row) => row.id === f.service.id)?.toothAnatomy).toBeNull()
 })
+
+it("la endodoncia de una permanente en una temporal ofrece la pulpectomía; al revés, ninguna (QA del 9 nov, repaso 3)", async () => {
+  await seedOdentiaCatalog(ownerDb)
+  const f = await clinicalFixture()
+  const ids = await templateIds(["endodoncia-posterior-no-vital", "pulpectomia-posterior-deciduo"])
+  const create = (key: string, priceCents: number) =>
+    f.run((tx) => createService(tx, "org_a", f.actor, { templateId: ids.get(key)!, priceCents }))
+  const endodontics = await create("endodoncia-posterior-no-vital", 70_000)
+  const pulpectomy = await create("pulpectomia-posterior-deciduo", 28_000)
+  const found = await f.run((tx) => getService(tx, "org_a", endodontics.id))
+  const notice = toothFitNotice(
+    { name: found.name, anatomy: found.toothAnatomy },
+    75,
+    found.toothAnatomy!.siblings,
+  )
+  expect(notice?.sibling).toMatchObject({ id: pulpectomy.id, priceCents: 28_000 })
+  // En una permanente la pulpectomía de temporal no sabe si la pulpa vive: no elige por la persona.
+  const back = await f.run((tx) => getService(tx, "org_a", pulpectomy.id))
+  expect(back.toothAnatomy?.siblings.map((sibling) => sibling.id)).not.toContain(endodontics.id)
+})

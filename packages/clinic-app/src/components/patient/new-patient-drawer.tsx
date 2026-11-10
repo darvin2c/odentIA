@@ -26,7 +26,6 @@ import {
 import {
   BirthDateInput,
   FormDrawer,
-  INCOMPLETE_PHONE,
   internationalText,
   normalizeCountry,
   PersonAvatar,
@@ -371,13 +370,13 @@ export function NewPatientDrawer({
    * regla que aplica el servidor. Lo que no tiene campo aquí (el responsable
    * sin teléfono ni correo, su documento ya guardado) se dice junto a los botones.
    */
-  function draftErrors(current: Draft, phoneHalfWritten: boolean): Record<string, string> {
+  function draftErrors(current: Draft): Record<string, string> {
     const found: Record<string, string> = {}
     if (!current.givenNames.trim()) found.givenNames = "Escribe los nombres"
     if (!current.surnames.trim()) found.surnames = "Escribe los apellidos"
-    // Un número a medias ya lo dice el campo («le faltan dígitos»).
-    if (!dependent && !picked && !current.phone && !phoneHalfWritten)
-      found.phone = "Escribe su celular: ahí le avisamos sus citas"
+    // Sin celular se registra igual (una urgencia, un turista, un adulto mayor): el campo
+    // avisa que no le llegarán sus avisos, sin frenar. Un número a medias sí lo dice el
+    // campo («le faltan dígitos»): ese no se guarda a medias.
     if (dependent && !current.relation) found.relation = `Elige qué es ${guardianFirst} para él o ella`
     if (!current.promotions) found.promotions = "Pregúntale y elige una opción"
     if (config.data) {
@@ -412,11 +411,7 @@ export function NewPatientDrawer({
   const form = useAppForm({
     defaultValues: initialDraft(target),
     validators: {
-      onSubmit: ({ value, formApi }) =>
-        placeErrors(
-          formApi,
-          draftErrors(value, formApi.getFieldMeta("phone")?.errorMap.onChange === INCOMPLETE_PHONE),
-        ),
+      onSubmit: ({ value, formApi }) => placeErrors(formApi, draftErrors(value)),
     },
     onSubmit: async ({ value }) => {
       const result = await register.mutateAsync(value)
@@ -663,7 +658,10 @@ export function NewPatientDrawer({
                 description={
                   guardian && !field.state.value
                     ? `Si no tiene celular propio, sus avisos le llegan a ${guardian.displayName}.`
-                    : "Aquí le avisamos sus citas por WhatsApp."
+                    : field.state.value
+                      ? "Aquí le avisamos sus citas por WhatsApp."
+                      : // Avisa sin frenar: sin celular también se registra.
+                        "Aquí le avisamos sus citas por WhatsApp. Sin celular no le llegan los recordatorios; puedes agregarlo después."
                 }
               />
             )}

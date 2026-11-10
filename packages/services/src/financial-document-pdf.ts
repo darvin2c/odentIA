@@ -96,6 +96,9 @@ export interface TicketSnapshot {
   totalCents: number
   /** Lo que quedó por cobrar de esos conceptos al momento del cobro. */
   remainingCents: number | null
+  /** La cuenta al terminar el cobro (tickets desde el repaso 3 del 9 nov); nulo en los de antes. */
+  accountDueCents: number | null
+  accountCreditCents: number | null
   /** Lo que falta pagar de cada concepto (ADR 0083); null en tickets de antes. */
   pending: Array<{ description: string; amountCents: number; remainingCents: number }> | null
   /** El impuesto de lo cobrado, congelado al cobrar (ADR 0083). */
@@ -185,6 +188,8 @@ export async function buildTicketSnapshot(
     changeCurrency: ticket.changeCurrency,
     totalCents: ticket.totalCents,
     remainingCents: frozen.remainingCents ?? null,
+    accountDueCents: frozen.accountDueCents ?? null,
+    accountCreditCents: frozen.accountCreditCents ?? null,
     pending: frozen.pending ?? null,
     taxes: frozen.taxes ?? null,
     tender: frozen.tender ?? null,
@@ -281,16 +286,32 @@ function payoutRows(
     moneyRow(kit, label, formatMoney(payout.amountCents, payout.currency, locale))
 }
 
+/**
+ * Si el ticket dice cómo queda la cuenta: lo que falta o lo que queda a favor. Los de antes
+ * guardaban solo lo que faltaba de sus conceptos.
+ */
+function owesOrKeeps(snap: TicketSnapshot): boolean {
+  if (snap.accountDueCents != null) return snap.accountDueCents !== (snap.accountCreditCents ?? 0)
+  return snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0
+}
+
 /** Lo que falta del tratamiento va aparte del pago, con su nombre, y solo si falta algo. */
 function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
-  if (snap.remainingCents == null || snap.remainingCents <= 0 || snap.lines.length === 0) return
+  if (!owesOrKeeps(snap)) return
+  // Una sola cifra, como su cuenta: lo que tiene a favor ya se descuenta de lo que falta.
+  const gross = snap.accountDueCents ?? snap.remainingCents ?? 0
+  const credit = snap.accountCreditCents ?? 0
+  const owed = Math.max(0, gross - credit)
   // En la hoja, «Le falta pagar» ya es el título de la sección.
-  moneyRow(
-    kit,
-    kit.thermal ? "Le falta pagar" : "Por este tratamiento",
-    money(snap.remainingCents),
-    { strong: true },
-  )
+  if (owed > 0)
+    moneyRow(
+      kit,
+      kit.thermal ? "Le falta pagar" : snap.accountDueCents != null ? "En esta moneda" : "Por este tratamiento",
+      money(owed),
+      { strong: true },
+    )
+  if (owed > 0 && credit > 0) smallNote(kit, `Ya descuenta ${money(Math.min(gross, credit))} que tiene a favor.`)
+  if (credit > gross) moneyRow(kit, "Le queda a favor", money(credit - gross))
   for (const item of snap.pending ?? []) {
     smallNote(
       kit,
@@ -373,7 +394,7 @@ export async function renderTicketPdf(
         leading: 1.4,
       })
     howPaid(kit, snap, money)
-    if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
+    if (owesOrKeeps(snap)) {
       thermalRule(kit)
       stillOwed(kit, snap, money)
     }
@@ -442,8 +463,9 @@ export async function renderTicketPdf(
     after: 3,
   })
   howPaid(kit, snap, money)
-  if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
-    kit.subheading("Le falta pagar", { face: "sansSemi", before: 14, after: 3 })
+  if (owesOrKeeps(snap)) {
+    const owes = (snap.accountDueCents ?? snap.remainingCents ?? 0) > (snap.accountCreditCents ?? 0)
+    kit.subheading(owes ? "Le falta pagar" : "Su cuenta", { face: "sansSemi", before: 14, after: 3 })
     stillOwed(kit, snap, money)
   }
   return kit.finish()

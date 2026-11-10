@@ -45,7 +45,8 @@ const COMPOSED = new Set([
   "sesión 1 de 2",
   "sesión 2 de 2",
   "Necesita consentimiento · Preparar",
-  "Debe: 100 · A favor: 100 · Saldo: 0",
+  "Debe: 100 · A favor: 100 · Falta pagar: 0",
+  "Corona · sesión 1 de 2: mar 10 nov, 9:00 · la sesión 2 se reserva en esa cita",
   "sí, ahí estaré",
   "y en agosto",
 ])

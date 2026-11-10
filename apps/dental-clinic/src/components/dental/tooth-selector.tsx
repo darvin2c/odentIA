@@ -1,7 +1,7 @@
 import { FDI_ADULT_ROWS, FDI_CHILD_ROWS, isValidTooth } from "@odentia/dental"
 import { Button, Input } from "@odentia/ui"
 import { useId, useState } from "react"
-import { OdontogramArch } from "./odontogram-arch"
+import { OdontogramArchPicker } from "./odontogram-arch"
 
 export interface ToothSelectorProps {
   value: number[]
@@ -51,11 +51,12 @@ function addAll(teeth: number[], add: readonly number[]): number[] {
 }
 
 /**
- * Selector visual multi-pieza reutilizable sobre el OdontogramArch anatómico
- * existente (no recrea dibujos). MULTI por defecto: cada clic alterna la pieza
- * sin reemplazar la selección. Cambiar de dentición solo cambia la vista y
- * conserva las piezas ya seleccionadas. No pinta su etiqueta: la pantalla lo
- * nombra (`FieldSet` + `FieldLegend` o `field.Group`).
+ * Selector visual multi-pieza reutilizable sobre el arco anatómico del
+ * odontograma (no recrea dibujos); en el celular, una arcada a la vez. MULTI
+ * por defecto: cada clic alterna la pieza sin reemplazar la selección. Cambiar
+ * de dentición solo cambia la vista y conserva las piezas ya seleccionadas. No
+ * pinta su etiqueta: la pantalla lo nombra (`FieldSet` + `FieldLegend` o
+ * `field.Group`).
  */
 export function ToothSelector({
   value,
@@ -138,9 +139,8 @@ export function ToothSelector({
         </div>
       </div>
 
-      <OdontogramArch
+      <OdontogramArchPicker
         teeth={{ upper: rows[0] ?? [], lower: rows[1] ?? [] }}
-        entriesOf={() => []}
         selected={value}
         disabled={disabled}
         onToggle={(tooth) => {

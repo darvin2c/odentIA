@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
-import { encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, encounter, serviceCatalog, treatmentPlanItem, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -224,4 +224,47 @@ it("la cita de la propia atención no es la próxima sesión, aunque su hora sea
   expect(closing.sessions.continuing).toEqual([{ planItemId: endo.id, title: "Tratamiento propio", n: 1, m: 2 }])
   const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   expect(closed.nextSessions).toMatchObject([{ planItemId: endo.id, booked: null, toBook: { n: 2, m: 2 } }])
+})
+
+it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya no falta nada y al terminarla queda su control al año (QA del 9 nov, repaso 3)", async () => {
+  const f = await clinicalFixture()
+  // El servicio de la clínica es una endodoncia de la biblioteca.
+  const [template] = await ownerDb
+    .insert(treatmentTemplate)
+    .values({ key: `endo-espera-${randomUUID()}`, name: "Endodoncia de prueba", kind: "endodoncia", scope: "tooth" })
+    .returning()
+  // Su familia de la biblioteca (lo dental se escribe en SQL: lo común no importa el esquema dental, ADR 0079).
+  await ownerDb.execute(
+    sql`insert into catalog.dental_template_rule (template_id, tooth_groups, family) values (${template!.id}, array['molar'], 'endodoncia-vital')`,
+  )
+  await ownerDb.update(serviceCatalog).set({ templateId: template!.id, source: "template" }).where(eq(serviceCatalog.id, f.service.id))
+  const endo = await acceptedTreatment(f, 2)
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const lima = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(date)
+  const inAWeek = lima(new Date(Date.now() + 7 * DAY))
+  expect(closed.nextSessions[0]?.toBook).toEqual({ n: 2, m: 2, from: inAWeek })
+  const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  expect(next).toMatchObject({ kind: "continuar", action: { label: "Reservar la sesión 2", date: inAWeek } })
+
+  // Con la sesión 2 reservada no dice «Nada pendiente»: dice cuándo es.
+  const book = await booker(f)
+  await book(8, [endo.id])
+  const booked = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  expect(booked).toMatchObject({ kind: "reservado", action: null, detail: "Con su cita" })
+  expect(booked.text).toMatch(/^Tratamiento propio · sesión 2 de 2: /)
+
+  // Terminada en la sesión 2, queda su control radiográfico al año.
+  const second = await attention(f)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: endo.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, second))
+  const controls = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.planItemId, endo.id))
+  const yearly = controls.find((row) => row.title === "Control radiográfico de la endodoncia")
+  expect(yearly).toMatchObject({ status: "pendiente", kind: "tratamiento" })
+  expect(yearly!.dueAt.getTime() - Date.now()).toBeGreaterThan(360 * DAY)
+  // Ese control lejano no responde «¿Cuándo vuelve?» en la próxima atención: se sigue preguntando.
+  const third = await attention(f)
+  const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, third))
+  expect(closing.controls.next).toBeNull()
 })

@@ -1148,6 +1148,13 @@ export interface TicketFrozen {
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
   /**
+   * La cuenta en la moneda del ticket al terminar este cobro: todo lo que le falta pagar y lo que le
+   * queda a favor. Todo ticket lo dice, también el de un adelanto (QA del 9 nov, repaso 3: el
+   * adelanto de quien ya debía no decía cuánto faltaba). Sin ello (tickets de antes), solo `remainingCents`.
+   */
+  accountDueCents?: number
+  accountCreditCents?: number
+  /**
    * Lo que falta pagar de cada concepto de este cobro (ADR 0083): «Le falta
    * pagar», aparte del pago, con lo pagado de lo que cuesta. Solo los que aún
    * deben algo.
@@ -1904,6 +1911,19 @@ export async function collectCharge(
       scope: "servicios",
     })
   const ticketTaxes = ticketTaxesOf(taxes, taxable, profile.locale)
+  // Cómo queda la cuenta en esta moneda: lo que debía (con lo cargado en este cobro) menos lo que
+  // este cobro paga, y lo que tenía a favor menos lo usado más lo que queda a favor ahora.
+  const newApplied = Object.values(newAppliedByCharge).reduce((total, cents) => total + cents, 0)
+  const owedBefore = sum(
+    (await outstandingCharges(tx, orgId, patientId, unit)).map((t) => ({ amountCents: t.outstanding })),
+  )
+  const creditBefore = sum(
+    (advanceFor !== undefined ? await availableCredit(tx, orgId, patientId, unit) : credit).map((c) => ({
+      amountCents: c.available,
+    })),
+  )
+  const accountDueCents = Math.max(0, owedBefore - newApplied - creditApplied)
+  const accountCreditCents = Math.max(0, creditBefore - creditApplied + (cancels - newApplied))
   const paymentTaxes = splitTaxAcrossPayments(ticketTaxes?.taxCents ?? 0, amounts)
   const [ticket] = await tx
     .insert(paymentTicket)
@@ -1957,6 +1977,8 @@ export async function collectCharge(
           : {}),
         // Lo que quedó por cobrar de estos conceptos: el reintento lo repite igual.
         remainingCents: sum(targets.map((t) => ({ amountCents: t.outstanding }))),
+        accountDueCents,
+        accountCreditCents,
         pending: targets
           .filter((t) => t.outstanding > 0)
           .map((t) => ({

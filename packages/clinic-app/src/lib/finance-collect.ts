@@ -139,6 +139,34 @@ export function amountHelpText(input: {
   return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
 }
 
+/**
+ * Con un pago parcial de varios conceptos, a cuál va el dinero: el servidor paga lo más antiguo
+ * primero (QA del 9 nov, repaso 3: solo se veía en el ticket). `items` en ese orden. Nulo si paga
+ * todo, nada o un solo concepto.
+ */
+export function partialSplitWords(
+  items: ReadonlyArray<{ description: string; saldoCents: number }>,
+  cents: number | null,
+  currency: string,
+  locale: string,
+  /** Lo que tiene a favor en esa moneda: el servidor lo usa primero, también en lo más antiguo. */
+  creditCents = 0,
+): string | null {
+  const total = items.reduce((sum, item) => sum + item.saldoCents, 0)
+  if (items.length < 2 || cents === null || cents <= 0) return null
+  const covered = cents + Math.max(0, creditCents)
+  if (covered >= total) return null
+  let rest = covered
+  const parts: string[] = []
+  for (const item of items) {
+    if (rest <= 0) break
+    const take = Math.min(rest, item.saldoCents)
+    parts.push(`${item.description} ${formatMoney(take, currency, locale)}`)
+    rest -= take
+  }
+  return `${creditCents > 0 ? "Con lo que tiene a favor, va" : "Va"} primero a lo más antiguo: ${parts.join(" · ")}.`
+}
+
 /** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */
 export function sentence(text: string): string {
   return /[.!?]$/.test(text.trimEnd()) ? text : `${text}.`
@@ -254,6 +282,9 @@ export interface CollectSnapshot {
   tender?: TicketTender | null
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
+  /** La cuenta en esta moneda al terminar el cobro: lo que le falta y lo que le queda a favor. */
+  accountDueCents?: number
+  accountCreditCents?: number
   /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
   pending?: Array<{ chargeId: string; description: string; amountCents: number; remainingCents: number }>
   /** El impuesto de lo cobrado hoy (`TicketFrozen.taxes`, ADR 0083); nulo si nada lo lleva. */

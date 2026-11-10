@@ -42,6 +42,7 @@ import {
   totalsOf,
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
+import { reviseTreatmentApi } from "../../lib/clinical-journey"
 import { removeIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel, quotedPriceOf } from "../../lib/patients"
@@ -138,9 +139,14 @@ function indicationErrors(value: IndicationValues, editing?: PlanItem): Record<s
   if (value.scope === "quadrant" && !value.quadrant) fields.quadrant = "Elige el cuadrante."
   if (value.scope === "arch" && !value.arch) fields.arch = "Elige la arcada."
   const sessions = value.sessions.trim()
-  if (value.service && sessions !== "" && !(/^\d{1,2}$/.test(sessions) && Number(sessions) >= 1 && Number(sessions) <= 60))
+  if ((value.service || editing) && sessions !== "" && !(/^\d{1,2}$/.test(sessions) && Number(sessions) >= 1 && Number(sessions) <= 60))
     fields.sessions = "Escribe un número de sesiones entre 1 y 60."
   return fields
+}
+
+/** Sin ninguna sesión hecha, «Cambiar» todavía puede corregir las previstas. */
+function editableSessions(item: PlanItem): boolean {
+  return (item.status === "pendiente" || item.status === "programado") && !item.sessionsDone
 }
 
 /** El servidor nombra el dato como en el cuerpo de la petición. */
@@ -226,6 +232,16 @@ export function EncounterPlanPanel({
     // La opción que no eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
     .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
+  // Lo que va después de otro de la misma pieza (la corona tras la endodoncia en curso) baja a
+  // continuación de él, aunque se indicara hoy: la regla de «Qué sigue» (QA del 9 nov, repaso 3).
+  for (const item of [...brief]) {
+    const blocker = item.waitsFor ? brief.findIndex((other) => other.id === item.waitsFor?.id) : -1
+    const at = brief.findIndex((other) => other.id === item.id)
+    if (blocker > at) {
+      brief.splice(at, 1)
+      brief.splice(blocker, 0, item)
+    }
+  }
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
   const [changing, setChanging] = useState<string | null>(null)
@@ -337,6 +353,40 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
+  /**
+   * Una línea ya aceptada no se corrige en su lugar (el paciente aceptó ese servicio y ese precio):
+   * se reemplaza por el hermano, con el motivo de la pieza, y el nuevo queda por responder.
+   */
+  const replaceAccepted = async (item: PlanItem, sibling: { id: string; name: string }) => {
+    if (switching || removing) return
+    setSwitching(item.id)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await reviseTreatmentApi(patientId, item.id, {
+        encounterId,
+        serviceId: sibling.id,
+        reason: `La pieza ${item.toothNumber} no es para «${item.title}»: se cambia por «${sibling.name}».`,
+        toothNumber: item.toothNumber,
+        surfaces: item.surfaces.length > 0 ? item.surfaces : null,
+        detail: item.detail,
+        diagnosisCode: item.diagnosisCode,
+        diagnosisSystem: item.diagnosisSystem ?? null,
+      })
+      await Promise.all(
+        ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next", "budget", "budgets"].map(
+          (key) => queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+        ),
+      )
+      await onChanged()
+    } catch (err) {
+      setRowError({ itemId: item.id, message: submitErrorMessage(err) })
+    } finally {
+      setSwitching(null)
+      onPendingChange(false)
+    }
+  }
   const fitNotice = (item: PlanItem) => {
     if (!toothFit || !today.has(item.id) || item.toothNumber == null || changing === item.id)
       return null
@@ -345,13 +395,23 @@ export function EncounterPlanPanel({
     const service = fitServices?.find((candidate) => candidate.id === item.serviceId)
     // Se cambia mientras quien atiende aún puede cambiar el renglón (lo decide el servidor).
     const editable = canWrite && !disabled && removableIds.has(item.id)
+    // Aceptada y sin empezar: se reemplaza (el nuevo precio lo vuelve a responder el paciente).
+    const replaceable =
+      canWrite && !disabled && !editable && item.decisionStatus === "aceptado" && !item.sessionsDone &&
+      (item.status === "pendiente" || item.status === "programado")
     return (
       <div className="basis-full">
         <toothFit.Notice
           service={{ name: item.title, toothAnatomy: service?.toothAnatomy ?? null }}
           place={item.toothNumber}
           pending={switching !== null || removing !== null}
-          onUse={editable ? (sibling) => void switchService(item, sibling.id) : undefined}
+          onUse={
+            editable
+              ? (sibling) => void switchService(item, sibling.id)
+              : replaceable
+                ? (sibling) => void replaceAccepted(item, sibling)
+                : undefined
+          }
         />
       </div>
     )
@@ -432,6 +492,7 @@ export function EncounterPlanPanel({
                         <span className="text-xs text-muted-foreground">
                           {[
                             treatmentSiteLabel(item),
+                            item.waitsFor ? `va después de ${item.waitsFor.title}` : "",
                             // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
                             quotedPriceOf(item).priceCents != null && orgLocale
                               ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
@@ -1039,6 +1100,8 @@ function IndicationForm({
         odontogramEntryId: editing.odontogramEntryId ?? "",
         detail: editing.detail ?? "",
         diagnosisCode: editing.diagnosisCode ?? "",
+        // Las que ya tiene; al elegir otro servicio, las habituales del nuevo (como al indicar).
+        sessions: editing.plannedSessions != null ? String(editing.plannedSessions) : "",
       }
     : { ...EMPTY_INDICATION, ...defaults }
   const form = useAppForm({
@@ -1064,6 +1127,11 @@ function IndicationForm({
             : {}),
           ...(value.service && value.service.id !== editing.serviceId ? { serviceId: value.service.id } : {}),
         }
+        // Las sesiones van si cambiaron o si cambió el servicio: sin ellas, el servidor pone las
+        // habituales del nuevo, que son las que el formulario ya mostró.
+        const sessions = value.sessions.trim()
+        if (editableSessions(editing) && sessions !== "" && (Number(sessions) !== editing.plannedSessions || patch.serviceId))
+          patch.plannedSessions = Number(sessions)
         const tooth = value.teeth[0] ?? null
         if ((value.scope === "tooth" || value.scope === "surfaces") && tooth !== editing.toothNumber)
           patch.toothNumber = tooth
@@ -1149,6 +1217,15 @@ function IndicationForm({
   const entryId = useStore(form.store, (state) => state.values.odontogramEntryId)
   const service = useStore(form.store, (state) => state.values.service)
   const toothFit = productUi().services.toothFit
+  // Al cambiar sin elegir otro servicio, el aviso de la pieza mira el que ya tiene: mover la
+  // endodoncia anterior a la 46 también avisa.
+  const editingService = useQuery({
+    queryKey: ["services", "one", editing?.serviceId ?? null],
+    queryFn: () => fetchService(editing!.serviceId!),
+    enabled: toothFit !== null && !!editing?.serviceId,
+    staleTime: 30_000,
+  }).data?.data
+  const fitService = service ?? editingService ?? null
   const [switching, setSwitching] = useState(false)
   const [switchError, setSwitchError] = useState<string | null>(null)
   /** «Usar Endodoncia posterior vital»: cambia el servicio elegido, con sus sesiones habituales. */
@@ -1170,6 +1247,17 @@ function IndicationForm({
   const vigentes = productUi().useFindings(patientId, canRead)
   // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
   const findings = vigentes.filter((entry) => tooth != null && entry.toothNumber === tooth)
+  /**
+   * Las caras del hallazgo que motiva, para un servicio por caras: la resina de una caries M-O
+   * nace con mesial y oclusal marcadas (QA del 9 nov, repaso 3). Solo si aún no se marcó ninguna.
+   */
+  const fillSurfacesFrom = (entryId: string, nextScope: string) => {
+    if (nextScope !== "surfaces" || !entryId || form.getFieldValue("surfaces").length > 0) return
+    const group = groupFindings(findings).find((candidate) => candidate.ids.includes(entryId))
+    const valid = form.getFieldValue("teeth")[0] != null ? (site?.partsOf(form.getFieldValue("teeth")[0]!) ?? []).map(String) : []
+    const surfaces = (group?.surfaces ?? []).map(String).filter((surface) => valid.includes(surface))
+    if (surfaces.length > 0) form.setFieldValue("surfaces", surfaces)
+  }
 
   const blocked = disabled || pending
   /** Elegir la pieza en el dibujo; con una ya puesta, se ofrece «Cambiar». */
@@ -1249,7 +1337,17 @@ function IndicationForm({
           </form.AppField>
         )}
         {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && !editing && (
-          <form.AppField name="odontogramEntryId">
+          <form.AppField
+            name="odontogramEntryId"
+            listeners={{
+              onChange: ({ value }) => {
+                // Otro hallazgo, otras caras: las que trae ese.
+                if (form.getFieldValue("scope") !== "surfaces") return
+                form.setFieldValue("surfaces", [])
+                fillSurfacesFrom(value, "surfaces")
+              },
+            }}
+          >
             {(field) => (
               <field.SelectField
                 id={`${uid}-finding`}
@@ -1350,6 +1448,7 @@ function IndicationForm({
                 onChange={(next) => {
                   field.handleChange(next)
                   if (next.scope) form.setFieldValue("scope", next.scope)
+                  fillSurfacesFrom(form.getFieldValue("odontogramEntryId"), next.scope ?? form.getFieldValue("scope"))
                   // Nace con las sesiones habituales del servicio; aquí se cambian si este paciente necesita otras.
                   form.setFieldValue("sessions", String(next.usualSessions ?? 1))
                 }}
@@ -1368,9 +1467,9 @@ function IndicationForm({
         </p>
       ) : null}
       {/* Justo debajo de lo elegido: la endodoncia anterior en la 46 avisa y ofrece la que encaja. */}
-      {service && toothFit && tooth != null && (scope === "tooth" || scope === "surfaces") ? (
+      {fitService && toothFit && tooth != null && (scope === "tooth" || scope === "surfaces") ? (
         <toothFit.Notice
-          service={service}
+          service={fitService}
           place={tooth}
           pending={blocked || switching}
           onUse={(sibling) => void switchToSibling(sibling.id)}
@@ -1381,7 +1480,9 @@ function IndicationForm({
           {switchError}
         </p>
       ) : null}
-      {service && !editing ? (
+      {/* «Cambiar» las pide igual que «Indicar»: una endodoncia cambiada desde una exodoncia no llega
+          al cierre como «1 de 1» (QA del 9 nov, repaso 3). Ya empezado, se cambian desde el Plan. */}
+      {(editing ? editableSessions(editing) : service) ? (
         <form.AppField name="sessions">
           {(field) => (
             <field.TextField

@@ -2,6 +2,7 @@ import type { Db } from "@odentia/db"
 import { serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { dentalTemplateRule, serviceFinding } from "@odentia/db/schema/dental"
 import {
+  DENTITION_COUNTERPART_FAMILIES,
   type Dentition,
   type LeavesFinding,
   leavesFindingIssues,
@@ -86,6 +87,11 @@ function asJson<T>(value: unknown): T | null {
  * `toothAnatomy` de un servicio, para elegirlo junto con sus columnas. Los
  * hermanos son de la misma clínica (y la RLS lo vuelve a exigir).
  */
+/** Pares (familia, la de la otra dentición) para el SQL de los hermanos. */
+const COUNTERPART_PAIRS = Object.entries(DENTITION_COUNTERPART_FAMILIES).flatMap(([family, others]) =>
+  others.map((other) => `${family}>${other}`),
+)
+
 export const serviceToothAnatomy = sql<ServiceToothAnatomy | null>`(
   select jsonb_build_object(
     'groups', to_jsonb(own_rule."tooth_groups"), 'dentition', own_rule."dentition", 'family', own_rule."family",
@@ -97,7 +103,13 @@ export const serviceToothAnatomy = sql<ServiceToothAnatomy | null>`(
       from "service_catalog" other
       join ${dentalTemplateRule} kin on kin."template_id" = other."template_id"
       where other."organization_id" = ${serviceCatalog.organizationId} and other."is_active"
-        and other."id" <> ${serviceCatalog.id} and kin."family" = own_rule."family"
+        and other."id" <> ${serviceCatalog.id}
+        -- La misma familia, o la que hace lo mismo en la otra dentición (la pulpectomía de una temporal).
+        and (kin."family" = own_rule."family"
+          or (own_rule."family" || '>' || kin."family") in (${sql.join(
+            COUNTERPART_PAIRS.map((pair) => sql`${pair}`),
+            sql`, `,
+          )}))
     ), '[]'::jsonb))
   from ${dentalTemplateRule} own_rule
   where own_rule."template_id" = ${serviceCatalog.templateId} and own_rule."family" is not null

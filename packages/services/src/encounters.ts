@@ -125,6 +125,7 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { nextSessionFromOf } from "./session-gap.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
@@ -1903,6 +1904,12 @@ export interface FinalizeEncounterBase {
    */
   bookedAfter: BookedAfter[]
   /**
+   * Lo aceptado de la misma pieza que va después de lo que sigue en curso y aún no tiene cita (la
+   * corona mientras la endodoncia pide la sesión 2): «Atención finalizada» lo dice para que no se
+   * pierda, sin ofrecer reservarlo todavía (pendiente de la entrega 8).
+   */
+  waitingAfter: Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>
+  /**
    * Lo trabajado hoy que sigue en curso, con su próxima sesión: la cita que ya la
    * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
    */
@@ -2056,8 +2063,11 @@ export interface NextSession {
   /** Con qué servicio se abre «Nueva cita». */
   serviceId: string | null
   booked: BookedSession | null
-  /** La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no le falta. */
-  toBook: { n: number; m: number } | null
+  /**
+   * La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no
+   * le falta. `from`: desde qué día conviene (`nextSessionFromOf`), si no es mañana.
+   */
+  toBook: { n: number; m: number; from?: string } | null
 }
 
 /** Lo aceptado que va después de otro tratamiento sin terminar y ya tiene su cita. */
@@ -2190,6 +2200,7 @@ export async function nextSessionsOf(
       firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt, professionalUserId: row.professionalUserId })
   }
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
+  const fromOf = await nextSessionFromOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
   const out: NextSession[] = []
   for (const item of items) {
     const id = item.id
@@ -2197,7 +2208,11 @@ export async function nextSessionsOf(
     const first = firstOf.get(id)
     const session = first ? sessionsOf.get(first.appointmentId)?.find((row) => row.planItemId === id) : undefined
     const booked = first ? { ...first, n: session?.n ?? count.done + 1, m: session?.m ?? item.plannedSessions } : null
-    const toBook = !booked && canBookAnother(item, count) ? { n: count.done + count.booked + 1, m: item.plannedSessions } : null
+    const from = fromOf.get(id)
+    const toBook =
+      !booked && canBookAnother(item, count)
+        ? { n: count.done + count.booked + 1, m: item.plannedSessions, ...(from ? { from } : {}) }
+        : null
     if (booked || toBook) out.push({ planItemId: id, title: item.title, serviceId: item.serviceId, booked, toBook })
   }
   return out
@@ -2346,6 +2361,8 @@ export interface ClosingAppointmentControl {
   id: string
   title: string
   repeatEveryMonths: number | null
+  /** Quien lo indicó, si no es quien atiende hoy. */
+  byName: string | null
 }
 
 export interface ClosingControls {
@@ -2508,8 +2525,13 @@ async function closingControlsOf(
       originEncounterId: clinicalFollowUp.originEncounterId,
       appointmentId: clinicalFollowUp.appointmentId,
       repeatEveryMonths: clinicalFollowUp.repeatEveryMonths,
+      kind: clinicalFollowUp.kind,
       startsAt: appointment.startsAt,
       appointmentStatus: appointment.status,
+      // Quien lo indicó: el cierre dice qué control se cumple y de quién (QA del 9 nov, repaso 3).
+      originProfessionalName: sql<string | null>`(select u."name" from ${encounter} e join ${user} u on u."id" = e."professional_user_id"
+        where e."id" = ${clinicalFollowUp.originEncounterId} and e."organization_id" = ${clinicalFollowUp.organizationId}
+          and e."professional_user_id" is distinct from ${row.professionalUserId})`,
     })
     .from(clinicalFollowUp)
     .leftJoin(
@@ -2528,10 +2550,23 @@ async function closingControlsOf(
   const byAppointment = open.filter(
     (control) => row.appointmentId !== null && control.status === "programado" && control.appointmentId === row.appointmentId,
   )
-  const first = open.find((control) => !dueIds.has(control.id) && !byAppointment.includes(control))
+  // Un control de tratamiento lejano (el radiográfico de la endodoncia, al año) no dice cuándo
+  // vuelve: más allá del recordatorio de la clínica, «¿Cuándo vuelve?» se sigue preguntando
+  // (revisión antes de entregar: si no, nadie podía indicar la limpieza de los 6 meses en un año).
+  const recallDay = addMonthsToDay(today, recallMonths)
+  const farTreatmentControl = (control: (typeof open)[number]) =>
+    control.kind === "tratamiento" && control.status === "pendiente" && dayKeyIn(control.dueAt, timezone) > recallDay
+  const first = open.find(
+    (control) => !dueIds.has(control.id) && !byAppointment.includes(control) && !farTreatmentControl(control),
+  )
   return {
     recallMonths,
-    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths }) => ({ id, title, repeatEveryMonths })),
+    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths, originProfessionalName }) => ({
+      id,
+      title,
+      repeatEveryMonths,
+      byName: originProfessionalName ?? null,
+    })),
     shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
     due,
     next: first
@@ -3165,6 +3200,17 @@ export async function finalizeEncounter(
     },
     keptOpen,
     bookedAfter,
+    waitingAfter:
+      continuingNext.length > 0
+        ? closing.sessions.accepted
+            .filter((session) => !session.booked && !bookedAfter.some((row) => row.planItemId === session.planItemId))
+            .map((session) => ({
+              planItemId: session.planItemId,
+              title: session.title,
+              ...(session.place ? { place: session.place } : {}),
+              beforeTitle: continuingNext[0]!.title,
+            }))
+        : [],
     nextSessions,
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,

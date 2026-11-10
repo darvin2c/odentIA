@@ -1,5 +1,5 @@
 import { isTooth } from "./site.js"
-import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, isDiagnosisVerification } from "@odentia/clinical"
+import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, doneSessionWords, isDiagnosisVerification } from "@odentia/clinical"
 import { isValidTooth } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
@@ -16,6 +16,7 @@ import { and, eq, inArray, or } from "drizzle-orm"
 import { listPatientDocuments } from "../clinical.js"
 import { validation } from "../errors.js"
 import { requirePatient } from "../patients.js"
+import { encounterSessionKey, encounterSessionsOf } from "../to-schedule.js"
 
 export type ToothEventKind = "hallazgo" | "diagnostico" | "procedimiento" | "control" | "documento"
 
@@ -33,6 +34,12 @@ export interface ToothEvent {
   surfaces: string[]
   /** Estado propio del hecho: vigente, tratado, anulado, en curso, realizado… */
   status: string
+  /**
+   * El estado dicho, cuando la clave sola no alcanza: la sesión de un
+   * tratamiento de varias («Sesión 1 de 2 · hecha»), nunca «Realizado» con el
+   * tratamiento en curso (tercer repaso del 9 nov, E12). Nulo: el de `status`.
+   */
+  statusText: string | null
   detail: string | null
   encounterId: string | null
   /** La atención de origen sigue abierta: el hecho aún puede corregirse. */
@@ -123,6 +130,12 @@ export async function getToothHistory(
     listPatientDocuments(tx, orgId, patientId),
   ])
 
+  // La sesión de cada procedimiento de un tratamiento, en las atenciones firmadas.
+  const sessions = await encounterSessionsOf(
+    tx,
+    orgId,
+    procedures.filter((p) => p.encounterStatus === "finalizada" && p.row.planItemId).map((p) => p.row.encounterId),
+  )
   const itemIds = items.map((item) => item.id)
   const procedureIds = procedures.map((p) => p.row.id)
   const followUps =
@@ -165,6 +178,7 @@ export async function getToothHistory(
       code: row.condition,
       surfaces: row.surface ? [row.surface] : [],
       status,
+      statusText: null,
       detail: row.note,
       encounterId: row.encounterId,
       encounterOpen: false,
@@ -183,6 +197,7 @@ export async function getToothHistory(
       code: diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode),
       surfaces: row.siteQualifiers,
       status: row.voidedAt ? "anulado" : row.status,
+      statusText: null,
       detail:
         [
           isDiagnosisVerification(row.diagnosisType) ? DIAGNOSIS_VERIFICATION_LABELS[row.diagnosisType] : null,
@@ -198,6 +213,11 @@ export async function getToothHistory(
     })
   }
   for (const { row, author, encounterStatus } of procedures) {
+    const session =
+      !row.voidedAt && encounterStatus === "finalizada" && row.planItemId
+        ? sessions.get(encounterSessionKey(row.encounterId, row.planItemId))
+        : undefined
+    const words = session ? doneSessionWords(session.n, session.m, session.finished) : null
     events.push({
       kind: "procedimiento",
       id: row.id,
@@ -206,6 +226,10 @@ export async function getToothHistory(
       code: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
       surfaces: row.siteQualifiers,
       status: row.voidedAt ? "anulado" : encounterStatus === "borrador" ? "en_curso" : "realizado",
+      // «Sesión 1 de 2 · hecha» mientras sigue; «Sesión 2 de 2 · tratamiento terminado» en la última.
+      statusText: words
+        ? `${words.charAt(0).toUpperCase()}${words.slice(1)}${session?.finished ? "" : " · hecha"}`
+        : null,
       detail: null,
       encounterId: row.encounterId,
       encounterOpen: encounterStatus === "borrador",
@@ -222,6 +246,7 @@ export async function getToothHistory(
       code: null,
       surfaces: [],
       status: row.status,
+      statusText: null,
       detail: row.outcome ?? row.cancelledReason ?? row.instructions,
       encounterId: row.completedEncounterId ?? row.originEncounterId,
       encounterOpen: false,
@@ -239,6 +264,7 @@ export async function getToothHistory(
       code: doc.category,
       surfaces: [],
       status: "vigente",
+      statusText: null,
       detail: doc.contentType,
       encounterId: doc.encounterId,
       encounterOpen: false,
