@@ -1452,6 +1452,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "color de la marca",
       "colores de la clínica",
       "color",
+      // «Sacar de una foto» (ADR 0162): quien no tiene el logo lo busca por su letrero.
+      "letrero",
+      "color del letrero",
+      "foto del letrero",
       "ruc",
       "moneda",
       "zona horaria",
