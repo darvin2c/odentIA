@@ -536,6 +536,8 @@ export function PersonPanel({
         isLoading={query.isPending}
         actions={replyBox}
       >
+        {/* Lo demás de la persona arriba, antes del hilo: al final quedaba fuera de la vista. */}
+        {also ? <div className="mb-5">{also}</div> : null}
         {query.isError || (!query.isPending && !panel) ? (
           <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
         ) : panel ? (
@@ -609,8 +611,6 @@ export function PersonPanel({
                 </ul>
               </DetailSection>
             ) : null}
-
-            {also}
 
             {approvedOnly && !sent ? (
               <InboxApprovedMessages conversationId={conversationId} contactName={name} lastInboundAt={panel.lastInboundAt} draft="" onSent={settled} />

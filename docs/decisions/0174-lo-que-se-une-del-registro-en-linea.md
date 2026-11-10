@@ -22,7 +22,7 @@ Quien se registra por el código QR o el enlace de la clínica no prueba quién 
 
 ## Consecuencias
 
-Recepción decide en una pantalla y la ficha guarda de dónde vino cada cambio. Lo que cambia la identidad cuesta un clic más. Pendiente: el consentimiento y los permisos de mensajes de quien se registró no se guardan al resolver; el responsable de un menor no se resuelve aquí; lo demás de su salud (enfermedades, medicación) queda en una nota de su persona.
+Recepción decide en una pantalla y la ficha guarda de dónde vino cada cambio. Lo que cambia la identidad cuesta un clic más. Después (10 nov): al decidir se guardan su consentimiento y sus permisos con el aviso que vio y la fecha del registro, solo si es una persona adulta que se registró a sí misma (por una menor decide su representante; nadie consiente por otro adulto), sin pisar lo que revocó o cambió después; sus enfermedades, su medicación y la entrevista se suman a Antecedentes con su nota de origen y la salud pendiente de revisión. Pendiente: el responsable de un menor no se resuelve aquí, y un grupo sanguíneo declarado distinto del guardado no se dice.
 
 ## Referencias
 

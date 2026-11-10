@@ -597,7 +597,8 @@ export async function setConsent(
   orgId: string,
   actorUserId: string | null,
   contactId: string,
-  input: { purpose: string; granted: boolean; source?: string },
+  /** `at`: cuándo lo dijo, si no es ahora (el registro en línea que recepción decide después). */
+  input: { purpose: string; granted: boolean; source?: string; at?: Date },
 ): Promise<ConsentRow> {
   const purpose = assertPurpose(input.purpose)
   const source = assertSource(input.source?.trim() || (actorUserId ? "presencial" : "baja"))
@@ -610,10 +611,10 @@ export async function setConsent(
   const status = input.granted ? "granted" : "revoked"
   const [row] = await tx
     .insert(automationConsent)
-    .values({ organizationId: orgId, contactId, purpose, status, source, createdBy: actorUserId })
+    .values({ organizationId: orgId, contactId, purpose, status, source, createdBy: actorUserId, ...(input.at ? { createdAt: input.at, updatedAt: input.at } : {}) })
     .onConflictDoUpdate({
       target: [automationConsent.organizationId, automationConsent.contactId, automationConsent.purpose],
-      set: { status, source, updatedAt: new Date() },
+      set: { status, source, updatedAt: input.at ?? new Date() },
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar el permiso")

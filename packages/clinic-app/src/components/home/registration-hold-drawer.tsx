@@ -116,7 +116,7 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
   const openPerson = (personId: string) => ({ label: "Ver su ficha", onClick: () => void navigate({ to: "/people/$personId", params: { personId } }) })
   const decide = useMutation({
     mutationFn: (isSame: boolean) =>
-      apiFetch<{ data: { patientId: string; personId: string; applied: number } }>(`/api/tasks/${taskId}/registration`, {
+      apiFetch<{ data: { patientId: string; personId: string; applied: number; consent?: string } }>(`/api/tasks/${taskId}/registration`, {
         method: "POST",
         body: JSON.stringify(isSame ? { same: true, apply: apply.map((row) => row.key), revision: data?.revision } : { same: false, revision: data?.revision }),
       }),
@@ -131,8 +131,17 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
           ? `Listo: ${name} ya es paciente${count ? `, con ${plural(count, "cambio", "cambios")}` : ""}.`
           : count
             ? `Listo: ${count === 1 ? "se guardó 1 cambio" : `se guardaron ${count} cambios`} en la ficha de ${name}.${replaced ? " Lo de antes quedó en una nota." : ""}`
-            : `Listo: la ficha de ${name} queda como estaba.`
-      toast.success(message, { action: openPerson(result.data.personId) })
+            : `Listo: no se cambió ningún dato de ${name}.`
+      // Su consentimiento de datos: si no quedó guardado, que se lo pidan en la clínica.
+      const consent =
+        result.data.consent === "pendiente"
+          ? " Pídele su consentimiento de datos en la clínica: no quedó guardado."
+          : result.data.consent === "revocado"
+            ? " Su consentimiento no se guardó: lo revocó después de registrarse."
+            : ""
+      // Lo que declaró de su salud entra igual (si es la misma persona): se dice para que no parezca perdido.
+      const health = isSame && data?.health ? " Lo que declaró de su salud quedó en sus antecedentes para que el profesional lo revise." : ""
+      toast.success(`${message}${health}${consent}`, { action: openPerson(result.data.personId) })
       seen.current = null
       done()
     },

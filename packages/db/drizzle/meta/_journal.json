@@ -603,6 +603,13 @@
       "when": 1794262445836,
       "tag": "0085_factura_por_pagar_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794275895229,
+      "tag": "0086_registro_guarda_su_aviso",
+      "breakpoints": true
     }
   ]
 }
