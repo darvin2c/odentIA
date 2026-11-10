@@ -449,6 +449,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     "crm_note",
     "task",
     "workspace_notification",
+    "push_subscription",
     "opportunity_event",
     "opportunity",
     "clinical_form_addendum",

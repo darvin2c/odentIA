@@ -25,6 +25,8 @@ export const Route = createRootRoute({
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: faviconIco, sizes: "16x16 32x32 48x48 64x64" },
       { rel: "icon", href: favicon, type: "image/svg+xml" },
+      // El ícono en el inicio del iPhone (la app instalada, ADR 0177): opaco, iOS rellena de negro lo transparente.
+      { rel: "apple-touch-icon", href: "/pwa/odentia-apple-180.png" },
     ],
   }),
   component: RootComponent,

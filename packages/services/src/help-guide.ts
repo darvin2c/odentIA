@@ -80,6 +80,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "campana",
       "notificaciones",
       "marcar todo leído",
+      "avisos en el celular",
+      "notificaciones en el teléfono",
+      "instalar la app",
+      "app en el celular",
+      "sin conexión",
       "te lo pasó el agente",
       "no confirmó",
       "sala de espera",
@@ -98,6 +103,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Qué trae la campana?",
         a: "Lo que conviene saber y no pide trabajo: un consentimiento firmado, la caja que cerró con diferencia, una oportunidad ganada o perdida, un mensaje que WhatsApp aprobó. Abrir un aviso lo marca leído y «Marcar todo leído» los marca todos. Un aviso desaparece solo cuando su asunto se resuelve, y nunca te avisa de algo que hiciste tú. Lo que hay que hacer está en «Te espera».",
+      },
+      {
+        q: "¿Cómo recibo avisos en el celular o la computadora aunque no tenga la clínica abierta?",
+        a: "Abre la campana y prende «Recibir avisos en este equipo»; el navegador te pide permiso y llega un aviso de «Listo». Es de ese equipo y de esta clínica: si trabajas en otra, actívalo también ahí. Te avisa cuando alguien te escribe o el agente te pasa a alguien, solo en el horario de atención de la clínica (lo de la noche llega al abrir), y a cualquier hora si WhatsApp o el agente dejan de funcionar y tú lo ves en la campana. El aviso no dice el nombre de la persona ni lo que escribió: eso se ve al tocarlo, en la clínica. Leerlo en el celular no lo resuelve: sigue en «Te espera» hasta que alguien lo atiende. En iPhone, primero agrega la clínica a tu inicio desde Safari (Compartir › Agregar a inicio) y actívalo desde ese ícono. No lo actives en la tablet que le pasas al paciente. Al cerrar sesión en la clínica, ese equipo deja de recibir tus avisos de esa clínica.",
+      },
+      {
+        q: "¿Puedo instalar la clínica como una app?",
+        a: "Sí. En la campana, «Instalar en este equipo» aparece cuando el navegador lo permite (Chrome o Edge en la computadora y en Android); en iPhone, desde Safari con Compartir › Agregar a inicio. Queda un ícono con el nombre de tu clínica que abre en Inicio y sin la barra del navegador. Sigue necesitando internet: si se corta, arriba dice «Sin conexión»; lo que escribiste sigue ahí y lo que tocaste guardar se guarda solo cuando vuelve.",
       },
       {
         q: "¿Por qué aparece «No confirmó su cita»?",

@@ -3,3 +3,7 @@
 # (`scripts/static-files.mjs`).
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# La app instalada (ADR 0176): el navegador revisa siempre si cambió.
+/sw.js
+  Cache-Control: no-cache

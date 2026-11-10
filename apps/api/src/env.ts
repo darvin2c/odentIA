@@ -11,6 +11,8 @@ const envSchema = z.object({
   ADMIN_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
   TRUSTED_ORIGINS: z.string().min(1),
+  /** La clave pública VAPID de los avisos en el equipo, la misma del worker. Vacía: no se ofrecen. */
+  VAPID_PUBLIC_KEY: z.string().default(""),
   /**
    * El dominio de latidIA (decisión 9 del issue 229): sus clínicas, su panel y
    * su API van en él (`<slug>.`, `app.`, `api.`), con el esquema y el puerto

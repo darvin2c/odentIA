@@ -645,6 +645,20 @@
       "when": 1794325900036,
       "tag": "0091_descartar_atencion_vacia",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1794331834113,
+      "tag": "0092_app_instalable_avisos",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1794331837148,
+      "tag": "0093_app_instalable_avisos_reglas",
+      "breakpoints": true
     }
   ]
 }

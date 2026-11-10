@@ -36,6 +36,14 @@ const envSchema = z.object({
    * La app de odentIA en Meta, las mismas de la API: con ellas el worker renueva
    * la clave de «Conectar con Facebook» antes de que venza. Vacías: no se renueva.
    */
+  /**
+   * Avisos en el equipo (push web, RFC 8292): el par de claves VAPID, una sola para
+   * los tres productos (cambiarla invalida todos los equipos suscritos), y a quién
+   * escribir si un servicio de push tiene un problema. Vacías: no se envía nada.
+   */
+  VAPID_PUBLIC_KEY: z.string().default(""),
+  VAPID_PRIVATE_KEY: z.string().default(""),
+  VAPID_SUBJECT: z.string().default(""),
   META_APP_ID: z.string().default(""),
   META_APP_SECRET: z.string().default(""),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
