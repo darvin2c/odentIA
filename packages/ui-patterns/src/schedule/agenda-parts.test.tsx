@@ -222,7 +222,7 @@ describe("recursos y días", () => {
 
   it("ningún profesional lleva el color de la marca ni los de fábrica: ese queda para lo que se toca y lo elegido", () => {
     for (const tone of [0, 1, 2, 3, 4] as const)
-      expect(scheduleToneClass(tone)).not.toMatch(/primary|agent|cyan|teal|violet|purple/)
+      expect(scheduleToneClass(tone)).not.toMatch(/primary|agent|cyan|teal|violet|purple|green|emerald/)
   })
 
   it("la franja marca el día elegido y pasa de semana", () => {

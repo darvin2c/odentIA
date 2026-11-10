@@ -6,7 +6,7 @@
  *
  * Paleta categórica (excepción prevista en `packages/ui/AGENTS.md`): tonos que
  * no se confunden con los de estado; por eso no hay verde, ámbar ni rojo. Tampoco
- * el color de la marca ni los de fábrica (turquesa de odentIA, violeta de latidIA):
+ * el color de la marca ni los de fábrica (turquesa de odentIA, violeta de latidIA, verde de vistIA):
  * ese queda para actuar y lo seleccionado (ADR 0162), y un profesional en ese tono
  * parecía elegido. Los parecidos (azul e índigo, rosa y fucsia) quedan lejos en el
  * ciclo, y las iniciales los distinguen.
