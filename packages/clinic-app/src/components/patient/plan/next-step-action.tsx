@@ -117,7 +117,10 @@ export function NextStepButton({
         // La cita no se alarga sola: si lo que lleva suele durar más, se dice y el aviso se queda
         // hasta cerrarlo (segunda mesa del 9 nov: se iba solo y no se entendía «105»).
         description: [outsideWords, tooShortWords].filter(Boolean).join(" ") || undefined,
-        ...(stays ? { duration: Number.POSITIVE_INFINITY, closeButton: true } : {}),
+        // Se cierra solo (se pausa con el puntero o el foco encima) para no quedar sobre la cabecera
+        // donde va el siguiente clic; «Deshacer» sigue en el cajón de la cita (QA de la ficha del 10 nov, U2).
+        duration: stays ? 15_000 : 8_000,
+        closeButton: true,
         action: {
           label: "Deshacer",
           onClick: () =>

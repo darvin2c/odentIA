@@ -1329,7 +1329,8 @@ export function EncounterClosingDialog({
               {mayCharge || seesFinance ? (
                 <p className="text-xs text-muted-foreground">
                   {!mayCharge
-                    ? "Después: lo que debe, para avisar a caja."
+                    ? // Hoy no se carga nada: solo lo que ya debía (QA de la ficha del 10 nov, B6).
+                      "Hoy no se carga nada. Después: si debe algo de antes, para avisar a caja."
                     : seesFinance
                       ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
                       : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}

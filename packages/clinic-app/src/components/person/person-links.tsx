@@ -439,7 +439,8 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
           <p className="text-sm text-muted-foreground">
             Lo declaró{" "}
             {registration.respondent
-              ? (RESPONDENT_LABELS[registration.respondent] ?? "alguien")
+              ? // A media frase, en minúscula: «Lo declaró el equipo de la clínica» (B13).
+                (RESPONDENT_LABELS[registration.respondent] ?? "alguien").replace(/^\p{Lu}(?!\p{Lu})/u, (first) => first.toLowerCase())
               : "alguien sin registrar"}
             {registration.actor ? ` · lo registró ${registration.actor.name}` : ""}
           </p>

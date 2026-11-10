@@ -66,7 +66,8 @@ export function OpenEncounterCard({
     >
       <div className="flex min-w-0 flex-col gap-1">
         <h2 id="open-encounter-title" className="font-heading text-base font-medium">
-          Atención en curso
+          {/* De otro día no está «en curso»: quedó abierta (QA de la ficha del 10 nov, B12). */}
+          {formatClock(encounter.startedAt).startsWith("hoy") ? "Atención en curso" : "Atención abierta"}
           <span className="font-normal text-muted-foreground">
             {" "}
             · {formatClock(encounter.startedAt)}

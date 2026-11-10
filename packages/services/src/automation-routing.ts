@@ -476,7 +476,10 @@ function noRoute(
     cause: "sin_conexion",
     detail: identity
       ? "La clínica no tiene WhatsApp conectado"
-      : "La persona solo tiene correo y la clínica no tiene un correo conectado",
+      : // Con un teléfono que aún no es su WhatsApp no «solo tiene correo» (QA de la ficha del 10 nov, B10).
+        facts.phoneWithoutWhatsApp
+        ? "Su teléfono aún no es su WhatsApp y la clínica no tiene un correo conectado"
+        : "La persona solo tiene correo y la clínica no tiene un correo conectado",
   }
 }
 
