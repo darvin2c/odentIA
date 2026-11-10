@@ -583,6 +583,8 @@ describe("una clínica de una moneda", () => {
     await ownerDb.execute(
       sql`update treatment_budget_item set created_at = now() - interval '3 days' where budget_id = ${budget.id}`,
     )
+    // Firmada la atención, el presupuesto queda armado (en borrador aún se prepara).
+    await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounterId}`)
     const home = await f.run((tx) => getWorkspaceHome(tx, f.orgId, f.actor, SENDS_BUDGETS))
     const row = unsentRow(home)
     expect(row).toMatchObject({ totalCents: 30_000, currency: "PEN", itemCount: 1 })
@@ -597,6 +599,8 @@ describe("«Te espera» con dos monedas", () => {
     await ownerDb.execute(
       sql`update treatment_budget_item set created_at = now() - interval '3 days' where budget_id = ${budget.id}`,
     )
+    // Firmada la atención, el presupuesto queda armado (en borrador aún se prepara).
+    await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounterId}`)
     const home = await f.run((tx) => getWorkspaceHome(tx, f.orgId, f.actor, SENDS_BUDGETS))
     const row = unsentRow(home)
     expect(row).toMatchObject({

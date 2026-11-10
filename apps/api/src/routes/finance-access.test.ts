@@ -437,6 +437,8 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
     `/finance/tickets/${id}`,
     `/finance/movements?branchId=${BRANCH_A}&day=2026-01-15`,
     `/finance/expenses?branchId=${BRANCH_A}`,
+    `/finance/expenses/month/download?branchId=${BRANCH_A}&year=2026&month=11`,
+    `/finance/payables?branchId=${BRANCH_A}&open=1`,
   ]
   const writes: Array<[string, unknown]> = [
     [
@@ -446,6 +448,8 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
     [`/finance/movements/${id}/void`, { reason: "x" }],
     ["/finance/expenses", { branchId: BRANCH_A, concept: "Útiles", amountCents: 1000 }],
     [`/finance/expenses/${id}/void`, { reason: "x" }],
+    ["/finance/payables", { branchId: BRANCH_A, supplierName: "Laboratorio", amountCents: 1000 }],
+    [`/finance/payables/${id}/void`, { reason: "x" }],
     [
       "/finance/closures",
       { branchId: BRANCH_A, shiftId: null, countedCents: 0, retainedCents: 0, deliveredCents: 0 },
@@ -464,7 +468,7 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
         `${role} POST ${path}`,
       ).toBe(403)
   }  // Un id que no es uuid no existe: 404, no un error interno.
-  for (const path of ["/finance/expenses/no-es-un-id/void", "/finance/movements/no-es-un-id/void"])
+  for (const path of ["/finance/expenses/no-es-un-id/void", "/finance/movements/no-es-un-id/void", "/finance/payables/no-es-un-id/void"])
     expect((await postJson(buildApp("cashier", CASH), path, { reason: "x" })).status, path).toBe(404)
 })
 
@@ -475,6 +479,12 @@ it("cuenta y cobro: reception/professional 403, cashier cobra con ticket, tenanc
   expect((await buildApp("cashier", CASH).request(accountPath)).status).toBe(200)
   // Tenant: la cuenta de org_fin_a no existe en org_fin_b.
   expect((await buildApp("admin", ADMIN_B, ORG_B).request(accountPath)).status).toBe(404)
+  // Lo aceptado, pagado y por pagar de cada presupuesto: caja y presupuesto a la vez.
+  const totalsPath = `/patients/${PAT_A}/accepted-totals`
+  expect((await buildApp("reception", RECEP).request(totalsPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT1).request(totalsPath)).status).toBe(403)
+  expect((await buildApp("cashier", CASH).request(totalsPath)).status).toBe(200)
+  expect((await buildApp("admin", ADMIN_B, ORG_B).request(totalsPath)).status).toBe(404)
 
   // Adelanto con medios válidos: el 403 de rol no lo mascara la validación.
   const collectBody = (methodId: string) => ({
@@ -922,4 +932,16 @@ it("anular un ticket con la comisión ya pagada: quien administra comisiones ve 
   // Quien no ve la cuenta no llega.
   expect((await buildApp("clinician", DENT1).request(returnable)).status).toBe(403)
   expect((await buildApp("reception", RECEP).request(returnable)).status).toBe(403)
+})
+
+it("lo que se le paga al personal: caja no lo anota ni elige a quién; administración sí (ADR 0166)", async () => {
+  const cashier = buildApp("cashier", CASH)
+  const admin = buildApp("admin", ADMIN)
+  const salary = { branchId: BRANCH_A, category: "Personal", concept: "Sueldo de Rosa", amountCents: 1000 }
+  expect((await postJson(cashier, "/finance/expenses", salary)).status).toBe(403)
+  expect((await cashier.request("/finance/expenses/recurring/people")).status).toBe(403)
+  expect((await postJson(admin, "/finance/expenses", salary)).status).toBe(201)
+  expect((await admin.request("/finance/expenses/recurring/people")).status).toBe(200)
+  // Lo demás lo sigue anotando caja.
+  expect((await postJson(cashier, "/finance/expenses", { ...salary, category: "Otros", concept: "Útiles" })).status).toBe(201)
 })

@@ -10,8 +10,7 @@ import {
   clinicalOrderPatientId,
   confirmLinkSignedConsent,
   consentDocumentPatientId,
-  markConsentSentByLink,
-  sendPersonalLink,
+  sendConsentToSign,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -20,28 +19,22 @@ import {
   createSpecialty,
   discardFormResponse,
   finalizeFormResponse,
+  findOrgCountry,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
-  keepIssuedPaper,
   getConsentPrint,
   getConsentSheetFrame,
   getEncounterConsentNeeds,
   getOrderPrint,
   getOwnProfessionalProfile,
   getProfessionalProfile,
+  keepIssuedPaper,
   listClinicalOrders,
   listConsentDocuments,
+  listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
   listConsentTemplates,
-  findOrgCountry,
-  loadDocumentClinic,
-  markConsentTemplateReviewed,
-  parseConsentDraft,
-  renderConsentPreviewPdf,
-  saveConsentTemplate,
-  ServiceError,
-  setConsentTemplateActive,
   listFormAddenda,
   listFormResponses,
   listFormTemplates,
@@ -50,10 +43,18 @@ import {
   listSpecialties,
   listSpecialtiesOverview,
   listSpecialtyProfessionals,
+  loadDocumentClinic,
+  markConsentSentByLink,
+  markConsentTemplateReviewed,
+  parseConsentDraft,
   prepareEncounterConsents,
   publishConsentTemplate,
   publishFormTemplate,
+  renderConsentPreviewPdf,
   revokeConsentDocument,
+  ServiceError,
+  saveConsentTemplate,
+  setConsentTemplateActive,
   setConsentTemplateServices,
   setProfessionalProfile,
   setProfessionalSpecialties,
@@ -955,6 +956,21 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return response
   })
 
+  // Lo que firmó en su enlace y espera que el profesional lo confirme: la atención en curso lo muestra arriba.
+  app.get("/consents/to-confirm", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    const parsed = z.object({ patientId: uuid }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { patientId } = parsed.data
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listLinkSignedToConfirm(tx, orgId, patientId)),
+    )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
+    return response
+  })
+
   // «Preparar»: genera los que faltan, llenos con lo de la atención.
   app.post("/consent-needs/prepare", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
@@ -1027,9 +1043,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
         signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
-      // el PDF se reintenta con POST …/pdf (no se repite la firma).
+      // el PDF se reintenta con POST …/pdf (no se repite la firma). El aviso del
+      // documento del representante (si no quedó en su ficha) va con la respuesta.
       try {
-        return await generateConsentPdf(orgId, userId, signed.id)
+        const withPdf = await generateConsentPdf(orgId, userId, signed.id)
+        return signed.signerDocNotice
+          ? { ...withPdf, signerDocNotice: signed.signerDocNotice }
+          : withPdf
       } catch (e) {
         console.error("consent pdf", e)
         return signed
@@ -1037,8 +1057,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     })
   })
 
-  // Antes de llegar (decisión 3): se envía a firmar por «Su enlace» de la
-  // persona (o de su representante legal), con la regla de envío de siempre.
+  // Antes de llegar (decisión 3): se envía a firmar a la persona (o a su representante
+  // legal) con «Firma tu consentimiento», que abre directo la hoja; sin aprobar, «Su enlace».
   app.post("/consents/:id/send-link", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
@@ -1049,25 +1069,32 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { requestId: parsed.data.requestId ?? null })
-        return sendPersonalLink(
+        return sendConsentToSign(
           tx,
           orgId,
           userId,
-          { patientId: consent.patientId, requestId: parsed.data.requestId ?? null },
+          { patientId: consent.patientId, consentId: consent.id, requestId: parsed.data.requestId ?? null },
           { secretsKey: deps.secretsKey },
         )
       }),
     )
   })
 
-  // En la cita, el profesional confirma lo que la persona firmó en su enlace.
+  // En la cita, el profesional confirma lo que la persona firmó en su enlace: dentro de su atención en curso.
   app.post("/consents/:id/confirm", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
       return forbidden(c, "Sin permiso para firmar consentimientos")
     }
+    // Sin `encounterId` llega del panel anterior mientras dura el despliegue: el servicio le dice
+    // que recargue («ahora se confirma dentro de su atención») en vez de un 400 sin explicación.
+    const parsed = z.strictObject({ encounterId: uuid.optional() }).safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { encounterId } = parsed.data
     return runService(c, 200, async () => {
-      const signed = await withOrgContext(deps.db, orgId, (tx) => confirmLinkSignedConsent(tx, orgId, userId, c.req.param("id")))
+      const signed = await withOrgContext(deps.db, orgId, (tx) =>
+        confirmLinkSignedConsent(tx, orgId, userId, c.req.param("id"), { encounterId }),
+      )
       // Como al firmar en la clínica: el PDF se genera después y se reintenta aparte si falla.
       try {
         return await generateConsentPdf(orgId, userId, signed.id)

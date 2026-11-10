@@ -12,7 +12,6 @@ import { productUi } from "../product/product-ui"
 
 export const PATIENT_AREAS = [
   { id: "resumen", label: "Resumen" },
-  { id: "conversaciones", label: "Conversaciones" },
   { id: "citas", label: "Citas" },
   { id: "clinica", label: "Clínica" },
   { id: "plan", label: "Plan" },
@@ -48,14 +47,6 @@ const COMMON_SECTIONS = [
     area: "resumen",
     label: "Resumen",
     permission: null,
-    patient: false,
-  },
-  {
-    id: "conversaciones",
-    area: "conversaciones",
-    label: "Conversaciones",
-    // Odontología lee conversaciones sin el CRM: ve las suyas, no las oportunidades.
-    permission: ["conversations.read", "crm.read"],
     patient: false,
   },
   {
@@ -106,7 +97,10 @@ const COMMON_SECTIONS = [
     permission: "finance.read",
     patient: true,
   },
+  // Datos en cuatro (QA de la ficha del 8 nov): antes eran siete. Cada bloque de
+  // dentro sigue pidiendo su propio permiso; la sección se ve con cualquiera.
   {
+    // Identidad, contacto y, para quien lleva el CRM, sus canales: el WhatsApp va junto a su número.
     id: "filiacion",
     area: "datos",
     label: "Datos personales",
@@ -114,25 +108,12 @@ const COMMON_SECTIONS = [
     patient: false,
   },
   {
+    // «Personas vinculadas» y «Responsables» eran dos lugares para lo mismo.
     id: "contactos",
     area: "datos",
-    label: "Personas vinculadas",
+    label: "Familia y responsables",
     permission: "patients.read",
     patient: false,
-  },
-  {
-    id: "canales",
-    area: "datos",
-    label: "Canales",
-    permission: "crm.read",
-    patient: false,
-  },
-  {
-    id: "responsables",
-    area: "datos",
-    label: "Responsables",
-    permission: "patients.read",
-    patient: true,
   },
   {
     id: "portal",
@@ -141,23 +122,14 @@ const COMMON_SECTIONS = [
     permission: "patients.write",
     patient: true,
   },
-  // «Sus datos y la ley» (ADR 0080): quién consultó su historia y lo que
-  // pidió sobre sus datos. Los atienden Recepción y Administración.
-  {
-    id: "accesos",
-    area: "datos",
-    label: "Consultas a la historia",
-    permission: "audit.read",
-    patient: true,
-    group: "Sus datos y la ley",
-  },
+  // Quién consultó su historia (audit.read) y lo que pidió sobre sus datos
+  // (patients.write), juntos (ADR 0080). Los atienden Recepción y Administración.
   {
     id: "pedidos",
     area: "datos",
-    label: "Pedidos sobre sus datos",
-    permission: "patients.write",
+    label: "Privacidad y pedidos",
+    permission: ["patients.write", "audit.read"],
     patient: true,
-    group: "Sus datos y la ley",
   },
 ] as const satisfies ReadonlyArray<SectionDef>
 
@@ -167,21 +139,30 @@ export type PatientSectionId = (typeof COMMON_SECTIONS)[number]["id"] | (string 
 export type Can = (permission: string) => boolean
 
 /**
- * Las secciones de la página, en el orden de navegación: las comunes y, en
- * Clínica después de Antecedentes, las que agrega el producto. Son clínicas:
- * piden leer la historia y aparecen cuando la persona ya es paciente.
+ * Las secciones de la página, en el orden de navegación: las comunes y las que
+ * agrega el producto. Las suyas son clínicas salvo que digan otra pestaña: en
+ * Clínica van después de Antecedentes y piden leer la historia; en otra, al
+ * final de las de esa pestaña, con su permiso. Todas aparecen cuando la
+ * persona ya es paciente.
  */
 export function patientSections(): readonly PatientSection[] {
   const own: PatientSection[] = productUi().record.sections.map((section) => ({
     id: section.id,
-    area: "clinica",
+    area: section.area ?? "clinica",
     label: section.label,
-    permission: "clinical.read",
+    permission: section.permission ?? "clinical.read",
     patient: true,
     ...(section.parent ? { parent: section.parent } : {}),
   }))
   const after = COMMON_SECTIONS.findIndex((section) => section.id === "antecedentes") + 1
-  return [...COMMON_SECTIONS.slice(0, after), ...own, ...COMMON_SECTIONS.slice(after)]
+  const clinical = own.filter((section) => section.area === "clinica")
+  const base: PatientSection[] = [...COMMON_SECTIONS.slice(0, after), ...clinical, ...COMMON_SECTIONS.slice(after)]
+  return own
+    .filter((section) => section.area !== "clinica")
+    .reduce((list, section) => {
+      const last = list.findLastIndex((item) => item.area === section.area)
+      return last < 0 ? [...list, section] : [...list.slice(0, last + 1), section, ...list.slice(last + 1)]
+    }, base)
 }
 
 /**
@@ -194,7 +175,13 @@ export function patientSections(): readonly PatientSection[] {
  */
 const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
   actividad: "resumen",
-  seguimiento: "conversaciones",
+  // La pestaña Conversaciones se quitó: sus conversaciones y oportunidades están en el Resumen.
+  conversaciones: "resumen",
+  seguimiento: "resumen",
+  // Datos en cuatro: cada sección vieja abre la que ahora la contiene.
+  canales: "filiacion",
+  responsables: "contactos",
+  accesos: "pedidos",
   recorrido: "plan",
   controles: "plan",
   coordinacion: "plan",
@@ -334,7 +321,8 @@ export interface AreaNavEntry {
 
 /**
  * Pestañas que muestran sus secciones en un menú lateral en vez de una barra:
- * Datos tiene siete y la barra se desbordaba (lienzo del lote 2, ADR 0080).
+ * Datos tenía siete y la barra se desbordaba (lienzo del lote 2, ADR 0080); con
+ * cuatro sigue igual, para no cambiar de lugar lo que ya se conoce.
  */
 export const SIDE_NAV_AREAS: ReadonlySet<PatientAreaId> = new Set(["datos"])
 

@@ -5,6 +5,7 @@ import type { AutomationCause } from "@odentia/db/schema/automation"
 import { agentConfig } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq, type SQL, sql } from "drizzle-orm"
+import { type AdminDraftView, draftViewOf } from "./admin-drafts.js"
 import {
   ADMIN_LINES,
   type AdminLine,
@@ -20,14 +21,9 @@ import {
   lineOfJobKind,
   TASK_AREA_LABELS,
 } from "./admin-lines.js"
-import { type AdminDraftView, draftViewOf } from "./admin-drafts.js"
-import { isAppointmentNotice, messageExampleValues, renderMessage } from "./automation-messages.js"
-import { currentSaasPeriod } from "./saas-actions.js"
-import { currentAutomationMessageOf } from "./clinic-messages.js"
 import {
   activeSince,
   adminRuntime,
-  listBudgetHeldJobs,
   CAUSE_WORDS,
   causeWordsFor,
   type DeliverDeps,
@@ -41,40 +37,44 @@ import {
   lineConfigOf,
   lineDays,
   lineTiming,
+  listBudgetHeldJobs,
   listLineRules,
   preferredContact,
   purposeOfKind,
+  type RuleRow,
   reconcileDeliveries,
   requestNeededTemplates,
-  type RuleRow,
-  setLine,
   type SetLineInput,
+  setLine,
+  settleTasks,
   syncAppointmentReminders,
   syncBudgetFollowUps,
   syncCancelledAppointments,
   syncCheckupReminders,
-  settleTasks,
+  syncLapsedInvites,
   syncOpportunityFollowUps,
   syncVisitFollowUps,
-  syncLapsedInvites,
 } from "./automation.js"
+import { isAppointmentNotice, messageExampleValues, renderMessage } from "./automation-messages.js"
 import type { TemplateDeps } from "./channel-templates.js"
-import { shouldSkipSaasOrg } from "./saas-billing.js"
+import { currentAutomationMessageOf } from "./clinic-messages.js"
 import { type ConversationCareDeps, tickConversationCare } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { offerPendingHeldReplies } from "./held-replies.js"
-import { retakeForgottenTopics } from "./topic-retake.js"
-import { purgeOldWebchatTests } from "./webchat.js"
-import { patientCreditSql } from "./payments.js"
-import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoneyToday, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
 import { closeUnansweredOncePerDay } from "./opportunities.js"
+import { getPatientRegistrationConfig } from "./patient-registration.js"
+import { patientCreditSql } from "./payments.js"
 import { productHooks } from "./products.js"
 import { debtZoneSql } from "./report-debts.js"
 import { lapsedToInvite } from "./return-invites.js"
-import { budgetToScheduleSql, noUpcomingAppointmentSql, overdueControlSql } from "./to-schedule.js"
-import { getWritingHours, type WritingWeek } from "./writing-hours.js"
+import { currentSaasPeriod } from "./saas-actions.js"
+import { shouldSkipSaasOrg } from "./saas-billing.js"
 import type { Storage } from "./storage.js"
+import { budgetToScheduleSql, noUpcomingAppointmentSql, overdueControlSql } from "./to-schedule.js"
+import { retakeForgottenTopics } from "./topic-retake.js"
+import { purgeOldWebchatTests } from "./webchat.js"
+import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 
 /* ---------- Argos: mira cómo va la clínica, recomienda qué prender y hace lo que le encargan ---------- */
 
@@ -187,14 +187,17 @@ const blank = { patientId: null, contactId: null, opportunityId: null, appointme
 /** Sin cita futura: ninguna cita programada o confirmada desde ahora (`noUpcomingAppointmentSql`). */
 const NO_FUTURE_APPOINTMENT = noUpcomingAppointmentSql({ id: sql`p.id`, organizationId: sql`p.organization_id` })
 
-/** El presupuesto `b` tiene algo aceptado sin cita: la regla de Pacientes › «Por agendar». */
-const BUDGET_TO_SCHEDULE = budgetToScheduleSql({ id: sql`b.id`, organizationId: sql`b.organization_id` })
+/** El presupuesto `b` tiene algo aceptado sin cita: la regla de Pacientes › «Por agendar», con las fases de su producto. */
+const budgetToSchedule = (phases: readonly string[]) =>
+  budgetToScheduleSql({ id: sql`b.id`, organizationId: sql`b.organization_id` }, phases)
 /** Un tratamiento en curso del presupuesto sin cita para su próxima sesión (decisión 14): no espera los días. */
-const NEXT_SESSION_OPEN = budgetToScheduleSql(
-  { id: sql`b.id`, organizationId: sql`b.organization_id` },
-  sql`now()`,
-  sql`and scheduled_item.status = 'en_curso'`,
-)
+const nextSessionOpen = (phases: readonly string[]) =>
+  budgetToScheduleSql(
+    { id: sql`b.id`, organizationId: sql`b.organization_id` },
+    phases,
+    sql`now()`,
+    sql`and scheduled_item.status = 'en_curso'`,
+  )
 
 /** Solo lo nuevo desde que se prendió y que aún no tiene su caso. `at` es cuándo se cumplió la condición. */
 function fresh(scope: Fresh | undefined, id: SQL, at: SQL): SQL {
@@ -396,8 +399,29 @@ async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: numb
  * demás se dicen en la fila. Otra cita de la persona no lo agenda: la fila dice
  * cuál es. Al crear casos (`scope`), quien ya tiene uno abierto no recibe otro.
  */
-async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; next_session: boolean; next_at: Date | string | null; budgets: number; total: number }>(sql`
+async function budgetsWithoutAppointment(
+  tx: Db,
+  orgId: string,
+  zone: OrgLocale,
+  days: number,
+  scope?: Fresh,
+  limit: number = ADMIN_LIST_LIMIT,
+): Promise<CaseResult> {
+  const { planPhases } = await productHooks(tx, orgId)
+  const BUDGET_TO_SCHEDULE = budgetToSchedule(planPhases)
+  const NEXT_SESSION_OPEN = nextSessionOpen(planPhases)
+  const rows = await tx.execute<{
+    id: string
+    patient_id: string
+    name: string
+    title: string
+    number: number
+    decided_at: Date | string
+    next_session: boolean
+    next_at: Date | string | null
+    budgets: number
+    total: number
+  }>(sql`
     with due as (
       select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
              ${NEXT_SESSION_OPEN} as next_session,

@@ -29,7 +29,7 @@ import {
 import { usePermission } from "../../lib/crm"
 import type { ServiceCatalogItem } from "../../lib/services"
 import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
-import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
+import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
 import { ServiceSelect } from "../service-select"
 
 /** Hasta cuántos días después de su fecha se miran las citas en pie para ofrecer «Usar esa cita». */
@@ -137,6 +137,7 @@ function ScheduleForm({
   const [service, setService] = useState<ServiceCatalogItem | null>(null)
   // «Usar esa cita» es un botón por cita, no el formulario: su rechazo va junto a esa cita.
   const [useError, setUseError] = useState<{ appointmentId: string; message: string } | null>(null)
+  const indicatedBy = resources.professionals.find((item) => item.id === control.originProfessionalUserId) ?? null
   const toneOf = useMemo(() => {
     const index = new Map(resources.professionals.map((item, at) => [item.id, at]))
     return (id: string) => scheduleToneAt(index.get(id) ?? 0)
@@ -152,6 +153,9 @@ function ScheduleForm({
     date: zonedDateOf(control.dueAt, timeZone),
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: service?.id || undefined,
+    // Primero quien lo indicó, si atiende en esta sede: el control lo suele hacer quien lo pidió
+    // (QA del 9 nov, repaso 3: proponía a otro). Se cambia a «Cualquiera» con un toque.
+    ...(indicatedBy ? { professionalUserId: indicatedBy.id, professionalLabel: indicatedBy.label } : {}),
   })
   // Si ya tiene una cita en pie desde que el control toca (su ventana), se ofrece usarla en vez
   // de reservar otra, en cualquier sede: esa visita lo cumple (ADR 0152).
@@ -216,6 +220,8 @@ function ScheduleForm({
           serviceId: service?.id || undefined,
           startsAt: target.start,
           endsAt: target.end,
+          // Fuera del horario de quien lo indicó, como en «Nueva cita»: lo avisado se reserva igual.
+          ...exceptionFlags(when.exception),
         },
       })
     },
@@ -235,7 +241,6 @@ function ScheduleForm({
       title="Programar control"
       description={`${control.title} · ${resources.branchName}`}
       isSubmitting={schedule.isPending}
-      isDirty
       submitLabel={target ? `Reservar ${whenSaid(target.start, timeZone, today)}` : "Reservar cita"}
       onClose={() => {
         if (!schedule.isPending) onClose()

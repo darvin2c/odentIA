@@ -496,10 +496,10 @@ describe("reservar desde un enlace", () => {
     })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: lia.contactId, relationship: "self", isPreferred: true }))
 
-    // Al reservar ve lo que ya sabemos, con el documento abreviado, lo que falta y lo pendiente.
+    // Al reservar ve lo que ya sabemos, con el documento y el celular enmascarados, lo que falta y lo pendiente.
     const sent = await run((tx) => createBookingLink(tx, ORG, { conversationId: lia.conversationId, branchId: site!.id }, { secretsKey: KEY }))
     const view = await run((tx) => getBookingLinkView(tx, ORG, sent.token))
-    expect(view.you).toEqual({ name: "Lía Campos", givenNames: "Lía", familyName: "Campos", document: "DNI ••••7123", phone: "+51987000111" })
+    expect(view.you).toEqual({ name: "Lía Campos", givenNames: "Lía", familyName: "Campos", document: "DNI ••••7123", phone: "•••111" })
     expect(view.pending).toEqual({ privacy: true, promotions: true, promotionsOffer: false })
     expect(view.data?.missing.map((item) => item.key)).toEqual(expect.arrayContaining(["birthDate", "sex"]))
 
@@ -682,7 +682,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     // Lo que la clínica exige y no se pidió queda dicho en el caso.
     const pendingNote = (await run((tx) => getCaseBrief(tx, ORG, nuevo.conversationId))).known.map((item) => item.text).join(" ")
     // La fecha y el sexo se pidieron al reservar: solo queda confirmar su nombre.
-    expect(pendingNote).toContain("Faltan datos para atenderla: confirmar apellidos y nombres.")
+    expect(pendingNote).toContain("Faltan datos para la atención: confirmar apellidos y nombres.")
 
     // Ya es paciente: el mismo enlace reserva, y no vuelve a pedir datos.
     const after = await run((tx) => getBookingLinkView(tx, ORG, link.token))

@@ -11,6 +11,10 @@ describe("addressFromName", () => {
     expect(addressFromName("Clínica Dental Sonrisa")).toBe("sonrisa")
     expect(addressFromName("Centro Odontológico San Juan")).toBe("san-juan")
     expect(addressFromName("Consultorio Dental de la Dra. Ruiz")).toBe("dra-ruiz")
+    // «Óptica» es genérica solo en el panel de vistIA: el de odentIA y el de latidIA no cambian.
+    expect(addressFromName("Óptica Clara", "optical")).toBe("clara")
+    expect(addressFromName("Centro Óptico Visión Total", "optical")).toBe("vision-total")
+    expect(addressFromName("Óptica Clara", "dental")).toBe("optica-clara")
   })
 
   it("no deja la dirección vacía", () => {

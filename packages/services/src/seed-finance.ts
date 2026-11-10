@@ -21,8 +21,9 @@ export async function seedFinance(tx: Db, input: {
   const methods = await listPaymentMethods(tx, orgId, { activeOnly: false })
   const cash = methods.find((method) => method.typeCode === "10")
   const wallet = methods.find((method) => method.name === "Yape")
-  const transfer = methods.find((method) => method.typeCode === "30")
-  if (!cash || !wallet || !transfer) throw new Error("Faltan los medios de pago de la clínica demo")
+  // El medio apagado es Plin: la transferencia queda para pagar el alquiler y los sueldos (ADR 0167).
+  const off = methods.find((method) => method.name === "Plin")
+  if (!cash || !wallet || !off) throw new Error("Faltan los medios de pago de la clínica demo")
   const shift = await ensureOpenShift(tx, orgId, ownerUserId, branchId, "PEN")
   await addShiftMovement(tx, orgId, ownerUserId, shift.id, {
     direction: "ingreso", kind: "aporte", amountCents: 20000, concept: "Fondo de caja inicial",
@@ -47,7 +48,19 @@ export async function seedFinance(tx: Db, input: {
     ...(inCash > 0 ? { cashReceivedCents: 10000 } : {}),
   })
   await createExpense(tx, orgId, ownerUserId, {
-    branchId, category: "Materiales", concept: "Guantes y mascarillas", amountCents: 3550, fromCash: true,
+    branchId, category: "Materiales", concept: "Guantes y mascarillas", amountCents: 3550, paymentMethodId: cash.id,
+    receiptType: "03", receiptNumber: "B001-4512",
+  })
+  // Lo chico del día, como en una clínica de verdad (ADR 0167): el motorizado que trae un trabajo
+  // del laboratorio, en efectivo y sin comprobante, y la limpieza con tarjeta y su boleta.
+  await createExpense(tx, orgId, ownerUserId, {
+    branchId, category: "Otros", concept: "Motorizado: trajo la corona del laboratorio", amountCents: 1500, paymentMethodId: cash.id,
+    receiptType: "sin",
+  })
+  const card = methods.find((method) => method.typeCode === "48" && method.isActive)
+  await createExpense(tx, orgId, ownerUserId, {
+    branchId, category: "Otros", concept: "Útiles de limpieza", amountCents: 4280,
+    ...(card ? { paymentMethodId: card.id } : {}), receiptType: "03", receiptNumber: "B003-0291",
   })
   const cancelled = await collectCharge(tx, orgId, ownerUserId, patientId, {
     branchId, advanceCents: 5000, requestId: "50206010-0000-4000-8000-000000000002",
@@ -65,5 +78,5 @@ export async function seedFinance(tx: Db, input: {
   await createCharge(tx, orgId, ownerUserId, patientId, {
     branchId, description: "Resina", amountCents: 24000, currency: "PEN",
   })
-  await updatePaymentMethod(tx, orgId, ownerUserId, transfer.id, { isActive: false })
+  await updatePaymentMethod(tx, orgId, ownerUserId, off.id, { isActive: false })
 }

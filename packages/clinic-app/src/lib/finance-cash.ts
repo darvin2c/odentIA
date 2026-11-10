@@ -9,14 +9,15 @@
  * o la sede. Aquí no hay país, moneda ni medio de pago escritos.
  */
 import type { PurchaseBalance, PurchasesToPay } from "./reports"
-import { currencyWord, parseMoney, upperFirst } from "@odentia/clinical"
-import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
+import { currencyWord, expenseCategoryWord, parseMoney, upperFirst } from "@odentia/clinical"
+import { minutesToInstant, normalizeSearchText, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { ApiError, apiFetch } from "./api"
+import { ApiError, apiDownload, apiFetch } from "./api"
 import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
 import { useOrgSecondCurrency } from "./org"
+import { appWords } from "./product-words"
 
 /** Efectivo según UN/CEFACT 4461: lo único que se cuenta al cerrar. */
 export const CASH_TYPE_CODE = "10"
@@ -280,7 +281,10 @@ export const TICKET_STATE_OPTIONS = [
 export interface TicketListRow {
   id: string
   number: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173): `displayName` es quien compró o «Venta de mostrador». */
+  patientId: string | null
+  /** La persona que compró en el mostrador, si se eligió: su página se abre desde la fila. */
+  buyerContactId: string | null
   displayName: string
   docType: string | null
   docNumber: string | null
@@ -392,7 +396,8 @@ export interface DayMovement {
 export interface VoidedTicket {
   ticketId: string
   ticketNumber: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173). */
+  patientId: string | null
   patientName: string
   currency: string
   totalCents: number
@@ -625,6 +630,8 @@ export function addCashMovementApi(body: {
   concept: string
   /** La caja de esa moneda; sin ella, la de la moneda de la clínica. */
   currency?: string
+  /** La clave del formulario abierto: reintentar no mueve el efectivo dos veces. */
+  requestId?: string
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/cash/movements", {
     method: "POST",
@@ -775,8 +782,46 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
 /** Los tipos con que se filtra Gastos: los de un gasto y el pago de comisiones (`EXPENSE_FILTER_TYPES`). */
 export const EXPENSE_FILTER_TYPES = [...EXPENSE_CATEGORIES, "Pago de comisiones"] as const
 
+/**
+ * Cómo se dice cada tipo de gasto (QA de Gastos, G25): «Personal» se leía como el gasto propio y
+ * «Servicios» como lo que se vende. Solo cambia la palabra: el valor guardado sigue igual, y Gastos,
+ * los filtros y Reportes dicen lo mismo.
+ */
+export function expenseCategoryLabel(category: string): string {
+  return expenseCategoryWord(category)
+}
+
+/**
+ * Una línea de ayuda por tipo, para quien duda dónde va lo que pagó. Lo del laboratorio y los
+ * insumos lo dice cada producto (una óptica no paga coronas ni resinas).
+ */
+export function expenseCategoryHint(category: string): string | undefined {
+  const own = appWords().expenseHints
+  const hints: Record<string, string> = {
+    Personal: "Sueldos y lo que se le paga al equipo (sin las comisiones).",
+    Alquiler: "El alquiler de la sede.",
+    Laboratorio: own.lab,
+    Materiales: own.supplies,
+    Servicios: "Luz, agua, internet y teléfono.",
+    Impuestos: "El IGV de lo cobrado, la renta, los arbitrios.",
+    Otros: "Lo que no va en los demás: taxi, útiles, limpieza.",
+  }
+  return hints[category]
+}
+
 /** Valor con que el servidor guarda «sin comprobante». */
 export const NO_RECEIPT = "ninguno"
+
+/** Lo que era un gasto antes de corregirlo. */
+export interface ExpenseBefore {
+  amountCents: number
+  currency: string
+  category: string
+  concept: string
+  spentAt: string
+  methodName: string | null
+  reason: string | null
+}
 
 export interface ExpenseRow {
   id: string
@@ -795,6 +840,25 @@ export interface ExpenseRow {
   spentAt: string
   receiptKind: string
   receiptNumber: string | null
+  /** El tipo del país (SUNAT en el Perú) o «sin»; nulo en lo de antes, que era texto libre. */
+  receiptType?: string | null
+  /** Con qué se pagó (ADR 0167); nulo en lo de antes, que solo dice si salió de la caja. */
+  paymentMethodId?: string | null
+  methodName?: string | null
+  methodTypeCode?: string | null
+  paymentReference?: string | null
+  supplierTaxId?: string | null
+  /** De quién es el sueldo pagado (solo para quien administra comisiones). */
+  personName?: string | null
+  /** Corrige a otro gasto: lo que era antes. */
+  replacesExpenseId?: string | null
+  replaced?: ExpenseBefore | null
+  /** Toda la cadena de correcciones, de la más reciente a la primera. */
+  history?: ExpenseBefore[]
+  /** `false` si la cadena se cortó (en un sueldo, para quien no los ve): lo último no es lo primero. */
+  historyComplete?: boolean
+  /** El pago (o una parte) de una factura por pagar (ADR 0175). */
+  payableId?: string | null
   notes: string | null
   voidedAt: string | null
   voidReason: string | null
@@ -814,6 +878,15 @@ export interface ExpenseRow {
   commission: boolean
   /** El pago de comisión al que lleva la fila (solo para quien administra comisiones). */
   commissionPayment?: { professionalUserId: string; year: number | null; month: number | null } | null
+  /**
+   * Los sueldos pagados en una sola fila «Pago de sueldos», para quien no administra comisiones:
+   * no dice a quién ni se anula desde aquí.
+   */
+  salary?: boolean
+  /** El pago del impuesto de lo cobrado (ADR 0083): se ve y no suma en «Gastado». */
+  salesTax?: boolean
+  /** Salió de una caja que ya se cerró: anularlo es de administración. */
+  shiftClosed?: boolean
 }
 
 export interface MonthExpenses {
@@ -823,9 +896,11 @@ export interface MonthExpenses {
   timezone: string
   /** Del mes entero, sin los anulados y solo en la moneda de la clínica. */
   totalCents: number
+  /** El impuesto de lo cobrado pagado en el mes: no es un gasto y no está en el total. */
+  salesTaxCents?: number
   byCategory: Array<{ category: string; cents: number }>
-  /** Lo que queda a la vista con la búsqueda y el tipo. */
-  shown: { count: number; totalCents: number }
+  /** Lo que queda a la vista con la búsqueda y el tipo; `notCounted`, lo que se ve y no suma. */
+  shown: { count: number; totalCents: number; notCounted?: number }
   /** Incluye los anulados, marcados. */
   expenses: ExpenseRow[]
 }
@@ -845,6 +920,14 @@ export function fetchMonthExpenses(query: {
   if (query.q?.trim()) params.set("q", query.q.trim())
   if (query.category) params.set("category", query.category)
   return apiFetch<{ data: MonthExpenses }>(`/api/finance/expenses/month?${params}`)
+}
+
+/** La lista del mes para el contador (CSV), con lo que se busca y el tipo elegido, como en la pantalla. */
+export function downloadMonthExpenses(query: { branchId: string; year: number; month: number; q?: string; category?: string }): Promise<void> {
+  const params = new URLSearchParams({ branchId: query.branchId, year: String(query.year), month: String(query.month) })
+  if (query.q?.trim()) params.set("q", query.q.trim())
+  if (query.category) params.set("category", query.category)
+  return apiDownload(`/api/finance/expenses/month/download?${params}`, `gastos-${query.year}-${String(query.month).padStart(2, "0")}.csv`)
 }
 
 export function createExpenseApi(body: {
@@ -873,11 +956,120 @@ export function createExpenseApi(body: {
     /** Se paga al mes siguiente (el sueldo de noviembre, el 2 de diciembre). */
     dueNextMonth?: boolean
   }
-}): Promise<{ data: { id: string } }> {
+  /** La clave del formulario abierto: reintentar después de un corte devuelve el mismo gasto. */
+  requestId?: string
+  /** El pago (o una parte) de una factura por pagar (ADR 0175). */
+  payableId?: string
+} & ExpensePaper): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+/** Una factura por pagar (ADR 0175), con lo pagado y lo que falta. */
+export interface Payable {
+  id: string
+  branchId: string
+  category: string
+  concept: string
+  supplierId: string | null
+  supplierName: string
+  supplierTaxId: string | null
+  receiptType: string | null
+  receiptNumber: string | null
+  issuedOn: string
+  dueOn: string | null
+  currency: string
+  amountCents: number
+  paidCents: number
+  dueCents: number
+  overdue: boolean
+  patientId: string | null
+  patientName: string | null
+  planItemId: string | null
+  planItemTitle: string | null
+  planItemSite: string | null
+  notes: string | null
+}
+
+export function fetchPayables(query: { branchId?: string; patientId?: string; open?: boolean }): Promise<{ data: { today: string; payables: Payable[] } }> {
+  const params = new URLSearchParams()
+  if (query.branchId) params.set("branchId", query.branchId)
+  if (query.patientId) params.set("patientId", query.patientId)
+  if (query.open) params.set("open", "1")
+  return apiFetch(`/api/finance/payables?${params}`)
+}
+
+/** Anota una factura por pagar: no paga ni toca la caja. */
+export function notePayableApi(body: {
+  requestId: string
+  branchId: string
+  category: string
+  supplierId?: string
+  supplierName?: string
+  supplierTaxId?: string
+  receiptType?: string
+  receiptNumber?: string
+  issuedOn?: string
+  dueOn?: string
+  currency?: string
+  amountCents: number
+  patientId?: string
+  planItemId?: string
+}): Promise<{ data: { id: string } }> {
+  return apiFetch("/api/finance/payables", { method: "POST", body: JSON.stringify(body) })
+}
+
+/** «Corregir la factura» (sin pagos): anula la anotada con lo que cambió y anota esta. */
+export function correctPayableApi(id: string, body: Parameters<typeof notePayableApi>[0]): Promise<{ data: { id: string } }> {
+  return apiFetch(`/api/finance/payables/${id}/correct`, { method: "POST", body: JSON.stringify(body) })
+}
+
+export function voidPayableApi(id: string, reason: string): Promise<{ data: { id: string } }> {
+  return apiFetch(`/api/finance/payables/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) })
+}
+
+/** Con qué se pagó, el comprobante del país y a quién (ADR 0167). */
+export interface ExpensePaper {
+  paymentMethodId?: string | null
+  paymentReference?: string | null
+  receiptType?: string | null
+  supplierId?: string | null
+  supplierName?: string | null
+  supplierTaxId?: string | null
+}
+
+/** «Corregir»: anula el gasto con lo que cambió y registra este, en una sola operación. */
+export function correctExpenseApi(id: string, body: Parameters<typeof createExpenseApi>[0]): Promise<{ data: { id: string } }> {
+  const { repeat: _repeat, ...rest } = body
+  return apiFetch(`/api/finance/expenses/${id}/correct`, { method: "POST", body: JSON.stringify(rest) })
+}
+
+/** A quién se pagó: los proveedores de la clínica, con su documento. */
+/** Los proveedores para decir a quién se pagó: los de Inventario (con `id`) y los ya escritos (sin él). */
+export function fetchExpenseSuppliers(): Promise<{
+  data: Array<{ id: string | null; name: string; docType: string | null; docNumber: string | null }>
+}> {
+  return apiFetch("/api/finance/suppliers")
+}
+
+/** «Anotar lo que se repite»: la plantilla sola, sin pagar nada. */
+export function noteRecurringApi(body: {
+  branchId: string
+  category: string
+  concept: string
+  amountCents: number
+  currency?: string
+  everyMonths: 1 | 6 | 12
+  day: number
+  firstMonth?: string
+  memberUserId?: string | null
+  dueNextMonth?: boolean
+  paymentMethodId?: string | null
+  requestId?: string
+}): Promise<{ data: { id: string; firstMonth: string } }> {
+  return apiFetch("/api/finance/expenses/recurring", { method: "POST", body: JSON.stringify(body) })
 }
 
 // --- Gastos que se repiten ------------------------------------------------------------------
@@ -899,7 +1091,11 @@ export interface RecurringDue {
   amountCents: number
   currency: string
   fromCash: boolean
+  /** Con qué se suele pagar: se propone al pagar. */
+  paymentMethodId: string | null
   everyMonths: number
+  /** Varios sueldos en una fila, para quien no administra comisiones: no se paga desde aquí. */
+  group: number | null
 }
 
 export interface RecurringTemplate {
@@ -916,7 +1112,11 @@ export interface RecurringTemplate {
   memberUserId: string | null
   memberName: string | null
   fromCash: boolean
+  paymentMethodId: string | null
+  dueNextMonth?: boolean
   nextMonth: string | null
+  /** Varios sueldos en una fila, para quien no administra comisiones: no se cambia desde aquí. */
+  group: number | null
 }
 
 export interface RecurringMonth {
@@ -925,10 +1125,43 @@ export interface RecurringMonth {
   currency: string
   timezone: string
   today: string
-  /** «Lo fijo del mes»: lo que cae en el mes, lo pagado y lo que falta. */
+  /** Lo que se repite y cae en el mes: cuánto, lo pagado y lo que falta. */
   fixed: { totalCents: number; paidCents: number; dueCents: number; count: number }
   due: RecurringDue[]
   templates: RecurringTemplate[]
+}
+
+/** Palabras que no distinguen un gasto de otro: «sueldo de la asistente», «luz del local». */
+const LINKING_WORDS = new Set(["del", "las", "los", "para", "con", "por", "una", "uno", "que", "mes", "pago", "sede", "local", "clinica", "consultorio"])
+
+function conceptWords(text: string, ignored: ReadonlySet<string> = new Set()): Set<string> {
+  return new Set(
+    normalizeSearchText(text)
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length >= 3 && !LINKING_WORDS.has(word) && !ignored.has(word)),
+  )
+}
+
+/**
+ * Lo que ya se repite y se parece a lo que se está por anotar: comparte una palabra del concepto
+ * («Luz» y «Luz sede Centro»), o es del mismo tipo y se paga el mismo día. Solo avisa: puede ser
+ * otro de verdad (dos alquileres), y quien anota decide.
+ */
+export function similarRecurring(
+  templates: readonly RecurringTemplate[],
+  draft: { concept: string; category: string; day: number | null },
+  /** El nombre de la sede: «Luz Centro» y «Agua Centro» no se parecen por «Centro». */
+  branchName = "",
+): RecurringTemplate[] {
+  const ignored = conceptWords(branchName)
+  const words = conceptWords(draft.concept, ignored)
+  return templates
+    .filter((row) => {
+      const sharesWord = [...conceptWords(row.concept, ignored)].some((word) => words.has(word))
+      const sameSlot = draft.category !== "" && row.category === draft.category && draft.day !== null && row.day === draft.day
+      return sharesWord || sameSlot
+    })
+    .slice(0, 2)
 }
 
 export function fetchRecurringMonth(query: { year: number; month: number; branchId?: string }): Promise<{ data: RecurringMonth }> {
@@ -943,7 +1176,15 @@ export function fetchRecurringPeople(): Promise<{ data: Array<{ userId: string; 
 
 export function payRecurringApi(
   id: string,
-  body: { month: string; amountCents?: number; fromCash?: boolean },
+  body: {
+    month: string
+    amountCents?: number
+    fromCash?: boolean
+    requestId?: string
+    spentAt?: string
+    receiptNumber?: string | null
+    exchangeRate?: string
+  } & ExpensePaper,
 ): Promise<{ data: { id: string; amountCents: number; currency: string; fromCash: boolean } }> {
   return apiFetch(`/api/finance/expenses/recurring/${id}/pay`, { method: "POST", body: JSON.stringify(body) })
 }
@@ -957,12 +1198,20 @@ export function skipRecurringApi(id: string, month: string, undo = false): Promi
 
 export function updateRecurringApi(
   id: string,
-  body: { concept?: string; amountCents?: number; day?: number; memberUserId?: string | null; fromCash?: boolean; lastMonth?: string | null },
+  body: {
+    concept?: string
+    amountCents?: number
+    day?: number
+    memberUserId?: string | null
+    fromCash?: boolean
+    lastMonth?: string | null
+    paymentMethodId?: string | null
+  },
 ): Promise<unknown> {
   return apiFetch(`/api/finance/expenses/recurring/${id}`, { method: "PATCH", body: JSON.stringify(body) })
 }
 
-/** `stillDue`: los meses de antes del fin que quedaron sin pagar y siguen por pagar. */
+/** `stillDue`: lo que sigue por pagar después de dejar de repetir: lo vencido y lo de este mes. */
 export function endRecurringApi(
   id: string,
 ): Promise<{ data: { previousLastMonth: string | null; stillDue: string[] } }> {
@@ -991,9 +1240,34 @@ export function payPurchaseApi(
     expectedDueCents?: number
     /** Lo pagado que mostró la pantalla: un envío repetido no paga dos veces. */
     expectedPaidCents?: number
+    /** La clave del cajón: reintentar tras un corte devuelve el mismo pago. */
+    requestId?: string
+    /** Con qué se pagó: manda sobre `fromCash`. */
+    paymentMethodId?: string
+    paymentReference?: string
+    /** El tipo de comprobante del país. */
+    receiptType?: string
   },
 ): Promise<{ data: { balance: PurchaseBalance } }> {
   return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })
+}
+
+/**
+ * Pedirle a administración que anule un gasto de una caja ya cerrada: una tarea para el área,
+ * con el motivo. No anula nada: el gasto sigue hasta que administración lo haga.
+ */
+export function requestExpenseVoidApi(body: { title: string }): Promise<unknown> {
+  return apiFetch("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title: body.title.slice(0, 200), area: "administracion" }),
+  })
+}
+
+/** Gastos sueltos de Materiales que pueden ser este mismo pago: pagar la compra los contaría dos veces. */
+export function fetchPurchaseLookalikes(
+  orderId: string,
+): Promise<{ data: Array<{ id: string; concept: string; amountCents: number; currency: string; spentAt: string }> }> {
+  return apiFetch(`/api/finance/purchases/${orderId}/lookalikes`)
 }
 
 /** «No hubo ese gasto» en Reportes › Finanzas. */
@@ -1074,6 +1348,7 @@ export const financeKeys = {
   expenses: (branchId: string, ref: MonthRef, q = "", category = "") =>
     ["finance-expenses", branchId, ref.year, ref.month, q, category] as const,
   purchases: (branchId: string | null) => ["finance-purchases", branchId] as const,
+  payables: (branchId: string | null, patientId: string | null = null) => ["finance-payables", branchId, patientId] as const,
   tickets: (branchId: string, params: TicketListParams) => ["finance-tickets", branchId, params] as const,
   ticket: (id: string) => ["finance-ticket", id] as const,
 }
@@ -1087,6 +1362,7 @@ export function invalidateFinance(queryClient: QueryClient): void {
     "finance-closures",
     "finance-expenses",
     "finance-purchases",
+    "finance-payables",
     "finance-tickets",
     "finance-ticket",
     // Un gasto o el pago de una compra cambian Inventario y Reportes.

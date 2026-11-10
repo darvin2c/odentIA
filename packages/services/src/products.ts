@@ -11,8 +11,22 @@ import { MEDICAL_AGENT_TEXTS } from "./medical/agent-texts.js"
 import { MEDICAL_DEMO_KINDS } from "./medical/demo-kinds.js"
 import { MEDICAL_HELP_TOPICS } from "./medical/help.js"
 import { medicalHooks } from "./medical/hooks.js"
+import { OPTICAL_AGENT_TEXTS } from "./optical/agent-texts.js"
+import { OPTICAL_DEMO_KINDS } from "./optical/demo-kinds.js"
+import { OPTICAL_HELP_TOPICS } from "./optical/help.js"
+import { opticalHooks } from "./optical/hooks.js"
 import type { ProductAgentTexts } from "./product-agent.js"
 import type { ProductDictation, ProductHooks } from "./product-hooks.js"
+
+/**
+ * Si el producto trabaja con pedidos (ADR 0171): su pantalla Pedidos, «Pedido
+ * listo» en sus mensajes y lo que Sofi responde de ellos. El pedido es común; hoy
+ * solo una óptica lo usa.
+ */
+const ORDERS: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
+export function worksWithOrders(product: ClinicalProduct): boolean {
+  return ORDERS[product]
+}
 
 /**
  * El único lugar de lo común que conoce los productos (ADR 0079): qué hace
@@ -21,6 +35,7 @@ import type { ProductDictation, ProductHooks } from "./product-hooks.js"
 const HOOKS: Record<ClinicalProduct, ProductHooks> = {
   dental: dentalHooks,
   medical: medicalHooks,
+  optical: opticalHooks,
 }
 
 /** Lo que hace el producto de esta clínica en cada momento de lo común. */
@@ -52,6 +67,8 @@ const AGENT_TEXTS: Record<ClinicalProduct, ProductAgentTexts> = {
   dental: DENTAL_AGENT_TEXTS,
   // Los de latidIA (entrega 9 del issue 229): se miden antes de abrir consultorios reales.
   medical: MEDICAL_AGENT_TEXTS,
+  // Los de vistIA: se miden antes de abrir ópticas reales.
+  optical: OPTICAL_AGENT_TEXTS,
 }
 
 /** Las palabras del producto en lo que lee el modelo (ADR 0079). */
@@ -64,14 +81,22 @@ export async function productAgentTexts(tx: Db, orgId: string): Promise<ProductA
   return agentTextsFor(await orgProduct(tx, orgId))
 }
 
-const DEMO_KINDS: Record<ClinicalProduct, readonly DemoKindRecipe[]> = { dental: DENTAL_DEMO_KINDS, medical: MEDICAL_DEMO_KINDS }
+const DEMO_KINDS: Record<ClinicalProduct, readonly DemoKindRecipe[]> = {
+  dental: DENTAL_DEMO_KINDS,
+  medical: MEDICAL_DEMO_KINDS,
+  optical: OPTICAL_DEMO_KINDS,
+}
 
 /** Los tipos de demo para presentar de cada producto (ADR 0096). */
 export function demoKindsFor(product: ClinicalProduct): readonly DemoKindRecipe[] {
   return DEMO_KINDS[product]
 }
 
-const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = { dental: HELP_TOPICS, medical: MEDICAL_HELP_TOPICS }
+const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = {
+  dental: HELP_TOPICS,
+  medical: MEDICAL_HELP_TOPICS,
+  optical: OPTICAL_HELP_TOPICS,
+}
 
 /** La guía de la Ayuda de un producto, sin clínica (las mediciones). */
 export function helpTopicsFor(product: ClinicalProduct): readonly HelpTopic[] {
@@ -92,9 +117,11 @@ export async function productHelpTopics(tx: Db, orgId: string): Promise<readonly
 export {
   checkServiceFinding,
   libraryServiceFinding,
-  saveServiceFinding,
   type ServiceLeaves,
+  type ServiceToothAnatomy,
+  saveServiceFinding,
   serviceLeavesFinding,
+  serviceToothAnatomy,
   type TemplateDental as TemplateProduct,
   templateDentalColumns as templateProductColumns,
 } from "./dental/service-finding.js"

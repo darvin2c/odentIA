@@ -284,7 +284,14 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   const postFresh = (role: string, phone: string | null) =>
     buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: fresh(phone) })
   expect((await postFresh("clinician", "+51987111222")).status).toBe(403)
-  expect((await postFresh("reception", null)).status).toBe(400)
+  // Sin celular también se registra (un urgente sin teléfono, QA del 9 nov, repaso 3): la identidad
+  // nunca se decide por el teléfono, así que no nace una ficha paralela.
+  const noPhone = await buildApp("reception").request("/patients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...registrationBody("Rosa Quispe", { givenNames: "Rosa", familyName: "Quispe" }), scope: "essentials" }),
+  })
+  expect(noPhone.status).toBe(201)
   const agenda = await postFresh("reception", "+51987111222")
   expect(agenda.status).toBe(201)
   const agendaId = ((await agenda.json()) as { data: { id: string } }).data.id
@@ -335,6 +342,21 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   expect((await get("reception", "/next-step")).status).toBe(200)
   expect((await get("cashier", "/next-step")).status).toBe(200)
   expect((await get("member", "/next-step")).status).toBe(403)
+  // «No contesta»: lo anota quien anota la respuesta (recepción y caja), no quien solo tiene tareas.
+  const noAnswer = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/budgets/00000000-0000-4000-8000-000000000000/no-answer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callAgainAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    })
+  expect((await noAnswer("reception")).status).toBe(404)
+  expect((await noAnswer("cashier")).status).toBe(404)
+  expect((await noAnswer("member")).status).toBe(403)
+  // «Armarlo ahora» en la atención: de quien atiende y arma presupuestos.
+  const assemble = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/encounters/00000000-0000-4000-8000-000000000000/budget`, { method: "POST" })
+  expect((await assemble("reception")).status).toBe(403)
+  expect((await assemble("cashier")).status).toBe(403)
   // La lista del Resumen, con el mismo permiso.
   expect((await get("reception", "/next-steps")).status).toBe(200)
   expect((await get("cashier", "/next-steps")).status).toBe(200)
@@ -453,7 +475,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
 
   // Recepción recibe solo la alerta de alergias; caja, nada clínico.
   type Trimmed = {
-    data: { registration: unknown; activeAllergies: { substance: string }[]; activeConditions: unknown[] }
+    data: { registration: unknown; activeAllergies: { substance: string }[]; activeConditions: unknown[]; allergyReview: string | null }
   }
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
   const receptionBody = (await asReception.json()) as Trimmed
@@ -463,12 +485,16 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   expect(receptionRegistration?.entryPoint).toBeTruthy()
   expect(receptionRegistration?.answers).not.toHaveProperty("health")
   expect(receptionBody.data.activeConditions).toEqual([])
+  // Si se le preguntó por alergias, sí (la cabecera distingue «niega» de «no preguntado»).
+  expect(receptionBody.data.allergyReview).toBe("recorded")
   const receptionHealth = await buildApp("reception").request(`/patients/${patientId}/health`, {
     method: "GET",
   })
   expect(receptionHealth.status).toBe(403)
   const asCashier = await buildApp("cashier").request(`/patients/${patientId}`, { method: "GET" })
-  expect(((await asCashier.json()) as Trimmed).data.activeAllergies).toEqual([])
+  const cashierBody = (await asCashier.json()) as Trimmed
+  expect(cashierBody.data.activeAllergies).toEqual([])
+  expect(cashierBody.data.allergyReview).toBeNull()
 
   // Motivo/examen/diagnóstico ya no pertenecen a la entrevista.
   const forbidden = await app.request(`/patients/${patientId}/health`, {

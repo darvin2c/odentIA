@@ -8,7 +8,7 @@ import {
 } from "@odentia/dental"
 import { Button, Input } from "@odentia/ui"
 import { useId, useState } from "react"
-import { OdontogramArch } from "./odontogram-arch"
+import { OdontogramArchPicker } from "./odontogram-arch"
 
 export interface ToothSite {
   toothNumber: number | null
@@ -108,9 +108,8 @@ export function ToothSiteSelector({
           ))}
         </fieldset>
       </div>
-      <OdontogramArch
+      <OdontogramArchPicker
         teeth={{ upper: rows[0] ?? [], lower: rows[1] ?? [] }}
-        entriesOf={() => []}
         selected={tooth === null ? [] : [tooth]}
         disabled={disabled}
         onToggle={(clicked) => {

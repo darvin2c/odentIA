@@ -55,8 +55,10 @@ function useShownLink(patientId: string) {
  * Las vías de su enlace en «Pendientes» (lienzo «Su enlace y el código QR»):
  * «Enviarle su enlace» cuando se puede enviar; si no (fuera de las 24 horas,
  * sin mensaje aprobado, sin permiso), no se abre ninguna ventana: se dice por
- * qué ahí mismo y quedan «Copiar enlace» y «Mostrar su código». `leading` va
- * primero en la fila (p. ej. «Completar»).
+ * qué ahí mismo y quedan «Copiar enlace» y «Mostrar su código». Con un enlace
+ * vigente, «Quitar enlace» va junto a ellos: así lo corta también quien solo
+ * escribe por el chat web (entrega 2). `leading` va primero en la fila (p. ej.
+ * «Completar»).
  */
 export function PersonalLinkActions({
   patientId,
@@ -68,9 +70,18 @@ export function PersonalLinkActions({
   missing: string
   leading?: ReactNode
 }) {
+  const queryClient = useQueryClient()
   const preview = usePersonalLinkPreview(patientId)
   const data = preview.data?.data
   const copy = useShownLink(patientId)
+  const revoke = useMutation({
+    mutationFn: () => apiFetch<{ data: { revoked: number } }>(`/api/patients/${patientId}/personal-link`, { method: "DELETE" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: previewKey(patientId) })
+      toast.success("Enlace quitado: el que tenía ya no sirve, tampoco el botón de sus correos. Lo que hizo con él se conserva.")
+    },
+    onError: (error) => toast.error(submitErrorMessage(error)),
+  })
   const blocked = data?.blocked ?? null
   const row = (
     <span className="flex flex-wrap gap-2">
@@ -100,6 +111,11 @@ export function PersonalLinkActions({
       ) : null}
       {!blocked ? <SendPersonalLinkButton patientId={patientId} missing={missing} /> : null}
       {!data || data.canShow ? <ShowPersonalCodeButton patientId={patientId} missing={missing} /> : null}
+      {data?.liveUntil ? (
+        <Button type="button" size="sm" variant="ghost" disabled={revoke.isPending} onClick={() => revoke.mutate()}>
+          {revoke.isPending ? "Quitando…" : "Quitar enlace"}
+        </Button>
+      ) : null}
     </span>
   )
   if (!blocked) return row
@@ -107,7 +123,7 @@ export function PersonalLinkActions({
     <span className="flex flex-col gap-2">
       <span className="text-sm text-muted-foreground">
         {data?.canShow
-          ? `No se le puede enviar ahora: ${blocked.replace(/\.$/, "")}. Cópialo para pegarlo cuando escriba, o muéstrale su código.`
+          ? `No se le puede enviar ahora: ${/^\p{Lu}\p{Ll}*$/u.test(blocked.split(/\s/)[0] ?? "") ? blocked.charAt(0).toLowerCase() : blocked.charAt(0)}${blocked.slice(1).replace(/\.$/, "")}. Cópialo para pegarlo cuando escriba, o muéstrale su código.`
           : blocked}
       </span>
       {row}
@@ -245,10 +261,6 @@ export function SendPersonalLinkButton({
     // Enviarlo crea o renueva su enlace: «hasta cuándo sirve» se vuelve a leer.
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: previewKey(patientId) }),
   })
-  const revoke = useMutation({
-    mutationFn: () => apiFetch<{ data: { revoked: number } }>(`/api/patients/${patientId}/personal-link`, { method: "DELETE" }),
-    onSuccess: () => void preview.refetch(),
-  })
   const data = preview.data?.data
   const problem = send.error ? submitErrorMessage(send.error) : null
   const by = data?.channel === "email" ? "por correo" : "por WhatsApp"
@@ -271,7 +283,6 @@ export function SendPersonalLinkButton({
         variant="outline"
         onClick={() => {
           send.reset()
-          revoke.reset()
           setRequestId(crypto.randomUUID())
           setOpen(true)
         }}
@@ -300,45 +311,16 @@ export function SendPersonalLinkButton({
             Reintentar
           </Button>
         ) : null}
-        {!send.isSuccess && revoke.isSuccess && !data?.liveUntil ? (
-          <p role="status" className="text-sm text-muted-foreground">
-            Enlace quitado: el que tenía ya no sirve. Lo que hizo con él se conserva.
-          </p>
-        ) : null}
-        {/* «Quitar enlace» se conserva (deja sin efecto el que tiene) como una línea discreta. */}
+        {/* «Quitar enlace» va junto a «Copiar enlace» y «Mostrar su código» (`PersonalLinkActions`). */}
         {!send.isSuccess && data?.liveUntil ? (
           <p className="text-sm text-muted-foreground">
-            Ya tiene un enlace que sirve hasta el {formatDate(data.liveUntil)}: le llega el mismo.{" "}
-            <Button
-              type="button"
-              variant="link"
-              className="h-auto p-0 align-baseline"
-              disabled={revoke.isPending}
-              onClick={() => revoke.mutate()}
-            >
-              Quitar enlace
-            </Button>
-            {revoke.isError ? <span className="block text-destructive">{submitErrorMessage(revoke.error)}</span> : null}
+            Ya tiene un enlace que sirve hasta el {formatDate(data.liveUntil)}: le llega el mismo.
           </p>
         ) : null}
       </ConfirmDialog>
     </>
   )
 }
-
-/**
- * Lo que su enlace le muestra (`getPersonalLinkView`), en palabras para quien atiende. Cada
- * parte sale solo si le corresponde: sin cita no hay cita, y lo de su salud y sus papeles es
- * de quien decide por el paciente.
- */
-const LINK_SHOWS = [
-  "su próxima cita, para confirmarla o cambiarla, y el cuestionario «Antes de tu cita» si hay uno",
-  "los datos y lo de su salud que le faltan, para completarlos",
-  "los presupuestos que se le enviaron, para responderlos",
-  "lo que tiene por firmar",
-  "sus recetas y comprobantes de los últimos 30 días",
-  "sus mensajes: qué avisos quiere recibir",
-]
 
 /** Hasta cuándo sirve su enlace, o que aún no tiene uno: solo lo que se sabe. */
 function LinkValidity({ preview }: { preview: ReturnType<typeof usePersonalLinkPreview> }) {
@@ -371,54 +353,11 @@ export function PersonalLinkSummary({ patientId, missing = "" }: { patientId: st
   return (
     <div className="flex flex-col gap-2 text-sm">
       <p className="text-muted-foreground">
-        Le llega con cada aviso de la clínica, y abre sin crear una cuenta: ve su cita, lo que le falta completar, sus
-        presupuestos, lo que tiene por firmar, sus recetas y comprobantes, y sus mensajes.
+        Le llega con cada aviso de la clínica y abre sin crear una cuenta, directo en lo que cada mensaje dice: su cita,
+        lo que le falta completar, sus presupuestos, lo que tiene por firmar y sus mensajes.
       </p>
       <LinkValidity preview={preview} />
       <PersonalLinkActions patientId={patientId} missing={missing} />
     </div>
-  )
-}
-
-/**
- * «Su enlace», siempre a mano en la ficha (decisión del 2026-11-05), falten o
- * no datos: qué le muestra, hasta cuándo sirve y cómo dárselo. Es el mismo
- * enlace que le llega con cada aviso; no hace falta el portal.
- */
-export function PersonalLinkDrawer({
-  patientId,
-  open,
-  onClose,
-  missing = "",
-}: {
-  patientId: string
-  open: boolean
-  onClose: () => void
-  /** Lo que le falta, en palabras; vacío si no le falta nada. */
-  missing?: string
-}) {
-  const preview = usePersonalLinkPreview(patientId, open)
-  return (
-    <DetailDrawer
-      open={open}
-      onClose={onClose}
-      title="Su enlace"
-      description="Una página suya, que abre sin crear una cuenta y le llega con cada aviso de la clínica."
-      closeLabel="Listo"
-    >
-      <div className="flex flex-col gap-3 text-sm">
-        <div className="flex flex-col gap-1">
-          <p className="font-medium">Con su enlace ve:</p>
-          <ul className="list-disc pl-5 text-muted-foreground">
-            {LINK_SHOWS.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <p className="text-muted-foreground">Cada parte aparece solo si le corresponde hoy.</p>
-        </div>
-        <LinkValidity preview={preview} />
-        <PersonalLinkActions patientId={patientId} missing={missing} />
-      </div>
-    </DetailDrawer>
   )
 }

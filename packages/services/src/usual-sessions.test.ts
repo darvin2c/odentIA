@@ -19,11 +19,16 @@ setupTestDb()
 let keySeq = 0
 
 /** Un tratamiento de la biblioteca de `sessions` sesiones habituales y el servicio de la clínica que lo usa. */
-async function libraryService(f: Awaited<ReturnType<typeof clinicalFixture>>, sessions: number, scope = "general") {
+async function libraryService(
+  f: Awaited<ReturnType<typeof clinicalFixture>>,
+  sessions: number,
+  scope = "general",
+  kind = "endodoncia",
+) {
   keySeq += 1
   const [template] = await ownerDb
     .insert(treatmentTemplate)
-    .values({ key: `prueba-sesiones-${keySeq}`, name: `Endodoncia de prueba ${keySeq}`, kind: "endodoncia", scope, usualSessions: sessions })
+    .values({ key: `prueba-sesiones-${keySeq}`, name: `Endodoncia de prueba ${keySeq}`, kind, scope, usualSessions: sessions })
     .returning()
   const [service] = await ownerDb
     .insert(serviceCatalog)
@@ -200,4 +205,47 @@ it("no se reabre si lo firmado no llega a las sesiones con que se repartió su c
   // Se cobró con tres sesiones previstas y después se bajaron: lo que sobró ya es de la última.
   await ownerDb.update(patientCharge).set({ commissionSessions: 3 }).where(eq(patientCharge.planItemId, item.id))
   await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({ code: "ITEM_FINISHED_EARLY" })
+})
+
+it("«Cambiar» una exodoncia por una endodoncia recalcula la fase y acepta las sesiones previstas (QA del 9 nov, repaso 3)", async () => {
+  const f = await clinicalFixture()
+  const { service: extraction } = await libraryService(f, 1, "general", "cirugia")
+  const { service: endodontics } = await libraryService(f, 1)
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: extraction.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  expect(item.phase).toBe("quirurgica")
+  // Sin sesiones en el cambio: las habituales del nuevo y su fase.
+  const changed = await f.run((tx) =>
+    updatePlanItem(tx, ...f.args, item.id, { serviceId: endodontics.id, encounterId: f.encounter.id }),
+  )
+  expect(changed).toMatchObject({ phase: "basica", plannedSessions: 1 })
+  // Con las sesiones que se escribieron en «Cambiar».
+  const two = await f.run((tx) =>
+    updatePlanItem(tx, ...f.args, item.id, { plannedSessions: 2, encounterId: f.encounter.id }),
+  )
+  expect(two.plannedSessions).toBe(2)
+  await expect(
+    f.run((tx) => updatePlanItem(tx, ...f.args, item.id, { plannedSessions: 61, encounterId: f.encounter.id })),
+  ).rejects.toMatchObject({ status: 400 })
+  // Ya empezado, las sesiones se cambian desde el Plan, que mira las hechas.
+  await ownerDb.update(treatmentPlanItem).set({ status: "en_curso" }).where(eq(treatmentPlanItem.id, item.id))
+  await expect(
+    f.run((tx) => updatePlanItem(tx, ...f.args, item.id, { plannedSessions: 3, encounterId: f.encounter.id })),
+  ).rejects.toMatchObject({ fields: { plannedSessions: "Ya empezó: cambia sus sesiones desde el Plan" } })
+})
+
+it("una consulta hecha no ofrece «Falta otra sesión»: se hace de una vez", async () => {
+  const f = await clinicalFixture()
+  const { service: consult } = await libraryService(f, 1, "general", "diagnostico")
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: consult.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, item.id))
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const [listed] = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).filter((row) => row.id === item.id)
+  expect(listed).toMatchObject({ status: "realizado", canAddSession: false })
+  await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({ code: "ITEM_ONE_OFF" })
 })

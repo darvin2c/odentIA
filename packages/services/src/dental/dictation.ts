@@ -203,9 +203,12 @@ async function prepareFinding(
       ? payload["quality"]
       : undefined
   const surfaces = finding.scope === "surface" ? normalizeSurfaces(tooth, payload["surfaces"]) : []
+  // Un hallazgo por cara dicho sin cara (una caries en la 36): la cara se elige con un
+  // toque. Lo que además admite el dibujo de su forma se dibuja tocando la pieza.
   const missing = [
     ...(finding.variants && !variant && strictVariants ? ["variant"] : []),
     ...(finding.color === "quality" && !quality ? ["quality"] : []),
+    ...(finding.scope === "surface" && surfaces.length === 0 ? ["surfaces"] : []),
   ]
   const code = findingDiagnosisCode(diagnosisSystem, finding.code, variant ?? null)
   const known = code ? await findDiagnosisCode(tx, diagnosisSystem, code) : null
@@ -228,6 +231,8 @@ async function prepareFinding(
         ? `Elige ${(finding.variantName ?? "la variante").toLowerCase()}: la norma de tu país lo pide.`
         : "",
       missing.includes("quality") ? "¿En buen o mal estado?" : "",
+      // Solo con un toque: dicha después, la cara llega como otro hallazgo (su clave lleva las caras).
+      missing.includes("surfaces") ? `¿Qué cara de la ${tooth}? Elígela aquí.` : "",
     ].filter(Boolean)
     return { payload: { ...ready, missing }, status: "por_revisar", note: asks.join(" ") }
   }

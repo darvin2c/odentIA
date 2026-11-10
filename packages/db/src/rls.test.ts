@@ -439,7 +439,7 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   ).rejects.toThrow()
 
   // Inmutabilidad real: presupuestos se cancelan por estado (nunca DELETE);
-  // vínculos y contextos son append-only (rechazados con 42501).
+  // contextos append-only (rechazados con 42501) y vínculos que solo se borran de un borrador.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       tx.execute(sql`delete from treatment_budget where budget_number = 2`),
@@ -459,13 +459,11 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
       ),
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      tx.execute(
-        sql`delete from encounter_plan_item where encounter_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'`,
-      ),
-    ),
-  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  // El vínculo de una atención firmada no se borra: solo «Hoy no» saca lo traído a un borrador (ADR 0165).
+  await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from encounter_plan_item where encounter_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'`),
+  )
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(linkQuery))).toHaveLength(1)
 
   // Archivo clínico: la app no cambia ni borra el archivo; solo puede retirarlo
   // con motivo y quien lo retira, y un retiro no se deshace.
@@ -523,10 +521,18 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
   expect(await withOrgContext(appDb, "org_b", tx => tx.execute(linkedQuery))).toHaveLength(0)
   expect(await appDb.execute(linkedQuery)).toHaveLength(0)
-  await expect(
-    withOrgContext(appDb, "org_a", tx =>
-      tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`)),
-  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  // Lo que llevó una cita cancelada es constancia: la app no lo borra (solo de una cita en pie
+  // y por venir, «Sumar a su cita» y su «Deshacer»).
+  await withOrgContext(appDb, "org_a", tx =>
+    tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`))
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
+  await ownerDb.execute(sql`update appointment set status = 'programada' where id = ${cita!.id}`)
+  await withOrgContext(appDb, "org_b", tx =>
+    tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`))
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
+  await withOrgContext(appDb, "org_a", tx =>
+    tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`))
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(0)
   // La cita y el tratamiento son del mismo paciente: otro paciente no se cuela.
   await expect(
     ownerDb.execute(sql`insert into appointment_plan_item (organization_id,patient_id,appointment_id,plan_item_id)
@@ -1091,7 +1097,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   const repetidas = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname in ('public', 'admin', 'catalog', 'auth', 'dental') and c.relkind in ('r', 'p', 'v')
+    where n.nspname in ('public', 'admin', 'catalog', 'auth', 'dental', 'optical') and c.relkind in ('r', 'p', 'v')
     group by c.relname having count(*) > 1
   `)) as unknown as { tabla: string }[]
   expect(repetidas).toEqual([])
@@ -1112,6 +1118,14 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     "plan_item_finding",
     "service_finding",
   ])
+  // Lo de vistIA también vive en su esquema (ADR 0170): solo la receta de lentes.
+  const optica = (await ownerDb.execute(sql`
+    select c.relname as "tabla"
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'optical' and c.relkind in ('r', 'p')
+    order by 1
+  `)) as unknown as { tabla: string }[]
+  expect(optica.map((r) => r.tabla)).toEqual(["lens_prescription"])
   const columnasDentales = (await ownerDb.execute(sql`
     select c.relname || '.' || a.attname as "columna"
     from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
@@ -1129,7 +1143,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   const abiertas = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname in ('public', 'dental') and c.relkind in ('r', 'p') and not c.relrowsecurity
+    where n.nspname in ('public', 'dental', 'optical') and c.relkind in ('r', 'p') and not c.relrowsecurity
       and has_table_privilege(${APP_ROLE}, c.oid, 'select, insert, update, delete')
       and exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'organization_id' and not a.attisdropped)
     order by 1

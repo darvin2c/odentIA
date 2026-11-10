@@ -23,12 +23,17 @@ export function VoidDrawer({
   open,
   title,
   description,
+  submitLabel = "Anular",
+  cancelLabel = "No anular",
   onClose,
   onConfirm,
 }: {
   open: boolean
   title: string
   description: string
+  /** Lo que hace el botón, si no es anular (pedírselo a quien puede). */
+  submitLabel?: string
+  cancelLabel?: string
   onClose: () => void
   onConfirm: (reason: string) => Promise<unknown>
 }) {
@@ -53,8 +58,8 @@ export function VoidDrawer({
       open={open}
       title={title}
       description={description}
-      submitLabel="Anular"
-      cancelLabel="No anular"
+      submitLabel={submitLabel}
+      cancelLabel={cancelLabel}
       onClose={() => {
         if (!surface.isSubmitting) onClose()
       }}

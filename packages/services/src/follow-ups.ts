@@ -50,6 +50,8 @@ function selectFollowUps(tx: Db) {
       },
       // La sede del control es la de la atención donde se indicó (ADR 0152).
       branchId: encounter.branchId,
+      // Quien lo indicó: la reserva lo propone primero (QA del 9 nov, repaso 3).
+      originProfessionalUserId: encounter.professionalUserId,
     })
     .from(clinicalFollowUp)
     .leftJoin(
@@ -73,10 +75,13 @@ function present(row: {
   control: typeof clinicalFollowUp.$inferSelect
   appointment: { id: string; startsAt: Date; endsAt: Date; status: string } | null
   branchId: string | null
+  originProfessionalUserId: string | null
 }) {
   return {
     ...row.control,
     appointment: row.appointment,
+    /** Quien lo indicó (el profesional de la atención de origen); nulo si no se indicó en una. */
+    originProfessionalUserId: row.originProfessionalUserId,
     /** La sede de la atención donde se indicó; nula si no tiene: se reserva en la sede activa. */
     branchId: row.branchId,
     /** Desde cuándo una visita lo cumple (`controlWindowStart`): «Usar esa cita» busca desde ahí. */

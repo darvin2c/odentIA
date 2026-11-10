@@ -243,6 +243,23 @@ export function RadioGroupField({ legend, description, id, className, options, d
 /** Lo que se dice de un teléfono a medio escribir: no se guarda vacío en silencio. */
 export const INCOMPLETE_PHONE = "Revisa el número: le faltan dígitos o no es un teléfono."
 
+/** Posible pero no válido para su país: se guarda igual y se avisa. */
+export const DOUBTFUL_PHONE =
+  "Revisa el número: no parece de un celular de ese país. Se guarda tal como está."
+
+/** Un número reservado para ficción o pruebas: se guarda, pero nadie lo recibe. */
+export const FICTIONAL_PHONE = "Número de prueba: no le llegará ningún mensaje."
+
+/**
+ * Los números que el regulador reserva para ficción y pruebas: no son de nadie
+ * y ningún mensaje llega. Hoy, el del Reino Unido: Ofcom reserva los móviles
+ * 07700 900000 a 07700 900999 («Telephone numbers for use in TV and radio
+ * drama»), que en E.164 son +44 7700 900000 a +44 7700 900999.
+ */
+export function isFictionalPhone(e164: string | null | undefined): boolean {
+  return !!e164 && /^\+447700900\d{3}$/.test(e164)
+}
+
 export type PhoneFieldProps = FieldText &
   Pick<
     PhoneInputProps,
@@ -256,8 +273,13 @@ export type PhoneFieldProps = FieldText &
 export function PhoneField({ label, description, hideLabel, id, className, ...phone }: PhoneFieldProps) {
   const field = useFieldContext<string | null>()
   // Posible pero no válido para su país (un dígito de más, un rango reservado): se guarda y se avisa.
-  const [doubtful, setDoubtful] = useState(false)
-  const hint = doubtful ? "Revisa el número: no parece de un celular de ese país. Se guarda tal como está." : description
+  // Vale para el número con que se calculó: si el valor cambia desde fuera (elegir a una persona
+  // ya registrada), no queda el aviso del número anterior (segunda mesa del 9 nov).
+  // Un número de prueba (el rango de ficción del Reino Unido) se dice como tal, sin pedir revisarlo (QA del 9 nov).
+  const [doubtfulFor, setDoubtfulFor] = useState<string | null>(null)
+  const value = field.state.value ?? null
+  const doubtful = doubtfulFor !== null && doubtfulFor === value
+  const hint = isFictionalPhone(value) ? FICTIONAL_PHONE : doubtful ? DOUBTFUL_PHONE : description
   return (
     <FormField label={label} description={hint} hideLabel={hideLabel} id={id} className={className}>
       {(control) => (
@@ -271,7 +293,7 @@ export function PhoneField({ label, description, hideLabel, id, className, ...ph
           onBlur={control.onBlur}
           onChange={(next, meta) => {
             field.handleChange(next)
-            setDoubtful(meta.e164 !== null && !meta.isValid)
+            setDoubtfulFor(meta.e164 !== null && !meta.isValid ? meta.e164 : null)
             // Solo se toca el aviso propio: el de un validador de la pantalla se respeta.
             if (meta.digits.length > 0 && !meta.e164) field.setErrorMap({ onChange: INCOMPLETE_PHONE })
             else if (field.state.meta.errorMap.onChange === INCOMPLETE_PHONE) field.setErrorMap({ onChange: undefined })

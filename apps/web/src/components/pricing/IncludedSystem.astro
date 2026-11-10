@@ -1,42 +1,58 @@
 ---
 // «Todo el sistema, USD 0»: lo que trae el sistema, cada cosa a USD 0 y con su página, para que se
 // vea que no se cobra el software sino lo que hacen los agentes. Va bajo la portada de Precios.
-// Cada web lista lo suyo; en latidIA «Varias sedes» no tiene página propia. Lienzo «Precios: por lo que hizo».
+// Cada web lista lo suyo; en latidIA y vistIA «Varias sedes» no tiene página propia. Lienzo «Precios: por lo que hizo».
 import { money, shownPlan } from "../../lib/pricing"
-import { MEDICAL, WORDS } from "../../lib/product"
+import { AGENTS, HAS_CLIO, ofProduct, WORDS } from "../../lib/product"
 
 const plan = shownPlan(Astro.locals.pricing)
 const currency = plan?.currency ?? "USD"
 const zero = money(0, currency)
-const tiers = [plan?.tiers.informa, plan?.tiers.simple].filter((value): value is number => value != null)
+// El trabajo más barato: una respuesta de Sofi o, donde Clío trabaja, una consulta simple.
+const tiers = [plan?.tiers.informa, HAS_CLIO ? plan?.tiers.simple : null].filter((value): value is number => value != null)
 const from = tiers.length ? Math.min(...tiers) : null
 const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.slice(1)}, usuarios`
 const storage = plan?.storage
+/** «Sofi, Clío y Argos», o «Sofi y Argos» donde Clío no trabaja. */
+const NAMES = { sofi: "Sofi", clio: "Clío", argos: "Argos" } as const
+const names = AGENTS.map((agent) => NAMES[agent])
+const agentNames = `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
 
 type Item = { name: string; what: string; href?: string }
-const items: Item[] = MEDICAL
-  ? [
-      { name: "Agenda médica y controles", what: "Citas, salas, recordatorios y controles que se repiten", href: "/agenda-medica" },
-      { name: "Historia clínica y signos vitales", what: "Examen por sistemas, antecedentes y lista de problemas", href: "/historia-clinica-electronica" },
-      { name: "Receta y descanso médico", what: "Avisos de alergia y embarazo; se emiten con tu firma", href: "/receta-y-descanso-medico" },
-      { name: "Caja y cobros", what: "Pagos, saldos y deudas al día", href: "/caja-y-cobros" },
-      { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
-      { name: "Su enlace y QR", what: "El paciente reserva, se registra y ve lo suyo", href: "/portal-del-paciente" },
-      { name: "Reportes", what: `Pacientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
-      { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su hora" },
-      { name: "Seguridad y permisos por rol", what: "Recepción, médicos y caja ven solo lo suyo", href: "/seguridad" },
-    ]
-  : [
-      { name: "Agenda odontológica", what: "Citas, unidades dentales y recordatorios", href: "/agenda-odontologica" },
-      { name: "Historia clínica y odontograma", what: "Periodontograma, tomografías e imágenes", href: "/historia-clinica-y-odontograma" },
-      { name: "Presupuestos", what: "Hasta tres opciones, con su enlace para aceptar", href: "/presupuestos-dentales" },
-      { name: "Caja y cobros", what: "Pagos, saldos y deudas al día", href: "/caja-y-cobros" },
-      { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
-      { name: "Su enlace y QR", what: "El paciente reserva, se registra y ve lo suyo", href: "/portal-del-paciente" },
-      { name: "Reportes", what: `Pacientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
-      { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su hora", href: "/varias-sedes" },
-      { name: "Seguridad y permisos por rol", what: "Recepción, odontología y caja ven solo lo suyo", href: "/seguridad" },
-    ]
+const items: Item[] = ofProduct<Item[]>({
+  medical: [
+    { name: "Agenda médica y controles", what: "Citas, salas, recordatorios y controles que se repiten", href: "/agenda-medica" },
+    { name: "Historia clínica y signos vitales", what: "Examen por sistemas, antecedentes y lista de problemas", href: "/historia-clinica-electronica" },
+    { name: "Receta y descanso médico", what: "Avisos de alergia y embarazo; se emiten con tu firma", href: "/receta-y-descanso-medico" },
+    { name: "Caja y cobros", what: "Pagos, saldos y deudas al día", href: "/caja-y-cobros" },
+    { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
+    { name: "Su enlace y QR", what: "El paciente reserva, se registra y ve lo suyo", href: "/portal-del-paciente" },
+    { name: "Reportes", what: `Pacientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
+    { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su hora" },
+    { name: "Seguridad y permisos por rol", what: "Recepción, médicos y caja ven solo lo suyo", href: "/seguridad" },
+  ],
+  dental: [
+    { name: "Agenda odontológica", what: "Citas, unidades dentales y recordatorios", href: "/agenda-odontologica" },
+    { name: "Historia clínica y odontograma", what: "Periodontograma, tomografías e imágenes", href: "/historia-clinica-y-odontograma" },
+    { name: "Presupuestos", what: "Hasta tres opciones, con su enlace para aceptar", href: "/presupuestos-dentales" },
+    { name: "Caja y cobros", what: "Pagos, saldos y deudas al día", href: "/caja-y-cobros" },
+    { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
+    { name: "Su enlace y QR", what: "El paciente reserva, se registra y ve lo suyo", href: "/portal-del-paciente" },
+    { name: "Reportes", what: `Pacientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
+    { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su hora", href: "/varias-sedes" },
+    { name: "Seguridad y permisos por rol", what: "Recepción, odontología y caja ven solo lo suyo", href: "/seguridad" },
+  ],
+  optical: [
+    { name: "Agenda y controles", what: "Citas por sala de examen y optómetra, recordatorios y el control que se repite", href: "/agenda-para-opticas" },
+    { name: "Ficha e historia clínica", what: "Antecedentes, diagnósticos, consentimientos y pruebas del ojo", href: "/historia-clinica-electronica" },
+    { name: "Caja e inventario", what: "Cobros, saldos y lo que vendes, con su stock por sede", href: "/caja-y-cobros" },
+    { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
+    { name: "Su enlace", what: "El cliente ve su cita, la cambia y ve sus documentos", href: "/portal-del-cliente" },
+    { name: "Reportes", what: `Clientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
+    { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su stock" },
+    { name: "Seguridad y permisos por rol", what: "Recepción, optómetras y caja ven solo lo suyo", href: "/seguridad" },
+  ],
+})
 const extra: Item = storage
   ? {
       name: `${people} y ${storage.includedGb} GB de archivos`,
@@ -52,7 +68,7 @@ const extra: Item = storage
       <p class="lead">No cobramos por usuario, por sede ni por módulo. Usas todo desde el primer día y pagas solo cuando un agente hizo un trabajo.</p>
       <div class="only">
         <span class="only-k">Lo único que se paga</span>
-        <span class="only-t">Lo que hacen Sofi, Clío y Argos</span>
+        <span class="only-t">Lo que hacen {agentNames}</span>
         <span class="only-d">
           {from !== null && plan ? <>Desde <b>{money(from, currency)}</b> por trabajo. </> : null}Si el agente no hizo nada útil, la fila dice {zero}.
         </span>

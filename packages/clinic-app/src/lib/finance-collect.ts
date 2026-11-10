@@ -139,6 +139,34 @@ export function amountHelpText(input: {
   return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
 }
 
+/**
+ * Con un pago parcial de varios conceptos, a cuál va el dinero: el servidor paga lo más antiguo
+ * primero (QA del 9 nov, repaso 3: solo se veía en el ticket). `items` en ese orden. Nulo si paga
+ * todo, nada o un solo concepto.
+ */
+export function partialSplitWords(
+  items: ReadonlyArray<{ description: string; saldoCents: number }>,
+  cents: number | null,
+  currency: string,
+  locale: string,
+  /** Lo que tiene a favor en esa moneda: el servidor lo usa primero, también en lo más antiguo. */
+  creditCents = 0,
+): string | null {
+  const total = items.reduce((sum, item) => sum + item.saldoCents, 0)
+  if (items.length < 2 || cents === null || cents <= 0) return null
+  const covered = cents + Math.max(0, creditCents)
+  if (covered >= total) return null
+  let rest = covered
+  const parts: string[] = []
+  for (const item of items) {
+    if (rest <= 0) break
+    const take = Math.min(rest, item.saldoCents)
+    parts.push(`${item.description} ${formatMoney(take, currency, locale)}`)
+    rest -= take
+  }
+  return `${creditCents > 0 ? "Con lo que tiene a favor, va" : "Va"} primero a lo más antiguo: ${parts.join(" · ")}.`
+}
+
 /** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */
 export function sentence(text: string): string {
   return /[.!?]$/.test(text.trimEnd()) ? text : `${text}.`
@@ -229,7 +257,10 @@ export interface CollectSnapshotMethod {
  * opcionales faltan en tickets emitidos antes de congelarlos.
  */
 export interface CollectSnapshot {
-  patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null }
+  /** Nulo en una venta de mostrador (ADR 0173): entonces dice `buyer`. */
+  patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null } | null
+  /** Quién compró en una venta de mostrador: un contacto o un nombre escrito; nulo si nadie. */
+  buyer?: { contactId: string | null; displayName: string } | null
   /** Quién pagó, si no fue el propio paciente. */
   payer?: { contactId: string; displayName: string } | null
   /** Quién cobró. */
@@ -251,6 +282,9 @@ export interface CollectSnapshot {
   tender?: TicketTender | null
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
+  /** La cuenta en esta moneda al terminar el cobro: lo que le falta y lo que le queda a favor. */
+  accountDueCents?: number
+  accountCreditCents?: number
   /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
   pending?: Array<{ chargeId: string; description: string; amountCents: number; remainingCents: number }>
   /** El impuesto de lo cobrado hoy (`TicketFrozen.taxes`, ADR 0083); nulo si nada lo lleva. */
@@ -275,7 +309,10 @@ export interface CollectSnapshotTaxes {
 /** Fila real de `payment_ticket` con su snapshot inmutable. */
 export interface CollectTicketRow {
   id: string
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173). */
+  patientId: string | null
+  /** La persona que compró en el mostrador, si se eligió. */
+  buyerContactId?: string | null
   branchId: string
   ticketNumber: number
   currency: string
@@ -321,6 +358,8 @@ export interface CollectInput {
   chargeIds?: string[]
   /** Adelanto puro, sin chargeIds. Excluyente con chargeIds. */
   advanceCents?: number
+  /** El adelanto es para un tratamiento aceptado: la línea de su presupuesto. */
+  advanceForBudgetItemId?: string
   /** Omitido = solo crédito (el servidor consume el saldo a favor). */
   payments?: Array<{ paymentMethodId: string; amountCents: number; reference?: string }>
   cashReceivedCents?: number
@@ -346,6 +385,7 @@ export function collectApi(patientId: string, body: CollectInput): Promise<{ dat
 export function invalidatePatientAccount(queryClient: QueryClient, patientId: string): void {
   void queryClient.invalidateQueries({ queryKey: ["patient-account3", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
+  void queryClient.invalidateQueries({ queryKey: ["patient-accepted-totals", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["ticket-receipt", patientId] })
   void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
@@ -366,15 +406,26 @@ export interface VoidTicketResult {
   /** Los productos del ticket que salieron de la cuenta y volvieron a su sede (ADR 0068). */
   returnedProducts?: Array<{ description: string; quantity: number; branchId: string | null }>
   compensated: boolean
-  account: AccountSummary
+  /** Nula en una venta de mostrador: no hay cuenta. */
+  account: AccountSummary | null
+}
+
+/**
+ * Lo que se hace con el ticket de una venta de mostrador (ADR 0173) va por
+ * Finanzas, sin ficha: `/finance/counter-sales/:ticketId/…`.
+ */
+function ticketBase(patientId: string | null, ticketId: string): string {
+  return patientId === null
+    ? `/api/finance/counter-sales/${ticketId}`
+    : `/api/patients/${patientId}/tickets/${ticketId}`
 }
 
 export function voidTicketApi(
-  patientId: string,
+  patientId: string | null,
   ticketId: string,
   reason: string,
 ): Promise<{ data: VoidTicketResult }> {
-  return apiFetch<{ data: VoidTicketResult }>(`/api/patients/${patientId}/tickets/${ticketId}/void`, {
+  return apiFetch<{ data: VoidTicketResult }>(`${ticketBase(patientId, ticketId)}/void`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   })
@@ -397,8 +448,8 @@ export function fetchTicketReceipt(
 /** El mismo ticket por su identificador, sin saber de quién es (Cobros, buscador rápido). */
 export function fetchTicketById(
   ticketId: string,
-): Promise<{ data: { patientId: string; ticket: CollectTicketRow; closedAfter?: boolean } }> {
-  return apiFetch<{ data: { patientId: string; ticket: CollectTicketRow; closedAfter?: boolean } }>(
+): Promise<{ data: { patientId: string | null; ticket: CollectTicketRow; closedAfter?: boolean } }> {
+  return apiFetch<{ data: { patientId: string | null; ticket: CollectTicketRow; closedAfter?: boolean } }>(
     `/api/finance/tickets/${encodeURIComponent(ticketId)}`,
   )
 }
@@ -466,8 +517,8 @@ export function paidCommissionWarnings(
   return returnable.commissionPaid ? ["Una comisión de este cobro ya se pagó: se descontará del próximo pago."] : []
 }
 
-export function fetchTicketReturnable(patientId: string, ticketId: string): Promise<{ data: TicketReturnable }> {
-  return apiFetch<{ data: TicketReturnable }>(`/api/patients/${patientId}/tickets/${ticketId}/returnable`)
+export function fetchTicketReturnable(patientId: string | null, ticketId: string): Promise<{ data: TicketReturnable }> {
+  return apiFetch<{ data: TicketReturnable }>(`${ticketBase(patientId, ticketId)}/returnable`)
 }
 
 export interface ReturnLineBody {
@@ -488,7 +539,9 @@ export interface ReturnBody {
 
 /** Lo que la devolución congeló al hacerse: con esto se ve, se imprime y se envía. */
 export interface ReturnSnapshot {
-  patient: { id: string; displayName: string; docType: string | null; docNumber: string | null }
+  /** Nulo al devolver una venta de mostrador: entonces dice `buyer`, como su ticket. */
+  patient: { id: string; displayName: string; docType: string | null; docNumber: string | null } | null
+  buyer?: { contactId: string | null; displayName: string } | null
   issuer: { userId: string; name: string }
   branch: { id: string; name: string }
   ticket: { id: string; number: number; createdAt: string }
@@ -508,7 +561,7 @@ export interface ReturnSnapshot {
 
 export interface PaymentReturnRow {
   id: string
-  patientId: string
+  patientId: string | null
   ticketId: string
   returnNumber: number
   totalCents: number
@@ -521,20 +574,61 @@ export interface PaymentReturnRow {
 }
 
 export function createTicketReturnApi(
-  patientId: string,
+  patientId: string | null,
   ticketId: string,
   body: ReturnBody,
-): Promise<{ data: { paymentReturn: PaymentReturnRow; duplicate: boolean; account: AccountSummary } }> {
-  return apiFetch<{ data: { paymentReturn: PaymentReturnRow; duplicate: boolean; account: AccountSummary } }>(
-    `/api/patients/${patientId}/tickets/${ticketId}/returns`,
+): Promise<{ data: { paymentReturn: PaymentReturnRow; duplicate: boolean; account: AccountSummary | null } }> {
+  return apiFetch<{ data: { paymentReturn: PaymentReturnRow; duplicate: boolean; account: AccountSummary | null } }>(
+    `${ticketBase(patientId, ticketId)}/returns`,
     { method: "POST", body: JSON.stringify(body) },
   )
 }
 
-/** PDF del servidor de una devolución: el mismo que se envía. */
-export function returnPdfPath(patientId: string, returnId: string): string {
+/** PDF del servidor de una devolución: el mismo que se envía; la de una venta de mostrador, por su ticket. */
+export function returnPdfPath(patientId: string | null, returnId: string, ticketId: string): string {
+  if (patientId === null) return `/api/finance/counter-sales/${ticketId}/returns/${returnId}/pdf`
   const params = new URLSearchParams({ documentType: "return", documentId: returnId })
   return `/api/patients/${patientId}/financial-document-pdf?${params}`
+}
+
+// --- Venta de mostrador (ADR 0173): POST /finance/counter-sales ---------------------
+
+/** El nombre con que se dice una venta de mostrador sin nadie que la compre. */
+export const COUNTER_SALE_LABEL = "Venta de mostrador"
+
+/**
+ * A quién es un ticket, como lo dicen el ticket y el PDF: «Paciente: …»,
+ * «Cliente: …» (una venta de mostrador a alguien) o solo «Venta de mostrador».
+ */
+export function ticketPartyOf(frozen: {
+  patient?: { displayName: string } | null
+  buyer?: { displayName: string } | null
+}): { label: "Paciente" | "Cliente" | null; name: string } {
+  if (frozen.patient) return { label: "Paciente", name: frozen.patient.displayName }
+  if (frozen.buyer?.displayName) return { label: "Cliente", name: frozen.buyer.displayName }
+  return { label: null, name: COUNTER_SALE_LABEL }
+}
+
+export interface CounterSaleBody {
+  branchId: string
+  /** La misma mientras el cajón sigue abierto: un reintento devuelve el mismo ticket. */
+  requestId: string
+  lines: Array<{ productId: string; quantity?: number }>
+  /** Una persona elegida (cualquier contacto)… */
+  contactId?: string
+  /** …o solo un nombre escrito; sin los dos, «Venta de mostrador». */
+  buyerName?: string
+  payments: Array<{ paymentMethodId: string; amountCents: number; reference?: string }>
+  cashReceivedCents?: number
+}
+
+export function counterSaleApi(
+  body: CounterSaleBody,
+): Promise<{ data: { ticket: CollectTicketRow; payments: Array<{ id: string }>; duplicate: boolean } }> {
+  return apiFetch<{ data: { ticket: CollectTicketRow; payments: Array<{ id: string }>; duplicate: boolean } }>(
+    "/api/finance/counter-sales",
+    { method: "POST", body: JSON.stringify(body) },
+  )
 }
 
 export interface RefundResult {
@@ -743,6 +837,47 @@ export function fetchPatientAccount3(patientId: string): Promise<{ data: Account
   return apiFetch<{ data: AccountSummary }>(`/api/patients/${patientId}/account`)
 }
 
+/**
+ * Lo aceptado de un presupuesto en una moneda, lo pagado de sus tratamientos y
+ * lo que falta (`acceptedTreatmentTotals`): «¿cuánto me falta en total?».
+ */
+export interface AcceptedTreatmentTotal {
+  budgetId: string
+  budgetNumber: number
+  decidedAt: string | null
+  currency: string
+  agreedCents: number
+  paidCents: number
+  remainingCents: number
+  /** De lo que falta, lo ya cargado y sin pagar: está en Pendiente. */
+  owingCents: number
+  discountCents: number
+  returnedCents: number
+  lines: Array<{
+    budgetItemId: string
+    planItemId: string
+    title: string
+    siteCode: string | null
+    billingMode: string
+    agreedCents: number
+    /** Lo acordado que aún no se carga: lo que se puede adelantar para él. */
+    toChargeCents: number
+  }>
+}
+
+/** Pide caja y presupuesto a la vez (finance.read y budgets.read). */
+export function fetchAcceptedTotals(patientId: string): Promise<{ data: AcceptedTreatmentTotal[] }> {
+  return apiFetch<{ data: AcceptedTreatmentTotal[] }>(`/api/patients/${patientId}/accepted-totals`)
+}
+
+export const acceptedTotalsKey = (patientId: string | null) => ["patient-accepted-totals", patientId] as const
+
+/** Un tratamiento por su nombre y su lugar: «Corona · Pieza 46». */
+export function treatmentLineName(line: { title: string; siteCode: string | null }, placeName?: (code: string) => string | null): string {
+  const place = line.siteCode && placeName ? placeName(line.siteCode) : null
+  return place ? `${line.title} · ${place}` : line.title
+}
+
 
 export function createManualChargeApi(
   patientId: string,
@@ -769,6 +904,12 @@ export interface SaleProduct {
   /** Precio de venta por unidad; null si aún no tiene (no se puede agregar). */
   salePriceCents: number | null
   currency: string | null
+  /** Lo de su etiqueta, si la tiene (código de barras, marca, modelo, color y medidas). */
+  barcode?: string | null
+  brand?: string | null
+  model?: string | null
+  color?: string | null
+  size?: string | null
   /** Lo que hay en la sede (lotes − faltante; puede ser negativo). */
   onHand: number
   /** «4 frascos»; null si no hay. */

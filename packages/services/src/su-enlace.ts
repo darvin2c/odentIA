@@ -20,16 +20,20 @@ import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
 import {
+  appointmentPlanItem,
   patient,
   patientDataConsent,
   patientResponsibility,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
-import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
-import { getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
+import { adminRuntime, appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
+  CONSENT_TO_SIGN_MESSAGE_KEY,
+  CONSENT_TO_SIGN_SUBJECT,
+  type MessageSpec,
   NOTICE_PURPOSE,
   PERSONAL_LINK_MESSAGE_KEY,
   PERSONAL_LINK_SUBJECT,
@@ -39,16 +43,19 @@ import {
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName } from "./automation-routing.js"
 import {
-  PERSONAL_LINK_TTL_DAYS,
   appointmentView,
   type BookingLinkAppointment,
   type BookingLinkBranch,
   bookingContext,
+  type BookAnother,
+  bookAnotherOf,
   clinicNameOf,
-  hasSchedulableItems,
+  contactHandlesAppointment,
+  linkReplyVia,
   issuePersonalLink,
   linkContactFirstName,
   linkExpired,
+  PERSONAL_LINK_TTL_DAYS,
   patientFirstNameOf,
   type ResolvedPersonalLink,
   requireLinkDecider,
@@ -58,7 +65,7 @@ import {
   tellConversation,
 } from "./booking-links.js"
 import { serviceRecipient } from "./budget-send.js"
-import { listBudgets } from "./budgets.js"
+import type { BudgetWithTotals } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import {
   type DeclaredPatientHealthInput,
@@ -68,19 +75,23 @@ import {
 import {
   CONSENT_SIGNATURE_WORDS,
   consentDiagnosisTitles,
+  type RemoteSignBlock,
+  remoteSignBlock,
   type SignatureEvidence,
+  shortDocument,
   signConsentByLink,
 } from "./clinical-forms.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
+import { createContactNote } from "./crm-workspace.js"
 import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { chartNumber } from "./document-kit.js"
-import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { joinPatientPerson } from "./patient-identity.js"
-import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
+import { getPatientMissingData, getPatientRegistrationConfig, patientHealthToAsk } from "./patient-registration.js"
+import { consentsToSign, hasTodo, type PatientTodo, patientTodo } from "./patient-todo.js"
 import { privacyNoticeOf } from "./privacy-notice.js"
 import {
   patientOrganizationToday,
@@ -97,9 +108,11 @@ import {
   toPortalBudget,
 } from "./portal.js"
 import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
-import { personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
+import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
+import { productHooks } from "./products.js"
+import { waitingItemIds } from "./to-schedule.js"
 
 /**
  * Lo que tiene pendiente cada persona en «Su enlace» (decisión 8; ADR 0037):
@@ -109,9 +122,22 @@ import { createTask } from "./tasks.js"
  * aparte. Nunca se muestra lo guardado: de sus datos solo qué falta.
  */
 
+/** La cita para la que es algo: día y hora en la zona de su sede. */
+export interface PersonalLinkWhen {
+  startsAt: string
+  timeZone: string
+}
+
 export interface PersonalLinkConsent {
   id: string
   title: string
+  /** Lo que se consiente, como en el papel: «Exodoncia de la pieza 38» (U6). Solo en la página, nunca en un mensaje. */
+  procedureRef: string | null
+  /** La cita para la que es: la que lleva su tratamiento o, sin ella, la próxima del paciente. */
+  appointment: PersonalLinkWhen | null
+  /** Se puede firmar desde el teléfono; si no, se lee y se firma en la cita (`why`). */
+  signable: boolean
+  why: RemoteSignBlock | null
 }
 
 /**
@@ -127,8 +153,36 @@ export interface PersonalLinkMessages {
   nothing: boolean
 }
 
+/**
+ * Por qué el enlace ya no sirve, para decirlo como es (entrega 2, acta 8): ya no le queda
+ * nada (`hecho`), venció (`vencido`), pasó la cita para la que era (`cita-pasada`) o la
+ * clínica lo quitó o lo reemplazó por otro (`quitado`).
+ */
+export type PersonalLinkClosedReason = "hecho" | "vencido" | "cita-pasada" | "quitado"
+
+/**
+ * «Enviarme uno nuevo» en un enlace vencido: por dónde le llegaría, con el destino
+ * enmascarado («•••701»), y si ya se le envió uno hoy desde su enlace (el tope: uno al
+ * día por persona y paciente, porque fuera de las 24 horas cada envío se cobra).
+ */
+export interface PersonalLinkResend {
+  channel: "whatsapp" | "correo"
+  /** «•••701» o «e•••@g•••.com»; vacío si no hay qué mostrar. */
+  to: string
+  /** Cuándo salió el que se le envió hoy; nulo si aún puede pedir uno. */
+  sentAt: string | null
+}
+
+export interface PersonalLinkClosed {
+  reason: PersonalLinkClosedReason
+  /** Solo en `vencido`, con algo pendiente, quien decide por el paciente y por dónde enviárselo. */
+  resend: PersonalLinkResend | null
+  /** En `cita-pasada`: la cita que ya pasó. */
+  appointment: PersonalLinkWhen | null
+}
+
 export interface PersonalLinkView {
-  /** `vencido`: revocado, o ya no le queda nada pendiente. */
+  /** `vencido`: revocado, o ya no le queda nada pendiente (`closed` dice cuál). */
   status: "abierto" | "vencido"
   clinicName: string
   /** Formato regional de la clínica (BCP 47): la página escribe fechas y horas con él. */
@@ -164,6 +218,7 @@ export interface PersonalLinkView {
    * que tiene su chat, no quién es. Sus nombres y apellidos, para que corrija
    * el que no es suyo (`PersonalLinkDataInput.name`).
    */
+  /** `document` y `phone` van abreviados («DNI ••••8912», «•••701»): para reconocerlos, no para leerlos. */
   you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
   /**
    * Lo que aún no aceptó o no respondió: se le pide en el mismo paso en que
@@ -178,16 +233,27 @@ export interface PersonalLinkView {
   /** «Antes de tu cita», si hay uno por responder. */
   questionnaire: { title: string } | null
   /**
+   * M3: lo que aceptó de su presupuesto y aún no tiene cita, «Lo que aceptaste, por
+   * agendar»; se agenda con `planItemIds` al reservar. Solo a quien decide por el paciente.
+   */
+  toSchedule: Array<{ planItemId: string; title: string }>
+  /** «Reservar otra» en «Tu cita» (`another: true` al reservar): citas por venir y el tope. Nulo si no le corresponde. */
+  another: BookAnother | null
+  /**
+   * B2: por dónde se le confirma lo que haga aquí, solo si de verdad sale (`linkReplyVia`);
+   * nulo: queda anotado y no se le escribe, y la página no lo promete.
+   */
+  confirmVia: "whatsapp" | "chat" | "correo" | null
+  /** B2: por dónde le llegan los recordatorios de su cita; nulo si no le llegarán. */
+  remindersVia: "whatsapp" | "correo" | null
+  /** Con `status: "vencido"`: por qué y si puede pedir uno nuevo. Nulo mientras sirve. */
+  closed: PersonalLinkClosed | null
+  /**
    * «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien
    * decide por él). La receta y el comprobante ya no están aquí (ADR 0156): le
    * llegan en PDF por su chat o su correo, y están en su portal.
    */
   messages: PersonalLinkMessages | null
-  /**
-   * Siempre vacío: solo para la página anterior, que lo lee mientras dura el
-   * despliegue (las pantallas y la API no cambian a la vez). Se quita en la entrega siguiente.
-   */
-  papers: never[]
 }
 
 /*
@@ -207,8 +273,9 @@ async function missingOf(
 }
 
 /**
- * Su salud se le pregunta (opcional) solo si la clínica la pregunta y nadie la
- * registró en su ficha, y solo a quien decide por el paciente.
+ * Su salud se le pregunta (opcional) solo si la clínica la pregunta, nadie la registró en su
+ * ficha y nunca envió «Tus datos» (`patientHealthToAsk`, la misma regla que el recordatorio),
+ * y solo a quien decide por el paciente.
  */
 async function healthPendingOf(
   tx: Db,
@@ -216,14 +283,22 @@ async function healthPendingOf(
   link: ResolvedPersonalLink,
 ): Promise<boolean> {
   if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return false
-  if (!(await clinicAsksHealth(tx, orgId))) return false
-  return healthNeverRecorded(tx, orgId, link.patientId)
+  return patientHealthToAsk(tx, orgId, link.patientId)
 }
 
-/** «DNI ••••8912»: el documento abreviado, para que reconozca el suyo sin mostrarlo entero. */
-function shortDocument(docType: string | null, docNumber: string | null): string | null {
-  if (!docNumber) return null
-  return `${docType ?? "Documento"} ••••${docNumber.slice(-4)}`
+/**
+ * Lo que tiene por hacer (`patientTodo`, la definición que comparten la página, el recordatorio
+ * y «Enviarme uno nuevo»), con lo que sabe este enlace: quién lo abre, si ya envió sus datos y
+ * si muestra una cita por venir. Solo para quien decide por el paciente.
+ */
+async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PatientTodo | null> {
+  if (!link.patientId || !link.decides || link.expired) return null
+  return patientTodo(tx, orgId, {
+    patientId: link.patientId,
+    contactId: link.row.contactId,
+    dataSubmitted: link.row.dataSubmittedAt !== null,
+    withAppointment: link.appointment !== null && link.appointment.status !== "cancelada",
+  })
 }
 
 /**
@@ -244,7 +319,8 @@ async function youOf(
           givenNames: person.givenNames ?? null,
           familyName: person.familyName ?? null,
           document: shortDocument(person.docType, person.docNumber),
-          phone: person.phone ?? null,
+          // Enmascarado, como «Enviarme uno nuevo»: quien tiene el token (quizá el representante) no ve el número entero.
+          phone: maskedAddress("whatsapp", person.phone ?? null) || null,
         }
       : null,
     // También al cambiar su cita o agendar lo aceptado: lo que no respondió se le pregunta ahí.
@@ -288,15 +364,7 @@ async function pendingOf(
   }
 }
 
-async function budgetsOf(
-  tx: Db,
-  orgId: string,
-  link: ResolvedPersonalLink,
-): Promise<PortalBudgetView[]> {
-  if (!link.patientId || !link.decides || link.expired) return []
-  const budgets = (await listBudgets(tx, orgId, link.patientId)).filter(
-    (budget) => budget.status !== "borrador" && budget.awaitsAnswer,
-  )
+async function budgetViews(tx: Db, orgId: string, budgets: BudgetWithTotals[]): Promise<PortalBudgetView[]> {
   if (budgets.length === 0) return []
   // `link.decides` ya dijo que es la propia persona o su representante.
   const context = await portalBudgetContext(
@@ -308,26 +376,74 @@ async function budgetsOf(
   return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
+/** La próxima cita en pie que lleva ese tratamiento, en la zona de su sede. */
+async function appointmentOfPlanItem(
+  tx: Db,
+  orgId: string,
+  planItemId: string,
+): Promise<PersonalLinkWhen | null> {
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
+    .from(appointmentPlanItem)
+    .innerJoin(
+      appointment,
+      and(
+        eq(appointment.organizationId, appointmentPlanItem.organizationId),
+        eq(appointment.id, appointmentPlanItem.appointmentId),
+      ),
+    )
+    .innerJoin(branch, eq(branch.id, appointment.branchId))
+    .where(
+      and(
+        eq(appointmentPlanItem.organizationId, orgId),
+        eq(appointmentPlanItem.planItemId, planItemId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt))
+    .limit(1)
+  if (!row) return null
+  return {
+    startsAt: row.startsAt.toISOString(),
+    timeZone: row.timeZone ?? (await findOrgLocale(tx, orgId)).timezone,
+  }
+}
+
 async function consentsOf(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
 ): Promise<PersonalLinkConsent[]> {
   if (!link.patientId || !link.decides || link.expired) return []
-  const rows = await tx
-    .select({ id: consentDocument.id, title: consentDocument.titleSnapshot })
-    .from(consentDocument)
-    .where(
-      and(
-        eq(consentDocument.organizationId, orgId),
-        eq(consentDocument.patientId, link.patientId),
-        eq(consentDocument.status, "pendiente"),
-        isNotNull(consentDocument.linkSentAt),
-        isNull(consentDocument.personSignedAt),
-      ),
-    )
-    .orderBy(asc(consentDocument.createdAt))
-  return rows
+  const rows = await consentsToSign(tx, orgId, link.patientId)
+  if (rows.length === 0) return []
+  return consentViews(tx, orgId, link, rows, await remoteSignBlock(tx, orgId, link.patientId, link.row.contactId))
+}
+
+/** Cada consentimiento por firmar con la cita para la que es (U6) y si se firma desde aquí. */
+async function consentViews(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  rows: PatientTodo["consents"],
+  /** Quién firma y qué le falta no cambia de un consentimiento a otro. */
+  why: RemoteSignBlock | null,
+): Promise<PersonalLinkConsent[]> {
+  if (rows.length === 0) return []
+  const out: PersonalLinkConsent[] = []
+  for (const row of rows) {
+    out.push({
+      id: row.id,
+      title: row.title,
+      procedureRef: row.procedureRef,
+      // Solo la cita en que está agendado su tratamiento: otra cita (una limpieza) no es la suya.
+      appointment: row.planItemId ? await appointmentOfPlanItem(tx, orgId, row.planItemId) : null,
+      signable: why === null,
+      why,
+    })
+  }
+  return out
 }
 
 /**
@@ -404,29 +520,30 @@ export async function getPersonalLinkView(
     budgets: [],
     consents: [],
     questionnaire: null,
+    toSchedule: [],
+    another: null,
+    confirmVia: null,
+    remindersVia: null,
     messages: null,
-    papers: [],
   }
-  if (!link.live) return empty
+  if (!link.live) return { ...empty, closed: await closedOf(tx, orgId, link) }
   const appointment = link.appointment
     ? await appointmentView(tx, orgId, link.appointment.id)
     : null
-  const missing = await missingOf(tx, orgId, link)
-  const health = await healthPendingOf(tx, orgId, link)
-  const budgets = await budgetsOf(tx, orgId, link)
-  const consents = await consentsOf(tx, orgId, link)
-  const questionnaire = await questionnaireOf(tx, orgId, link)
+  // Lo que tiene por hacer: la misma definición que el recordatorio y «Enviarme uno nuevo».
+  const todo = await todoOf(tx, orgId, link)
+  const missing = todo && todo.missing.length > 0 ? todo.missing : null
+  const health = todo?.health ?? false
+  const budgets = todo ? await budgetViews(tx, orgId, todo.budgets) : []
+  const consents = todo ? await consentViews(tx, orgId, link, todo.consents, todo.signBlock) : []
+  const questionnaire = todo?.questionnaire ?? null
   const messages = await messagesOf(tx, orgId, link)
-  // Las sedes, para reservar o para agendar lo aceptado de su presupuesto (también después de responderlo).
-  const schedulable =
-    !link.canBook &&
-    budgets.length === 0 &&
-    link.patientId !== null &&
-    link.decides &&
-    !link.expired &&
-    (await hasSchedulableItems(tx, orgId, link.patientId))
+  // M3: lo aceptado y sin cita, a quien decide por el paciente.
+  const toSchedule = todo?.toSchedule ?? []
+  const another = appointment ? await bookAnotherOf(tx, orgId, link) : null
+  // Las sedes, para reservar, para agendar lo aceptado de su presupuesto (también después de responderlo) o para otra cita.
   const context =
-    link.canBook || budgets.length > 0 || schedulable
+    link.canBook || budgets.length > 0 || toSchedule.length > 0 || another?.allowed
       ? await bookingContext(tx, orgId, link.row)
       : null
   // «Tus mensajes» siempre sirve a quien los recibe: el enlace no vence por no tener otra cosa pendiente.
@@ -438,8 +555,9 @@ export async function getPersonalLinkView(
     budgets.length === 0 &&
     consents.length === 0 &&
     !questionnaire &&
+    toSchedule.length === 0 &&
     !messages
-  if (nothing) return empty
+  if (nothing) return { ...empty, closed: await closedOf(tx, orgId, link) }
   const self = link.patientId
     ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
     : true
@@ -464,8 +582,15 @@ export async function getPersonalLinkView(
     budgets,
     consents,
     questionnaire,
+    toSchedule,
+    another,
+    confirmVia: await linkReplyVia(tx, orgId, link.row),
+    // A quien abre solo se le promete si los recordatorios le llegan a él (`preferredContact`).
+    remindersVia: link.handlesAppointment
+      ? await appointmentRemindersVia(tx, orgId, link.row.contactId, link.patientId)
+      : null,
+    closed: null,
     messages,
-    papers: [],
   }
 }
 
@@ -560,6 +685,7 @@ function fieldsFor(missing: MissingPersonDatum[]): Set<DataField> {
       allowed.add("insuranceScheme")
       allowed.add("insurerName")
       allowed.add("affiliationNumber")
+    } else if (item.key === "representativeDoc") {
     } else {
       allowed.add(item.key)
     }
@@ -1017,6 +1143,8 @@ export interface PersonalLinkReservation {
   professionalUserId: string
   roomId?: string
   planItemIds?: string[]
+  /** «Reservar otra» desde «Tu cita» (`PersonalLinkView.another`). */
+  another?: boolean
   /** Quien ya es paciente: lo que faltaba y lo que acepta, guardado en el mismo paso. */
   you?: PersonalLinkDataInput
 }
@@ -1115,7 +1243,7 @@ export async function bookedDataLink(
     },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token)
+  const url = await personalLinkUrl(tx, orgId, link.token, missing.length > 0 ? "datos" : "pendientes")
   return url ? { missing: missing.map((item) => item.label.toLowerCase()), url } : null
 }
 
@@ -1174,12 +1302,25 @@ export async function decidePersonalLinkBudget(
     )
   }
   const context = await portalBudgetContext(tx, orgId, [budgetId], true)
+  // Lo común aceptado está en cada camino: cada tratamiento una vez.
+  const accepted = result.budget.items
+    .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
+    .filter(
+      (line, index, all) =>
+        all.findIndex((other) => other.planItemId === line.planItemId) === index,
+    )
+  // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia) no se
+  // reserva junto: se ofrece cuando lo de antes termine, como en «Qué sigue» (entrega 8).
+  const waiting = await waitingItemIds(
+    tx,
+    orgId,
+    accepted.map((line) => line.planItemId),
+    (await productHooks(tx, orgId)).planPhases,
+  )
   return {
     budget: toPortalBudget(result.budget, context),
-    // Lo común aceptado está en cada camino: cada tratamiento una vez.
-    toSchedule: result.budget.items
-      .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
-      .filter((line, index, all) => all.findIndex((other) => other.planItemId === line.planItemId) === index)
+    toSchedule: accepted
+      .filter((line) => !waiting.has(line.planItemId))
       .map((line) => ({ planItemId: line.planItemId, title: line.title })),
   }
 }
@@ -1213,6 +1354,19 @@ export interface PersonalLinkConsentView {
   minor: boolean
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
+  /**
+   * Se firma desde el teléfono. Si no (`why`), la hoja se lee entera y el aviso va arriba:
+   * «Este lo firmas en tu cita» o, a quien decide por el paciente, «Este lo firmas tú en la
+   * cita de Mateo»; el servidor tampoco acepta la firma.
+   */
+  signable: boolean
+  why: RemoteSignBlock | null
+  /** A quién le habla la página: al paciente o a quien decide por él (`patientFirstName`). */
+  speaksTo: "paciente" | "representante"
+  /** Primer nombre del paciente: «Consentimiento de Mateo», «la cita de Mateo». */
+  patientFirstName: string
+  /** La cita para la que es (U6). */
+  appointment: PersonalLinkWhen | null
 }
 
 async function requireLinkConsent(
@@ -1222,14 +1376,15 @@ async function requireLinkConsent(
   consentId: string,
 ) {
   const consents = await consentsOf(tx, orgId, link)
-  if (!consents.some((item) => item.id === consentId)) throw linkExpired()
+  const listed = consents.find((item) => item.id === consentId)
+  if (!listed) throw linkExpired()
   const [doc] = await tx
     .select()
     .from(consentDocument)
     .where(and(eq(consentDocument.organizationId, orgId), eq(consentDocument.id, consentId)))
     .limit(1)
   if (!doc) throw notFound("Consentimiento")
-  return doc
+  return { doc, listed }
 }
 
 /** Lo que lee antes de firmar en su enlace. */
@@ -1241,7 +1396,7 @@ export async function getPersonalLinkConsent(
 ): Promise<PersonalLinkConsentView> {
   const link = await requireLiveLink(tx, orgId, token)
   if (!link.patientId) throw linkExpired()
-  const doc = await requireLinkConsent(tx, orgId, link, consentId)
+  const { doc, listed } = await requireLinkConsent(tx, orgId, link, consentId)
   const [signer] = await tx
     .select({ name: contact.displayName, docType: contact.docType })
     .from(contact)
@@ -1249,7 +1404,7 @@ export async function getPersonalLinkConsent(
     .limit(1)
   const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
   const [person] = await tx
-    .select({ name: contact.displayName, patientNumber: patient.patientNumber })
+    .select({ name: contact.displayName, givenNames: contact.givenNames, patientNumber: patient.patientNumber })
     .from(patient)
     .innerJoin(contact, joinPatientPerson())
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, doc.patientId)))
@@ -1280,6 +1435,11 @@ export async function getPersonalLinkConsent(
       // Solo el tipo («DNI», «Pasaporte»): el número lo escribe la persona.
       documentLabel: signer?.docType ? documentText(signer.docType, "").trim() : null,
     },
+    signable: listed.signable,
+    why: listed.why,
+    speaksTo: self ? "paciente" : "representante",
+    patientFirstName: (person?.givenNames ?? person?.name ?? "").trim().split(/\s+/)[0] ?? "",
+    appointment: listed.appointment,
   }
 }
 
@@ -1501,6 +1661,71 @@ export async function sendPersonalLink(
   input: { patientId: string; requestId?: string | null },
   deps: { secretsKey: Buffer },
 ): Promise<PersonalLinkSent> {
+  return sendLinkMessage(tx, orgId, actorUserId, input, deps)
+}
+
+/**
+ * «Firma tu consentimiento» (entrega 2, decisión 9): lo que sale con «Enviar para firmar»,
+ * a la persona o a quien decide por el paciente, con la regla de siempre. Abre directo la
+ * hoja (`abre=firma`) y no dice nada clínico: la clínica, de quién es la cita y cuándo, y
+ * que es un consentimiento para leer y firmar. Mientras WhatsApp no aprueba su plantilla
+ * (o no hay por dónde mandarlo), sale «Su enlace», como antes. Una misma `requestId` no lo
+ * envía dos veces.
+ */
+export async function sendConsentToSign(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { patientId: string; consentId: string; requestId?: string | null },
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkSent> {
+  return sendLinkMessage(tx, orgId, actorUserId, input, deps)
+}
+
+/** «tu cita del jueves 13 de noviembre», «la cita de Mateo del…» o, sin cita, «tu próxima cita». */
+async function appointmentWords(
+  tx: Db,
+  orgId: string,
+  input: { patientId: string; consentId: string; recipientContactId: string },
+): Promise<string> {
+  const [consent] = await tx
+    .select({ planItemId: consentDocument.planItemId })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.organizationId, orgId), eq(consentDocument.id, input.consentId)))
+    .limit(1)
+  // Solo la cita en que está agendado su tratamiento; si no, «tu próxima cita», sin fecha que lo ate a otra.
+  const when = consent?.planItemId ? await appointmentOfPlanItem(tx, orgId, consent.planItemId) : null
+  // A quien decide por otro, de quién es: solo su primer nombre.
+  const self = (await patientPersonId(tx, orgId, input.patientId)) === input.recipientContactId
+  const whose = self ? "tu" : "la"
+  const of = self ? "" : ` de ${(await patientFirstNameOf(tx, orgId, input.patientId)) ?? "tu familiar"}`
+  if (!when) return `${whose} próxima cita${of}`
+  const { locale } = await findOrgLocale(tx, orgId)
+  const day = new Intl.DateTimeFormat(locale, {
+    timeZone: when.timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(when.startsAt))
+  return `${whose} cita${of} del ${day}`
+}
+
+async function sendLinkMessage(
+  tx: Db,
+  orgId: string,
+  /** Nulo: lo pidió la persona desde su enlace vencido («Enviarme uno nuevo»); sale como aviso, sin nadie del equipo. */
+  actorUserId: string | null,
+  input: {
+    patientId: string
+    requestId?: string | null
+    consentId?: string
+    /** A esa persona y no a la de siempre: quien pidió uno nuevo, si sigue decidiendo por el paciente. */
+    recipientContactId?: string
+    /** El enlace vencido desde el que lo pidió: queda en la traza y cuenta para el tope del día. */
+    resentFrom?: string
+  },
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkSent> {
   if (input.requestId) {
     const lockKey = `su-enlace-envio:${orgId}:${input.requestId}`
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`)
@@ -1527,12 +1752,34 @@ export async function sendPersonalLink(
       }
     }
   }
-  const recipient = await serviceRecipient(tx, orgId, input.patientId)
-  const { spec, params, text } = await personalLinkMessage(tx, orgId, recipient.displayName)
-  const route = await openRoute(tx, orgId, recipient.contactId, spec, {
-    purpose: NOTICE_PURPOSE,
-    initiative: "equipo",
-  })
+  const recipient = await serviceRecipient(tx, orgId, input.patientId, input.recipientContactId)
+  const gate = { purpose: NOTICE_PURPOSE, initiative: "equipo" } as const
+  const senderKind = actorUserId ? "user" : "agent"
+  let message: {
+    spec: MessageSpec
+    params: string[]
+    text: string
+    abre: PersonalLinkTarget
+    subject: string
+  } = { ...(await personalLinkMessage(tx, orgId, recipient.displayName)), abre: "pendientes", subject: PERSONAL_LINK_SUBJECT }
+  if (input.consentId) {
+    // «Firma tu consentimiento» si tiene por dónde salir; si no, «Su enlace» como antes.
+    const spec = await currentCatalogMessage(tx, orgId, CONSENT_TO_SIGN_MESSAGE_KEY)
+    if (!("cause" in (await previewRoute(tx, orgId, recipient.contactId, spec, gate)))) {
+      const rendered = renderMessage(spec, {
+        persona: firstName({ givenNames: null, displayName: recipient.displayName }),
+        clinica: await findClinicName(tx, orgId),
+        cita_de: await appointmentWords(tx, orgId, {
+          patientId: input.patientId,
+          consentId: input.consentId,
+          recipientContactId: recipient.contactId,
+        }),
+      })
+      message = { spec, ...rendered, abre: "firma", subject: CONSENT_TO_SIGN_SUBJECT }
+    }
+  }
+  const { spec, params, text } = message
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, gate)
   if ("cause" in route) {
     if (route.cause === "sin_permiso") throw new ServiceError("LINK_OPTED_OUT", 409, OPTED_OUT)
     throw new ServiceError("LINK_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}`)
@@ -1551,14 +1798,20 @@ export async function sendPersonalLink(
     },
     deps,
   )
-  // En el mensaje no queda el token: lo pone el worker al enviarlo.
-  const url = await personalLinkMessageUrl(tx, orgId, link.linkId)
+  // En el mensaje no queda el token: lo pone el worker al enviarlo. Abre lo suyo.
+  const url = await personalLinkMessageUrl(
+    tx,
+    orgId,
+    link.linkId,
+    message.abre,
+    message.abre === "firma" ? input.consentId : null,
+  )
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   let sent: { id: string }
   if (route.via === "plantilla" && route.template) {
     sent = await sendTemplateOutbound(tx, orgId, deps.secretsKey, {
       conversationId: route.conversationId,
-      senderKind: "user",
+      senderKind,
       senderUserId: actorUserId,
       fromAction: true,
       name: route.template.name,
@@ -1573,14 +1826,14 @@ export async function sendPersonalLink(
     const body = withLinkLine(text, spec.link, url)
     sent = await sendOutbound(tx, orgId, {
       conversationId: route.conversationId,
-      senderKind: "user",
+      senderKind,
       senderUserId: actorUserId,
       fromAction: true,
       content: {
         type: "text",
         text:
           route.via === "correo"
-            ? `${PERSONAL_LINK_SUBJECT} · ${await findClinicName(tx, orgId)}\n\n${body}`
+            ? `${message.subject} · ${await findClinicName(tx, orgId)}\n\n${body}`
             : body,
       },
     })
@@ -1596,7 +1849,7 @@ export async function sendPersonalLink(
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
-    action: "personal_link.sent",
+    action: input.resentFrom ? RESENT_ACTION : "personal_link.sent",
     entity: "message",
     entityId: sent.id,
     metadata: {
@@ -1606,10 +1859,182 @@ export async function sendPersonalLink(
       channel: route.channel,
       via: route.via,
       recipientName: recipient.displayName,
+      message: spec.key,
+      ...(input.consentId ? { consentId: input.consentId } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
+      ...(input.resentFrom ? { fromLinkId: input.resentFrom } : {}),
     },
   })
   return result
+}
+
+// ------------------------------------------ «Enviarme uno nuevo» (acta 8) ---
+
+/** La traza de «Enviarme uno nuevo»: cuenta para el tope del día y dice cuándo salió. */
+const RESENT_ACTION = "personal_link.resent"
+
+/**
+ * «•••701» de un celular o «e•••@g•••.com» de un correo: lo justo para que lo reconozca quien
+ * ya lo sabe. El dominio tampoco va entero: en un dominio propio (`familia-quispe.pe`) bastaría
+ * para saber de quién es.
+ */
+export function maskedAddress(channel: "whatsapp" | "correo", value: string | null): string {
+  if (!value) return ""
+  if (channel === "whatsapp") {
+    const digits = value.replace(/\D/g, "")
+    return digits.length >= 3 ? `•••${digits.slice(-3)}` : ""
+  }
+  const [user, domain] = value.split("@")
+  if (!user || !domain) return ""
+  const dot = domain.lastIndexOf(".")
+  const host = dot > 0 ? domain.slice(0, dot) : domain
+  const tld = dot > 0 ? domain.slice(dot) : ""
+  return `${user.slice(0, 1)}•••@${host.slice(0, 1)}•••${tld}`
+}
+
+/** El que se le envió hoy (en el día de la clínica) a esa persona por ese paciente, o el que salió desde ese enlace. */
+async function resentAt(
+  tx: Db,
+  orgId: string,
+  of: { contactId: string; patientId: string } | { fromLinkId: string },
+): Promise<{ at: Date; channel: "whatsapp" | "correo"; recipientContactId: string } | null> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const [row] = await tx
+    .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.action, RESENT_ACTION),
+        "fromLinkId" in of
+          ? sql`${auditEvent.metadata}->>'fromLinkId' = ${of.fromLinkId}`
+          : and(
+              sql`${auditEvent.metadata}->>'recipientContactId' = ${of.contactId}`,
+              sql`${auditEvent.metadata}->>'patientId' = ${of.patientId}`,
+              sql`${auditEvent.createdAt} >= (date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone})`,
+            ),
+      ),
+    )
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(1)
+  if (!row) return null
+  const metadata = (row.metadata ?? {}) as { channel?: string; recipientContactId?: string }
+  return {
+    at: row.at,
+    channel: metadata.channel === "email" ? "correo" : "whatsapp",
+    recipientContactId: metadata.recipientContactId ?? "",
+  }
+}
+
+async function addressOf(tx: Db, orgId: string, contactId: string, channel: "whatsapp" | "correo"): Promise<string> {
+  if (!contactId) return ""
+  const [row] = await tx
+    .select({ phone: contact.phone, email: contact.email })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+    .limit(1)
+  return maskedAddress(channel, channel === "whatsapp" ? (row?.phone ?? null) : (row?.email ?? null))
+}
+
+/**
+ * Por dónde le llegaría uno nuevo: solo a quien decide por el paciente, por la regla de
+ * siempre (la de «Enviarle su enlace»). Nulo si no hay por dónde, si pidió no recibir
+ * mensajes o si ya no decide por él: la página le dice que escriba.
+ */
+async function resendOffer(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkResend | null> {
+  if (!link.patientId || !link.decides) return null
+  // Sale sin nadie del equipo, a nombre de Sofi (como lo que hace en el enlace, `tellConversation`):
+  // con Sofi apagada o los agentes en pausa no sale, y la página le dice que escriba a la clínica.
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn || runtime.agentsPaused) return null
+  if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) return null
+  try {
+    await serviceRecipient(tx, orgId, link.patientId, link.row.contactId)
+  } catch {
+    return null
+  }
+  const spec = await currentCatalogMessage(tx, orgId, PERSONAL_LINK_MESSAGE_KEY)
+  const route = await previewRoute(tx, orgId, link.row.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) return null
+  const channel = route.channel === "email" ? "correo" : "whatsapp"
+  const today = await resentAt(tx, orgId, { contactId: link.row.contactId, patientId: link.patientId })
+  return { channel, to: await addressOf(tx, orgId, link.row.contactId, channel), sentAt: today?.at.toISOString() ?? null }
+}
+
+/** La cita del enlace ya pasó y era lo que lo mantenía vivo. */
+async function ownAppointmentPassed(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkWhen | null> {
+  // Sin facultad sobre la cita (S3) tampoco se le dice cuándo fue.
+  if (!link.row.appointmentId || !link.handlesAppointment) return null
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
+    .from(appointment)
+    .innerJoin(branch, eq(branch.id, appointment.branchId))
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, link.row.appointmentId)))
+    .limit(1)
+  if (!row || row.startsAt.getTime() > Date.now() || row.startsAt <= link.row.expiresAt) return null
+  return { startsAt: row.startsAt.toISOString(), timeZone: row.timeZone ?? (await findOrgLocale(tx, orgId)).timezone }
+}
+
+/** Le queda algo por hacer si el enlace siguiera vivo: si no, pedir otro no sirve de nada. */
+async function pendingIfFresh(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
+  // Lo mismo que la página le mostraría (`hasTodo`), como si el enlace siguiera vivo.
+  const todo = await todoOf(tx, orgId, { ...link, expired: false })
+  return todo !== null && hasTodo(todo)
+}
+
+/** Por qué ya no sirve (la página lo dice con su `EmptyState`) y si puede pedir uno nuevo. */
+async function closedOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkClosed> {
+  const none = { resend: null, appointment: null }
+  if (!link.live) {
+    // Si lo dejó sin efecto «Enviarme uno nuevo», se le dice cuándo salió el nuevo; si no, lo quitó la clínica.
+    const resent = await resentAt(tx, orgId, { fromLinkId: link.row.id })
+    if (!resent) return { reason: "quitado", ...none }
+    return {
+      reason: "vencido",
+      resend: {
+        channel: resent.channel,
+        to: await addressOf(tx, orgId, resent.recipientContactId, resent.channel),
+        sentAt: resent.at.toISOString(),
+      },
+      appointment: null,
+    }
+  }
+  if (!link.expired) return { reason: "hecho", ...none }
+  const passed = await ownAppointmentPassed(tx, orgId, link)
+  if (passed) return { reason: "cita-pasada", resend: null, appointment: passed }
+  if (!(await pendingIfFresh(tx, orgId, link))) return { reason: "hecho", ...none }
+  return { reason: "vencido", resend: await resendOffer(tx, orgId, link), appointment: null }
+}
+
+/**
+ * «Enviarme uno nuevo» (acta 8): desde un enlace vencido al que le queda algo por hacer,
+ * quien decide por el paciente pide otro y le llega por su canal registrado, nunca a otro
+ * número. Uno al día por persona y paciente: fuera de las 24 horas cada envío se cobra. El
+ * enlace se bloquea mientras se envía, así un doble toque no manda dos. Responde por dónde
+ * salió; está encolado: la página dice «Te lo enviamos», nunca que llegó.
+ */
+export async function resendPersonalLink(
+  tx: Db,
+  orgId: string,
+  token: string,
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkResend> {
+  const link = await resolvePersonalLink(tx, orgId, token, true)
+  const closed = await closedOf(tx, orgId, link)
+  if (closed.resend?.sentAt) {
+    throw new ServiceError("LINK_RESEND_LIMIT", 409, "Ya te enviamos uno nuevo hoy. Búscalo en tu chat o escríbenos.")
+  }
+  if (closed.reason !== "vencido" || !closed.resend || !link.patientId) {
+    throw new ServiceError("LINK_RESEND_UNAVAILABLE", 409, "Desde este enlace no podemos enviarte otro. Escríbenos y te ayudamos.")
+  }
+  await sendLinkMessage(
+    tx,
+    orgId,
+    null,
+    { patientId: link.patientId, recipientContactId: link.row.contactId, resentFrom: link.row.id },
+    deps,
+  )
+  return { ...closed.resend, sentAt: new Date().toISOString() }
 }
 
 export interface PersonalLinkShown {
@@ -1639,7 +2064,7 @@ export async function showPersonalLink(
     { contactId: recipient.contactId, patientId, createdBy: actorUserId, booking: false },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token)
+  const url = await personalLinkUrl(tx, orgId, link.token, "pendientes")
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -1660,8 +2085,8 @@ export async function showPersonalLink(
 
 /**
  * Los enlaces de confirmar o cancelar de un correo (`/c/:token`) solo llevan a
- * «Su enlace» (ADR 0037): con el token del correo, aún vigente, se da el
- * enlace de esa persona con esa cita, donde confirma, cambia o cancela.
+ * «Su enlace» (ADR 0037): con el token del correo, aún vigente y sin usar, se da
+ * el enlace de esa persona con esa cita, donde confirma, cambia o cancela.
  */
 export async function personalLinkForEmailToken(
   tx: Db,
@@ -1682,6 +2107,8 @@ export async function personalLinkForEmailToken(
     row.purpose === "baja" ||
     !row.appointmentId ||
     !row.contactId ||
+    // Usado: al mover, cancelar o atender la cita sus botones quedan usados y ya no emiten nada.
+    row.usedAt !== null ||
     row.expiresAt.getTime() <= Date.now()
   ) {
     throw linkExpired()
@@ -1692,11 +2119,13 @@ export async function personalLinkForEmailToken(
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, row.appointmentId)))
     .limit(1)
   if (!appt) throw linkExpired()
+  // Antes de emitir, la facultad de hoy: un vínculo que cambió o que nunca la tuvo no recibe su enlace (S4).
+  if (!(await contactHandlesAppointment(tx, orgId, row.contactId, appt.patientId))) throw linkExpired()
   const link = await issuePersonalLink(
     tx,
     orgId,
     { contactId: row.contactId, patientId: appt.patientId, appointmentId: row.appointmentId },
     deps,
   )
-  return { token: link.token, url: await personalLinkUrl(tx, orgId, link.token) }
+  return { token: link.token, url: await personalLinkUrl(tx, orgId, link.token, "cita") }
 }

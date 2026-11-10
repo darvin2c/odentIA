@@ -95,7 +95,7 @@ export const saasDemo = adminSchema.table(
     uniqueIndex("saas_demo_organization_uidx").on(table.organizationId),
     uniqueIndex("saas_demo_slug_uidx").on(table.slug),
     index("saas_demo_status_idx").on(table.status),
-    check("saas_demo_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("saas_demo_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check("saas_demo_size_check", sql`${table.size} IN ('pequeno','mediano','grande')`),
     check("saas_demo_months_check", sql`${table.months} IN (6, 12, 24)`),
     check(

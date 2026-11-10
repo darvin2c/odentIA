@@ -1,4 +1,5 @@
-import type { ClinicalProduct } from "@odentia/clinical"
+import { type ClinicalProduct, type DomainProduct, type ProductDomains, productWords } from "@odentia/clinical"
+import { BASE_MAIL_BRAND, type MailBrandDomains } from "@odentia/mail"
 
 /**
  * Una instalación para los dos dominios (decisión 9 del lienzo del issue 229):
@@ -61,4 +62,17 @@ export function trustedOriginsOn(
   return origins
     .filter((origin) => isOnDomain(origin, from) && !except.includes(origin))
     .map((origin) => onDomain(origin, from, to))
+}
+
+/**
+ * La web de cada marca con dominio propio, para el pie de los correos: sale del
+ * mismo mapa de dominios de cada producto, con la marca de su producto.
+ */
+export function mailBrandDomains(domains: ProductDomains): Partial<MailBrandDomains> {
+  const out: Partial<MailBrandDomains> = {}
+  for (const [product, domain] of Object.entries(domains) as [DomainProduct, string | undefined][]) {
+    const brand = productWords(product).brand
+    if (domain && brand !== BASE_MAIL_BRAND) out[brand] = domain
+  }
+  return out
 }

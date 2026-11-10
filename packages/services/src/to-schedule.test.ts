@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { canAccess } from "@odentia/auth/permissions"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
@@ -19,13 +20,16 @@ import { countOverdueControls, getAdminRecommendation } from "./agent-admin.js"
 import { argosFigure } from "./argos-figures.js"
 import { runArgosQuery } from "./argos-query.js"
 import { setLine } from "./automation.js"
-import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
+import { listPeople } from "./people.js"
+import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { getPlanNextStep } from "./plan-next.js"
 import { upcomingWork } from "./report-finance.js"
-import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import {
+  awaitsBooked,
+  awaitsBookedSql,
   controlWindowOpenSql,
   controlWindowStart,
   controlWindowStartSql,
@@ -35,16 +39,19 @@ import {
   overdueControlSql,
   patientsToSchedule,
   patientsWithOverdueControl,
+  planItemSql,
   toScheduleSql,
+  waitingFor,
 } from "./to-schedule.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
-import { canAccess } from "@odentia/auth/permissions"
 
 setupTestDb()
 
 const DAY = 86_400_000
 const LIMA = "America/Lima"
 const all = () => true
+/** Las fases del plan de odentIA, en su orden (`productHooks(...).planPhases` de una clínica dental). */
+const PHASES = ["urgencia", "basica", "quirurgica", "rehabilitadora", "mantenimiento"]
 /** Lo que ve cada rol en Inicio, con sus permisos de verdad (como `accessFor` de la API). */
 function accessOf(role: string): { access: WorkspaceAccess; can: (permission: string) => boolean } {
   const can = (permission: string) => canAccess(role, permission)
@@ -158,14 +165,14 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
       select i.id, i.status, i.decision_status as "decisionStatus",
         exists (select 1 from appointment_plan_item x join appointment a on a.id = x.appointment_id
           where x.plan_item_id = i.id and a.status in ('programada','confirmada') and a.starts_at > now()) as carried,
-        ${toScheduleSql({ id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` })} as due
+        ${toScheduleSql(planItemSql("i"), PHASES)} as due
       from treatment_plan_item i where i.organization_id = ${c.orgId}`),
   )
   const carried = new Set(items.filter((row) => row.carried).map((row) => row.id))
   for (const row of items) expect(isToSchedule(row, carried)).toBe(row.due)
 
   const expected = [ana, beto, dani, gabi].sort()
-  expect((await c.run((tx) => patientsToSchedule(tx, c.orgId))).sort()).toEqual(expected)
+  expect((await c.run((tx) => patientsToSchedule(tx, c.orgId, PHASES))).sort()).toEqual(expected)
   // Pacientes › «Por agendar»: la misma regla.
   const members = await c.run((tx) => peopleShortcutMembers(tx, c.orgId, all, LIMA, new Date(), "por_agendar"))
   expect(members.por_agendar?.sort()).toEqual(expected)
@@ -189,7 +196,7 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   expect(argos.items.find((item) => item.patientId === dani)?.line).toMatch(/^Falta la cita de la próxima sesión · /)
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, gabi, all))).toMatchObject({ kind: "agendar" })
   // «Qué sigue» de Beto dice que su cita no la lleva, no que le falta una.
-  expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: su cita del .+ no lo lleva$/)
+  expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: aún no va en su cita del .+$/)
 
   // Con un presupuesto por enviar, «Qué sigue» pide enviarlo, y sigue en «Por agendar».
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: ana, title: "Otro plan" }).returning({ id: treatmentPlan.id })
@@ -210,6 +217,148 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   const both = await c.run((tx) => peopleShortcutMembers(tx, c.orgId, all, LIMA, new Date()))
   expect(both.por_agendar).toContain(ana)
   expect(both.presupuesto_sin_enviar).toContain(ana)
+})
+
+it("«va después» es una sola regla: la corona espera a la endodoncia de su pieza y, si esa ya tiene cita, no cuenta como sin cita (entrega 8)", async () => {
+  const c = await clinic()
+  const rodrigo = await person(c, "Rodrigo Paz")
+  const [plan] = await ownerDb
+    .insert(treatmentPlan)
+    .values({ organizationId: c.orgId, patientId: rodrigo, title: "Plan" })
+    .returning({ id: treatmentPlan.id })
+  const item = async (title: string, phase: string, tooth: string | null, status = "pendiente") => {
+    const [row] = await ownerDb
+      .insert(treatmentPlanItem)
+      .values({
+        organizationId: c.orgId,
+        patientId: rodrigo,
+        planId: plan!.id,
+        title,
+        currency: "PEN",
+        priceCents: 10_000,
+        status,
+        decisionStatus: "aceptado",
+        phase,
+        ...(tooth ? { siteSystem: "FDI", siteCode: tooth } : {}),
+      })
+      .returning({ id: treatmentPlanItem.id })
+    return row!.id
+  }
+  const endo = await item("Endodoncia", "basica", "46", "en_curso")
+  const corona = await item("Corona", "rehabilitadora", "46")
+  // Otra pieza, la misma fase o sin pieza: no esperan.
+  const otherTooth = await item("Corona 36", "rehabilitadora", "36")
+  const sameRank = await item("Resina 46", "basica", "46")
+  const noSite = await item("Limpieza", "mantenimiento", null)
+  // Un presupuesto aceptado con las dos coronas: lo que suma Argos.
+  const [budget] = await ownerDb
+    .insert(treatmentBudget)
+    .values({
+      organizationId: c.orgId,
+      patientId: rodrigo,
+      planId: plan!.id,
+      budgetNumber: number++,
+      title: "Coronas",
+      currency: "PEN",
+      status: "borrador",
+    })
+    .returning({ id: treatmentBudget.id })
+  const optionId = randomUUID()
+  await ownerDb
+    .insert(treatmentBudgetOption)
+    .values({
+      id: optionId,
+      organizationId: c.orgId,
+      patientId: rodrigo,
+      budgetId: budget!.id,
+      position: 1,
+      isRecommended: true,
+    })
+  for (const planItemId of [corona, otherTooth])
+    await ownerDb.insert(treatmentBudgetItem).values({
+      organizationId: c.orgId,
+      patientId: rodrigo,
+      planId: plan!.id,
+      budgetId: budget!.id,
+      optionId,
+      planItemId,
+      title: "Corona",
+      currency: "PEN",
+      priceCents: 10_000,
+      decision: "aceptado",
+    })
+  await ownerDb
+    .update(treatmentBudget)
+    .set({
+      status: "aceptado",
+      presentedAt: new Date(Date.now() - 2 * DAY),
+      decidedAt: new Date(Date.now() - DAY),
+    })
+    .where(eq(treatmentBudget.id, budget!.id))
+  const argosCents = async () => {
+    const figure = argosFigure("lo_que_viene_sin_cita")?.sources[0]?.rows
+    const official = await runArgosQuery(appDb, {
+      orgId: c.orgId,
+      memberRole: "owner",
+      query: `select sum(v) as v from (${figure}) x`,
+    })
+    return Math.round(Number(official.rows[0]?.v ?? 0) * 100)
+  }
+  const rows = () =>
+    c.run((tx) =>
+      tx.execute<{
+        id: string
+        status: string
+        decisionStatus: string
+        phase: string
+        siteSystem: string | null
+        siteCode: string | null
+        due: boolean
+        waits: boolean
+        carried: boolean
+      }>(sql`
+        select i.id, i.status, i.decision_status as "decisionStatus", i.phase, i.site_system as "siteSystem", i.site_code as "siteCode",
+          ${toScheduleSql(planItemSql("i"), PHASES)} as due, ${awaitsBookedSql(planItemSql("i"), PHASES)} as waits,
+          exists (select 1 from appointment_plan_item x join appointment a on a.id = x.appointment_id
+            where x.plan_item_id = i.id and a.status in ('programada','confirmada') and a.starts_at > now()) as carried
+        from treatment_plan_item i where i.organization_id = ${c.orgId}`),
+    )
+  /** Código y SQL dicen lo mismo de cada tratamiento; devuelve lo que cuenta como sin cita. */
+  const agree = async () => {
+    const all = await rows()
+    const carried = new Set(all.filter((row) => row.carried).map((row) => row.id))
+    for (const row of all) {
+      expect(awaitsBooked(row, all, carried, PHASES), row.id).toBe(row.waits)
+      expect(isToSchedule(row, carried) && !awaitsBooked(row, all, carried, PHASES), row.id).toBe(
+        row.due,
+      )
+    }
+    return new Set(all.filter((row) => row.due).map((row) => row.id))
+  }
+  const facts = await rows()
+  expect(waitingFor(facts.find((row) => row.id === corona)!, facts, PHASES)?.id).toBe(endo)
+  for (const id of [otherTooth, sameRank, noSite, endo])
+    expect(waitingFor(facts.find((row) => row.id === id)!, facts, PHASES)).toBeNull()
+  // La endodoncia sin cita: la corona cuenta (Rodrigo ya está en «Por agendar» por la endodoncia).
+  expect((await agree()).has(corona)).toBe(true)
+  expect(await argosCents()).toBe(20_000)
+  // La sesión 2 reservada: la corona espera y no cuenta, ni en Inicio ni en Argos.
+  await bookIn(c, rodrigo, 2, [endo])
+  const due = await agree()
+  expect(due.has(corona)).toBe(false)
+  expect(due.has(otherTooth)).toBe(true)
+  // Argos suma solo la corona de la 36: la de la 46 espera a la endodoncia, que ya tiene su cita.
+  expect(await argosCents()).toBe(10_000)
+  // Pausada sin cita, la endodoncia ya no la retiene: vuelve a contar.
+  await ownerDb
+    .update(appointment)
+    .set({ status: "cancelada" })
+    .where(eq(appointment.patientId, rodrigo))
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ status: "suspendido" })
+    .where(eq(treatmentPlanItem.id, endo))
+  expect((await agree()).has(corona)).toBe(true)
 })
 
 it("la ventana de un control abre max(2 días, 25 % del intervalo) antes de su día, igual en código y en SQL (ADR 0152)", async () => {
@@ -296,4 +445,39 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
   // Con la línea prendida, avisa antes de que toque; lo que ya venció vuelve a esta fila.
   await c.run((tx) => setLine(tx, c.orgId, c.actor, "recordatorio_control", { enabled: true }))
   expect(await rowOf()).toMatchObject({ controls: 1, patients: 1 })
+})
+
+it("Pacientes filtrado por un atajo dice el paso de ese atajo; el paso único no cambia (QA del 8 nov)", async () => {
+  const c = await clinic()
+  const lia = await person(c, "Lía Paz")
+  // Control vencido y, además, algo aceptado sin cita: una sola fila y una cita para los dos (QA del 8 nov, entrega 3).
+  await ownerDb.insert(clinicalFollowUp).values({ organizationId: c.orgId, patientId: lia, kind: "mantenimiento", title: "Limpieza y control", dueAt: new Date(Date.now() - 20 * DAY), status: "pendiente" })
+  await accepted(c, lia)
+  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, lia, all))).toMatchObject({ kind: "agendar", action: { label: "Reservar lo aceptado y el control" } })
+  const rowIn = async (atajo?: string) =>
+    (await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes", limit: 100, ...(atajo ? { atajo } : {}) }, all))).items.find(
+      (item) => item.patient?.id === lia,
+    )?.nextStep
+  // La misma fila sin filtro, en «Control vencido» y en «Por agendar».
+  for (const atajo of [undefined, "control_por_reservar", "por_agendar"])
+    expect(await rowIn(atajo)).toMatchObject({ kind: "agendar", text: "Falta su cita: lo aceptado y el control vencido", actionLabel: "Reservar lo aceptado y el control" })
+
+  // Con un presupuesto armado y sin enviar, el paso único es enviarlo; «Por agendar» sigue diciendo lo aceptado.
+  const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: lia, title: "Otro plan" }).returning({ id: treatmentPlan.id })
+  const [item] = await ownerDb
+    .insert(treatmentPlanItem)
+    .values({ organizationId: c.orgId, patientId: lia, planId: plan!.id, title: "Resina", currency: "PEN", priceCents: 5_000 })
+    .returning({ id: treatmentPlanItem.id })
+  const [draft] = await ownerDb
+    .insert(treatmentBudget)
+    .values({ organizationId: c.orgId, patientId: lia, planId: plan!.id, budgetNumber: number++, title: "Resina", currency: "PEN", status: "borrador" })
+    .returning({ id: treatmentBudget.id })
+  const optionId = randomUUID()
+  await ownerDb.insert(treatmentBudgetOption).values({ id: optionId, organizationId: c.orgId, patientId: lia, budgetId: draft!.id, position: 1, isRecommended: true })
+  await ownerDb.insert(treatmentBudgetItem).values({
+    organizationId: c.orgId, patientId: lia, planId: plan!.id, budgetId: draft!.id, optionId, planItemId: item!.id, title: "Resina", currency: "PEN", priceCents: 5_000,
+  })
+  expect(await rowIn()).toMatchObject({ kind: "enviar" })
+  expect(await rowIn("por_agendar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado y el control" })
+  expect(await rowIn("control_por_reservar")).toMatchObject({ kind: "agendar", actionLabel: "Reservar lo aceptado y el control" })
 })

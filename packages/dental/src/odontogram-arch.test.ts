@@ -67,6 +67,16 @@ describe("arco del odontograma en herradura", () => {
     expect(layout.teeth[0]!.w).toBeGreaterThan(29)
   })
 
+  it("para elegir piezas (WCAG 2.5.8): las dos arcadas desde 380 px y, más angosto, una sola, con piezas de 24 × 24 px o más", () => {
+    // El selector de los formularios parte en una arcada bajo 380 px (`OdontogramArchPicker`).
+    const smallest = (layout: ArchLayout) => Math.min(...layout.teeth.flatMap((t) => [t.w, t.h]))
+    expect(smallest(archLayout(380, adult))).toBeGreaterThanOrEqual(24)
+    for (const w of [228, 278, 379]) {
+      expect(smallest(archLayout(w, { upper: adult.upper, lower: [] }, undefined, { single: "upper" })), `${w} px`).toBeGreaterThanOrEqual(24)
+      expect(smallest(archLayout(w, { upper: [], lower: child.lower }, undefined, { single: "lower" })), `${w} px`).toBeGreaterThanOrEqual(24)
+    }
+  })
+
   it("la cara vestibular mira hacia afuera: arriba los incisivos giran media vuelta, abajo no", () => {
     const layout = archLayout(360, adult)
     const turn = (n: number) => ((layout.teeth.find((t) => t.tooth === n)!.rotation % 360) + 360) % 360

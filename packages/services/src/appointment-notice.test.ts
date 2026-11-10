@@ -232,7 +232,7 @@ describe("al cambiar la cita, el agente le avisa", () => {
       const stored = await bodyOf(job!.sentMessageId)
       // En el mensaje guardado no queda el token: una referencia que el worker resuelve al enviar.
       expect(stored).toMatch(
-        /^Hola, Pedro\. Te esperamos en Clínica Sonríe, sede Centro: .+\. Antes de venir, completa tus datos aquí\.\n\nVer mi cita y mis datos: https:\/\/aviso-[0-9a-f-]+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
+        /^Hola, Pedro\. Te esperamos en Clínica Sonríe, sede Centro: .+\. Antes de venir, completa tus datos aquí\.\n\nVer mi cita y mis datos: https:\/\/aviso-[0-9a-f-]+\.odentia\.test\/pendientes\?abre=datos&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
       )
       const body = resolvePersonalLinkRefs(stored, KEY)
       // El enlace es el de esa persona: muestra esa cita y lo que le falta.

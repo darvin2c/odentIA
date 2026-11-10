@@ -626,7 +626,7 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
           ticket={ticket.result.ticket}
           remainingCents={ticket.result.remainingCents}
           receipt={ticket.result.receipt ?? null}
-          patientName={ticket.result.ticket.snapshot.patient.displayName}
+          patientName={ticket.result.ticket.snapshot.patient?.displayName ?? ""}
           branchName={ticket.result.ticket.snapshot.branch.name}
           locale={profile.locale}
           timeZone={cash.timezone}
@@ -635,7 +635,7 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
           onCollectRest={(currency) => {
             const { patient } = ticket.result.ticket.snapshot
             setTicket(null)
-            setCollecting({ patientId: patient.id, displayName: patient.displayName, currency })
+            if (patient) setCollecting({ patientId: patient.id, displayName: patient.displayName, currency })
           }}
           onChanged={() => {
             changed()

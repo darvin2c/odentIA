@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { CLINICAL_PRODUCTS } from "./products.js"
 import {
   APP_SURFACES,
   brandColorName,
@@ -135,12 +136,17 @@ describe("los sugeridos", () => {
     for (const color of SUGGESTED_BRAND_COLORS) expect(brandPalette(color.hex).reddish, color.name).toBe(false)
   })
 
-  it("el de fábrica va primero en cada producto", () => {
-    expect(suggestedBrandColors("dental")[0]).toMatchObject({ hex: PRODUCT_BRAND_COLORS.dental, factory: true })
-    const medical = suggestedBrandColors("medical")
-    expect(medical[0]).toMatchObject({ hex: PRODUCT_BRAND_COLORS.medical, factory: true })
-    expect(medical).toHaveLength(12)
-    expect(medical.filter((color) => color.factory)).toHaveLength(1)
+  it("el de fábrica va primero en cada producto, una sola vez y sin perder ninguno", () => {
+    for (const product of CLINICAL_PRODUCTS) {
+      const colors = suggestedBrandColors(product)
+      expect(colors[0], product).toMatchObject({ hex: PRODUCT_BRAND_COLORS[product], factory: true })
+      expect(colors, product).toHaveLength(12)
+      expect(colors.filter((color) => color.factory), product).toHaveLength(1)
+      expect(new Set(colors.map((color) => color.hex)).size, product).toBe(12)
+    }
+    // odentIA conserva el orden de siempre.
+    expect(suggestedBrandColors("dental").map((color) => color.hex)).toEqual(SUGGESTED_BRAND_COLORS.map((color) => color.hex))
+    expect(suggestedBrandColors("optical")[0]?.name).toBe("Verde")
   })
 })
 

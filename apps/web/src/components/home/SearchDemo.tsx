@@ -540,7 +540,7 @@ export default function SearchDemo({
               <span className="sd-title">
                 Preguntarle a {data.agent}: «{text}»
               </span>
-              <span className="sd-sub">Responde con los datos de la clínica que tú puedes ver</span>
+              <span className="sd-sub">{`Responde con los datos de ${data.place ?? "la clínica"} que tú puedes ver`}</span>
             </span>
             {shortcut}
           </div>

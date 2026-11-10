@@ -1118,6 +1118,16 @@ it("encounters: cierre guiado por requisitos, diagnósticos anulables, anulació
     },
   )
   expect(voidMissingReason.status).toBe(400)
+  // Lo que el diálogo muestra antes de confirmar: sin presupuesto, nada más que anular.
+  const preview = await app.request(`/patients/${patientId}/encounters/${encounterId}/void-preview`)
+  expect(preview.status).toBe(200)
+  expect(((await preview.json()) as { data: unknown }).data).toEqual({ budgets: [], blocked: false, confirm: [] })
+  const badBudgets = await app.request(`/patients/${patientId}/encounters/${encounterId}/void`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "Abierta por error", budgets: [{ id: "no-es-uuid", status: "presentado" }] }),
+  })
+  expect(badBudgets.status).toBe(400)
   const voidedEncounter = await app.request(
     `/patients/${patientId}/encounters/${encounterId}/void`,
     {

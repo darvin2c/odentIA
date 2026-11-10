@@ -30,6 +30,8 @@ export function taskAreasOfRole(role: string): TaskArea[] {
   if (role === "owner" || role === "admin") return ["administracion"]
   if (role === "reception") return ["recepcion"]
   if (role === "cashier") return ["caja"]
+  // Ventas (vistIA) hace lo de recepción y lo de caja.
+  if (role === "sales") return ["recepcion", "caja"]
   if (role === "clinician") return ["clinico"]
   return []
 }
@@ -643,6 +645,11 @@ export async function updateTask(
     conversationId: input.conversationId !== undefined ? input.conversationId : current.conversationId,
     opportunityId: input.opportunityId !== undefined ? input.opportunityId : current.opportunityId,
   }
+  // Lo que dejó el sistema con su propia fila (`kind`) es de esa persona: decidirlo
+  // cambia su ficha, así que no se mueve a otra.
+  const sameLinks =
+    next.contactId === current.contactId && next.conversationId === current.conversationId && next.opportunityId === current.opportunityId
+  if (linksChanged && current.kind && !sameLinks) throw validation("Este pendiente es de esa persona: no se puede pasar a otra")
   if (linksChanged) {
     // Si se limpia el contacto pero quedan hilos, se revincula automáticamente;
     // si hay discrepancia se rechaza.

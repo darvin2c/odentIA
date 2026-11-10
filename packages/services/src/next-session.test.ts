@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
-import { encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, encounter, serviceCatalog, treatmentPlanItem, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -15,8 +15,8 @@ import { createAppointment } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "./encounters.js"
-import { getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
+import { getPlanNextStep, getPlanNextSteps, planNextStepsOf } from "./plan-next.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -92,6 +92,11 @@ it("X5: «Qué sigue» pone lo empezado sin cita antes de lo aceptado sin empeza
   const later = await attention(f)
   const extra = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: later }))
   await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [extra.id] }))
+  // Mientras esa atención sigue en borrador, su presupuesto se está preparando: no se pide enviarlo.
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).kind).not.toBe("enviar")
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${later}`,
+  )
   const sending = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
   expect(sending.kind).toBe("enviar")
   expect(sending.detail).toContain("también falta la cita de la próxima sesión de Tratamiento propio")
@@ -128,7 +133,7 @@ it("Al firmar la sesión 1, el resultado dice la sesión que falta reservar; si 
       title: "Tratamiento propio",
       n: 1,
       m: 2,
-      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), n: 2, m: 2 },
+      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), professionalUserId: second.professionalUserId, n: 2, m: 2 },
     },
   ])
   const signed = await g.run((tx) => finalizeEncounter(tx, ...g.args, g.encounter.id))
@@ -137,7 +142,7 @@ it("Al firmar la sesión 1, el resultado dice la sesión que falta reservar; si 
       planItemId: other.id,
       title: "Tratamiento propio",
       serviceId: g.service.id,
-      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), n: 2, m: 2 },
+      booked: { appointmentId: second.id, startsAt: new Date(second.startsAt), professionalUserId: second.professionalUserId, n: 2, m: 2 },
       toBook: null,
     },
   ])
@@ -168,6 +173,44 @@ it("«Falta otra sesión» deja por reservar la que se sumó; lo que se termina 
   expect(audit!.next).toBe("sesion_en_curso")
 })
 
+it("la corona ya reservada se avisa al firmar si la endodoncia de su pieza pide otra sesión, salvo que esa sesión ya tenga cita antes (entrega 8)", async () => {
+  const f = await clinicalFixture()
+  const endo = await acceptedTreatment(f, 1)
+  const corona = await acceptedTreatment(f, 1)
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "basica" })
+    .where(eq(treatmentPlanItem.id, endo.id))
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ siteSystem: "FDI", siteCode: "46", phase: "rehabilitadora", title: "Corona" })
+    .where(eq(treatmentPlanItem.id, corona.id))
+  const book = await booker(f)
+  await book(3, [corona.id])
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  // Antes no decía nada: la corona quedaba en su cita aunque la endodoncia no hubiera terminado.
+  const closed = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, f.encounter.id, { addSessionPlanItemIds: [endo.id] }),
+  )
+  expect(closed.bookedAfter).toEqual([
+    expect.objectContaining({ planItemId: corona.id, title: "Corona", beforeTitle: endo.title }),
+  ])
+  // «Qué sigue» de recepción también lo avisa en la fila de la sesión que falta.
+  const steps = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  expect(steps.steps.find((step) => step.kind === "continuar")?.notice).toMatch(
+    /^Corona ya tiene cita el .+, y va después: revisa esa cita.$/,
+  )
+  // Con la sesión 2 reservada antes que la corona, no hay nada que revisar.
+  await book(1, [endo.id])
+  const second = await attention(f)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: endo.id }))
+  const again = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, second, { addSessionPlanItemIds: [endo.id] }),
+  )
+  expect(again.bookedAfter).toEqual([])
+})
+
 it("la cita de la propia atención no es la próxima sesión, aunque su hora sea después", async () => {
   const f = await clinicalFixture()
   const endo = await acceptedTreatment(f, 2)
@@ -181,4 +224,47 @@ it("la cita de la propia atención no es la próxima sesión, aunque su hora sea
   expect(closing.sessions.continuing).toEqual([{ planItemId: endo.id, title: "Tratamiento propio", n: 1, m: 2 }])
   const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   expect(closed.nextSessions).toMatchObject([{ planItemId: endo.id, booked: null, toBook: { n: 2, m: 2 } }])
+})
+
+it("la sesión 2 de una endodoncia se propone desde una semana, con su cita ya no falta nada y al terminarla queda su control al año (QA del 9 nov, repaso 3)", async () => {
+  const f = await clinicalFixture()
+  // El servicio de la clínica es una endodoncia de la biblioteca.
+  const [template] = await ownerDb
+    .insert(treatmentTemplate)
+    .values({ key: `endo-espera-${randomUUID()}`, name: "Endodoncia de prueba", kind: "endodoncia", scope: "tooth" })
+    .returning()
+  // Su familia de la biblioteca (lo dental se escribe en SQL: lo común no importa el esquema dental, ADR 0079).
+  await ownerDb.execute(
+    sql`insert into catalog.dental_template_rule (template_id, tooth_groups, family) values (${template!.id}, array['molar'], 'endodoncia-vital')`,
+  )
+  await ownerDb.update(serviceCatalog).set({ templateId: template!.id, source: "template" }).where(eq(serviceCatalog.id, f.service.id))
+  const endo = await acceptedTreatment(f, 2)
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const lima = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(date)
+  const inAWeek = lima(new Date(Date.now() + 7 * DAY))
+  expect(closed.nextSessions[0]?.toBook).toEqual({ n: 2, m: 2, from: inAWeek })
+  const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  expect(next).toMatchObject({ kind: "continuar", action: { label: "Reservar la sesión 2", date: inAWeek } })
+
+  // Con la sesión 2 reservada no dice «Nada pendiente»: dice cuándo es.
+  const book = await booker(f)
+  await book(8, [endo.id])
+  const booked = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  expect(booked).toMatchObject({ kind: "reservado", action: null, detail: "Con su cita" })
+  expect(booked.text).toMatch(/^Tratamiento propio · sesión 2 de 2: /)
+
+  // Terminada en la sesión 2, queda su control radiográfico al año.
+  const second = await attention(f)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: endo.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, second))
+  const controls = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.planItemId, endo.id))
+  const yearly = controls.find((row) => row.title === "Control radiográfico de la endodoncia")
+  expect(yearly).toMatchObject({ status: "pendiente", kind: "tratamiento" })
+  expect(yearly!.dueAt.getTime() - Date.now()).toBeGreaterThan(360 * DAY)
+  // Ese control lejano no responde «¿Cuándo vuelve?» en la próxima atención: se sigue preguntando.
+  const third = await attention(f)
+  const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, third))
+  expect(closing.controls.next).toBeNull()
 })

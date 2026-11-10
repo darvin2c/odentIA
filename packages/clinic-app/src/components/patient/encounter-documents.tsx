@@ -87,6 +87,29 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * formularios, imágenes y archivos. Una sola lectura para el bloque, su
  * resumen y el cierre: React Query comparte las consultas.
  */
+/**
+ * Lo que falta firmar lo dice el servidor (lo que la atención pide): uno preparado
+ * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) ya no se
+ * pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su enlace sigue su
+ * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide».
+ */
+export function consentsStillAsked<T extends { id: string; linkSentAt?: string | null; personSignedAt?: string | null }>(
+  pending: readonly T[],
+  needs: { data?: { data: ReadonlyArray<{ documentId: string | null }> }; isFetching: boolean },
+): { pendingSignatures: T[]; notAsked: T[]; toSign: T[] } {
+  const asked = needs.data && !needs.isFetching ? new Set(needs.data.data.map((need) => need.documentId)) : null
+  const notAsked = asked
+    ? pending.filter((doc) => !asked.has(doc.id) && !doc.linkSentAt && !doc.personSignedAt)
+    : []
+  const pendingSignatures = pending.filter((doc) => !notAsked.includes(doc))
+  return {
+    pendingSignatures,
+    notAsked,
+    // Lo firmado en su enlace solo falta confirmarlo; lo enviado de algo que ya no se pide, no se ofrece aquí.
+    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!asked || asked.has(doc.id))),
+  }
+}
+
 export function useEncounterDocuments(
   patientId: string,
   encounterId: string,
@@ -149,15 +172,20 @@ export function useEncounterDocuments(
     (leave) => leave.encounterId === encounterId && leave.status === "emitido",
   )
   const needList = needs.data?.data ?? []
-  const pendingSignatures = ownConsents.filter((doc) => doc.status === "pendiente")
+  const { pendingSignatures, notAsked, toSign } = consentsStillAsked(
+    ownConsents.filter((doc) => doc.status === "pendiente"),
+    needs,
+  )
   return {
     needs: needList,
+    /** Preparado para lo que dejó fuera: ya no hace falta firmarlo. */
+    notAsked,
     toPrepare: needList.filter((need) => need.status === "sin_preparar"),
     unpublished: needList.filter((need) => need.status === "sin_publicar"),
     consents: ownConsents,
     pendingSignatures,
     /** Lo que aún no firmó; lo firmado en su enlace solo falta confirmarlo. */
-    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt),
+    toSign,
     orders: ownOrders,
     prescriptions: ownPrescriptions,
     forms: ownForms,
@@ -505,10 +533,36 @@ export function EncounterDocumentsBlock({
                     Ver
                   </Button>
                 ) : null}
-                {canWrite ? <ConsentLinkActions document={doc} onChanged={refresh} /> : null}
+                {canWrite ? (
+                  <ConsentLinkActions
+                    document={doc}
+                    onChanged={refresh}
+                    // Lo firmado por enlace se confirma aquí, mientras la atención siga en curso.
+                    encounterId={detail.encounter.status === "borrador" ? encounterId : null}
+                  />
+                ) : null}
               </div>
             </li>
           ))}
+        {docs.notAsked.map((doc) => (
+          <li key={`fuera-${doc.id}`} className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
+              <span className="text-xs text-muted-foreground">
+                Ya no se pide: no lo aceptó o eligió otra opción
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label={`Ver ${doc.titleSnapshot}`}
+              onClick={() => setViewing({ kind: "consent", document: doc })}
+            >
+              Ver
+            </Button>
+          </li>
+        ))}
         {docs.consents
           .filter((doc) => doc.status === "firmado")
           .map((doc) => (

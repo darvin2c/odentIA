@@ -9,6 +9,7 @@
  */
 import {
   formatMoney,
+  ticketCreditSummary,
   ticketFooterLines,
   type TicketTender,
   ticketTenderTitle,
@@ -35,6 +36,7 @@ import {
   getTicketReceipt,
   type TicketFrozen,
 } from "./payments.js"
+import { ticketPartyOf } from "./ticket-party.js"
 
 export { ticketFormat } from "./document-kit.js"
 
@@ -69,6 +71,12 @@ export interface TicketSnapshot {
   numberLabel: string
   status: "vigente" | "anulado"
   voidReason: string | null
+  /**
+   * Cómo se dice a quién es: «Paciente», «Cliente» (una venta de mostrador a
+   * alguien) o nulo, una venta de mostrador sin nombre (ADR 0173).
+   */
+  partyLabel: "Paciente" | "Cliente" | null
+  /** El paciente, quien compró en el mostrador o «Venta de mostrador». */
   patientName: string
   patientDoc: string | null
   payerName: string | null
@@ -88,6 +96,9 @@ export interface TicketSnapshot {
   totalCents: number
   /** Lo que quedó por cobrar de esos conceptos al momento del cobro. */
   remainingCents: number | null
+  /** La cuenta al terminar el cobro (tickets desde el repaso 3 del 9 nov); nulo en los de antes. */
+  accountDueCents: number | null
+  accountCreditCents: number | null
   /** Lo que falta pagar de cada concepto (ADR 0083); null en tickets de antes. */
   pending: Array<{ description: string; amountCents: number; remainingCents: number }> | null
   /** El impuesto de lo cobrado, congelado al cobrar (ADR 0083). */
@@ -106,10 +117,11 @@ export interface TicketSnapshot {
 export async function buildTicketSnapshot(
   tx: Db,
   orgId: string,
-  patientId: string,
+  /** Nulo: el ticket de una venta de mostrador (ADR 0173). */
+  patientId: string | null,
   documentId: string,
 ): Promise<TicketSnapshot> {
-  const patientRow = await requirePatient(tx, orgId, patientId)
+  const patientRow = patientId === null ? null : await requirePatient(tx, orgId, patientId)
   const receipt = await getTicketReceipt(tx, orgId, patientId, documentId)
   const { ticket } = receipt
   const frozen = ticket.snapshot as TicketFrozen
@@ -131,9 +143,13 @@ export async function buildTicketSnapshot(
       .limit(1)
     payerName = payer?.displayName ?? null
   }
-  const docType = frozen.patient.docType === undefined ? patientRow.docType : frozen.patient.docType
+  const docType =
+    frozen.patient?.docType === undefined ? (patientRow?.docType ?? null) : frozen.patient.docType
   const docNumber =
-    frozen.patient.docNumber === undefined ? patientRow.docNumber : frozen.patient.docNumber
+    frozen.patient?.docNumber === undefined
+      ? (patientRow?.docNumber ?? null)
+      : frozen.patient.docNumber
+  const party = ticketPartyOf(frozen)
   const lines = frozen.lines ?? []
   const advance = lines.find((line) => line.chargeId === null) ?? null
   return {
@@ -142,7 +158,10 @@ export async function buildTicketSnapshot(
     numberLabel: String(ticket.ticketNumber).padStart(6, "0"),
     status: ticket.voidedAt ? "anulado" : "vigente",
     voidReason: ticket.voidReason ?? null,
-    patientName: frozen.patient.displayName || patientRow.displayName,
+    partyLabel: party.label,
+    patientName: frozen.patient
+      ? frozen.patient.displayName || (patientRow?.displayName ?? "")
+      : party.name,
     patientDoc: docNumber ? `${docType ?? "Doc."} ${docNumber}` : null,
     payerName,
     issuerName: frozen.issuer?.name || null,
@@ -169,6 +188,8 @@ export async function buildTicketSnapshot(
     changeCurrency: ticket.changeCurrency,
     totalCents: ticket.totalCents,
     remainingCents: frozen.remainingCents ?? null,
+    accountDueCents: frozen.accountDueCents ?? null,
+    accountCreditCents: frozen.accountCreditCents ?? null,
     pending: frozen.pending ?? null,
     taxes: frozen.taxes ?? null,
     tender: frozen.tender ?? null,
@@ -199,6 +220,19 @@ function thermalRule(kit: DocumentKit) {
 }
 
 function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
+  // Con saldo a favor: la suma de las líneas, lo que se restó y lo pagado hoy, para que
+  // cuadre a la vista (QA del 9 nov). Solo presentación: lo congelado no cambia.
+  const credit = ticketCreditSummary({
+    lineCents: snap.lines.map((line) => line.amountCents),
+    advanceCents: snap.advanceCents,
+    creditAppliedCents: snap.creditAppliedCents,
+    totalCents: snap.totalCents,
+  })
+  if (credit) {
+    // Con una sola línea, la suma es esa línea: no se repite.
+    if (snap.lines.length + (snap.advanceCents ? 1 : 0) > 1) moneyRow(kit, "Suma", money(credit.sumCents))
+    moneyRow(kit, "Saldo a favor usado", `−${money(credit.creditCents)}`)
+  }
   if (snap.taxes) {
     // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa.
     moneyRow(kit, "Subtotal", money(snap.taxes.subtotalCents))
@@ -209,11 +243,11 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
   }
   if (kit.thermal) {
     kit.gap(2)
-    kit.total("TOTAL", money(snap.totalCents))
+    kit.total(credit ? "PAGADO HOY" : "TOTAL", money(snap.totalCents))
   } else {
     kit.gap(4)
     kit.rule({ tone: "ink" })
-    kit.total({ text: "Total", face: "sansSemi" }, money(snap.totalCents), { before: 5 })
+    kit.total({ text: credit ? "Pagado hoy" : "Total", face: "sansSemi" }, money(snap.totalCents), { before: 5 })
   }
 }
 
@@ -230,8 +264,6 @@ function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) 
     )
     if (method.reference) smallNote(kit, `Operación ${method.reference}`)
   }
-  if (snap.creditAppliedCents > 0)
-    moneyRow(kit, "Saldo a favor usado", money(snap.creditAppliedCents))
   if (snap.cashReceivedCents != null) moneyRow(kit, "Recibido", paid(snap.cashReceivedCents))
   if (snap.changeCents != null && snap.changeCents > 0)
     moneyRow(
@@ -254,22 +286,54 @@ function payoutRows(
     moneyRow(kit, label, formatMoney(payout.amountCents, payout.currency, locale))
 }
 
+/**
+ * Si el ticket dice cómo queda la cuenta: lo que falta o lo que queda a favor. Los de antes
+ * guardaban solo lo que faltaba de sus conceptos.
+ */
+function owesOrKeeps(snap: TicketSnapshot): boolean {
+  if (snap.accountDueCents != null) return snap.accountDueCents !== (snap.accountCreditCents ?? 0)
+  return snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0
+}
+
 /** Lo que falta del tratamiento va aparte del pago, con su nombre, y solo si falta algo. */
 function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
-  if (snap.remainingCents == null || snap.remainingCents <= 0 || snap.lines.length === 0) return
+  if (!owesOrKeeps(snap)) return
+  // Una sola cifra, como su cuenta: lo que tiene a favor ya se descuenta de lo que falta.
+  const gross = snap.accountDueCents ?? snap.remainingCents ?? 0
+  const credit = snap.accountCreditCents ?? 0
+  const owed = Math.max(0, gross - credit)
   // En la hoja, «Le falta pagar» ya es el título de la sección.
-  moneyRow(
-    kit,
-    kit.thermal ? "Le falta pagar" : "Por este tratamiento",
-    money(snap.remainingCents),
-    { strong: true },
-  )
+  if (owed > 0)
+    moneyRow(
+      kit,
+      kit.thermal ? "Le falta pagar" : snap.accountDueCents != null ? "En esta moneda" : "Por este tratamiento",
+      money(owed),
+      { strong: true },
+    )
+  if (owed > 0 && credit > 0) smallNote(kit, `Ya descuenta ${money(Math.min(gross, credit))} que tiene a favor.`)
+  if (credit > gross) moneyRow(kit, "Le queda a favor", money(credit - gross))
   for (const item of snap.pending ?? []) {
     smallNote(
       kit,
       `${item.description}: pagó ${money(item.amountCents - item.remainingCents)} de ${money(item.amountCents)}`,
     )
   }
+}
+
+/**
+ * A quién es, en el rollo: «Paciente: …», «Cliente: …» o, en una venta de
+ * mostrador sin nombre, «Venta de mostrador» solo (ADR 0173).
+ */
+function partyLine(kit: DocumentKit, label: "Paciente" | "Cliente" | null, name: string) {
+  kit.text(label ? [{ text: `${label}: `, face: "sansSemi" }, name] : [{ text: name, face: "sansSemi" }], {
+    size: SIZE.second,
+    leading: 1.4,
+  })
+}
+
+/** Lo mismo en la hoja: el dato «Paciente» o «Cliente»; sin nombre, «Venta» de mostrador. */
+function partyFact(label: "Paciente" | "Cliente" | null, name: string): { label: string; value: string } {
+  return label ? { label, value: name } : { label: "Venta", value: "De mostrador" }
 }
 
 export async function renderTicketPdf(
@@ -306,10 +370,7 @@ export async function renderTicketPdf(
     kit.text(shortDayTime(snap.paidAt, org), { size: SIZE.label, leading: 1.4 })
     voided()
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, snap.patientName], {
-      size: SIZE.second,
-      leading: 1.4,
-    })
+    partyLine(kit, snap.partyLabel, snap.patientName)
     if (snap.patientDoc) kit.text(snap.patientDoc, { size: SIZE.label, leading: 1.4 })
     if (snap.payerName && snap.payerName !== snap.patientName)
       kit.text(`Pagó: ${snap.payerName}`, { size: SIZE.label, leading: 1.4 })
@@ -333,7 +394,7 @@ export async function renderTicketPdf(
         leading: 1.4,
       })
     howPaid(kit, snap, money)
-    if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
+    if (owesOrKeeps(snap)) {
       thermalRule(kit)
       stillOwed(kit, snap, money)
     }
@@ -349,8 +410,7 @@ export async function renderTicketPdf(
   kit.facts(
     [
       {
-        label: "Paciente",
-        value: snap.patientName,
+        ...partyFact(snap.partyLabel, snap.patientName),
         strong: true,
         ...(snap.patientDoc ? { sub: snap.patientDoc } : {}),
       },
@@ -403,8 +463,9 @@ export async function renderTicketPdf(
     after: 3,
   })
   howPaid(kit, snap, money)
-  if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
-    kit.subheading("Le falta pagar", { face: "sansSemi", before: 14, after: 3 })
+  if (owesOrKeeps(snap)) {
+    const owes = (snap.accountDueCents ?? snap.remainingCents ?? 0) > (snap.accountCreditCents ?? 0)
+    kit.subheading(owes ? "Le falta pagar" : "Su cuenta", { face: "sansSemi", before: 14, after: 3 })
     stillOwed(kit, snap, money)
   }
   return kit.finish()
@@ -512,7 +573,8 @@ export async function getRefundReceiptPdf(
 export async function renderReturnPdf(
   tx: Db,
   orgId: string,
-  patientId: string,
+  /** Nulo: la devolución de una venta de mostrador (ADR 0173). */
+  patientId: string | null,
   returnId: string,
   paper?: string | null,
 ): Promise<{ bytes: Uint8Array; filename: string; numberLabel: string; tradeName: string }> {
@@ -526,14 +588,15 @@ export async function renderReturnPdf(
   const numberLabel = String(row.returnNumber).padStart(6, "0")
   const ticketLabel = String(frozen.ticket.number).padStart(6, "0")
   const label = `Devolución N.º ${numberLabel}`
+  const party = ticketPartyOf(frozen)
   const kit = await DocumentKit.open(org, ticketFormat(org, paper), {
     title: label,
     docLabel: label,
-    patientLabel: frozen.patient.displayName,
+    patientLabel: party.name,
     legalNote: ticketFooterLines(frozen.notice).join(" "),
     createdAt: row.createdAt,
   })
-  const patientDoc = frozen.patient.docNumber
+  const patientDoc = frozen.patient?.docNumber
     ? `${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}`
     : null
   if (kit.thermal) {
@@ -562,10 +625,7 @@ export async function renderReturnPdf(
       leading: 1.4,
     })
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, frozen.patient.displayName], {
-      size: SIZE.second,
-      leading: 1.4,
-    })
+    partyLine(kit, party.label, party.name)
     if (patientDoc) kit.text(patientDoc, { size: SIZE.label, leading: 1.4 })
     if (frozen.issuer.name)
       kit.text(`Caja: ${frozen.issuer.name}`, { size: SIZE.label, leading: 1.4 })
@@ -593,8 +653,7 @@ export async function renderReturnPdf(
     kit.facts(
       [
         {
-          label: "Paciente",
-          value: frozen.patient.displayName,
+          ...partyFact(party.label, party.name),
           strong: true,
           ...(patientDoc ? { sub: patientDoc } : {}),
         },

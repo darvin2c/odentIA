@@ -1,5 +1,6 @@
 import type { Db } from "@odentia/db"
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { NEUTRAL_TIMEZONE } from "./locale.js"
 
 /**
  * Lo que falta agendar, con una sola regla para cada pregunta (propuestas O1 y
@@ -8,7 +9,13 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
  *
  * - **Aceptó y no tiene cita**: un tratamiento aceptado que aún se hace
  *   (pendiente, programado o en curso) y que ninguna cita por venir lleva. Otra cita de la
- *   persona no lo agenda: «Qué sigue» lo dice («su cita del 12 dic no lo lleva»).
+ *   persona no lo agenda: «Qué sigue» lo dice («su cita del 12 dic no lo lleva»). Lo que va
+ *   después de otro tratamiento de la misma pieza que ya tiene su cita (la corona tras la
+ *   endodoncia, con la sesión 2 reservada) no cuenta mientras esa cita esté por venir.
+ * - **Va después** (`waitingFor`): lo aceptado sin empezar espera a otro aceptado y sin
+ *   terminar (o pausado) de la misma persona y la misma pieza, de una fase anterior del plan.
+ *   Es un aviso, nunca un freno: «Qué sigue», «Hoy viene a…» y el enlace lo dicen, y la
+ *   reserva se puede hacer igual.
  * - **Control vencido sin cita**: un control pendiente cuyo día ya pasó, de una
  *   persona sin ninguna cita por venir. A un control le sirve cualquier visita:
  *   la cita no tiene que llevarlo.
@@ -55,13 +62,174 @@ export function carriedByUpcomingSql(
       and carrier_appointment.status in (${list(LIVE_APPOINTMENT_STATUSES)}) and carrier_appointment.starts_at > ${now})`
 }
 
-/** Aceptó y no tiene cita, en SQL, sobre una fila de `treatment_plan_item` (o un alias). */
+/**
+ * Un tratamiento del plan con lo que pide la regla «va después»: su fase del plan y su sitio
+ * (la pieza). Las fases son las del producto (`productHooks.planPhases`), en el orden en que
+ * se hacen: latidIA tiene una sola y nunca espera nada.
+ */
+export interface SequencedItem {
+  id: string
+  status: string
+  decisionStatus: string
+  phase: string
+  siteSystem: string | null
+  siteCode: string | null
+}
+
+/** Lo que espera empezar: lo único que puede ir después de otro. */
+const NOT_STARTED_STATUSES = ["pendiente", "programado"] as const
+/** Lo que todavía va antes: aceptado y sin terminar, también pausado (retomarlo es lo primero). */
+const BEFORE_STATUSES = [...TO_SCHEDULE_STATUSES, "suspendido"] as const
+
+/** `before` va antes de `item`: misma pieza, aceptado y sin terminar, de una fase anterior. */
+function goesBefore(
+  item: SequencedItem,
+  before: SequencedItem,
+  phases: readonly string[],
+): boolean {
+  const rank = (row: SequencedItem) => phases.indexOf(row.phase)
+  return (
+    (NOT_STARTED_STATUSES as readonly string[]).includes(item.status) &&
+    !!item.siteCode &&
+    before.id !== item.id &&
+    before.decisionStatus === "aceptado" &&
+    (BEFORE_STATUSES as readonly string[]).includes(before.status) &&
+    before.siteSystem === item.siteSystem &&
+    before.siteCode === item.siteCode &&
+    rank(before) >= 0 &&
+    rank(item) > rank(before)
+  )
+}
+
+/**
+ * Lo que va antes de `item` (QA de la ficha del 9 nov; en un solo lugar desde la entrega 8):
+ * otro tratamiento aceptado y sin terminar de la misma pieza, en una fase anterior. Si hay
+ * varios, el que ya empezó: es el que se está terminando. `items` son los de la misma persona.
+ */
+export function waitingFor<T extends SequencedItem>(
+  item: T,
+  items: readonly T[],
+  phases: readonly string[],
+): T | null {
+  const before = items.filter((other) => goesBefore(item, other, phases))
+  return before.find((other) => other.status === "en_curso") ?? before[0] ?? null
+}
+
+/**
+ * Va después de otro tratamiento que ya tiene su cita por venir (`carried`): mientras tanto
+ * no cuenta como «aceptó y no tiene cita». Si lo de antes no tiene cita, la persona ya
+ * aparece por eso; si su cita pasó, se pausó sin cita o terminó, vuelve a contar.
+ */
+export function awaitsBooked(
+  item: SequencedItem,
+  items: readonly SequencedItem[],
+  carried: ReadonlySet<string>,
+  phases: readonly string[],
+): boolean {
+  return items.some((other) => carried.has(other.id) && goesBefore(item, other, phases))
+}
+
+/** Las columnas de un tratamiento del plan con las que trabajan estas reglas en SQL. */
+export interface PlanItemSql {
+  id: SQLWrapper
+  organizationId: SQLWrapper
+  patientId: SQLWrapper
+  status: SQLWrapper
+  decisionStatus: SQLWrapper
+  phase: SQLWrapper
+  siteSystem: SQLWrapper
+  siteCode: SQLWrapper
+}
+
+/** Esas columnas sobre un alias de `treatment_plan_item` («i», «pi»). */
+export function planItemSql(alias: string): PlanItemSql {
+  const col = (name: string) => sql.raw(`${alias}.${name}`)
+  return {
+    id: col("id"),
+    organizationId: col("organization_id"),
+    patientId: col("patient_id"),
+    status: col("status"),
+    decisionStatus: col("decision_status"),
+    phase: col("phase"),
+    siteSystem: col("site_system"),
+    siteCode: col("site_code"),
+  }
+}
+
+/** El orden de las fases en SQL (`array_position` empieza en 1; fuera de la lista, nulo). */
+const phaseRankSql = (phases: readonly string[], phase: SQLWrapper) =>
+  phases.length
+    ? sql`array_position(array[${list(phases)}]::text[], ${phase}::text)`
+    : sql`null::int`
+
+/** `before` va antes de `item` (`waitingFor`), en SQL: un rango nulo deja la comparación falsa. */
+export function goesBeforeSql(
+  item: PlanItemSql,
+  before: PlanItemSql,
+  phases: readonly string[],
+): SQL {
+  return sql`(${item.status} in (${list(NOT_STARTED_STATUSES)}) and ${item.siteCode} is not null
+    and ${before.organizationId} = ${item.organizationId} and ${before.patientId} = ${item.patientId}
+    and ${before.id} <> ${item.id} and ${before.decisionStatus} = 'aceptado'
+    and ${before.status} in (${list(BEFORE_STATUSES)})
+    and ${before.siteSystem} is not distinct from ${item.siteSystem} and ${before.siteCode} = ${item.siteCode}
+    and ${phaseRankSql(phases, before.phase)} < ${phaseRankSql(phases, item.phase)})`
+}
+
+/** Va después de otro tratamiento con su cita por venir (`awaitsBooked`), en SQL. */
+export function awaitsBookedSql(
+  item: PlanItemSql,
+  phases: readonly string[],
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  const before = planItemSql("before_item")
+  return sql`exists (select 1 from treatment_plan_item before_item where ${goesBeforeSql(item, before, phases)}
+    and ${carriedByUpcomingSql(before, now)})`
+}
+
+/**
+ * Hasta cuántos días por venir puede abrir su ventana el control de un tratamiento para ir en la
+ * misma cita que lo aceptado de esa pieza (la corona con el control de su endodoncia). Supuesto a
+ * confirmar con una clínica: el control de corto plazo de una endodoncia, no el radiográfico de
+ * meses. La usan «Qué sigue» y la reserva desde el cierre de la atención.
+ */
+export const PAIRED_CONTROL_DAYS = 30
+
+/** El control abre su ventana dentro de `PAIRED_CONTROL_DAYS`: puede ir en la cita de lo aceptado. */
+export function pairsWithAccepted(
+  control: { dueAt: Date; createdAt: Date },
+  now: Date = new Date(),
+): boolean {
+  return controlWindowStart(control).getTime() <= now.getTime() + PAIRED_CONTROL_DAYS * 86_400_000
+}
+
+/** De `ids`, los que van después de otro tratamiento de la persona (`waitingFor`). */
+export async function waitingItemIds(
+  tx: Db,
+  orgId: string,
+  ids: readonly string[],
+  phases: readonly string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set()
+  const rows = await tx.execute<{ id: string }>(sql`
+    select i.id from treatment_plan_item i
+    where i.organization_id = ${orgId} and i.id in (${list(ids)})
+      and exists (select 1 from treatment_plan_item before_item where ${goesBeforeSql(planItemSql("i"), planItemSql("before_item"), phases)})`)
+  return new Set(rows.map((row) => row.id))
+}
+
+/**
+ * Aceptó y no tiene cita, en SQL, sobre una fila de `treatment_plan_item` (o un alias), sin lo
+ * que va después de otro tratamiento que ya tiene su cita. En código: `isToSchedule` y no
+ * `awaitsBooked`. Las fases, las del producto de la clínica (`productHooks(...).planPhases`).
+ */
 export function toScheduleSql(
-  item: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; decisionStatus: SQLWrapper },
+  item: PlanItemSql,
+  phases: readonly string[],
   now: SQLWrapper = sql`now()`,
 ): SQL {
   return sql`(${item.decisionStatus} = 'aceptado' and ${item.status} in (${list(TO_SCHEDULE_STATUSES)})
-    and not ${carriedByUpcomingSql(item, now)})`
+    and not ${carriedByUpcomingSql(item, now)} and not ${awaitsBookedSql(item, phases, now)})`
 }
 
 /**
@@ -71,6 +239,7 @@ export function toScheduleSql(
  */
 export function budgetToScheduleSql(
   budget: { id: SQLWrapper; organizationId: SQLWrapper },
+  phases: readonly string[],
   now: SQLWrapper = sql`now()`,
   extra: SQL = sql``,
 ): SQL {
@@ -79,15 +248,7 @@ export function budgetToScheduleSql(
       and scheduled_item.id = scheduled_line.plan_item_id
     where scheduled_line.organization_id = ${budget.organizationId} and scheduled_line.budget_id = ${budget.id}
       and scheduled_line.decision = 'aceptado' ${extra}
-      and ${toScheduleSql(
-        {
-          id: sql`scheduled_item.id`,
-          organizationId: sql`scheduled_item.organization_id`,
-          status: sql`scheduled_item.status`,
-          decisionStatus: sql`scheduled_item.decision_status`,
-        },
-        now,
-      )})`
+      and ${toScheduleSql(planItemSql("scheduled_item"), phases, now)})`
 }
 
 /**
@@ -152,17 +313,29 @@ export function sessionsDoneSql(
       ${exceptAppointment ? sql`and done_encounter.appointment_id is distinct from ${exceptAppointment}` : sql``})`
 }
 
-/** La cita está en pie para el tratamiento (ver arriba), sobre una fila de `appointment` (o un alias). */
+/**
+ * La cita está en pie para el tratamiento (ver arriba), sobre una fila de `appointment` (o un alias).
+ * Una cita cuya hora ya pasó cuenta solo si es de hoy, en el día de la clínica, y la persona
+ * llegó o se la está atendiendo: es la sesión que ocurre ahora. Una de un día anterior que
+ * nadie cerró (llegó, o su atención quedó abierta, y nadie la marcó atendida) no va a volver a
+ * ocurrir: si su atención registró la sesión, ya cuenta como hecha (`sessionsDoneSql`), y si
+ * no, la sesión sigue por reservar (QA del 8 nov, entrega 3: «Reservar la sesión 2» contaba una
+ * cita ya pasada).
+ */
 export function standingForSql(
   appointment: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; startsAt: SQLWrapper; arrivedAt: SQLWrapper },
   itemId: SQLWrapper,
   now: SQLWrapper = sql`now()`,
 ): SQL {
+  const zone = sql`coalesce(nullif((select standing_zone.timezone from org_profile standing_zone
+    where standing_zone.organization_id = ${appointment.organizationId}), ''), ${NEUTRAL_TIMEZONE})`
   return sql`(${appointment.status} in (${list(LIVE_APPOINTMENT_STATUSES)})
-    and (${appointment.startsAt} > ${now} or ${appointment.arrivedAt} is not null
-      or exists (select 1 from encounter standing_encounter
-        where standing_encounter.organization_id = ${appointment.organizationId}
-          and standing_encounter.appointment_id = ${appointment.id} and standing_encounter.status <> 'anulada'))
+    and (${appointment.startsAt} > ${now}
+      or ((${appointment.startsAt} at time zone ${zone})::date = (${now} at time zone ${zone})::date
+        and (${appointment.arrivedAt} is not null
+          or exists (select 1 from encounter standing_encounter
+            where standing_encounter.organization_id = ${appointment.organizationId}
+              and standing_encounter.appointment_id = ${appointment.id} and standing_encounter.status <> 'anulada'))))
     and not exists (select 1 from encounter standing_done
       join encounter_procedure standing_procedure on standing_procedure.organization_id = standing_done.organization_id
         and standing_procedure.encounter_id = standing_done.id
@@ -209,6 +382,71 @@ export async function sessionCountsOf(tx: Db, orgId: string, itemIds: readonly s
     from treatment_plan_item counted
     where counted.organization_id = ${orgId} and counted.id in (${list(ids)})`)
   return new Map(rows.map((row) => [row.id, { done: Number(row.done), booked: Number(row.booked) }]))
+}
+
+/**
+ * En qué sesión quedó un tratamiento con una atención ya hecha: `n` cuenta las
+ * atenciones no anuladas con un procedimiento vigente del tratamiento hasta
+ * esta (por su inicio, y por su id si empezaron a la vez), con la regla de
+ * `sessionsDoneSql`; `m`, las previstas; `finished`, que esta fue la que lo
+ * terminó (realizado, y ninguna hecha después).
+ */
+export interface EncounterSession {
+  encounterId: string
+  planItemId: string
+  n: number
+  m: number
+  finished: boolean
+}
+
+/** La clave de `encounterSessionsOf`: la atención y el tratamiento. */
+export const encounterSessionKey = (encounterId: string, planItemId: string) => `${encounterId}:${planItemId}`
+
+/**
+ * La sesión de cada tratamiento hecho en esas atenciones, en una sola consulta.
+ * Lo usan la Historia (la tarjeta de la atención) y la historia de la pieza,
+ * para decir «sesión 1 de 2» y no «Realizado» con el tratamiento en curso
+ * (tercer repaso del 9 nov, E8 y E12). Las anuladas no tienen sesión.
+ */
+export async function encounterSessionsOf(
+  tx: Db,
+  orgId: string,
+  encounterIds: readonly string[],
+): Promise<Map<string, EncounterSession>> {
+  const ids = [...new Set(encounterIds)]
+  if (ids.length === 0) return new Map()
+  const item = { id: sql`session_item.id`, organizationId: sql`session_item.organization_id` }
+  const rows = await tx.execute<{ encounter_id: string; plan_item_id: string; status: string; m: number; n: number; done: number }>(sql`
+    select distinct here.encounter_id, session_item.id as plan_item_id, session_item.status,
+      session_item.planned_sessions as m,
+      (select count(distinct earlier_procedure.encounter_id)::int from encounter_procedure earlier_procedure
+        join encounter earlier on earlier.organization_id = earlier_procedure.organization_id
+          and earlier.id = earlier_procedure.encounter_id
+        where earlier_procedure.organization_id = session_item.organization_id
+          and earlier_procedure.plan_item_id = session_item.id
+          and earlier_procedure.voided_at is null and earlier.status <> 'anulada'
+          and (earlier.started_at, earlier.id) <= (this_encounter.started_at, this_encounter.id)) as n,
+      ${sessionsDoneSql(item)} as done
+    from encounter_procedure here
+    join encounter this_encounter on this_encounter.organization_id = here.organization_id
+      and this_encounter.id = here.encounter_id
+    join treatment_plan_item session_item on session_item.organization_id = here.organization_id
+      and session_item.id = here.plan_item_id
+    where here.organization_id = ${orgId} and here.encounter_id in (${list(ids)})
+      and here.voided_at is null and this_encounter.status <> 'anulada'`)
+  return new Map(
+    rows.map((row) => {
+      const n = Number(row.n)
+      const session: EncounterSession = {
+        encounterId: row.encounter_id,
+        planItemId: row.plan_item_id,
+        n,
+        m: Number(row.m),
+        finished: row.status === "realizado" && n >= Number(row.done),
+      }
+      return [encounterSessionKey(row.encounter_id, row.plan_item_id), session]
+    }),
+  )
 }
 
 /** La persona no tiene ninguna cita por venir. */
@@ -398,13 +636,17 @@ export function overdueControlSql(
 }
 
 /** Pacientes activos y que no son de prueba con algo aceptado y sin cita: Pacientes › «Por agendar» y su fila de Inicio. */
-export async function patientsToSchedule(tx: Db, orgId: string): Promise<string[]> {
+export async function patientsToSchedule(
+  tx: Db,
+  orgId: string,
+  phases: readonly string[],
+): Promise<string[]> {
   const rows = await tx.execute<{ id: string }>(sql`
     select distinct p.id from treatment_plan_item i
     join patient p on p.organization_id = i.organization_id and p.id = i.patient_id
     join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active and not pp.is_test
     where i.organization_id = ${orgId}
-      and ${toScheduleSql({ id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` })}`)
+      and ${toScheduleSql(planItemSql("i"), phases)}`)
   return rows.map((row) => row.id)
 }
 

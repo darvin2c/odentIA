@@ -79,13 +79,16 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
       // Sin aceptar, no tiene sesiones por reservar.
       sessionsLeft: 0,
       nextSession: { n: 1, m: 1 },
+      // Solo el título de lo que va antes en su pieza, sin pieza ni diagnóstico (entrega 8).
+      after: null,
+      unbooked: false,
     },
   ])
   expect(view.followUps).toHaveLength(1)
   expect(Object.keys(view.followUps[0]).sort()).toEqual(
     // La sede y el inicio de su ventana son de agenda: dónde reservar y desde cuándo le sirve una cita (ADR 0152),
     // y la cita por venir que le sirve sin ser la suya (`servedBy`).
-    ["appointment", "branchId", "dueAt", "id", "legacyScheduledAt", "overdue", "patientId", "servedBy", "status", "title", "windowFrom"].sort(),
+    ["appointment", "branchId", "dueAt", "id", "legacyScheduledAt", "originProfessionalUserId", "overdue", "patientId", "servedBy", "status", "title", "windowFrom"].sort(),
   )
   expect(JSON.stringify(view)).not.toMatch(/reservad[oa]|priceCents|toothNumber|diagnosis/)
 

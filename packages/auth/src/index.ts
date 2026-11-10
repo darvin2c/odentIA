@@ -1,4 +1,4 @@
-import { brandEmailColors, type ClinicalProduct, productWords } from "@odentia/clinical"
+import { BASE_PRODUCT, brandEmailColors, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   changeEmailConfirmationTemplate,
@@ -20,6 +20,7 @@ import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
 import { legalAcceptance } from "./terms.js"
 import { keepTwoFactorWhileRequired } from "./team-two-factor.js"
+import { PRODUCT_ROLES } from "./permissions.js"
 
 export interface CreateAuthOptions {
   db: Db
@@ -222,9 +223,31 @@ export function createAuth({
             team: [],
             ac: ["read"],
           }),
+          // Ventas y Taller (vistIA, ADR 0171): como los demás roles operativos.
+          sales: defaultAc.newRole({
+            organization: [],
+            member: [],
+            invitation: [],
+            team: [],
+            ac: ["read"],
+          }),
+          workshop: defaultAc.newRole({
+            organization: [],
+            member: [],
+            invitation: [],
+            team: [],
+            ac: ["read"],
+          }),
         },
         organizationHooks: {
           beforeUpdateOrganization: lockClinicIdentityFields,
+          // Ventas y Taller son de vistIA (ADR 0171): en otro producto no se invitan ni se asignan.
+          beforeCreateInvitation: async ({ invitation }) => {
+            await requireProductRole(ownerDb, invitation.organizationId, invitation.role)
+          },
+          beforeUpdateMemberRole: async ({ member, newRole }) => {
+            await requireProductRole(ownerDb, member.organizationId, newRole)
+          },
           // La clínica nace con el contrato de encargo que aceptó quien la abre; si no lo
           // aceptó (entró invitado a otra), se le pide en la clínica al entrar.
           afterCreateOrganization: async ({ organization: org, user }) => {
@@ -271,6 +294,17 @@ async function clinicMailAccent(db: Db, orgId: string) {
  * comercial (ADR 0043). Una dirección de logo guardada a mano podría apuntar
  * al de otra clínica y borrarlo al cambiarlo.
  */
+/** Un rol (o varios, separados por coma) que no es del producto de la clínica no se invita ni se asigna. */
+export async function requireProductRole(ownerDb: Db, organizationId: string, role: string): Promise<void> {
+  const [row] = (await ownerDb.execute(
+    sql`select product from org_profile where organization_id = ${organizationId}`,
+  )) as unknown as Array<{ product: string }>
+  const product = isClinicalProduct(row?.product) ? row.product : BASE_PRODUCT
+  const allowed: readonly string[] = PRODUCT_ROLES[product]
+  if (role.split(",").some((one) => !allowed.includes(one.trim())))
+    throw new APIError("BAD_REQUEST", { message: "Ese rol no está en este producto" })
+}
+
 export async function lockClinicIdentityFields({ organization: changes }: { organization: Record<string, unknown> }): Promise<void> {
   if ("logo" in changes || "name" in changes) {
     throw APIError.from("FORBIDDEN", {

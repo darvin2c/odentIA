@@ -25,6 +25,21 @@ import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
  * Un producto que no hace nada en un momento usa `NO_PRODUCT_HOOKS`.
  */
 
+/**
+ * Lo que una venta copia en su pedido (ADR 0171; vistIA: la receta de lentes
+ * vigente): lo que se muestra al elegirla y la copia que va al taller, que así no
+ * abre la historia.
+ */
+export interface SaleReference {
+  id: string
+  /** «Receta de anteojos · 12/03/2026». */
+  label: string
+  /** Una línea por ojo, como en la receta. */
+  lines: string[]
+  /** Vencida o sin verificar: se informa, no impide vender. */
+  notices: string[]
+}
+
 /** Lo que un producto agrega a una respuesta común, con su nombre (`odontogram`, `periodontal`…). */
 export type ProductParts = Record<string, unknown>
 
@@ -414,8 +429,46 @@ export interface ProductHooks {
   planPhases: readonly string[]
   /** La fase que propone un tipo de tratamiento de la biblioteca. */
   phaseFor(kind: string | null): string
+  /**
+   * Cuántos días, como mínimo, entre una sesión y la siguiente de un tipo de tratamiento de la
+   * biblioteca (odentIA: la endodoncia con medicación intraconducto, una semana). Sin él, o sin
+   * nada que decir, la siguiente se propone desde mañana.
+   */
+  sessionGapDays?(kind: string | null): number | null
+  /**
+   * Los tipos de tratamiento de la biblioteca que se hacen de una vez y nunca piden otra sesión
+   * (odentIA: consultas, evaluaciones y radiografías). Sin él, ninguno.
+   */
+  oneOffKinds?: readonly string[]
   /** El nombre de una fase en el papel; sin nombre (una sola fase), el presupuesto no habla de etapas. */
   phaseWords?(phase: string): string | null
+  /**
+   * Lo que el producto agrega a una demo para presentar ya armada (vistIA: la
+   * receta de anteojos de cada examen de la vista firmado). Corre al armarla y cada
+   * noche, después de cerrar las visitas del día: debe poder repetirse. Sin él, nada.
+   */
+  demoBuilt?(tx: Db, orgId: string, now?: Date): Promise<void>
+  /**
+   * Lo que el producto copia en el pedido de una venta (ADR 0171; vistIA: la receta
+   * de lentes vigente). `current`, lo que se ofrece al vender; `snapshot`, la copia
+   * de una, o null si no es de esa persona o está anulada. Sin él, la venta va sin.
+   */
+  saleReference?: {
+    current(tx: Db, orgId: string, patientId: string): Promise<SaleReference[]>
+    snapshot(tx: Db, orgId: string, patientId: string, id: string): Promise<Record<string, unknown> | null>
+  }
+  /**
+   * Los papeles que solo existen en este producto y van a «Tus documentos» del
+   * portal (vistIA: la receta de lentes), con su PDF. Sin él, ninguno.
+   */
+  portalPapers?: {
+    list(
+      tx: Db,
+      orgId: string,
+      patientId: string,
+    ): Promise<Array<{ id: string; type: string; title: string; at: Date; stateWord: string | null }>>
+    pdf(tx: Db, orgId: string, patientId: string, id: string): Promise<{ bytes: Uint8Array; filename: string }>
+  }
   /**
    * Lo que un documento que solo existe en este producto dice al comprobarlo con su
    * QR (odentIA: el odontograma firmado). Sin él, ese documento no se comprueba.

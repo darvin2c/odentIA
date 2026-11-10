@@ -1,19 +1,26 @@
 import { BRAND_DIGITS, BRAND_NAMES, type BrandId, useBrand } from "@odentia/ui"
 
 /**
- * El logotipo de cada marca: el nombre («odentIA», «latidIA») en IBM Plex Mono Regular, con la
+ * El logotipo de cada marca: el nombre («odentIA», «latidIA», «vistIA») en IBM Plex Mono Regular, con la
  * separación ajustada del aprobado (escala 0,1032, base 82 y 61,888 entre
- * letras), y el isotipo con su número ([32] o [72]). «IA» va en el color del
+ * letras), y el isotipo con su número ([32], [72] o [20]). «IA» va en el color del
  * isotipo, para que el nombre diga que trae inteligencia. Colores independientes
  * del tema de organización: `--identity-ink` y `--identity-accent`.
  */
-/** «IA», igual en las dos marcas. */
+/** «IA» en la sexta y la séptima letra, igual en odentIA y latidIA. */
 const IA = [
   "M362.69 82L318.11 82L318.11 75.09L336.07 75.09L336.07 16.88L318.11 16.88L318.11 9.97L362.69 9.97L362.69 16.88L344.73 16.88L344.73 75.09L362.69 75.09L362.69 82Z",
   "M430.15 82L420.97 82L414.88 61.46L389.59 61.46L383.51 82L374.53 82L396.61 9.97L408.07 9.97L430.15 82ZM412.81 53.93L402.70 19.15L401.77 19.15L391.66 53.93L412.81 53.93Z",
 ]
 
-const WORDMARKS: Record<BrandId, { ink: readonly string[]; accent: readonly string[] }> = {
+/** El ancho del logotipo de siete letras; cada letra de menos le quita 61,888. */
+const WIDTH_SEVEN = 597.2378223495703
+
+/**
+ * Cada nombre con sus letras (`ink`), su «IA» (`accent`) y su ancho: el isotipo
+ * va siempre a 162 del borde derecho, así queda a la misma distancia del nombre.
+ */
+const WORDMARKS: Record<BrandId, { ink: readonly string[]; accent: readonly string[]; width: number }> = {
   odentia: {
     ink: [
       "M30.96 83.24L30.96 83.24Q25.39 83.24 20.90 81.28Q16.41 79.32 13.26 75.65Q10.11 71.99 8.46 66.88Q6.81 61.77 6.81 55.37L6.81 55.37Q6.81 49.08 8.46 43.92Q10.11 38.76 13.26 35.10Q16.41 31.43 20.90 29.47Q25.39 27.51 30.96 27.51L30.96 27.51Q36.53 27.51 41.02 29.47Q45.51 31.43 48.66 35.10Q51.81 38.76 53.46 43.92Q55.11 49.08 55.11 55.37L55.11 55.37Q55.11 61.77 53.46 66.88Q51.81 71.99 48.66 75.65Q45.51 79.32 41.02 81.28Q36.53 83.24 30.96 83.24ZM30.96 76.12L30.96 76.12Q37.87 76.12 42.11 71.99Q46.34 67.86 46.34 59.19L46.34 59.19L46.34 51.56Q46.34 42.89 42.11 38.76Q37.87 34.63 30.96 34.63L30.96 34.63Q24.05 34.63 19.81 38.76Q15.58 42.89 15.58 51.56L15.58 51.56L15.58 59.19Q15.58 67.86 19.81 71.99Q24.05 76.12 30.96 76.12Z",
@@ -23,6 +30,7 @@ const WORDMARKS: Record<BrandId, { ink: readonly string[]; accent: readonly stri
       "M281.09 82Q275 82 272.17 78.6Q269.33 75.19 269.33 69.83V35.79H251.59V28.77H264.79Q267.47 28.77 268.56 27.69Q269.64 26.61 269.64 23.93V10H277.58V28.77H301.82V35.79H277.58V74.99H301.82V82Z",
     ],
     accent: IA,
+    width: WIDTH_SEVEN,
   },
   latidia: {
     ink: [
@@ -33,6 +41,21 @@ const WORDMARKS: Record<BrandId, { ink: readonly string[]; accent: readonly stri
       "M291.41 73.33L291 73.33Q285.84 83.24 274.59 83.24Q264.79 83.24 259.27 75.91Q253.74 68.58 253.74 55.37Q253.74 42.16 259.27 34.84Q264.79 27.51 274.59 27.51Q285.84 27.51 291 37.42L291.41 37.42L291.41 5.63L299.67 5.63L299.67 82L291.41 82ZM277.79 75.91Q280.58 75.91 283.05 75.19Q285.53 74.47 287.39 73.07Q289.24 71.68 290.33 69.67Q291.41 67.66 291.41 64.97L291.41 45.78Q291.41 43.09 290.33 41.08Q289.24 39.07 287.39 37.68Q285.53 36.28 283.05 35.56Q280.58 34.84 277.79 34.84Q270.57 34.84 266.59 39.22Q262.62 43.61 262.62 50.83L262.62 59.92Q262.62 67.14 266.59 71.53Q270.57 75.91 277.79 75.91Z",
     ],
     accent: IA,
+    width: WIDTH_SEVEN,
+  },
+  vistia: {
+    ink: [
+      "M25.7 82 6.6 28.75H14.96L22.6 51.04L30.86 75.09H31.27L39.53 51.04L47.16 28.75H55.32L36.22 82Z",
+      "M96.15 16.98Q92.54 16.98 91.09 15.49Q89.65 13.99 89.65 11.72V10.07Q89.65 7.8 91.09 6.3Q92.54 4.81 96.15 4.81Q99.76 4.81 101.21 6.3Q102.65 7.8 102.65 10.07V11.72Q102.65 13.99 101.21 15.49Q99.76 16.98 96.15 16.98ZM72.83 74.98H92.02V35.77H72.83V28.75H100.28V74.98H118.24V82H72.83Z",
+      "M155.36 83.24Q147 83.24 140.96 80.4Q134.92 77.56 130.69 72.82L136.26 67.96Q140.08 71.99 144.62 74.16Q149.16 76.32 155.56 76.32Q161.75 76.32 165.73 74.11Q169.7 71.89 169.7 67.14Q169.7 65.08 168.93 63.68Q168.15 62.29 166.81 61.46Q165.47 60.64 163.82 60.17Q162.17 59.71 160.31 59.4L151.95 58.16Q149.16 57.75 145.91 57.03Q142.66 56.3 139.98 54.7Q137.3 53.1 135.49 50.42Q133.68 47.74 133.68 43.4Q133.68 39.38 135.28 36.44Q136.88 33.5 139.77 31.48Q142.66 29.47 146.58 28.49Q150.5 27.51 155.15 27.51Q162.37 27.51 167.69 29.78Q173 32.05 176.82 36.08L171.45 41.13Q170.53 40 169.13 38.81Q167.74 37.62 165.73 36.64Q163.71 35.66 161.03 35.04Q158.35 34.42 154.84 34.42Q148.54 34.42 145.19 36.59Q141.84 38.76 141.84 42.89Q141.84 44.95 142.61 46.34Q143.38 47.74 144.73 48.56Q146.07 49.39 147.77 49.85Q149.47 50.32 151.23 50.63L159.59 51.87Q162.48 52.28 165.68 53Q168.87 53.72 171.56 55.32Q174.24 56.92 176.05 59.61Q177.85 62.29 177.85 66.62Q177.85 74.57 171.71 78.9Q165.57 83.24 155.36 83.24Z",
+      "M219.2 82Q213.12 82 210.28 78.59Q207.44 75.19 207.44 69.82V35.77H189.69V28.75H202.9Q205.58 28.75 206.67 27.67Q207.75 26.58 207.75 23.9V9.97H215.7V28.75H239.95V35.77H215.7V74.98H239.95V82Z",
+    ],
+    // «IA» en la quinta y la sexta letra: «vistIA» tiene una letra menos.
+    accent: [
+      "M256.22 82V75.09H274.18V16.88H256.22V9.97H300.8V16.88H282.85V75.09H300.8V82Z",
+      "M359.08 82 352.99 61.46H327.71L321.62 82H312.64L334.72 9.97H346.18L368.26 82ZM340.81 19.15H339.88L329.77 53.93H350.93Z",
+    ],
+    width: WIDTH_SEVEN - 61.888,
   },
 }
 
@@ -67,7 +90,7 @@ export function Brand({
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox={compact ? "0 0 128 112" : "-2 -10 597.2378223495703 134"}
+      viewBox={compact ? "0 0 128 112" : `-2 -10 ${WORDMARKS[id].width} 134`}
       role="img"
       aria-label={BRAND_NAMES[id]}
       className={
@@ -90,7 +113,7 @@ export function Brand({
               <path key={d} d={d} />
             ))}
           </g>
-          <g transform="translate(435.2378223495702 -13) scale(1.22)">
+          <g transform={`translate(${WORDMARKS[id].width - 162} -13) scale(1.22)`}>
             <Isotype brand={id} />
           </g>
         </>

@@ -122,6 +122,8 @@ jobs:
         run: |
           pnpm --filter @odentia/dental exec vitest run src/boundaries.test.ts
           pnpm --filter @odentia/medical exec vitest run src/boundaries.test.ts
+          pnpm --filter @odentia/optical exec vitest run src/boundaries.test.ts
+          pnpm --filter @odentia/clinical exec vitest run src/product-choices.test.ts
           pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts
           pnpm --filter @odentia/ui-patterns exec vitest run src/scroll-policy.test.ts
 
@@ -312,7 +314,8 @@ jobs:
       (needs.arquitectura.result == 'success' || needs.arquitectura.result == 'skipped'))) }}
     needs: [alcance, ya-probado, check, e2e, arquitectura]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Con vistIA son hasta diez armados seguidos (tres webs, tres paneles, la administración y tres apps).
+    timeout-minutes: 40
     concurrency:
       group: deploy-web-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || github.sha }}
       cancel-in-progress: false
@@ -343,7 +346,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - if: env.OMITIR != 'true'
-        run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic...
+        run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic... --filter @odentia/optical-clinic...
       # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
       # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
       - name: Armar la web de odentIA
@@ -375,6 +378,22 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
+      - name: Armar la web de vistIA
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
+        working-directory: apps/web
+        env:
+          VITE_BASE_DOMAIN: vistia20.com
+          VITE_PRODUCT: optical
+          CLOUDFLARE_ENV: vistia
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la web de vistIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_ENV: vistia
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
       # La administración y el panel (ADR 0137), con los mismos dominios con que se arman en el VPS.
       - name: Armar la administración
         if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/admin')
@@ -384,6 +403,7 @@ jobs:
           VITE_BASE_DOMAIN: odentia32.com
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la administración
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/admin')
@@ -400,6 +420,7 @@ jobs:
           VITE_BASE_DOMAIN: odentia32.com
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar el panel de odentIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
@@ -416,6 +437,7 @@ jobs:
           VITE_BASE_DOMAIN: latidia72.com
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
           VITE_PRODUCT: medical
           CLOUDFLARE_ENV: latidia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
@@ -424,6 +446,26 @@ jobs:
         working-directory: apps/panel
         env:
           CLOUDFLARE_ENV: latidia
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      - name: Armar el panel de vistIA
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
+        working-directory: apps/panel
+        env:
+          VITE_API_URL: https://api.vistia20.com
+          VITE_BASE_DOMAIN: vistia20.com
+          VITE_DENTAL_DOMAIN: odentia32.com
+          VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_PRODUCT: optical
+          CLOUDFLARE_ENV: vistia
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar el panel de vistIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
+        working-directory: apps/panel
+        env:
+          CLOUDFLARE_ENV: vistia
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
@@ -436,6 +478,7 @@ jobs:
           VITE_BASE_DOMAIN: odentia32.com
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las clínicas de odentIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/dental-clinic')
@@ -452,11 +495,30 @@ jobs:
           VITE_BASE_DOMAIN: latidia72.com
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
           VITE_PRODUCT: medical
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las clínicas de latidIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/medical-clinic')
         working-directory: apps/medical-clinic
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      - name: Armar la app de las ópticas de vistIA
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/optical-clinic')
+        working-directory: apps/optical-clinic
+        env:
+          VITE_API_URL: https://api.vistia20.com
+          VITE_BASE_DOMAIN: vistia20.com
+          VITE_DENTAL_DOMAIN: odentia32.com
+          VITE_MEDICAL_DOMAIN: latidia72.com
+          VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_PRODUCT: optical
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la app de las ópticas de vistIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/optical-clinic')
+        working-directory: apps/optical-clinic
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

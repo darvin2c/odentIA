@@ -35,6 +35,14 @@ export function latidiaUrl(subdomain: string, path = ""): string {
   return `${SCHEME}://${host}${PORT}${path}`
 }
 
+/** vistIA en su dominio (`vistia.<tld>`, ADR 0169), como latidIA: la suite completa o un recorrido suyo. */
+export function vistiaUrl(subdomain: string, path = ""): string {
+  const domain = process.env.E2E_OPTICAL_DOMAIN
+  if (!domain) throw new Error("Esta ejecución no levantó vistIA: corre un recorrido vistia*.spec.ts")
+  const host = subdomain ? `${subdomain}.${domain}` : domain
+  return `${SCHEME}://${host}${PORT}${path}`
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

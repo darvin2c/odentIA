@@ -3,7 +3,6 @@ import { isWhatsAppAccountFailure, type NormalizedTemplateStatus } from "@odenti
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
-import { recordAgentAction } from "./agent-actions.js"
 import type {
   AutomationCause,
   AutomationJobStatus,
@@ -33,36 +32,51 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } from "./admin-lines.js"
-import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
-import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCalendarInvite } from "./appointment-calendar.js"
+import { recordAgentAction } from "./agent-actions.js"
+import {
+  APPOINTMENT_CALENDAR_FILENAME,
+  APPOINTMENT_CALENDAR_MIME,
+  appointmentCalendarInvite,
+} from "./appointment-calendar.js"
+import { type ConfirmedItem, confirmationReply } from "./appointment-confirm-words.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_ARRIVAL_KEY,
   APPOINTMENT_DATA_NOTICE_KEY,
   REMINDER_CONFIRMED_KEY,
   REMINDER_DATA_KEY,
+  REMINDER_PENDING_KEY,
+  type MessageVariable,
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
   type AutomationMessage,
   automationMessageOf,
   CHOOSE_MESSAGES_LINK,
-  isStopWord,
-  optInReply,
-  optOutReply,
-  SWITCHABLE_PURPOSES,
   generalPermissionButtons,
   generalPermissionWords,
   isAppointmentNotice,
+  isStopWord,
+  optInReply,
+  optOutReply,
   parseReplyId,
+  SWITCHABLE_PURPOSES,
   withLinkLine,
 } from "./automation-messages.js"
-import { clinicName, type ComposedMessage, composeJobMessage, previewMessageRoute, routeMessage } from "./automation-routing.js"
-import { permissionRefusal, writingTimeFor } from "./message-gate.js"
-import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
+import {
+  type ComposedMessage,
+  clinicName,
+  composeJobMessage,
+  previewMessageRoute,
+  routeMessage,
+} from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
+import { patientTodo, remoteTodoCount } from "./patient-todo.js"
 import { answerBudgetButton } from "./budget-send.js"
-import { appointmentServesControlSql, TO_SCHEDULE_STATUSES, toScheduleSql } from "./to-schedule.js"
-import { applyTemplateStatuses, reviewConnectionTemplates, type TemplateDeps } from "./channel-templates.js"
+import {
+  applyTemplateStatuses,
+  reviewConnectionTemplates,
+  type TemplateDeps,
+} from "./channel-templates.js"
 import {
   currentAutomationMessage,
   currentAutomationMessageOf,
@@ -74,22 +88,40 @@ import {
 } from "./clinic-messages.js"
 import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
-import { lapsedToInvite, recordInvitation } from "./return-invites.js"
+import { permissionRefusal, writingTimeFor } from "./message-gate.js"
+import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { updateOpportunity } from "./opportunities.js"
-import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
-import { contactDecides, listDecisionRecipients, patientAge, representationEnded } from "./responsibilities.js"
-import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
-import { createTask, settleTask } from "./tasks.js"
-import { upsertWorkspaceNotification } from "./workspace.js"
+import { productHooks } from "./products.js"
+import {
+  clinicOriginOf,
+  personalLinkMessageUrl,
+  personalLinkUrl,
+  publicLinksConfigured,
+} from "./public-links.js"
+import {
+  contactDecides,
+  listDecisionRecipients,
+  patientAge,
+  representationEnded,
+} from "./responsibilities.js"
+import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
-import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
+import { createTask, settleTask } from "./tasks.js"
+import {
+  appointmentServesControlSql,
+  awaitsBookedSql,
+  planItemSql,
+  TO_SCHEDULE_STATUSES,
+  toScheduleSql,
+} from "./to-schedule.js"
+import { patientCreditSql } from "./payments.js"
 import { isPatientLocked, joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { productHooks } from "./products.js"
+import { upsertWorkspaceNotification } from "./workspace.js"
+import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -1047,6 +1079,53 @@ async function enabledLine(tx: Db, orgId: string, kind: AutomationKind): Promise
 }
 
 /**
+ * B2: por dónde le llegarán a esta persona los recordatorios de su cita, solo si de verdad
+ * salen: «Recordar la cita» prendida, Sofi y Argos encendidos y sin pausa, sin haberlos
+ * apagado y con una vía (`previewMessageRoute`, la misma regla de cada envío). Nulo: no le
+ * llegarán, y ni la página ni recepción lo prometen. Con `patientId`, los recordatorios
+ * salen a quien los recibe por el paciente (`preferredContact`): si no es esta persona (el
+ * padre abre el enlace y le llegan a la madre), a ella no le llegan y es nulo.
+ */
+export async function appointmentRemindersVia(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string | null = null,
+): Promise<"whatsapp" | "correo" | null> {
+  if (patientId && (await preferredContact(tx, orgId, patientId)) !== contactId) return null
+  if (!(await enabledLine(tx, orgId, "recordatorio_cita"))) return null
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn || !runtime.adminOn || runtime.agentsPaused) return null
+  if (!(await mayWriteFirst(tx, orgId, contactId, "recordatorio"))) return null
+  const route = await previewMessageRoute(tx, orgId, contactId, await currentAutomationMessage(tx, orgId, "recordatorio_cita"))
+  if ("cause" in route) return null
+  return route.channel === "whatsapp" ? "whatsapp" : "correo"
+}
+
+/**
+ * Lo mismo para quien aún no está registrado (lo reserva recepción con su teléfono): le
+ * llegarían por WhatsApp si la clínica tiene uno conectado y los recordatorios salen.
+ * Sin correo aún, no hay otra vía. Nulo: recepción no le dice «te escribiremos por WhatsApp».
+ */
+export async function newPersonRemindersVia(tx: Db, orgId: string): Promise<"whatsapp" | null> {
+  if (!(await enabledLine(tx, orgId, "recordatorio_cita"))) return null
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn || !runtime.adminOn || runtime.agentsPaused) return null
+  const [connection] = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .limit(1)
+  return connection ? "whatsapp" : null
+}
+
+/**
  * Cita que sigue sin confirmar después del primer recordatorio de «Recordar la
  * cita»: en pie, por venir, sin confirmar y con un recordatorio que ya salió.
  * La insistencia del agente es el aviso siguiente (tres horas antes); además
@@ -1713,15 +1792,29 @@ async function stillValid(
     // agenda. El caso es de la persona: sigue mientras le quede algo aceptado sin cita, de este
     // presupuesto o de otro. Si no, el motivo dice por qué: una cita lo lleva, o ya no está por hacer.
     const at = sql`${now.toISOString()}::timestamptz`
-    const item = { id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` }
+    const item = planItemSql("i")
+    const { planPhases } = await productHooks(tx, orgId)
     const whose = job.patientId
       ? sql`i.organization_id = ${orgId} and i.patient_id = ${job.patientId}::uuid`
       : sql`i.organization_id = ${orgId} and i.id in (select l.plan_item_id from treatment_budget_item l where l.organization_id = ${orgId} and l.budget_id = ${job.budgetId}::uuid and l.decision = 'aceptado')`
-    const [state] = await tx.execute<{ open: boolean; pending: boolean }>(sql`
-      select exists (select 1 from treatment_plan_item i where ${whose} and ${toScheduleSql(item, at)}) as open,
+    const [state] = await tx.execute<{ open: boolean; pending: boolean; waiting: boolean }>(sql`
+      select exists (select 1 from treatment_plan_item i where ${whose} and ${toScheduleSql(item, planPhases, at)}) as open,
+        exists (select 1 from treatment_plan_item i where ${whose} and ${awaitsBookedSql(item, planPhases, at)}) as waiting,
         exists (select 1 from treatment_plan_item i where ${whose} and i.decision_status = 'aceptado'
-          and i.status in (${sql.join(TO_SCHEDULE_STATUSES.map((status) => sql`${status}`), sql`, `)})) as pending`)
-    if (!state?.open) return { valid: false, reason: state?.pending ? "Lo aceptado ya tiene cita" : "Lo aceptado ya no está por hacer" }
+          and i.status in (${sql.join(
+            TO_SCHEDULE_STATUSES.map((status) => sql`${status}`),
+            sql`, `,
+          )})) as pending`)
+    // Lo que queda va después de otro tratamiento que ya tiene su cita (la corona tras la endodoncia): no es que tenga cita.
+    if (!state?.open)
+      return {
+        valid: false,
+        reason: state?.waiting
+          ? "Lo aceptado va después de otro tratamiento que ya tiene su cita"
+          : state?.pending
+            ? "Lo aceptado ya tiene cita"
+            : "Lo aceptado ya no está por hacer",
+      }
     return { valid: true }
   }
   if (job.kind === "seguimiento_comercial" && job.opportunityId) {
@@ -1838,45 +1931,83 @@ async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, no
 }
 
 /**
- * El aviso de reserva (o el recordatorio) con «Su enlace» cuando al paciente
- * de la cita le faltan datos para atenderlo: el enlace de quien recibe el
- * aviso, con esa cita. Sin dirección pública configurada sale el de siempre.
+ * Lo que tiene por hacer antes de su cita quien decide por el paciente (entrega 2,
+ * decisión 4), con la definición de la página (`patientTodo`): solo se cuenta lo que se
+ * hace desde el teléfono (`remoteTodoCount`). Un consentimiento que se firma en la cita no.
  */
-async function dataNoticeFor(
+export async function pendingBeforeAppointment(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  contactId: string,
+  options: { health?: boolean } = {},
+): Promise<{ data: boolean; total: number }> {
+  // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella.
+  const todo = await patientTodo(tx, orgId, { patientId, contactId, withAppointment: true })
+  return remoteTodoCount(todo, options)
+}
+
+/** «3 cosas», «1 cosa». */
+function thingsWords(n: number): string {
+  return n === 1 ? "1 cosa" : `${n} cosas`
+}
+
+interface LinkedNotice {
+  spec: AutomationMessage
+  link: { token: string; url: string }
+  /** Lo que el mensaje dice y no sale de los trabajos (`pendientes`). */
+  extra: Partial<Record<MessageVariable, string>>
+}
+
+/**
+ * El aviso de reserva (o el recordatorio) con «Su enlace» cuando al paciente de la cita le
+ * falta algo, para quien recibe el aviso y decide por él, con esa cita. En orden de
+ * preferencia: el recordatorio «Antes de tu cita» si tiene más que sus datos por hacer
+ * (dice cuántas cosas y abre «Tus pendientes»), y el que pide sus datos si le faltan. Quien
+ * envía elige el primero que tiene por dónde salir (`previewMessageRoute`): sin aprobar,
+ * sale el siguiente o el de siempre. Sin dirección pública, ninguno.
+ */
+async function pendingNoticesFor(
   tx: Db,
   orgId: string,
   job: typeof automationJob.$inferSelect,
   contactId: string,
   deps: DeliverDeps,
   key: typeof APPOINTMENT_DATA_NOTICE_KEY | typeof REMINDER_DATA_KEY = APPOINTMENT_DATA_NOTICE_KEY,
-): Promise<{ spec: AutomationMessage; link: { token: string; url: string } } | null> {
-  if (!job.appointmentId || !publicLinksConfigured()) return null
+): Promise<LinkedNotice[]> {
+  if (!job.appointmentId || !publicLinksConfigured()) return []
   const [row] = await tx
     .select({ patientId: appointment.patientId })
     .from(appointment)
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, job.appointmentId)))
     .limit(1)
-  if (!row) return null
-  // Solo a quien puede completarlos: a otro, su enlace no le mostraría nada que hacer.
-  if (!(await contactDecides(tx, orgId, row.patientId, contactId))) return null
-  // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella.
-  const pending =
-    (await getPatientMissingData(tx, orgId, row.patientId)).length > 0 ||
-    (key === APPOINTMENT_DATA_NOTICE_KEY && (await patientHealthToAsk(tx, orgId, row.patientId)))
-  if (!pending) return null
+  if (!row) return []
+  // Solo a quien puede hacerlo: a otro, su enlace no le mostraría nada que hacer.
+  if (!(await contactDecides(tx, orgId, row.patientId, contactId))) return []
+  const pending = await pendingBeforeAppointment(tx, orgId, row.patientId, contactId, {
+    health: key === APPOINTMENT_DATA_NOTICE_KEY,
+  })
+  // Un aviso por cita: solo el recordatorio los cuenta (los envíos del equipo salen al momento).
+  const many = key === REMINDER_DATA_KEY && pending.total > (pending.data ? 1 : 0)
+  if (!pending.data && !many) return []
   const issued = await issuePersonalLink(
     tx,
     orgId,
     { contactId, patientId: row.patientId, appointmentId: job.appointmentId },
     { secretsKey: deps.secretsKey },
   )
-  // En el mensaje no queda el token: lo pone el worker al enviarlo.
-  const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
-  if (!url) return null
-  return {
-    spec: await currentAutomationMessage(tx, orgId, key),
-    link: { token: personalLinkRef(issued.linkId), url },
+  const notices: LinkedNotice[] = []
+  const add = async (spec: AutomationMessage, extra: LinkedNotice["extra"] = {}) => {
+    // En el mensaje no queda el token: lo pone el worker al enviarlo.
+    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId, spec.link?.abre ?? "pendientes")
+    if (url) notices.push({ spec, link: { token: personalLinkRef(issued.linkId), url }, extra })
   }
+  if (many)
+    await add(await currentAutomationMessage(tx, orgId, REMINDER_PENDING_KEY), {
+      pendientes: thingsWords(pending.total),
+    })
+  if (pending.data) await add(await currentAutomationMessage(tx, orgId, key))
+  return notices
 }
 
 /**
@@ -1920,8 +2051,8 @@ async function confirmedReminderFor(
       { contactId, patientId, appointmentId: lead.appointmentId },
       { secretsKey: deps.secretsKey },
     )
-    // En el mensaje no queda el token: lo pone el worker al enviarlo.
-    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
+    // En el mensaje no queda el token: lo pone el worker al enviarlo. «Cambiar mi cita» abre su cita.
+    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId, "cita")
     if (url) link = { token: personalLinkRef(issued.linkId), url }
   }
   if (route.via === "plantilla" && !link) return null
@@ -2658,32 +2789,40 @@ export async function deliverJob(
   if (confirmed) spec = confirmed.spec
   // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
   // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
-  // Igual el recordatorio de la cita: lleva «Completar mis datos» mientras falten (fase 3).
-  const withData =
+  // Igual el recordatorio de la cita: lleva «Completar mis datos» mientras falten (fase 3)
+  // o, con más cosas por hacer, «Antes de tu cita» (entrega 2), que abre «Tus pendientes».
+  const candidates =
     confirmed
-      ? null
+      ? []
       : spec && job.kind === "aviso_cita_reservada"
-        ? await dataNoticeFor(tx, orgId, job, contactId, deps)
+        ? await pendingNoticesFor(tx, orgId, job, contactId, deps)
         : spec && job.kind === "recordatorio_cita"
-          ? await dataNoticeFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
-          : null
-  let link = confirmed?.link ?? withData?.link ?? null
+          ? await pendingNoticesFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
+          : []
+  // El primero que tiene por dónde salir: mientras WhatsApp no aprueba uno, sale el siguiente
+  // o el de siempre, sin su enlace.
+  let withData: (LinkedNotice & { via: string }) | null = null
+  for (const candidate of candidates) {
+    const candidateRoute = await previewMessageRoute(tx, orgId, contactId, candidate.spec)
+    if ("cause" in candidateRoute) continue
+    withData = { ...candidate, via: candidateRoute.via }
+    break
+  }
+  const link = confirmed?.link ?? withData?.link ?? null
   // El título de la línea con su enlace, cuando el texto es el de siempre (respuesta o correo del recordatorio).
   let linkTitle: { title: string } | undefined
+  let extra: LinkedNotice["extra"] = {}
   if (spec && withData) {
-    const dataRoute = await routeMessage(tx, orgId, contactId, withData.spec)
-    if ("cause" in dataRoute) {
-      // Mientras WhatsApp no aprueba el mensaje con su enlace, sale el de siempre, sin él.
-      link = null
-    } else if (job.kind === "recordatorio_cita" && dataRoute.via !== "plantilla") {
-      // El botón «Completar mis datos» es de la plantilla: por respuesta o correo sale el
-      // recordatorio con el texto de la clínica y una línea más con su enlace.
+    if (job.kind === "recordatorio_cita" && withData.via !== "plantilla") {
+      // El botón es de la plantilla: por respuesta o correo sale el recordatorio con el
+      // texto de la clínica y una línea más con su enlace.
       linkTitle = withData.spec.link
     } else {
       spec = withData.spec
+      extra = withData.extra
     }
   }
-  const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now) : null
+  const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now, extra) : null
   if (!spec || !composed) {
     await close(ids(), "cancelado", "Ya no existe lo que originó el mensaje")
     return { jobId: job.id, outcome: "cancelado", detail: "Sin datos para el mensaje" }
@@ -3177,7 +3316,11 @@ export interface PublicLinkInfo {
   stops: UnsubscribeWords | null
 }
 
-/** Información mínima del enlace: nunca incluye paciente ni contacto. */
+/**
+ * Información mínima del enlace de baja (`/baja/:token`): nunca incluye paciente ni contacto.
+ * Solo responde por una baja: los botones «Confirmar» y «Cancelar» del correo van a su enlace
+ * (`personalLinkForEmailToken`), que mira la facultad de hoy. Vencido, no dice cuándo es la cita.
+ */
 export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLinkInfo> {
   const [link] = await tx
     .select()
@@ -3186,10 +3329,12 @@ export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLi
     .limit(1)
   if (!link) throw notFound("Enlace")
   const purpose = assertLinkPurpose(link.purpose)
+  // Un token de confirmar o cancelar (también uno vencido al quitar el enlace) no se lee por aquí.
+  if (purpose !== "baja") throw notFound("Enlace")
   const expired = link.expiresAt.getTime() < Date.now()
   let when: string | null = null
   let timeZone = NEUTRAL_TIMEZONE
-  if (link.appointmentId) {
+  if (link.appointmentId && !expired) {
     const [appt] = await tx
       .select({
         startsAt: appointment.startsAt,
@@ -3428,10 +3573,10 @@ export async function messageChoicesUrl(
     { contactId, patientId: patientId ?? (await ownPatientOf(tx, orgId, contactId)) },
     deps,
   )
-  const url = options.raw
-    ? await personalLinkUrl(tx, orgId, link.token)
-    : await personalLinkMessageUrl(tx, orgId, link.linkId)
-  return url ? `${url}#mensajes` : null
+  // Abre directo «Tus mensajes» (`abre=mensajes`); los enlaces de antes llevaban `#mensajes`.
+  return options.raw
+    ? personalLinkUrl(tx, orgId, link.token, "mensajes")
+    : personalLinkMessageUrl(tx, orgId, link.linkId, "mensajes")
 }
 
 async function contactFirstName(tx: Db, orgId: string, contactId: string): Promise<string | null> {

@@ -45,7 +45,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import {
   CashCloseDrawer,
@@ -53,9 +53,12 @@ import {
   ClosureSheetDrawer,
 } from "../../components/finance/cash-close-drawer"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
+import { CounterSaleDrawer } from "../../components/finance/counter-sale-drawer"
 import { DebtsTab } from "../../components/finance/debts-tab"
 import { ExchangeRateLine } from "../../components/finance/exchange-rate-line"
-import { ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
+import { type ExpenseDrawerMode, ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
+import { NotePayableDrawer } from "../../components/finance/payables"
+import type { Payable } from "../../lib/finance-cash"
 import { ExpensesTab } from "../../components/finance/expenses-tab"
 import {
   CommissionsAdminPanel,
@@ -243,7 +246,7 @@ interface CollectTarget {
  * medio escribir en la columna, el siguiente se abre encima como cajón (la regla de la columna
  * lateral) y el primero queda como estaba.
  */
-type PanelKind = "gasto" | "cerrar" | "efectivo"
+type PanelKind = "gasto" | "cerrar" | "efectivo" | "mostrador"
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
@@ -301,6 +304,11 @@ function FinanceWorkspace() {
     [],
   )
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
+  // «Pagar» y «Corregir» de Gastos: aquí, fuera de las pestañas, como «Registrar gasto» (QA de
+  // Gastos, UX4: al mirar la Caja se perdía lo escrito).
+  const [expenseMode, setExpenseMode] = useState<{ mode: ExpenseDrawerMode; branchId: string } | null>(null)
+  // «Anotar una factura» (o corregirla), aquí por lo mismo: no pierde lo escrito al mirar la Caja.
+  const [invoiceDrawer, setInvoiceDrawer] = useState<{ correcting: Payable | null; branchId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
   const [justClosed, setJustClosed] = useState<{
     id: string
@@ -312,6 +320,11 @@ function FinanceWorkspace() {
 
   const branchId = sede.branchId ?? sede.branches[0]?.id ?? ""
   const branchName = sede.branches.find((item) => item.id === branchId)?.name ?? ""
+  // Al cambiar de sede, «Pagar» o «Corregir» de la otra se cierra: no vuelve al regresar.
+  useEffect(() => {
+    setExpenseMode((current) => (current && current.branchId !== branchId ? null : current))
+    setInvoiceDrawer((current) => (current && current.branchId !== branchId ? null : current))
+  }, [branchId])
   const prof = profile.data?.data ?? null
   const branchZone = useBranchesStatus()
   // La zona de la sede la dice su caja; mientras llega, la de la clínica.
@@ -382,6 +395,7 @@ function FinanceWorkspace() {
     collect: () => collect(),
     close: () => openPanel("cerrar"),
     expense: () => openPanel("gasto"),
+    counter: () => openPanel("mostrador"),
   }
   // Acciones de la sección: en el teléfono, en una barra siempre a la vista (cobrar y cerrar sin desplazarse).
   const phoneActions = isMobile && ws ? financePhoneActions(view, access) : []
@@ -397,11 +411,13 @@ function FinanceWorkspace() {
   const headerOn = !isMobile && ws !== null
   // Mientras llegan la sede y el perfil, la acción sigue a la vista, deshabilitada: no aparece, se va y vuelve.
   const headerWaiting = !isMobile && ws === null && (profile.isPending || branchZone.isPending)
-  const { primary: headerPrimary, menu: headerMenu } = headerOn
+  const { primary: headerPrimary, secondary: headerSecondary, menu: headerMenu } = headerOn
     ? financeHeader(view, access, runAction)
     : headerWaiting
       ? financeHeader(view, access)
-      : { primary: undefined, menu: [] }
+      : { primary: undefined, secondary: undefined, menu: [] }
+  // En el teléfono la barra de abajo trae «Cobrar»; «Venta de mostrador» va en ⋯ de la cabecera.
+  const phoneSecondary = isMobile && ws ? financeHeader(view, access, runAction).secondary : undefined
 
   const commissionsSubtitle = financeCommissionsSubtitle(access)
 
@@ -427,6 +443,7 @@ function FinanceWorkspace() {
           </>
         }
         primary={headerPrimary}
+        secondary={headerSecondary ?? phoneSecondary}
         menu={headerMenu}
       />
 
@@ -494,14 +511,32 @@ function FinanceWorkspace() {
               {canCommissions ? <TabsTrigger value="comisiones" className="shrink-0">Comisiones</TabsTrigger> : null}
             </TabsList>
             {isMobile && monthPicker ? <div className="ml-auto">{monthPicker}</div> : null}
-            {canReports ? (
-              <Link
-                to="/reports"
-                search={{ tab: "finanzas", ...(view !== "comisiones" ? { branch: ws.branchId } : {}) }}
-                className="ml-auto inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
-              >
-                Ver el reporte
-              </Link>
+            {(view === "comisiones" && canCommissionsWrite) || canReports ? (
+              <div className="ml-auto flex flex-wrap items-center gap-x-4">
+                {view === "comisiones" && canCommissionsWrite ? (
+                  // Lo que se lleva cada profesional se fija en Configuración: aquí se liquida el mes.
+                  <Link
+                    to="/settings/commissions"
+                    className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
+                  >
+                    Configurar comisiones
+                  </Link>
+                ) : null}
+                {canReports ? (
+                  <Link
+                    to="/reports"
+                    search={{
+                      tab: "finanzas",
+                      ...(view !== "comisiones" ? { branch: ws.branchId } : {}),
+                      // Desde Gastos, el reporte del mismo mes que se mira (QA de Gastos, G13).
+                      ...(view === "gastos" && period ? { period: `${period.year}-${String(period.month).padStart(2, "0")}` } : {}),
+                    }}
+                    className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
+                  >
+                    Ver el reporte
+                  </Link>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <TabsContent value={strip}>
@@ -593,12 +628,15 @@ function FinanceWorkspace() {
               <ExpensesTab
                 key={ws.branchId}
                 branchId={ws.branchId}
+                branchName={ws.branchName}
                 locale={ws.locale}
                 orgTimeZone={ws.orgTimeZone}
                 currency={ws.currency}
                 month={period}
                 canWrite={canWrite}
                 onExpense={() => openPanel("gasto")}
+                onOpenExpense={(mode) => setExpenseMode({ mode, branchId: ws.branchId })}
+                onNoteInvoice={(correcting) => setInvoiceDrawer({ correcting, branchId: ws.branchId })}
               />
             ) : null}
           </TabsContent>
@@ -634,6 +672,38 @@ function FinanceWorkspace() {
             place={ws}
             open={openPanels.has("gasto")}
             onClose={() => closePanel("gasto")}
+            onPayInvoice={(payable) => {
+              closePanel("gasto")
+              setExpenseMode({ mode: { kind: "factura", payable }, branchId: ws.branchId })
+            }}
+            onNoteInvoice={() => {
+              closePanel("gasto")
+              setInvoiceDrawer({ correcting: null, branchId: ws.branchId })
+            }}
+          />
+          {invoiceDrawer && invoiceDrawer.branchId === ws.branchId ? (
+            <NotePayableDrawer place={ws} open correcting={invoiceDrawer.correcting} onClose={() => setInvoiceDrawer(null)} />
+          ) : null}
+          {/* Lo de otra sede no se paga ni se corrige en esta: al cambiar de sede se cierra. */}
+          {expenseMode && expenseMode.branchId === ws.branchId ? (
+            <ExpenseFormDrawer place={ws} open mode={expenseMode.mode} onClose={() => setExpenseMode(null)} />
+          ) : null}
+          <CounterSaleDrawer
+            open={openPanels.has("mostrador")}
+            branchId={ws.branchId}
+            branchName={ws.branchName}
+            currency={ws.currency}
+            locale={ws.locale}
+            onClose={() => closePanel("mostrador")}
+            onSold={(sold, already) => {
+              closePanel("mostrador")
+              invalidateFinance(queryClient)
+              // Un reintento sin respuesta: lo que se ve es el ticket que ya estaba, no otra venta.
+              if (already) toast.info(`Esta venta ya estaba registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}: no se cobró otra vez.`)
+              else toast.success(`Venta registrada · Ticket ${ticketDisplayNumber(sold.ticketNumber)}`)
+              // El ticket se abre al lado, el mismo de Cobros: imprimir, devolver o anular.
+              openTicket(sold.id)
+            }}
           />
           <CashMoveDrawer
             branchId={ws.branchId}
@@ -707,7 +777,7 @@ function FinanceWorkspace() {
             ticket={ticket.result.ticket}
             remainingCents={ticket.result.remainingCents}
             receipt={ticket.result.receipt ?? null}
-            patientName={ticket.result.ticket.snapshot.patient.displayName}
+            patientName={ticket.result.ticket.snapshot.patient?.displayName ?? ""}
             branchName={ticket.result.ticket.snapshot.branch.name}
             locale={prof.locale}
             timeZone={ws?.timeZone ?? prof.timezone}
@@ -716,7 +786,7 @@ function FinanceWorkspace() {
             onCollectRest={(currency) => {
               const { patient } = ticket.result.ticket.snapshot
               setTicket(null)
-              collect({ id: patient.id, name: patient.displayName, currency })
+              if (patient) collect({ id: patient.id, name: patient.displayName, currency })
             }}
             onChanged={() => {
               invalidateFinance(queryClient)

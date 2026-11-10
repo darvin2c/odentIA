@@ -22,6 +22,8 @@ interface WordLine {
 interface WordOption {
   id: string
   decision: string
+  /** Su lugar (1 = «Opción A»): con varias y una elegida, se dice cuál. */
+  position?: number
 }
 
 /** Líneas que cuentan para «Aceptó N de M»: las de la opción elegida, o todas si no hay. */
@@ -57,8 +59,13 @@ export function budgetStateText(budget: {
       return "Entregado · espera respuesta"
     case "pospuesto":
       return "Lo está pensando"
-    case "aceptado":
+    case "aceptado": {
+      // Con varios caminos, aceptar es elegir uno: «Aceptó todo» junto a «Exodoncia · No
+      // elegida» se leía como si hubiera aceptado las dos (QA del 9 nov).
+      const chosen = budget.options && budget.options.length > 1 ? budget.options.find((option) => option.decision === "elegida") : undefined
+      if (chosen) return chosen.position ? `Eligió la ${inSentence(budgetOptionLabel(chosen.position))}` : "Eligió una opción"
       return "Aceptó todo"
+    }
     case "parcial": {
       const lines = decidedLines(budget.items, budget.options)
       const accepted = lines.filter((line) => line.decision === "aceptado").length
@@ -102,6 +109,35 @@ export function budgetAnswerText(decision: string | null | undefined): string {
   }
 }
 
+/** Los estados de un tratamiento, en palabras (nunca «en_curso»). */
+const PLAN_STATE_WORDS: Record<string, string> = {
+  pendiente: "Pendiente",
+  programado: "Con cita",
+  en_curso: "En curso",
+  suspendido: "Suspendido",
+  realizado: "Realizado",
+  cancelado: "Cancelado",
+  reemplazado: "Reemplazado",
+}
+
+/**
+ * Una sola etiqueta por tratamiento (U8 de la QA de la ficha): mientras no
+ * empieza, su decisión («Aceptado», «Lo está pensando»); después, su estado.
+ * La usan la tarjeta de la Historia y el detalle de la atención, para que lo
+ * plegado y lo abierto digan lo mismo (tercer repaso del 9 nov, E9).
+ */
+export function planItemStateText(status: string, decision: string | null | undefined): string {
+  if ((status === "pendiente" || status === "programado") && decision && decision !== "aceptado")
+    return budgetAnswerText(decision)
+  if (status === "pendiente" && decision === "aceptado") return "Aceptado"
+  return PLAN_STATE_WORDS[status] ?? status
+}
+
+/** Lo que ya no es trabajo vigente: se pliega en «Ya no vigente», no se tacha. */
+export function isRetiredPlanStatus(status: string): boolean {
+  return status === "cancelado" || status === "reemplazado"
+}
+
 /** «Opción A» para la posición 1. */
 export function budgetOptionLabel(position: number): string {
   const letter = String.fromCharCode(64 + Math.min(Math.max(Math.trunc(position), 1), 26))
@@ -118,3 +154,8 @@ export const BUDGET_OPTIONS_MAX = 3
  */
 export const BUDGET_SIGN_DECLARATION =
   "Me explicaron este presupuesto, sus precios y sus condiciones. Acepto los tratamientos que dicen «Aceptado»."
+
+/** «Opción A» → «opción A», para decirla dentro de una frase. */
+function inSentence(label: string): string {
+  return label.charAt(0).toLowerCase() + label.slice(1)
+}

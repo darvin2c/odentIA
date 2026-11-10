@@ -5,7 +5,7 @@
  * coincide el profesional, no dice nada.
  */
 import { useQuery } from "@tanstack/react-query"
-import { type AgendaAppointment, professionalSaid } from "../../lib/agenda"
+import { type AgendaAppointment, ofProfessional } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 
@@ -27,7 +27,7 @@ export function AttendingForNotice({
   if (!visit || visit.professionalUserId === encounterProfessionalUserId) return null
   return (
     <p role="note" className="rounded-lg bg-info-soft px-3 py-2 text-sm text-foreground">
-      Atiendes la cita de {professionalSaid(visit.professionalName, { full: true })}
+      Atiendes la cita {ofProfessional(visit.professionalName, { full: true })}
     </p>
   )
 }

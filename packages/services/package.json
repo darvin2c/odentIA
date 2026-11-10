@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./test-patient": "./src/test-patient.ts",
     "./dental": "./src/dental/index.ts",
-    "./medical": "./src/medical/index.ts"
+    "./medical": "./src/medical/index.ts",
+    "./optical": "./src/optical/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
@@ -18,7 +19,8 @@
     "mail:preview": "tsx --env-file-if-exists=../../infra/dev/.env src/mail-preview.ts",
     "bench:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/bench-reports.ts",
     "import:peek": "tsx src/clinic-import-cli.ts peek",
-    "import:prepare": "tsx src/clinic-import-cli.ts prepare"
+    "import:prepare": "tsx src/clinic-import-cli.ts prepare",
+    "import:carta": "tsx src/clinic-import-cli.ts letter"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1131.0",
@@ -30,6 +32,7 @@
     "@odentia/dental": "workspace:*",
     "@odentia/mail": "workspace:*",
     "@odentia/medical": "workspace:*",
+    "@odentia/optical": "workspace:*",
     "@pdf-lib/fontkit": "1.1.1",
     "@simplewebauthn/server": "14.0.3",
     "dicom-parser": "1.8.21",

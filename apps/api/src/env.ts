@@ -1,4 +1,5 @@
 import { fakeModelStartProblem } from "@odentia/agent"
+import type { ProductDomains } from "@odentia/clinical"
 import { z } from "zod"
 
 const envSchema = z.object({
@@ -20,6 +21,13 @@ const envSchema = z.object({
     .trim()
     .toLowerCase()
     .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. latidia72.com")
+    .default(""),
+  /** El dominio de vistIA (`vistia20.com`), como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
+  OPTICAL_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. vistia20.com")
     .default(""),
   /**
    * Cabecera con la IP de quien pide, para el límite de intentos de Better Auth
@@ -47,6 +55,8 @@ const envSchema = z.object({
   SMTP_FROM: z.string().min(1),
   // El remitente de los correos de latidIA (issue 229); vacío, el de SMTP_FROM con su nombre.
   MEDICAL_SMTP_FROM: z.string().optional(),
+  // El de vistIA, igual.
+  OPTICAL_SMTP_FROM: z.string().optional(),
   /**
    * Correo de odentIA que recibe el aviso de cada Hoja de Reclamación (Libro de
    * Reclamaciones de la web). Opcional: sin él solo sale la copia al consumidor.
@@ -150,7 +160,11 @@ function loadEnv() {
   return {
     ...rest,
     trustedOrigins: TRUSTED_ORIGINS.split(",").map((o) => o.trim()),
-    productDomains: rest.MEDICAL_DOMAIN ? { medical: rest.MEDICAL_DOMAIN } : {},
+    // Uno por producto con dominio propio: el que se agregue tiene que decir el suyo.
+    productDomains: {
+      medical: rest.MEDICAL_DOMAIN || undefined,
+      optical: rest.OPTICAL_DOMAIN || undefined,
+    } satisfies ProductDomains,
   }
 }
 

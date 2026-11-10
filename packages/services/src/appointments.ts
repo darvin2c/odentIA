@@ -7,6 +7,7 @@
  * su cuenta). Toda función recibe `tx: Db` ya contextualizado.
  */
 import { ATTENDING_ROLES } from "@odentia/auth/permissions"
+import { showsSession } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   APPOINTMENT_STATUSES,
@@ -15,6 +16,7 @@ import {
   scheduleRoom,
 } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
+import { scheduleBlock } from "@odentia/db/schema/availability"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
@@ -24,44 +26,53 @@ import {
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { scheduleBlock } from "@odentia/db/schema/availability"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm"
-import { foldedWordsMatch } from "./search-text.js"
 import { alias } from "drizzle-orm/pg-core"
-import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
-import { createWorkspaceNotification } from "./workspace.js"
-import { TEST_KEEP_MS } from "./conversation-state.js"
-import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
+import { requireCanAttend } from "./attending.js"
 import {
   appointmentConfirmationPlan,
-  cancelPendingForAppointment,
   type ConfirmationPlan,
+  cancelPendingForAppointment,
   enqueueAppointmentNotice,
   invalidateAppointmentTokens,
   preferredContact,
   rescheduleAppointmentReminders,
 } from "./automation.js"
-import { requireCanAttend } from "./attending.js"
+import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
+import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
+import { TEST_KEEP_MS } from "./conversation-state.js"
 import {
   branchNotFound,
-  roomNotFound,
-  isExclusionViolation,
   invalidField,
+  isExclusionViolation,
   notFound,
+  roomNotFound,
   ServiceError,
   validation,
 } from "./errors.js"
 import { looksLikeId } from "./ids.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
-import { listPatients } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { listPatients } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
-import { showsSession } from "@odentia/clinical"
-import { canBookAnother, sessionCountsOf, sessionsDoneSql, standingForSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
-import { countAgendaUpgrade, countRecoveredAppointment, refreshConversationTier } from "./saas-actions.js"
+import {
+  countAgendaUpgrade,
+  countRecoveredAppointment,
+  refreshConversationTier,
+} from "./saas-actions.js"
+import { foldedWordsMatch } from "./search-text.js"
+import { attendingRule } from "./specialties.js"
+import {
+  canBookAnother,
+  sessionCountsOf,
+  sessionsDoneSql,
+  standingForSql,
+  TO_SCHEDULE_STATUSES,
+} from "./to-schedule.js"
+import { createWorkspaceNotification } from "./workspace.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -978,6 +989,11 @@ export interface CreateAppointmentInput {
    * aceptados y sin terminar.
    */
   planItemIds?: string[]
+  /**
+   * Controles pendientes del mismo paciente que se hacen en esta cita: quedan
+   * reservados con ella, en la misma transacción. Solo lo decide una persona del equipo.
+   */
+  followUpIds?: string[]
 }
 
 /** Lo que una cita puede traer: aceptado y todavía por hacer (la regla de «Por agendar», `to-schedule.ts`). */
@@ -1210,6 +1226,25 @@ export async function createAppointment(
         .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, input.patientId), eq(patientContact.relationship, "self")))
         .limit(1)
       if (self) await refreshConversationTier(tx, orgId, { contactId: self.contactId, at: new Date() })
+    }
+    // Los controles que vienen en la misma cita («Reservar lo aceptado y el control»): la misma
+    // operación que «Reservar el control» con esta cita (`scheduleFollowUp`), en la misma
+    // transacción, así nunca queda la cita sin su control (QA del 8 nov, entrega 3).
+    if (input.followUpIds?.length) {
+      // Import tardío: `follow-ups.ts` reserva sus citas con este mismo servicio.
+      const { scheduleFollowUp } = await import("./follow-ups.js")
+      for (const followUpId of [...new Set(input.followUpIds)]) {
+        try {
+          await scheduleFollowUp(tx, orgId, actorUserId, input.patientId, followUpId, { appointmentId: created.id })
+        } catch (error) {
+          // Otro lo reservó o lo canceló entre tanto: se dice junto a la casilla y no se reserva nada.
+          if (error instanceof ServiceError && (error.status === 404 || error.code === "FOLLOW_UP_STATUS"))
+            throw new ServiceError(error.code, error.status, `El control ya no está por reservar: ${error.message}`, {
+              followUpIds: "Ese control ya no está por reservar: quítalo de esta cita.",
+            })
+          throw error
+        }
+      }
     }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, created.id)
@@ -1471,6 +1506,122 @@ export async function updateAppointment(
     }
     throw error
   }
+}
+
+/**
+ * Lo que lleva una cita que ya existe (QA de la ficha del 9 nov: «Sumar a su cita del 10 nov»
+ * en vez de darle otra visita). Recibe lo que se suma y lo que se quita: «Deshacer» quita lo
+ * que se acaba de sumar. Solo una cita en pie y por venir, sin atención abierta; lo
+ * nuevo, aceptado, por hacer y sin otra cita por venir que lo lleve (salvo que le falten
+ * sesiones). La hora no cambia: no se le avisa a la persona. Si lo que lleva suele durar más que
+ * la cita, se devuelve para que la pantalla lo diga; la cita no se alarga sola (podría pisar otra).
+ * Lo sumado que su profesional no atiende (la regla de la agenda, `attendingRule`) también se
+ * devuelve (`outsideService`): se avisa, no se frena, como al reservar con quien se pidió (ADR 0039).
+ */
+export async function setAppointmentPlanItems(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  input: { expectedVersion: number; add?: string[]; remove?: string[] },
+): Promise<
+  AppointmentItem & { usualMinutes: number | null; added: string[]; outsideService: string[] }
+> {
+  const current = await requireAppointment(tx, orgId, id, { lock: true })
+  if (current.version !== input.expectedVersion)
+    throw conflict("STALE_VERSION", "La cita cambió mientras la mirabas; vuelve a abrirla e intenta de nuevo")
+  if (!(current.status === "programada" || current.status === "confirmada") || current.startsAt.getTime() <= Date.now())
+    throw conflict("APPOINTMENT_STATUS", "Solo se suma a una cita por venir que sigue en pie")
+  if (await linkedEncounter(tx, orgId, current.id))
+    throw conflict("APPOINTMENT_IN_ATTENTION", "La cita ya tiene su atención: lo que se hace hoy se registra ahí")
+  const clean = (list: string[] | undefined) => [...new Set((list ?? []).map((value) => value.trim()).filter(Boolean))]
+  const links = await tx
+    .select({ planItemId: appointmentPlanItem.planItemId })
+    .from(appointmentPlanItem)
+    .where(and(eq(appointmentPlanItem.organizationId, orgId), eq(appointmentPlanItem.appointmentId, id)))
+  const had = new Set(links.map((row) => row.planItemId))
+  const removed = clean(input.remove).filter((planItemId) => had.has(planItemId))
+  const added = clean(input.add).filter((planItemId) => !had.has(planItemId) && !removed.includes(planItemId))
+  const wanted = [...[...had].filter((planItemId) => !removed.includes(planItemId)), ...added]
+  await requireSchedulableItems(tx, orgId, current.patientId, added)
+  // Lo que otra cita por venir ya lleva no se lleva dos veces, salvo la sesión siguiente de
+  // un tratamiento de varias (`canBookAnother`).
+  if (added.length > 0) {
+    const elsewhere = await scheduledItems(tx, orgId, current.patientId, added)
+    if (elsewhere.size > 0) {
+      const counts = await sessionCountsOf(tx, orgId, [...elsewhere])
+      const rows = await tx
+        .select({
+          id: treatmentPlanItem.id,
+          status: treatmentPlanItem.status,
+          decisionStatus: treatmentPlanItem.decisionStatus,
+          plannedSessions: treatmentPlanItem.plannedSessions,
+        })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, [...elsewhere])))
+      if (rows.some((row) => !canBookAnother(row, counts.get(row.id) ?? { done: 0, booked: 0 })))
+        throw onField(conflict("ITEM_SCHEDULED", "Ese tratamiento ya va en otra cita por venir"), "planItemIds")
+    }
+  }
+  if (removed.length > 0)
+    await tx
+      .delete(appointmentPlanItem)
+      .where(
+        and(
+          eq(appointmentPlanItem.organizationId, orgId),
+          eq(appointmentPlanItem.appointmentId, id),
+          inArray(appointmentPlanItem.planItemId, removed),
+        ),
+      )
+  if (added.length > 0)
+    await tx.insert(appointmentPlanItem).values(
+      added.map((planItemId) => ({
+        organizationId: orgId,
+        patientId: current.patientId,
+        appointmentId: id,
+        planItemId,
+        createdBy: actorUserId,
+      })),
+    )
+  await tx
+    .update(appointment)
+    .set({ version: current.version + 1, updatedAt: new Date() })
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
+  await audit(tx, orgId, actorUserId, "appointment.plan_items_set", id, { added, removed })
+  await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
+  // Lo que suele durar lo que lleva: el servicio de la cita y el de cada tratamiento sumado.
+  const services = wanted.length
+    ? await tx
+        .select({ serviceId: treatmentPlanItem.serviceId, minutes: serviceCatalog.durationMin })
+        .from(treatmentPlanItem)
+        .leftJoin(
+          serviceCatalog,
+          and(eq(serviceCatalog.organizationId, treatmentPlanItem.organizationId), eq(serviceCatalog.id, treatmentPlanItem.serviceId)),
+        )
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, wanted)))
+    : []
+  const own = current.serviceId ? services.find((row) => row.serviceId === current.serviceId) : undefined
+  const extra = services.filter((row) => row.serviceId !== current.serviceId).reduce((sum, row) => sum + (row.minutes ?? 0), 0)
+  const usualMinutes = extra > 0 ? (own?.minutes ?? current.durationMin) + extra : null
+  // Lo sumado cuyo servicio atiende otra especialidad, no la de quien tiene la cita.
+  const outsideService: string[] = []
+  if (added.length > 0) {
+    const sums = await tx
+      .select({ title: treatmentPlanItem.title, serviceId: treatmentPlanItem.serviceId })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, added)))
+    for (const row of sums) {
+      if (!row.serviceId) continue
+      const rule = await attendingRule(tx, orgId, {
+        serviceId: row.serviceId,
+        branchId: current.branchId,
+      })
+      if (rule && !rule.professionalUserIds.includes(current.professionalUserId))
+        outsideService.push(row.title)
+    }
+  }
+  // Lo que de verdad se sumó: «Deshacer» quita solo eso, no lo que la cita ya llevaba.
+  return { ...(await getAppointment(tx, orgId, id)), usualMinutes, added, outsideService }
 }
 
 /** Quién pidió cancelar: lo que recepción anota al liberar el hueco. */

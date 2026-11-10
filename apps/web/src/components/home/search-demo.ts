@@ -1,4 +1,4 @@
-// El buscador rápido de la demo de la portada (las dos webs): la misma forma de buscar del producto
+// El buscador rápido de la demo de la portada (todas las webs): la misma forma de buscar del producto
 // (packages/services/src/global-search.ts y search-text.ts), en el navegador y sobre datos de ejemplo.
 // Por letras sin tildes ni mayúsculas, cada palabra por el comienzo de una palabra; los números
 // («987 654», «HC-000123», «B001-000245») por sus dígitos. Cada resultado va debajo de su dueño.
@@ -68,12 +68,14 @@ export interface DemoOwner {
 }
 
 export interface SearchDemoData {
-  /** «odentIA» o «latidIA». */
+  /** «odentIA», «latidIA» o «vistIA». */
   product: string
   /** El agente que responde preguntas de los datos. */
   agent: string
   /** La clínica de la demo, en la barra de arriba. */
   clinic: string
+  /** Cómo se dice el lugar en «Responde con los datos de…»; sin decirlo, «la clínica». */
+  place?: string
   owners: DemoOwner[]
   /** Ids de las personas «Abiertas hace poco». */
   recents: string[]

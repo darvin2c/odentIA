@@ -53,7 +53,7 @@ function Section({
 }) {
   return (
     <section
-      className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
+      className="@container flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
       aria-label={title}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -64,7 +64,7 @@ function Section({
           </Button>
         ) : null}
       </div>
-      <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">{children}</dl>
+      <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 @sm:grid-cols-2">{children}</dl>
       {footer}
     </section>
   )
@@ -127,7 +127,7 @@ export function FiliacionPanel({
   const birthPlace = [p.birthPlace, countryText(p.birthCountry)].filter(Boolean).join(", ") || null
 
   return (
-    <section aria-labelledby="filiacion-titulo" className="flex min-w-0 flex-col gap-4">
+    <section aria-labelledby="filiacion-titulo" className="@container flex min-w-0 flex-col gap-4">
       {/* Jerarquía de la ficha: h1 paciente, h2 sección, h3 bloques. */}
       <h2 id="filiacion-titulo" className="text-base font-semibold">
         Datos personales
@@ -149,7 +149,8 @@ export function FiliacionPanel({
           </>
         ) : null}
       </div>
-      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+      {/* Por su propio ancho, no el de la ventana: con un cajón abierto al lado, una columna (QA de la ficha del 8 nov). */}
+      <div className="grid min-w-0 gap-4 @3xl:grid-cols-2">
         <Section title="Identidad" onEdit={edit("identidad")}>
           <Item label="Nombres">{p.givenNames}</Item>
           <Item label="Apellidos">{p.familyName}</Item>
@@ -211,7 +212,7 @@ export function FiliacionPanel({
           ) : null}
         </div>
         <CollapsibleContent>
-          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 pt-3 sm:grid-cols-2">
+          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 pt-3 @sm:grid-cols-2">
             <Item label="Nacionalidad">{countryText(p.nationality)}</Item>
             <Item label="Lugar de nacimiento">{birthPlace}</Item>
             <Item label="Estado civil">
@@ -231,11 +232,11 @@ export function FiliacionPanel({
         </CollapsibleContent>
       </Collapsible>
       <section
-        className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
+        className="@container flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
         aria-label="Datos y consentimiento"
       >
         <h3 className="font-heading text-sm font-medium">Datos y consentimiento</h3>
-        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 @sm:grid-cols-2">
           <Item label="Sede de registro">
             {p.registeredBranchId
               ? (branches.data?.data.find((b) => b.id === p.registeredBranchId)?.name ?? "—")

@@ -16,7 +16,7 @@ import { AlertTriangle, ArrowDown, Bot } from "lucide-react"
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
-import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory } from "../../lib/finance-cash"
+import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory, expenseCategoryLabel } from "../../lib/finance-cash"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   amountsWords,
@@ -392,7 +392,14 @@ function Cascade({ data }: { data: ReportFinance }) {
   const { cascade } = data
   const taxName = data.taxName ?? "Impuesto"
   const current = data.totals.current
-  const gastosSearch = { tab: "gastos" as const, ...(data.branch ? { branch: data.branch.id } : {}) }
+  // Un periodo de un solo mes abre Gastos en ese mes; uno más largo, en el mes en curso (G13).
+  const oneMonth =
+    data.period.from.year === data.period.to.year && data.period.from.month === data.period.to.month && !data.period.days
+  const gastosSearch = {
+    tab: "gastos" as const,
+    ...(data.branch ? { branch: data.branch.id } : {}),
+    ...(oneMonth ? { year: data.period.from.year, month: data.period.from.month } : {}),
+  }
   const steps: Array<WaterfallStep & { note: string; link?: ReactNode }> = [
     {
       key: "cobrado",
@@ -429,15 +436,20 @@ function Cascade({ data }: { data: ReportFinance }) {
     },
     ...cascade.categories.map((item) => ({
       key: item.category,
-      label: item.category,
+      // La misma palabra que en Gastos («Sueldos», «Servicios básicos»; QA de Gastos, G25).
+      label: expenseCategoryLabel(item.category),
       value: item.cents,
       kind: "less" as const,
       note:
         item.category === "Materiales"
           ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
-          : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
+          : (CATEGORY_NOTE[item.category] ?? `Gastos de ${expenseCategoryLabel(item.category)} registrados en Finanzas › Gastos.`),
       link: canFinance ? (
-        <Link to="/finance" search={gastosSearch} className="font-bold text-primary-soft-foreground underline-offset-2 hover:underline">
+        <Link
+          to="/finance"
+          search={{ ...gastosSearch, tipo: item.category }}
+          className="font-bold text-primary-soft-foreground underline-offset-2 hover:underline"
+        >
           Ver los gastos
         </Link>
       ) : null,
@@ -830,7 +842,7 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
           </p>
         ) : null}
         <p className="text-[13px] text-muted-foreground">
-          La barra de cada profesional mide lo que se cobró más lo que atendió sin cobrar, a la misma escala. «Se cobró» incluye lo cobrado en el periodo de atenciones anteriores. Los porcentajes se cambian en Finanzas › Comisiones, y pagar también se hace allí: el pago queda como gasto de comisiones, separado de los sueldos.
+          La barra de cada profesional mide lo que se cobró más lo que atendió sin cobrar, a la misma escala. «Se cobró» incluye lo cobrado en el periodo de atenciones anteriores. La comisión de cada profesional se fija en Configuración › Comisiones por profesional y se paga en Finanzas › Comisiones: el pago queda como gasto de comisiones, separado de los sueldos.
         </p>
       </>
     )
@@ -946,8 +958,9 @@ function PayablesCard({ data }: { data: ReportFinance }) {
   const canInventory = usePermission("inventory.read")
   const { commissions, purchases, salesTax } = data.payables
   const fixed = data.payables.fixed ?? { cents: 0, count: 0 }
+  const invoices = data.payables.invoices ?? { cents: 0, count: 0, overdueCents: 0 }
   const taxName = data.taxName ?? "Impuesto"
-  const total = commissions.cents + purchases.cents + salesTax.cents + fixed.cents
+  const total = commissions.cents + purchases.cents + salesTax.cents + fixed.cents + invoices.cents
   const daysSince = purchases.oldestReceivedAt ? Math.max(0, Math.floor((new Date(data.period.end).getTime() - new Date(purchases.oldestReceivedAt).getTime()) / 86_400_000)) : null
   return (
     <ReportCard title="Lo que debes">
@@ -961,7 +974,8 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             { key: "comisiones", label: "Comisiones", value: commissions.cents, tone: "series-2" },
             { key: "compras", label: "Compras", value: purchases.cents, tone: "series-3" },
             ...(salesTax.cents > 0 ? [{ key: "impuesto", label: taxName, value: salesTax.cents, tone: "muted" as const }] : []),
-            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Gastos fijos", value: fixed.cents, tone: "series-1" as const }] : []),
+            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Lo que se repite", value: fixed.cents, tone: "series-1" as const }] : []),
+            ...(invoices.cents > 0 ? [{ key: "facturas", label: "Facturas", value: invoices.cents, tone: "muted" as const }] : []),
           ]}
         />
       ) : null}
@@ -998,10 +1012,26 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             ) : null}
           </span>
         </li>
+        {invoices.cents > 0 ? (
+          <li className="flex min-w-0 flex-col">
+            <span className="flex justify-between gap-2">
+              <strong>Facturas por pagar</strong>
+              <strong className="tabular-nums">{invoices.byCurrency ? amountsWords(invoices.byCurrency, locale) : money(invoices.cents)}</strong>
+            </span>
+            <span className="text-[13px] text-muted-foreground">
+              {invoices.byCurrency ? `En total, unos ${money(invoices.cents)} al cambio de hoy. ` : ""}
+              {invoices.count === 1 ? "1 factura" : `${invoices.count} facturas`}
+              {invoices.overdueCents > 0 ? `, ${money(invoices.overdueCents)} vencido` : ""} ·{" "}
+              <Link to="/finance" search={{ tab: "gastos" }} className="font-bold text-primary-soft-foreground">
+                Pagar en Gastos
+              </Link>
+            </span>
+          </li>
+        ) : null}
         {fixed.cents > 0 ? (
           <li className="flex min-w-0 flex-col">
             <span className="flex justify-between gap-2">
-              <strong>Gastos fijos vencidos</strong>
+              <strong>Lo que se repite, vencido</strong>
               <strong className="tabular-nums">{money(fixed.cents)}</strong>
             </span>
             <span className="text-[13px] text-muted-foreground">

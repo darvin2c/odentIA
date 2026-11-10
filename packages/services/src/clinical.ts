@@ -21,6 +21,8 @@ import {
   registrationAnswersSchema,
   DIAGNOSIS_VERIFICATION,
   FAMILY_KINSHIP,
+  type HealthAuthorship,
+  healthReviewPending,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -247,6 +249,12 @@ export interface PatientHealth {
   allergiesReviewedAt: Date | null
   allergiesReviewedBy: string | null
   allergyReviewDue: boolean
+  /**
+   * Lo declarado por el paciente espera la revisión de un profesional
+   * (`healthReviewPending`): lo que solo anotó un clínico («Niega enfermedades»
+   * en la atención) no lo deja pendiente.
+   */
+  reviewPending: boolean
   allergies: HealthAllergyRow[]
   conditions: HealthConditionRow[]
   medications: HealthMedicationRow[]
@@ -557,7 +565,7 @@ export async function getPatientHealth(
       ),
     )
     .orderBy(asc(patientFamilyHistory.createdAt))
-  return {
+  const health = {
     revision: header.revision,
     bloodGroup: header.bloodGroup,
     asaClass: header.asaClass,
@@ -577,7 +585,34 @@ export async function getPatientHealth(
     medications,
     latestAnamnesis: latest,
   }
+  return { ...health, reviewPending: healthReviewPending(health, await healthAuthorshipOf(tx, orgId, patientId)) }
 }
+
+/**
+ * Quién escribió los antecedentes, según la auditoría: si el paciente los declaró
+ * alguna vez (`health.declared`, o sus alergias en un cuestionario) y si un clínico negó un grupo en la atención
+ * (`health.denied`). Se lee de lo que ya pasó: también corrige a quien quedó
+ * «por revisar» por una negación antes de este cambio.
+ */
+async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Promise<HealthAuthorship> {
+  const rows = await tx
+    .selectDistinct({ action: auditEvent.action })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "patient"),
+        eq(auditEvent.entityId, patientId),
+        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied"]),
+      ),
+    )
+  const actions = new Set(rows.map((row) => row.action))
+  return {
+    declaredByPatient: actions.has("health.declared") || actions.has("health.allergies_declared"),
+    deniedByClinician: actions.has("health.denied"),
+  }
+}
+
 function assertReviewStatus(input: HealthReviewStatusInput): {
   allergies: string
   conditions: string
@@ -728,7 +763,9 @@ export async function healthGapsOf(tx: Db, orgId: string, patientId: string): Pr
 /**
  * «Niega enfermedades» y «No toma medicación» desde la atención: deja esos
  * grupos en «niega», sin rearmar el resto de los antecedentes; quién y cuándo
- * quedan en la auditoría. No marca revisado todo el agregado: lo que declaró
+ * quedan en la auditoría (`health.denied`). No marca revisado todo el agregado,
+ * pero lo que solo anotó un clínico no queda «declarado por revisar»
+ * (`healthReviewPending`); lo que declaró
  * el paciente y nadie revisó sigue pendiente de revisión. Con una fila vigente
  * no se puede negar: eso ya se registró. Avanza la revisión, así una edición
  * abierta de Antecedentes recarga.

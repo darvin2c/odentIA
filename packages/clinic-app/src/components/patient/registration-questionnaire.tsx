@@ -18,6 +18,7 @@ import {
   type RegistrationConfig,
   type RegistrationFieldKey,
   registrationFieldAsked,
+  registrationHealthSection,
   SEX_LABELS,
   validateDemographics,
   validateRegistrationAnswers,
@@ -577,7 +578,7 @@ export function RegistrationQuestionnaire({
   const asked = (key: RegistrationFieldKey) =>
     !fill
       ? registrationFieldAsked(config, key, countryCode, product)
-      : HEALTH_KEYS.has(key) || key.startsWith("personal.") || key.startsWith("dental.") || key.startsWith("medical.")
+      : HEALTH_KEYS.has(key) || registrationHealthSection(key) !== null
         ? fill.health && registrationFieldAsked(config, key, countryCode, product)
         : fillWants(fill, key)
   const required = (key: RegistrationFieldKey) => config.fields[key] === "required"

@@ -3,6 +3,9 @@
  * Sale del nombre mientras la persona no la escriba a mano (issue 106).
  */
 
+import type { ClinicalProduct } from "@odentia/clinical"
+import { PANEL_PRODUCT } from "./brand"
+
 /** Formato que acepta el servidor: minúsculas, números y guiones sueltos. */
 export const CLINIC_ADDRESS_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -22,6 +25,13 @@ const GENERIC_WORDS = new Set([
   "dental",
   "dentales",
 ])
+
+/** Lo que además no distingue en el panel de un producto: «Óptica Clara» propone `clara` en el de vistIA. */
+const PRODUCT_GENERIC_WORDS: Record<ClinicalProduct, readonly string[]> = {
+  dental: [],
+  medical: [],
+  optical: ["optica", "opticas", "optico", "opticos"],
+}
 /** Lo que queda suelto al quitar lo genérico: «Consultorio *de la* Dra. Ruiz». */
 const CONNECTORS = new Set(["de", "del", "la", "las", "el", "los", "y"])
 
@@ -47,15 +57,17 @@ function cutAtHyphen(slug: string, max: number): string {
 /**
  * Dirección propuesta para un nombre: «Clínica Dental Sonrisa» → `sonrisa`.
  * Quita al principio las palabras genéricas (y lo que queda suelto tras ellas),
- * sin dejarla vacía: «Clínica Dental» se queda `clinica-dental`.
+ * sin dejarla vacía: «Clínica Dental» se queda `clinica-dental`. Las palabras
+ * genéricas son las de todos más las del producto del panel.
  */
-export function addressFromName(name: string): string {
+export function addressFromName(name: string, product: ClinicalProduct = PANEL_PRODUCT): string {
+  const own = new Set(PRODUCT_GENERIC_WORDS[product])
   const words = slugify(name).split("-").filter(Boolean)
   let start = 0
   let removedGeneric = false
   while (start < words.length) {
     const word = words[start] as string
-    if (GENERIC_WORDS.has(word)) removedGeneric = true
+    if (GENERIC_WORDS.has(word) || own.has(word)) removedGeneric = true
     else if (!(removedGeneric && CONNECTORS.has(word))) break
     start += 1
   }

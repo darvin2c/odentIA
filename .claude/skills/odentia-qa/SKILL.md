@@ -1,11 +1,18 @@
 ---
 name: odentia-qa
-description: Recorrer odentIA y latidIA como QA, en un navegador real y con cinco voces (novato, clínica, desarrollo, auditor y diseño UX), para encontrar errores y mejoras que las pruebas no ven, proponer cómo simplificar lo que cuesta, confirmarlos y dejarlos listos para corregir. Usar para una ronda periódica o cuando pidan «haz QA», «revisa esta pantalla buscando problemas» o «navega por la app a ver qué falla», aunque no haya un cambio nuevo. No usar para probar un cambio propio antes de su PR (eso es odentia-entrega) ni para medir la calidad de Sofi, Clío o Argos.
+description: Recorrer odentIA, latidIA y vistIA como QA, en un navegador real y con cinco voces (novato, clínica, desarrollo, auditor y diseño UX), para encontrar errores y mejoras que las pruebas no ven, supervisar cada proceso clínico contra su catálogo, proponer cómo simplificar lo que cuesta, confirmarlos y dejarlos listos para corregir. Usar para una ronda periódica o cuando pidan «haz QA», «revisa esta pantalla buscando problemas», «revisa la atención como un odontólogo», «revisa el examen de la vista», «¿esto sirve para atender?» o «navega por la app a ver qué falla», aunque no haya un cambio nuevo. También la llama odentia-entrega antes de pedir el sí, y sus voces son la mesa de odentia-entrega. No usar sola para probar un cambio propio (eso lo hace odentia-entrega, que la llama) ni para medir la calidad de Sofi, Clío o Argos.
 ---
 
-# QA de odentIA y latidIA
+# QA de odentIA, latidIA y vistIA
 
-Una ronda recorre un área en la demo de producción. Encuentra, confirma e informa, pero no corrige: cada arreglo va después por `odentia-entrega`, porque un QA que corrige de paso mezcla cambios y deja de mirar. Las rutas parten de la raíz del repositorio.
+Una ronda recorre un área en la app. Encuentra, confirma e informa, pero no corrige: cada arreglo va después por `odentia-entrega`, porque un QA que corrige de paso mezcla cambios y deja de mirar. Las rutas parten de la raíz del repositorio.
+
+Se corre de dos maneras:
+
+- **Ronda**, la que pide el usuario o la periódica: un área, en local o en una demo de producción, con informe en un lienzo privado. Son los apartados 1 a 6.
+- **Antes de entregar**, la que llama `odentia-entrega` con el cambio ya hecho y antes de pedir el sí: sobre la rama, en local. Usa las mismas voces y la misma confirmación, con lo que cambia en el apartado 7.
+
+Las voces y su método están en `references/voces.md`. La voz clínica supervisa cada proceso con los catálogos `references/clinica/odontologia.md` (odentIA), `references/clinica/medicina.md` (latidIA), `references/clinica/optica.md` (vistIA) y `references/clinica/comunes.md` (lo que rodea a la atención en todos), y en cada revisión busca los flujos que los catálogos todavía no tienen.
 
 ## Reglas de toda ronda
 
@@ -39,7 +46,9 @@ Los archivos de la ronda van fuera del repositorio, porque es público, en `~/od
 
 ## 3. Recorrer
 
-Las voces entran una a una, cada una como subagente aparte, en este orden: novato, clínica, desarrollo, auditor y diseño UX. Comparten la demo, cada una con su propia sesión del navegador. El novato no sabe lo que los demás encontraron, y diseño UX va al final porque trabaja sobre los tropiezos de las demás. Qué hace cada una está en `references/voces.md`.
+Las voces entran una a una, cada una como subagente aparte, en este orden: novato, clínica, desarrollo, auditor y diseño UX. Comparten la demo, cada una con su propia sesión del navegador. El novato no sabe lo que los demás encontraron, y diseño UX va al final porque trabaja sobre los tropiezos de las demás. Qué hace cada una, y con qué método, está en `references/voces.md`: cada subagente recibe «Para todas» y su apartado enteros, más `comun.md`, no un resumen, porque el resumen es lo que vuelve genérica a una voz. Diseño UX recibe además los informes de las demás.
+
+**La voz clínica entra siempre que el área toque datos o decisiones clínicas** y recibe además el catálogo de su producto y `comunes.md`. Antes de empezar, la ronda le pasa la lista de procesos del catálogo que el área toca, para que ninguno quede sin revisar, y la voz hace su barrido de flujos que faltan.
 
 **Navegador.** Cada voz abre su propio contexto aislado (en chrome-devtools, `new_page` con `isolatedContext`), para que las sesiones no se mezclen; el navegador de Playwright puede estar tomado por otra sesión. Se escribe tecleando, no llenando el campo de golpe (`fill_form`): React no ve ese cambio y produce falsas alarmas.
 
@@ -49,7 +58,9 @@ Cada hallazgo lleva:
 - **Pasos exactos** para repetirlo, con cuenta, producto y ancho de pantalla.
 - **Qué esperaba y qué pasó**, con captura y errores de consola o red.
 - **Tipo:** `error` (no hace lo que dice, muestra algo falso o se rompe) o `mejora` (funciona, pero cuesta).
-- **Gravedad:** alta (dinero, datos clínicos, permisos o perder trabajo), media (traba la tarea) o baja (molesta).
+- **Gravedad:** alta (dinero, datos clínicos, seguridad del paciente, permisos o perder trabajo), media (traba la tarea) o baja (molesta).
+- **Proceso clínico**, si es de uno del catálogo: su código (`P-ODO-06`) y la comprobación que falla.
+- **Causa**, si la conoce, y si comparte causa con otros hallazgos.
 
 ## 4. Confirmar
 
@@ -71,14 +82,17 @@ Nada se hace público hasta que el usuario decida. Un error clínico también da
 **Informe de la ronda:** un lienzo privado, Artifact de tipo Design como los de `odentia-entrega`, sin compartirlo con nadie. Sus archivos van en `.tmp/qa-lienzo/` del repositorio (ignorado por git), porque el Artifact solo publica desde el directorio de trabajo. Tableros:
 
 - **Resumen:** qué se recorrió, con qué roles y anchos, qué no se alcanzó a ver y cuántas alarmas se descartaron.
+- **Procesos clínicos**, si entró la voz clínica: la tabla de estado por proceso (listo, sirve con trabas, no sirve, no se pudo ver), con las comprobaciones que fallan y el caso donde se vio. Debajo, el recorrido largo etapa por etapa (primera consulta, plan, ejecución, fin del plan, seguimiento y vuelta), con lo que se perdió al pasar de una a otra. Es lo que el usuario supervisa.
+- **Causas raíz:** lo que explica varios hallazgos a la vez, con la propuesta de rediseño en vez de corregir pieza por pieza.
 - **Uno por error alto**, con sus capturas: qué le pasa a la persona, los pasos, lo esperado, la causa, a qué producto afecta.
 - **Seguridad, aparte:** permisos, aislamiento o datos que llegan a quien no debe. Se avisa enseguida, nunca llega a un issue y el tablero se quita antes de compartir el lienzo.
 - **Medios y bajos** juntos y **mejoras**. Lo que está mal por una decisión va aquí, o en su tablero de error alto, según su gravedad, con la decisión citada y cómo debería ser.
 - **Errores de la demo**, con su causa en la semilla.
 - **Descartadas**, para no volver a reportarlas: solo las falsas alarmas y lo que es a propósito y está bien, cada una con su motivo.
 - **Propuestas de diseño UX**, con el antes y el después en pasos y saltos. No se reproducen, pero se confirma que el permiso y el servicio que suponen existen.
+- **Para el catálogo:** los procesos y comprobaciones clínicas que la ronda encontró y el catálogo no tiene, con el texto listo para sumarlo.
 
-**`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, cuántos solo vio la pantalla, tropiezos del entorno y tokens gastados. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
+**`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, procesos clínicos por estado, cuántos solo vio la pantalla, tropiezos del entorno y tokens gastados. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
 
 El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Nombra cada decisión que produce un problema y cómo debería ser. Lista qué sigue para corregir y qué candidatos a issue hay. Cierra con las decisiones que esperan del usuario, cada una como pregunta y con la opción sugerida. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
 
@@ -86,4 +100,21 @@ El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mej
 
 ## 6. Cerrar
 
+Lo de «Para el catálogo» no se escribe en el repositorio durante la ronda: queda en el informe y lo suma la próxima entrega que toque esa área, o un PR propio si el usuario lo pide. Así el catálogo crece con cada ronda sin que la ronda cambie nada.
+
 Si la ronda creó una demo en producción, la elimina desde la administración (solo borra demos: ADR 0096, «Borrar demo») y después verifica que la eliminación sea completa: que la demo ya no aparece en la lista, que su dirección no abre y que su fila en `admin.saas_demo` ya no existe. Si la verificación falla, se informa tal cual, sin dar la ronda por cerrada. Cerrar las páginas del navegador que abrió la ronda. Si se encendió algo en local, apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben (`routeTree.gen.ts`). Los contenedores de otras sesiones no se tocan.
+
+## 7. Antes de entregar
+
+Cuando la llama `odentia-entrega` (su etapa 7), con el cambio ya implementado, probado y revisado. Su trabajo es ver el cambio en la pantalla real, como lo usará la gente, antes de pedir el sí. Corre siempre, también en un cambio chico. Respecto de la ronda, cambia esto:
+
+- **Dónde.** En local, con `pnpm dev` sobre la rama y `pnpm --filter @odentia/services seed:dev`, en cada producto al que llega si el cambio es común (vistIA, en su rama mientras no esté en `main`). Desarrollo lee el código de la rama, no el de producción. No se crea demo en producción.
+- **Qué área.** Lo que el cambio toca y los recorridos vecinos que puede haber roto. La entrega le pasa el acta de la mesa y la lista de lo cambiado, pero no al novato.
+- **Qué voces.** Las de la tabla «Por dónde entra cada cambio» de `odentia-entrega`, y clínica siempre que toque datos o decisiones clínicas. Si el cambio no tiene efecto visible, entra al menos desarrollo, que recorre en la pantalla lo que el cambio podría haber roto.
+- **Confirmar**, igual que en el apartado 4, con agentes nuevos.
+- **Informe.** Sin lienzo ni issues: un informe en `~/odentia-qa/<fecha>-entrega-<rama>/` y un resumen para el PR. Cada hallazgo confirmado va a uno de estos grupos:
+  - **Lo rompió o lo dejó a medias este cambio:** la entrega lo corrige en el mismo PR. Después, un verificador nuevo repite en pantalla solo esos pasos, hasta que todos pasan.
+  - **Ya estaba antes:** queda como pendiente en el PR y en la memoria, sin mezclarlo con lo pedido. Un fallo de permisos, de aislamiento o de datos no se escribe en el PR, porque el repositorio es público: va solo al informe privado y se le avisa al usuario.
+  - **Decisión de producto:** va a la parada del sí, como pregunta con su recomendación.
+  - **Para el catálogo:** se suma a `references/clinica/` en el mismo PR.
+- **Una fila en `~/odentia-qa/recorrido.md`**, marcada «antes de entregar» y con el número del PR.

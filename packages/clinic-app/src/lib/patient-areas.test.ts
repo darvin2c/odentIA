@@ -1,5 +1,5 @@
 import { canAccess } from "@odentia/auth/permissions"
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { bareProduct, declareProduct, type ProductUi } from "../product/product-ui"
 import {
   areaNav,
@@ -35,15 +35,15 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   const ids = (role: string, isPatient = true) =>
     visibleAreas(as(role), isPatient).map((area) => area.id)
 
-  it("recepción: resumen, conversaciones, citas, plan y datos; ni clínica ni cobros", () => {
-    expect(ids("reception")).toEqual(["resumen", "conversaciones", "citas", "plan", "datos"])
+  it("recepción: resumen, citas, plan y datos; ni clínica ni cobros", () => {
+    expect(ids("reception")).toEqual(["resumen", "citas", "plan", "datos"])
     expect(defaultSection(as("reception"))).toBe("resumen")
     // Coordina el tratamiento en el mismo Plan, sin leer la clínica (ADR 0034).
     expect(areaNav("citas", as("reception")).map((entry) => entry.label)).toEqual(["Sus citas"])
     expect(resolveSection("plan", as("reception"))).toBe("plan")
   })
 
-  it("los pedidos sobre sus datos los ven Recepción y Administración, en el grupo «Sus datos y la ley» (ADR 0080)", () => {
+  it("los pedidos sobre sus datos los ven Recepción y Administración, junto a quién consultó su historia (ADR 0080)", () => {
     const datos = (role: string) => areaNav("datos", as(role)).map((entry) => entry.value)
     expect(datos("reception")).toContain("pedidos")
     expect(datos("owner")).toContain("pedidos")
@@ -51,17 +51,18 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(datos("cashier")).not.toContain("pedidos")
     // Solo con ficha: quien aún no es paciente no tiene historia que pedir.
     expect(areaNav("datos", as("owner"), false).map((entry) => entry.value)).not.toContain("pedidos")
-    const owner = areaNav("datos", as("owner"))
-    expect(owner.filter((entry) => entry.group === "Sus datos y la ley").map((entry) => entry.value)).toEqual([
-      "accesos",
-      "pedidos",
+    // Datos en cuatro (QA de la ficha del 8 nov): antes eran siete.
+    expect(areaNav("datos", as("owner")).map((entry) => entry.label)).toEqual([
+      "Datos personales",
+      "Familia y responsables",
+      "Enlace y portal",
+      "Privacidad y pedidos",
     ])
   })
 
-  it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
+  it("odontología: clínica y plan; sin cobros", () => {
     expect(ids("clinician")).toEqual([
       "resumen",
-      "conversaciones",
       "citas",
       "clinica",
       "plan",
@@ -74,8 +75,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     // Ni canales ni portal: son del CRM y de quien edita la filiación.
     expect(areaNav("datos", as("clinician")).map((entry) => entry.label)).toEqual([
       "Datos personales",
-      "Personas vinculadas",
-      "Responsables",
+      "Familia y responsables",
     ])
   })
 
@@ -87,7 +87,6 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   it("propietario: todas las pestañas", () => {
     expect(ids("owner")).toEqual([
       "resumen",
-      "conversaciones",
       "citas",
       "clinica",
       "plan",
@@ -97,7 +96,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   })
 
   it("quien aún no es paciente no tiene clínica, plan ni cobros: aparecen al registrarla", () => {
-    expect(ids("owner", false)).toEqual(["resumen", "conversaciones", "citas", "datos"])
+    expect(ids("owner", false)).toEqual(["resumen", "citas", "datos"])
     expect(ids("cashier", false)).toEqual(["resumen", "datos"])
     // Caja sin ficha no tiene cobros: entra por el resumen.
     expect(defaultSection(as("cashier"), false)).toBe("resumen")
@@ -107,7 +106,6 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   it("quien solo es responsable de otros no tiene citas propias", () => {
     expect(visibleAreas(as("reception"), "responsable").map((area) => area.id)).toEqual([
       "resumen",
-      "conversaciones",
       "datos",
     ])
   })
@@ -121,7 +119,13 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
 
   it("los enlaces guardados de la ficha anterior abren la sección que hace ese trabajo", () => {
     expect(sectionFromSearch("actividad")).toBe("resumen")
-    expect(sectionFromSearch("seguimiento")).toBe("conversaciones")
+    // Conversaciones ya no es una pestaña: sus conversaciones están en el Resumen.
+    expect(sectionFromSearch("seguimiento")).toBe("resumen")
+    expect(sectionFromSearch("conversaciones")).toBe("resumen")
+    // Datos en cuatro: cada sección vieja abre la que la contiene.
+    expect(sectionFromSearch("canales")).toBe("filiacion")
+    expect(sectionFromSearch("responsables")).toBe("contactos")
+    expect(sectionFromSearch("accesos")).toBe("pedidos")
     expect(sectionFromSearch("estudio")).toBe("estudio")
     expect(sectionFromSearch("no-existe")).toBeUndefined()
     // Tratamientos, Controles y la coordinación de recepción viven ahora en el Plan.
@@ -130,7 +134,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("Clínica con lo del producto después de Antecedentes; el que atiende ve 12 y el propietario 17 (ADR 0035 y 0080)", () => {
+  it("Clínica con lo del producto después de Antecedentes; el que atiende ve 10 y el propietario 13 (ADR 0035 y 0080; Datos en cuatro)", () => {
     expect(areaNav("clinica", as("clinician")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
       "Estudio",
@@ -138,14 +142,19 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
       "Documentos",
     ])
     // Lo que va debajo de otra sección no suma una pestaña: se elige dentro de ella.
-    expect(subsectionNav("detalle", as("clinician")).map((entry) => entry.label)).toEqual(["Estudio", "Detalle"])
+    expect(subsectionNav("detalle", as("clinician")).map((entry) => entry.label)).toEqual([
+      "Estudio",
+      "Detalle",
+    ])
     expect(subsectionNav("estudio", as("clinician"))).toHaveLength(2)
     expect(subsectionNav("historia", as("clinician"))).toEqual([])
     expect(navSectionOf("detalle")).toBe("estudio")
-    expect(visibleSections(as("clinician"))).toHaveLength(12)
-    expect(visibleSections(as("owner"))).toHaveLength(17)
+    expect(visibleSections(as("clinician"))).toHaveLength(10)
+    expect(visibleSections(as("owner"))).toHaveLength(13)
     // Recepción y caja no cambian.
-    expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
+    expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain(
+      "antecedentes",
+    )
     expect(visibleSections(as("cashier")).map((section) => section.area)).not.toContain("clinica")
   })
 
@@ -180,5 +189,36 @@ describe("el nombre de un área en el enlace", () => {
     expect(sectionFromSearch("datos")).toBe("filiacion")
     expect(sectionFromSearch("cobros")).toBe("cuenta")
     expect(sectionFromSearch("clinica")).toBe("antecedentes")
+  })
+})
+
+describe("una sección del producto en otra pestaña (vistIA: sus pedidos, en Cobros)", () => {
+  const WITH_ORDERS: ProductUi = {
+    ...PRODUCT,
+    record: {
+      sections: [
+        ...PRODUCT.record.sections,
+        {
+          id: "encargos",
+          label: "Encargos",
+          area: "cobros",
+          permission: "orders.read",
+          render: () => null,
+        },
+      ],
+    },
+  }
+  beforeAll(() => declareProduct(WITH_ORDERS))
+  afterAll(() => declareProduct(PRODUCT))
+  const ids = (role: string) => visibleSections(as(role)).map((section) => section.id)
+
+  it("va al final de su pestaña, con su permiso, y no entra en Clínica", () => {
+    const owner = ids("owner")
+    expect(owner.indexOf("encargos")).toBe(owner.indexOf("cuenta") + 1)
+    expect(resolveSection("encargos", as("owner"))).toBe("encargos")
+    // Recepción ve los pedidos sin ver la caja: la pestaña Cobros solo trae esa sección.
+    expect(ids("reception")).toContain("encargos")
+    expect(ids("reception")).not.toContain("cuenta")
+    expect(visibleAreas(as("reception")).map((area) => area.id)).toContain("cobros")
   })
 })

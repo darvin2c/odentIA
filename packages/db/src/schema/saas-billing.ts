@@ -138,7 +138,7 @@ export const saasPlan = adminSchema.table(
   (table) => [
     unique("saas_plan_code_uidx").on(table.code),
     uniqueIndex("saas_plan_default_uidx").on(table.product).where(sql`${table.isDefault}`),
-    check("saas_plan_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("saas_plan_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check(
       "saas_plan_founders_check",
       sql`(${table.seatLimit} IS NULL OR ${table.seatLimit} > 0) AND (${table.guaranteeMonths} IS NULL OR ${table.guaranteeMonths} BETWEEN 1 AND 120)`,
@@ -795,7 +795,8 @@ export type SaasSignupMode = (typeof SAAS_SIGNUP_MODES)[number]
 
 /**
  * Cómo se abren clínicas nuevas: «solo con invitación» o «abierta», una por
- * producto (ADR 0093): `mode` es el de odentIA y `medical_mode` el de latidIA.
+ * producto (ADR 0093): `mode` es el de odentIA, `medical_mode` el de latidIA y
+ * `optical_mode` el de vistIA.
  * Una sola fila (`id = 1`) que escribe la administración; la lee el guard de
  * `organization/create`. Global, sin `organization_id`: solo `ownerDb`.
  */
@@ -805,6 +806,7 @@ export const saasSignupPolicy = adminSchema.table(
     id: integer("id").primaryKey().default(1),
     mode: text("mode").notNull().default("invitacion"),
     medicalMode: text("medical_mode").notNull().default("invitacion"),
+    opticalMode: text("optical_mode").notNull().default("invitacion"),
     updatedBy: text("updated_by").references(() => user.id),
     ...timestamps,
   },
@@ -812,6 +814,7 @@ export const saasSignupPolicy = adminSchema.table(
     check("saas_signup_policy_singleton_check", sql`${table.id} = 1`),
     check("saas_signup_policy_mode_check", sql`${table.mode} IN ('invitacion','abierta')`),
     check("saas_signup_policy_medical_mode_check", sql`${table.medicalMode} IN ('invitacion','abierta')`),
+    check("saas_signup_policy_optical_mode_check", sql`${table.opticalMode} IN ('invitacion','abierta')`),
   ],
 )
 
@@ -945,7 +948,7 @@ export const saasWaitlistRequest = adminSchema.table(
       sql`${table.currentTool} IN ('nada','cuaderno_excel','otro_software')`,
     ),
     check("saas_waitlist_request_country_check", sql`${table.countryCode} ~ '^[A-Z]{2}$'`),
-    check("saas_waitlist_request_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("saas_waitlist_request_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check(
       "saas_waitlist_request_text_check",
       sql`length(trim(${table.firstName})) BETWEEN 1 AND 80 AND length(trim(${table.lastName})) BETWEEN 1 AND 80

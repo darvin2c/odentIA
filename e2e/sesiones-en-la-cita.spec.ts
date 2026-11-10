@@ -1,7 +1,7 @@
 /**
  * Un tratamiento de varias sesiones se ve como tal (QA del 6 nov): la reserva
  * ofrece la segunda sesión aunque ya tenga cita, cada cita dice «sesión 1 de 2»
- * o «sesión 2 de 2», «Hecho hoy» pide registrar la sesión antes de completar,
+ * o «sesión 2 de 2», «Realizado hoy» pide registrar la sesión antes de completar,
  * el cierre dice que sigue en curso y, en la última, «¿Terminaste?» viene en
  * «Sí, terminar»: firmar sin tocarlo lo termina (QA del 8 nov, X1).
  */
@@ -46,7 +46,7 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre 
   await bookingFor(page, "Lucía Quispe")
   const first = page.getByRole("checkbox", { name: "Endodoncia unirradicular · sesión 1 de 2" })
   await expect(first).toBeChecked()
-  await expect(page.getByText("Tratamientos aceptados con sesiones por reservar.", { exact: false })).toBeVisible()
+  await expect(page.getByText("Lo marcado queda listo en su atención.", { exact: false })).toBeVisible()
   // Una semana después el día entero está libre, sea la hora que sea hoy.
   await page.getByRole("button", { name: "Semana siguiente" }).click()
   await views("reserva-sesion-1")
@@ -82,24 +82,27 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre 
   await expect(appointmentDrawer.getByText("sesión 2 de 2", { exact: true })).toBeVisible()
   await views("cita-sesion-2")
 
-  // 3. Se atiende la cita 1: su atención trae la endodoncia y «Hecho hoy» pide registrar la sesión.
+  // 3. Se atiende la cita 1: su atención trae la endodoncia y «Realizado hoy» pide registrar la sesión.
   const visit = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, { appointmentId: booked[0]!.id, reason: "Sesión 1 de la endodoncia" }, 201)
   await call(page, "PATCH", `${apiPath}/encounters/${visit.id}`, slug, { evolution: "Apertura y conformación de conductos de la 36." })
   await call(page, "POST", `${apiPath}/encounters/${visit.id}/diagnoses`, slug, { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 36 }, 201)
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit.id}`))
-  const openPlan = () =>
-    page.getByRole("region", { name: "Plan y controles" }).getByRole("button", { name: "Abrir", exact: true }).click()
-  await openPlan()
+  // «Realizado hoy» está a la vista, sin abrir nada; «Hoy viene a…» dice qué sesión le toca.
+  const realizado = page.getByRole("region", { name: "Realizado hoy", exact: true })
+  await expect(page.getByRole("region", { name: "Hoy viene a…" })).toContainText("sesión 1 de 2")
+  await expect(realizado).toContainText("sesión 1 de 2 · por registrar")
   // Sin la sesión de hoy no se ofrece «Completar».
-  await expect(page.getByRole("button", { name: "Completar", exact: true })).toHaveCount(0)
+  await expect(realizado.getByRole("button", { name: "Completar", exact: true })).toHaveCount(0)
   await views("hecho-hoy-sin-sesion")
-  await page.getByRole("button", { name: "Registrar la sesión", exact: true }).click()
+  await realizado.getByRole("button", { name: "Registrar la sesión", exact: true }).click()
   const procedure = surface(page, { name: "Registrar procedimiento" })
   await expect(procedure.getByText(/queda en curso/)).toBeVisible()
   await procedure.getByRole("button", { name: "Registrar procedimiento", exact: true }).click()
   await expect(procedure).toBeHidden()
-  await openPlan()
-  await expect(page.getByRole("button", { name: "Completar", exact: true })).toBeVisible()
+  await expect(realizado.getByRole("button", { name: "Completar", exact: true })).toBeVisible()
+  // La sesión de hoy cuenta: sigue siendo la 1 de 2, ya registrada.
+  await expect(realizado).toContainText("sesión 1 de 2")
+  await expect(realizado).not.toContainText("por registrar")
   await views("hecho-hoy-con-sesion")
 
   // Al firmar, la endodoncia no se termina sola: sigue en curso.

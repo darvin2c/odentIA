@@ -1,6 +1,6 @@
-import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { z } from "zod"
-import type { ClinicalProduct } from "./products.js"
+import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
+import { CLINICAL_PRODUCTS, type ClinicalProduct } from "./products.js"
 import {
   type ClinicalCountryProfile,
   clinicalProfileFor,
@@ -14,8 +14,8 @@ import {
 import {
   DOC_TYPE_LABELS,
   EDUCATION_LEVELS,
-  identityDocumentError,
   ISO_COUNTRY_RE,
+  identityDocumentError,
   KINSHIP,
   MARITAL_STATUSES,
   normalizePhone,
@@ -244,6 +244,8 @@ export const registrationAnswersSchema = z.strictObject({
       lactancia: z.boolean().optional(), tabaco: z.enum(["nunca", "fuma", "dejo"]).optional(),
       alcohol: z.enum(["no", "ocasional", "frecuente"]).optional(),
     }).optional(),
+    /** vistIA todavía no pregunta nada propio en el registro: sus antecedentes de la vista llegan con el examen. */
+    optical: z.strictObject({}).optional(),
   }).optional(),
   privacyAccepted: z.boolean(),
   // Permisos de mensajes: solo cuentan si el registro los pregunta y se aceptó el aviso.
@@ -399,11 +401,27 @@ export function validateDemographics(
   countryErrors(data, profile, previous, errors)
   return errors
 }
+/**
+ * Los apartados de la salud con nombre propio: la entrevista (`personal.*`) y lo
+ * de cada producto (`dental.*`, `medical.*`). Un producto nuevo trae el suyo en
+ * `health`, o el compilador lo pide aquí.
+ */
+const HEALTH_SECTIONS = ["personal", ...CLINICAL_PRODUCTS] as const
+type HealthSection = (typeof HEALTH_SECTIONS)[number]
+
+/** El apartado de la salud de una clave del registro («dental.bruxismo» → «dental»); null si no es de uno. */
+export function registrationHealthSection(key: string): HealthSection | null {
+  const prefix = key.slice(0, key.indexOf("."))
+  return HEALTH_SECTIONS.find((section) => section === prefix) ?? null
+}
+
 function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGISTRATION_FIELDS)[number]): unknown {
   const key = field.key
-  if (key.startsWith("dental.")) return data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
-  if (key.startsWith("medical.")) return data.health?.medical?.[key.slice(8) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["medical"]>]
-  if (key.startsWith("personal.")) return data.health?.personal?.[key.slice(9) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["personal"]>]
+  const section = registrationHealthSection(key)
+  if (section) {
+    const answers: Record<string, unknown> | undefined = data.health?.[section]
+    return answers?.[key.slice(section.length + 1)]
+  }
   if (field.step === "salud") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
   return data.demographics[key as keyof RegistrationDemographics]
 }
@@ -420,13 +438,25 @@ export function contactCoveredByRepresentative(key: RegistrationFieldKey, repres
   return representativeContact && (key === "phone" || key === "email")
 }
 
-/** Un dato que le falta a la persona para atenderla, con su nombre en pantalla. */
+/**
+ * Un dato que le falta a la persona para atenderla, con su nombre en pantalla.
+ * `representativeDoc` no es de ella: un menor cuyo representante legal no tiene
+ * documento (lo pide la firma de su consentimiento). Solo lo ve el equipo: su
+ * enlace no lo pide (`getStaffMissingData` en los servicios).
+ */
 export interface MissingPersonDatum {
   key:
     | "givenNames" | "familyName" | "birthDate" | "phone" | "docType" | "docNumber"
     | "sex" | "nationality" | "birthPlace" | "email" | "address" | "emergencyContactName" | "emergencyContactPhone"
     | "insuranceType"
+    | "representativeDoc"
   label: string
+}
+
+/** Lo que falta de su representante legal, dicho como un dato más de «Faltan datos». */
+export const REPRESENTATIVE_DOC_GAP: MissingPersonDatum = {
+  key: "representativeDoc",
+  label: "Documento de su representante",
 }
 
 /**
@@ -530,7 +560,11 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     else {
       if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Escribe el teléfono o el correo del responsable"
       if (minor && data.representative.relationship !== "guardian") errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
-      if (minor && (!data.representative.docType || !data.representative.docNumber)) errors["representative.docNumber"] = "Escribe el documento del representante legal"
+      // En la clínica, el documento de quien lo representa no frena registrar al menor: se pide al
+      // firmar un consentimiento (la firma lo exige y lo deja escribir). Desde fuera sí: es lo que
+      // identifica a quien registra (QA de la ficha del 9 nov; lo legal, NTS 139, queda por validar).
+      if (minor && context.mode === "public" && (!data.representative.docType || !data.representative.docNumber))
+        errors["representative.docNumber"] = "Escribe el documento del representante legal"
       representativeDocumentErrors(data.representative, profile, errors)
     }
   } else if (data.representative) errors.representative = "Selecciona registrar a otra persona"
@@ -573,11 +607,11 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     }
     if (!data.demographics.phone && !data.demographics.email && !representativeContact) errors["demographics.phone"] = "Escribe un teléfono o un correo"
   } else if (context.scope === "essentials") {
-    // Lo mínimo que registra el equipo al reservar: nombres, apellidos y, si se
-    // conoce, el teléfono (a quien escribe ya se le conocen sus canales; a quien
-    // llega por la Agenda el servicio le exige el teléfono). Como en el enlace
-    // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
-    // pendiente (`pendingRegistrationFields`).
+    // Lo mínimo que registra el equipo: nombres, apellidos y, si lo tiene, el
+    // teléfono (a quien escribe ya se le conocen sus canales; quien llega sin
+    // celular se registra igual y la pantalla avisa que no le llegarán sus
+    // avisos). Como en el enlace de reserva, lo que la clínica exige y aquí no
+    // se pide no bloquea: queda pendiente (`pendingRegistrationFields`).
     essentialIdentityErrors(data, errors, (key) => (ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key))
   } else if (config.version > 0) {
     // Alta interna: lo que la clínica configuró como obligatorio también lo es
@@ -587,7 +621,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       if (config.fields[field.key] !== "required" || field.group === "health") continue
       if (field.key === "phone") {
         if (!data.demographics.phone && !data.demographics.email && !representativeContact)
-          errors["demographics.phone"] = "Teléfono o correo: hace falta uno para atenderla"
+          errors["demographics.phone"] = "Teléfono o correo: hace falta uno para la atención"
         continue
       }
       if (needsRepresentative && (field.key === "email") && representativeContact) continue

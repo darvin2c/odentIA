@@ -3,8 +3,14 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { TextDecoder } from "node:util"
 import { SUGGESTED_CONSENT_TEMPLATES, type SuggestedConsentTemplate } from "@odentia/clinical"
-import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
+import {
+  anatomyFits,
+  TREATMENT_KIND_KEYS,
+  TREATMENT_SCOPES,
+  validateLeavesFinding,
+} from "@odentia/dental"
 import { expect, it } from "vitest"
+import { libraryAnatomy } from "./dental/library.js"
 import { librarySessions, loadPatientGuides } from "./procedure-codes.js"
 
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
@@ -58,6 +64,7 @@ const FILES = [
   "procedure_code_systems.csv",
   "biblioteca.csv",
   "biblioteca_codigos.csv",
+  "biblioteca_piezas.csv",
   "procedure_catalog_release.csv",
   "procedure_code_products.csv",
   ...RELEASES.map((release) => release.file),
@@ -356,4 +363,62 @@ it("las sesiones habituales: de tratamientos de su biblioteca, de 2 a 60, y nunc
     const most = visits ? Math.max(...(visits.match(/\d+/g) ?? []).map(Number)) : null
     if (most !== null) expect(sessions, key).toBeLessThanOrEqual(most)
   }
+})
+
+it("la anatomía de la biblioteca: explícita, de tratamientos por pieza, y la endodoncia anterior no es para la 46", () => {
+  const scopes = new Map(
+    strictRead("biblioteca.csv")
+      .split("\n")
+      .slice(1)
+      .filter(Boolean)
+      .map((line) => {
+        const [key, , scope] = line.split(",")
+        return [key!, scope!] as const
+      }),
+  )
+  const anatomy = libraryAnatomy("biblioteca_piezas.csv", scopes)
+  // Cada tratamiento que dice en su nombre para qué piezas es la tiene: endodoncia,
+  // apicectomía, retratamiento, resinas y pulpectomía (las radiografías por zona son generales).
+  for (const key of scopes.keys()) {
+    if (
+      /^(endodoncia|apicectomia|retratamiento|resina|pulpectomia)-.*(anterior|bicuspide|posterior)/.test(
+        key,
+      )
+    ) {
+      expect(anatomy.has(key), key).toBe(true)
+    }
+  }
+  // «Posterior» no es una palabra: en la endodoncia son los molares; en la resina, premolares y molares.
+  expect(anatomy.get("endodoncia-posterior-vital")).toEqual({
+    groups: ["molar"],
+    dentition: "permanent",
+    family: "endodoncia-vital",
+  })
+  expect(anatomy.get("resina-fotocurable-1-superficie-posterior")?.groups).toEqual([
+    "premolar",
+    "molar",
+  ])
+  expect(anatomy.get("pulpectomia-posterior-deciduo")).toMatchObject({
+    groups: ["molar"],
+    dentition: "deciduous",
+  })
+  expect(anatomyFits(anatomy.get("endodoncia-anterior-vital")!, 46)).toBe(false)
+  expect(anatomyFits(anatomy.get("endodoncia-posterior-vital")!, 46)).toBe(true)
+  // La endodoncia es de permanentes: en un molar temporal (la 75) avisa (QA antes de entregar).
+  expect(anatomyFits(anatomy.get("endodoncia-posterior-vital")!, 75)).toBe(false)
+  // Cada familia tiene más de un miembro (si no, no hay a quién ofrecer) salvo la corona completa anterior.
+  const families = new Map<string, number>()
+  for (const item of anatomy.values())
+    families.set(item.family, (families.get(item.family) ?? 0) + 1)
+  expect([...families].filter(([, count]) => count < 2).map(([family]) => family)).toEqual([
+    "resina-corona-completa",
+  ])
+  // Una clave que no existe, o un tratamiento que no es de una pieza, falla antes de tocar la base.
+  expect(() => libraryAnatomy("biblioteca_piezas.csv", new Map())).toThrow(/no está/)
+  expect(() =>
+    libraryAnatomy(
+      "biblioteca_piezas.csv",
+      new Map([...scopes, ["endodoncia-anterior-vital", "general"]]),
+    ),
+  ).toThrow(/no es de una pieza/)
 })

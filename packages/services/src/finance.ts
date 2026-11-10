@@ -13,11 +13,15 @@ import {
   commissionOfValue,
   type ExpenseExchange,
   expenseExchange,
+  expenseReceiptType,
   formatMoney,
+  isTaxDocument,
+  NO_RECEIPT_TYPE,
   type MoneyFraction,
   roundMoneyValue,
   sumMoneyValues,
 } from "@odentia/clinical"
+import { canAttend } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { conversation } from "@odentia/db/schema/crm"
@@ -47,8 +51,11 @@ import {
   commissionSettlementLine,
   expense,
   expenseGapDismissal,
+  expensePayable,
+  expenseRecurring,
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
+import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
@@ -75,9 +82,10 @@ import {
   paymentValueSql,
 } from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
-import { salaryOfMonth } from "./expense-recurring-occurrences.js"
+import { salaryOfMonth, userNamesOf } from "./expense-recurring-occurrences.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
+import { buyerPerson, COUNTER_SALE_LABEL, joinBuyerPerson, ticketPartyNameSql } from "./ticket-party.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
@@ -169,6 +177,26 @@ async function audit(
   await tx
     .insert(auditEvent)
     .values({ organizationId: orgId, actorUserId, entity, entityId: id, action, metadata: metadata ?? null })
+}
+
+/**
+ * Una factura por pagar con su saldo (ADR 0175), bloqueada mientras se paga: dos pagos a la vez no
+ * pasan de lo que falta. Lo pagado es la suma de sus gastos vigentes.
+ */
+export async function lockPayable(tx: Db, orgId: string, payableId: string) {
+  if (!looksLikeId(payableId)) throw invalidField("payableId", "Esa factura no existe")
+  const [row] = await tx
+    .select()
+    .from(expensePayable)
+    .where(and(eq(expensePayable.organizationId, orgId), eq(expensePayable.id, payableId)))
+    .for("update")
+  if (!row) throw invalidField("payableId", "Esa factura no existe")
+  const [paid] = await tx
+    .select({ cents: sql<string>`coalesce(sum(${expense.amountCents}), 0)::text` })
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.payableId, payableId), isNull(expense.voidedAt)))
+  const paidCents = Number(paid?.cents ?? 0)
+  return { ...row, paidCents, dueCents: Math.max(0, row.amountCents - paidCents) }
 }
 
 export async function requireBranch(tx: Db, orgId: string, branchId: string) {
@@ -478,10 +506,11 @@ function methodTotals(movements: CashMove[]): MethodTotal[] {
 
 /**
  * La caja la ve caja, que no ve a quién se pagó cada comisión (ADR 0018, D-14 de la ronda de
- * comisiones): el movimiento del pago de una comisión se llama «Pago de comisiones», como su
- * fila en Gastos. Lo nuevo ya se guarda así; esto cubre lo guardado antes con el nombre.
+ * comisiones) ni cada sueldo (S1 de la QA de Gastos): el movimiento del pago de una comisión se
+ * llama «Pago de comisiones» y el de un sueldo, «Pago de sueldo», como su fila en Gastos. Lo nuevo
+ * ya se guarda así; esto cubre lo guardado antes con el nombre.
  */
-async function withoutCommissionPayees<T extends { expenseId: string | null; concept: string }>(
+async function withoutCommissionPayees<T extends { expenseId: string | null; concept: string; direction: string }>(
   tx: Db,
   orgId: string,
   movements: T[],
@@ -493,7 +522,40 @@ async function withoutCommissionPayees<T extends { expenseId: string | null; con
     .from(commissionSettlement)
     .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, ids)))
   const paid = new Set(rows.map((row) => row.expenseId))
-  return movements.map((m) => (m.expenseId && paid.has(m.expenseId) ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT } : m))
+  const salaries = await salaryPaymentsOf(tx, orgId, ids)
+  // Solo la salida: la «Compensación por anulación» de un pago anulado dice lo que es.
+  return movements.map((m) =>
+    m.direction !== "egreso"
+      ? m
+      : m.expenseId && paid.has(m.expenseId)
+        ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT }
+        : m.expenseId && salaries.has(m.expenseId)
+          ? { ...m, concept: SALARY_PAYMENT_CONCEPT }
+          : m,
+  )
+}
+
+/** El tipo de lo que se le paga al personal: lo ve con detalle quien administra comisiones (ADR 0166). */
+export const STAFF_PAY_CATEGORY = "Personal"
+
+/**
+ * Los gastos que son pagos al personal (el tipo «Personal»), sin los de comisión, que tienen su
+ * propia fila: con persona o sin ella, porque el nombre también puede ir en el concepto.
+ */
+async function salaryPaymentsOf(tx: Db, orgId: string, expenseIds: string[]): Promise<Set<string>> {
+  if (expenseIds.length === 0) return new Set()
+  const rows = await tx
+    .select({ id: expense.id })
+    .from(expense)
+    .where(
+      and(
+        eq(expense.organizationId, orgId),
+        inArray(expense.id, expenseIds),
+        eq(expense.category, STAFF_PAY_CATEGORY),
+        sql`not exists (select 1 from commission_settlement s where s.organization_id = ${expense.organizationId} and s.expense_id = ${expense.id})`,
+      ),
+    )
+  return new Set(rows.map((row) => row.id))
 }
 
 /** Turno con movimientos vigentes y esperado de efectivo calculado en vivo. */
@@ -539,6 +601,28 @@ export interface AddMovementInput {
   kind: "aporte" | "retiro"
   amountCents: number
   concept: string
+  /** La clave del formulario: el mismo pedido devuelve el mismo movimiento (ADR 0018). */
+  requestId?: string | null
+}
+
+/** Una clave de pedido (`requestId`) es un UUID que genera la pantalla al abrir el formulario. */
+export function requestKey(value: string | null | undefined): string | null {
+  if (!value) return null
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+    throw invalidField("requestId", "La clave del pedido debe ser un UUID")
+  return value.toLowerCase()
+}
+
+/** Dos envíos con la misma clave se esperan en fila: el segundo ve lo que dejó el primero. */
+export async function lockRequest(tx: Db, kind: string, orgId: string, requestId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${kind} || ':' || ${orgId} || ':' || ${requestId}))`)
+}
+
+export function requestReused(): ServiceError {
+  return conflict(
+    "REQUEST_ID_CONFLICT",
+    "Este formulario ya registró algo antes de cortarse la conexión: ciérralo y revisa la lista antes de anotarlo otra vez",
+  )
 }
 
 /**
@@ -560,6 +644,19 @@ export async function addShiftMovement(
   if ((input.kind === "aporte") !== (input.direction === "ingreso"))
     throw validation("Ingresar efectivo es un aporte y retirarlo es un retiro")
   const amount = assertCents(input.amountCents, "El importe", "amountCents")
+  const requestId = requestKey(input.requestId)
+  if (requestId) {
+    await lockRequest(tx, "cash-move", orgId, requestId)
+    const [replay] = await tx
+      .select()
+      .from(cashMovement)
+      .where(and(eq(cashMovement.organizationId, orgId), eq(cashMovement.requestId, requestId)))
+    if (replay) {
+      // El reintento de lo mismo devuelve lo que ya quedó, sin mover el efectivo otra vez.
+      if (replay.kind !== input.kind || replay.amountCents !== amount || replay.shiftId !== shift.id) throw requestReused()
+      return replay
+    }
+  }
   // El efectivo nunca queda negativo: el egreso no supera el contado actual.
   if (input.direction === "egreso") await requireCashAvailable(tx, orgId, shift.id, amount, "amountCents")
   const [row] = await tx
@@ -572,6 +669,7 @@ export async function addShiftMovement(
       amountCents: amount,
       currency: shift.currency,
       concept: concept(input.concept, "concept"),
+      requestId,
       createdBy: actorUserId,
     })
     .returning()
@@ -586,6 +684,7 @@ export interface CashMovementInput {
   amountCents: number
   concept: string
   currency?: string
+  requestId?: string | null
 }
 
 /**
@@ -605,6 +704,7 @@ export async function addCashMovement(
     kind: input.kind,
     amountCents: input.amountCents,
     concept: input.concept,
+    requestId: input.requestId,
   })
 }
 
@@ -1179,6 +1279,91 @@ export interface CreateExpenseInput {
    * ADR 0083): no resta de lo que deja, porque ese impuesto ya salió de lo cobrado.
    */
   salesTax?: boolean
+  /**
+   * La clave del formulario abierto (ADR 0018, como el cobro): reintentar después de un corte
+   * devuelve el mismo gasto, sin otro gasto ni otra salida de caja (QA de Gastos, G2).
+   */
+  requestId?: string | null
+  /**
+   * Con qué se pagó (ADR 0167): un medio activo de la clínica, el mismo de Cobrar. Manda sobre
+   * `fromCash`: sale del efectivo de la caja solo si es efectivo (UN/CEFACT 10).
+   */
+  paymentMethodId?: string | null
+  /** El n.º de operación de un medio que no es efectivo (Yape, transferencia). */
+  paymentReference?: string | null
+  /**
+   * El tipo de comprobante del país (`expenseReceiptTypes`, en el Perú la tabla 10 de SUNAT), o
+   * «sin». Con él, `receiptKind` es su nombre.
+   */
+  receiptType?: string | null
+  /** A quién se pagó: un proveedor de Inventario, o su nombre escrito. */
+  supplierId?: string | null
+  supplierName?: string | null
+  /** El documento del proveedor (RUC), para el crédito fiscal. */
+  supplierTaxId?: string | null
+}
+
+/** El medio de pago activo de la clínica, para congelarlo en el gasto (como un cobro). */
+async function expenseMethod(tx: Db, orgId: string, id: string) {
+  if (!looksLikeId(id)) throw invalidField("paymentMethodId", "Elige con qué se pagó")
+  const [method] = await tx
+    .select({ id: organizationPaymentMethod.id, name: organizationPaymentMethod.name, typeCode: organizationPaymentMethod.typeCode })
+    .from(organizationPaymentMethod)
+    .where(
+      and(
+        eq(organizationPaymentMethod.organizationId, orgId),
+        eq(organizationPaymentMethod.id, id),
+        eq(organizationPaymentMethod.isActive, true),
+      ),
+    )
+  if (!method) throw invalidField("paymentMethodId", "Ese medio ya no está activo: elige otro")
+  return method
+}
+
+/** El efectivo (UN/CEFACT 10) es lo único que sale de la caja. */
+const CASH_METHOD = "10"
+
+/**
+ * Lo que dice la persona del comprobante y del proveedor, con el tipo del país y el proveedor de
+ * Inventario si lo eligió (su nombre y su documento se congelan).
+ */
+export async function expensePaper(
+  tx: Db,
+  orgId: string,
+  input: Pick<CreateExpenseInput, "receiptType" | "receiptKind" | "supplierId" | "supplierName" | "supplierTaxId">,
+) {
+  // Comprobante libre de antes (sin tipo): se guarda tal cual, como siempre.
+  let receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
+  let receiptType: string | null = null
+  if (input.receiptType) {
+    if (input.receiptType === NO_RECEIPT_TYPE) {
+      receiptType = NO_RECEIPT_TYPE
+      receiptKind = "ninguno"
+    } else {
+      const { countryCode } = await getOrgLocale(tx, orgId)
+      const type = expenseReceiptType(countryCode, input.receiptType)
+      if (!type) throw invalidField("receiptType", "Ese comprobante no es de los de tu país")
+      receiptType = type.code
+      receiptKind = type.label
+    }
+  }
+  let supplierName = input.supplierName?.trim() ? input.supplierName.trim().slice(0, 200) : null
+  let supplierTaxId = input.supplierTaxId?.trim() ? input.supplierTaxId.trim().slice(0, 20) : null
+  let supplierId: string | null = null
+  if (input.supplierId) {
+    if (!looksLikeId(input.supplierId)) throw invalidField("supplierId", "Ese proveedor no existe")
+    const [row] = await tx
+      .select({ id: supplier.id, name: supplier.name, docNumber: supplier.docNumber })
+      .from(supplier)
+      .where(and(eq(supplier.organizationId, orgId), eq(supplier.id, input.supplierId)))
+    if (!row) throw invalidField("supplierId", "Ese proveedor no existe")
+    supplierId = row.id
+    supplierName = row.name
+    // Solo un documento tributario va como RUC del comprobante; el DNI de una persona no.
+    const [doc] = await tx.select({ docType: supplier.docType }).from(supplier).where(eq(supplier.id, row.id))
+    supplierTaxId = supplierTaxId ?? (isTaxDocument(doc?.docType) ? row.docNumber : null) ?? null
+  }
+  return { receiptKind, receiptType, supplierId, supplierName, supplierTaxId }
 }
 
 /** Lo que salió en otra moneda que la que cancela un gasto. */
@@ -1247,6 +1432,48 @@ function frozenExpense(
 }
 
 /**
+ * El gasto que ya dejó este mismo pedido (`requestId`), con la clave bloqueada hasta el final de la
+ * transacción. Otra cosa con la misma clave es un error: la clave es de un solo formulario.
+ */
+export async function replayedExpense(
+  tx: Db,
+  orgId: string,
+  input: Pick<
+    CreateExpenseInput,
+    "requestId" | "branchId" | "amountCents" | "concept" | "currency" | "category" | "fromCash" | "salesTax" | "paymentMethodId"
+  >,
+  link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string; replacesExpenseId?: string; payableId?: string } = {},
+) {
+  const requestId = requestKey(input.requestId)
+  if (!requestId) return null
+  await lockRequest(tx, "expense", orgId, requestId)
+  const [row] = await tx
+    .select()
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
+  if (!row) return null
+  if (
+    row.voidedAt !== null ||
+    row.branchId !== input.branchId ||
+    row.amountCents !== input.amountCents ||
+    row.concept !== input.concept.trim() ||
+    (input.currency !== undefined && row.currency !== input.currency) ||
+    (input.category !== undefined && row.category !== (input.category.trim() || "Otros")) ||
+    (input.paymentMethodId
+      ? row.paymentMethodId !== input.paymentMethodId
+      : input.fromCash !== undefined && (row.shiftId !== null) !== input.fromCash) ||
+    row.replacesExpenseId !== (link.replacesExpenseId ?? null) ||
+    (input.salesTax !== undefined && row.salesTax !== input.salesTax) ||
+    row.purchaseOrderId !== (link.purchaseOrderId ?? null) ||
+    row.payableId !== (link.payableId ?? null) ||
+    row.recurringId !== (link.recurringId ?? null) ||
+    row.recurringMonth !== (link.recurringMonth ?? null)
+  )
+    throw requestReused()
+  return row
+}
+
+/**
  * Registra un gasto con su tipo. Con `fromCash` el egreso sale del efectivo
  * de la ventana abierta (movimiento + gasto en la misma transacción); sin
  * caja es gasto directo. Sin proveedor ni turno a mano. La caja que se usa es la
@@ -1262,10 +1489,28 @@ export async function createExpense(
    * otra moneda, lo que salió. Un gasto suelto no cruza monedas. Solo
    * `expense-recurring.ts`: el gasto es el pago de ese mes de un gasto que se repite.
    */
-  link: { purchaseOrderId?: string; tender?: ExpenseTender; recurringId?: string; recurringMonth?: string } = {},
+  link: {
+    purchaseOrderId?: string
+    tender?: ExpenseTender
+    recurringId?: string
+    recurringMonth?: string
+    /** Cómo se llama su movimiento de caja si no es el concepto: «Pago de sueldo», sin a quién. */
+    cashConcept?: string
+    /** Solo `correctExpense`: el gasto que este reemplaza, anulado en la misma operación. */
+    replacesExpenseId?: string
+    /** El pago (o una parte) de una factura por pagar (ADR 0175). */
+    payableId?: string
+  } = {},
+  /**
+   * Quien registra: lo que se le paga al personal (el tipo «Personal») lo anota quien administra
+   * comisiones (ADR 0166). Sin decirlo, no: es lo más protector.
+   */
+  viewer: { seesPeople: boolean } = { seesPeople: false },
 ) {
   if (Boolean(link.recurringId) !== Boolean(link.recurringMonth))
     throw validation("El pago de un gasto que se repite lleva su plantilla y su mes")
+  const replay = await replayedExpense(tx, orgId, input, link)
+  if (replay) return replay
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const profile = await lockOrgMoney(tx, orgId)
   if (!input.currency && !profile) throw orgProfileRequired()
@@ -1273,6 +1518,8 @@ export async function createExpense(
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw invalidField("category", "Tipo de gasto inválido")
+  if (category === STAFF_PAY_CATEGORY && !viewer.seesPeople)
+    throw new ServiceError("FORBIDDEN", 403, "Lo que se le paga al personal lo anotan quienes administran las comisiones")
   if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
     throw invalidField("category", "El pago de una compra es un gasto de Materiales")
   const salesTax = input.salesTax === true
@@ -1281,9 +1528,30 @@ export async function createExpense(
   // El impuesto de lo cobrado se paga en moneda del negocio: es la de lo que deja.
   if (salesTax && profile?.secondCurrency && unit !== profile.currency)
     throw invalidField("salesTax", "El impuesto de lo cobrado se paga en la moneda del negocio")
-  // Comprobante libre según país (el catálogo fiscal llega con su módulo).
-  const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
+  // El comprobante: el tipo del país (ADR 0167) o, en lo que llega sin tipo, el texto de siempre.
+  const paper = await expensePaper(tx, orgId, input)
+  // Con qué se pagó: el medio manda; sin medio (lo de antes, una compra, una comisión), la casilla.
+  const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
+  const fromCash = method ? method.typeCode === CASH_METHOD : input.fromCash === true
   const amountCents = assertCents(input.amountCents, "El gasto", "amountCents")
+  // El pago de una factura por pagar: de su sede, su tipo y su moneda, y nunca más de lo que falta.
+  if (link.payableId) {
+    if (link.purchaseOrderId) throw validation("Un pago es de una compra o de una factura, no de las dos")
+    const owed = await lockPayable(tx, orgId, link.payableId)
+    if (owed.voidedAt) throw conflict("PAYABLE_VOIDED", "Esa factura se anuló: ya no se paga")
+    if (owed.branchId !== branchRow.id) throw invalidField("branchId", "Esa factura es de otra sede: se paga en la suya")
+    if (owed.category !== category) throw invalidField("category", `Esa factura es de ${owed.category}: su pago va en ese tipo`)
+    if (owed.currency !== unit) throw invalidField("currency", `Esa factura es en ${owed.currency}: se paga en esa moneda`)
+    if (amountCents > owed.dueCents) {
+      const { locale } = await getOrgLocale(tx, orgId)
+      throw invalidField(
+        "amountCents",
+        owed.dueCents === 0
+          ? "Esa factura ya está pagada"
+          : `Es más de lo que falta: de esa factura queda ${formatMoney(owed.dueCents, owed.currency, locale)} por pagar`,
+      )
+    }
+  }
   const tender = link.tender
     ? {
         cents: assertCents(link.tender.cents, "Lo que salió", "tenderCents"),
@@ -1298,7 +1566,7 @@ export async function createExpense(
     isPurchase: Boolean(link.purchaseOrderId),
   })
   const out = frozen?.tender ?? { cents: amountCents, currency: unit }
-  const shift = input.fromCash
+  const shift = fromCash
     ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, out.currency)
     : null
   const [row] = await tx
@@ -1320,13 +1588,25 @@ export async function createExpense(
           }
         : {}),
       spentAt: input.spentAt ? instant(input.spentAt, "spentAt") : new Date(),
-      receiptKind,
-      receiptNumber: input.receiptNumber?.trim() || null,
+      receiptKind: paper.receiptKind,
+      receiptType: paper.receiptType,
+      receiptNumber: paper.receiptType === NO_RECEIPT_TYPE ? null : input.receiptNumber?.trim().slice(0, 60) || null,
+      supplierId: paper.supplierId,
+      supplierName: paper.supplierName,
+      supplierTaxId: paper.supplierTaxId,
+      paymentMethodId: method?.id ?? null,
+      methodName: method?.name ?? null,
+      methodTypeCode: method?.typeCode ?? null,
+      // El n.º de operación es de lo que no es efectivo.
+      paymentReference: method && method.typeCode !== CASH_METHOD ? input.paymentReference?.trim().slice(0, 60) || null : null,
+      replacesExpenseId: link.replacesExpenseId ?? null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
       purchaseOrderId: link.purchaseOrderId ?? null,
+      payableId: link.payableId ?? null,
       salesTax,
       recurringId: link.recurringId ?? null,
       recurringMonth: link.recurringMonth ?? null,
+      requestId: requestKey(input.requestId),
       createdBy: actorUserId,
     })
     .returning()
@@ -1335,7 +1615,7 @@ export async function createExpense(
       kind: "gasto",
       amountCents: out.cents,
       currency: out.currency,
-      concept: row.concept,
+      concept: link.cashConcept ?? row.concept,
       expenseId: row.id,
       amountField: frozen?.tender ? "tenderCents" : "amountCents",
     })
@@ -1366,9 +1646,10 @@ export async function listExpenses(
   if (viewer.seesCommissions || rows.length === 0) return rows
   // Quien no administra comisiones no lee a quién se pagó ni cuánto a cada uno (ver `getMonthExpenses`).
   const paid = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
-  return withoutCommissionNames(rows.map((row) => ({ ...row, commission: paid.has(row.id) }))).map(
-    ({ commission: _commission, ...row }) => row,
-  )
+  const salaries = await salaryPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  return withoutCommissionNames(
+    rows.map((row) => ({ ...row, commission: paid.has(row.id), salary: salaries.has(row.id) })),
+  ).map(({ commission: _commission, salary: _salary, ...row }) => row)
 }
 
 /** El pago de comisión de cada gasto que lo es, con su profesional y su mes. */
@@ -1390,6 +1671,12 @@ async function commissionPaymentsOf(tx: Db, orgId: string, expenseIds: string[])
 
 /** Concepto con que ve el pago de comisiones quien no administra comisiones. */
 export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
+
+/** Concepto con que ve los sueldos pagados quien no administra comisiones (S1). */
+export const SALARY_PAYMENTS_CONCEPT = "Pago de sueldos"
+
+/** El movimiento de caja del pago de un sueldo: sin a quién, como el de una comisión. */
+export const SALARY_PAYMENT_CONCEPT = "Pago de sueldo"
 
 /**
  * Concepto del efectivo que devuelve un profesional de comisiones ya pagadas (ADR 0157): como el
@@ -1420,25 +1707,42 @@ function withoutCommissionNames<
     receiptNumber: string | null
     createdBy: string | null
     voidedAt: Date | null
+    recurringId: string | null
+    recurringMonth: string | null
+    receiptKind: string
+    shiftId: string | null
+    requestId: string | null
+    receiptType: string | null
+    paymentMethodId: string | null
+    methodName: string | null
+    methodTypeCode: string | null
+    paymentReference: string | null
+    supplierId: string | null
+    supplierName: string | null
+    supplierTaxId: string | null
+    replacesExpenseId: string | null
     commission: boolean
+    /** El pago del sueldo de una persona: se junta igual, como «Pago de sueldos» (S1). */
+    salary: boolean
   },
 >(rows: T[]): T[] {
   const merged = new Map<string, T>()
   const out: T[] = []
   for (const row of rows) {
-    if (!row.commission) {
+    if (!row.commission && !row.salary) {
       out.push(row)
       continue
     }
     if (row.voidedAt) continue
-    const key = `${row.branchId}|${row.currency}`
+    const kind = row.commission ? "comisiones" : "sueldos"
+    const key = `${kind}|${row.branchId}|${row.currency}`
     const seen = merged.get(key)
     if (!seen) {
       // Las filas llegan de la más reciente a la más antigua: la fecha es la del último pago.
       const first: T = {
         ...row,
-        id: `comisiones:${row.branchId}:${row.currency}`,
-        concept: COMMISSION_PAYMENTS_CONCEPT,
+        id: `${kind}:${row.branchId}:${row.currency}`,
+        concept: row.commission ? COMMISSION_PAYMENTS_CONCEPT : SALARY_PAYMENTS_CONCEPT,
         businessCents: null,
         tenderCents: null,
         tenderCurrency: null,
@@ -1446,6 +1750,28 @@ function withoutCommissionNames<
         notes: null,
         receiptNumber: null,
         createdBy: null,
+        recurringId: null,
+        recurringMonth: null,
+        // Junta pagos hechos de varias formas: no dice de qué caja, con qué medio ni con qué papel
+        // salió cada uno, ni a quién (un recibo por honorarios dice el nombre y el RUC), ni lo que
+        // era antes de corregirlo (ADR 0166).
+        receiptKind: "ninguno",
+        shiftId: null,
+        requestId: null,
+        receiptType: null,
+        paymentMethodId: null,
+        methodName: null,
+        methodTypeCode: null,
+        paymentReference: null,
+        supplierId: null,
+        supplierName: null,
+        supplierTaxId: null,
+        replacesExpenseId: null,
+        ...("fromCash" in row ? { fromCash: false } : {}),
+        ...("shiftClosed" in row ? { shiftClosed: false } : {}),
+        ...("replaced" in row ? { replaced: null } : {}),
+        ...("history" in row ? { history: [] } : {}),
+        ...("payableId" in row ? { payableId: null } : {}),
       }
       merged.set(key, first)
       out.push(first)
@@ -1488,11 +1814,15 @@ export async function getMonthExpenses(
   const valueOf = (row: { amountCents: number; businessCents: number | null; currency: string }) =>
     orgPartValue(row.amountCents, row, money)
   const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
+  // El pago del impuesto de lo cobrado no es un gasto (ADR 0083): se ve en la lista y no suma, como
+  // en Reportes, para que «Gastado» diga lo mismo en las dos pantallas (QA de Gastos, G12).
+  const spent = live.filter((row) => !row.salesTax)
   const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  const salaries = viewer.seesCommissions ? new Set<string>() : await salaryPaymentsOf(tx, orgId, rows.map((row) => row.id))
   // El pago de comisiones va aparte de «Personal», como en Reportes: así «Personal» dice lo mismo en
   // las dos pantallas (los sueldos) y el pago de comisiones tiene su propia cifra.
   const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
-  for (const row of live) {
+  for (const row of spent) {
     const key = settlementOf.has(row.id) ? COMMISSION_PAYMENTS_CONCEPT : row.category
     const list = byCategoryValues.get(key) ?? []
     list.push(valueOf(row))
@@ -1513,41 +1843,321 @@ export async function getMonthExpenses(
         .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
-  const detailed = rows.map((row) => {
+  // La caja de cada gasto en efectivo, cerrada o no: anularlo después del cierre es de administración,
+  // y la pantalla lo dice antes de pedir el motivo (QA de Gastos, G15).
+  const shiftIds = [...new Set(rows.map((row) => row.shiftId).filter((id): id is string => id !== null))]
+  const closedShifts = new Set(
+    shiftIds.length
+      ? (
+          await tx
+            .select({ id: cashShift.id })
+            .from(cashShift)
+            .where(and(eq(cashShift.organizationId, orgId), inArray(cashShift.id, shiftIds), eq(cashShift.status, "cerrada")))
+        ).map((shift) => shift.id)
+      : [],
+  )
+  // «Corregir» (ADR 0167): el gasto corregido no se lista aparte; lo dice el nuevo, con lo de antes.
+  const replacedIds = new Set(
+    rows.length
+      ? (
+          await tx
+            .select({ id: expense.replacesExpenseId })
+            .from(expense)
+            .where(
+              and(
+                eq(expense.organizationId, orgId),
+                inArray(expense.replacesExpenseId, rows.map((row) => row.id)),
+                // Solo si lo nuevo quedó en este mes: corregido a otro mes, sigue aquí anulado y lo dice.
+                gte(expense.spentAt, start),
+                lt(expense.spentAt, end),
+              ),
+            )
+        ).map((row) => row.id)
+      : [],
+  )
+  // La cadena entera de correcciones: lo de antes, y lo de antes de eso (hasta 10 vueltas).
+  type Before = {
+    id: string
+    amountCents: number
+    currency: string
+    category: string
+    concept: string
+    spentAt: Date
+    methodName: string | null
+    shiftId: string | null
+    voidReason: string | null
+    replacesExpenseId: string | null
+  }
+  const before = new Map<string, Before>()
+  let pendingIds = rows.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null)
+  for (let turn = 0; turn < 10 && pendingIds.length > 0; turn += 1) {
+    const found = await tx
+      .select({
+        id: expense.id,
+        amountCents: expense.amountCents,
+        currency: expense.currency,
+        category: expense.category,
+        concept: expense.concept,
+        spentAt: expense.spentAt,
+        methodName: expense.methodName,
+        shiftId: expense.shiftId,
+        voidReason: expense.voidReason,
+        replacesExpenseId: expense.replacesExpenseId,
+      })
+      .from(expense)
+      .where(and(eq(expense.organizationId, orgId), inArray(expense.id, pendingIds)))
+    for (const row of found) before.set(row.id, row)
+    pendingIds = found.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null && !before.has(id))
+  }
+  const chainOf = (id: string | null): Before[] => {
+    const out: Before[] = []
+    for (let at = id; at && out.length < 10; at = before.get(at)?.replacesExpenseId ?? null) {
+      const row = before.get(at)
+      if (!row) break
+      out.push(row)
+    }
+    return out
+  }
+  const untilSalary = (chain: Before[], seesPeople: boolean) => {
+    if (seesPeople) return chain
+    const cut = chain.findIndex((item) => item.category === STAFF_PAY_CATEGORY)
+    return cut === -1 ? chain : chain.slice(0, cut)
+  }
+  const beforeWords = (was: Before) => ({
+    amountCents: was.amountCents,
+    currency: was.currency,
+    category: was.category,
+    concept: was.concept,
+    spentAt: was.spentAt,
+    methodName: was.methodName ?? (was.shiftId ? "Efectivo de la caja" : null),
+    reason: was.voidReason,
+  })
+  // De quién es cada sueldo pagado de lo que se repite: solo para quien administra comisiones (ADR 0166).
+  const persons = new Map<string, string>()
+  if (viewer.seesCommissions) {
+    const ids = [...new Set(rows.map((row) => row.recurringId).filter((id): id is string => id !== null))]
+    if (ids.length > 0) {
+      const owners = await tx
+        .select({ id: expenseRecurring.id, memberUserId: expenseRecurring.memberUserId })
+        .from(expenseRecurring)
+        .where(and(eq(expenseRecurring.organizationId, orgId), inArray(expenseRecurring.id, ids)))
+      const names = await userNamesOf(tx, owners.map((owner) => owner.memberUserId))
+      for (const owner of owners) {
+        const name = owner.memberUserId ? names.get(owner.memberUserId) : undefined
+        if (name) persons.set(owner.id, name)
+      }
+    }
+  }
+  // Lo anulado para convertirlo en un sueldo no dice su motivo a quien no ve los sueldos: el motivo
+  // cuenta lo que se pagaba y a quién (ADR 0166).
+  const voidedIds = rows.filter((row) => row.voidedAt !== null).map((row) => row.id)
+  const intoSalary = new Set(
+    viewer.seesCommissions || voidedIds.length === 0
+      ? []
+      : (
+          await tx
+            .select({ id: expense.replacesExpenseId })
+            .from(expense)
+            .where(and(eq(expense.organizationId, orgId), inArray(expense.replacesExpenseId, voidedIds), eq(expense.category, STAFF_PAY_CATEGORY)))
+        ).map((row) => row.id),
+  )
+  const detailed = rows.filter((row) => !replacedIds.has(row.id)).map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
+    const was = row.replacesExpenseId ? before.get(row.replacesExpenseId) : undefined
     return {
       ...row,
+      voidReason: intoSalary.has(row.id) ? null : row.voidReason,
       // El tipo con que se ve y se filtra: el mismo que su cifra del mes (`byCategory`).
       category: settlement !== undefined ? COMMISSION_PAYMENTS_CONCEPT : row.category,
       fromCash: row.shiftId !== null,
+      /** Salió de una caja que ya se cerró. */
+      shiftClosed: row.shiftId !== null && closedShifts.has(row.shiftId),
       purchaseOrderNumber: order?.orderNumber ?? null,
-      supplierName: order?.supplierName ?? null,
+      // El proveedor de la compra, o el que se dijo en el gasto.
+      supplierName: order?.supplierName ?? row.supplierName ?? null,
+      /** De quién es el sueldo pagado (solo para quien administra comisiones). */
+      personName: row.recurringId ? (persons.get(row.recurringId) ?? null) : null,
+      /** Lo que era antes de corregirlo: el importe, el tipo, la fecha y cómo se pagó. */
+      // Lo de antes de un sueldo no se le dice a quien no administra comisiones (ADR 0166).
+      replaced: was && (viewer.seesCommissions || was.category !== STAFF_PAY_CATEGORY) ? beforeWords(was) : null,
+      /**
+       * Toda la cadena de correcciones, de la más reciente a la primera. Para quien no ve los
+       * sueldos se corta en el primero: el motivo de la versión anterior a un sueldo podría
+       * contar lo que se pagaba (ADR 0166).
+       */
+      history: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).map(beforeWords),
+      /** La cadena llega a su primer gasto (no se cortó en un sueldo para quien no los ve). */
+      historyComplete: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).length === chainOf(row.replacesExpenseId).length,
       commission: settlement !== undefined,
+      salary: salaries.has(row.id),
       /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */
       commissionPayment: viewer.seesCommissions && settlement ? settlement : null,
     }
   })
   const expenses = (viewer.seesCommissions ? detailed : withoutCommissionNames(detailed))
     .filter((row) => !query.category || row.category === query.category)
-    .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
-  const shownLive = expenses.filter((row) => !row.voidedAt && valueOf(row) !== null)
+    .filter(
+      (row) =>
+        !query.q?.trim() ||
+        textMatchesWords(
+          [row.concept, row.supplierName, row.receiptNumber, row.notes, row.receiptKind === "ninguno" ? null : row.receiptKind, row.methodName, row.paymentReference],
+          query.q,
+        ),
+    )
+  const shownLive = expenses.filter((row) => !row.voidedAt && !row.salesTax && valueOf(row) !== null)
+  const shownTax = expenses.filter((row) => !row.voidedAt && row.salesTax).length
   return {
     year: query.year,
     month: query.month,
     currency: unit,
     timezone,
-    totalCents: roundMoneyValue(sumMoneyValues(live.map(valueOf))),
+    totalCents: roundMoneyValue(sumMoneyValues(spent.map(valueOf))),
+    /** Lo pagado del impuesto de lo cobrado en el mes: está en la lista y no suma en el total. */
+    salesTaxCents: roundMoneyValue(sumMoneyValues(live.filter((row) => row.salesTax).map(valueOf))),
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
     /** Lo que queda a la vista con la búsqueda y el tipo: cuántos y cuánto suman. */
     shown: {
+      /** Lo que no suma (el pago del impuesto de lo cobrado) también se ve: se cuenta aparte. */
+      notCounted: shownTax,
       count: shownLive.length,
       totalCents: roundMoneyValue(sumMoneyValues(shownLive.map(valueOf))),
     },
     expenses,
   }
+}
+
+/**
+ * «Corregir» un gasto (ADR 0167; QA de Gastos, G10): en una sola operación anula el original con un
+ * motivo que escribe el sistema con lo que cambió («S/ 24.00 → S/ 42.00») y registra el nuevo,
+ * enlazado (`replaces_expense_id`). Nada se borra, como pide el ADR 0018. La caja se mueve como al
+ * anular y registrar: vuelve lo que salió y sale lo nuevo, así que al final cuenta solo la
+ * diferencia. La caja ya cerrada pide administración, como anular. El pago de una compra o de una
+ * comisión se corrige en su compra o en Comisiones.
+ */
+export async function correctExpense(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  expenseId: string,
+  input: CreateExpenseInput,
+  opts: { allowPostClose?: boolean; seesPeople?: boolean } = {},
+) {
+  if (!looksLikeId(expenseId)) throw notFound("Gasto")
+  // El pago de una factura se bloquea en el orden de pagarla: primero la factura (ADR 0175).
+  const [owedBy] = await tx
+    .select({ payableId: expense.payableId })
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.id, expenseId)))
+  if (owedBy?.payableId) await lockPayable(tx, orgId, owedBy.payableId)
+  const [original] = await tx
+    .select()
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.id, expenseId)))
+    .for("update")
+  if (!original) throw notFound("Gasto")
+  const viewer = { seesPeople: opts.seesPeople === true }
+  // El mismo pedido enviado dos veces devuelve la corrección que ya quedó.
+  const replay = await replayedExpense(tx, orgId, input, {
+    ...(original.recurringId && original.recurringMonth
+      ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
+      : {}),
+    ...(original.payableId ? { payableId: original.payableId } : {}),
+    replacesExpenseId: original.id,
+  })
+  if (replay) return replay
+  if (original.voidedAt)
+    throw conflict("EXPENSE_VOIDED", "Ese gasto ya se anuló o alguien ya lo corrigió: actualiza la lista y abre el que quedó")
+  if (original.purchaseOrderId)
+    throw conflict("EXPENSE_IS_PURCHASE", "El pago de una compra se corrige en la compra: anúlalo y vuelve a pagarla")
+  if ((await commissionPaymentsOf(tx, orgId, [original.id])).size > 0)
+    throw conflict("EXPENSE_IS_COMMISSION", "El pago de una comisión se corrige en Comisiones")
+  const { locale } = await getOrgLocale(tx, orgId)
+  const money = (cents: number, unit: string) => formatMoney(cents, unit, locale)
+  const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
+  const was = original.methodName ?? (original.shiftId ? "Efectivo de la caja" : "Otro medio")
+  const now = method?.name ?? (input.fromCash ? "Efectivo de la caja" : "Otro medio")
+  // Lo que no se manda se queda como estaba (la API o el agente pueden mandar solo lo que cambia).
+  const unit = input.currency ?? original.currency
+  const category = input.category?.trim() || original.category
+  const changes = [
+    original.amountCents !== input.amountCents || original.currency !== unit
+      ? `${money(original.amountCents, original.currency)} → ${money(input.amountCents, unit)}`
+      : null,
+    original.concept !== input.concept.trim() ? `«${original.concept}» → «${input.concept.trim()}»` : null,
+    original.category !== category ? `${original.category} → ${category}` : null,
+    was !== now ? `${was} → ${now}` : null,
+    (input.receiptType ?? null) !== (original.receiptType ?? null) || (input.receiptNumber ?? null) !== (original.receiptNumber ?? null)
+      ? `comprobante ${[original.receiptKind === "ninguno" ? "sin" : original.receiptKind, original.receiptNumber].filter(Boolean).join(" ")} → ${input.receiptType ? (expenseReceiptType((await getOrgLocale(tx, orgId)).countryCode, input.receiptType)?.label ?? "sin") : "sin"}${input.receiptNumber ? ` ${input.receiptNumber}` : ""}`
+      : null,
+    (input.supplierTaxId ?? null) !== (original.supplierTaxId ?? null) && (input.supplierTaxId || original.supplierTaxId)
+      ? `RUC ${original.supplierTaxId ?? "sin"} → ${input.supplierTaxId ?? "sin"}`
+      : null,
+  ].filter((text): text is string => text !== null)
+  const reason = `Corregido${changes.length > 0 ? `: ${changes.join("; ")}` : " (comprobante, proveedor o fecha)"}`.slice(0, 2000)
+  await voidExpense(tx, orgId, actorUserId, original.id, { reason }, { allowPostClose: opts.allowPostClose, seesPeople: viewer.seesPeople })
+  const row = await createExpense(
+    tx,
+    orgId,
+    actorUserId,
+    {
+      ...input,
+      branchId: original.branchId,
+      category,
+      currency: unit,
+      spentAt: input.spentAt === undefined ? original.spentAt.toISOString() : input.spentAt,
+      notes: input.notes === undefined ? original.notes : input.notes,
+      // El pago del impuesto de lo cobrado lo sigue siendo solo si sigue en «Impuestos».
+      salesTax: input.salesTax ?? (category === SALES_TAX_EXPENSE_CATEGORY ? original.salesTax : false),
+    },
+    {
+      ...(original.recurringId && original.recurringMonth
+        ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
+        : {}),
+      replacesExpenseId: original.id,
+      // El pago corregido sigue siendo de su factura: si no, quedaría otra vez por pagar (ADR 0175).
+      ...(original.payableId ? { payableId: original.payableId } : {}),
+      // El movimiento de caja de un sueldo no dice a quién, como al pagarlo (ADR 0166).
+      ...(category === STAFF_PAY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
+    },
+    viewer,
+  )
+  await audit(tx, orgId, actorUserId, "expense", row.id, "finance.expense_corrected")
+  return row
+}
+
+/**
+ * Los proveedores de la clínica para decir a quién se pagó un gasto: solo nombre y documento (lo que
+ * va en el comprobante), sin compras ni precios. Los lee quien registra gastos (`finance.write`),
+ * aunque no vea Inventario.
+ */
+export async function listExpenseSuppliers(tx: Db, orgId: string) {
+  const listed = await tx
+    .select({ id: supplier.id, name: supplier.name, docType: supplier.docType, docNumber: supplier.docNumber })
+    .from(supplier)
+    .where(and(eq(supplier.organizationId, orgId), eq(supplier.isActive, true)))
+    .orderBy(asc(supplier.name))
+  // Los que se escribieron a mano en un gasto o una factura (el laboratorio), con el último RUC dicho:
+  // así se sugieren igual y el contador no ve dos nombres para el mismo proveedor.
+  const written = await tx.execute<{ name: string; taxId: string | null }>(sql`
+    select distinct on (lower(name)) name, tax_id as "taxId" from (
+      -- Nunca lo pagado al personal: su recibo por honorarios dice el nombre y el RUC de la persona (ADR 0166).
+      select supplier_name as name, supplier_tax_id as tax_id, created_at from expense
+        where organization_id = ${orgId} and supplier_id is null and supplier_name is not null and voided_at is null
+          and category <> ${STAFF_PAY_CATEGORY}
+      union all
+      select supplier_name, supplier_tax_id, created_at from expense_payable
+        where organization_id = ${orgId} and supplier_id is null and voided_at is null
+    ) s
+    order by lower(name), (tax_id is null), created_at desc
+    limit 200`)
+  const known = new Set(listed.map((row) => row.name.toLocaleLowerCase("es")))
+  const extra = [...written]
+    .filter((row) => !known.has(row.name.toLocaleLowerCase("es")))
+    .map((row) => ({ id: null as string | null, name: row.name, docType: row.taxId ? "RUC" : null, docNumber: row.taxId }))
+  return [...listed.map((row) => ({ ...row, id: row.id as string | null })), ...extra].sort((a, b) => a.name.localeCompare(b.name, "es"))
 }
 
 /**
@@ -1566,13 +2176,19 @@ export async function voidExpense(
    * cuya caja ya cerró; la caja de hoy recibe la «Compensación por anulación»,
    * como al anular un cobro (`reverseCashIncome`). Lo cerrado no se toca.
    */
-  opts: { fromCommission?: boolean; allowPostClose?: boolean } = {},
+  opts: { fromCommission?: boolean; allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   const [found] = await tx
-    .select({ purchaseOrderId: expense.purchaseOrderId })
+    .select({ purchaseOrderId: expense.purchaseOrderId, payableId: expense.payableId })
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
   if (!found) throw notFound("Gasto")
+  // El pago de una factura (ADR 0175): la factura se bloquea antes que la caja, como al pagarla.
+  if (found.payableId) await lockPayable(tx, orgId, found.payableId)
+  // Lo pagado al personal lo anula quien lo ve (`commissions.write`, ADR 0166); el pago de una
+  // comisión se anula con su pago, que ya pide ese permiso.
+  if (!opts.fromCommission && opts.seesPeople !== true && (await salaryPaymentsOf(tx, orgId, [expenseId])).size > 0)
+    throw new ServiceError("FORBIDDEN", 403, "Lo que se le paga al personal lo ven y lo anulan quienes administran las comisiones")
   // El pago de una compra se anula con su orden y su proveedor bloqueados antes
   // que el gasto, en el mismo orden que al pagarla o cancelarla: dos de esas
   // operaciones a la vez se esperan en fila en vez de bloquearse entre sí.
@@ -1795,11 +2411,19 @@ export interface PayPurchaseOrderInput {
   expectedDueCents?: number
   /**
    * Lo pagado que mostró la pantalla. Si cambió, alguien pagó mientras tanto o
-   * este mismo pago ya entró (un envío repetido): no se registra otra vez. No
-   * es una clave de idempotencia (el gasto no tiene dónde guardarla): el
-   * reintento recibe un aviso, no el pago que ya se hizo.
+   * este mismo pago ya entró (un envío repetido): no se registra otra vez.
    */
   expectedPaidCents?: number
+  /**
+   * La clave del cajón de pago (ADR 0018): el reintento de un pago con dinero que ya entró
+   * devuelve ese pago en vez del aviso de «la compra cambió».
+   */
+  requestId?: string | null
+  /** Con qué se pagó (ADR 0167): manda sobre `fromCash`, como en un gasto. */
+  paymentMethodId?: string | null
+  paymentReference?: string | null
+  /** El tipo de comprobante del país; el proveedor (y su RUC) es el de la compra. */
+  receiptType?: string | null
 }
 
 /**
@@ -1829,6 +2453,19 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
     throw invalidField("tenderCents", "Escribe lo que salió")
   if (input.tenderCents !== undefined && amountCents === 0)
     throw invalidField("amountCents", "Escribe lo que cancelas")
+  const requestId = requestKey(input.requestId)
+  if (requestId && amountCents > 0) {
+    await lockRequest(tx, "expense", orgId, requestId)
+    const [replay] = await tx
+      .select()
+      .from(expense)
+      .where(and(eq(expense.organizationId, orgId), eq(expense.requestId, requestId)))
+    if (replay) {
+      if (replay.purchaseOrderId !== order.id || replay.amountCents !== amountCents || replay.voidedAt !== null) throw requestReused()
+      const [now] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+      return { expense: replay, creditUse: null, balance: now as PurchaseBalance }
+    }
+  }
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
   if (!before) throw purchaseOrderNotFound()
   if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
@@ -1876,6 +2513,12 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
         receiptNumber: input.receiptNumber,
         notes: input.notes,
         fromCash: input.fromCash ?? false,
+        paymentMethodId: input.paymentMethodId,
+        paymentReference: input.paymentReference,
+        receiptType: input.receiptType,
+        // A quién se pagó es el proveedor de la compra, con su RUC si lo tiene (ADR 0167).
+        supplierId: order.supplierId,
+        requestId,
       },
       {
         purchaseOrderId: order.id,
@@ -1978,6 +2621,38 @@ export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId
     ),
     credits: (await supplierCredits(tx, orgId)).filter((credit) => credit.cents > 0),
   }
+}
+
+/**
+ * Gastos sueltos de Materiales que pueden ser el pago de esta compra, anotados antes como otro
+ * gasto (QA de Gastos, G4): misma sede y moneda, sin compra, vigentes, desde una semana antes de
+ * pedirla, y por lo recibido, lo que falta o lo pedido. Pagar la compra los contaría dos veces;
+ * la pantalla lo avisa sin frenar, y quien paga decide (anular el suelto o es otro gasto).
+ */
+export async function purchaseLookalikes(tx: Db, orgId: string, orderId: string) {
+  if (!looksLikeId(orderId)) throw purchaseOrderNotFound()
+  const [balance] = (await purchaseBalances(tx, orgId, { orderIds: [orderId] })) ?? []
+  if (!balance) throw purchaseOrderNotFound()
+  const amounts = [...new Set([balance.dueCents, balance.receivedCents, balance.orderedCents].filter((cents) => cents > 0))]
+  if (amounts.length === 0) return []
+  const since = new Date(balance.createdAt.getTime() - 7 * 24 * 60 * 60 * 1000)
+  return tx
+    .select({ id: expense.id, concept: expense.concept, amountCents: expense.amountCents, currency: expense.currency, spentAt: expense.spentAt })
+    .from(expense)
+    .where(
+      and(
+        eq(expense.organizationId, orgId),
+        eq(expense.branchId, balance.branchId),
+        eq(expense.category, PURCHASE_EXPENSE_CATEGORY),
+        eq(expense.currency, balance.currency),
+        isNull(expense.purchaseOrderId),
+        isNull(expense.voidedAt),
+        gte(expense.spentAt, since),
+        inArray(expense.amountCents, amounts),
+      ),
+    )
+    .orderBy(desc(expense.spentAt))
+    .limit(3)
 }
 
 /**
@@ -2234,7 +2909,9 @@ export interface CommissionExceptionInput {
 /**
  * Una excepción para un servicio: otro porcentaje, un monto fijo por cada uno o,
  * sin ninguno de los dos, quitarla (vuelve al general). Vale para lo que se atienda
- * desde ahora, como el porcentaje general. El monto va en la moneda del precio del
+ * desde ahora, como el porcentaje general; la primera de un servicio, sin porcentaje
+ * general, vale también para lo ya cobrado de él que aún no se paga (un profesional
+ * puede comisionar solo por servicio). El monto va en la moneda del precio del
  * servicio, porque la comisión va en la moneda de lo cobrado (ADR 0155).
  */
 export async function setCommissionException(
@@ -2265,6 +2942,22 @@ export async function setCommissionException(
     sql`select pg_advisory_xact_lock(hashtextextended(${`commission-rate:${orgId}:${input.professionalUserId}`}, 0))`,
   )
   const current = await latestRate(tx, orgId, input.professionalUserId, service.id)
+  // Sin porcentaje general ni nada antes para este servicio, lo ya cobrado de él no tenía ninguna regla
+  // (daba 0 y un pago no lo congelaba): la primera comisión del servicio vale también para eso, como el
+  // primer porcentaje general. Con un general, lo de antes ya se calculó con él y el cambio vale desde ahora.
+  const [anyBefore] = current
+    ? [current]
+    : await tx
+        .select({ id: commissionRate.id })
+        .from(commissionRate)
+        .where(
+          and(
+            eq(commissionRate.organizationId, orgId),
+            eq(commissionRate.professionalUserId, input.professionalUserId),
+            or(isNull(commissionRate.serviceId), eq(commissionRate.serviceId, service.id)),
+          ),
+        )
+        .limit(1)
   const zone = await getOrgLocale(tx, orgId)
   // Lo guardado sin moneda es del negocio: el mismo monto en otra moneda es otra regla.
   const currentCurrency = current?.fixedCents == null ? null : (current.fixedCurrency ?? zone.currency)
@@ -2274,13 +2967,28 @@ export async function setCommissionException(
     currentCurrency === fixedCurrency
   // Quitar lo que no había, o repetir lo mismo, no agrega una versión.
   if (same || (!current && rateBps === null && fixedCents === null)) return current
+  // Comisionar solo por servicio es decidir que lo demás no comisiona: sin un porcentaje general, se
+  // guarda uno de 0 desde siempre. Así lo demás se paga en 0 (y se congela al pagar) en vez de quedar
+  // sin decidir, y un porcentaje que se ponga después vale desde ese día sin reabrir meses pagados.
+  if (rateBps !== null || fixedCents !== null) {
+    const general = await latestRate(tx, orgId, input.professionalUserId, null)
+    if (!general)
+      await tx.insert(commissionRate).values({
+        organizationId: orgId,
+        professionalUserId: input.professionalUserId,
+        serviceId: null,
+        effectiveFrom: sql`'-infinity'::timestamptz`,
+        rateBps: 0,
+        createdBy: actorUserId,
+      })
+  }
   const [row] = await tx
     .insert(commissionRate)
     .values({
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
       serviceId: service.id,
-      effectiveFrom: sql`clock_timestamp()`,
+      effectiveFrom: anyBefore ? sql`clock_timestamp()` : sql`'-infinity'::timestamptz`,
       rateBps,
       fixedCents,
       fixedCurrency,
@@ -2314,6 +3022,56 @@ export async function listCommissionRates(
     rows.map((r) => r.professionalUserId),
   )
   return rows.map((r) => ({ ...r, professionalName: names.get(r.professionalUserId) ?? null }))
+}
+
+/**
+ * La comisión de hoy de cada persona del equipo que puede atender, la tenga o no: su porcentaje
+ * general (con desde cuándo y el anterior) y cada servicio con una comisión distinta. Es lo que se
+ * fija en Configuración › Comisiones por profesional; el mes se calcula aparte, con lo que valía cada día.
+ *
+ * - Sin ningún porcentaje ni servicio: aún no se decidió (lo cobrado de lo que atiende da 0 hasta fijarla).
+ * - Porcentaje 0 sin servicios: no cobra comisión (por ejemplo, solo tiene sueldo).
+ * - Porcentaje 0 con servicios: comisiona solo por esos servicios (la primera comisión de un
+ *   servicio, sin porcentaje general, guarda también el 0 general).
+ */
+export async function listCommissionAgreements(tx: Db, orgId: string) {
+  const team = await tx
+    .select({ userId: member.userId, role: member.role, name: user.name })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(eq(member.organizationId, orgId))
+  // Quien dejó de atender (cambió de rol) sigue si tiene una comisión: el mes lo lista y desde aquí se
+  // deja en «no cobra comisión». Una comisión nueva solo se le pone a quien atiende.
+  const withRules = new Set(
+    (
+      await tx
+        .selectDistinct({ userId: commissionRate.professionalUserId })
+        .from(commissionRate)
+        .where(eq(commissionRate.organizationId, orgId))
+    ).map((row) => row.userId),
+  )
+  const people = team
+    .filter((row) => canAttend(row.role) || withRules.has(row.userId))
+    .sort((a, b) => a.name.localeCompare(b.name, "es"))
+  const out = []
+  for (const person of people) {
+    const rules = await commissionRulesOf(tx, orgId, person.userId)
+    const attends = canAttend(person.role)
+    // Quien ya no atiende y ya no cobra nada no tiene nada que decidir: no se lista.
+    if (!attends && rules.rateBps === 0 && rules.exceptions.length === 0) continue
+    out.push({
+      professionalUserId: person.userId,
+      professionalName: person.name,
+      /** Puede atender: solo a él se le pone una comisión; a quien ya no, solo se le deja en 0. */
+      attends,
+      rateBps: rules.rateBps,
+      hasRate: rules.hasRate,
+      rateSince: rules.since,
+      previousRateBps: rules.previousRateBps,
+      exceptions: rules.exceptions,
+    })
+  }
+  return out
 }
 
 async function commissionRateOf(tx: Db, orgId: string, professionalUserId: string): Promise<number> {
@@ -2593,7 +3351,9 @@ async function collectedApplications(
     .where(and(...filters))
   return rows.flatMap((r) => {
     const appValue = orgPartValue(r.app.amountCents, r.payment, money)
-    if (!appValue) return []
+    // Lo de una atención siempre es de una ficha: una venta de mostrador no tiene (ADR 0173).
+    const patientId = r.app.patientId
+    if (!appValue || patientId === null) return []
     return [
       {
         appId: r.app.id,
@@ -2613,7 +3373,7 @@ async function collectedApplications(
         paidAt: r.payment.paidAt,
         methodLabel: r.payment.methodName,
         cashMethod: methodCashOf(r.payment),
-        patientId: r.app.patientId,
+        patientId,
         professionalUserId: r.professionalUserId,
       },
     ]
@@ -3230,6 +3990,8 @@ function commissionSummary(view: MonthCommissionsView) {
     month: view.month,
     currency: view.currency,
     rateBps: view.rateBps,
+    /** Ya tiene un porcentaje general, aunque sea 0 (no cobra comisión o solo por servicio). */
+    hasRate: view.hasRate,
     /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
     exceptionCount: view.exceptions.length,
     /**
@@ -3323,7 +4085,10 @@ export async function listMonthCommissions(
     // Quien salió sin comisión en el mes (por ejemplo, sin porcentaje) ni nada que deber no se lista.
     const shows = (v: MonthCommissionsView) =>
       v.commissionCents > 0 || v.paidCents > 0 || v.pendingCents !== 0 || v.owedCents > 0
-    if (view.inTeam || shows(view) || view.others.some(shows)) rows.push(summaryWithOthers(view))
+    // Quien no cobra comisión (porcentaje 0 y ningún servicio aparte) no tiene nada que pagar en el mes:
+    // solo aparece si queda algo de antes, pagado o por descontar.
+    const noCommission = view.hasRate && view.rateBps === 0 && view.exceptions.length === 0
+    if ((view.inTeam && !noCommission) || shows(view) || view.others.some(shows)) rows.push(summaryWithOthers(view))
   }
   return rows.sort(
     (a, b) => b.commissionCents - a.commissionCents || (a.professionalName ?? "").localeCompare(b.professionalName ?? ""),
@@ -3426,6 +4191,9 @@ export interface PayMonthCommissionInput {
    * gasto, para que el cierre cuadre. Sin esto queda «fuera de la caja».
    */
   fromCash?: boolean
+  /** Con qué se pagó (ADR 0167), como un gasto: manda sobre `fromCash`; solo el efectivo sale de la caja. */
+  paymentMethodId?: string | null
+  paymentReference?: string | null
 }
 
 /**
@@ -3555,8 +4323,11 @@ export async function payMonthCommission(
       })
     return { settlement, expense: null }
   }
+  // Con qué se pagó, como en un gasto: el medio manda, y solo el efectivo sale de la caja.
+  const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
+  const fromCash = method ? method.typeCode === CASH_METHOD : input.fromCash === true
   // Como un gasto de la caja (`createExpense`): la abre si hace falta y no la deja en negativo.
-  const shift = input.fromCash
+  const shift = fromCash
     ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
     : null
   // En otra moneda, el gasto guarda su valor en la del negocio con el cambio de hoy, como cualquier gasto.
@@ -3578,6 +4349,10 @@ export async function payMonthCommission(
       category: COMMISSION_EXPENSE_CATEGORY,
       spentAt: paidAt,
       receiptKind: "ninguno",
+      paymentMethodId: method?.id ?? null,
+      methodName: method?.name ?? null,
+      methodTypeCode: method?.typeCode ?? null,
+      paymentReference: method && method.typeCode !== CASH_METHOD ? input.paymentReference?.trim().slice(0, 60) || null : null,
       createdBy: actorUserId,
     })
     .returning()
@@ -4265,7 +5040,10 @@ export async function getDebts(
     outstandingOnly: true,
     ...(query.patientIds ? { patientIds: query.patientIds } : {}),
   })
-  const live = rows.filter((r) => r.outstandingCents > 0)
+  // Una venta de mostrador se paga entera al venderse (ADR 0173): nunca deja deuda ni es de una ficha.
+  const live = rows.flatMap((r) =>
+    r.outstandingCents > 0 && r.charge.patientId !== null ? [{ ...r, patientId: r.charge.patientId }] : [],
+  )
   if (live.length === 0) return []
   const groups: Record<string, DebtRow & { latestCharge: string | null }> = {}
   const chargesOf: Record<string, Array<{ id: string; procedureId: string | null }>> = {}
@@ -4275,9 +5053,9 @@ export async function getDebts(
     // se debe igual: se ve en la caja de cualquier sede, nunca en ninguna.
     if (query.branchId && own !== null && own !== query.branchId) continue
     const branchId = query.branchId ?? own
-    const key = `${row.charge.patientId}|${branchId ?? ""}|${row.charge.currency}`
+    const key = `${row.patientId}|${branchId ?? ""}|${row.charge.currency}`
     const entry = groups[key] ?? {
-      patientId: row.charge.patientId,
+      patientId: row.patientId,
       displayName: "",
       branchId,
       currency: row.charge.currency,
@@ -4474,7 +5252,7 @@ export async function getCashToday(tx: Db, orgId: string, query: { branchId: str
     select distinct c.patient_id from patient_charge c
       left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
       left join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
-    where c.organization_id = ${orgId} and c.voided_at is null
+    where c.organization_id = ${orgId} and c.voided_at is null and c.patient_id is not null
       and (c.created_at >= now() - interval '2 days' or e.finalized_at >= now() - interval '2 days')`)
   const toCollect = (await getDebts(tx, orgId, { branchId: branchRow.id, patientIds: recent.map((row) => row.patient_id) }))
     .filter((row): row is DebtRow & { attendedTodayAt: Date } => row.attendedTodayAt !== null)
@@ -4620,7 +5398,8 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
     {
       ticketId: string | null
       ticketNumber: number | null
-      patientId: string
+      /** Nulo en una venta de mostrador (ADR 0173): entonces el nombre es el de quien compró. */
+      patientId: string | null
       patientName: string
       exchangeRate: string | null
       ticketCurrency: string | null
@@ -4637,7 +5416,7 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
         ticketId: patientPayment.ticketId,
         ticketNumber: paymentTicket.ticketNumber,
         patientId: patientPayment.patientId,
-        patientName: patientPerson.displayName,
+        patientName: ticketPartyNameSql(),
         exchangeRate: patientPayment.exchangeRate,
         ticketCurrency: paymentTicket.currency,
         ticketTotalCents: paymentTicket.totalCents,
@@ -4646,12 +5425,13 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
         changeCurrency: paymentTicket.changeCurrency,
       })
       .from(patientPayment)
-      .innerJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
-      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+      .leftJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
+      .leftJoin(patientPerson, joinPatientPerson(patientPerson))
       .leftJoin(
         paymentTicket,
         and(eq(paymentTicket.id, patientPayment.ticketId), eq(paymentTicket.organizationId, orgId)),
       )
+      .leftJoin(buyerPerson, joinBuyerPerson())
       .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, paymentIds)))
     for (const row of rows) origin.set(row.paymentId, row)
   }
@@ -4698,7 +5478,8 @@ async function countedMovements(tx: Db, orgId: string, shiftId: string) {
 export interface VoidedTicketOfDay {
   ticketId: string
   ticketNumber: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173): el nombre es el de quien compró. */
+  patientId: string | null
   patientName: string
   currency: string
   totalCents: number
@@ -4727,10 +5508,11 @@ async function voidedTicketsOfDay(
   ]
   if (unit) filters.push(eq(paymentTicket.currency, currency(unit)))
   const rows = await tx
-    .select({ ticket: paymentTicket, patientName: patientPerson.displayName })
+    .select({ ticket: paymentTicket, patientName: ticketPartyNameSql() })
     .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(and(...filters))
     .orderBy(asc(paymentTicket.createdAt), asc(paymentTicket.id))
   return rows.map(({ ticket, patientName }) => {
@@ -5141,7 +5923,10 @@ export interface TicketListQuery {
 export interface TicketListRow {
   id: string
   number: number
-  patientId: string
+  /** Nulo en una venta de mostrador (ADR 0173): `displayName` es quien compró o «Venta de mostrador». */
+  patientId: string | null
+  /** La persona que compró en el mostrador, si se eligió: su página se abre desde la fila. */
+  buyerContactId: string | null
   displayName: string
   docType: string | null
   docNumber: string | null
@@ -5224,12 +6009,15 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
   // El nombre y el documento como se congelaron en el ticket (un nombre cambiado después también encuentra).
   const frozenName = sql`${paymentTicket.snapshot}->'patient'->>'displayName'`
   const frozenDocument = sql`${paymentTicket.snapshot}->'patient'->>'docNumber'`
+  // Una venta de mostrador (ADR 0173) se busca por quien compró o por cómo se llama.
+  const frozenBuyer = sql`${paymentTicket.snapshot}->'buyer'->>'displayName'`
+  const counterLabel = sql`case when ${paymentTicket.patientId} is null then ${COUNTER_SALE_LABEL} end`
 
   const filters: SQL[] = [eq(paymentTicket.organizationId, orgId), eq(paymentTicket.branchId, branchRow.id)]
   // Una historia bloqueada (ADR 0080) guarda sus comprobantes, que siguen
   // sumando; pero su nombre y su documento quedan solo dentro de la historia:
   // no se buscan por ellos ni se muestran aquí.
-  const unlocked = isNull(patientPerson.recordLockedAt)
+  const unlocked = and(isNull(patientPerson.recordLockedAt), isNull(buyerPerson.recordLockedAt))!
   if (q)
     filters.push(
       allDates
@@ -5238,7 +6026,13 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
             digits ? and(unlocked, digitsContain(patientPerson.docNumber, digits))! : sql`false`,
             digits ? and(unlocked, digitsContain(frozenDocument, digits))! : sql`false`,
           )!
-        : and(unlocked, foldedWordsMatch([patientPerson.displayName, frozenName], q))!,
+        : and(
+            unlocked,
+            foldedWordsMatch(
+              [patientPerson.displayName, frozenName, buyerPerson.displayName, paymentTicket.buyerName, frozenBuyer, counterLabel],
+              q,
+            ),
+          )!,
     )
   if (!allDates && query.from) filters.push(gte(paymentTicket.createdAt, dayBoundsUTC(day(query.from), timezone).start))
   if (!allDates && query.to) filters.push(lt(paymentTicket.createdAt, dayBoundsUTC(day(query.to), timezone).end))
@@ -5279,14 +6073,15 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
     .select({
       ticket: paymentTicket,
       at: sql<string>`${paymentTicket.createdAt}::text`,
-      displayName: patientPerson.displayName,
+      displayName: ticketPartyNameSql(),
       docType: patientPerson.docType,
       docNumber: patientPerson.docNumber,
-      lockedAt: patientPerson.recordLockedAt,
+      lockedAt: sql<Date | null>`coalesce(${patientPerson.recordLockedAt}, ${buyerPerson.recordLockedAt})`,
     })
     .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(and(where, after))
     .orderBy(...order)
     .limit(limit + 1)
@@ -5335,6 +6130,7 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
         id: ticket.id,
         number: ticket.ticketNumber,
         patientId: ticket.patientId,
+        buyerContactId: locked ? null : ticket.buyerContactId,
         displayName: locked ? LOCKED_RECORD_NAME : displayName,
         docType: locked ? null : (docType ?? frozen?.patient?.docType ?? null),
         docNumber: locked ? null : (docNumber ?? frozen?.patient?.docNumber ?? null),
@@ -5384,8 +6180,9 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       cents: sql<string>`coalesce(sum(${enteredCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
     })
     .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .innerJoin(paid, sql`true`)
     .where(where)
     .groupBy(entered)
@@ -5401,8 +6198,9 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       paymentTicket,
       and(eq(paymentTicket.organizationId, patientPayment.organizationId), eq(paymentTicket.id, patientPayment.ticketId)),
     )
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(
       and(
         where,
@@ -5436,8 +6234,9 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       paymentTicket,
       and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
     )
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+    .leftJoin(buyerPerson, joinBuyerPerson())
     .where(where)
     .groupBy(methodCurrency)
   const totals: TicketTotals[] = counts.map((row) => {

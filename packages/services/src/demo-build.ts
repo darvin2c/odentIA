@@ -49,7 +49,7 @@ import { getOrgLocale } from "./locale.js"
 import { initialOrgRegion } from "./organization-profile.js"
 import { ensureDefaultPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { demoKindsFor, productHooks } from "./products.js"
+import { demoKindsFor, dictationFor, productHooks } from "./products.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { addDays, dayStart, reportDayOf } from "./report-periods.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
@@ -69,11 +69,33 @@ import {
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
+import { seedAcceptedProgress } from "./seed-reports-progress.js"
 import { demoPromotionsOf, seedOperation, seedPromotions } from "./seed-operation.js"
 import { seedRepliesRuns, seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
+
+/**
+ * Cómo se nombra a quien atiende en cada producto: el odontólogo y el médico, «Dr.»
+ * o «Dra.»; el optómetra, tecnólogo médico con licenciatura, «Lic.».
+ */
+const CLINICIAN_HONORIFIC: Record<ClinicalProduct, Record<"F" | "M", string>> = {
+  dental: { F: "Dra.", M: "Dr." },
+  medical: { F: "Dra.", M: "Dr." },
+  optical: { F: "Lic.", M: "Lic." },
+}
+
+/**
+ * Quien atiende el mostrador de la demo: recepción; en una óptica, Ventas, que
+ * también vende y cobra (ADR 0171). Su usuario es el mismo (`…recepcion`).
+ */
+const DEMO_DESK_ROLE: Record<ClinicalProduct, "reception" | "sales"> = { dental: "reception", medical: "reception", optical: "sales" }
+/** Quien hace los lentes en el taller propio: solo una óptica lo tiene (ADR 0171). */
+const DEMO_HAS_WORKSHOP: Record<ClinicalProduct, boolean> = { dental: false, medical: false, optical: true }
+
+/** Cómo se llama cada sala de la demo en cada producto: «Unidad 1», «Consultorio 1», «Sala de examen 1». */
+const DEMO_ROOM: Record<ClinicalProduct, string> = { dental: "Unidad", medical: "Consultorio", optical: "Sala de examen" }
 
 /**
  * El motor de las demos para presentar (ADR 0096). Arma una clínica inventada
@@ -335,7 +357,7 @@ export async function buildDemo(
       rent: demoPriceCents(index === 0 ? 5_500 : 4_200, country),
     })
   }
-  const roomWord = demo.product === "dental" ? "Unidad" : "Consultorio"
+  const roomWord = DEMO_ROOM[demo.product]
   const rooms = new Map<string, string[]>()
   for (const item of branches) {
     const ids: string[] = []
@@ -350,7 +372,7 @@ export async function buildDemo(
   const terms = { termsVersion: LEGAL.terms.version, termsAcceptedAt: now }
   const people: Array<{
     id: string
-    role: "clinician" | "reception" | "cashier"
+    role: "clinician" | "reception" | "cashier" | "sales" | "workshop"
     sex: "F" | "M"
     given: string
     family: string
@@ -367,11 +389,19 @@ export async function buildDemo(
   }
   people.push({
     id: `${prefix}recepcion`,
-    role: "reception",
+    role: DEMO_DESK_ROLE[demo.product],
     sex: "F",
     given: random.pick(country.given.F),
     family: random.pick(country.surnames),
   })
+  if (DEMO_HAS_WORKSHOP[demo.product])
+    people.push({
+      id: `${prefix}taller`,
+      role: "workshop",
+      sex: "M",
+      given: random.pick(country.given.M),
+      family: random.pick(country.surnames),
+    })
   if (demo.size !== "pequeno")
     people.push({
       id: `${prefix}caja`,
@@ -382,7 +412,7 @@ export async function buildDemo(
     })
   await tx.insert(user).values(
     people.map((person, index) => {
-      const honorific = person.role === "clinician" ? (person.sex === "F" ? "Dra. " : "Dr. ") : ""
+      const honorific = person.role === "clinician" ? `${CLINICIAN_HONORIFIC[demo.product][person.sex]} ` : ""
       return {
         id: person.id,
         name: `${honorific}${person.given} ${person.family}`,
@@ -445,7 +475,7 @@ export async function buildDemo(
     }
     team.push({
       userId: person.id,
-      name: `${person.sex === "F" ? "Dra." : "Dr."} ${signerName}`,
+      name: `${CLINICIAN_HONORIFIC[demo.product][person.sex]} ${signerName}`,
       signerName,
       registration,
       title,
@@ -473,7 +503,8 @@ export async function buildDemo(
     orgId,
     {
       enabled: true,
-      clinicalAssistantEnabled: true,
+      // Clío, donde su producto dicta (en vistIA no dicta).
+      clinicalAssistantEnabled: dictationFor(demo.product) !== null,
       personaName: "Sofi",
       treatment: "usted",
       tone: "cercano",
@@ -624,6 +655,10 @@ export async function buildDemo(
     },
   })
 
+  // Lo que una visita de la historia ya hizo queda hecho, como en la demo de desarrollo: sin
+  // esto el Plan lo daba por no empezado y reservar decía «sesión 2 (1 prevista)» (QA del 8 nov).
+  await seedAcceptedProgress(tx, orgId)
+
   // --- Lo que hicieron los agentes y lo que Argos ya respondió --------------------------------
   await step(3, "agentes")
   // Miles de filas recién escritas: sin sus estadísticas el planificador elige mal y lo que sigue tarda minutos.
@@ -634,13 +669,14 @@ export async function buildDemo(
     orgId,
     planCode: plan.code,
     months: demo.months,
-    dictating: team
-      .slice(0, 3)
-      .map((item, index) => ({
-        userId: item.userId,
-        fromMonthsAgo: Math.max(1, Math.min(demo.months, [10, 6, 3][index] ?? 3)),
-        share: [0.25, 0.6] as [number, number],
-      })),
+    // Clío solo dicta donde su producto dicta: una óptica de vistIA no tiene consultas dictadas.
+    dictating: dictationFor(demo.product)
+      ? team.slice(0, 3).map((item, index) => ({
+          userId: item.userId,
+          fromMonthsAgo: Math.max(1, Math.min(demo.months, [10, 6, 3][index] ?? 3)),
+          share: [0.25, 0.6] as [number, number],
+        }))
+      : [],
   })
   // Lo que cobra el plan cuenta el mes desde el alta; la demo nunca se factura.
   await tx
@@ -700,6 +736,8 @@ export async function buildDemo(
   // Con su historia armada, el WhatsApp de la demo queda desconectado: no tiene un número
   // de verdad, así que no dice «Conectado» ni intenta enviar (la Bandeja lo dice al escribir).
   await setConnectionStatus(tx, orgId, connection.id, "disabled")
+  // Lo propio del producto sobre la historia ya armada (vistIA: las recetas de lentes).
+  await (await productHooks(tx, orgId)).demoBuilt?.(tx, orgId)
   await step(DEMO_BUILD_STEPS, "listo")
   return { organizationId: orgId, historyThrough: through, slug }
 }
@@ -1599,6 +1637,8 @@ export async function advanceDemo(
   const at = now.toISOString()
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
+  // Lo que el producto agrega a lo cerrado anoche (vistIA: la receta de cada examen firmado).
+  await (await productHooks(tx, demo.organizationId)).demoBuilt?.(tx, demo.organizationId, now)
   // Lo cobrado de ayer ya está en su caja: recepción la cierra.
   await closeDemoCash(tx, ctx, today)
   const through = addDays(today, HORIZON_DAYS)

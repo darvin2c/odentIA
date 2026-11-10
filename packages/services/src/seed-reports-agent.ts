@@ -238,13 +238,16 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
   }
 
   // --- Consultas dictadas: quienes dictan, cada vez más ------------------------------------
+  // Sin quien dicte (un producto donde Clío no dicta, como vistIA) no hay nada que buscar.
   const names = new Map(
-    (
-      await tx
-        .select({ id: user.id, name: user.name })
-        .from(user)
-        .where(inArray(user.id, input.dictating.map((item) => item.userId)))
-    ).map((row) => [row.id, row.name]),
+    input.dictating.length
+      ? (
+          await tx
+            .select({ id: user.id, name: user.name })
+            .from(user)
+            .where(inArray(user.id, input.dictating.map((item) => item.userId)))
+        ).map((row) => [row.id, row.name])
+      : [],
   )
   const consultations: Array<typeof saasAction.$inferInsert> = []
   for (const professional of input.dictating) {

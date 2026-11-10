@@ -45,6 +45,7 @@ import type { PaperStorage } from "./issued-papers.js"
 import { getOrgLocale } from "./locale.js"
 import { getPortalPolicy } from "./portal-policy.js"
 import type { PortalContext } from "./portal.js"
+import { productHooks } from "./products.js"
 import type { Storage } from "./storage.js"
 
 export const PORTAL_PAPER_KINDS = [
@@ -55,6 +56,8 @@ export const PORTAL_PAPER_KINDS = [
   "consentimiento",
   "comprobante",
   "archivo",
+  // Lo que solo existe en un producto (vistIA: la receta de lentes), con su PDF (`portalPapers`).
+  "producto",
 ] as const
 export type PortalPaperKind = (typeof PORTAL_PAPER_KINDS)[number]
 
@@ -166,6 +169,11 @@ export async function collectPortalPapers(
             : null,
       image: false,
     })
+  }
+
+  const own = (await productHooks(tx, orgId)).portalPapers
+  for (const paper of own ? await own.list(tx, orgId, patientId) : []) {
+    papers.push({ kind: "producto", ...paper, image: false })
   }
 
   const orders = await tx
@@ -532,6 +540,11 @@ export async function getPortalPaperPdf(
   if (paper.kind === "comprobante") {
     const snap = await buildTicketSnapshot(tx, ctx.orgId, ctx.session.patientId, paper.id)
     return { bytes: await renderTicketPdf(snap, null), filename: `Comprobante-${snap.numberLabel}.pdf` }
+  }
+  if (paper.kind === "producto") {
+    const own = (await productHooks(tx, ctx.orgId)).portalPapers
+    if (!own) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este documento no está en tu portal")
+    return own.pdf(tx, ctx.orgId, ctx.session.patientId, paper.id)
   }
   const type = HEALTH_TYPE_OF[paper.kind]
   if (!type) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este documento no está en tu portal")

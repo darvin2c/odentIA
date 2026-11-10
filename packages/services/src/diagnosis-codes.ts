@@ -17,6 +17,7 @@
 import {
   clinicalProfileFor,
   DIAGNOSIS_SYSTEM_INFO,
+  diagnosisCodeLabel,
   type DiagnosisSystemKey,
   findingDiagnosisCode,
   isDiagnosisSystem,
@@ -603,3 +604,32 @@ export async function setOrgDiagnosisSystem(
 
 // El agente no depende de @odentia/clinical: recibe de aquí lo que necesita para el dictado de práctica.
 export { type DiagnosisSystemKey, findingDiagnosisCode } from "@odentia/clinical"
+
+/**
+ * El nombre del catálogo de cada diagnóstico codificado, por lista y código
+ * («Pulpitis»): la historia y el Resumen lo dicen con su nombre, no solo con el
+ * código (QA de la ficha del 8 nov). Lo que el catálogo no trae queda sin nombre.
+ */
+export async function diagnosisTitlesOf(
+  tx: Db,
+  coded: ReadonlyArray<{ system: string | null | undefined; code: string | null | undefined }>,
+): Promise<Map<string, string>> {
+  const codes = [...new Set(coded.flatMap((row) => (row.code ? [row.code] : [])))]
+  if (codes.length === 0) return new Map()
+  const rows = await tx
+    .select({ system: diagnosisCatalog.systemKey, code: diagnosisCatalog.code, title: diagnosisCatalog.title })
+    .from(diagnosisCatalog)
+    .where(inArray(diagnosisCatalog.code, codes))
+  return new Map(rows.map((row) => [`${row.system}|${row.code}`, row.title]))
+}
+
+/** «Pulpitis (CIE-11 DA09.0)»: el nombre con su código; sin nombre en el catálogo, solo el código. */
+export function namedDiagnosis(
+  titles: ReadonlyMap<string, string>,
+  system: string | null | undefined,
+  code: string,
+): string {
+  const label = diagnosisCodeLabel(system, code)
+  const title = titles.get(`${system}|${code}`)
+  return title ? `${title} (${label.replace(" · ", " ")})` : label
+}

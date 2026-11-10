@@ -11,7 +11,7 @@
  */
 import { randomUUID } from "node:crypto"
 import type { MedicationEntry } from "@odentia/clinical"
-import { findMedication, includedTaxCents, medicalLeaveEnd } from "@odentia/clinical"
+import { expenseReceiptType, findMedication, includedTaxCents, medicalLeaveEnd, NO_RECEIPT_TYPE } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { scheduleBlock } from "@odentia/db/schema/availability"
@@ -36,6 +36,7 @@ import {
 import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { expense, expenseRecurring } from "@odentia/db/schema/finance"
+import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
@@ -1111,9 +1112,32 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     income.set(key, (income.get(key) ?? 0) + payment.amountCents)
   }
   const expenses: Array<typeof expense.$inferInsert> = []
+  // Con qué se pagó y su comprobante (ADR 0167): lo fijo por transferencia, los servicios por Yape,
+  // y cada tipo con el papel que suele traer. Nada sale de la caja: la historia no tiene sus turnos.
+  const orgMethods = await tx
+    .select({ id: organizationPaymentMethod.id, name: organizationPaymentMethod.name, typeCode: organizationPaymentMethod.typeCode })
+    .from(organizationPaymentMethod)
+    .where(and(eq(organizationPaymentMethod.organizationId, input.orgId), eq(organizationPaymentMethod.isActive, true)))
+  const methodOf = (typeCode: string) => orgMethods.find((method) => method.typeCode === typeCode) ?? null
+  const { countryCode } = await getOrgLocale(tx, input.orgId)
+  let paperCount = 0
+  const paperOf = (category: string) => {
+    const method = category === "Servicios" ? (methodOf("68") ?? methodOf("30")) : methodOf("30")
+    const code = category === "Servicios" ? "14" : category === "Personal" ? NO_RECEIPT_TYPE : category === "Materiales" ? "03" : "01"
+    const type = expenseReceiptType(countryCode, code)
+    // Un comprobante con su número, como llega: la serie de cada tipo y un correlativo.
+    paperCount += 1
+    const series = code === "01" ? "F001" : code === "03" ? "B001" : code === "14" ? "S001" : null
+    return {
+      ...(method ? { paymentMethodId: method.id, methodName: method.name, methodTypeCode: method.typeCode } : {}),
+      receiptType: code === NO_RECEIPT_TYPE ? NO_RECEIPT_TYPE : (type?.code ?? null),
+      receiptKind: type?.label ?? "ninguno",
+      ...(series && type ? { receiptNumber: `${series}-${String(1000 + paperCount).padStart(6, "0")}` } : {}),
+    }
+  }
   // El alquiler, la planilla y los servicios se anotan como gastos que se repiten, con su historia
   // enlazada mes a mes: así la demo muestra «por pagar» solo lo que de verdad falta este mes.
-  const REPEATING = new Set(["Planilla del mes", "Alquiler del local", "Luz, agua e internet"])
+  const REPEATING = new Set(["Planilla del resto del equipo", "Alquiler del local", "Luz", "Agua", "Internet y teléfono"])
   const templates = new Map<string, typeof expenseRecurring.$inferInsert & { id: string }>()
   // Del mes en curso, solo lo que ya se pagó (hasta donde llega la historia).
   for (let back = monthsBack; back >= 0; back -= 1) {
@@ -1122,13 +1146,13 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     for (const branch of input.branches) {
       const revenue = income.get(`${branch.id}:${new Date(start + 15 * 86_400_000).toISOString().slice(0, 7)}`) ?? 0
       const staffOf = input.professionals.filter((professional) => professional.branchId === branch.id)
-      // El sueldo base de cada profesional va con su nombre (se ve junto a su comisión); la
-      // planilla es la del resto del equipo.
+      // El sueldo base de cada profesional: la persona va en la plantilla y no en el concepto, que
+      // ve también caja (S1 de la QA de Gastos); la planilla es la del resto del equipo.
       const salaries = (perStaffCents: number, day: number) =>
         perStaffCents > 0
           ? staffOf.map((professional) => ({
               category: "Personal",
-              concept: `Sueldo base de ${professional.signerName}`,
+              concept: "Sueldo base",
               cents: perStaffCents,
               day,
               memberUserId: professional.userId,
@@ -1151,12 +1175,14 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
               ...salaries(item.perStaffCents ?? 0, item.day),
             ])
           : [
-              { category: "Personal", concept: "Planilla del mes", cents: 3_000_00, day: 28 },
+              { category: "Personal", concept: "Planilla del resto del equipo", cents: 3_000_00, day: 28 },
               ...salaries(900_00, 28),
               { category: "Alquiler", concept: "Alquiler del local", cents: branch.rent, day: 1 },
               { category: "Laboratorio", concept: "Coronas y prótesis", cents: Math.round((revenue * 0.09) / 100) * 100, day: 20 },
               { category: "Materiales", concept: "Insumos", cents: Math.round((revenue * 0.05) / 100) * 100, day: 12 },
-              { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00 + random.int(0, 30) * 1_000, day: 18 },
+              { category: "Servicios", concept: "Luz", cents: 250_00 + random.int(0, 6) * 1_000, day: 18 },
+              { category: "Servicios", concept: "Agua", cents: 120_00, day: 10 },
+              { category: "Servicios", concept: "Internet y teléfono", cents: 250_00, day: 5 },
             ]
       for (const item of monthly) {
         const spentAt = new Date(start + (item.day - 1) * 86_400_000 + 15 * 3_600_000)
@@ -1168,7 +1194,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         const month = spentAt.toISOString().slice(0, 7)
         let link: { recurringId: string; recurringMonth: string } | Record<string, never> = {}
         if (repeats) {
-          const key = `${branch.id}|${item.concept}`
+          // El sueldo base se llama igual para todos: la persona distingue la plantilla.
+          const key = `${branch.id}|${item.concept}|${item.memberUserId ?? ""}`
           const template = templates.get(key) ?? {
             id: randomUUID(),
             organizationId: input.orgId,
@@ -1182,6 +1209,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
             firstMonth: month,
             fromCash: false,
             memberUserId: item.memberUserId ?? null,
+            paymentMethodId: (item.category === "Servicios" ? (methodOf("68") ?? methodOf("30")) : methodOf("30"))?.id ?? null,
             createdBy: input.ownerUserId,
           }
           // Se propone el último importe pagado.
@@ -1198,6 +1226,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           currency,
           spentAt,
           createdBy: input.ownerUserId,
+          ...paperOf(item.category),
           ...link,
         })
       }

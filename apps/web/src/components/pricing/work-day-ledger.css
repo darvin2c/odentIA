@@ -62,6 +62,9 @@
 :root[data-brand="latidia"] .wd-new {
   background: rgba(183, 156, 240, 0.1);
 }
+:root[data-brand="vistia"] .wd-new {
+  background: rgba(74, 222, 128, 0.1);
+}
 .wd-time,
 .wd-price {
   font-family: var(--agent-font);

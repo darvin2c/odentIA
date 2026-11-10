@@ -158,6 +158,9 @@ beforeAll(async () => {
   // Un gasto suelto y el pago de la comisión de la Dra. Pruebas, que deja su propio gasto de Personal.
   await ownerDb.execute(sql`insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at)
     values (${ORG}, ${sede!.id}, 'Alquiler del local', 'Alquiler', 350000, 'PEN', '2026-10-01T15:00:00Z')`)
+  // Un sueldo anotado con el nombre en el concepto (ADR 0166): caja no lo encuentra.
+  await ownerDb.execute(sql`insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at)
+    values (${ORG}, ${sede!.id}, 'Sueldo de Rosa Mamani', 'Personal', 120000, 'PEN', '2026-10-28T15:00:00Z')`)
   await ownerDb.execute(sql`with paid as (
       insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at)
       values (${ORG}, ${sede!.id}, 'Comisión de setiembre de 2026 — Dra. Ana Pruebas', 'Personal', 123400, 'PEN', '2026-10-10T15:00:00Z')
@@ -235,6 +238,18 @@ describe("buscar sin tildes y con su dueño", () => {
   })
 })
 
+it("a igual coincidencia, el paciente va antes que un homónimo que aún no lo es: Enter abre el primero (QA del 9 nov)", async () => {
+  // El contacto se crea primero: sin la regla, el orden lo decidía su id.
+  for (let i = 0; i < 3; i++) {
+    await ownerDb.insert(contact).values({ organizationId: ORG, displayName: `Rosa Aguilar${i ? ` ${"Z".repeat(i)}` : ""}` })
+  }
+  await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Rosa Aguilar", patientNumber: 90 })
+  const result = await as("reception", "rosa aguilar")
+  const people = result.owners.filter((o) => o.kind === "persona")
+  expect(people[0]).toMatchObject({ title: "Rosa Aguilar", badge: "Paciente" })
+  expect(people.some((o) => o.badge === "Aún no es paciente")).toBe(true)
+})
+
 describe("cada rol ve lo de su pantalla", () => {
   it("la historia clínica solo para quien la ve, y queda anotado lo que se mostró", async () => {
     const professional = await as("clinician", "bruxismo")
@@ -291,6 +306,12 @@ describe("cada rol ve lo de su pantalla", () => {
       expect(cashier.owners.some((o) => o.kind === "gasto" && o.title.includes("Pruebas"))).toBe(false)
       expect(cashier.owners.some((o) => o.kind === "gasto" && o.title.startsWith("Comisión"))).toBe(false)
     }
+    // Un sueldo tampoco, aunque el nombre vaya en el concepto (ADR 0166).
+    for (const q of ["sueldo", "rosa", "personal"]) {
+      const cashier = await as("cashier", q)
+      expect(cashier.owners.some((o) => o.kind === "gasto" && o.title.includes("Rosa"))).toBe(false)
+    }
+    expect((await as("owner", "rosa")).owners.some((o) => o.kind === "gasto" && o.title.includes("Rosa"))).toBe(true)
     // Quien administra comisiones los encuentra: el pago, bajo su profesional, y su gasto.
     const admin = await as("owner", "comision")
     expect(admin.owners.flatMap((o) => o.items).some((item) => item.kind === "comision")).toBe(true)

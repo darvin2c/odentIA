@@ -1,6 +1,8 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
   DIAGNOSIS_VERIFICATION_LABELS,
+  hasHealthInfo as sharedHasHealthInfo,
+  healthReviewPending,
   type MissingPersonDatum,
   type Vitals,
 } from "@odentia/clinical"
@@ -198,6 +200,8 @@ export interface PatientHealth {
   allergiesReviewedAt?: string | null
   allergiesReviewedBy?: string | null
   allergyReviewDue?: boolean
+  /** Lo declarado por el paciente espera la revisión de un profesional (lo decide el servidor). */
+  reviewPending?: boolean
   latestAnamnesis: {
     id: string
     version: number
@@ -276,48 +280,21 @@ export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
 }
 
 /**
- * Hay información clínica registrada: grupo sanguíneo, filas vigentes o una
- * determinación explícita (negación o registro) en algún grupo, o entrevista.
- * La longitud de las listas por sí sola no basta: sangre, un «No» o una
- * respuesta odontológica también son información.
+ * Hay información clínica registrada (no es solo «No se le preguntó»). La
+ * regla es común con el servidor (`@odentia/clinical`).
  */
 export function hasHealthInfo(health: PatientHealth | null | undefined): boolean {
-  if (!health) return false
-  // La declaración explícita «No sé» incrementa revisión aunque no cree filas.
-  if (health.revision > 0) return true
-  if (health.bloodGroup != null) return true
-  if (health.allergies.length > 0 || health.conditions.length > 0 || health.medications.length > 0)
-    return true
-  const status = health.reviewStatus
-  if (
-    status.allergies !== "unknown" ||
-    status.conditions !== "unknown" ||
-    status.medications !== "unknown"
-  )
-    return true
-  const answers = health.latestAnamnesis?.answers
-  return !!answers && Object.keys(answers).length > 0
+  return sharedHasHealthInfo(health)
 }
 
 /**
- * Declaración pendiente de revisión profesional: hay información pero nunca se
- * marcó revisor/fecha. Distinto de «No se le preguntó» (contenido desconocido).
+ * Declaración pendiente de revisión profesional. La decide el servidor
+ * (`reviewPending`), que sabe si lo anotó un clínico o lo declaró el paciente;
+ * una respuesta sin ese dato usa la misma regla sin él.
  */
 export function isHealthReviewPending(health: PatientHealth | null | undefined): boolean {
-  if (!health || health.reviewedAt || !hasHealthInfo(health)) return false
-  // Las alergias tienen su propia revisión: las que agregó o revisó el equipo no son «declaradas
-  // por el paciente», y por sí solas no dejan pendiente lo demás.
-  if (!health.allergiesReviewedAt) return true
-  const status = health.reviewStatus
-  const answers = health.latestAnamnesis?.answers
-  return (
-    health.bloodGroup != null ||
-    health.conditions.length > 0 ||
-    health.medications.length > 0 ||
-    status.conditions !== "unknown" ||
-    status.medications !== "unknown" ||
-    (!!answers && Object.keys(answers).length > 0)
-  )
+  if (!health) return false
+  return health.reviewPending ?? healthReviewPending(health)
 }
 
 export interface ClinicalNote {
@@ -501,6 +478,8 @@ export interface PlanItem {
   /** Sesiones previstas y hechas (atenciones distintas con un procedimiento vigente). */
   plannedSessions?: number
   sessionsDone?: number
+  /** En la atención: indicado en ella, sin respuesta ni entregar; quien la lleva lo puede quitar. Lo decide el servidor. */
+  removable?: boolean
   decidedAt: string | null
   decidedByContactId: string | null
   decidedByName: string | null
@@ -538,6 +517,41 @@ export interface PlanItem {
   newTermsPending?: boolean
   /** Realizado al que le puede faltar otra sesión: el Plan ofrece «Falta otra sesión…». */
   canAddSession?: boolean
+  /** El precio acordado (la línea aceptada, lo que se cobra); nulo sin nada aceptado. */
+  agreedPriceCents?: number | null
+  agreedCurrency?: string | null
+  /** Sin nada aceptado, el que le ofrece su presupuesto: no es lo que se cobra. */
+  offeredPriceCents?: number | null
+  offeredCurrency?: string | null
+  /** El diagnóstico con su nombre («Pulpitis (CIE-11 DA09.0)»), como lo dice el servidor. */
+  diagnosisName?: string | null
+  /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia): lo dice el servidor. */
+  waitsFor?: { id: string; title: string } | null
+}
+
+type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
+
+/**
+ * Lo que se cobra al hacerlo: el precio acordado si lo aceptó, si no el de la
+ * indicación (QA de la ficha del 8 nov: la atención decía S/ 120 de lista con
+ * S/ 90 acordado).
+ */
+export function agreedPriceOf(item: PriceFields): { priceCents: number | null; currency: string } {
+  return item.agreedCurrency != null
+    ? { priceCents: item.agreedPriceCents ?? null, currency: item.agreedCurrency }
+    : { priceCents: item.priceCents, currency: item.currency }
+}
+
+/**
+ * El precio que se dice de un tratamiento y de dónde sale: el acordado; si no
+ * aceptó, el que le ofrece su presupuesto («en su presupuesto», no se cobra así
+ * todavía); si no tiene presupuesto, el de la indicación.
+ */
+export function quotedPriceOf(item: PriceFields): { priceCents: number | null; currency: string; offered: boolean } {
+  if (item.agreedCurrency != null) return { ...agreedPriceOf(item), offered: false }
+  if (item.offeredCurrency != null)
+    return { priceCents: item.offeredPriceCents ?? null, currency: item.offeredCurrency, offered: item.offeredPriceCents !== item.priceCents }
+  return { priceCents: item.priceCents, currency: item.currency, offered: false }
 }
 
 export interface PlanItemPath {
@@ -597,6 +611,10 @@ export interface EncounterDetail {
   teeth: number[]
   plannedItems: PlanItem[]
   indicatedItems: PlanItem[]
+  /** Los presupuestos de lo indicado en ella, con su estado dicho («Eligió la opción A», «Anulado»). */
+  budgets?: Array<{ id: string; budgetNumber: number; status: string; stateText: string; voidedWith?: boolean }>
+  /** Lo que la atención deja por ejecutar, sin lo que la persona dejó fuera: lo cuenta el servidor. */
+  pendingTreatments: number
   procedures: ProcedureItem[]
   /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
   diagnoses: EncounterDiagnosis[]
@@ -610,6 +628,46 @@ export interface EncounterDetail {
   documents: PatientDocument[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
+  /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
+  visit?: EncounterVisit | null
+}
+
+/** Un tratamiento aceptado por hacer, con la sesión que le toca hoy («sesión 2 de 2»). */
+export interface VisitTreatment {
+  planItemId: string
+  title: string
+  toothNumber: number | null
+  n: number
+  m: number
+  started: boolean
+  /** Ya está en esta atención (lo trajo su cita o «Hacerla hoy»). */
+  linked: boolean
+  /** Su sesión de hoy ya está registrada. */
+  registered: boolean
+  /** Lo trae la cita de esta atención: no se saca desde aquí. */
+  broughtByAppointment: boolean
+  /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia); `today`: ese se hace hoy. */
+  after?: { title: string; today: boolean } | null
+}
+
+/** Un control con su ventana abierta: esta visita lo cumple si se marca. */
+export interface VisitControl {
+  id: string
+  title: string
+  dueAt: string
+  overdue: boolean
+  byName: string | null
+  chosen: boolean
+  /** Reservado en la cita de esta atención: se cumple al firmar, sin elegirlo. */
+  byAppointment?: boolean
+}
+
+export interface EncounterVisit {
+  treatments: VisitTreatment[]
+  moreTreatments: number
+  controls: VisitControl[]
+  /** Sin cita hoy: su próxima cita ya reservada. */
+  booked?: { startsAt: string; serviceName: string | null } | null
 }
 
 export type TimelineType =
@@ -669,8 +727,30 @@ export interface TimelineItem {
   dueAt?: string | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** Quién atendió; en una anulada, quién y cuándo la anuló. */
+  professionalName?: string | null
+  /** Quién firmó la atención y cuándo. */
+  signerName?: string | null
+  signedAt?: string | null
+  /** Hecho de una atención que sigue en curso, sin firmar. */
+  openEncounter?: boolean
+  voidedByName?: string | null
+  voidedAt?: string | null
+  /** Lo que nació en la atención, dentro de su tarjeta (solo en la historia completa). */
+  born?: EncounterBorn
   /** El periodontograma de la atención: un hecho de ella. */
   periodontal?: PeriodontalBrief | null
+}
+
+/** Lo nacido en una atención; lo anulado o cancelado viene con `retired` para plegarlo. */
+export interface EncounterBorn {
+  indicated: Array<{ id: string; title: string; where: string | null; stateText: string; retired: boolean; budgetId: string | null }>
+  budgets: Array<{ id: string; budgetNumber: number; stateText: string; retired: boolean }>
+  consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
+  prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
+  orders: Array<{ id: string; title: string; state: string }>
+  forms: Array<{ id: string; title: string }>
+  followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
 export interface PlanPendingTotal {
@@ -730,6 +810,8 @@ export interface TreatmentJourneySummary {
   nextFollowUp: { id: string; title: string; status: string; dueAt: string } | null
   /** null cuando el tratamiento está cerrado y no admite más trabajo. */
   nextAction: TreatmentNextAction | null
+  /** La cita por venir que ya lo lleva, si tiene. */
+  nextAppointmentAt?: string | null
   balances: TreatmentBalance[]
 }
 
@@ -874,6 +956,12 @@ export interface PatientFull {
    * fase 3); null para quien no edita los datos (odontólogo, caja).
    */
   missingData: MissingPersonDatum[] | null
+  /**
+   * Si se le preguntó por alergias («recorded», «none» = niega, «unknown» = no se
+   * le preguntó): sin alergias registradas no es lo mismo. Solo a quien ve las
+   * alergias; nulo para el resto.
+   */
+  allergyReview?: HealthReviewState | null
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }
@@ -1020,6 +1108,11 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   return apiFetch<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
+}
+
+/** De lo que falta, lo suyo: lo que pide su enlace (el documento de su representante no lo completa ella). */
+export function ownGaps<T extends { key: string }>(gaps: readonly T[]): T[] {
+  return gaps.filter((gap) => gap.key !== "representativeDoc")
 }
 
 /**

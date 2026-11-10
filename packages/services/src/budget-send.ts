@@ -349,6 +349,9 @@ export async function sendBudget(
             contactId: recipient.contactId,
             patientId: input.patientId,
             createdBy: senderKind === "user" ? actor.userId : null,
+            // Abre el presupuesto, no una reserva sin usar: con ella, el botón fijo de la
+            // plantilla aprobada (`/reserva`) mostraría «Elige tu cita» (igual que «Su enlace»).
+            booking: false,
           },
           { secretsKey: deps.secretsKey },
         )
@@ -358,7 +361,7 @@ export async function sendBudget(
   })
   const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   // En el mensaje no queda el token: lo pone el worker al enviarlo.
-  const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId) : null
+  const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId, "presupuesto", input.budgetId) : null
   let sent: { conversationId: string; messageId: string }
   if (route.via === "plantilla" && route.template) {
     // Pasadas las 24 horas solo sale el mensaje aprobado, con el botón de su enlace.

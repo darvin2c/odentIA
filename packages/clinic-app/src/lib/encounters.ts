@@ -50,7 +50,38 @@ export interface ClosingCheck {
    * en curso. `n` cuenta esta.
    * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada.
    */
-  sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
+  sessions?: {
+    finishing: ClosingSession[]
+    continuing: ClosingSession[]
+    notRegistered?: ClosingSession[]
+    /** Lo aceptado sin empezar, a lo que vuelve si nada sigue en curso (la corona tras la endodoncia). */
+    accepted?: ClosingSession[]
+  }
+  /**
+   * Los diagnósticos activos que resuelve un tratamiento de hoy si queda
+   * realizado: el cierre los propone marcados y manda en `resolveDiagnosisIds` los que siguen marcados.
+   */
+  resolvable?: ClosingResolvable[]
+}
+
+/** Un diagnóstico que un tratamiento de hoy resuelve: «Pulpitis (CIE-11 DA09.0) · pieza 46». */
+export interface ClosingResolvable {
+  diagnosisIds: string[]
+  /** Los tratamientos de hoy que lo resuelven si terminan (basta uno). */
+  planItemIds: string[]
+  label: string
+  site: string | null
+  /** Sana en su control (la periodontitis apical): se propone sin marcar. */
+  followUp?: boolean
+}
+
+/**
+ * Si el diagnóstico sigue activo al firmar. `keep` guarda lo que quien firma tocó: lo propuesto
+ * marcado que desmarcó y, en lo que sana en su control, lo que marcó.
+ */
+export function keepsDiagnosis(found: ClosingResolvable, keep: ReadonlySet<string>): boolean {
+  const touched = found.diagnosisIds.some((id) => keep.has(id))
+  return found.followUp ? !touched : touched
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión. */
@@ -59,6 +90,8 @@ export interface ClosingSession {
   title: string
   n: number
   m: number
+  /** Dónde, si no se hizo hoy («pieza 46»): lo aceptado sin empezar no está en la atención. */
+  place?: string
   /** La cita por venir que ya lleva su próxima sesión; sin cita, no viene. */
   booked?: BookedSession
 }
@@ -67,6 +100,10 @@ export interface ClosingSession {
 export interface BookedSession {
   appointmentId: string
   startsAt: string
+  /** Con quién es la cita. */
+  professionalUserId: string
+  /** Su nombre, cuando lo dio el servidor al reservarla aquí mismo. */
+  professionalName?: string
   n: number
   m: number
 }
@@ -80,7 +117,8 @@ export interface NextSession {
   title: string
   serviceId: string | null
   booked: BookedSession | null
-  toBook: { n: number; m: number } | null
+  /** `from`: desde qué día conviene (la endodoncia, una semana después), si no es mañana. */
+  toBook: { n: number; m: number; from?: string } | null
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */
@@ -91,6 +129,8 @@ export interface ClosingDueControl {
   dueAt: string
   /** Quien firma atendió la atención donde se indicó: viene marcado. */
   mine: boolean
+  /** Se eligió al empezar («Viene a su control»): también viene marcado. */
+  chosen?: boolean
   repeatEveryMonths: number | null
 }
 
@@ -109,7 +149,7 @@ export interface ClosingControls {
   /** Los meses de «En N meses» del producto. */
   recallMonths: number
   /** Los controles reservados en la cita de esta atención: se cumplen al firmarla. */
-  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null }>
+  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null; byName?: string | null }>
   /** El día de cada atajo («2026-11-14»), en la zona de la clínica. */
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
@@ -142,7 +182,8 @@ export interface FinalizedMaterials {
 
 /** Lo que el cierre hizo con los controles: el que indicó «¿Cuándo vuelve?» y los que cumplió. */
 export interface FinalizedControls {
-  next: { id: string; title: string; dueAt: string } | null
+  /** `joinsNext`: va en la misma cita que lo aceptado que «Reservar» ofrece, desde `from` (`YYYY-MM-DD`). */
+  next: { id: string; title: string; dueAt: string; joinsNext?: { from: string } } | null
   fulfilled: Array<{ id: string; title: string }>
 }
 
@@ -168,7 +209,12 @@ export function finalizedControlsWords(controls: FinalizedControls, now = new Da
   const words: string[] = []
   if (controls.next) {
     const day = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(controls.next.dueAt))
-    words.push(`Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`)
+    // Si va en la misma cita que lo aceptado, «Reservar su próxima cita» ya lo trae: no se manda a recepción.
+    words.push(
+      controls.next.joinsNext
+        ? `${controls.next.title} (toca el ${controlDaySaid(day, now)}): «Reservar su próxima cita» lo trae en la misma cita.`
+        : `Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`,
+    )
   }
   if (controls.fulfilled.length > 0) {
     const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")
@@ -313,8 +359,49 @@ export function fetchEncounterClosing(patientId: string, encounterId: string, ad
   return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing${query}`)
 }
 
-export function voidEncounterApi(patientId: string, encounterId: string, reason: string) {
-  return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason })
+/** Lo que no se deshace al anular la atención (`EncounterVoidBlock` del servicio). */
+export type EncounterVoidBlock =
+  | { kind: "cobro"; treatments: string[] }
+  | { kind: "hecho"; treatments: string[] }
+  | { kind: "firma"; signedAt: string; signerName: string | null }
+  | { kind: "otros"; others: number }
+  | { kind: "ajeno"; others: number }
+  | { kind: "revision" }
+
+/** Un presupuesto que anular la atención anula, deja sin lo de ella o frena. */
+export interface EncounterVoidBudget {
+  id: string
+  budgetNumber: number
+  status: string
+  delivered: boolean
+  presentedAt: string | null
+  decidedAt: string | null
+  effect: "anula" | "quita" | "frena"
+  treatments: string[]
+  others: number
+  blocks: EncounterVoidBlock[]
+  appointments: Array<{ id: string; startsAt: string }>
+}
+
+export interface EncounterVoidPreview {
+  budgets: EncounterVoidBudget[]
+  blocked: boolean
+  /** Lo entregado que se anula con ella: va tal cual al anular. */
+  confirm: Array<{ id: string; status: string }>
+}
+
+/** Qué se lleva anular la atención, antes de confirmar (la misma regla del servidor al anular). */
+export function fetchEncounterVoidPreview(patientId: string, encounterId: string) {
+  return apiFetch<{ data: EncounterVoidPreview }>(`${base(patientId)}/encounters/${encounterId}/void-preview`)
+}
+
+export function voidEncounterApi(
+  patientId: string,
+  encounterId: string,
+  reason: string,
+  budgets: ReadonlyArray<{ id: string; status: string }> = [],
+) {
+  return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason, budgets })
 }
 
 export function takeOverEncounterApi(patientId: string, encounterId: string) {
@@ -425,4 +512,41 @@ export function registrationLabel(
   return profile.registrationNumber
     ? `${profile.registrationBody} ${profile.registrationNumber}`
     : null
+}
+
+/** «Hacerla hoy»: trae a la atención un tratamiento aceptado por hacer (motivo y diagnóstico si faltan). */
+export function bringTreatmentApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch<{ data: { reasonSet: boolean; diagnosisAdded: boolean } }>(
+    `${base(patientId)}/encounters/${encounterId}/visit/treatments`,
+    { method: "POST", body: JSON.stringify({ planItemId }) },
+  )
+}
+
+/** Deshace «Hacerla hoy» mientras no tenga su sesión registrada. */
+export function leaveTreatmentApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch(`${base(patientId)}/encounters/${encounterId}/visit/treatments/${planItemId}`, {
+    method: "DELETE",
+  })
+}
+
+/** «Viene a su control» (o `null`: ninguno): se cumple al firmar. */
+export function chooseVisitControlApi(
+  patientId: string,
+  encounterId: string,
+  followUpId: string | null,
+) {
+  return apiFetch<{ data: { reasonSet: boolean } }>(
+    `${base(patientId)}/encounters/${encounterId}/visit/control`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ followUpId }),
+    },
+  )
+}
+
+/** «Quitar» un renglón indicado en esta misma atención, antes de que responda. */
+export function removeIndicatedApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch(`${base(patientId)}/encounters/${encounterId}/indicated/${planItemId}`, {
+    method: "DELETE",
+  })
 }

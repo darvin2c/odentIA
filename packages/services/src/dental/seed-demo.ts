@@ -88,22 +88,15 @@ import {
   periodontalTooth,
   planItemFinding,
 } from "@odentia/db/schema/dental"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm"
-import { opportunity } from "@odentia/db/schema/opportunities"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
-import {
-  DEMO_CBCT,
-  DEMO_IMAGES,
-  type DemoImageSource,
-  demoImage,
-  readGipl,
-} from "./demo-imaging.js"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "../agent-operations.js"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "../allergies.js"
@@ -166,7 +159,7 @@ import {
   updateEncounterDraft,
   voidEncounter,
 } from "../encounters.js"
-import { setCommissionRate } from "../finance.js"
+import { setCommissionException, setCommissionRate } from "../finance.js"
 import {
   cancelFollowUp,
   completeFollowUp,
@@ -254,6 +247,13 @@ import { librarySpecialtyIds } from "../specialties.js"
 import { createStorage } from "../storage.js"
 import { completeTask, createTask, settleTask, updateTask } from "../tasks.js"
 import { makeImageThumbnail } from "../thumbnails.js"
+import {
+  DEMO_CBCT,
+  DEMO_IMAGES,
+  type DemoImageSource,
+  demoImage,
+  readGipl,
+} from "./demo-imaging.js"
 import type { DentalFinalizeParts } from "./hooks.js"
 import {
   addOdontogramEntries,
@@ -470,6 +470,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     // El gasto que se repite: su «este mes no» y sus pagos van antes que la plantilla.
     "expense_recurring_skip",
     "expense",
+    "expense_payable",
     "expense_recurring",
     "cash_shift",
     "stock_movement",
@@ -1091,19 +1092,16 @@ const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
       causeAt: new Date(Date.now() + 2 * 24 * 3600_000),
     })
   },
-  // Pasó sola: presupuesto presentado.
+  // Interesado, con quien la lleva. No se mueve a «Presupuesto enviado» a mano: ahí llegan
+  // solas las de los presupuestos que la demo sí entrega (QA del 8 nov: una oportunidad en
+  // «Presupuesto enviado» cuyo cajón decía «Sin presupuesto»).
   "Carlos Paredes": async (contactId) => {
-    const opp = await createOpportunity(
+    await createOpportunity(
       db,
       ORG_A,
       { contactId, title: "Endodoncia", assignedUserId: ANA_ID },
       { userId: ANA_ID },
     )
-    await moveOpportunity(db, ORG_A, opp.id, stageOf("presupuesto_enviado").id, {
-      userId: null,
-      origin: "automatico",
-      cause: "presupuesto_presentado",
-    })
   },
   // Ganada: aceptó el presupuesto.
   "Lucía Fernández": async (contactId) => {
@@ -2151,7 +2149,12 @@ const seedOffers: Array<{
   /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
   leavesFinding?: { condition: string; variant?: string }
   /** En Perú cada servicio lleva su código CPMS, también el propio (ADR 0069). */
-  officialCode: string
+  officialCode?: string
+  /**
+   * De la biblioteca: toma el código y la anatomía de su tratamiento (no lleva
+   * código propio). Así la atención avisa si se indica en otro grupo de piezas.
+   */
+  templateKey?: string
 }> = [
   {
     code: "EVALUACION",
@@ -2173,10 +2176,12 @@ const seedOffers: Array<{
     durationMin: 45,
     priceDisclosure: "exacto",
   },
+  // De la biblioteca, como en una clínica real: la anterior y la posterior son hermanas, y la
+  // anterior indicada en la 46 avisa y ofrece la posterior (entrega 8 de la atención).
   {
     code: "ENDODONCIA",
-    officialCode: "D3310",
-    name: "Endodoncia unirradicular",
+    templateKey: "endodoncia-anterior-vital",
+    name: "Endodoncia anterior vital",
     specialty: "endodoncia",
     scope: "tooth",
     priceCents: 45000,
@@ -2187,7 +2192,7 @@ const seedOffers: Array<{
   // Un molar no es unirradicular: la endodoncia de la 46 es esta.
   {
     code: "ENDODONCIA_POSTERIOR",
-    officialCode: "D3330",
+    templateKey: "endodoncia-posterior-vital",
     name: "Endodoncia posterior vital",
     specialty: "endodoncia",
     scope: "tooth",
@@ -2196,6 +2201,44 @@ const seedOffers: Array<{
     usualSessions: 2,
     priceDisclosure: "desde",
     leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
+  },
+  // La necrosis pulpar es otra endodoncia (no vital): con medicación entre sesiones, en dos (QA del
+  // 9 nov, repaso 3: la demo solo tenía las vitales).
+  {
+    code: "ENDODONCIA_POSTERIOR_NO_VITAL",
+    templateKey: "endodoncia-posterior-no-vital",
+    name: "Endodoncia posterior no vital",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 70000,
+    durationMin: 90,
+    usualSessions: 2,
+    priceDisclosure: "desde",
+    leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
+  },
+  {
+    code: "ENDODONCIA_ANTERIOR_NO_VITAL",
+    templateKey: "endodoncia-anterior-no-vital",
+    name: "Endodoncia anterior no vital",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 50000,
+    durationMin: 90,
+    usualSessions: 2,
+    priceDisclosure: "desde",
+    leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
+  },
+  // En una temporal, la endodoncia es la pulpectomía: el aviso de la pieza la ofrece.
+  {
+    code: "PULPECTOMIA_POSTERIOR_DECIDUO",
+    templateKey: "pulpectomia-posterior-deciduo",
+    name: "Pulpectomía posterior, deciduo",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 28000,
+    durationMin: 60,
+    priceDisclosure: "exacto",
+    leavesFinding: { condition: "root_canal_treatment", variant: "pulpectomy" },
   },
   {
     code: "CORONA",
@@ -2260,11 +2303,28 @@ const seedOffers: Array<{
 const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_KIND_KEYS)
 const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_KIND_KEYS)
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
-for (const { specialty, ...offer } of seedOffers) {
+const offerTemplates = new Map(
+  (
+    await db
+      .select({ id: treatmentTemplate.id, key: treatmentTemplate.key })
+      .from(treatmentTemplate)
+      .where(
+        inArray(
+          treatmentTemplate.key,
+          seedOffers.flatMap((offer) => (offer.templateKey ? [offer.templateKey] : [])),
+        ),
+      )
+  ).map((row) => [row.key, row.id]),
+)
+for (const { specialty, templateKey, ...offer } of seedOffers) {
+  const templateId = templateKey ? offerTemplates.get(templateKey) : undefined
+  if (templateKey && !templateId)
+    throw new Error(`Falta ${templateKey} en la biblioteca: ejecuta seed:procedures`)
+  const input = templateId ? { ...offer, templateId } : offer
   catalogA.push(
-    await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }),
+    await createService(db, ORG_A, ANA_ID, { ...input, specialtyId: specialtiesA.get(specialty) }),
   )
-  await createService(db, ORG_B, CORA_ID, { ...offer, specialtyId: specialtiesB.get(specialty) })
+  await createService(db, ORG_B, CORA_ID, { ...input, specialtyId: specialtiesB.get(specialty) })
 }
 // Implantología sin nadie que la atienda (decisión 2 de la fase 4): la agenda
 // ofrece el implante a cualquiera y Especialidades lo avisa con «Elegir quién atiende».
@@ -3430,6 +3490,8 @@ const marco = await createPatient(db, ORG_A, ANA_ID, {
   phone: "+51987650600",
   registeredBranchId: miraflores.id,
 })
+// Con su nombre, para su cita de la Agenda (abajo).
+patientIdByName.set("Marco Torres", marco.id)
 const marcoEval = await createEncounter(db, ORG_A, ANA_ID, marco.id, {
   reason: "Evaluación de ortodoncia",
   branchId: miraflores.id,
@@ -4124,7 +4186,7 @@ const domainSeed = {
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
 await db.transaction((tx) => seedAvailability(tx, domainSeed))
 // La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
-// (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
+// (fase 4, tablero 2): «Endodoncia anterior vital» se ofrece solo en sus horas.
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: miraflores.id,
   professionalUserId: ROJAS_ID,
@@ -4266,7 +4328,8 @@ const agendaSeed: Array<{
     day: 1,
     start: "09:00",
     end: "10:00",
-    service: "ENDODONCIA",
+    // La 46 es un molar: su endodoncia es la posterior, como su tratamiento (QA del 9 nov).
+    service: "ENDODONCIA_POSTERIOR",
     status: "programada",
     planItemIds: [endo46.id],
   },
@@ -4277,11 +4340,26 @@ const agendaSeed: Array<{
     day: 8,
     start: "09:00",
     end: "10:00",
-    service: "ENDODONCIA",
+    // La 46 es un molar: su endodoncia es la posterior, como su tratamiento (QA del 9 nov).
+    service: "ENDODONCIA_POSTERIOR",
     status: "programada",
     planItemIds: [endo46.id],
   },
-  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino».
+  // Marco vino a su control de ortodoncia hace 9 días y la cita quedó «atendida», pero nadie
+  // registró el control: su «Qué sigue» lo avisa al reservar (QA de la ficha del 8 nov).
+  {
+    patient: "Marco Torres",
+    professional: ANA_ID,
+    room: 1,
+    day: -9,
+    start: "16:00",
+    end: "16:30",
+    service: "ORTODONCIA_CTRL",
+    status: "atendida",
+    planItemIds: [marcoCtrl.id],
+  },
+  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino»,
+  // y su ficha, en «Qué sigue», con «¿Vino?».
   {
     patient: "Elena Huamán",
     professional: ANA_ID,
@@ -4406,6 +4484,15 @@ for (const item of agendaSeed) {
     })
   }
 }
+// Marco: su control de ortodoncia se aceptó y se reservó antes de esa cita de hace 9 días (la
+// semilla lo crea hoy; aquí queda en sus fechas, así la cita de verdad lo llevaba).
+await db.update(treatmentPlanItem).set({ createdAt: daysAgo(14) }).where(eq(treatmentPlanItem.id, marcoCtrl.id))
+await db
+  .update(treatmentBudget)
+  .set({ createdAt: daysAgo(14), presentedAt: daysAgo(13), decidedAt: daysAgo(12) })
+  .where(eq(treatmentBudget.id, marcoBudget.id))
+await db.update(appointmentPlanItem).set({ createdAt: daysAgo(12) }).where(eq(appointmentPlanItem.planItemId, marcoCtrl.id))
+
 // La sala de espera de la Dra. Ana hoy (tablero 7): Lucía llegó y espera, y
 // Rosa ya está en atención (su evaluación en borrador de hoy se une a su cita
 // y la llegada queda marcada a esa hora). Ana es propietaria y atiende: su
@@ -4549,6 +4636,15 @@ for (const seed of [
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
+// Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
+// por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.
+await db.transaction((tx) =>
+  setCommissionException(tx, ORG_A, ANA_ID, {
+    professionalUserId: "seed-user-dentista",
+    serviceId: serviceIdA("ENDODONCIA"),
+    rateBps: 5000,
+  }),
+)
 // «Tus mensajes» (ADR 0040): Carmen pidió por teléfono no recibir recordatorios
 // (en su página se ve apagado y, con «Recordar la cita» prendida, «Te espera»
 // pide llamarla el día antes de su cita); Diego no quiere ningún mensaje.
@@ -4624,7 +4720,51 @@ if (pedroRiosPerson) {
       { secretsKey },
     ),
   )
-  console.log(`«Su enlace» de Pedro Ríos (dental-smile): /reserva?token=${pedroLink.token}`)
+  console.log(`«Tus pendientes» de Pedro Ríos (dental-smile): /pendientes?token=${pedroLink.token}`)
+  // A Pedro le falta su fecha y su documento: el consentimiento que se le envió se lee
+  // en su teléfono y dice, antes de leer, que lo firma en su cita (ADR 0167).
+  const [endodontics] = await db
+    .select({ id: consentTemplate.id })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, ORG_A),
+        eq(consentTemplate.key, "endodoncia"),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  if (endodontics) {
+    await db.transaction(async (tx) => {
+      const toRead = await createConsentDocument(tx, ORG_A, ANA_ID, {
+        templateId: endodontics.id,
+        patientId: pedroRios.id,
+        procedureRef: "Endodoncia pieza 46",
+      })
+      await markConsentSentByLink(tx, ORG_A, ANA_ID, toRead.id)
+    })
+    console.log(`Su consentimiento, para leer y firmar en la cita: /pendientes?abre=firma&token=${pedroLink.token}`)
+  }
+}
+// Un familiar sin autorización (ADR 0167): Jorge, hermano de Rosa, quedó vinculado
+// a ella sin ninguna facultad y tiene un enlace de antes. Abierto, no le muestra la
+// cita de Rosa ni le deja tocarla; Sofi tampoco le daría uno.
+{
+  const [brother] = await db
+    .insert(contact)
+    .values({ organizationId: ORG_A, displayName: "Jorge Quispe", givenNames: "Jorge", familyName: "Quispe", phone: "+51987650011" })
+    .returning({ id: contact.id })
+  await db.insert(patientContact).values({
+    organizationId: ORG_A,
+    patientId: domainSeed.patientId,
+    contactId: brother!.id,
+    relationship: "family",
+    createdBy: ANA_ID,
+  })
+  const brotherLink = await db.transaction((tx) =>
+    issuePersonalLink(tx, ORG_A, { contactId: brother!.id, patientId: domainSeed.patientId, createdBy: ANA_ID }, { secretsKey }),
+  )
+  console.log(`El enlace de Jorge Quispe, familiar sin autorización (dental-smile): /pendientes?token=${brotherLink.token}`)
 }
 {
   const [exodonciaPending] = await db
@@ -4640,9 +4780,16 @@ if (pedroRiosPerson) {
       ),
     )
     .limit(1)
-  if (exodonciaPending)
+  if (exodonciaPending) {
     await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
-  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo.
+    // Lo que abre «Firma tu consentimiento»: la hoja directo, con «‹ Tus pendientes» arriba.
+    const rosaLink = await db.transaction((tx) =>
+      issuePersonalLink(tx, ORG_A, { contactId: domainSeed.contactId, patientId: domainSeed.patientId, createdBy: ANA_ID }, { secretsKey }),
+    )
+    console.log(`«Firma tu consentimiento» de Rosa (dental-smile): /pendientes?abre=firma&token=${rosaLink.token}`)
+  }
+  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo. Rosa
+  // está hoy en atención (su borrador de hoy): al abrirla, arriba sale para confirmarlo ahí.
   const [implant] = await db
     .select({ id: consentTemplate.id })
     .from(consentTemplate)
@@ -5169,6 +5316,41 @@ await db.transaction(async (tx) => {
     { ...demo, product: "medical", size: "pequeno" },
     { secretsKey, fetch },
   )
+  await tx
+    .update(saasDemo)
+    .set({
+      organizationId: built.organizationId,
+      slug: built.slug,
+      status: "lista",
+      historyThrough: built.historyThrough,
+      readyAt: new Date(),
+      progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
+    })
+    .where(eq(saasDemo.id, demo.id))
+})
+
+// --- vistIA: una óptica para presentar, con el motor de «Crear demo» (ADR 0096) ---
+// La arma igual que la administración: su equipo, su biblioteca, meses de historia y
+// las próximas dos semanas. Se entra desde Clínicas › «Demos».
+await db.transaction(async (tx) => {
+  const [demo] = await tx
+    .insert(saasDemo)
+    .values({
+      product: "optical",
+      kind: "optica",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Óptica Clara Miraflores",
+      slug: "seed-optica-clara-miraflores",
+      presenterUserId: SEED_STAFF_ADMIN_ID,
+      createdBy: SEED_STAFF_ADMIN_ID,
+      seed: 20_261_108,
+      status: "creando",
+    })
+    .returning()
+  if (!demo) throw new Error("No se pudo pedir la demo de la óptica de la semilla")
+  const built = await buildDemo(tx, { ...demo, product: "optical", size: "pequeno" }, { secretsKey, fetch })
   await tx
     .update(saasDemo)
     .set({

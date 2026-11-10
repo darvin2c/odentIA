@@ -15,6 +15,7 @@ import {
 } from "../../../lib/budgets"
 import { label as glossaryLabel } from "../../../lib/glossary"
 import { useOrgProfile } from "../../../lib/org"
+import { partNames } from "../../../product/site-fields"
 
 /**
  * Importe con la moneda y el formato de la clínica. `plain` es el mismo importe
@@ -100,7 +101,8 @@ export function treatmentSiteLabel(site: {
 }): string {
   if (site.scope === "tooth" && site.toothNumber != null) return `Pieza ${site.toothNumber}`
   if (site.scope === "surfaces" && site.toothNumber != null) {
-    const extra = site.surfaces.length > 0 ? ` (${site.surfaces.join(", ")})` : ""
+    // Las caras en palabras («distal, oclusal»), no sus códigos (QA del 9 nov: «occlusal»).
+    const extra = site.surfaces.length > 0 ? ` (${partNames(site.surfaces).toLowerCase()})` : ""
     return `Pieza ${site.toothNumber}${extra}`
   }
   if (site.scope === "quadrant" && site.quadrant != null) return `Cuadrante ${site.quadrant}`

@@ -29,12 +29,13 @@ export interface ProductAgentTexts {
   /**
    * Lo que cambia en las fichas de los agentes en otro producto (latidIA: Clío
    * para el médico, Sofi sin piezas ni odontograma); sin ello, las de odentIA.
-   * No lo lee el modelo: son las páginas de los agentes.
+   * `available: false` dice que el agente no existe en el producto (vistIA: Clío
+   * no dicta). No lo lee el modelo: son las páginas de los agentes.
    */
   roles?: Partial<
     Record<
       "recepcion" | "asistente_clinico",
-      Partial<Pick<AgentRole, "nameReason" | "audience" | "role" | "functions" | "sees" | "notSees" | "never" | "confirms" | "behaves" | "learningOwner" | "later" | "learnsLater">>
+      Partial<Pick<AgentRole, "available" | "nameReason" | "audience" | "role" | "functions" | "sees" | "notSees" | "never" | "confirms" | "behaves" | "learningOwner" | "later" | "learnsLater">>
     >
   >
   /**
@@ -59,6 +60,12 @@ export interface ProductAgentTexts {
   site: string
   /** Reglas de Sofi que son del producto (odentIA: la tomografía llega en CD, USB o ZIP). */
   receptionRules: readonly string[]
+  /**
+   * Si el producto trabaja con pedidos (ADR 0172), cómo se dice lo que se
+   * encargó (vistIA: «sus lentes»): Sofi tiene `ver_pedidos`. Sin ello no la tiene,
+   * y lo que lee el modelo en los demás productos no cambia.
+   */
+  orders?: { noun: string }
   /** Ejemplo de etiqueta para el contacto (odentIA: «interesado-ortodoncia»). */
   tagExample: string
   /** Ejemplos de lo que pide una persona con sus palabras (odentIA: «dientes amarillos»…). */

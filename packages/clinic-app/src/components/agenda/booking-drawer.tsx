@@ -38,6 +38,7 @@ import type { AgendaAppointment } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import type { PhoneWhatsApp } from "../../lib/people"
 import { appWords } from "../../lib/product-words"
@@ -61,6 +62,12 @@ export interface BookingSeed {
   professionalUserId?: string | null
   /** Su nombre, por si no tiene horario en la sede (se sumó a la vista para una excepción). */
   professionalLabel?: string
+  /**
+   * La sesión siguiente de un tratamiento («Reservar la sesión 2» al firmar): con el
+   * servicio de la semilla, quien atendió sigue elegido aunque el servicio no lo
+   * ofrezca, y se dice por qué (QA del 8 nov).
+   */
+  keepProfessional?: boolean
   /** Instante del hueco ya elegido. */
   startsAt?: string
   /** Día en que se abre el selector. */
@@ -73,6 +80,19 @@ export interface BookingSeed {
    * servicio; lo demás aceptado sin cita se ve sin marcar.
    */
   planItemIds?: string[]
+  /**
+   * Controles pendientes que esta cita viene a hacer («Reservar lo aceptado y el
+   * control»): vienen marcados y quedan reservados con la cita, en la misma
+   * operación (QA del 8 nov, entrega 3).
+   */
+  followUpIds?: string[]
+  /**
+   * Por qué se busca hora desde `date` (lo que va después de otro tratamiento de la misma pieza,
+   * o el control que aún no se puede hacer): se dice en el cajón (QA de la ficha del 9 nov).
+   */
+  note?: string
+  /** Antes de este día (`YYYY-MM-DD`) se avisa, sin frenar: la persona decide. */
+  notBefore?: string
 }
 
 /**
@@ -175,6 +195,14 @@ export function BookingDrawer({
     enabled: registering && (can("crm.read") || can("settings.read")),
     retry: false,
   })
+  // Solo se le dice «te escribiremos por WhatsApp» si de verdad saldrán los recordatorios (B2).
+  const remindersQuery = useQuery({
+    queryKey: ["appointments", "reminders-via"],
+    queryFn: () => apiFetch<{ data: { via: "whatsapp" | null } }>("/api/appointments/reminders-via"),
+    enabled: registering,
+    retry: false,
+  })
+  const remindersByWhatsApp = remindersQuery.data?.data.via === "whatsapp"
 
   // Lo que se avisa después de reservar y no debe perderse con el toast.
   const consentNote = React.useRef<string | null>(null)
@@ -183,7 +211,14 @@ export function BookingDrawer({
   const phase = React.useRef<"registro" | "cita">("cita")
 
   const save = useMutation({
-    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: AgendaException | null; planItemIds?: string[] }) =>
+    mutationFn: (input: {
+      patientId: string
+      value: BookingValues
+      range: ScheduleRangeValue
+      exception: AgendaException | null
+      planItemIds?: string[]
+      followUpIds?: string[]
+    }) =>
       apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
@@ -193,6 +228,7 @@ export function BookingDrawer({
           serviceId: input.value.serviceId || undefined,
           // La lista que se ve, aunque quede vacía: sin decir nada, el servidor une lo aceptado del servicio.
           ...(input.planItemIds ? { planItemIds: input.planItemIds } : {}),
+          ...(input.followUpIds?.length ? { followUpIds: input.followUpIds } : {}),
           startsAt: input.range.start,
           endsAt: input.range.end,
           reason: input.value.reason.trim() || undefined,
@@ -248,7 +284,8 @@ export function BookingDrawer({
         ? "Su número de WhatsApp ya es de otra persona de la clínica: no se movió. Revísalo en su página antes de escribirle."
         : null
     // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono: los mensajes
-    // de su cita (se le dijo que le escribirán por WhatsApp) y su respuesta a novedades y promociones.
+    // de su cita solo si se le dijo que le escribirán por WhatsApp (B2, como `saveLinkConsents` en su
+    // enlace) y su respuesta a novedades y promociones.
     await (async () => {
       const personId =
         seed.person?.contactId ??
@@ -258,7 +295,8 @@ export function BookingDrawer({
           method: "POST",
           body: JSON.stringify({ tipo, recibir, source: "telefono" }),
         })
-      await permission("recordatorio", true)
+      // Sin teléfono no se le prometió nada por WhatsApp: no se anota.
+      if (remindersByWhatsApp && value.phone) await permission("recordatorio", true)
       if (value.generalConsent !== null) await permission("novedades", value.generalConsent)
     })().catch(() => {
       consentNote.current = "No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes."
@@ -268,7 +306,7 @@ export function BookingDrawer({
     return registered.data
   }
 
-  // Quien registra escribe nombres y apellidos (y su teléfono si es alguien nuevo); quien elige, elige.
+  // Quien registra escribe nombres y apellidos (y su teléfono, si lo tiene); quien elige, elige.
   const schema = z.object({
     patientId: registering ? z.string() : z.string().min(1, "Elige un paciente."),
     givenNames: registering
@@ -277,13 +315,9 @@ export function BookingDrawer({
     surname: registering
       ? z.string().trim().min(1, "Escribe los apellidos.").max(200, "Escribe los apellidos en 200 caracteres o menos.")
       : z.string(),
-    phone:
-      registering && !seed.person
-        ? z
-            .string()
-            .nullable()
-            .refine((phone) => Boolean(phone), "Escribe su teléfono: por ahí le llegan los avisos de la cita.")
-        : z.string().nullable(),
+    // Sin teléfono también se reserva (una urgencia, alguien sin celular): el campo avisa que
+    // no le llegarán los avisos de la cita, sin frenar. Un número a medias lo dice el campo.
+    phone: z.string().nullable(),
     // A quien se registra se le pregunta por novedades: sin su respuesta no se guarda.
     generalConsent: registering
       ? z
@@ -338,6 +372,7 @@ export function BookingDrawer({
           range,
           exception: when.exception,
           planItemIds: chosenItemsFor(patientId),
+          followUpIds: chosenControlsFor(patientId),
         })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
@@ -391,10 +426,19 @@ export function BookingDrawer({
   // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
   // Uno solo de varias sesiones dice cuál sería esta cita: «Endodoncia · sesión 2 de 2».
   const toScheduleRows = React.useMemo(() => {
-    const rows = new Map<string, { key: string; title: string; ids: string[]; session: string | null }>()
+    const rows = new Map<
+      string,
+      { key: string; title: string; ids: string[]; session: string | null; after: string | null }
+    >()
     for (const item of toSchedule) {
       const key = `${item.serviceId ?? ""}|${item.title}`
-      const row = rows.get(key) ?? { key, title: item.title, ids: [], session: null }
+      const row = rows.get(key) ?? {
+        key,
+        title: item.title,
+        ids: [],
+        session: null,
+        after: item.after ?? null,
+      }
       row.ids.push(item.id)
       const next = item.nextSession
       row.session = row.ids.length === 1 && next && showsSession(next.n, next.m) ? sessionWords(next.n, next.m) : null
@@ -449,6 +493,34 @@ export function BookingDrawer({
       form.setFieldValue("serviceId", first, { dontUpdateMeta: true })
     }
   }, [coordinationQuery.data, values.patientId])
+  // Los controles que faltan reservar (vencidos o ya en su ventana) también se hacen en esta
+  // cita: una sola visita para lo aceptado y la limpieza. El que pidió «Qué sigue» viene marcado.
+  const seededControls = values.patientId === seed.patient?.id ? (seed.followUpIds ?? []) : []
+  const controls = (coordinationQuery.data?.data.followUps ?? []).filter(
+    (row) =>
+      row.status === "pendiente" &&
+      (seededControls.includes(row.id) || (!row.servedBy && (row.overdue || new Date(row.windowFrom).getTime() <= Date.now()))),
+  )
+  const [markedControls, setMarkedControls] = React.useState<{ patientId: string; ids: string[] } | null>(null)
+  const controlIds =
+    markedControls?.patientId === values.patientId
+      ? markedControls.ids
+      : seededControls.filter((id) => controls.some((row) => row.id === id))
+  const markControl = (id: string, checked: boolean) =>
+    setMarkedControls({
+      patientId: values.patientId,
+      ids: checked ? [...controlIds.filter((other) => other !== id), id] : controlIds.filter((other) => other !== id),
+    })
+  /** Los controles marcados que siguen a la vista (otro pudo reservarlo entre tanto). */
+  // Sin la lista (aún carga o falló), los que pidió «Qué sigue»: el servidor los rechaza si ya no están por reservar.
+  const chosenControlsFor = (patientId: string): string[] | undefined => {
+    if (coordinationQuery.data && patientId === values.patientId)
+      return controlIds.filter((id) => controls.some((row) => row.id === id))
+    return seed.followUpIds?.length && patientId === seed.patient?.id ? seed.followUpIds : undefined
+  }
+  const controlDay = (iso: string) =>
+    new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", timeZone }).replace(".", "")
+
   /** Lo que la cita trae; sin la lista (rol sin acceso o paciente recién registrado), lo que pidió el Plan o la regla del servidor. */
   const chosenItemsFor = (patientId: string): string[] | undefined => {
     // Solo lo que se ve: lo que otra persona reservó entre tanto ya no está en la lista.
@@ -510,8 +582,13 @@ export function BookingDrawer({
     startsAt: seed.startsAt,
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: serviceId || undefined,
+    // Solo mientras el servicio es el de la sesión: otro servicio elegido a mano sigue la regla.
+    keepProfessional: Boolean(seed.keepProfessional && (seed.serviceId ?? "") === (serviceId ?? "")),
   })
   const { shown } = when
+  // Elegir antes de lo que dice la nota: se avisa, no se frena (la persona decide).
+  const shownDay = shown ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(shown.start)) : null
+  const beforeNote = Boolean(seed.notBefore && shownDay && shownDay < seed.notBefore)
 
   React.useEffect(() => {
     onPreview(
@@ -633,6 +710,11 @@ export function BookingDrawer({
                     id="cita-nuevo-telefono"
                     label="Teléfono"
                     defaultCountry={normalizeCountry(profile.data?.countryCode)}
+                    description={
+                      seed.person || field.state.value
+                        ? undefined
+                        : "Sin teléfono no le llegan los avisos de la cita; puedes agregarlo después."
+                    }
                   />
                 )}
               </form.AppField>
@@ -662,10 +744,19 @@ export function BookingDrawer({
                   ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
-              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. */}
-              <p className="text-xs text-muted-foreground">
-                Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
-              </p>
+              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. Solo si saldrán. */}
+              {/* Sin teléfono no hay nada que decirle: lo avisa el campo. */}
+              {remindersByWhatsApp ? (
+                seed.person || values.phone ? (
+                  <p className="text-xs text-muted-foreground">
+                    Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
+                  </p>
+                ) : null
+              ) : remindersQuery.isSuccess ? (
+                <p className="text-xs text-muted-foreground">
+                  Esta clínica no envía hoy los recordatorios por WhatsApp: no se lo prometas.
+                </p>
+              ) : null}
               <form.AppField name="generalConsent">
                 {(field) => (
                   <field.Group
@@ -743,7 +834,7 @@ export function BookingDrawer({
             </div>
           )}
 
-          {toScheduleRows.length > 0 ? (
+          {toScheduleRows.length > 0 || controls.length > 0 ? (
             <FieldSet className="gap-2">
               <FieldLegend variant="label" className="mb-0">
                 Para esta cita
@@ -763,15 +854,38 @@ export function BookingDrawer({
                       }
                     />
                     <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
-                      {row.title}
-                      {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
-                      {row.session ? ` · ${row.session}` : ""}
+                      {/* Un solo bloque de texto: la etiqueta es flex y partía «va después» en otra columna. */}
+                      <span>
+                        {row.title}
+                        {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
+                        {row.session ? ` · ${row.session}` : ""}
+                        {/* Lo dice como «Qué sigue»: marcarlo igual es decisión de quien reserva (entrega 8). */}
+                        {row.after ? (
+                          <span className="text-muted-foreground">{` · va después de ${row.after}`}</span>
+                        ) : null}
+                      </span>
+                    </FieldLabel>
+                  </Field>
+                ))}
+                {controls.map((row, index) => (
+                  <Field key={row.id} orientation="horizontal">
+                    <Checkbox
+                      id={`cita-control-${index}`}
+                      checked={controlIds.includes(row.id)}
+                      onCheckedChange={(checked) => markControl(row.id, checked === true)}
+                    />
+                    <FieldLabel htmlFor={`cita-control-${index}`} className="font-normal">
+                      {row.title} · {row.overdue ? `vencido, tocaba el ${controlDay(row.dueAt)}` : `toca el ${controlDay(row.dueAt)}`}
                     </FieldLabel>
                   </Field>
                 ))}
               </FieldGroup>
               <FieldDescription>
-                Tratamientos aceptados con sesiones por reservar. Los que marques quedan listos en su atención.
+                {toScheduleRows.length > 1
+                  ? "Viene marcado lo del primer servicio; marca más si caben en esta cita. "
+                  : ""}
+                {toScheduleRows.length > 0 ? "Lo marcado queda listo en su atención." : ""}
+                {controls.length > 0 ? `${toScheduleRows.length > 0 ? " " : ""}El control marcado queda reservado con esta cita.` : ""}
               </FieldDescription>
             </FieldSet>
           ) : null}
@@ -802,12 +916,18 @@ export function BookingDrawer({
               </field.Control>
             )}
           </form.AppField>
-          {when.attending ? (
+          {/* Mientras se mira a quien se pidió y no es como los demás, lo dice su línea bajo «Profesional». */}
+          {when.attending && !(when.seedNote && when.professionalFilter === when.input.professionalUserId) ? (
             <p role="status" className="-mt-2 text-xs text-muted-foreground">
               {`Solo se ofrecen las horas de quien atiende ${when.attending.specialtyName}.`}
             </p>
           ) : null}
 
+          {seed.note ? (
+            <p role="status" className={`-mb-2 text-sm ${beforeNote ? "text-warning" : "text-muted-foreground"}`}>
+              {beforeNote ? `Es antes de lo indicado. ${seed.note}` : seed.note}
+            </p>
+          ) : null}
           <WhenFields form={form} fields="when" when={when} />
 
           <form.AppField name="reason">

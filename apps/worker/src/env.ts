@@ -20,6 +20,13 @@ const envSchema = z.object({
     .toLowerCase()
     .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. latidia72.com")
     .default(""),
+  /** El dominio de vistIA, como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
+  OPTICAL_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. vistia20.com")
+    .default(""),
   /** Versión del Graph API de Meta, la misma de la API: WhatsApp, Messenger e Instagram. */
   META_GRAPH_VERSION: z
     .string()
@@ -45,6 +52,8 @@ const envSchema = z.object({
   SMTP_FROM: z.string().min(1),
   // El remitente de los correos de latidIA (issue 229); vacío, el de SMTP_FROM con su nombre.
   MEDICAL_SMTP_FROM: z.string().optional(),
+  // El de vistIA, igual.
+  OPTICAL_SMTP_FROM: z.string().optional(),
   GMAIL_CLIENT_ID: z.string().default(""),
   GMAIL_CLIENT_SECRET: z.string().default(""),
   GMAIL_REDIRECT_URI: z.string().default(""),

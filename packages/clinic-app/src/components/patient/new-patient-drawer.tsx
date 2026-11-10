@@ -11,6 +11,7 @@ import {
 } from "@odentia/clinical"
 import {
   Button,
+  cn,
   Input,
   Item,
   ItemActions,
@@ -25,7 +26,6 @@ import {
 import {
   BirthDateInput,
   FormDrawer,
-  INCOMPLETE_PHONE,
   internationalText,
   normalizeCountry,
   PersonAvatar,
@@ -36,7 +36,7 @@ import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Check } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { brandedQrDataUrl } from "../../lib/branded-qr"
 import { useCan } from "../../lib/crm"
@@ -183,6 +183,9 @@ function draftFromPerson(person: PersonPage): Draft {
 /** El borrador con que abre: lo que ya se sabe de la persona, o el nombre que se buscó. */
 function initialDraft(target: NewPatientTarget): Draft {
   if (target.kind === "person") return draftFromPerson(target.person)
+  // Alguien a su cargo (un niño sin celular): lo completa el equipo ahora o su responsable en el suyo,
+  // nunca «el paciente, en su celular» por omisión (QA de la ficha del 9 nov).
+  if (target.kind === "dependent") return { ...EMPTY, who: "equipo" }
   if (target.kind === "new" && target.name?.trim()) {
     const [givenNames = "", ...rest] = target.name.trim().split(/\s+/)
     return { ...EMPTY, givenNames, surnames: rest.join(" ") }
@@ -253,6 +256,8 @@ export function NewPatientDrawer({
 
   const [stage, setStage] = useState<Stage>("form")
   const [picked, setPicked] = useState<PersonPage | null>(fromPerson)
+  // Lo que se había escrito antes de tocar «Es esta persona»: «No es esta persona» lo devuelve.
+  const [typedBeforePick, setTypedBeforePick] = useState<Draft | null>(null)
   const [showNotice, setShowNotice] = useState(false)
   const [created, setCreated] = useState<Created | null>(null)
   // No se pudo anotar lo que dijo de sus mensajes: se dice al terminar, sin deshacer el registro.
@@ -365,16 +370,14 @@ export function NewPatientDrawer({
    * regla que aplica el servidor. Lo que no tiene campo aquí (el responsable
    * sin teléfono ni correo, su documento ya guardado) se dice junto a los botones.
    */
-  function draftErrors(current: Draft, phoneHalfWritten: boolean): Record<string, string> {
+  function draftErrors(current: Draft): Record<string, string> {
     const found: Record<string, string> = {}
     if (!current.givenNames.trim()) found.givenNames = "Escribe los nombres"
     if (!current.surnames.trim()) found.surnames = "Escribe los apellidos"
-    // Un número a medias ya lo dice el campo («le faltan dígitos»).
-    if (!dependent && !picked && !current.phone && !phoneHalfWritten)
-      found.phone = "Escribe su celular: ahí le avisamos sus citas"
+    // Sin celular se registra igual (una urgencia, un turista, un adulto mayor): el campo
+    // avisa que no le llegarán sus avisos, sin frenar. Un número a medias sí lo dice el
+    // campo («le faltan dígitos»): ese no se guarda a medias.
     if (dependent && !current.relation) found.relation = `Elige qué es ${guardianFirst} para él o ella`
-    if (needsGuardianDocOf(current) && !current.guardianDocNumber.trim())
-      found.guardianDocNumber = "Hace falta el documento de quien lo representa"
     if (!current.promotions) found.promotions = "Pregúntale y elige una opción"
     if (config.data) {
       const server = validateRegistrationAnswers(config.data.data, answersFrom(current).answers, {
@@ -408,11 +411,7 @@ export function NewPatientDrawer({
   const form = useAppForm({
     defaultValues: initialDraft(target),
     validators: {
-      onSubmit: ({ value, formApi }) =>
-        placeErrors(
-          formApi,
-          draftErrors(value, formApi.getFieldMeta("phone")?.errorMap.onChange === INCOMPLETE_PHONE),
-        ),
+      onSubmit: ({ value, formApi }) => placeErrors(formApi, draftErrors(value)),
     },
     onSubmit: async ({ value }) => {
       const result = await register.mutateAsync(value)
@@ -453,6 +452,7 @@ export function NewPatientDrawer({
     if (!open) return
     setStage("form")
     setPicked(target.kind === "person" ? target.person : null)
+    setTypedBeforePick(null)
     form.reset(initialDraft(target))
     setShowNotice(false)
     setCreated(null)
@@ -519,6 +519,7 @@ export function NewPatientDrawer({
     setPicked(page.data)
     // Lo que ya se sabía de ella, sin perder el celular que se acaba de escribir.
     const typed = form.state.values
+    setTypedBeforePick(typed)
     form.reset({ ...draftFromPerson(page.data), phone: page.data.phone ?? typed.phone, who: typed.who })
     setStage("form")
   }
@@ -572,6 +573,24 @@ export function NewPatientDrawer({
     >
       {stage === "form" ? (
         <div className="flex min-w-0 flex-col gap-5">
+          {picked && typedBeforePick ? (
+            <p className="flex flex-wrap items-center gap-x-2 rounded-2xl bg-muted px-3 py-2 text-sm" role="status">
+              <span>Registras a {picked.displayName}, que ya estaba en la clínica.</span>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0"
+                onClick={() => {
+                  // Se equivocó de persona: vuelve lo que había escrito, como si no la hubiera elegido.
+                  setPicked(null)
+                  form.reset(typedBeforePick)
+                  setTypedBeforePick(null)
+                }}
+              >
+                No es esta persona: volver a lo que escribí
+              </Button>
+            </p>
+          ) : null}
           {guardian ? (
             <form.AppField name="relation">
               {(field) => (
@@ -639,7 +658,10 @@ export function NewPatientDrawer({
                 description={
                   guardian && !field.state.value
                     ? `Si no tiene celular propio, sus avisos le llegan a ${guardian.displayName}.`
-                    : "Aquí le avisamos sus citas por WhatsApp."
+                    : field.state.value
+                      ? "Aquí le avisamos sus citas por WhatsApp."
+                      : // Avisa sin frenar: sin celular también se registra.
+                        "Aquí le avisamos sus citas por WhatsApp. Sin celular no le llegan los recordatorios; puedes agregarlo después."
                 }
               />
             )}
@@ -648,6 +670,7 @@ export function NewPatientDrawer({
           {lookup ? (
             <MatchesNote
               searching={probes.length > 0 && matches.isFetching && !matches.data}
+              refreshing={probes.length > 0 && matches.isFetching && !!matches.data}
               asked={probes.length > 0 && (matches.isSuccess || matches.isPlaceholderData)}
               rows={probes.length > 0 ? (matches.data ?? []) : []}
               onPick={(row) => void startFrom(row)}
@@ -659,9 +682,10 @@ export function NewPatientDrawer({
               <form.AppField name="guardianDocNumber">
                 {(field) => (
                   <field.Control
-                    label={`Documento de ${guardian?.displayName}`}
+                    label={`Documento de ${guardian?.displayName} (si lo tienes)`}
                     id="np-guardian-doc"
-                    description="Al ser menor, queda como su representante legal."
+                    // No frena registrarlo: la firma de un consentimiento lo pide si falta (QA de la ficha del 9 nov).
+                    description="Al ser menor, queda como su representante legal. Si no lo trae, regístralo igual: se le pide al firmar un consentimiento."
                   >
                     {(control) => (
                       <div className="flex min-w-0 flex-col gap-2">
@@ -728,7 +752,14 @@ export function NewPatientDrawer({
                   tone="primary"
                   columns={2}
                   value={field.state.value}
-                  options={WHO_OPTIONS}
+                  options={
+                    dependent
+                      ? [
+                          { value: "paciente", label: `${guardianFirst}, en su celular` },
+                          { value: "equipo", label: "Yo, ahora" },
+                        ]
+                      : WHO_OPTIONS
+                  }
                   onChange={(next) => field.handleChange(next)}
                 />
               )}
@@ -914,11 +945,49 @@ export function NewPatientDrawer({
  */
 function MatchesNote({
   searching,
+  refreshing = false,
   asked,
   rows,
   onPick,
 }: {
   searching: boolean
+  /** Vuelve a buscar con lo nuevo que se escribió: lo anterior sigue a la vista, atenuado. */
+  refreshing?: boolean
+  asked: boolean
+  rows: PersonListItem[]
+  onPick: (row: PersonListItem) => void
+}) {
+  // Mientras se escribe, el recuadro no se achica: lo que viene debajo no salta y un clic
+  // para salir del campo no cae en «Es esta persona» (QA del 8 nov: cambió el formulario por
+  // otra persona sin querer). Vuelve a su alto cuando la búsqueda termina: con «es nuevo» quedaba
+  // un hueco en blanco del alto de la lista anterior (QA de la ficha del 9 nov).
+  const box = useRef<HTMLDivElement>(null)
+  const [minHeight, setMinHeight] = useState(0)
+  const active = searching || refreshing
+  useLayoutEffect(() => {
+    if (!active) {
+      if (minHeight !== 0) setMinHeight(0)
+      return
+    }
+    const height = box.current?.offsetHeight ?? 0
+    if (height > minHeight) setMinHeight(height)
+  })
+  return (
+    <div ref={box} style={active && minHeight ? { minHeight } : undefined} className="min-w-0">
+      <MatchesNoteBody searching={searching} refreshing={refreshing} asked={asked} rows={rows} onPick={onPick} />
+    </div>
+  )
+}
+
+function MatchesNoteBody({
+  searching,
+  refreshing,
+  asked,
+  rows,
+  onPick,
+}: {
+  searching: boolean
+  refreshing: boolean
   asked: boolean
   rows: PersonListItem[]
   onPick: (row: PersonListItem) => void
@@ -937,14 +1006,21 @@ function MatchesNote({
         className="flex items-center gap-2 rounded-2xl bg-success-soft px-3 py-2 text-sm text-success"
         aria-live="polite"
       >
-        <Check aria-hidden className="size-4 shrink-0" />
+        {refreshing ? <Spinner className="size-4" aria-hidden /> : <Check aria-hidden className="size-4 shrink-0" />}
         No hay nadie con estos datos: es nuevo.
       </p>
     )
   }
   return (
-    <div className="flex min-w-0 flex-col gap-2 rounded-3xl bg-warning-soft p-3" aria-live="polite">
-      <span className="px-1 text-sm font-medium text-warning">¿Es alguna de estas personas?</span>
+    <div
+      className={cn("flex min-w-0 flex-col gap-2 rounded-3xl bg-warning-soft p-3", refreshing && "opacity-70")}
+      aria-live="polite"
+      aria-busy={refreshing || undefined}
+    >
+      <span className="flex items-center gap-2 px-1 text-sm font-medium text-warning">
+        ¿Es alguna de estas personas?
+        {refreshing ? <Spinner className="size-3.5" aria-hidden /> : null}
+      </span>
       {rows.map((row) => (
         <Item key={row.id} variant="outline" className="rounded-2xl bg-background">
           <ItemMedia>
@@ -961,12 +1037,8 @@ function MatchesNote({
             <ItemDescription className="line-clamp-none">{personLine(row)}</ItemDescription>
           </ItemContent>
           <ItemActions className="ms-auto">
-            <Button
-              type="button"
-              size="sm"
-              variant={row.patient ? "secondary" : "default"}
-              onClick={() => onPick(row)}
-            >
+            {/* Los dos iguales: el aviso no empuja a elegir a nadie. */}
+            <Button type="button" size="sm" variant="secondary" onClick={() => onPick(row)}>
               {row.patient ? "Abrir" : "Es esta persona"}
             </Button>
           </ItemActions>

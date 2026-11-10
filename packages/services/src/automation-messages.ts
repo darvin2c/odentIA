@@ -1,6 +1,7 @@
 import { type ClinicalProduct } from "@odentia/clinical"
 import type { TemplateCategory } from "@odentia/channels"
 import type { ConsentPurpose } from "@odentia/db/schema/automation"
+import type { PersonalLinkTarget } from "./public-links.js"
 
 /**
  * Lo que odentIA escribe por su cuenta, declarado una sola vez: el texto, los
@@ -60,8 +61,11 @@ export interface MessageSpec {
    * Botón que abre «Su enlace» de la persona (ADR 0037): en WhatsApp es un botón
    * de dirección con el token al final; dentro de las 24 horas y por correo, la
    * dirección va escrita al final del texto. Lo pone el sistema al enviar.
+   * `abre`: lo que abre (entrega 2, «Un enlace por cosa»). `buttonAbre`: lo que abre
+   * el botón de su plantilla, si no es lo mismo: las ya aprobadas conservan su base
+   * (`/reserva`, que lleva a «Tus pendientes»), porque cambiarla sería otra plantilla.
    */
-  link?: { title: string }
+  link?: { title: string; abre: PersonalLinkTarget; buttonAbre?: PersonalLinkTarget }
   /**
    * Encabezado con el documento de cada envío (`documento_listo`): el PDF va
    * en el mensaje aprobado. Para pedirlo, WhatsApp exige un PDF de muestra.
@@ -91,6 +95,9 @@ export const MESSAGE_VARIABLES = {
   // El ejemplo que se manda a WhatsApp lleva la moneda de la clínica (`exampleValues` en `clinic-messages.ts`).
   resumen_presupuesto: { label: "Tratamientos y total del presupuesto", example: "3 tratamientos por 540" },
   oportunidad: { label: "Título de la oportunidad", example: "Ortodoncia" },
+  // De quién es y cuándo, sin nada clínico: «tu cita del jueves 13 de noviembre» o «la cita de Mateo del…».
+  cita_de: { label: "De quién es la cita y cuándo", example: "tu cita del jueves 13 de noviembre" },
+  pendientes: { label: "Cuántas cosas tiene por hacer antes de su cita", example: "3 cosas" },
 } as const
 export type MessageVariable = keyof typeof MESSAGE_VARIABLES
 
@@ -99,13 +106,21 @@ export type MessageVariable = keyof typeof MESSAGE_VARIABLES
  * línea de Argos y lo que se manda a Meta para aprobar la plantilla no deben
  * hablar de ortodoncia en latidIA.
  */
-const PRODUCT_EXAMPLES: Partial<Record<ClinicalProduct, Partial<Record<MessageVariable, string>>>> = {
+const PRODUCT_EXAMPLES: Record<ClinicalProduct, Partial<Record<MessageVariable, string>>> = {
+  dental: {},
   medical: {
     lugar: "Consultorio Vida, sede Centro",
     clinica: "Consultorio Vida",
     control: "Control de presión arterial",
     presupuesto: "Chequeo preventivo",
     oportunidad: "Chequeo preventivo",
+  },
+  optical: {
+    lugar: "Óptica Clara, sede Centro",
+    clinica: "Óptica Clara",
+    control: "Control anual de la vista",
+    presupuesto: "Lentes progresivos",
+    oportunidad: "Lentes progresivos",
   },
 }
 
@@ -160,6 +175,16 @@ export const APPOINTMENT_DATA_NOTICE_KEY = "aviso_cita_reservada_datos"
 export const REMINDER_DATA_KEY = "recordatorio_cita_datos"
 
 /**
+ * «Antes de tu cita» (entrega 2, decisión 4): un aviso por cita. Cuando la cita trae
+ * más que datos por completar (un consentimiento por firmar, el cuestionario, un
+ * presupuesto por responder), el recordatorio dice cuántas cosas son y abre «Tus
+ * pendientes». Sale en lugar del recordatorio y solo a quien decide por el paciente;
+ * mientras WhatsApp no lo aprueba, sale el de datos o el de siempre. Nunca dice qué es
+ * cada cosa: el texto se ve con el teléfono bloqueado.
+ */
+export const REMINDER_PENDING_KEY = "recordatorio_cita_pendientes"
+
+/**
  * El recordatorio de una cita que ya está confirmada (ADR 0109): la que eligió
  * la persona, en su enlace o con su sí en el chat, o la que ya confirmó. No le
  * pide «Confirmar»: «Cambiar mi cita» abre su enlace, donde la cambia o la
@@ -181,6 +206,7 @@ export const APPOINTMENT_ARRIVAL_KEY = "cita_sin_llegar"
 export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
   REMINDER_DATA_KEY,
+  REMINDER_PENDING_KEY,
   REMINDER_CONFIRMED_KEY,
   APPOINTMENT_ARRIVAL_KEY,
   // Los avisos de la cita van junto a su línea, «Recordar la cita»; el de
@@ -221,13 +247,28 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     template: "odentia_recordatorio_cita_datos_v1",
     body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}. Aún nos faltan algunos datos tuyos: complétalos antes de venir y te atendemos más rápido.",
     variables: ["persona", "lugar", "citas"],
-    link: { title: "Completar mis datos" },
+    link: { title: "Completar mis datos", abre: "datos", buttonAbre: "reserva" },
     buttons: [
       { action: "confirmar", title: "Confirmar" },
       { action: "responder", title: "No podré ir", asks: "cambiar" },
       NO_REMINDERS,
     ],
     subject: "Recordatorio de cita: completa tus datos",
+  },
+  recordatorio_cita_pendientes: {
+    key: "recordatorio_cita_pendientes",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_antes_de_tu_cita_v1",
+    body: "Hola, {{1}}. Antes de tu cita en {{2}}, {{3}}, tienes {{4}} por hacer. Lo ves todo aquí y te toma unos minutos.",
+    variables: ["persona", "lugar", "citas", "pendientes"],
+    link: { title: "Ver mis pendientes", abre: "pendientes" },
+    buttons: [
+      { action: "confirmar", title: "Confirmar" },
+      { action: "responder", title: "No podré ir", asks: "cambiar" },
+      NO_REMINDERS,
+    ],
+    subject: "Antes de tu cita",
   },
   // Lo aprobado en el lienzo «Recordatorio, un día antes», con una frase al
   // final: WhatsApp rechaza el texto que termina en un dato (`checkBody`).
@@ -238,7 +279,7 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     template: "odentia_recordatorio_cita_confirmada_v1",
     body: "Hola, {{1}}. Te esperamos {{2}} en {{3}}. Si necesitas cambiar la cita, responde a este mensaje.",
     variables: ["persona", "citas", "lugar"],
-    link: { title: "Cambiar mi cita" },
+    link: { title: "Cambiar mi cita", abre: "cita", buttonAbre: "reserva" },
     buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, NO_REMINDERS],
     subject: "Recordatorio de cita",
   },
@@ -345,7 +386,7 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     template: "odentia_aviso_cita_datos_v2",
     body: "Hola, {{1}}. Te esperamos en {{2}}: {{3}}. Antes de venir, completa tus datos aquí.",
     variables: ["persona", "lugar", "citas"],
-    link: { title: "Ver mi cita y mis datos" },
+    link: { title: "Ver mi cita y mis datos", abre: "datos", buttonAbre: "reserva" },
     buttons: [],
     subject: "Tu cita quedó reservada: completa tus datos",
   },
@@ -372,15 +413,23 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
 }
 
 /**
- * Lo que cambia en un producto (issue 229): latidIA invita a volver al año
- * (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
- * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia.
+ * Lo que cambia en un producto (issue 229): latidIA y vistIA invitan a volver al
+ * año (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
+ * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia. La de
+ * vistIA ofrece revisar la vista, sin decir que fue un examen: cuenta cualquier visita.
  */
-const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>>> = {
+const PRODUCT_MESSAGES: Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>> = {
+  dental: {},
   medical: {
     invitar_a_volver: {
       template: "latidia_invitar_a_volver_v1",
       body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para tu control?",
+    },
+  },
+  optical: {
+    invitar_a_volver: {
+      template: "vistia_invitar_a_volver_v1",
+      body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para revisar tu vista?",
     },
   },
 }
@@ -389,14 +438,14 @@ const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<Automatio
 export function productTemplatesOf(key: AutomationMessageKey): string[] {
   return [
     AUTOMATION_MESSAGES[key].template,
-    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages?.[key] ? [messages[key].template] : [])),
+    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages[key] ? [messages[key].template] : [])),
   ]
 }
 
 export function automationMessageOf(kind: string, product: ClinicalProduct = "dental"): AutomationMessage | null {
   if (!(AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(kind)) return null
   const key = kind as AutomationMessageKey
-  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product]?.[key] }
+  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product][key] }
 }
 
 /**
@@ -452,18 +501,19 @@ export const BUDGET_READY_MESSAGE: MessageSpec = {
   template: "odentia_presupuesto_listo_v2",
   body: "Hola, {{1}}. Tu presupuesto está listo: {{2}}. Puedes verlo y decirnos qué aceptas aquí.",
   variables: ["persona", "resumen_presupuesto"],
-  link: { title: "Ver y responder" },
+  link: { title: "Ver y responder", abre: "presupuesto", buttonAbre: "reserva" },
   buttons: [],
 }
 /** Asunto cuando «Presupuesto listo» sale por correo. */
 export const BUDGET_READY_SUBJECT = "Tu presupuesto está listo"
 
 /**
- * «Su enlace» (ADR 0037): lo envía recepción con «Enviarle su enlace» (datos
- * por completar, un consentimiento por firmar) y lleva solo el botón que lo
- * abre. Es un aviso, como el de su cita (ADR 0040): no pide permiso y solo
- * deja de salir con «No quiero ningún mensaje». Los papeles ya no salen por
- * aquí: van con «Documento listo» (ADR 0156).
+ * «Su enlace» (ADR 0037): lo envía recepción con «Enviarle su enlace» (sus datos
+ * por completar) y lleva solo el botón que abre «Tus pendientes». Es un aviso,
+ * como el de su cita (ADR 0040): no pide permiso y solo deja de salir con «No
+ * quiero ningún mensaje». Los papeles ya no salen por aquí: van con «Documento
+ * listo» (ADR 0156). El consentimiento tiene el suyo («Firma tu consentimiento»)
+ * y usa este solo mientras WhatsApp no lo aprueba.
  */
 export const PERSONAL_LINK_MESSAGE_KEY = "su_enlace"
 export const PERSONAL_LINK_MESSAGE: MessageSpec = {
@@ -472,11 +522,32 @@ export const PERSONAL_LINK_MESSAGE: MessageSpec = {
   template: "odentia_su_enlace_v1",
   body: "Hola, {{1}}. En {{2}} te dejamos aquí lo que tienes pendiente con nosotros.",
   variables: ["persona", "clinica"],
-  link: { title: "Ver lo pendiente" },
+  link: { title: "Ver lo pendiente", abre: "pendientes", buttonAbre: "reserva" },
   buttons: [],
 }
 /** Asunto cuando «Su enlace» sale por correo. */
 export const PERSONAL_LINK_SUBJECT = "Lo que tienes pendiente con la clínica"
+
+/**
+ * «Firma tu consentimiento» (entrega 2, decisión 9): lo envía el equipo con «Enviar
+ * para firmar» y abre directo la hoja (`abre=firma`). Dice de qué clínica, de quién es
+ * la cita y cuándo, y qué es («un consentimiento para leer y firmar»), nunca el
+ * procedimiento, la pieza ni nada clínico: se ve en la notificación del teléfono. Sirve
+ * también a quien lo firma en la cita: ahí lo lee. Es un aviso: solo lo frena «No quiero
+ * ningún mensaje». Mientras WhatsApp no lo aprueba, sale «Su enlace».
+ */
+export const CONSENT_TO_SIGN_MESSAGE_KEY = "consentimiento_por_firmar"
+export const CONSENT_TO_SIGN_MESSAGE: MessageSpec = {
+  key: CONSENT_TO_SIGN_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_consentimiento_por_firmar_v1",
+  body: "Hola, {{1}}. {{2}} te envía un consentimiento para leer y firmar antes de {{3}}. Lo encuentras aquí.",
+  variables: ["persona", "clinica", "cita_de"],
+  link: { title: "Leer y firmar", abre: "firma" },
+  buttons: [],
+}
+/** Asunto cuando «Firma tu consentimiento» sale por correo. */
+export const CONSENT_TO_SIGN_SUBJECT = "Un consentimiento para leer y firmar"
 
 /**
  * «Recibido desde su enlace» (ADR 0129): la persona hizo algo en su enlace y
@@ -515,8 +586,47 @@ export const DOCUMENT_READY_MESSAGE: MessageSpec = {
 }
 
 /**
+ * «Pedido listo» (entrega 5 del plan de vistIA, ADR 0172): sale al marcar
+ * «Listo» un pedido, a quien recibe los avisos de la persona. Cada producto que
+ * trabaja con pedidos dice lo suyo (vistIA: «Tus lentes ya están listos»). Es un
+ * aviso de lo que pasó: solo lo frena «No quiero ningún mensaje». No dice cuánto
+ * falta pagar: eso lo responde Sofi o el equipo si la persona pregunta.
+ */
+export const ORDER_READY_MESSAGE_KEY = "pedido_listo"
+export const ORDER_READY_MESSAGE: MessageSpec = {
+  key: ORDER_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_pedido_listo_v1",
+  body: "Hola, {{1}}. Tu pedido ya está listo para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
+  variables: ["persona", "clinica"],
+  buttons: [],
+}
+/** Asunto cuando «Pedido listo» sale por correo. */
+export const ORDER_READY_SUBJECT = "Tu pedido está listo"
+
+/** «Pedido listo» en cada producto que trabaja con pedidos: su texto y su plantilla, que Meta aprueba aparte. */
+const ORDER_READY_BY_PRODUCT: Record<ClinicalProduct, (Pick<MessageSpec, "template" | "body"> & { subject: string }) | null> = {
+  dental: null,
+  medical: null,
+  optical: {
+    subject: "Tus lentes están listos",
+    template: "vistia_lentes_listos_v1",
+    body: "Hola, {{1}}. Tus lentes ya están listos para recoger en {{2}}. Si tienes alguna pregunta, responde este mensaje.",
+  },
+}
+
+/** El asunto de «Pedido listo» por correo en un producto (vistIA: «Tus lentes están listos»). */
+export function orderReadySubjectOf(product: ClinicalProduct): string {
+  return ORDER_READY_BY_PRODUCT[product]?.subject ?? ORDER_READY_SUBJECT
+}
+
+/** Los mensajes que solo tiene el producto que trabaja con pedidos (ADR 0171): los demás no los piden ni los listan. */
+export const ORDER_MESSAGE_KEYS: readonly string[] = [ORDER_READY_MESSAGE_KEY]
+
+/**
  * El tipo de los avisos que no son de una línea: «Presupuesto listo», «Su
- * enlace», «Retomar la conversación» y los papeles («Documento listo»).
+ * enlace», «Retomar la conversación», los papeles («Documento listo») y
+ * «Pedido listo».
  * Salen siempre y solo los frena «No quiero ningún mensaje» (ADR 0040).
  */
 export const NOTICE_PURPOSE = "avisos" satisfies ConsentPurpose
@@ -527,9 +637,11 @@ export const CATALOG_MESSAGE_KEYS = [
   RESUME_MESSAGE_KEY,
   BUDGET_READY_MESSAGE_KEY,
   PERSONAL_LINK_MESSAGE_KEY,
+  CONSENT_TO_SIGN_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
   DOCUMENT_READY_MESSAGE_KEY,
+  ORDER_READY_MESSAGE_KEY,
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
@@ -537,14 +649,21 @@ export function catalogMessageOf(key: string, product: ClinicalProduct = "dental
   if (key === RESUME_MESSAGE_KEY) return RESUME_MESSAGE
   if (key === BUDGET_READY_MESSAGE_KEY) return BUDGET_READY_MESSAGE
   if (key === PERSONAL_LINK_MESSAGE_KEY) return PERSONAL_LINK_MESSAGE
+  if (key === CONSENT_TO_SIGN_MESSAGE_KEY) return CONSENT_TO_SIGN_MESSAGE
   if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
   if (key === LINK_RECEIVED_MESSAGE_KEY) return LINK_RECEIVED_MESSAGE
   if (key === DOCUMENT_READY_MESSAGE_KEY) return DOCUMENT_READY_MESSAGE
+  if (key === ORDER_READY_MESSAGE_KEY) return { ...ORDER_READY_MESSAGE, ...ORDER_READY_BY_PRODUCT[product] }
   return automationMessageOf(key, product)
 }
 
 /** Las plantillas de un mensaje del catálogo en todos los productos. */
 export function catalogTemplatesOf(key: string): string[] {
+  if (key === ORDER_READY_MESSAGE_KEY)
+    return [
+      ORDER_READY_MESSAGE.template,
+      ...Object.values(ORDER_READY_BY_PRODUCT).flatMap((own) => (own ? [own.template] : [])),
+    ]
   return (AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(key)
     ? productTemplatesOf(key as AutomationMessageKey)
     : [catalogMessageOf(key)?.template ?? ""]
@@ -570,6 +689,7 @@ export const AUTOMATION_MESSAGE_LANGUAGE = "es"
 export const NOTICE_TEXTS: Partial<Record<string, string>> = {
   recordatorio_cita: "Hola, {{persona}}. Este es el aviso de tu cita en {{lugar}}: {{citas}}. Para cambiarla, responde a este mensaje.",
   recordatorio_cita_datos: "Hola, {{persona}}. Este es el aviso de tu cita en {{lugar}}: {{citas}}. Faltan tus datos para atenderte: complétalos antes de venir.",
+  recordatorio_cita_pendientes: "Hola, {{persona}}. Este es el aviso de tu cita en {{lugar}}: {{citas}}. Antes de venir tienes {{pendientes}} por hacer.",
   recordatorio_cita_confirmada: "Hola, {{persona}}. Tu cita es {{citas}} en {{lugar}}. Para cambiarla, responde a este mensaje.",
   cita_sin_llegar: "Hola, {{persona}}. Tu cita en {{lugar}} es {{citas}}. Si no puedes llegar, responde a este mensaje.",
   recordatorio_control: "Hola, {{persona}}. En {{clinica}} tienes este control pendiente: {{control}}. Responde a este mensaje para agendarlo.",
