@@ -92,6 +92,39 @@ describe("plantillas", () => {
   })
 })
 
+describe("el color de la clínica", () => {
+  // Un naranja con letra blanca y un celeste con letra oscura, como los calcula `brandEmailColors`.
+  const orange = { boton: "#cc4d0a", botonTinta: "#ffffff", enlace: "#b8460a", oscuro: { boton: "#ea580c", botonTinta: "#ffffff", enlace: "#f59e6b" } }
+  const sky = { boton: "#7cc4ec", botonTinta: "#181818", enlace: "#2a6f95", oscuro: { boton: "#7cc4ec", botonTinta: "#111111", enlace: "#8fd0f2" } }
+
+  it("va en el botón y su enlace de respaldo; la cabecera, la firma y el pie siguen con la marca", () => {
+    const mail = invitationTemplate({ organizationName: "Clínica Sonrisa", inviterName: "María Pérez", url: URL, accent: orange })
+    expect(mail.html).toContain('bgcolor="#cc4d0a" style="border-radius:6px;background-color:#cc4d0a;"')
+    expect(mail.html).toContain('class="enlace accion"')
+    expect(mail.html).toContain("color:#b8460a;word-break:break-all;")
+    // En oscuro, lo mismo con sus tonos; los enlaces del pie, con los de odentIA.
+    expect(mail.html).toContain(".boton td{background-color:#ea580c!important}")
+    expect(mail.html).toContain("a.accion{color:#f59e6b!important}")
+    expect(mail.html).toContain("a.enlace{color:#8ad8e6!important}")
+    expect(mail.html).toContain('style="color:#0e7490;text-decoration:underline;')
+    expect(mail.html).toContain(`cid:${LOGO_CIDS.logotipoClaro}`)
+  })
+
+  it("un color claro lleva la letra oscura en el botón", () => {
+    const mail = invitationTemplate({ organizationName: "Clínica Sonrisa", inviterName: "María Pérez", url: URL, accent: sky })
+    expect(mail.html).toContain("font-weight:bold;color:#181818;text-decoration:none;")
+    expect(mail.html).toContain(".boton a{color:#111111!important}")
+  })
+
+  // Que sin color sea idéntico al de antes lo cuida el snapshot de `invitacion`.
+  it("sin color, el botón y los enlaces son los de la marca", () => {
+    const plain = invitationTemplate({ organizationName: "Clínica Sonrisa", inviterName: "María Pérez", url: URL })
+    expect(plain.html).not.toContain("a.accion")
+    expect(plain.html).not.toContain("enlace accion")
+    expect(plain.html).toContain("background-color:#0e7490;")
+  })
+})
+
 describe("escape", () => {
   it("un nombre con <b> o & llega escrito tal cual y no rompe el correo", () => {
     const mail = invitationTemplate({

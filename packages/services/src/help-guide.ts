@@ -1463,6 +1463,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "color de la marca",
       "colores de la clínica",
       "color",
+      // «Sacar de una foto» (ADR 0162): quien no tiene el logo lo busca por su letrero.
+      "letrero",
+      "color del letrero",
+      "foto del letrero",
       "ruc",
       "moneda",
       "zona horaria",
@@ -1487,7 +1491,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Puedo poner el color de mi clínica?",
-        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos, y «Elegir otro color» abre la paleta o recibe el código de tu marca. Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Tu color va donde actúas: los botones principales, el menú en el que estás y lo que eliges; los nombres, las iniciales y los fondos quedan en negro y gris, para que la pantalla no se cargue. Los colores de error, listo y aviso no cambian, y las recetas, órdenes, descansos y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
+        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos; «Elegir otro color» abre la paleta o recibe el código de tu marca, y «Sacar de una foto» toma el color de una foto de tu letrero (tócala donde está tu color; la foto no se guarda). Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Tu color va donde actúas: los botones principales, el menú en el que estás y lo que eliges; los nombres, las iniciales y los fondos quedan en negro y gris, para que la pantalla no se cargue. La invitación a tu equipo y el resumen del lunes también llevan tu color en el botón; los correos de tu cuenta, como el de la contraseña, siguen con el de la app. Los colores de error, listo y aviso no cambian, y las recetas, órdenes, descansos y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
+      },
+      {
+        q: "¿Cómo saco el color de mi letrero?",
+        forms: ["color de mi letrero", "el color de mi letrero", "color del letrero", "sacar el color de una foto", "foto del letrero", "tengo una foto del letrero"],
+        a: "En «Datos de la clínica» › «Color de la marca», toca «Sacar de una foto» y elige la foto de tu letrero. Salen sus colores; también puedes tocar la foto donde está tu color. Se guarda con «Usar este color». La foto no se sube ni se guarda.",
       },
       {
         q: "¿Trabajo con la CIE-10 o con la CIE-11?",

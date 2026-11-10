@@ -2,13 +2,15 @@ import { FirmaTrace } from "@odentia/clinic-app/components/patient/firma-pad"
 import { brandedQrDataUrl } from "@odentia/clinic-app/lib/branded-qr"
 import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
 import { useOrgProfile } from "@odentia/clinic-app/lib/org"
+import { cn } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import type { PrintEstablishment } from "../../lib/dental/odontogram"
 
 /**
  * Las hojas del odontograma siguen en HTML por el gráfico de la norma; llevan el
  * mismo membrete, la misma hoja y la misma firma que los PDF de la clínica. El
- * papel es de la clínica: sin el color de la plataforma.
+ * papel es de la clínica: sin el color de la plataforma; con el de su marca solo en
+ * la línea del membrete y el cuadro de iniciales, lejos del rojo y el azul de la norma.
  */
 
 /** Hoja del perfil de la clínica y márgenes; al imprimir solo sale la hoja. */
@@ -45,15 +47,27 @@ export function SheetLetterhead({ establishment }: { establishment: PrintEstabli
   ]
     .filter(Boolean)
     .join(" · ")
+  const ink = establishment?.brandInk ?? null
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-400 pb-3">
+    <header
+      className={cn(
+        "flex flex-wrap items-start justify-between gap-4 pb-3",
+        ink ? "border-b-2" : "border-b border-gray-400",
+      )}
+      style={ink ? { borderColor: ink } : undefined}
+    >
       <div className="flex min-w-0 items-center gap-3">
         {establishment?.logo ? (
           <img src={establishment.logo} alt="" className="size-12 shrink-0 object-contain" />
         ) : (
           <span
             aria-hidden
-            className="flex size-12 shrink-0 items-center justify-center rounded border border-gray-400 text-base font-semibold"
+            className={cn(
+              "flex size-12 shrink-0 items-center justify-center rounded text-base font-semibold",
+              // Sin esto, el navegador no imprime el relleno del cuadro.
+              ink ? "[print-color-adjust:exact]" : "border border-gray-400",
+            )}
+            style={ink ? { backgroundColor: ink, color: "#ffffff" } : undefined}
           >
             {initialsOf(name)}
           </span>

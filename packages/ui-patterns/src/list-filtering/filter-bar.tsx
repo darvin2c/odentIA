@@ -128,7 +128,7 @@ export function FilterBar({
   const hasActiveCriteria = activeFilterCount > 0 || Boolean(get("q"))
 
   return (
-    <div className={cn("flex p-3 bg-card rounded-md", className)}>
+    <div className={cn("flex", className)}>
       {/* scroll-nativo: `useFittedInlineCount` mide este desborde para pasar a «Más filtros» lo que no cabe; casi nunca llega a desplazarse.
           Sin barra visible: el desborde de 1 o 2 px que deja el anillo de foco no debe dibujar una barra bajo los filtros. */}
       <div

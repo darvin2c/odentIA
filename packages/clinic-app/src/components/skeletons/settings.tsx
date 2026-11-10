@@ -64,7 +64,7 @@ function SettingsPage({
 function FilterBarLoading({ filters = 1 }: { filters?: number }) {
   const chips = slots(filters)
   return (
-    <div aria-hidden className="flex rounded-md bg-card p-3">
+    <div aria-hidden className="flex">
       <div className="hidden w-full min-w-0 items-center gap-2 md:flex">
         <Skeleton className="h-9 w-40 rounded-full" />
         {chips.map((chip) => (

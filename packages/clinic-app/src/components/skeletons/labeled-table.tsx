@@ -43,7 +43,7 @@ export function LabeledTableSkeleton({
   const rows = Array.from({ length: rowCount }, (_, index) => index)
   return (
     <>
-      <div className="hidden overflow-hidden rounded-md bg-card md:block">
+      <div className="hidden overflow-hidden rounded-md border bg-card md:block">
         <Table>
           <TableHeader className="bg-muted/65">
             <TableRow>
@@ -67,7 +67,7 @@ export function LabeledTableSkeleton({
       </div>
       <div className="flex flex-col gap-2 md:hidden">
         {rows.map((row) => (
-          <Item key={row} className="rounded-md bg-card">
+          <Item key={row} variant="outline" className="rounded-md bg-card">
             <ItemContent className="min-w-0 basis-full">
               <div className="min-w-0 text-sm font-medium">{title}</div>
               <div className="flex flex-wrap items-start gap-x-3 gap-y-1 text-sm">{summary}</div>

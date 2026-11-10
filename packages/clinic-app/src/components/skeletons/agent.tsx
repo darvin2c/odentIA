@@ -966,7 +966,7 @@ export function AgentLogStatsSkeleton() {
 }
 
 export function AgentRunsSkeleton() {
-  return <DataTableSkeleton columnCount={8} rowCount={6} label="Cargando las ejecuciones…" />
+  return <DataTableSkeleton columnCount={8} rowCount={6} label="Cargando las ejecuciones…" inCard />
 }
 
 export function AgentDecisionsSkeleton() {

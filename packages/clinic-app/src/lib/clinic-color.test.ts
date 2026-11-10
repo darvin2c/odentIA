@@ -51,14 +51,18 @@ describe("el color de la clínica en la cabecera", () => {
     expect(token(dark, "background")).toBe(APP_SURFACES.dark.background)
     expect(token(dark, "card")).toBe(APP_SURFACES.dark.card)
     expect(token(dark, "secondary")).toBe(APP_SURFACES.dark.secondary)
-    // El texto gris se lee (4,5:1) sobre cada fondo donde va, en claro y en oscuro.
+    // El texto gris se lee (4,5:1) sobre cada fondo donde va, en claro y en oscuro, y el borde
+    // de campos, casillas y opciones se ve (3:1, WCAG 1.4.11): el relleno solo no marca el campo.
     for (const [rules, surfaces] of [
       [light, ["canvas", "muted", "secondary", "card", "sidebar"]],
       [dark, ["canvas", "muted", "secondary", "card", "sidebar"]],
     ] as const) {
       const text = token(rules, "muted-foreground")
-      for (const surface of surfaces)
+      const field = token(rules, "input-border")
+      for (const surface of surfaces) {
         expect(contrastRatio(text, token(rules, surface)), `texto gris sobre ${surface}`).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(field, token(rules, surface)), `borde de campo sobre ${surface}`).toBeGreaterThanOrEqual(3)
+      }
     }
   })
 })

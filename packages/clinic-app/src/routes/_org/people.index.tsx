@@ -283,7 +283,8 @@ function PeoplePage() {
               <span className="flex min-w-0 flex-col gap-1">
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="text-sm">{step.text}</span>
-                  {row.original.missingData ? <Badge variant="warning">Faltan datos</Badge> : null}
+                  {/* Se repite fila a fila: en gris. El ámbar queda en su página y en la cita, donde se completa. */}
+                  {row.original.missingData ? <Badge variant="outline">Faltan datos</Badge> : null}
                   {step.action && row.original.patient ? (
                     <NextStepButton
                       patient={{ id: row.original.patient.id, name: row.original.displayName }}

@@ -1,4 +1,4 @@
-import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
+import { BASE_PRODUCT, brandEmailColors, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   changeEmailConfirmationTemplate,
@@ -265,12 +265,26 @@ export function createAuth({
             inviterName: inviter.user.name,
             url: `${webURL}/accept-invitation/${invitation.id}`,
             brand,
+            accent: await clinicMailAccent(ownerDb, org.id),
           })
           await mailer.send({ to: email, ...template })
         },
       }),
     ],
   })
+}
+
+/**
+ * El color que eligió la clínica para el botón de sus correos al equipo (ADR 0162); sin
+ * color, el de la marca. Los correos de la cuenta (verificar, entrar, contraseña) no lo
+ * llevan: la persona puede estar en varias clínicas y el remitente es la plataforma.
+ */
+async function clinicMailAccent(db: Db, orgId: string) {
+  const [row] = await db.execute<{ brand_color: string | null }>(
+    sql`select brand_color from org_profile where organization_id = ${orgId} limit 1`,
+  )
+  // La base solo guarda #rrggbb (`org_profile_brand_color_check`).
+  return row?.brand_color ? brandEmailColors(row.brand_color) : undefined
 }
 
 /**

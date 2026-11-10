@@ -3,8 +3,10 @@ import { CLINICAL_PRODUCTS } from "./products.js"
 import {
   APP_SURFACES,
   brandColorName,
+  brandEmailColors,
   brandPalette,
   contrastRatio,
+  dominantColors,
   normalizeBrandColor,
   PRODUCT_BRAND_COLORS,
   SUGGESTED_BRAND_COLORS,
@@ -157,6 +159,39 @@ describe("brandColorName", () => {
     expect(brandColorName("#6ee7b7")).toBe("Menta")
     expect(brandColorName("#7c3aed")).toBe("Morado")
     expect(brandColorName("#334155")).toBe("Gris")
+  })
+})
+
+describe("brandEmailColors", () => {
+  it("el botón del correo es el de la app, y los enlaces se leen sobre la tarjeta blanca y la oscura", () => {
+    for (const hex of ["#ea580c", "#7cc4ec", "#1d5fa8", "#fefefe"]) {
+      const { light, dark } = brandPalette(hex)
+      const mail = brandEmailColors(hex)
+      expect(mail).toMatchObject({ boton: light.fill, botonTinta: light.fillForeground, enlace: light.primary })
+      expect(mail.oscuro).toEqual({ boton: dark.fill, botonTinta: dark.fillForeground, enlace: dark.primary })
+      expect(contrastRatio(mail.botonTinta, mail.boton), hex).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(mail.enlace, "#ffffff"), hex).toBeGreaterThanOrEqual(4.5)
+      // La tarjeta oscura del correo (`.tarjeta` en el molde).
+      expect(contrastRatio(mail.oscuro.enlace, "#171e2b"), hex).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+})
+
+describe("dominantColors", () => {
+  it("de una foto ofrece hasta los que se pidan, sin grises y sin el mismo color con otra luz", () => {
+    const pixel = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).concat(255)
+    const block = (hex: string, count: number) => Array.from({ length: count }, () => pixel(hex)).flat()
+    const photo = [
+      ...block("#ea580c", 40),
+      ...block("#1d5fa8", 30),
+      ...block("#22a06b", 20),
+      ...block("#e2e2e2", 60),
+      ...block("#ec5a10", 10),
+    ]
+    expect(dominantColors(photo, 4)).toHaveLength(2)
+    const four = dominantColors(photo, 4, 4)
+    expect(four).toHaveLength(3)
+    expect(four[0]).toBe("#ea580c")
   })
 })
 

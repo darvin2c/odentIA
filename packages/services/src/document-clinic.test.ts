@@ -1,6 +1,7 @@
+import { dominantColors } from "@odentia/clinical"
 import sharp from "sharp"
 import { expect, it } from "vitest"
-import { dominantColors, logoForPaper } from "./document-clinic.js"
+import { logoForPaper } from "./document-clinic.js"
 
 it("el papel lleva el mismo logo que la pantalla: un WebP se embebe como PNG; lo que no es imagen, no", async () => {
   const webp = new Uint8Array(
