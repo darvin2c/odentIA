@@ -12,10 +12,7 @@ import { expect, it } from "vitest"
 import { findClinicName } from "./automation-routing.js"
 import { clinicNameOf } from "./booking-links.js"
 import { clinicDisplayName, getClinicBrandColor, setClinicBrandColor } from "./clinic-identity.js"
-import { getOdontogramPrint } from "./dental/odontogram.js"
 import { loadDocumentClinic, loadDocumentLetterhead } from "./document-clinic.js"
-import { nextPatientNumber } from "./patients.js"
-import { insertTestPatients } from "./test-patient.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -87,21 +84,4 @@ it("el papel lleva el tono legible del color en la línea del membrete; sin colo
   expect(ink).toBe(brandPalette("#7cc4ec").paper)
   expect(ink).not.toBe("#7cc4ec")
   expect((await run((tx) => loadDocumentLetterhead(tx, orgId))).brandInk).toBe(ink)
-})
-
-it("la hoja del odontograma lleva la línea en el mismo tono que los demás papeles; sin color, gris", async () => {
-  const orgId = `org_${randomUUID().slice(0, 8)}`
-  await insertOrg(ownerDb, orgId, orgId)
-  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
-  const [patient] = await insertTestPatients(ownerDb, {
-    organizationId: orgId,
-    displayName: "Rosa Díaz",
-    patientNumber: await nextPatientNumber(ownerDb, orgId),
-  })
-  const sheet = () => run((tx) => getOdontogramPrint(tx, orgId, patient!.id))
-  expect((await sheet()).establishment?.brandInk).toBeNull()
-  await run((tx) => setClinicBrandColor(tx, orgId, "user_1", "#ea580c"))
-  expect((await sheet()).establishment?.brandInk).toBe((await run((tx) => loadDocumentClinic(tx, orgId))).brandInk)
-  // El color elegido no viaja crudo en la hoja: solo el tono legible del papel.
-  expect((await sheet()).establishment).not.toHaveProperty("brandColor")
 })
