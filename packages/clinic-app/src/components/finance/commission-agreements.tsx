@@ -4,7 +4,7 @@
  * o que no cobra comisión). Es lo que se fija al contratar y cambia poco; el mes se liquida y se
  * paga en Finanzas › Comisiones, que solo la muestra.
  *
- * Siempre parte de lo que vale hoy: un cambio vale para lo que se atienda desde ese día y lo
+ * Siempre parte de lo que vale hoy: un cambio vale para lo que se atienda desde que se guarda y lo
  * atendido antes conserva lo que tenía. La primera comisión vale también para lo ya cobrado que aún
  * no se paga. Importes, vigencias y permisos los decide el servidor.
  */
@@ -205,8 +205,8 @@ function AgreementCard({
       void queryClient.invalidateQueries({ queryKey: COMMISSIONS_KEY })
       toast.success(
         agreement.rateBps > 0
-          ? `${exception.serviceName}: desde hoy vuelve a su ${percentLabel(agreement.rateBps, locale)}`
-          : `${exception.serviceName}: desde hoy ya no comisiona`,
+          ? `${exception.serviceName}: desde ahora vuelve a su ${percentLabel(agreement.rateBps, locale)}`
+          : `${exception.serviceName}: desde ahora ya no comisiona`,
       )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo quitar")
@@ -355,8 +355,9 @@ function AgreementCard({
             Ver historial<span className="sr-only"> de {name}</span> ({history.length})
           </summary>
           <p className="mt-1 text-xs text-muted-foreground">
-            Cada cambio vale para lo que se atienda desde ese día; lo atendido antes conserva lo que tenía. La primera
-            valió también para lo atendido antes que aún no se pagaba.
+            Cada cambio vale para lo que se atienda desde el momento en que se guardó; lo atendido antes conserva lo
+            que tenía. «La primera» fue su primera comisión: valió también para lo que ya había atendido y no se le
+            había pagado.
           </p>
           <ol className="mt-1 flex min-w-0 flex-col">
             {history.map((line) => (
@@ -442,15 +443,15 @@ function RateDrawer({
   const percentHelp = first
     ? "Es su primer porcentaje: vale también para lo ya cobrado de lo que atendió que aún no se paga."
     : current > 0
-      ? `Hoy tiene ${percentLabel(current, locale)}. El nuevo vale para lo que se atienda desde hoy; lo atendido antes conserva el ${percentLabel(current, locale)}, aunque se cobre después. Se le avisa del cambio.`
-      : "Vale para lo que se atienda desde hoy; lo atendido antes conserva lo que tenía. Se le avisa del cambio."
+      ? `Hoy tiene ${percentLabel(current, locale)}. El nuevo vale para lo que se atienda desde ahora; lo atendido antes conserva lo que tenía, aunque se cobre después. Se le avisa del cambio.`
+      : "Vale para lo que se atienda desde ahora; lo atendido antes conserva lo que tenía. Se le avisa del cambio."
   const keeps =
     current > 0
-      ? ` Lo que atendió hasta hoy conserva su ${percentLabel(current, locale)} y se le paga en Finanzas › Comisiones.`
+      ? " Lo que atendió hasta ahora conserva lo que tenía y se le paga en Finanzas › Comisiones."
       : ""
   const noneHelp = hasServices
-    ? `Desde hoy comisiona solo por sus servicios con comisión; lo demás que atienda no comisiona.${keeps}`
-    : `${current > 0 ? "Desde hoy no" : "No"} comisiona por lo que atiende, y deja de aparecer en el mes cuando no tenga nada por pagar.${keeps} Si tiene un sueldo, se paga en Gastos.`
+    ? `Desde ahora comisiona solo por sus servicios con comisión; lo demás que atienda no comisiona.${keeps}`
+    : `${current > 0 ? "Desde ahora no" : "No"} comisiona por lo que atiende, y deja de aparecer en el mes cuando no tenga nada por pagar.${keeps} Si tiene un sueldo, se paga en Gastos.`
 
   return (
     <FormDrawer
@@ -577,7 +578,7 @@ function ServiceCommissionDrawer({
           : { rateBps: rateBpsFromPercent(value.percent) ?? 0 }),
       })
       void queryClient.invalidateQueries({ queryKey: COMMISSIONS_KEY })
-      toast.success(firstForService ? "Guardado: vale también para lo ya cobrado de ese servicio que aún no se paga" : "Guardado: vale para lo que se atienda desde hoy")
+      toast.success(firstForService ? "Guardado: vale también para lo ya cobrado de ese servicio que aún no se paga" : "Guardado: vale para lo que se atienda desde ahora")
       onClose()
     },
   })
@@ -620,7 +621,7 @@ function ServiceCommissionDrawer({
       description={`Para ${name}${instead}. ${
         firstForService
           ? "Es la primera para este servicio: vale también para lo ya cobrado de él que aún no se paga. Lo demás que atiende no comisiona; si además se lleva un porcentaje de todo, ponlo primero con «Poner su porcentaje»."
-          : "Vale para lo que se atienda desde hoy: lo atendido antes conserva lo que tenía, aunque se cobre después."
+          : "Vale para lo que se atienda desde ahora: lo atendido antes conserva lo que tenía, aunque se cobre después."
       }`}
       submitLabel="Guardar"
     >

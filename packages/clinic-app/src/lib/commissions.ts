@@ -462,7 +462,7 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   } | null
   /** Desde cuándo vale el porcentaje general (nulo si desde siempre) y el anterior. */
   rateSince?: string | null
-  /** Ya tiene un porcentaje general (cambiarlo vale desde hoy; el primero, también para lo ya cobrado). */
+  /** Ya tiene un porcentaje general (cambiarlo vale desde ahora; el primero, también para lo ya cobrado). */
   hasRate?: boolean
   previousRateBps?: number | null
   /** Otro porcentaje o un monto fijo para un servicio, lo que rige hoy. */
@@ -598,7 +598,7 @@ export interface CommissionAgreement {
   attends: boolean
   /** Porcentaje general de hoy; 0 si no tiene o si no cobra. */
   rateBps: number
-  /** Ya tiene un porcentaje general, aunque sea 0: cambiarlo vale desde hoy. Sin él, el primero vale también para lo cobrado sin pagar. */
+  /** Ya tiene un porcentaje general, aunque sea 0: cambiarlo vale desde ahora. Sin él, el primero vale también para lo cobrado sin pagar. */
   hasRate: boolean
   /** Desde cuándo vale el porcentaje (nulo si desde siempre). */
   rateSince: string | null
@@ -699,7 +699,7 @@ export function historyLines(
       key: `${event.at}:${index}`,
       at: event.at,
       what: parts.join(" · "),
-      detail: [date(event.at), event.byName ?? "Sin registro de quién", antes, event.fromStart ? "la primera" : null]
+      detail: [date(event.at), event.byName ? `por ${event.byName}` : "sin registro de quién", antes, event.fromStart ? "la primera" : null]
         .filter(Boolean)
         .join(" · "),
     })

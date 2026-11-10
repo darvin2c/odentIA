@@ -222,10 +222,10 @@ describe("el historial de una comisión, lo más nuevo primero", () => {
       "PEN",
     )
     expect(lines.map((line) => [line.what.replace(/\s/g, " "), line.detail])).toEqual([
-      ["Endodoncia: vuelve a su 40 %", "8 de noviembre de 2026 · Ana Torres"],
-      ["40 % de lo cobrado", "20 de octubre de 2026 · Sin registro de quién · antes 35 %"],
-      ["Endodoncia: S/ 150.00 por cada uno", "1 de octubre de 2026 · Ana Torres"],
-      ["35 % de lo cobrado", "1 de agosto de 2026 · Ana Torres · la primera"],
+      ["Endodoncia: vuelve a su 40 %", "8 de noviembre de 2026 · por Ana Torres"],
+      ["40 % de lo cobrado", "20 de octubre de 2026 · sin registro de quién · antes 35 %"],
+      ["Endodoncia: S/ 150.00 por cada uno", "1 de octubre de 2026 · por Ana Torres"],
+      ["35 % de lo cobrado", "1 de agosto de 2026 · por Ana Torres · la primera"],
     ])
   })
 
@@ -237,8 +237,8 @@ describe("el historial de una comisión, lo más nuevo primero", () => {
       "PEN",
     )
     expect(lines.map((line) => [line.what.replace(/\s/g, " "), line.detail])).toEqual([
-      ["Solo por 1 servicio", "2 de noviembre de 2026 · Ana Torres · antes 40 %"],
-      ["40 % de lo cobrado · Endodoncia: 50 %", "1 de noviembre de 2026 · Ana Torres · la primera"],
+      ["Solo por 1 servicio", "2 de noviembre de 2026 · por Ana Torres · antes 40 %"],
+      ["40 % de lo cobrado · Endodoncia: 50 %", "1 de noviembre de 2026 · por Ana Torres · la primera"],
     ])
   })
 
@@ -254,8 +254,8 @@ describe("el historial de una comisión, lo más nuevo primero", () => {
       "PEN",
     )
     expect(lines.map((line) => [line.what.replace(/\s/g, " "), line.detail])).toEqual([
-      ["40 % de lo cobrado", "10 de noviembre de 2026 · Ana Torres · antes solo por 1 servicio"],
-      ["Endodoncia: 50 % · lo demás no comisiona", "9 de noviembre de 2026 · Ana Torres · la primera"],
+      ["40 % de lo cobrado", "10 de noviembre de 2026 · por Ana Torres · antes solo por 1 servicio"],
+      ["Endodoncia: 50 % · lo demás no comisiona", "9 de noviembre de 2026 · por Ana Torres · la primera"],
     ])
   })
 

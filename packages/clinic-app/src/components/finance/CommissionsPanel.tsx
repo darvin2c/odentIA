@@ -834,7 +834,7 @@ function ProfessionalDetailBody({
 
 /**
  * «Su comisión»: con qué se calculó el mes (en uno pasado, lo que valía al terminar; los cobros dicen
- * cada uno la suya), solo a la vista. Se cambia en Configuración › Comisiones por profesional y vale desde ese día.
+ * cada uno la suya), solo a la vista. Se cambia en Configuración › Comisiones por profesional y vale desde que se guarda.
  */
 function AgreementSection({ detail, period, zone }: { detail: MonthlyCommissions; period: YearMonth; zone: string }) {
   const canWrite = usePermission("commissions.write")

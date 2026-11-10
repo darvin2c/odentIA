@@ -2695,6 +2695,11 @@ function dayWords(at: Date, zone: { locale: string; timezone: string }): string 
   return new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "long", timeZone: zone.timezone }).format(at)
 }
 
+/** «3:40 p. m.» en la zona de la clínica. */
+function hourWords(at: Date, zone: { locale: string; timezone: string }): string {
+  return new Intl.DateTimeFormat(zone.locale, { hour: "numeric", minute: "2-digit", timeZone: zone.timezone }).format(at)
+}
+
 /**
  * Cambiar el porcentaje general (ADR 0151 y 0155): una versión nueva que vale para
  * lo que se atienda desde ahora; lo atendido antes conserva el de su día, aunque se
@@ -2762,7 +2767,8 @@ export async function setCommissionRate(
       userId: input.professionalUserId,
       dedupeKey: `commission-rate:${row.id}`,
       title: "Cambió tu porcentaje de comisión",
-      body: `Pasó a ${percentWords(input.rateBps, zone.locale)} para lo que atiendas desde el ${dayWords(new Date(), zone)}. Lo atendido antes conserva el de su día, aunque se cobre después.`,
+      // Desde el momento del cambio, no desde el inicio del día: lo atendido esa mañana conserva el de antes.
+      body: `Pasó a ${percentWords(input.rateBps, zone.locale)} para lo que atiendas desde el ${dayWords(new Date(), zone)} a las ${hourWords(new Date(), zone)}. Lo atendido antes conserva el que tenía, aunque se cobre después.`,
       href: "/commissions",
       permission: "commissions.read",
       actorUserId,
