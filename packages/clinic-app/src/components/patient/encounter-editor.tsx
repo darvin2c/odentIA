@@ -3052,6 +3052,12 @@ export function EncounterEditor({
               onSaved={(appointment) => {
                 // Lo que la cita de verdad lleva (lo que el servidor devolvió), no lo que se pidió.
                 const carried = new Map((appointment.sessions ?? []).map((session) => [session.planItemId, session]))
+                // Lo que espera a otro tratamiento y se sumó a esta cita ya no está «sin cita» (QA del 10 nov, B3).
+                const brought = new Set([
+                  ...carried.keys(),
+                  ...(appointment.brings ?? []).map((row) => row.planItemId),
+                ])
+                setFinalizedWaiting((current) => current.filter((row) => !brought.has(row.planItemId)))
                 setFinalizedNext((current) =>
                   current.map((session) => {
                     const booked = carried.get(session.planItemId)

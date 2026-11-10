@@ -943,7 +943,18 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
    * («Corona metal-cerámica, metal base») y una «y» entre ellos no se leía (segunda mesa del 9 nov).
    */
   const namesOf = (list: PlanItemRow[]) => {
-    const titles = list.map((item) => item.title)
+    // El mismo tratamiento en dos piezas va una vez, con sus piezas: «Exodoncia simple · piezas 46
+    // y 48», no «Exodoncia simple · Exodoncia simple» (QA del 10 nov, B6).
+    const groups = new Map<string, PlanItemRow[]>()
+    for (const item of list) groups.set(item.title, [...(groups.get(item.title) ?? []), item])
+    const titles = [...groups].map(([title, rows]) => {
+      if (rows.length === 1) return title
+      const teeth = rows
+        .map((row) => (row.siteSystem === "ISO-3950" && /^[1-8][1-8]$/.test(row.siteCode ?? "") ? row.siteCode : null))
+        .filter((code): code is string => !!code)
+      if (teeth.length !== rows.length) return `${title} (${rows.length})`
+      return `${title} · piezas ${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
+    })
     return titles.length > 3 ? `${titles.slice(0, 3).join(" · ")} · y ${titles.length - 3} más` : titles.join(" · ")
   }
   const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
