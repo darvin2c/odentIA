@@ -609,6 +609,12 @@ export function EncounterEditor({
   const [voidOpen, setVoidOpen] = useState(false)
   const openRef = useOpenEncounter(patientId)
   const discard = useDiscardEncounter(patientId)
+  // Lo guardado cambia si está vacía: se vuelve a preguntar al guardar.
+  const savedStamp = String(detail.encounter.updatedAt ?? "")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se relee cuando cambia lo guardado.
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
+  }, [savedStamp, detail.documents.length, patientId, queryClient])
   const [takingOver, setTakingOver] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileForSignature, setProfileForSignature] = useState(false)
@@ -2713,7 +2719,10 @@ export function EncounterEditor({
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
               {/* Sin nada registrado se descarta de un toque, sin motivo ni rastro en la Historia (10 nov). */}
-              {openRef.data?.data?.id === encounterId && openRef.data.data.empty ? (
+              {openRef.data?.data?.id === encounterId &&
+              openRef.data.data.empty &&
+              detail.procedures.length === 0 &&
+              activeDiagnosisRows.length === 0 ? (
                 <Button
                   type="button"
                   variant="ghost"

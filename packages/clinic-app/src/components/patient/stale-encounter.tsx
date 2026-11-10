@@ -102,13 +102,16 @@ function StaleEncounterActions({
           size={size}
           variant="ghost"
           disabled={discard.isPending}
-          onClick={() =>
-            discard.mutate(open.id, {
-              onSuccess: async () => {
-                await onDiscarded?.()
-              },
-            })
-          }
+          onClick={async () => {
+            // Con la promesa, no con el `onSuccess` de la llamada: al releer la atención en curso,
+            // quien pregunta cambia y ese aviso no llegaría (QA en pantalla).
+            try {
+              await discard.mutateAsync(open.id)
+            } catch {
+              return
+            }
+            await onDiscarded?.()
+          }}
         >
           {discard.isPending ? "Descartando…" : "Descartarla"}
         </Button>
@@ -120,7 +123,7 @@ function StaleEncounterActions({
 function staleWords(open: OpenEncounterRef): string {
   return open.empty
     ? "Está vacía: descártala o sigue en ella si es lo de ese día."
-    : "Sigue en ella si es lo de ese día; si no, ciérrala (sin procedimientos también se cierra) para atender hoy en otra."
+    : "Sigue en ella si es lo de ese día; si no, ciérrala (sin procedimientos también se cierra) o anúlala con su motivo para atender hoy en otra."
 }
 
 /** En la ficha: el aviso de la atención que quedó abierta de otro día, sin frenar nada. */

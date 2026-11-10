@@ -308,14 +308,17 @@ export function NewEncounterButton({
     // La hora de la cita de hoy dice cuál se atiende: «Atender (10:00)».
     const at = !appointment && todayVisit ? clockOf(todayVisit.startsAt) : null
     return (
-      <SubmitButton
-        variant={variant}
-        size={size}
-        pending={attend.isPending}
-        onClick={() => attend.mutate({ patientId, appointment: visit })}
-      >
-        {at ? `Atender (${at})` : "Atender"}
-      </SubmitButton>
+      <>
+        <SubmitButton
+          variant={variant}
+          size={size}
+          pending={attend.isPending}
+          onClick={() => attend.mutate({ patientId, appointment: visit })}
+        >
+          {at ? `Atender (${at})` : "Atender"}
+        </SubmitButton>
+        {staleDialog}
+      </>
     )
   }
   return (
