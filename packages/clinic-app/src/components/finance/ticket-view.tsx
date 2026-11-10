@@ -487,7 +487,8 @@ export function TicketView({
                 <Row label={line.description} value={plain(paid)} />
                 {paid < line.amountCents ? (
                   <span className="text-xs text-muted-foreground">
-                    Paga una parte: cuesta {plain(line.amountCents)}
+                    {line.leftCents === 0 ? "Con esto queda pagado" : "Paga una parte"}: cuesta{" "}
+                    {plain(line.amountCents)}
                   </span>
                 ) : null}
                 {line.promotion ? (
