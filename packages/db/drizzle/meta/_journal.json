@@ -638,6 +638,13 @@
       "when": 1794323803537,
       "tag": "0090_consentimiento_por_tratamiento",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1794325900036,
+      "tag": "0091_descartar_atencion_vacia",
+      "breakpoints": true
     }
   ]
 }

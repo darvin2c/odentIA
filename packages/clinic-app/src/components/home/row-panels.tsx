@@ -16,6 +16,7 @@ import { productUi } from "../../product/product-ui"
 import { useAppointmentVisitStatus } from "../agenda/arrival"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { useAttendAppointment } from "../patient/new-encounter-button"
+import { useDiscardEncounter } from "../patient/stale-encounter"
 import { WriteToPersonDialog } from "../write-to-person"
 
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
@@ -327,6 +328,7 @@ export function EncounterPanel({
   onChanged: () => void
 }) {
   const queryClient = useQueryClient()
+  const discard = useDiscardEncounter(row.patientId)
   const text = waitingText(row, context)
   const orgProfile = useOrgProfile().data
   const needsLicense = row.missing.includes("signature")
@@ -375,7 +377,25 @@ export function EncounterPanel({
           >
             Continuar la atención
           </Link>
-          {canVoid ? (
+          {row.empty ? (
+            // Sin nada registrado se descarta de un toque, sin motivo (10 nov).
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={discard.isPending}
+              onClick={() =>
+                discard.mutate(row.id, {
+                  onSuccess: () => {
+                    onChanged()
+                    onClose()
+                  },
+                })
+              }
+            >
+              {discard.isPending ? "Descartando…" : "Descartarla: no tiene nada registrado"}
+            </Button>
+          ) : canVoid ? (
             <p className="text-[13px] text-muted-foreground">
               ¿No se hizo?{" "}
               <Button type="button" variant="link" className="h-auto min-h-0 p-0 text-[13px] font-semibold text-destructive" onClick={onVoid}>
@@ -387,7 +407,11 @@ export function EncounterPanel({
       }
     >
       <div className="flex flex-col gap-4">
-        <p className="text-sm">Se empezó y no se firmó. Mientras siga abierta no puedes abrirle otra atención.</p>
+        <p className="text-sm">
+          {row.empty
+            ? "Se abrió y no tiene nada registrado. Descártala o sigue en ella si es lo de ese día."
+            : "Se empezó y no se firmó. Ciérrala (sin procedimientos también se cierra) o anúlala para atender hoy en otra."}
+        </p>
         {has.length > 0 ? (
           <div className="rounded-xl border p-3 text-sm">
             <p className="text-[13px] font-bold text-muted-foreground">Lo que ya tiene</p>

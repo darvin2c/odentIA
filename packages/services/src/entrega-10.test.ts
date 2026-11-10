@@ -14,7 +14,7 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { consentDocument, consentTemplateService } from "@odentia/db/schema/clinical-forms"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
@@ -29,7 +29,14 @@ import { createConsentDocument, createConsentTemplate, publishConsentTemplate } 
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { treatmentConsentStates } from "./consent-state.js"
 import { bringTreatmentToEncounter } from "./encounter-visit.js"
-import { addEncounterProcedure, finalizeEncounter, getEncounterClosing, voidEncounter } from "./encounters.js"
+import {
+  addEncounterProcedure,
+  discardEmptyEncounter,
+  finalizeEncounter,
+  getEncounterClosing,
+  getOpenEncounterRef,
+  voidEncounter,
+} from "./encounters.js"
 import { undoFinishControls } from "./finish-controls.js"
 import { changeFollowUpDue } from "./follow-ups.js"
 import { addPlanItem, revisePlanItem } from "./plan.js"
@@ -422,4 +429,40 @@ it("consentimientos: el estado va con el tratamiento; «Cambiar» la pieza anula
   const [reset] = await ownerDb.select({ status: consentDocument.status }).from(consentDocument).where(eq(consentDocument.id, doc.id))
   expect(reset?.status).not.toBe("pendiente")
   expect(await state(changed.id)).toBe("falta")
+})
+
+it("«Descartar»: la atención sin nada registrado se borra sin motivo y deja su auditoría; con algo, no", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`,
+  )
+  const open = async (values: Partial<typeof encounter.$inferInsert> = {}) => {
+    const [row] = await ownerDb
+      .insert(encounter)
+      .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor, reason: "Dolor", ...values })
+      .returning({ id: encounter.id })
+    return row!.id
+  }
+  // Abierta ayer y vacía: la ficha lo sabe para preguntar.
+  const empty = await open({ startedAt: new Date(Date.now() - 2 * DAY) })
+  const ref = await f.run((tx) => getOpenEncounterRef(tx, "org_a", f.patient.id))
+  expect(ref).toMatchObject({ id: empty, today: false, empty: true })
+  await f.run((tx) => discardEmptyEncounter(tx, ...f.args, empty))
+  expect(await ownerDb.select({ id: encounter.id }).from(encounter).where(eq(encounter.id, empty))).toEqual([])
+  const [trace] = await ownerDb.select({ action: auditEvent.action }).from(auditEvent).where(eq(auditEvent.entityId, empty))
+  expect(trace).toBeDefined()
+  expect(await f.run((tx) => getOpenEncounterRef(tx, "org_a", f.patient.id))).toBeNull()
+
+  // Con la evolución escrita no está vacía: se cierra o se anula con motivo.
+  const written = await open({ evolution: "Paciente refiere mejoría" })
+  expect((await f.run((tx) => getOpenEncounterRef(tx, "org_a", f.patient.id)))?.empty).toBe(false)
+  await expect(f.run((tx) => discardEmptyEncounter(tx, ...f.args, written))).rejects.toMatchObject({
+    code: "ENCOUNTER_NOT_EMPTY",
+  })
+  await ownerDb.execute(sql`update encounter set evolution = null where id = ${written}`)
+  // Con un procedimiento, tampoco (la base no lo propaga para la app).
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, written, { serviceId: f.service.id }))
+  await expect(f.run((tx) => discardEmptyEncounter(tx, ...f.args, written))).rejects.toMatchObject({
+    code: "ENCOUNTER_NOT_EMPTY",
+  })
 })

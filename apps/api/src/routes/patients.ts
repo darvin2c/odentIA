@@ -41,6 +41,7 @@ import {
   getEncounterVoidPreview,
   getLatestAnamnesis,
   getOpenEncounterRef,
+  discardEmptyEncounter,
   getPatient,
   getPatientDocument,
   getPatientHealth,
@@ -1651,6 +1652,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           parsed.data,
           { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
+      ),
+    )
+  })
+  // «Descartar»: la atención en borrador sin nada registrado se borra sin motivo; queda su auditoría.
+  app.post("/:id/encounters/:encounterId/discard", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para descartar atenciones"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        discardEmptyEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
       ),
     )
   })

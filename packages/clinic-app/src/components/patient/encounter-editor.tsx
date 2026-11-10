@@ -138,6 +138,7 @@ import { EncounterTreatments } from "./encounter-treatments"
 import { EncounterVisitStrip } from "./encounter-visit"
 import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
+import { useDiscardEncounter, useOpenEncounter } from "./stale-encounter"
 import { PatientClinicalStrip } from "./patient-header"
 import { BudgetSendButton } from "./plan/budget-send"
 
@@ -606,6 +607,8 @@ export function EncounterEditor({
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [voidOpen, setVoidOpen] = useState(false)
+  const openRef = useOpenEncounter(patientId)
+  const discard = useDiscardEncounter(patientId)
   const [takingOver, setTakingOver] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileForSignature, setProfileForSignature] = useState(false)
@@ -2709,15 +2712,35 @@ export function EncounterEditor({
               )}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-              <Button
-                type="button"
-                variant="ghost"
-                className="text-destructive"
-                disabled={locked}
-                onClick={() => setVoidOpen(true)}
-              >
-                Anular esta atención…
-              </Button>
+              {/* Sin nada registrado se descarta de un toque, sin motivo ni rastro en la Historia (10 nov). */}
+              {openRef.data?.data?.id === encounterId && openRef.data.data.empty ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive"
+                  disabled={locked || discard.isPending}
+                  onClick={() =>
+                    discard.mutate(encounterId, {
+                      onSuccess: () => {
+                        clearTimer()
+                        void navigate({ to: "/patients/$patientId", params: { patientId } })
+                      },
+                    })
+                  }
+                >
+                  {discard.isPending ? "Descartando…" : "Descartar esta atención"}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive"
+                  disabled={locked}
+                  onClick={() => setVoidOpen(true)}
+                >
+                  Anular esta atención…
+                </Button>
+              )}
             </div>
             {dictation.busy ? (
               <p className="text-xs text-muted-foreground">

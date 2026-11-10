@@ -109,7 +109,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué me aparece una atención de ayer?",
-        a: "Porque quedó sin firmar y la ficha de esa persona sigue trabada. Al abrirla te dice lo que tiene y lo que le falta para cerrarse: «Continuar la atención» la abre para terminarla y «Anularla con motivo» la descarta dejando constancia de por qué.",
+        a: "Porque quedó sin firmar. Al abrirla te dice lo que tiene y lo que le falta para cerrarse: «Continuar la atención» la abre para terminarla (una consulta sin procedimientos también se cierra, con su motivo, un diagnóstico y la evolución) y «Anularla con motivo» deja constancia de por qué no vale. Si no tiene nada registrado, «Descartarla» la borra de un toque, sin motivo ni rastro en la Historia. Lo mismo te pregunta su ficha, y al atenderla otra vez: seguir en ella, cerrarla o descartarla si está vacía.",
       },
       {
         q: "¿Quién es Ariadna?",

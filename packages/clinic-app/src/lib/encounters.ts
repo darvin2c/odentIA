@@ -429,6 +429,26 @@ export function voidEncounterApi(
   return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/void`, { reason, budgets })
 }
 
+/** La atención en curso de un paciente, sin nada de su historia: cuál, de quién, de qué día y si está vacía. */
+export interface OpenEncounterRef {
+  id: string
+  professionalUserId: string
+  startedAt: string
+  /** Empezó hoy, en el día de la clínica. */
+  today: boolean
+  /** Sin nada registrado: se descarta de un toque. */
+  empty: boolean
+}
+
+export function fetchOpenEncounter(patientId: string) {
+  return apiFetch<{ data: OpenEncounterRef | null }>(`${base(patientId)}/open-encounter`)
+}
+
+/** «Descartar»: una atención en borrador sin nada registrado se borra, sin motivo. */
+export function discardEncounterApi(patientId: string, encounterId: string) {
+  return post<{ discarded: true; appointmentId: string | null }>(`${base(patientId)}/encounters/${encounterId}/discard`)
+}
+
 export function takeOverEncounterApi(patientId: string, encounterId: string) {
   return post<Encounter>(`${base(patientId)}/encounters/${encounterId}/take-over`)
 }

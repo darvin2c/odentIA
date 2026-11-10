@@ -100,6 +100,7 @@ import {
 import {
   branchNotFound,
   invalidField,
+  isForeignKeyViolation,
   isUniqueViolation,
   notFound,
   ServiceError,
@@ -578,15 +579,26 @@ async function joinOpenDraft(
   return joined
 }
 
-/** Borrador abierto de un paciente, sin nada de la historia: cuál es y quién lo lleva. */
+/** El borrador abierto de un paciente, sin nada de su historia. */
+export interface OpenEncounterRef {
+  id: string
+  professionalUserId: string
+  startedAt: Date
+  /** Empezó hoy, en el día de la clínica: si no, la app pregunta qué hacer con ella. */
+  today: boolean
+  /** Sin nada registrado: se descarta de un toque, sin motivo. */
+  empty: boolean
+}
+
+/** Borrador abierto de un paciente, sin nada de la historia: cuál es, quién lo lleva, de qué día y si está vacío. */
 export async function getOpenEncounterRef(
   tx: Db,
   orgId: string,
   patientId: string,
-): Promise<{ id: string; professionalUserId: string } | null> {
+): Promise<OpenEncounterRef | null> {
   await requirePatient(tx, orgId, patientId)
   const [row] = await tx
-    .select({ id: encounter.id, professionalUserId: encounter.professionalUserId })
+    .select()
     .from(encounter)
     .where(
       and(
@@ -596,7 +608,106 @@ export async function getOpenEncounterRef(
       ),
     )
     .limit(1)
-  return row ?? null
+  if (!row) return null
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+  return {
+    id: row.id,
+    professionalUserId: row.professionalUserId,
+    startedAt: row.startedAt,
+    today: day(row.startedAt) === day(new Date()),
+    empty: !(await encounterHasRecords(tx, orgId, row)),
+  }
+}
+
+/**
+ * Si la atención tiene algo registrado: lo escrito de la consulta (relato, examen, signos,
+ * evolución, indicaciones, pronóstico), hallazgos, diagnósticos, procedimientos, documentos
+ * (consentimientos, recetas, órdenes, descansos, formularios, archivos), lo indicado en el
+ * Plan, controles, materiales o cobros (que salen de sus procedimientos). El motivo no cuenta:
+ * suele venir de la cita. Lo que no está aquí lo frena igual la base al descartar.
+ */
+export async function encounterHasRecords(
+  tx: Db,
+  orgId: string,
+  row: Pick<
+    EncounterRow,
+    "id" | "presentIllness" | "illnessDuration" | "vitals" | "evolution" | "indications" | "prognosis" | "examination"
+  >,
+): Promise<boolean> {
+  const written = [row.presentIllness, row.illnessDuration, row.evolution, row.indications, row.prognosis]
+  if (written.some((text) => typeof text === "string" && text.trim().length > 0)) return true
+  const filled = (value: unknown): boolean =>
+    value !== null &&
+    value !== undefined &&
+    (typeof value !== "object" || Object.values(value as Record<string, unknown>).some((item) => filled(item))) &&
+    !(typeof value === "string" && value.trim() === "")
+  if (filled(row.vitals) || filled(row.examination)) return true
+  const [found] = await tx.execute<{ any: boolean }>(sql`
+    select (
+      exists (select 1 from encounter_procedure where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from encounter_diagnosis where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_note where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_form_response where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from clinical_order where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from consent_document where organization_id = ${orgId}
+        and (encounter_id = ${row.id} or informed_encounter_id = ${row.id}))
+      or exists (select 1 from medical_leave where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from patient_document_context where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from prescription where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from stock_movement where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from treatment_plan where organization_id = ${orgId} and origin_encounter_id = ${row.id})
+      or exists (select 1 from treatment_plan_item where organization_id = ${orgId} and source_encounter_id = ${row.id})
+      or exists (select 1 from clinical_follow_up where organization_id = ${orgId}
+        and (origin_encounter_id = ${row.id} or completed_encounter_id = ${row.id}))
+      or exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id})
+      or exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id})
+    ) as any`)
+  return found?.any === true
+}
+
+/**
+ * «Descartar» (10 nov): una atención en borrador sin nada registrado se borra de un toque, sin
+ * motivo. No queda en la Historia (no hay nada que contar); queda el evento de auditoría. Con
+ * algo registrado se cierra o se anula con su motivo, como siempre. La base solo deja borrar
+ * borradores, y lo que la nombra con contenido clínico frena el borrado (sus FK no se propagan).
+ */
+export async function discardEmptyEncounter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<{ discarded: true; appointmentId: string | null }> {
+  await requirePatient(tx, orgId, patientId)
+  const locked = await lockEncounter(tx, orgId, patientId, encounterId)
+  assertOpenDraft(locked, actorUserId)
+  const notEmpty = () =>
+    conflict("ENCOUNTER_NOT_EMPTY", "Tiene algo registrado: termínala o anúlala con su motivo")
+  if (await encounterHasRecords(tx, orgId, locked)) throw notEmpty()
+  try {
+    await tx.transaction(async (inner) => {
+      await inner
+        .delete(encounter)
+        .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.status, "borrador")))
+    })
+  } catch (error) {
+    // Algo la nombra (FK sin propagar): no está vacía.
+    if (isForeignKeyViolation(error)) throw notEmpty()
+    throw error
+  }
+  await audit(tx, orgId, actorUserId, "encounter.discarded", "encounter", encounterId, {
+    patientId,
+    startedAt: locked.startedAt.toISOString(),
+    professionalUserId: locked.professionalUserId,
+    appointmentId: locked.appointmentId,
+    ...(locked.reason ? { hadReason: true } : {}),
+  })
+  // La Agenda deja de decir «En atención»; la llegada se conserva, como al anular.
+  if (locked.appointmentId) await notifyAppointmentChanged(tx, orgId)
+  return { discarded: true, appointmentId: locked.appointmentId }
 }
 
 export async function createEncounter(
