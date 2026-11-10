@@ -119,7 +119,13 @@ export function VisitPanel({
                   onClick={() =>
                     status.mutate(
                       { id: row.id, status: "atendida" },
-                      { onSuccess: () => onChanged() },
+                      // El aviso lo dice y el panel se cierra: ya no queda nada que preguntar.
+                      {
+                        onSuccess: () => {
+                          onChanged()
+                          onClose()
+                        },
+                      },
                     )
                   }
                 >
@@ -146,7 +152,9 @@ export function VisitPanel({
               ) : null}
             </div>
             {!canAttend && row.professionalName ? (
-              <p className="text-[13px] text-muted-foreground">Si vino, la registra quien atendió: a {row.professionalName} también le aparece en «Te espera».</p>
+              <p className="text-[13px] text-muted-foreground">
+                «Vino» la deja atendida sin abrir otra atención; lo que se le hizo lo registra {row.professionalName}, a quien también le aparece en «Te espera».
+              </p>
             ) : null}
           </div>
         )

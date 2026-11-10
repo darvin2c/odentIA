@@ -117,11 +117,13 @@ import { useCan, useMyUserId, usePermission } from "../../lib/crm"
 import { agendaHeader } from "../../lib/screen-rules"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
+import { appointmentWhat } from "../../lib/patient-appointments"
 import { appWords, upperFirst } from "../../lib/product-words"
 
 /** Lo que dice el bloque bajo el nombre: el servicio (o el motivo) y, si va por sesiones, «sesión 2 de 2». */
 function blockSubtitle(item: AgendaAppointment): string | undefined {
-  const what = item.serviceName ?? item.reason
+  // Con lo que se le sumó, aunque sea de una sesión (QA antes de entregar de la entrega 10).
+  const what = item.sessions?.length ? (item.serviceName ?? item.reason) : appointmentWhat(item)
   const sessions = appointmentSessionsText(item.sessions, item.serviceName)
   return [what, sessions].filter(Boolean).join(" · ") || undefined
 }
