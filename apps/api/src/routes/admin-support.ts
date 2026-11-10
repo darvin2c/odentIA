@@ -1,3 +1,4 @@
+import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { AdminActor, Storage } from "@odentia/services"
 import {
@@ -23,6 +24,9 @@ import {
   staffAttachToSupportCase,
   staffSupportAttachmentUrl,
   supportKnowledgeGroups,
+  helpVideoTagList,
+  keepHelpVideoLink,
+  listHelpVideos,
   supportHelpStats,
   supportMetrics,
 } from "@odentia/services"
@@ -332,6 +336,33 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
   /** Lo que Ariadna no supo: conteos por pantalla y tema, nunca lo que se preguntó. */
   app.get("/help-stats", async (c) => {
     return runService(c, 200, () => supportHelpStats(deps.ownerDb, staffOf(c)))
+  })
+
+  /** Los videos de la Ayuda leídos de YouTube y a qué respuesta está unido cada uno (ADR 0178). */
+  app.get("/help-videos", async (c) => {
+    return runService(c, 200, async () => ({ data: await listHelpVideos(deps.ownerDb, staffOf(c)) }))
+  })
+
+  /** Las etiquetas que se pueden poner en la descripción de un video de un producto, para copiarlas. */
+  app.get("/help-videos/tags", async (c) => {
+    const product = z.enum(CLINICAL_PRODUCTS).safeParse(c.req.query("product"))
+    if (!product.success) return validationError(c, product.error.issues)
+    return runService(c, 200, async () => {
+      staffOf(c)
+      return { data: helpVideoTagList(product.data) }
+    })
+  })
+
+  /** «Sigue valiendo»: la respuesta cambió y el video sirve igual. */
+  app.post("/help-videos/:id/keep", async (c) => {
+    const id = z.uuid().safeParse(c.req.param("id"))
+    const body = z.object({ target: z.string().min(1).max(200) }).safeParse(await c.req.json().catch(() => null))
+    if (!id.success) return validationError(c, id.error.issues)
+    if (!body.success) return validationError(c, body.error.issues)
+    return runService(c, 200, async () => {
+      await keepHelpVideoLink(deps.ownerDb, staffOf(c), id.data, body.data.target)
+      return { ok: true }
+    })
   })
 
   /** Equipo asignable: id y nombre del staff activo, sin datos sensibles. */
