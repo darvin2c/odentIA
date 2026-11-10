@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mayIdentifySomeone } from "@odentia/clinical"
+import { withoutPersonData } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
@@ -12,15 +12,30 @@ import { getAdminSettings } from "./agent-admin.js"
 import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import {
+  HELP_JOIN_CONFIDENT,
+  HELP_OFFERED,
   type HelpDecider,
   helpAnswerText,
+  helpAreaQuestion,
+  helpAreas,
   helpCandidates,
+  helpJoinQuestion,
   type HelpOption,
+  helpOptionBatches,
   helpOptions,
+  helpOptionsIn,
+  helpParts,
+  helpPartsState,
+  type HelpPrevious,
   helpQuestion,
   helpScreenName,
   type HelpSelection,
   helpState,
+  helpWriteInstructions,
+  type HelpWriter,
+  helpWrittenProblem,
+  readHelpAreas,
+  readHelpJoin,
   readHelpSelection,
 } from "./help-decision.js"
 import {
@@ -84,6 +99,11 @@ export interface HelpReply {
   kind: "guia" | "estado" | "duda" | "nada" | "datos" | "charla"
   /** Lo que dice cuando es `charla`, `duda` o `datos`. */
   say: string | null
+  /**
+   * `guia` redactada: la respuesta escrita uniendo varias de la guía, que van en
+   * `answers` como su origen (ADR 0178). Nula cuando se muestra la guía tal cual.
+   */
+  written: string | null
   answers: HelpAnswer[]
   /** Lo que falta de verdad en la pantalla, cuando se preguntó por qué algo no se puede. */
   blockers: Array<{ text: string; where: string | null; path: string | null }>
@@ -197,7 +217,7 @@ async function reserveAsk(tx: Db, orgId: string, userId: string, screen: string)
     .from(helpAsk)
     .where(and(eq(helpAsk.organizationId, orgId), eq(helpAsk.userId, userId), gte(helpAsk.createdAt, since)))
   if (Number(row?.total ?? 0) >= HELP_DAILY_LIMIT) {
-    throw new ServiceError("HELP_LIMIT", 429, "Llegaste al tope de preguntas a Ariadna por hoy. Mañana vuelve a estar disponible.")
+    throw new ServiceError("HELP_LIMIT", 429, "Llegaste al tope de preguntas a Ariadna de las últimas 24 horas. En unas horas vuelve a estar disponible.")
   }
   const [reserved] = await tx.insert(helpAsk).values({ organizationId: orgId, userId, screen }).returning({ id: helpAsk.id })
   if (!reserved) throw new Error("No se pudo registrar la consulta")
@@ -269,7 +289,55 @@ function byWords(question: string, topics: readonly HelpTopic[]): HelpSelection 
  * (`ninguna`), Jev no estaba o no pudo (`sin_jev`), o lo escrito puede ser el
  * dato de una persona y no se le preguntó (`dato`).
  */
-type Decided = { via: (typeof HELP_ASK_VIA)[number]; selection: HelpSelection; why: "ninguna" | "sin_jev" | "dato" }
+type Decided = {
+  via: (typeof HELP_ASK_VIA)[number]
+  selection: HelpSelection
+  why: "ninguna" | "sin_jev" | "dato"
+  /** La categoría donde Jev buscó primero; nula si no decidió él o buscó en toda la guía. */
+  area?: string | null
+  /** Lo redactado con varias respuestas de la guía (`selection.shown` son ellas), ya comprobado. */
+  written?: string | null
+}
+
+/** Lo que espera a quien redacta: pasado esto, se ofrecen las respuestas para elegir. */
+const WRITER_TIMEOUT_MS = 8_000
+
+const withTimeout = <T,>(work: Promise<T>, ms: number): Promise<T | null> =>
+  Promise.race([work, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms).unref?.())])
+
+/**
+ * Segundo paso: Jev elige la respuesta en cada tanda de opciones (una, si la
+ * categoría fue segura; varias, si se busca en toda la guía). Gana la tanda
+ * que responde segura; si ninguna, se juntan las que ofrecen algo. Las partes
+ * para redactar valen solo si salen de una sola tanda: las probabilidades de
+ * dos preguntas distintas no se suman.
+ */
+async function pickAnswer(
+  state: string,
+  batches: readonly HelpOption[][],
+  question: string,
+  texts: ProductAgentTexts,
+  decider: HelpDecider,
+): Promise<{ selection: HelpSelection; parts: HelpOption[] } | null> {
+  const read = await Promise.all(
+    batches.map(async (batch) => {
+      const candidates = helpCandidates(batch, question)
+      const result = await decider.decide(state, [helpQuestion(candidates, texts)])
+      return { selection: readHelpSelection(result, candidates), parts: helpParts(result, candidates) }
+    }),
+  )
+  if (read.length === 0 || read.some((item) => item.selection.top === null)) return null
+  const top = Math.max(...read.map((item) => item.selection.top ?? 0))
+  const sure = read.filter((item) => item.selection.verdict === "seguro").sort((a, b) => (b.selection.top ?? 0) - (a.selection.top ?? 0))[0]
+  if (sure) return { selection: sure.selection, parts: [] }
+  const offering = read.filter((item) => item.selection.verdict === "duda" && item.selection.offered.length > 0)
+  if (offering.length > 0) {
+    const offered = offering.flatMap((item) => item.selection.offered).slice(0, HELP_OFFERED)
+    return { selection: { verdict: "duda", shown: [], offered, top }, parts: offering.length === 1 ? (offering[0]?.parts ?? []) : [] }
+  }
+  if (read.some((item) => item.selection.verdict === "datos")) return { selection: { verdict: "datos", shown: [], offered: [], top }, parts: [] }
+  return { selection: { ...NOTHING, top }, parts: [] }
+}
 
 /** El código de un error, sin su texto: puede repetir lo que se preguntó. */
 const errorCodeOf = (error: unknown): string => {
@@ -278,9 +346,13 @@ const errorCodeOf = (error: unknown): string => {
 }
 
 /**
- * Jev elige la respuesta de la guía con `help.v1`. Si falla, se niega o no da
- * probabilidades, deciden las palabras. Si da probabilidades y nada llega a
- * ofrecerse, es «ninguna»: Jev sí respondió.
+ * Jev decide en dos pasos (`help.v2`, ADR 0178): la categoría y, dentro de las
+ * elegidas, la respuesta. Si la categoría no fue segura se busca en toda la
+ * guía, por tandas; y antes de decir que algo no está, también: una categoría
+ * mal elegida no puede acabar en «Esto no está en la guía». Si la certeza se
+ * reparte entre dos o tres respuestas que se completan (lo decide Jev con un
+ * sí o no), quien escribe las une, y lo redactado se comprueba sin modelo. Si
+ * Jev falla, se niega o no da probabilidades, deciden las palabras.
  */
 async function decideHelp(
   question: string,
@@ -288,15 +360,33 @@ async function decideHelp(
   topics: readonly HelpTopic[],
   texts: ProductAgentTexts,
   decider: HelpDecider | null,
+  writer: HelpWriter | null = null,
+  previous: HelpPrevious | null = null,
 ): Promise<Decided> {
   if (decider) {
     try {
-      const candidates = helpCandidates(helpOptions(topics), question)
-      const result = await decider.decide(helpState(question, screenName), [helpQuestion(candidates, texts)])
-      const selection = readHelpSelection(result, candidates)
-      if (selection.top !== null) {
-        if (selection.verdict === "duda" && selection.offered.length === 0) return { via: "jev", selection: { ...NOTHING, top: selection.top }, why: "ninguna" }
-        return { via: "jev", selection, why: "ninguna" }
+      const state = helpState(question, screenName, previous)
+      const options = helpOptions(topics)
+      const areas = helpAreas(topics)
+      const where = readHelpAreas(await decider.decide(state, [helpAreaQuestion(areas, texts)]), areas)
+      if (where.verdict !== "areas") {
+        return { via: "jev", selection: { verdict: where.verdict, shown: [], offered: [], top: where.top }, why: "ninguna", area: null }
+      }
+      const chosen = new Set(where.areas.map((area) => area.id))
+      const area = where.sure ? (where.areas[0]?.id ?? null) : null
+      let picked = await pickAnswer(state, where.sure ? [helpOptionsIn(options, chosen)] : helpOptionBatches(options), question, texts, decider)
+      // No está en las categorías elegidas: se mira el resto de la guía antes de decir que no está.
+      if (picked && where.sure && picked.selection.verdict !== "seguro" && picked.selection.offered.length === 0) {
+        const rest = await pickAnswer(state, helpOptionBatches(options, chosen), question, texts, decider)
+        if (rest && (rest.selection.verdict === "seguro" || rest.selection.offered.length > 0)) picked = rest
+      }
+      if (picked) {
+        const { selection, parts } = picked
+        if (selection.verdict === "duda" && parts.length >= 2 && writer) {
+          const written = await writeFromParts(question, parts, texts, decider, writer)
+          if (written) return { via: "jev", selection: { verdict: "seguro", shown: parts, offered: [], top: selection.top }, why: "ninguna", area, written }
+        }
+        return { via: "jev", selection, why: "ninguna", area }
       }
     } catch (error) {
       // La Ayuda sigue sin Jev; queda el código (una clave rechazada es CONFIG), nunca la pregunta.
@@ -304,6 +394,47 @@ async function decideHelp(
     }
   }
   return { via: "respaldo", selection: byWords(question, topics), why: "sin_jev" }
+}
+
+/**
+ * Redacta con las partes, si Jev dice que juntas responden la pregunta. Nulo si
+ * no se completan (la pregunta es ambigua: se ofrecen para elegir), si quien
+ * escribe falla o tarda, o si lo escrito trae algo que las partes no dicen.
+ */
+async function writeFromParts(
+  question: string,
+  parts: readonly HelpOption[],
+  texts: ProductAgentTexts,
+  decider: HelpDecider,
+  writer: HelpWriter,
+): Promise<string | null> {
+  const state = helpPartsState(question, parts)
+  if (readHelpJoin(await decider.decide(state, [helpJoinQuestion(texts)])) < HELP_JOIN_CONFIDENT) return null
+  try {
+    const written = (await withTimeout(writer({ system: helpWriteInstructions(texts), user: state }), WRITER_TIMEOUT_MS))?.trim()
+    if (!written) return null
+    const problem = helpWrittenProblem(written, parts)
+    if (problem) console.warn(`La Ayuda no mostró lo redactado: ${problem}`)
+    return problem ? null : written
+  } catch (error) {
+    console.warn(`La Ayuda no pudo redactar: ${errorCodeOf(error)}`)
+    return null
+  }
+}
+
+/**
+ * La pregunta anterior de esa conversación, que manda la pantalla: va sin
+ * cifras ni correos y, si puede ser el dato de una persona, no va. La pantalla
+ * de su respuesta solo vale si es una de la guía.
+ */
+function readPrevious(input: unknown, topics: readonly HelpTopic[]): HelpPrevious | null {
+  if (!input || typeof input !== "object") return null
+  const { question, where } = input as { question?: unknown; where?: unknown }
+  if (typeof question !== "string") return null
+  const asked = withoutPersonData(question.trim().slice(0, QUESTION_CHARS))
+  if (!asked) return null
+  const known = typeof where === "string" && topics.some((topic) => helpTopicLabel(topic) === where || helpTopicLabel(topic, { own: true }) === where)
+  return { question: asked, where: known ? (where as string) : null }
 }
 
 /** Lo que dice cuando no responde, según por qué. */
@@ -343,40 +474,53 @@ export async function askHelp(
   db: Db,
   orgId: string,
   asker: HelpAsker,
-  input: { question: unknown; screen: unknown },
+  input: { question: unknown; screen: unknown; previous?: unknown },
   decider: HelpDecider | null = null,
+  writer: HelpWriter | null = null,
 ): Promise<HelpReply> {
   if (typeof input.question !== "string" || input.question.trim().length < 3) throw invalidField("question", "Escribe tu pregunta: al menos 3 caracteres.")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   const screen = typeof input.screen === "string" ? input.screen.slice(0, 200) : "/"
   const talk = helpSmallTalk(question)
   // Un saludo no es una consulta: no gasta del tope ni cuenta como algo que no supo.
-  if (talk) return { askId: "", kind: "charla", say: talk, answers: [], blockers: [], choices: [], argos: false, argosNote: null, basedOn: "" }
+  if (talk) return { askId: "", kind: "charla", say: talk, written: null, answers: [], blockers: [], choices: [], argos: false, argosNote: null, basedOn: "" }
 
   const ready = await withOrgContext(db, orgId, async (tx) => {
-    const askId = await reserveAsk(tx, orgId, asker.userId, screen)
+    const topics = await productHelpTopics(tx, orgId)
+    // Queda la pantalla de la guía, nunca la dirección: la de una ficha lleva el id de la persona.
+    const askId = await reserveAsk(tx, orgId, asker.userId, helpTopicForScreen(screen, topics)?.path ?? "/")
     const [config] = await tx.select({ personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
-    return { askId, topics: await productHelpTopics(tx, orgId), texts: await productAgentTexts(tx, orgId), personaName: config?.personaName }
+    return { askId, topics, texts: await productAgentTexts(tx, orgId), personaName: config?.personaName }
   })
   const { topics, askId } = ready
   const here = helpTopicForScreen(screen, topics)
   // La guía dice «Sofi»: una clínica que le puso otro nombre pregunta con el suyo.
   const asked = withGuideName(question, ready.personaName)
   const exact = exactHelpOption(asked, topics)
+  // A un modelo viaja sin cifras ni correos; si lo que queda puede ser el dato de una persona, no viaja.
+  const forModel = exact ? null : withoutPersonData(asked)
   const decided: Decided = exact
     ? { via: "exacta", selection: { verdict: "seguro", shown: [exact], offered: [], top: null }, why: "ninguna" }
-    : mayIdentifySomeone(question)
+    : forModel === null
       ? { via: "respaldo", selection: byWords(asked, topics), why: "dato" }
-      : await decideHelp(asked, helpScreenName(screen, topics), topics, ready.texts, decider)
+      : await decideHelp(forModel, helpScreenName(screen, topics), topics, ready.texts, decider, writer, readPrevious(input.previous, topics))
   const { selection } = decided
   const first = selection.shown[0]
 
   return withOrgContext(db, orgId, async (tx) => {
     const log = async (topicId: string | null, faq: string | null = null) => {
-      const verdict = decided.via === "jev" ? (selection.verdict satisfies (typeof HELP_ASK_VERDICTS)[number]) : null
+      const verdict: (typeof HELP_ASK_VERDICTS)[number] | null = decided.via !== "jev" ? null : decided.written ? "redactada" : selection.verdict
       const [row] = await tx
         .update(helpAsk)
-        .set({ topicId, faq, via: decided.via, verdict, probability: decided.via === "jev" ? probabilityOf(selection.top) : null })
+        .set({
+          topicId,
+          faq,
+          via: decided.via,
+          verdict,
+          probability: decided.via === "jev" ? probabilityOf(selection.top) : null,
+          area: decided.area ?? null,
+          written: !!decided.written,
+        })
         .where(and(eq(helpAsk.organizationId, orgId), eq(helpAsk.id, askId)))
         .returning({ id: helpAsk.id })
       if (!row) throw new Error("No se pudo registrar la consulta")
@@ -385,6 +529,7 @@ export async function askHelp(
     const reply = (kind: HelpReply["kind"], parts: Partial<HelpReply> & { askId: string }): HelpReply => ({
       kind,
       say: null,
+      written: null,
       answers: [],
       blockers: [],
       choices: [],
@@ -422,6 +567,7 @@ export async function askHelp(
       const places = [...new Set(answers.map((answer) => answer.where).filter(Boolean))]
       return reply("guia", {
         askId: await log(first.topic.id, first.kind === "faq" ? first.faq.q : null),
+        written: decided.written ?? null,
         answers,
         basedOn: places.length > 0 ? `El mapa del sistema: ${places.join(" y ")}.` : "La guía del sistema.",
       })
@@ -472,6 +618,16 @@ export async function rateHelp(tx: Db, orgId: string, userId: string, askId: str
   const [row] = await tx
     .update(helpAsk)
     .set({ helpful })
+    .where(and(eq(helpAsk.organizationId, orgId), eq(helpAsk.userId, userId), eq(helpAsk.id, askId)))
+    .returning({ id: helpAsk.id })
+  if (!row) throw notFound("Consulta de ayuda")
+}
+
+/** «Ninguna es lo que busco»: de lo que se le ofreció en la duda, nada era su pregunta. Sin texto. */
+export async function markHelpNoneFits(tx: Db, orgId: string, userId: string, askId: string): Promise<void> {
+  const [row] = await tx
+    .update(helpAsk)
+    .set({ noneFits: true })
     .where(and(eq(helpAsk.organizationId, orgId), eq(helpAsk.userId, userId), eq(helpAsk.id, askId)))
     .returning({ id: helpAsk.id })
   if (!row) throw notFound("Consulta de ayuda")

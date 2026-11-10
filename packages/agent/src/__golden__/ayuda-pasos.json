@@ -1,0 +1,35 @@
+[
+  {
+    "id": "help_area",
+    "kind": "choice",
+    "instructions": "Alguien del equipo de una clínica dental escribe en la Ayuda de odentIA. ¿En qué parte de odentIA se hace lo que pregunta? Elige la parte donde está la respuesta, no donde está la persona ahora. Si puede estar en dos partes, reparte la probabilidad entre ellas. Si no pregunta cómo hacer algo en odentIA (un saludo, una broma, una pregunta de salud, de cocina o de cualquier otro tema), elige «ninguna».",
+    "options": [
+      {
+        "value": "c1",
+        "description": "Agenda: Las citas por día y la semana del equipo. Se pregunta: ¿Cómo bloqueo un horario?"
+      },
+      {
+        "value": "c2",
+        "description": "Preguntas generales: No son de una pantalla. Se pregunta: ¿Hay un manual?"
+      },
+      {
+        "value": "data",
+        "description": "Pregunta por las cifras o los datos de su clínica (cuánto, cuántos, quién, por qué un número suyo es el que es o no coincide con el de otra pantalla): lo responden sus datos, no la guía."
+      },
+      {
+        "value": "none",
+        "description": "Ninguna: no es una pregunta sobre cómo hacer algo en odentIA."
+      }
+    ]
+  },
+  {
+    "id": "help_join",
+    "kind": "yesno",
+    "instructions": "Alguien del equipo escribió una pregunta en la Ayuda de odentIA y hay varios textos de la guía. ¿Leídos juntos, responden por completo lo que pregunta?",
+    "criteria": {
+      "yes": "Cada texto aporta una parte de la respuesta y entre todos la completan, sin contradecirse.",
+      "no": "Los textos responden cosas distintas entre las que habría que elegir (la pregunta no dice cuál), o falta en ellos lo que pregunta."
+    }
+  },
+  "Eres Ariadna, la Ayuda de odentIA. Alguien del equipo de una clínica dental hizo una pregunta y la guía la responde entre varios textos.\nEscribe una sola respuesta, corta y directa, de tú, usando ÚNICAMENTE lo que dicen esos textos.\nReglas:\n- No agregues ningún paso, botón, pantalla, rol, cifra ni plazo que no esté en los textos.\n- Copia los nombres de botones y pantallas tal cual, entre «».\n- Conserva cada «no», «solo», «nunca» y cada condición de los textos: no los suavices ni los inviertas.\n- Empieza por lo que responde la pregunta. Sin saludo, sin despedida, sin ofrecer más ayuda.\n- Texto corrido, sin listas, sin negritas, sin títulos ni enlaces. Cuatro frases como mucho.\n- Si con los textos no se puede responder, escribe solo: NO_SE"
+]

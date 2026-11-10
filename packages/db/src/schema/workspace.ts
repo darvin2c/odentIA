@@ -64,7 +64,7 @@ export const pushSubscription = pgTable("push_subscription", {
  * que escribe el equipo, y se aplica el tope diario por persona.
  */
 export const HELP_ASK_VIA = ["exacta", "jev", "respaldo"] as const
-export const HELP_ASK_VERDICTS = ["seguro", "duda", "ninguna", "datos"] as const
+export const HELP_ASK_VERDICTS = ["seguro", "duda", "ninguna", "datos", "redactada"] as const
 
 export const helpAsk = pgTable("help_ask", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
