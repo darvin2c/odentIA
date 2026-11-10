@@ -106,3 +106,12 @@ describe("lo que se usó para ajustar", () => {
     expect(measureHelpBank(helpBanks.final, HELP_TOPICS).bien).toBeGreaterThanOrEqual(85)
   })
 })
+
+/** El nombre fijo de cada respuesta: lo usan los videos, el registro y las mediciones. */
+describe("cada respuesta tiene su nombre fijo", () => {
+  it.each(CLINICAL_PRODUCTS)("único y bien escrito en la guía de %s", (product) => {
+    const ids = helpTopicsFor(product).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id))
+    expect(ids.filter((id) => !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id))).toEqual([])
+    expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([])
+  })
+})

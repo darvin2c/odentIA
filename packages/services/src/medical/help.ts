@@ -86,6 +86,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       if (faq.q.startsWith("¿Puedo ofrecer dos opciones"))
         return [
           {
+            id: "ofrecer-dos-opciones-presupuesto",
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
             a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer") } : {}),
@@ -121,14 +122,17 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       if (faq.q === "¿Dónde quedaron Atenciones, Recetas u Órdenes?") {
         return [
           {
+            id: faq.id,
             q: faq.q,
             a: "Clínica tiene cuatro secciones: Antecedentes, Signos vitales, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, descansos médicos, órdenes, consentimientos, formularios e imágenes); «Nuevo» abre directo el formulario.",
           },
           {
+            id: "registro-signos-vitales-examen-fisico",
             q: "¿Dónde registro los signos vitales y el examen físico?",
             a: "Dentro de la atención, en su bloque «Examen físico»: los signos vitales (el IMC sale solo del peso y la talla) y cada sistema «Sin alteraciones» o «Con hallazgos», con lo que encontraste y la parte del cuerpo. Lo que no marcas queda «No examinado», nunca normal. En su página, Clínica › Signos vitales los muestra en el tiempo.",
           },
           {
+            id: "emito-descanso-medico",
             q: "¿Cómo emito un descanso médico?",
             a: "En la atención, en su bloque «Documentos», con «Nuevo» › «Descanso médico»: desde qué día y cuántos, y el diagnóstico solo si la persona lo autoriza. Queda firmado con tu perfil profesional y numerado; no se corrige, se anula con motivo.",
           },
@@ -197,6 +201,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
     faqs: (topic.faqs ?? []).map((faq) =>
       faq.q === "¿Cómo elijo el diagnóstico de una atención?"
         ? {
+            id: faq.id,
             q: faq.q,
             a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
           }

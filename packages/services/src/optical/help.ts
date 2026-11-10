@@ -205,6 +205,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   // La OCT es una imagen con su informe: no hay visor de cortes (`imagingStudy: null`).
   "¿Cómo veo una tomografía?": () => [
     {
+      id: "oct",
       q: "¿Cómo veo una OCT?",
       a: "Como cualquier imagen: en su página › Clínica › Documentos, «Ver» la abre a toda la ventana y «Informe y datos» muestra su informe sin salir de ella. En vistIA la OCT es una imagen con su informe, no un estudio en cortes: no se recorre por cortes ni en 3D.",
       forms: ["como veo una tomografia", "tomografia de coherencia optica", "tomografia en 3d", "tomografia en cortes"],
@@ -252,26 +253,31 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
  */
 const EYE_FAQS: Faq[] = [
   {
+    id: "anoto-examen-vista",
     q: "¿Cómo anoto el examen de la vista?",
     a: "En la atención, en «Examen de la vista»: quién acompaña si es menor, si ya usa lentes, la agudeza visual de cada ojo sin y con corrección, de lejos y de cerca (20/20, 20/25+1, 0,8, CD 1 m y, de cerca, también J1, N5 o 0,5M), la refracción (esfera, cilindro, eje, adición y prisma; si el prisma es compuesto, el segundo va en el otro eje), la distancia pupilar de cada ojo y, si la mides, la binocular de lejos y de cerca, y la salud del ojo, con la presión si la mides. Si algo conviene que lo vea un oftalmólogo, como la presión alta o una vista que no mejora con lentes, te lo dice ahí mismo; tú decides si lo derivas con una orden de interconsulta.",
     forms: ["como anoto la medida de la vista", "donde pongo la graduacion", "como registro la refraccion", "donde va la agudeza visual"],
   },
   {
+    id: "emito-receta-lentes",
     q: "¿Cómo emito la receta de lentes?",
     a: "Con la refracción del examen guardada, en «Receta de lentes» de la atención: «Emitir receta de anteojos», o «Emitir receta de lentes de contacto», que trae la graduación llevada al ojo (desde 4 dioptrías cambia: un −8,00 de anteojos es un −7,25 de contacto) y sin prisma, para que la revises, y pide la curva base, el diámetro y la marca de cada ojo. La firmas tú, con tu colegiatura del perfil profesional. Queda en «Recetas de lentes» de su ficha: ahí se imprime con «Imprimir», con su código QR para comprobarla, y el cliente la ve en su portal.",
     forms: ["como hago la receta de lentes", "como imprimo la receta de lentes", "como le doy la medida al cliente", "receta de anteojos"],
   },
   {
+    id: "receta-trae-oftalmologo",
     q: "¿Qué hago con la receta que trae de su oftalmólogo?",
     a: "En «Recetas de lentes» de su ficha, «Transcribir receta externa»: la graduación de cada ojo (con el prisma, si es de anteojos), la distancia pupilar si la dice, la fecha, quién la firmó y la foto de la receta, que queda entre sus documentos. Queda «Sin verificar» hasta que un optómetra la revise con «La revisé: verificar», y recién entonces el cliente la ve en su portal.",
     forms: ["receta externa", "trae receta del oftalmologo", "como registro una receta de afuera"],
   },
   {
+    id: "equivoque-receta-emitida-corrijo",
     q: "¿Me equivoqué en una receta ya emitida, cómo la corrijo?",
     a: "Una receta emitida no se edita: en «Recetas de lentes» de su ficha, «Anular» con el motivo. Si era de un examen, quien la firmó tiene en «Anteriores» «Emitir otra desde su examen», con la graduación escrita para corregirla, aunque la atención ya esté firmada.",
     forms: ["corregir receta de lentes", "me equivoque en la receta", "como cambio una receta emitida"],
   },
   {
+    id: "pasa-receta-vencio",
     q: "¿Qué pasa si su receta venció?",
     a: "La receta avisa en su ficha que venció y que conviene un examen nuevo, y no impide nada: tú decides si lo examinas otra vez. Lo mismo una externa sin verificar.",
     forms: ["receta vencida", "cuanto dura una receta de lentes"],
@@ -331,6 +337,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         }
       if (faq.q === "¿Cómo enciendo a Clío?")
         return {
+          id: "dictar-atencion",
           q: "¿Puedo dictar la atención?",
           a: "No: en una óptica Clío no dicta, porque una medida mal oída son unos lentes mal hechos. Lo de la atención se escribe en ella.",
           forms: [
@@ -408,6 +415,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       // Lo del ojo primero (`opticalDiagnosisPattern`); el ojo se escribe en la nota, sin «dónde».
       if (faq.q === "¿Cómo elijo el diagnóstico de una atención?")
         return {
+          id: faq.id,
           q: faq.q,
           a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los del ojo. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. El ojo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
         }
@@ -420,6 +428,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
     faqs: [
       ...(topic.faqs ?? []),
       {
+        id: "roles-hay-optica",
         q: "¿Qué roles hay en una óptica?",
         a: "Además de los de siempre, dos de las ópticas. Ventas atiende el mostrador: registra a los clientes, lleva la agenda, las conversaciones y las tareas, vende y cobra, ve el inventario con precios y los pedidos, y ve la receta de lentes vigente sin el resto de la historia clínica. Taller ve los pedidos con sus medidas y la copia de la receta con que se hacen, y marca cómo van; nada más de la óptica. Se eligen al invitar o en «Cambiar rol».",
         forms: ["que hace el rol ventas", "que ve el taller", "rol para el vendedor", "rol para el que hace los lentes", "roles de una optica"],
@@ -479,41 +488,49 @@ const OPTICAL_ONLY_TOPICS: readonly HelpTopic[] = [
     writePermission: "orders.write",
     faqs: [
       {
+        id: "vendo-unos-lentes",
         q: "¿Cómo vendo unos lentes?",
         a: "En Pedidos, «Vender lentes», o en «Recetas de lentes» de su ficha, «Vender con esta receta»: para quién, la receta (la vigente; si venció o no se verificó te lo dice, no lo impide), lo que lleva (la montura del inventario y las lunas con su precio), las medidas para montar, qué es, quién lo hace, para cuándo y el adelanto con su medio de pago, o «Sin adelanto». El adelanto se cobra en la caja de siempre y el pedido queda «Por enviar», con una copia de la receta para el taller.",
         forms: ["como vendo lentes", "como hago una venta de anteojos", "como registro el adelanto", "como encargo los lentes al laboratorio"],
       },
       {
+        id: "marco-va-pedido",
         q: "¿Cómo marco cómo va un pedido?",
         a: "Ábrelo: el botón dice el paso que sigue, «Enviado al laboratorio», «Llegó del laboratorio», «Revisado: está listo» o «Entregar». Si el taller propio no pasa por el laboratorio, «Marcar listo» en «…». Cada paso dice quién lo marcó y cuándo, y no se vuelve atrás: si algo salió mal, se rehace.",
         forms: ["como marco que llegaron los lentes", "como paso el pedido a listo", "como entrego los lentes", "en que paso esta el pedido"],
       },
       {
+        id: "avisa-lentes-estan-listos",
         q: "¿Se le avisa cuando sus lentes están listos?",
         a: "Sí: al marcar el pedido listo le llega «Tus lentes ya están listos para recoger», por WhatsApp con su mensaje aprobado, escrito si te escribió en las últimas 24 horas, o por correo. El pedido dice en «Aviso de que está listo» si salió, si llegó, si falló o si no se sabe. Si no salió o falló, «Enviar el aviso»; si no se sabe si llegó, confírmalo con la persona antes de «Enviarlo otra vez», para que no le llegue dos veces.",
         forms: ["se le avisa que sus lentes estan listos", "como le aviso que ya estan sus lentes", "mensaje de lentes listos", "no le llego el aviso"],
       },
       {
+        id: "sofi-responde-estan-lentes",
         q: "¿Sofi responde si ya están sus lentes?",
         a: "Sí: le dice en qué paso está su pedido y para cuándo se le prometió. Cuánto le falta pagar solo se lo dice a la persona, a su representante o a quien paga por ella. Nunca le dice la receta.",
         forms: ["sofi dice si estan mis lentes", "el agente responde por el pedido", "cuanto me falta pagar sofi"],
       },
       {
+        id: "cliente-ve-pedido-portal",
         q: "¿El cliente ve su pedido en su portal?",
         a: "Sí, en «Tus pedidos», junto a «Tu cuenta»: si ya está listo para recoger, para cuándo y lo que le falta pagar. Si su cuenta no se muestra en el portal, sus pedidos tampoco.",
         forms: ["el cliente ve su pedido", "pedido en el portal", "puede ver si estan sus lentes"],
       },
       {
+        id: "falta-pagar-recogerlos",
         q: "¿Y si le falta pagar al recogerlos?",
         a: "El pedido listo dice cuánto falta y ofrece el cobro de siempre, el mismo de Cobros. Entregar no lo exige: tú decides.",
         forms: ["cobrar el saldo de los lentes", "cuanto le falta pagar de sus lentes", "pagar el resto del pedido"],
       },
       {
+        id: "ve-bien-lentes-nuevos",
         q: "¿Qué hago si no ve bien con sus lentes nuevos?",
         a: "En el pedido, «…» › «Rehacer», con por qué se rehace y para cuándo: sale otro pedido unido al original, con lo mismo y sin cobrar otra vez; lo que faltaba pagar sigue en el nuevo, y el original queda reemplazado. Rehacer y anular son de quien lleva la caja.",
         forms: ["no ve bien con sus lentes", "rehacer un pedido", "garantia de los lentes", "se rompio la luna en el taller"],
       },
       {
+        id: "anulo-pedido",
         q: "¿Cómo anulo un pedido?",
         a: "En el pedido, «…» › «Anular», con el motivo, mientras no se haya entregado. Lo que no se cobró se anula con él y la montura vuelve al inventario; lo ya cobrado queda en su cuenta, para devolverlo o usarlo desde Cobros.",
         forms: ["cancelar un pedido", "anular la venta de lentes", "se arrepintio de los lentes"],
