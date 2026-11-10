@@ -1598,7 +1598,7 @@ export function EncounterEditor({
   // Solo falta la colegiatura: se puede abrir el cierre, que la pide ahí mismo.
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
-  const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
+  const recorded = closingSections.filter((section) => !section.empty)
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
   // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
@@ -1616,12 +1616,18 @@ export function EncounterEditor({
   const unrecordedAll =
     !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
-  const finalizeDescription = [
-    recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
-    unrecordedAll.length > 0 ? `Sin registrar: ${unrecordedAll.join(", ")}.` : "",
-  ]
-    .filter(Boolean)
-    .join(" ")
+  // En pocas líneas, una por bloque: el párrafo de todo junto no se leía (producción, 10 nov).
+  const finalizeDescription =
+    recorded.length > 0 || unrecordedAll.length > 0 ? (
+      <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+        {recorded.map((section) => (
+          <li key={section.key}>
+            <span className="font-medium text-foreground">{section.title}:</span> {section.summary}
+          </li>
+        ))}
+        {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
+      </ul>
+    ) : null
 
   /** Al dictar, si cabe, el respaldo se muestra al lado. */
   const startDictation = () => {
@@ -2810,7 +2816,7 @@ export function EncounterEditor({
           />
         }
       >
-        {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
+        {finalizeDescription}
       </EncounterClosingDialog>
       {product.overlay}
       <ConsentSigningScreen

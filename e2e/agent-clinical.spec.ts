@@ -422,8 +422,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect((await dictation()).suggestions).toEqual([])
   expect((await detail()).encounter.status).toBe("borrador")
   await closingDialog.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
-  await expect(closingDialog.getByText("Escribe por qué sigues sin el consentimiento, o fírmalo ahora")).toBeVisible()
-  await closingDialog.getByLabel("Seguir sin él: ¿por qué?").fill("Urgencia: se firmará en la próxima cita")
+  await expect(closingDialog.getByText("Elige por qué sigues sin el consentimiento, o fírmalo ahora")).toBeVisible()
+  // Una constancia de un toque, no un campo vacío.
+  await closingDialog.getByRole("radio", { name: "Urgencia" }).or(closingDialog.getByRole("button", { name: "Urgencia" })).click()
   await closingDialog.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect.poll(async () => (await detail()).encounter.status, { timeout: 30_000 }).toBe("finalizada")
   const final = await detail()

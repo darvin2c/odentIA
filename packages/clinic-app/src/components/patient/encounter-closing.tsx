@@ -28,7 +28,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { Check } from "lucide-react"
-import { useId, useRef } from "react"
+import { useId, useRef, useState } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import type { ConsentNeed } from "../../lib/encounter-documents"
@@ -638,6 +638,68 @@ export function ClosingNextVisit({
   )
 }
 
+/** Las constancias de un toque para seguir sin el consentimiento de lo que se hizo hoy. */
+const SKIP_REASONS = ["Urgencia", "Lo firmó en papel"] as const
+
+/**
+ * Seguir sin el consentimiento de algo que se hizo hoy (producción, 10 nov): una constancia de un
+ * toque («Urgencia», «Lo firmó en papel») u «Otro motivo» con su texto, no un campo vacío en rojo.
+ * Lo indicado para otro día nunca llega aquí: se firma antes de hacerlo.
+ */
+function ConsentSkipReason({ form, disabled }: { form: ClosingForm; disabled: boolean }): React.JSX.Element {
+  const ids = useId()
+  const reason = useStore(form.store, (state) => state.values.consentSkipReason)
+  const preset = (SKIP_REASONS as readonly string[]).includes(reason)
+  const [other, setOther] = useState(false)
+  const choose = (value: string) => {
+    setOther(false)
+    form.setFieldValue("consentSkipReason", value)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p id={`${ids}-motivo`} className="text-sm font-medium">
+        Se hizo hoy sin el consentimiento firmado: ¿por qué?
+      </p>
+      <ToggleGroup
+        aria-labelledby={`${ids}-motivo`}
+        value={other ? ["otro"] : preset ? [reason] : []}
+        onValueChange={(next: unknown[]) => {
+          const picked = next[0]
+          if (picked === "otro") {
+            setOther(true)
+            form.setFieldValue("consentSkipReason", "")
+          } else if (typeof picked === "string") choose(picked)
+        }}
+        disabled={disabled}
+        spacing={2}
+        className="flex-wrap"
+      >
+        {[...SKIP_REASONS, "otro"].map((value) => (
+          <ToggleGroupItem key={value} value={value} className={CHIP}>
+            {(value === "otro" ? other : reason === value) ? <Check aria-hidden className="size-4" /> : null}
+            {value === "otro" ? "Otro motivo" : value}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      {other ? (
+        <form.AppField name="consentSkipReason">
+          {(field) => <field.TextareaField label="Otro motivo" rows={2} maxLength={2000} />}
+        </form.AppField>
+      ) : (
+        <form.AppField name="consentSkipReason">
+          {(field) =>
+            field.state.meta.errors.length > 0 ? (
+              <p role="alert" className="text-sm text-destructive">
+                {String(field.state.meta.errors[0])}
+              </p>
+            ) : null
+          }
+        </form.AppField>
+      )}
+    </div>
+  )
+}
+
 /** «dentro de 6 meses», «dentro de 1 año». */
 function recallWords(months: number): string {
   return months === 12 ? "dentro de 1 año" : months === 1 ? "dentro de 1 mes" : `dentro de ${months} meses`
@@ -668,7 +730,7 @@ export function useClosingForm(options: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
         if (latest.current.needsReason() && !value.consentSkipReason.trim())
-          fields.consentSkipReason = "Escribe por qué sigues sin el consentimiento, o fírmalo ahora"
+          fields.consentSkipReason = "Elige por qué sigues sin el consentimiento, o fírmalo ahora"
         if (latest.current.needsRegistration) Object.assign(fields, signatureRegistrationErrors(value))
         if (latest.current.needsNextDay?.(value)) fields.nextControlDate = "Elige el día en que vuelve, o uno de los atajos"
         return Object.keys(fields).length > 0 ? { fields } : undefined
@@ -1206,19 +1268,7 @@ export function EncounterClosingDialog({
                   </div>
                 )
               })}
-              {needsReason ? (
-                <form.AppField name="consentSkipReason">
-                  {(field) => (
-                    <field.TextareaField
-                      label="Seguir sin él: ¿por qué?"
-                      rows={2}
-                      maxLength={2000}
-                      required
-                      placeholder="Ej.: urgencia, se firmará en la próxima visita"
-                    />
-                  )}
-                </form.AppField>
-              ) : null}
+              {needsReason ? <ConsentSkipReason form={form} disabled={busy} /> : null}
               <form.AppField name="endTime">
                 {(field) => (
                   <field.Control label="Hora de fin">
