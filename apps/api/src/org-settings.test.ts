@@ -501,7 +501,7 @@ it("la app instalada se llama como la clínica: su nombre y producto son públic
 })
 
 it("avisos en este equipo: cada persona activa y apaga los suyos, y el servidor nunca muestra los de otra clínica", async () => {
-  const endpoint = "https://push.example.com/send/equipo-de-prueba"
+  const endpoint = "https://fcm.googleapis.com/fcm/send/equipo-de-prueba"
   const subscription = { endpoint, keys: { p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" } }
   expect(await data(await request("reception", "GET", "/push/key"))).toEqual({ publicKey: "BPublicaDePrueba" })
   // Sin sesión no hay clave ni suscripción.

@@ -95,7 +95,10 @@ export function registerAppWorker(open: (href: string) => void): () => void {
   })
   const onMessage = (event: MessageEvent) => {
     const data = event.data as { type?: string; href?: unknown } | null
-    if (data?.type === "odentia:abrir" && typeof data.href === "string" && isInternalPath(data.href)) open(data.href)
+    if (data?.type !== "odentia:abrir" || typeof data.href !== "string" || !isInternalPath(data.href)) return
+    // Le dice al service worker que esta ventana se encarga; si nadie responde, abre otra.
+    event.ports[0]?.postMessage("ok")
+    open(data.href)
   }
   navigator.serviceWorker.addEventListener("message", onMessage)
   return () => navigator.serviceWorker.removeEventListener("message", onMessage)
@@ -106,9 +109,22 @@ export function isInternalPath(href: string): boolean {
   return /^\/(?!\/)[a-zA-Z0-9/_?=&.%+-]*$/.test(href)
 }
 
+/** El service worker listo, o un error si no se registró: `ready` sola esperaría para siempre. */
+async function readyRegistration(): Promise<ServiceWorkerRegistration> {
+  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Sin la app en este equipo")), 8000))
+  return Promise.race([navigator.serviceWorker.ready, timeout])
+}
+
 async function readySubscription(): Promise<PushSubscription | null> {
-  const registration = await navigator.serviceWorker.ready
-  return registration.pushManager.getSubscription()
+  return (await readyRegistration()).pushManager.getSubscription()
+}
+
+/** Si la suscripción se hizo con la misma clave pública: si se cambiaron las claves, hay que suscribirse otra vez. */
+function sameKey(subscription: PushSubscription, key: Uint8Array): boolean {
+  const current = subscription.options?.applicationServerKey
+  if (!current) return true
+  const bytes = new Uint8Array(current)
+  return bytes.length === key.length && bytes.every((byte, index) => byte === key[index])
 }
 
 /** Si este equipo recibe hoy los avisos de quien mira (otra persona pudo activarlos después). */
@@ -141,10 +157,14 @@ export async function enableDevicePush(): Promise<NotificationPermission | "no-d
   if (permission !== "granted") return permission
   const { data } = await apiFetch<{ data: { publicKey: string | null } }>("/api/push/key")
   if (!data.publicKey) return "no-disponible"
-  const registration = await navigator.serviceWorker.ready
-  const subscription =
-    (await registration.pushManager.getSubscription()) ??
-    (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(data.publicKey) }))
+  const registration = await readyRegistration()
+  const key = applicationServerKey(data.publicKey)
+  let subscription = await registration.pushManager.getSubscription()
+  if (subscription && !sameKey(subscription, key)) {
+    await subscription.unsubscribe()
+    subscription = null
+  }
+  subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
   const json = subscription.toJSON()
   await apiFetch("/api/push/subscriptions", {
     method: "POST",

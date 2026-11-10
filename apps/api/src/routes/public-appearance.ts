@@ -9,8 +9,8 @@ import { Hono } from "hono"
  * Cómo se ve la clínica (ADR 0162): el color de su marca, para que su app y sus páginas
  * públicas (registro, su enlace, el portal, la reserva, el chat) salgan en su color desde
  * el primer pintado; y su nombre y producto, para la app instalada (su manifiesto). Son
- * datos públicos, se ven en cada página suya. Una dirección que no
- * es de una clínica responde igual que una clínica sin color: no dice cuáles existen.
+ * datos públicos, se ven en cada página suya. Una dirección que no es de una clínica
+ * responde sin nombre: que una clínica existe ya lo dice su dirección, que abre su portal.
  */
 export function createPublicAppearanceRoute(deps: { db: Db }) {
   const app = new Hono()

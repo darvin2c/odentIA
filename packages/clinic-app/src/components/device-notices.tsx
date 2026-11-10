@@ -1,6 +1,5 @@
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { getRouteApi } from "@tanstack/react-router"
 import { ChevronDown, Share } from "lucide-react"
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
 import {
@@ -18,8 +17,6 @@ import {
 import { useReceptionName } from "../lib/agent-names"
 import { appWords } from "../lib/product-words"
 
-const orgRouteApi = getRouteApi("/_org")
-
 /** Lo que llega, dicho una vez junto al interruptor. Sin nombres: se ve con el teléfono bloqueado. */
 const whatArrives = (agent: string) =>
   `Te avisamos cuando alguien nuevo te espera en Inicio (con la clínica abierta) y si WhatsApp o ${agent} dejan de funcionar. El aviso no dice el nombre de la persona.`
@@ -33,7 +30,6 @@ type State = "cargando" | "apagado" | "activado" | "bloqueado" | "no-compatible"
  * cuando el navegador lo ofrece, o cómo hacerlo en iPhone.
  */
 export function DeviceNotices() {
-  const { org } = orgRouteApi.useRouteContext()
   const brand = appWords().name
   const agent = useReceptionName()
   const [state, setState] = useState<State>("cargando")
@@ -83,7 +79,6 @@ export function DeviceNotices() {
   }
 
   const switchable = state === "apagado" || state === "activado"
-  const label = `Recibir avisos de ${org.name} en este equipo`
 
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-3 sm:px-5">
@@ -112,7 +107,6 @@ export function DeviceNotices() {
           {state === "no-compatible" || state === "no-disponible" ? null : (
             <Switch
               id={`${helpId}-switch`}
-              aria-label={label}
               aria-describedby={helpId}
               className="mt-1"
               checked={state === "activado"}

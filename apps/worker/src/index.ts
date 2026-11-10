@@ -480,9 +480,13 @@ async function consume(own: QueueDef[]): Promise<void> {
 // respondía a pedazos. En la auditoría del ADR 0104, un tercio de los entrantes
 // esperó 5 s o más. Cada cola sigue con un solo lector: una corrida a la vez.
 const isAgentRun = (queue: QueueDef) => queue.name === "agent_runs"
+// Los avisos en el equipo también: esperan a servicios de push de afuera, y uno lento
+// no puede atrasar los mensajes de WhatsApp.
+const isPush = (queue: QueueDef) => queue.name === "push_notices"
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 await Promise.all([
-  consume(queues.filter((queue) => !isAgentRun(queue))),
+  consume(queues.filter((queue) => !isAgentRun(queue) && !isPush(queue))),
   consume(queues.filter(isAgentRun)),
+  consume(queues.filter(isPush)),
 ])
 process.exit(0)

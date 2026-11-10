@@ -3,6 +3,8 @@ import { collectOrgPushes, forgetPushSubscription, type PushDelivery, pushSubscr
 import webpush from "web-push"
 import { shouldSkipSaasOrg } from "./saas-billing.js"
 
+const PARALLEL_SENDS = 8
+
 /** Lo mínimo de un envío: dice si el equipo ya no existe (el servicio de push respondió 404 o 410). */
 export interface PushSender {
   send(delivery: PushDelivery): Promise<{ gone: boolean }>
@@ -34,7 +36,9 @@ export function webPushSender(vapid: { publicKey: string; privateKey: string; su
         return { gone: false }
       } catch (error) {
         const status = (error as { statusCode?: number }).statusCode
-        if (status === 404 || status === 410) return { gone: true }
+        // 404/410: el equipo ya no existe. 403: se suscribió con otras claves VAPID (RFC 8292);
+        // olvidarlo hace que la campana lo muestre apagado y la persona lo vuelva a activar.
+        if (status === 404 || status === 410 || status === 403) return { gone: true }
         throw error
       }
     },
@@ -58,7 +62,7 @@ export async function runPushTick(deps: PushWorkerDeps): Promise<PushTickResult>
       console.error(`worker: avisos en el equipo sin armar (${orgId})`, error)
       continue
     }
-    for (const delivery of deliveries) {
+    const send = async (delivery: PushDelivery) => {
       try {
         const { gone } = await deps.sender.send(delivery)
         if (gone) {
@@ -69,6 +73,10 @@ export async function runPushTick(deps: PushWorkerDeps): Promise<PushTickResult>
         console.error(`worker: aviso en el equipo incierto (${orgId})`, error)
         result.uncertain += 1
       }
+    }
+    // Varios a la vez, con tope: un servicio de push lento no deja esperando a los demás.
+    for (let start = 0; start < deliveries.length; start += PARALLEL_SENDS) {
+      await Promise.all(deliveries.slice(start, start + PARALLEL_SENDS).map(send))
     }
   }
   return result

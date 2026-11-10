@@ -7,6 +7,7 @@ import { pushSubscription, workspaceNotification } from "@odentia/db/schema/work
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core"
 import { validation } from "./errors.js"
+import { findOrgLocale } from "./locale.js"
 import { isOpportune } from "./opportune-hours.js"
 import { clinicOpenSchedule } from "./topic-urgency.js"
 import { listWorkspaceWaitingPeople, type WorkspaceAccess, workspaceAccessFor } from "./workspace.js"
@@ -63,6 +64,14 @@ export interface PushDelivery extends PushKeys {
 
 const KEY_PATTERN = /^[A-Za-z0-9_-]+={0,2}$/
 
+/**
+ * Los servicios de push de los navegadores: Chrome, Edge y Android (FCM), Safari
+ * (Apple), Firefox (Mozilla) y Edge en Windows (WNS). El worker hace un POST a la
+ * dirección que manda el navegador: cualquier otra no se acepta, para que nadie lo
+ * use para llegar a otro servidor.
+ */
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^([a-z0-9-]+\.)*push\.apple\.com$/, /^([a-z0-9-]+\.)*push\.services\.mozilla\.com$/, /^([a-z0-9-]+\.)*notify\.windows\.com$/]
+
 function checkKeys(keys: PushKeys): PushKeys {
   let url: URL
   try {
@@ -70,20 +79,32 @@ function checkKeys(keys: PushKeys): PushKeys {
   } catch {
     throw validation("La dirección del equipo no es válida")
   }
-  if (url.protocol !== "https:" || keys.endpoint.length > 1000) throw validation("La dirección del equipo no es válida")
+  if (url.protocol !== "https:" || url.port !== "" || keys.endpoint.length > 1000 || !PUSH_HOSTS.some((host) => host.test(url.hostname)))
+    throw validation("La dirección del equipo no es válida")
   if (!KEY_PATTERN.test(keys.p256dh) || keys.p256dh.length > 200 || !KEY_PATTERN.test(keys.auth) || keys.auth.length > 100)
     throw validation("Las claves del equipo no son válidas")
   return keys
 }
 
+/** Equipos por persona en una clínica: más que eso es un error o un abuso, y el worker los recorre todos. */
+export const PUSH_DEVICES_PER_PERSON = 10
+
 /**
  * Este equipo recibe los avisos de quien lo activa. Si el equipo ya estaba
  * suscrito con otra persona (la compu del mostrador), pasa a quien lo activó
  * ahora. Lo que ya espera no se vuelve a avisar: se avisa lo que llegue después,
- * y antes sale «Listo» para que se vea que funciona.
+ * y antes sale «Listo» para que se vea que funciona. Volver a activarlo la misma
+ * persona solo renueva sus claves: no repite el «Listo».
  */
 export async function savePushSubscription(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, keys: PushKeys) {
   const { endpoint, p256dh, auth } = checkKeys(keys)
+  const [current] = await tx.select({ userId: pushSubscription.userId }).from(pushSubscription)
+    .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint))).limit(1)
+  if (current?.userId === userId) {
+    await tx.update(pushSubscription).set({ p256dh, auth })
+      .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint)))
+    return { active: true }
+  }
   const seen = await listWorkspaceWaitingPeople(tx, orgId, userId, access)
   await tx.insert(pushSubscription)
     .values({ organizationId: orgId, userId, endpoint, p256dh, auth, waitingSeen: seen })
@@ -91,6 +112,9 @@ export async function savePushSubscription(tx: Db, orgId: string, userId: string
       target: [pushSubscription.organizationId, pushSubscription.endpoint],
       set: { userId, p256dh, auth, welcomedAt: null, waitingSeen: seen, waitingPushedAt: null, noticesSince: sql`now()`, createdAt: sql`now()` },
     })
+  // Con más equipos que el tope, se olvidan los más antiguos de esa persona.
+  await tx.execute(sql`delete from push_subscription where organization_id = ${orgId} and user_id = ${userId} and id not in (
+    select id from push_subscription where organization_id = ${orgId} and user_id = ${userId} order by created_at desc, id limit ${PUSH_DEVICES_PER_PERSON})`)
   return { active: true }
 }
 
@@ -118,6 +142,12 @@ export async function forgetPushSubscription(tx: Db, orgId: string, subscription
 export async function pushSubscribedOrgs(ownerDb: Db): Promise<string[]> {
   const rows = await ownerDb.selectDistinct({ orgId: pushSubscription.organizationId }).from(pushSubscription)
   return rows.map((row) => row.orgId)
+}
+
+/** Las horas de una clínica que todavía no cargó su horario. */
+export function withinDefaultHours(at: Date, timeZone: string): boolean {
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hourCycle: "h23" }).format(at))
+  return hour >= 8 && hour < 20
 }
 
 export function waitingPushBody(people: number): string {
@@ -157,9 +187,9 @@ export async function collectOrgPushes(tx: Db, orgId: string, now: Date = new Da
   const roles = new Map((await tx.select({ userId: member.userId, role: member.role }).from(member)
     .where(and(eq(member.organizationId, orgId), inArray(member.userId, [...new Set(rows.map((row) => row.userId))]))))
     .map((row) => [row.userId, row.role]))
-  // Sin horario cargado cuentan las horas de reloj, como en la urgencia de los temas.
+  // Sin horario cargado (una clínica nueva), de 8:00 a 20:00 en su zona: nunca de madrugada.
   const schedule = await clinicOpenSchedule(tx, orgId, now)
-  const open = !schedule || isOpportune(now, schedule)
+  const open = schedule ? isOpportune(now, schedule) : withinDefaultHours(now, (await findOrgLocale(tx, orgId)).timezone)
   const product = clinic?.product
   const base = { title: clinic?.name ?? "Tu clínica", icon: PRODUCT_ICONS[isClinicalProduct(product) ? product : BASE_PRODUCT] }
   const deliveries: PushDelivery[] = []

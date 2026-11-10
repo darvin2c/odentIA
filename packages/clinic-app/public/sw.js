@@ -35,14 +35,30 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
-      const open = windows.find((client) => new URL(client.url).origin === self.location.origin)
-      if (open) {
+      // Primero la ventana enfocada; una página pública (el portal, la firma en la tablet) no responde.
+      const ours = windows.filter((client) => new URL(client.url).origin === self.location.origin)
+      ours.sort((a, b) => Number(b.focused) - Number(a.focused))
+      for (const client of ours) {
         // La app navega con su router: así respeta lo que se está escribiendo.
-        await open.focus()
-        open.postMessage({ type: "odentia:abrir", href })
-        return
+        if (await handOver(client, href)) {
+          await client.focus().catch(() => undefined)
+          return
+        }
       }
       await self.clients.openWindow(href)
     })(),
   )
 })
+
+/** Le pasa la pantalla a una ventana abierta de la clínica; falso si no responde a tiempo. */
+function handOver(client, href) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel()
+    const timer = setTimeout(() => resolve(false), 1500)
+    channel.port1.onmessage = () => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    client.postMessage({ type: "odentia:abrir", href }, [channel.port2])
+  })
+}

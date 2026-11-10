@@ -9,8 +9,9 @@ const ICON_NAMES: Record<ClinicalProduct, string> = { dental: "odentia", medical
  * clínica, con el ícono de su producto y su color, así quien trabaja en dos
  * clínicas distingue los dos íconos. Abre en Inicio y sin la barra del navegador.
  */
-export function clinicWebManifest(appearance: ClinicAppearance) {
-  const product = isClinicalProduct(appearance.product) ? appearance.product : BASE_PRODUCT
+export function clinicWebManifest(appearance: ClinicAppearance, appProduct?: ClinicalProduct) {
+  // El producto de la app manda: una clínica de otro producto se abre en su propio dominio.
+  const product = appProduct ?? (isClinicalProduct(appearance.product) ? appearance.product : BASE_PRODUCT)
   const brand = productWords(product).name
   const name = appearance.name?.trim() || brand
   const icon = ICON_NAMES[product]

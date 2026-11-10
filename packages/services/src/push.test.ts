@@ -11,6 +11,7 @@ import {
   collectOrgPushes,
   deletePushSubscription,
   getPushSubscription,
+  PUSH_DEVICES_PER_PERSON,
   PUSH_WAITING_GAP_MS,
   pushSubscribedOrgs,
   savePushSubscription,
@@ -20,7 +21,10 @@ import { createWorkspaceNotification, workspaceAccessFor } from "./workspace.js"
 
 setupTestDb()
 
-const keys = (n: string) => ({ endpoint: `https://push.example.com/send/${n}`, p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" })
+/** Lunes 16 de noviembre de 2026, 12:00 en Lima: una clínica sin horario cargado está abierta. */
+const NOON = new Date("2026-11-16T17:00:00Z")
+
+const keys = (n: string) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${n}`, p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" })
 
 /** Una clínica con su equipo y un canal: cada prueba la suya, para no depender de las otras. */
 async function clinic(roles: Record<string, string>) {
@@ -47,7 +51,7 @@ async function clinic(roles: Record<string, string>) {
   const tx = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, orgId, fn)
   const subscribe = (who: string, role: string, endpoint: string) =>
     tx((db) => savePushSubscription(db, orgId, people[who]!, workspaceAccessFor(role), keys(endpoint)))
-  const collect = (now = new Date()) => tx((db) => collectOrgPushes(db, orgId, now))
+  const collect = (now = NOON) => tx((db) => collectOrgPushes(db, orgId, now))
   return { orgId, people, writes, subscribe, collect, tx }
 }
 
@@ -77,7 +81,7 @@ it("entre dos avisos de «Te espera» pasan unos minutos, y lo que llegó en la 
   const { writes, subscribe, collect } = await clinic({ rita: "reception" })
   await subscribe("rita", "reception", "pausa")
   await collect()
-  const start = new Date()
+  const start = NOON
   await writes("Primera")
   expect((await collect(start)).map((d) => d.message.body)).toEqual(["Te espera 1 persona"])
   await writes("Segunda")
@@ -151,10 +155,33 @@ it("una clínica no ve ni avisa los equipos de otra", async () => {
   expect(await b.tx((db) => getPushSubscription(db, a.orgId, a.people.rita!, keys("aislada").endpoint))).toEqual({ active: false })
 })
 
-it("rechaza una dirección que no es https o claves que no son del navegador", async () => {
+it("rechaza una dirección que no es de un servicio de push o claves que no son del navegador", async () => {
   const { orgId, people, tx } = await clinic({ rita: "reception" })
   const save = (k: { endpoint: string; p256dh: string; auth: string }) =>
     tx((db) => savePushSubscription(db, orgId, people.rita!, workspaceAccessFor("reception"), k))
-  await expect(save({ ...keys("x"), endpoint: "http://push.example.com/x" })).rejects.toThrow(/dirección/)
+  await expect(save({ ...keys("x"), endpoint: "http://fcm.googleapis.com/x" })).rejects.toThrow(/dirección/)
+  // Solo los servicios de push de los navegadores: el worker no llega a otro servidor.
+  await expect(save({ ...keys("x"), endpoint: "https://169.254.169.254/latest" })).rejects.toThrow(/dirección/)
+  await expect(save({ ...keys("x"), endpoint: "https://fcm.googleapis.com.evil.test/x" })).rejects.toThrow(/dirección/)
+  await expect(save({ ...keys("x"), endpoint: "https://fcm.googleapis.com:8443/x" })).rejects.toThrow(/dirección/)
+  await expect(save({ ...keys("apple"), endpoint: "https://web.push.apple.com/QGuQyavXut" })).resolves.toEqual({ active: true })
   await expect(save({ ...keys("x"), p256dh: "no es base64!" })).rejects.toThrow(/claves/)
+})
+
+it("una clínica sin horario cargado no avisa de madrugada; volver a activar el mismo equipo no repite «Listo»; hay un tope de equipos por persona", async () => {
+  const { orgId, people, writes, subscribe, collect } = await clinic({ rita: "reception" })
+  await subscribe("rita", "reception", "madrugada")
+  expect((await collect()).map((d) => d.message.tag)).toEqual(["listo"])
+  await subscribe("rita", "reception", "madrugada")
+  expect(await collect()).toEqual([])
+  await writes("Escribe a las 3")
+  // Lunes 16, 3:00 en Lima.
+  expect(await collect(new Date("2026-11-16T08:00:00Z"))).toEqual([])
+  expect((await collect()).map((d) => d.message.tag)).toEqual(["te-espera"])
+
+  for (let n = 0; n < PUSH_DEVICES_PER_PERSON + 2; n += 1) await subscribe("rita", "reception", `equipo-${n}`)
+  const left = await ownerDb.select({ endpoint: pushSubscription.endpoint }).from(pushSubscription)
+    .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.userId, people.rita!)))
+  expect(left).toHaveLength(PUSH_DEVICES_PER_PERSON)
+  expect(left.map((row) => row.endpoint)).toContain(keys(`equipo-${PUSH_DEVICES_PER_PERSON + 1}`).endpoint)
 })
