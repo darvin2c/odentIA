@@ -563,6 +563,10 @@ interface ConceptJob {
 /** Lo que el servidor llama distinto en los bloques de un concepto. */
 const CONCEPT_FIELDS = { amountCents: "amount" }
 
+
+/** El adelanto que quedó escrito para después de cobrar lo que debe, por persona (solo en esta pestaña). */
+const carriedAdvance = new Map<string, { amount: string; advanceFor: string; debtCurrency: string; payCurrency: string }>()
+
 export function CollectDrawer({
   patientId,
   patientName,
@@ -677,6 +681,9 @@ export function CollectDrawer({
       void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
       void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
       requestId.current = crypto.randomUUID()
+      // El adelanto que quedó escrito para después («va en un cobro aparte») vuelve al abrir el
+      // próximo cobro de esta persona: no se pierde al cerrar (QA antes de entregar, entrega 9).
+      if (advanceDraft && !form.state.values.advance) carriedAdvance.set(id, advanceDraft)
       onCollected(result, id)
       onClose()
     },
@@ -779,7 +786,10 @@ export function CollectDrawer({
     form.reset()
     setSelectInit(false)
     setAmountTouched(false)
-    setAdvanceDraft(null)
+    // Lo que se dejó para «Cobrar un adelanto» en el cobro anterior de esta persona vuelve escrito.
+    const carried = patientId ? carriedAdvance.get(patientId) : undefined
+    if (patientId) carriedAdvance.delete(patientId)
+    setAdvanceDraft(carried ?? null)
     setPendingDraft(null)
     setEditor(null)
     setAdding(false)

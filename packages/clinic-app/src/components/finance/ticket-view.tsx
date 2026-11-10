@@ -575,7 +575,7 @@ export function TicketView({
           <div className="flex flex-col gap-0.5 rounded-md border bg-muted/40 px-3 py-2">
             {stillOwed > 0 ? <Row label="Le falta pagar" value={money(stillOwed)} strong /> : null}
             {stillOwed > 0 && creditCounted > 0 ? (
-              <span className="text-xs text-muted-foreground">Ya descuenta {plain(creditCounted)} que tiene a favor.</span>
+              <span className="text-xs text-muted-foreground">Ya descuenta {money(creditCounted)} que tiene a favor.</span>
             ) : null}
             {creditLeft > 0 ? <Row label="Le queda a favor" value={money(creditLeft)} /> : null}
             {(snapshot.pending ?? []).map((item) => (

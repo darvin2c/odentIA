@@ -297,7 +297,7 @@ export const dentalHooks: ProductHooks = {
         and(
           eq(clinicalFollowUp.organizationId, orgId),
           eq(clinicalFollowUp.planItemId, planItemId),
-          eq(clinicalFollowUp.title, radiographicControlTitle()),
+          sql`${clinicalFollowUp.title} like ${`${radiographicControlTitle()}%`}`,
           eq(clinicalFollowUp.status, "pendiente"),
         ),
       )
@@ -608,7 +608,8 @@ async function yearlyRadiographicControl(
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, item.serviceId)))
     .limit(1)
   if (!service?.family || !ROOT_CANAL_FAMILIES.has(service.family)) return
-  const title = radiographicControlTitle()
+  // Con la pieza: dos endodoncias del mismo día dejaban dos controles iguales (QA antes de entregar).
+  const title = item.siteCode ? `${radiographicControlTitle()} · pieza ${item.siteCode}` : radiographicControlTitle()
   const [already] = await tx
     .select({ id: clinicalFollowUp.id })
     .from(clinicalFollowUp)
