@@ -702,7 +702,7 @@ function RealAppointmentDrawer({
                 </DetailField>
               ) : null}
               <DetailField label="Servicio">
-                {appointmentWhat(appointment) ?? appointment.serviceName ?? "Sin servicio"}
+                {appointmentWhat({ ...appointment, reason: null }) ?? "Sin servicio"}
                 {/* Lo sumado que no cabe en lo reservado: se dice aquí, con «Reprogramar» al pie (QA del 10 nov, M3). */}
                 {appointmentShortWords(appointment) ? (
                   <span className="block text-sm font-semibold text-warning">
