@@ -161,14 +161,12 @@ function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: s
     .join(" · ")
 }
 
-/** La regla que usó la línea: «35 %», «45 % · para este servicio» o «monto fijo de 150.00 por cada uno». */
+/** La regla que usó la línea: «35 %», «45 % para este servicio» o «monto fijo de 150.00 por cada uno». */
 function ruleWords(line: CommissionLine, locale: string, currency: string): string {
   if (line.fixedCents !== null)
     return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno${otherServiceName(line, " · ")}`
   if (line.rateBps === null || (line.rateBps === 0 && !line.forService)) return "sin porcentaje"
-  return line.forService
-    ? `${percentLabel(line.rateBps, locale)} · ${serviceWords(line)}`
-    : percentLabel(line.rateBps, locale)
+  return line.forService ? `${percentLabel(line.rateBps, locale)} ${serviceWords(line)}` : percentLabel(line.rateBps, locale)
 }
 
 /**
