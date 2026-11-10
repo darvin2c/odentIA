@@ -233,6 +233,19 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** «El agente le avisa por su conversación» a quien pidió no recibir mensajes.
 **Caso:** el 13 de marzo se reserva una cita a un paciente que pidió ningún mensaje. El aviso dice que no se le escribirá y la conversación no tiene mensaje nuevo. Con otro paciente que sí acepta, el mensaje está en el hilo.
 
+## V-PRO-03 La Ayuda dice lo que la app hace
+**Aparece en:** el panel de Ayuda (`CA/help-panel.tsx`), con la guía de `S/help-guide.ts` y la de cada producto (`S/medical/help.ts`, `S/optical/help.ts`).
+**A mano:** por cada tarea del área se le pregunta cómo se hace, con cada rol que la hace, y se siguen sus pasos en la pantalla.
+- [ ] Conoce cada función del área, también la más nueva.
+- [ ] Nombra botones y pantallas como se llaman hoy.
+- [ ] Sus pasos llevan a terminar la tarea.
+- [ ] No le promete a un rol lo que no puede hacer ni le niega lo que sí puede.
+- [ ] No explica algo que se quitó o se movió.
+- [ ] Contesta sobre la pantalla donde está la persona.
+
+**Ya falló:** contestó sobre otra pantalla.
+**Caso:** recepción, en la Agenda, pregunta «¿cómo le mando a la señora el enlace de su cita?». La respuesta nombra dónde está el botón, y siguiéndola el enlace queda copiado o enviado. La misma pregunta con caja dice que eso lo hace recepción.
+
 ## V-RAS-01 Rastro del dinero
 **Aparece en:** Caja › «Movimientos de hoy», ficha › Cobros, el detalle de un gasto, Comisiones y la actividad del equipo (`R/_org/settings.audit.tsx`, `S/audit-words.ts`).
 **A mano:** por cada movimiento se busca quién, cuándo, a quién y por cuánto. Corregir es anular y crear de nuevo, enlazados. Nada se borra.

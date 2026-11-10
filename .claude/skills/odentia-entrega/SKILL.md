@@ -89,7 +89,7 @@ Lo que va en el mismo cambio:
 
 | Si cambia | Va junto |
 |---|---|
-| Una pantalla, un botón o un permiso | La guía de Ariadna (`packages/services/src/help-guide.ts` y su variante médica) |
+| Una pantalla, un botón o un permiso | La guía de la Ayuda (`packages/services/src/help-guide.ts` y el `help.ts` de cada producto), con lo que el acta dice en «En la Ayuda». La QA antes de entregar le pregunta y comprueba la respuesta |
 | Una pantalla o entidad nueva | La demo (`seed-demo.ts`, o `seed-common.ts` si sirve a los dos) |
 | Una composición compartida | Su story |
 | Tablas o reglas de la base | `pnpm db:generate` o una migración nueva, con su `GRANT` y RLS (`packages/db/AGENTS.md`) |
@@ -159,7 +159,7 @@ Título: `tipo(scope): lo que cambia para la persona`. Cuerpo en palabras simple
 ## Al desplegar
 ```
 
-«Cómo se probó» dice lo ejecutado y lo que no, con el resumen de la QA antes de entregar. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa o la QA como prueba de que una clínica real lo encuentre fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
+«Cómo se probó» dice lo ejecutado y lo que no, con el resumen de la QA antes de entregar y lo que contestó la Ayuda sobre lo nuevo. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa o la QA como prueba de que una clínica real lo encuentre fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
 
 Esperar el CI con `gh pr checks --watch`. Si falla, leer el registro y corregir la causa.
 
@@ -176,6 +176,7 @@ Con todo verde, enviar este resumen y esperar:
 - **Se quitó:** <lo que la mesa o la simplificación sacaron>
 - **Se comprobó:** <pruebas, CI>
 - **La QA:** <voces que entraron, qué encontró, qué se corrigió y qué verificó en pantalla; estado de los procesos clínicos que toca>
+- **La Ayuda:** <qué se le preguntó y si contestó bien, o por qué no aplica>
 - **No se comprobó:** <lo que falta, sin suavizar>
 - **Agentes:** <resultado frente a la versión anterior, o por qué no aplica>
 - **Al desplegar:** <migración y pasos a mano, o nada>

@@ -58,7 +58,7 @@ Arma de 3 a 5 tareas del área desde el día de esa persona, dichas como en la c
 3. **Su propio error:** se equivoca a propósito una vez (otro paciente, otro monto, otra hora) e intenta corregirlo. ¿Pudo? ¿Cuántos pasos?
 4. **¿Se guardó?** ¿Sabe si quedó hecho, pendiente o enviado, y a quién le llegó?
 5. **Explicarlo:** ¿podría decirle al paciente lo que acaba de pasar, con las palabras de la pantalla?
-6. **Ayuda:** si se pierde, usa «Ayuda» como lo haría cualquiera, y anota si le sirvió.
+6. **Ayuda:** al terminar cada tarea, y antes si se pierde, le pregunta a «Ayuda» con sus palabras cómo se hace, aunque ya la haya hecho. Anota la pregunta, lo que contestó y si con esa respuesta sola habría podido terminar. Una función que la Ayuda no conoce, o que explica con otros nombres, es un hallazgo: quien llega después solo tiene la Ayuda.
 
 Cierra con un conteo: tareas terminadas solas, con ayuda o no terminadas; clics de cada una; palabras que no entendió y botones que no apretaría.
 
@@ -217,6 +217,12 @@ Su catálogo es `catalogos/verdad.md`: las cifras y los datos que deben coincidi
 4. **Rastro.** Lo importante (dinero, firmas, datos clínicos, anulaciones) deja quién lo hizo y cuándo, y se puede ver.
 5. **Valor.** Hace la lista de cada elemento de la pantalla y, para cada uno, la tarea habitual que lo usa. Lo que no tiene tarea, lo que repite otra cosa y lo que está porque otros CRM lo tienen, lo propone para quitar. Aplica la pregunta del `AGENTS.md` raíz: ¿qué valor aporta, se integra con lo demás, justifica lo que complica?
 6. **Las reglas del producto.** Persona única (sin fichas paralelas), una misma operación para recepción, portal y agente, avisos que no traban el trabajo, y aprobación humana, confirmación y ejecución como estados distintos.
+7. **La Ayuda dice la verdad.** Es su dueño: una Ayuda que contesta mal es una promesa falsa. Por cada tarea del área (en la QA antes de entregar, por cada caso del acta y por lo que dice su línea «En la Ayuda») le pregunta cómo se hace, con cada rol que la hace, y compara la respuesta con la pantalla:
+   - ¿Conoce la función? ¿Nombra los botones y las pantallas como se llaman hoy?
+   - ¿Los pasos que da llevan a terminar la tarea?
+   - ¿Le promete a ese rol algo que no puede hacer, o le niega algo que sí puede?
+   - ¿Sigue explicando algo que se quitó o se movió?
+   **Con el modelo real.** Sin él, la Ayuda solo contesta lo que está escrito igual que en la guía, y un «no sé» no prueba nada: se anota «no se pudo ver» y se revisa solo el texto de la guía. Lee además el tema en la guía (`packages/services/src/help-guide.ts` y el `help.ts` de cada producto en `packages/services/src/<producto>/`) y dice qué le falta, con el texto listo. Anota cada pregunta y su respuesta.
 
 ### En la mesa
 
@@ -231,7 +237,7 @@ Con la propuesta puesta, por cada caso del banco:
 - **Las promesas:** lo que la propuesta dice que la persona podrá hacer o ver, cruzado con el permiso de su rol (con `archivo:línea`) y con el rastro que deja.
 - **Las trabas:** pasos que frenan firmar, atender o cobrar.
 
-En la QA antes de entregar, con capturas y diff: ¿volvió algo que se quitó? ¿Entrega el valor prometido? ¿Entró algo sin motivo?
+En la QA antes de entregar, con capturas y diff: ¿volvió algo que se quitó? ¿Entrega el valor prometido? ¿Entró algo sin motivo? ¿La Ayuda ya explica lo nuevo y dejó de explicar lo que se quitó (punto 7 de «En la app»)?
 
 Puede concluir «no hacerlo» o «hacer solo esta parte».
 
