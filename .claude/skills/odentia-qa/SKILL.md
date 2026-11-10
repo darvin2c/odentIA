@@ -17,7 +17,8 @@ Las voces y su método están en `references/voces.md`. Cómo se las convoca y s
 ## Reglas de toda ronda
 
 - **La ronda no pregunta.** Si falta un acceso (segundo factor, contraseña, una demo sin marcar), no se detiene a pedirlo: usa la alternativa permitida por esta skill (local, apartado 2) y lo anota en el informe. Solo se frena ante lo que esta skill marca como prohibido, nunca por comodidad.
-- **Lo que espera del usuario va siempre como pregunta, con sugerencia.** Al informar, cada decisión pendiente se le pregunta de forma concreta, con la opción que se recomienda y su motivo. No vale dejar «pendiente» o «espera tu sí» sin pregunta ni sugerencia.
+- **Una decisión de producto se le lleva al usuario como pregunta, con sugerencia.** Al informar, cada una se le pregunta de forma concreta, con la opción que se recomienda y su motivo. No vale dejar «pendiente» o «espera tu sí» sin pregunta ni sugerencia.
+- **Sin recomendación no hay pregunta.** Solo se pregunta cuando la decisión ya está estudiada y es del usuario. Lo que espera otra cosa (un informe, una ronda en curso, una confirmación) se dice como lo que es: qué falta y qué sigue. No se pregunta si esperar, en qué orden ir ni nada que la ronda puede decidir sola, y una respuesta no se cierra con preguntas por costumbre.
 - **Lo que es un error se corrige; no se pregunta.** Se anota en qué orden se corrige y por qué. Solo se le pregunta al usuario lo que es una decisión de producto: quitar, agregar o cambiar algo que funciona.
 - **En producción, solo dentro de una demo que la ronda crea para sí misma** desde la administración (ADR 0096: marcada «Demo» y sin cobro). Nunca en una clínica real, ni en las cuentas del usuario. Al terminar, la ronda elimina su demo y verifica que la eliminación sea completa. Las demos de cada ronda se anotan en `~/odentia-qa/demos.md`.
 - **Ningún mensaje sale de la demo.** En producción los envíos son reales, así que hay dos barreras:
