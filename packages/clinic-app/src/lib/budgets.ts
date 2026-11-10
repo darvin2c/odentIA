@@ -744,7 +744,7 @@ export function fetchTreatmentPlanDetail(
 
 /** «Qué sigue» del plan: frase y botón que decide el servidor. */
 export interface PlanNextStep {
-  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "cerrar" | "ninguno"
+  kind: "enviar" | "agendar" | "respuesta" | "continuar" | "reservado" | "control" | "cerrar" | "ninguno"
   text: string
   detail: string | null
   action: {

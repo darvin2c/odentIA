@@ -607,11 +607,11 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     }
     if (!data.demographics.phone && !data.demographics.email && !representativeContact) errors["demographics.phone"] = "Escribe un teléfono o un correo"
   } else if (context.scope === "essentials") {
-    // Lo mínimo que registra el equipo al reservar: nombres, apellidos y, si se
-    // conoce, el teléfono (a quien escribe ya se le conocen sus canales; a quien
-    // llega por la Agenda el servicio le exige el teléfono). Como en el enlace
-    // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
-    // pendiente (`pendingRegistrationFields`).
+    // Lo mínimo que registra el equipo: nombres, apellidos y, si lo tiene, el
+    // teléfono (a quien escribe ya se le conocen sus canales; quien llega sin
+    // celular se registra igual y la pantalla avisa que no le llegarán sus
+    // avisos). Como en el enlace de reserva, lo que la clínica exige y aquí no
+    // se pide no bloquea: queda pendiente (`pendingRegistrationFields`).
     essentialIdentityErrors(data, errors, (key) => (ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key))
   } else if (config.version > 0) {
     // Alta interna: lo que la clínica configuró como obligatorio también lo es

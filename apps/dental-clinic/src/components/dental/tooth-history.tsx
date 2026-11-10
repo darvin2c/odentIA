@@ -15,6 +15,8 @@ export interface ToothEvent {
   code: string | null
   surfaces: string[]
   status: string
+  /** El estado dicho por el servidor cuando la clave no alcanza («Sesión 1 de 2 · hecha»). */
+  statusText?: string | null
   detail: string | null
   encounterId: string | null
   encounterOpen: boolean
@@ -135,7 +137,7 @@ export function ToothHistory({
                         : ""}
                     </span>
                     <Badge variant={event.status === "tratado" ? "success" : "outline"}>
-                      {STATUS_LABELS[event.status] ?? event.status}
+                      {event.statusText ?? STATUS_LABELS[event.status] ?? event.status}
                     </Badge>
                   </p>
                   <p className="text-xs text-muted-foreground">

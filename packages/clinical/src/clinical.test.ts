@@ -3,6 +3,7 @@ import {
   ageLabel,
   composeDisplayName,
   identityDocumentError,
+  isFictionalPhone,
   normalizePhone,
   phoneFormatError,
   whatsappNumberProblem,
@@ -189,6 +190,14 @@ describe("identidad estándar", () => {
     // Sin perfil de país no se supone ningún formato.
     expect(whatsappNumberProblem("+5199215437", "CL")).toBeNull()
     expect(whatsappNumberProblem("+5199215437")).toBeNull()
+  })
+
+  it("el rango de ficción del Reino Unido es un número de prueba; los demás no", () => {
+    expect(isFictionalPhone("+447700900881")).toBe(true)
+    expect(isFictionalPhone("+447700900000")).toBe(true)
+    expect(isFictionalPhone("+447700901000")).toBe(false)
+    expect(isFictionalPhone("+51987654321")).toBe(false)
+    expect(isFictionalPhone(null)).toBe(false)
   })
 
   it("normaliza teléfonos, valida documentos y compone el nombre", () => {

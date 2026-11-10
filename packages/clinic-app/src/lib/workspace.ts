@@ -201,6 +201,10 @@ export type WaitingRow =
       createdAt: string
       /** `registro`: hay lo que escribió para decidir en «¿Es la misma persona?». */
       held?: boolean
+      /** `registro` guardado: por qué se parece. */
+      match?: "documento" | "celular"
+      /** `registro` guardado: cuántos datos de lo que escribió no coinciden con lo que ya tiene. */
+      differences?: number
     }
   /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }

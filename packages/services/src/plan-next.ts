@@ -54,6 +54,7 @@ import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
+import { nextSessionFromOf, SESSION_GAP_NOTE } from "./session-gap.js"
 import {
   appointmentServesControl,
   canBookAnother,
@@ -77,7 +78,7 @@ import {
  * lista de la ficha (`getPlanNextSteps`), con «¿Vino?», que abre la cita para registrar la atención
  * o decir que no vino. La frase única y la fila de Pacientes no la dicen.
  */
-export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "cerrar" | "ninguno"
+export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "reservado" | "control" | "cerrar" | "ninguno"
 
 export interface PlanNextAction {
   /** «Enviar», «Reservar cita» o «¿Qué respondió?». */
@@ -368,6 +369,7 @@ async function planFactsOf(
       sessions,
       controls,
       carriedAt: await carriedAtOf(tx, orgId, [patientId]),
+      sessionFrom: await nextSessionFromOf(tx, orgId, items.filter((item) => item.status === "en_curso").map((item) => item.id)),
       callbacks: new Map(
         callbacks.map((row) => [
           row.key.slice(BUDGET_CALLBACK_KEY.length),
@@ -519,6 +521,11 @@ async function planFactsMany(
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   const openEncounters = await openEncountersOf(tx, orgId, ids)
   const carriedAt = await carriedAtOf(tx, orgId, ids)
+  const sessionFrom = await nextSessionFromOf(
+    tx,
+    orgId,
+    [...itemsOf.values()].flat().filter((item) => item.status === "en_curso").map((item) => item.id),
+  )
   // «No contesta · volver a llamar» de cada uno: la fila de Pacientes dice lo mismo que la ficha.
   const callbackRows = await tx.execute<{ patientId: string; key: string; dueAt: Date | null; reason: string | null }>(sql`
     select patient_id as "patientId", idempotency_key as key, due_at as "dueAt", reason from task
@@ -542,6 +549,7 @@ async function planFactsMany(
       withAppointment,
       sessions,
       carriedAt,
+      sessionFrom,
       callbacks: callbacksOf.get(person.id),
       controls: controlsOf.get(person.id) ?? [],
       nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
@@ -583,7 +591,7 @@ async function planContext(tx: Db, orgId: string): Promise<PlanContext> {
 }
 
 /** La próxima cita por venir que lleva cada tratamiento. */
-async function carriedAtOf(tx: Db, orgId: string, patientIds: string[]): Promise<Map<string, Date>> {
+export async function carriedAtOf(tx: Db, orgId: string, patientIds: string[]): Promise<Map<string, Date>> {
   if (patientIds.length === 0) return new Map()
   const rows = await tx
     .select({ planItemId: appointmentPlanItem.planItemId, startsAt: appointment.startsAt })
@@ -636,6 +644,8 @@ interface PlanFacts {
   controlOrigins?: ReadonlyMap<string, { professionalName: string | null; at: Date; reason: string | null }>
   /** La próxima cita por venir que lleva cada tratamiento: cuándo es la sesión de lo que va antes. */
   carriedAt?: ReadonlyMap<string, Date>
+  /** Desde qué día conviene la próxima sesión de lo empezado (`nextSessionFromOf`): la endodoncia, una semana. */
+  sessionFrom?: ReadonlyMap<string, string>
   /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
 }
@@ -698,8 +708,12 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   const awaiting = budgets.filter((budget) => budget.awaitsAnswer).at(-1) ?? null
   // Un tratamiento en curso sin cita para su próxima sesión, o uno que ya tiene
   // su primera cita (o sesión) y le faltan otras por reservar.
+  // La sesión siguiente se pide cuando la anterior ya se hizo y no hay otra en pie: con la sesión 1
+  // de la corona reservada, la 2 se reserva en esa cita, cuando se sabe cuánto tarda el laboratorio
+  // (QA del 9 nov, repaso 3). Reservarla antes sigue siendo posible desde la agenda.
+  const asksNext = (item: PlanItemRow) => countOf(item).done > 0 && countOf(item).booked === 0
   const continuing =
-    started ?? items.find((item) => canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0) ?? null
+    started ?? items.find((item) => canBookAnother(item, countOf(item)) && asksNext(item)) ?? null
   // Para la lista, todos los que siguen así, sin lo que ya va en «lo aceptado sin cita»: el
   // mismo tratamiento no sale dos veces (uno ya empezado, con su cita de hoy pasada, también
   // queda «por agendar»).
@@ -707,8 +721,18 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     (item) =>
       !toStart.some((other) => other.id === item.id) &&
       ((item.status === "en_curso" && isToSchedule(item, withAppointment)) ||
-        (canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0)),
+        (canBookAnother(item, countOf(item)) && asksNext(item))),
   )
+  // Lo que ya tiene la cita de su próxima sesión: no falta nada, pero se dice cuándo es, para no
+  // leer «Nada pendiente» con una endodoncia abierta (QA del 9 nov, repaso 3). Solo a quien ve la agenda.
+  const bookedNext = seesAgenda
+    ? items.filter(
+        (item) =>
+          item.decisionStatus === "aceptado" &&
+          (TO_SCHEDULE_STATUSES as readonly string[]).includes(item.status) &&
+          !!facts.carriedAt?.get(item.id),
+      )
+    : []
 
   // --- Los controles ---------------------------------------------------------------------
   // Se cumple con su atención de hoy (`servedToday`) o con una cita por venir que le sirve
@@ -776,8 +800,33 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
         : {}),
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
-        ? { label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión", planItemIds: [item.id], serviceId: item.serviceId }
+        ? {
+            label: numbered ? `Reservar la sesión ${n}` : "Reservar la próxima sesión",
+            planItemIds: [item.id],
+            serviceId: item.serviceId,
+            // No mañana: lo que su tratamiento deja entre sesiones (QA del 9 nov, repaso 3).
+            ...(facts.sessionFrom?.get(item.id)
+              ? { date: facts.sessionFrom.get(item.id)!, note: SESSION_GAP_NOTE }
+              : {}),
+          }
         : null,
+    }
+  }
+
+  /** «Corona · sesión 1 de 2: mar 10 nov, 09:00», sin botón: ya tiene su cita. */
+  const bookedStep = (item: PlanItemRow): PlanNextStep => {
+    const at = facts.carriedAt!.get(item.id)!
+    const n = countOf(item).done + 1
+    const session = showsSession(n, item.plannedSessions) ? ` · ${sessionWords(n, item.plannedSessions)}` : ""
+    const time = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(at)
+    const weekday = new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: timezone }).format(at).replace(".", "")
+    const more = item.plannedSessions > n
+    return {
+      kind: "reservado",
+      text: `${item.title}${session}: ${weekday} ${day(at)}, ${time}`,
+      // La siguiente se reserva en esa cita: en la corona depende del laboratorio.
+      detail: more ? `Con su cita · la sesión ${n + 1} se reserva en esa cita` : "Con su cita",
+      action: null,
     }
   }
 
@@ -806,6 +855,11 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     return titles.length > 3 ? `${titles.slice(0, 3).join(" · ")} · y ${titles.length - 3} más` : titles.join(" · ")
   }
   const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+  /** El día siguiente a `YYYY-MM-DD`. */
+  const nextDayOf = (key: string) => {
+    const [y, m, d] = key.split("-").map(Number)
+    return new Date(Date.UTC(y!, m! - 1, d! + 1)).toISOString().slice(0, 10)
+  }
   /** El día siguiente a `date`, en la zona de la clínica (`YYYY-MM-DD`). */
   const dayAfter = (date: Date) => {
     const [y, m, d] = dayKey(date).split("-").map(Number)
@@ -848,6 +902,9 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       const blocker = blockerOf(listWaiting[0]!)!
       const at = facts.carriedAt?.get(blocker.id)
       const before = beforeWords(blocker)
+      // Sin cita lo de antes, al menos después de cuando conviene su próxima sesión: no hoy
+      // (pendiente de la entrega 8: reservar desde la ficha proponía hoy).
+      const blockerFrom = facts.sessionFrom?.get(blocker.id)
       return {
         kind: "agendar",
         text: `${namesOf(listWaiting)}: va después de terminar ${blocker.title}`,
@@ -857,7 +914,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
               label,
               planItemIds: listWaiting.map((item) => item.id),
               serviceId: listWaiting[0]?.serviceId ?? null,
-              ...(at ? { date: dayAfter(at) } : {}),
+              ...(at ? { date: dayAfter(at) } : blockerFrom ? { date: nextDayOf(blockerFrom) } : {}),
               note: `Va después de terminar ${blocker.title} (${before}).`,
             }
           : null,
@@ -1081,6 +1138,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     blockerOf,
     laterControl,
     continueStep,
+    bookedNext,
+    bookedStep,
     sendStep,
     scheduleStep,
     answerStep,
@@ -1144,6 +1203,11 @@ function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
   for (const item of ordered) {
     if (item.id === sessionFirst?.id || p.toStart.some((other) => other.id === item.id)) continue
     steps.push(p.continueStep(item))
+  }
+  // Lo que ya tiene la cita de su próxima sesión, después de lo que falta hacer.
+  for (const item of p.bookedNext) {
+    if (steps.some((step) => step.action?.planItemIds?.includes(item.id))) continue
+    steps.push(p.bookedStep(item))
   }
   if (p.laterControl) steps.push(p.controlStep(p.laterControl))
   return steps

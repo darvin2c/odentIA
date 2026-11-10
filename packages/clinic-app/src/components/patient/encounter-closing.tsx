@@ -44,6 +44,7 @@ import {
   type ClosingResolvable,
   type ClosingSession,
   controlDaySaid,
+  keepsDiagnosis,
   type HealthGap,
   type NextSession,
   type SignatureRegistration,
@@ -352,6 +353,13 @@ export function ClosingNextVisit({
   const beside = values.askControl ? controlBesideAccepted(continuing, day) : null
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
+      {/* El control que trae su cita de hoy se cumple al firmar: se dice cuál y de quién (QA del 9 nov, repaso 3). */}
+      {controls.byAppointment.map((control) => (
+        <p key={control.id} className="text-sm">
+          Se cumple su {inSentence(control.title)}
+          {control.byName ? `, que indicó ${control.byName}` : ""}: era su cita de hoy.
+        </p>
+      ))}
       {controls.due.length > 0 ? (
         <FieldSet className="gap-2">
           <FieldLegend variant="label" className="mb-0">
@@ -692,7 +700,7 @@ export function ClosingSessions({
       ))}
       {/* Lo que el tratamiento terminado resuelve: marcado, se desmarca si no (QA del 9 nov). */}
       {resolving.map((found) => {
-        const kept = found.diagnosisIds.some((id) => keepDiagnoses?.has(id))
+        const kept = keepsDiagnosis(found, keepDiagnoses ?? new Set())
         const checkboxId = `${ids}-resuelve-${found.diagnosisIds[0]}`
         return (
           <li key={found.diagnosisIds.join(",")} className="flex items-start gap-2">
@@ -700,13 +708,18 @@ export function ClosingSessions({
               id={checkboxId}
               checked={!kept}
               disabled={disabled || !onKeepDiagnosis}
-              onCheckedChange={(checked) => onKeepDiagnosis?.(found.diagnosisIds, checked !== true)}
+              // Lo que sana en su control se guarda como «tocado» al marcarlo; lo demás, al desmarcarlo.
+              onCheckedChange={(checked) =>
+                onKeepDiagnosis?.(found.diagnosisIds, found.followUp ? checked === true : checked !== true)
+              }
             />
             <label htmlFor={checkboxId} className="leading-snug">
               {found.label}
               {found.site ? ` · ${found.site}` : ""} pasa a resuelto
               <span className="block text-xs text-muted-foreground">
-                Lo resuelve {labelOfPlanItem(found.planItemIds, sessions, labelOf)}. Desmárcalo si sigue activo.
+                {found.followUp
+                  ? "Una lesión periapical se da por sanada en su control con radiografía: márcalo solo si ya sanó."
+                  : `Lo resuelve ${labelOfPlanItem(found.planItemIds, sessions, labelOf)}. Desmárcalo si sigue activo.`}
               </span>
             </label>
           </li>

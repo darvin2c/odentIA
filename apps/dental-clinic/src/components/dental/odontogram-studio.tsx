@@ -2,6 +2,7 @@ import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
 import { usePermission } from "@odentia/clinic-app/lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import { statusLabel } from "@odentia/clinic-app/lib/patients"
+import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   activeFindingsAsOf,
@@ -322,10 +323,12 @@ function StudioBody({
   const evolutionEmpty = selection.length === 0 && (visibleHistory.length === 0 || compact)
   const evolutionBelow = !wide && !compact && selection.length === 0
   function historyList(entries: OdontogramEntry[]) {
+    // Una caries de dos caras es una lesión: una tarjeta con sus caras, como en la atención (QA del
+    // 9 nov, repaso 3: la DO de la 46 salía en dos tarjetas en la ficha).
     return (
       <ol className="ml-2 flex flex-col gap-5 border-l pl-5">
-        {entries.map((entry) => (
-          <li key={entry.id} className="relative rounded-lg border bg-background p-4">
+        {groupFindings(entries).map(({ first: entry, ids, surfaces }) => (
+          <li key={ids.join(",")} className="relative rounded-lg border bg-background p-4">
             <span
               aria-hidden
               className="absolute top-5 -left-[26px] size-2.5 rounded-full border-2 border-background bg-muted-foreground"
@@ -351,9 +354,9 @@ function StudioBody({
                 ) : null}
               </div>
             </div>
-            {(entry.surface || entry.diagnosisCode) && (
+            {(surfaces.length > 0 || entry.diagnosisCode) && (
               <p className="mt-3 text-sm text-muted-foreground">
-                {entry.surface ? surfaceLabel(entry.surface) : "Pieza completa"}
+                {surfaces.length > 0 ? surfaces.map((surface) => surfaceLabel(surface)).join(" y ") : "Pieza completa"}
                 {entry.diagnosisCode
                   ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}`
                   : ""}

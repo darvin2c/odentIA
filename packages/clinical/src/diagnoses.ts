@@ -293,6 +293,22 @@ const PULP_DIAGNOSES: Partial<Record<DiagnosisSystemKey, PulpDiagnosisChoice[]>>
   ],
 }
 
+/**
+ * Un diagnóstico que no se da por resuelto al terminar el tratamiento, sino en
+ * su control: la lesión periapical (periodontitis apical, absceso periapical)
+ * sana en meses y se comprueba con una radiografía, al menos al año (ESE,
+ * Quality guidelines for endodontic treatment, Int Endod J 2006;39:921-930).
+ * La endodoncia terminada sí resuelve la pulpitis. Por código de la lista:
+ * CIE-10 K04.4 a K04.7 (también la del MINSA y la CIE-10-ES, que los
+ * subdivide) y CIE-11 DA09.6 y DA09.7 con sus subcódigos.
+ */
+export function healsAtFollowUp(system: string | null | undefined, code: string | null | undefined): boolean {
+  if (!code) return false
+  const value = code.trim().toUpperCase()
+  if (system === "ICD-11") return /^DA09\.[67]/.test(value)
+  return /^K04\.[4-7]/.test(value)
+}
+
 /** Los diagnósticos pulpares de esa lista, o ninguno si no tiene atajos. */
 export function pulpDiagnosisChoices(system: DiagnosisSystemKey): readonly PulpDiagnosisChoice[] {
   return PULP_DIAGNOSES[system === "ICD-10-PE" ? "ICD-10" : system] ?? []

@@ -212,6 +212,7 @@ No tiene camino en el código.
 - [ ] Corregir deja el rastro de todo lo que cambió, incluido el comprobante.
 - [ ] El pago a un especialista que no está en planilla (recibo por honorarios) dice a quién y su RUC, y no se suma dos veces con su comisión.
 - [ ] Gastos y Reportes dicen la misma cifra por tipo y por sede.
+- [ ] Del lado de lo que cobra la clínica: con deuda abierta, un adelanto sin «Para» lo avisa y ofrece cobrarlo a lo que debe; todo ticket dice cuánto le falta pagar y cuánto le queda a favor, y la lista de Cobros no suma como dinero lo que solo usó saldo a favor.
 
 **Fuentes:** ADR 0061, 0150, 0151 y 0167. SUNAT: tabla 10 de comprobantes, RUC de 11 dígitos con verificador y el registro de compras (verificar los artículos antes de citarlos).
 

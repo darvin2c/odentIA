@@ -71,6 +71,17 @@ export interface ClosingResolvable {
   planItemIds: string[]
   label: string
   site: string | null
+  /** Sana en su control (la periodontitis apical): se propone sin marcar. */
+  followUp?: boolean
+}
+
+/**
+ * Si el diagnóstico sigue activo al firmar. `keep` guarda lo que quien firma tocó: lo propuesto
+ * marcado que desmarcó y, en lo que sana en su control, lo que marcó.
+ */
+export function keepsDiagnosis(found: ClosingResolvable, keep: ReadonlySet<string>): boolean {
+  const touched = found.diagnosisIds.some((id) => keep.has(id))
+  return found.followUp ? !touched : touched
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión. */
@@ -106,7 +117,8 @@ export interface NextSession {
   title: string
   serviceId: string | null
   booked: BookedSession | null
-  toBook: { n: number; m: number } | null
+  /** `from`: desde qué día conviene (la endodoncia, una semana después), si no es mañana. */
+  toBook: { n: number; m: number; from?: string } | null
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */
@@ -137,7 +149,7 @@ export interface ClosingControls {
   /** Los meses de «En N meses» del producto. */
   recallMonths: number
   /** Los controles reservados en la cita de esta atención: se cumplen al firmarla. */
-  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null }>
+  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null; byName?: string | null }>
   /** El día de cada atajo («2026-11-14»), en la zona de la clínica. */
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]

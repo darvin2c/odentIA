@@ -125,6 +125,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Motivo, tiempo y relato son campos de la página, sin cajón. Se guardan mientras se escribe.
 - [ ] Hay un solo borrador por paciente. Si otro profesional lo toma, queda registrado (`takeOverEncounter`).
 - [ ] Se atiende sin cita (ADR 0098) y en domingo o fuera de horario, si la clínica lo permite.
+- [ ] Si viene por la cita de un control, «Hoy viene a…» lo sigue diciendo después de usar la cita como motivo, y el cierre nombra el control que se cumple y quién lo indicó.
 
 **Ya falló:** la atención sin cita salía en blanco (8 nov, PR 549); por la cita no proponía el diagnóstico, y por la ficha sí (9 nov); «Hoy viene a…» ofrecía «Corona · Hacerla hoy» con la endodoncia en curso (9 nov, tarde).
 **Fuentes:** NTS 139-MINSA (motivo, tiempo de enfermedad y relato); ADR 0002, 0003, 0098, 0128, 0139 y 0165.
@@ -196,6 +197,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Cada renglón indicado hoy tiene «Cambiar» y «Quitar», y «Cambiar» conserva el precio acordado.
 - [ ] Avisa si ya se hizo antes en esa pieza.
 - [ ] Lo anulado no ensucia el plan con renglones tachados.
+- [ ] «Cambiar» un tratamiento por otro de distinto tipo recalcula la fase y las sesiones, y deja verlas y editarlas. Caso: urgencia con exodoncia indicada que se cambia a endodoncia; el cierre no debe traer «Sí, terminar».
 
 **Ya falló:** «Endodoncia anterior vital» se ofrecía para un molar (demo) y el consentimiento firmado decía «anterior · pieza 46» (9 nov); la endodoncia indicada desde el odontograma no preguntaba sesiones y venía «Sí, terminar» marcado (9 nov); la corona antes de terminar la endodoncia del mismo diente (9 nov); «sesión 2» que contaba una cita pasada (PR 550).
 **Fuentes:** ADR 0034, 0099, 0153, 0161 y 0164.
@@ -262,6 +264,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
   - **Restauración:** material, clase y caras.
   Hoy ningún procedimiento tiene datos propios.
 - [ ] Anular un procedimiento pide motivo y deshace lo dibujado.
+- [ ] Tras la medicación intraconducto, la sesión siguiente se propone a 7 días o más (Sjögren y col., Int Endod J 1991;24:119-125; la AAE y la ESE no fijan plazo: confirmar con una clínica real).
 
 **Ya falló:** el procedimiento sin nota de la sesión y el tratamiento duplicado en la lista (8 nov).
 **Huecos conocidos:** ningún procedimiento tiene datos propios de su especialidad.
@@ -326,6 +329,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 - [ ] Si una sesión termina en «Falta otra sesión» y lo que va después ya tiene cita, el cierre lo avisa para revisar esa cita.
 - [ ] El cierre dice lo que se cargó hoy y una sola cifra de lo que debe, que sigue siendo cierta después de cobrar ahí mismo.
+- [ ] La periodontitis apical o el absceso periapical no se proponen resueltos al terminar la endodoncia: sanan en su control con radiografía. La pulpitis sí.
 
 **Ya falló:** tras un pago parcial, el cierre decía a la vez «Quedó por cobrar S/ 450» y «Debe S/ 200», y en la sesión 2 «ya estaba incluido en lo cobrado» debiendo 200 (9 nov); «Sí, terminar» venía marcado aunque faltaba una sesión; la sesión 2 se proponía el mismo día; el control de otro odontólogo venía desmarcado (8 y 9 nov; PR 524, 533, 535 y 537).
 **Fuentes:** NTS 139-MINSA; ADR 0003, 0152 y 0161.
@@ -352,6 +356,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Una atención en curso no queda suelta ni se confunde con una firmada.
 - [ ] El PDF, el odontograma impreso y la hoja del seguro dicen lo mismo que la pantalla.
 - [ ] La copia de la historia y la exportación FHIR traen todo (ADR 0080).
+- [ ] La tarjeta plegada dice la sesión y el estado (sesión 2 de 2 · tratamiento terminado; pulpitis resuelta). Lo quitado figura igual plegado y abierto, y una receta cuenta como indicación registrada.
 
 **Ya falló:** la Historia ilegible por evento suelto (PR 551); «¿Vino?» abría «Por confirmar».
 **Fuentes:** NTS 139-MINSA; HL7 FHIR R4; ADR 0080, 0115 y 0133.
@@ -365,6 +370,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] La lista de vencidos de Inicio tiene un número real y lleva a atenderlos.
 - [ ] La endodoncia deja un control corto (a 30 días o menos, que puede ir en la cita de la corona) y uno radiográfico de cicatrización (ESE 2006: al menos al año), que no se da por cumplido con el corto.
 - [ ] El recordatorio que sale al paciente coincide con el control.
+- [ ] Al terminar una endodoncia queda su control clínico y radiográfico al año, además del corto (ESE, Quality guidelines 2006, Int Endod J 39:921-930).
 
 **Ya falló:** «Indica el próximo control» sin botón; el control y la cita separados (6 nov).
 **Fuentes:** ADR 0152.

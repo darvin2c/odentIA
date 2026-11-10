@@ -109,6 +109,35 @@ export function budgetAnswerText(decision: string | null | undefined): string {
   }
 }
 
+/** Los estados de un tratamiento, en palabras (nunca «en_curso»). */
+const PLAN_STATE_WORDS: Record<string, string> = {
+  pendiente: "Pendiente",
+  programado: "Con cita",
+  en_curso: "En curso",
+  suspendido: "Suspendido",
+  realizado: "Realizado",
+  cancelado: "Cancelado",
+  reemplazado: "Reemplazado",
+}
+
+/**
+ * Una sola etiqueta por tratamiento (U8 de la QA de la ficha): mientras no
+ * empieza, su decisión («Aceptado», «Lo está pensando»); después, su estado.
+ * La usan la tarjeta de la Historia y el detalle de la atención, para que lo
+ * plegado y lo abierto digan lo mismo (tercer repaso del 9 nov, E9).
+ */
+export function planItemStateText(status: string, decision: string | null | undefined): string {
+  if ((status === "pendiente" || status === "programado") && decision && decision !== "aceptado")
+    return budgetAnswerText(decision)
+  if (status === "pendiente" && decision === "aceptado") return "Aceptado"
+  return PLAN_STATE_WORDS[status] ?? status
+}
+
+/** Lo que ya no es trabajo vigente: se pliega en «Ya no vigente», no se tacha. */
+export function isRetiredPlanStatus(status: string): boolean {
+  return status === "cancelado" || status === "reemplazado"
+}
+
 /** «Opción A» para la posición 1. */
 export function budgetOptionLabel(position: number): string {
   const letter = String.fromCharCode(64 + Math.min(Math.max(Math.trunc(position), 1), 26))

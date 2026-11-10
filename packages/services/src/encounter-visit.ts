@@ -12,6 +12,7 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
+  clinicalFollowUp,
   encounter,
   encounterDiagnosis,
   encounterPlanItem,
@@ -76,6 +77,11 @@ export interface VisitControl {
   byName: string | null
   /** Se eligió al empezar («Viene a su control»): se cumple al firmar. */
   chosen: boolean
+  /**
+   * Reservado en la cita de esta atención: viene a él y se cumple al firmar, sin elegirlo. Se sigue
+   * viendo después de usar la cita como motivo (QA del 9 nov, repaso 3).
+   */
+  byAppointment?: boolean
 }
 
 export interface EncounterVisit {
@@ -188,9 +194,32 @@ export async function encounterVisitOf(
   })
   const { timezone } = await findOrgLocale(tx, orgId)
   const due = await dueControlsOf(tx, orgId, row.professionalUserId, row, timezone)
+  // El control reservado en la cita de hoy no está «por cumplir» (ya tiene cita): es a lo que viene.
+  const booked = row.appointmentId
+    ? await tx
+        .select({
+          id: clinicalFollowUp.id,
+          title: clinicalFollowUp.title,
+          dueAt: clinicalFollowUp.dueAt,
+          originProfessionalUserId: encounter.professionalUserId,
+        })
+        .from(clinicalFollowUp)
+        .leftJoin(
+          encounter,
+          and(eq(encounter.id, clinicalFollowUp.originEncounterId), eq(encounter.organizationId, clinicalFollowUp.organizationId)),
+        )
+        .where(
+          and(
+            eq(clinicalFollowUp.organizationId, orgId),
+            eq(clinicalFollowUp.patientId, row.patientId),
+            eq(clinicalFollowUp.status, "programado"),
+            eq(clinicalFollowUp.appointmentId, row.appointmentId),
+          ),
+        )
+    : []
   const others = [
     ...new Set(
-      due.flatMap((control) =>
+      [...due, ...booked].flatMap((control) =>
         control.originProfessionalUserId &&
         control.originProfessionalUserId !== row.professionalUserId
           ? [control.originProfessionalUserId]
@@ -209,7 +238,7 @@ export async function encounterVisitOf(
       )
     : new Map<string, string>()
   const now = Date.now()
-  const [booked] = row.appointmentId
+  const [next] = row.appointmentId
     ? []
     : await tx.execute<{ startsAt: Date; serviceName: string | null }>(sql`
       select starts_at as "startsAt", service_name as "serviceName" from appointment
@@ -217,10 +246,22 @@ export async function encounterVisitOf(
         and starts_at > now() and not is_test
       order by starts_at limit 1`)
   return {
-    booked: booked ? { startsAt: new Date(booked.startsAt), serviceName: booked.serviceName } : null,
+    booked: next ? { startsAt: new Date(next.startsAt), serviceName: next.serviceName } : null,
     treatments,
     moreTreatments: Math.max(0, rows.length - treatments.length),
-    controls: due.map((control) => ({
+    controls: [
+      ...booked.map((control) => ({
+        id: control.id,
+        title: control.title,
+        dueAt: control.dueAt,
+        overdue: control.dueAt.getTime() < now,
+        byName: control.originProfessionalUserId
+          ? (names.get(control.originProfessionalUserId) ?? null)
+          : null,
+        chosen: true,
+        byAppointment: true,
+      })),
+      ...due.map((control) => ({
       id: control.id,
       title: control.title,
       dueAt: control.dueAt,
@@ -230,6 +271,7 @@ export async function encounterVisitOf(
         : null,
       chosen: control.chosen,
     })),
+    ],
   }
 }
 

@@ -151,11 +151,22 @@ async function sessionsForAnother(
   tx: Db,
   orgId: string,
   ids: string[],
-): Promise<Map<string, { signed: number; frozen: number }>> {
-  const out = new Map<string, { signed: number; frozen: number }>()
+): Promise<Map<string, { signed: number; frozen: number; oneOff?: boolean }>> {
+  const out = new Map<string, { signed: number; frozen: number; oneOff?: boolean }>()
   if (ids.length === 0) return out
-  const rows = await tx.execute<{ id: string; signed: number; frozen: number }>(sql`
+  const oneOffKinds = (await hooksOf(tx, orgId)).oneOffKinds ?? []
+  const oneOffSql = oneOffKinds.length
+    ? sql`tpl.specialty in (${sql.join(
+        oneOffKinds.map((kind) => sql`${kind}`),
+        sql`, `,
+      )})`
+    : sql`false`
+  const rows = await tx.execute<{ id: string; signed: number; frozen: number; one_off: boolean | null }>(sql`
     select item.id,
+      -- Una consulta, una evaluación o una radiografía se hacen de una vez: no piden otra sesión
+      -- (QA del 9 nov, repaso 3: la consulta de una urgencia ofrecía «Falta otra sesión»).
+      (select ${oneOffSql} from service_catalog svc join treatment_template tpl on tpl.id = svc.template_id
+        where svc.organization_id = item.organization_id and svc.id = item.service_id) as one_off,
       (select count(distinct e.id)::int from encounter_procedure ep
         join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
         where ep.organization_id = item.organization_id and ep.plan_item_id = item.id and ep.voided_at is null
@@ -164,16 +175,22 @@ async function sessionsForAnother(
         where c.organization_id = item.organization_id and c.plan_item_id = item.id and c.voided_at is null) as frozen
     from treatment_plan_item item
     where item.organization_id = ${orgId} and item.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
-  for (const row of rows) out.set(row.id, { signed: Number(row.signed), frozen: Number(row.frozen) })
+  for (const row of rows) out.set(row.id, { signed: Number(row.signed), frozen: Number(row.frozen), oneOff: row.one_off === true })
   return out
 }
 
 /** Si un realizado puede volver a en curso: lo firmado llega a sus previstas y a lo que repartió su comisión. */
 function anotherSessionAllowed(
   item: { status: string; plannedSessions: number },
-  money: { signed: number; frozen: number } | undefined,
+  money: { signed: number; frozen: number; oneOff?: boolean } | undefined,
 ): boolean {
-  return item.status === "realizado" && !!money && money.signed > 0 && money.signed >= Math.max(item.plannedSessions, money.frozen)
+  return (
+    item.status === "realizado" &&
+    !!money &&
+    !money.oneOff &&
+    money.signed > 0 &&
+    money.signed >= Math.max(item.plannedSessions, money.frozen)
+  )
 }
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
@@ -226,6 +243,11 @@ export interface UpdatePlanItemPatch {
   diagnosisCode?: string | null
   /** Lista del código; sin ella, la de la clínica (el ya guardado viaja con la suya). */
   diagnosisSystem?: string | null
+  /**
+   * Sesiones previstas (1–60) mientras no se hizo ninguna. Al cambiar de servicio sin ellas, las
+   * habituales del nuevo: «Cambiar» pide lo mismo que «Indicar» (QA del 9 nov, repaso 3).
+   */
+  plannedSessions?: number | null
   /** Atención borrador actual como contexto de mutación (obligatorio, nunca reescribe el origen). */
   encounterId: string
 }
@@ -1218,6 +1240,9 @@ export async function updatePlanItem(
       set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
       // Sin sesiones hechas, también las sesiones previstas son las del servicio nuevo (ADR 0164).
       if (current.status === "pendiente" || current.status === "programado") set.plannedSessions = service.usualSessions
+      // Y su fase: la exodoncia cambiada por una endodoncia no se queda en la quirúrgica (QA del 9 nov,
+      // repaso 3). Es la misma regla que al indicar; el orden del plan sale de ella («va después»).
+      set.phase = hooks.phaseFor(await serviceKindOf(tx, orgId, service))
       fields.push("serviceId")
     }
   }
@@ -1242,6 +1267,14 @@ export async function updatePlanItem(
     if (fields.includes("site") && !fields.includes("serviceId")) {
       // El sitio se valida contra el scope vigente del ítem.
     }
+  }
+  const plannedSessions = assertPlannedSessions(patch.plannedSessions)
+  if (plannedSessions !== null && plannedSessions !== (set.plannedSessions ?? current.plannedSessions)) {
+    // Con una sesión hecha, las previstas se cambian desde el Plan («Planificar»), que mira las hechas.
+    if (current.status !== "pendiente" && current.status !== "programado")
+      throw invalidField("plannedSessions", "Ya empezó: cambia sus sesiones desde el Plan")
+    set.plannedSessions = plannedSessions
+    fields.push("plannedSessions")
   }
   if (patch.detail !== undefined) {
     set.detail = assertDetail(patch.detail)
@@ -1276,6 +1309,7 @@ export async function updatePlanItem(
     // acordó por ese tratamiento (QA del 8 nov, entrega 3: «Cambiar» en la atención
     // volvía a la tarifa y perdía el precio pactado).
     const serviceChanged = fields.includes("serviceId")
+    const sessionsChanged = serviceChanged || fields.includes("plannedSessions")
     const modes = serviceChanged && updated.serviceId ? await readBillingModes(tx, orgId, [updated.serviceId]) : {}
     await tx
       .update(treatmentBudgetItem)
@@ -1296,10 +1330,10 @@ export async function updatePlanItem(
               promotionName: null,
               promotionMode: null,
               billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
-              sessionsPlanned: updated.plannedSessions,
               currency: updated.currency,
             }
           : {}),
+        ...(sessionsChanged ? { sessionsPlanned: updated.plannedSessions } : {}),
         updatedAt: new Date(),
       })
       .where(
@@ -1507,6 +1541,8 @@ export async function reopenPlanItemForSession(
       "ITEM_SESSION_UNSIGNED",
       "Su última sesión está en una atención sin firmar: fírmala y vuelve a intentarlo",
     )
+  if (money.oneOff)
+    throw conflict("ITEM_ONE_OFF", "Una consulta, una evaluación o una radiografía se hace de una vez: no le falta otra sesión")
   if (!anotherSessionAllowed(item, money)) {
     const planned = Math.max(item.plannedSessions, money.frozen)
     throw conflict(
