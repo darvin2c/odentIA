@@ -108,7 +108,7 @@ export function NextUpCard({
         <ul className="flex flex-col divide-y">
           {steps.map((step) => (
             <li
-              key={`${step.kind}-${step.action?.followUpId ?? step.action?.budgetId ?? step.action?.planItemIds?.join() ?? step.text}`}
+              key={`${step.kind}-${step.action?.followUpId ?? step.action?.budgetId ?? step.action?.planItemIds?.join() ?? ""}-${step.action?.appointmentId ?? ""}-${step.text}`}
               className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
             >
               {/* El texto tiene un ancho mínimo: el botón baja de línea en vez de dejarlo en una columna. */}

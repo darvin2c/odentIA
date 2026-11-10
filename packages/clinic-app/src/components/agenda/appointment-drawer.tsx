@@ -569,7 +569,8 @@ function RealAppointmentDrawer({
                   Llegó
                 </SubmitButton>
               ) : null}
-              {canWrite && appointment.visit === "por_confirmar" && !started ? (
+              {/* Para lo que ya se terminó no se confirma: primero usarla o liberarla (QA antes de entregar). */}
+              {canWrite && appointment.visit === "por_confirmar" && !started && !appointment.doneFor ? (
                 // Se anota cómo confirmó: queda en la actividad de la cita.
                 <DropdownMenu>
                   <DropdownMenuTrigger

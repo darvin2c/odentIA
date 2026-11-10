@@ -643,7 +643,7 @@ export function ConsentPaper({
             ) : (
               <p>
                 {consentLinkWords(document) ??
-                  `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
+                  `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. ${document.phoneSignBlock ? "Puedes enviárselo para que lo lea antes; lo firma en la cita." : "También puedes enviárselo para que lo firme desde su teléfono."}`}
               </p>
             )}
             <div className="flex flex-wrap gap-2">

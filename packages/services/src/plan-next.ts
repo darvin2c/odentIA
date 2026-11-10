@@ -428,6 +428,14 @@ async function planFactsOf(
     select idempotency_key as key, due_at as "dueAt", reason from task
     where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'open'
       and idempotency_key like ${`${BUDGET_CALLBACK_KEY}%`}`)
+  // El día de la vuelta que se dijo al cerrar, de su última atención firmada (no anulada).
+  const [returned] = await tx.execute<{ day: string }>(sql`
+    select ev.metadata->'returnsTo'->>'day' as day from audit_event ev
+    join encounter e on e.organization_id = ev.organization_id and e.id::text = ev.entity_id and e.status = 'finalizada'
+    where ev.organization_id = ${orgId} and ev.action = 'encounter.finalized' and ev.entity = 'encounter'
+      and e.patient_id = ${patientId}::uuid and ev.metadata ? 'returnsTo'
+    order by ev.created_at desc limit 1`)
+  const returnDay = returned?.day && returned.day >= dayKeyIn(new Date(), context.timezone) ? returned.day : null
   const freed = !forList
     ? []
     : await (await import("./appointments.js")).freedAppointmentsOf(tx, orgId, patientId, null)
@@ -435,6 +443,7 @@ async function planFactsOf(
     facts: {
       name: firstName(person),
       freed,
+      returnDay,
       budgets,
       items,
       openEncounters: await openEncountersOf(tx, orgId, [patientId], viewerUserId),
@@ -722,6 +731,11 @@ interface PlanFacts {
   sessionFrom?: ReadonlyMap<string, string>
   /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
+  /**
+   * «¿Cuándo vuelve? En 1 semana» para lo aceptado, sin control (M6): el día que se dijo al cerrar
+   * (`YYYY-MM-DD`), si aún no pasó. Recepción lo ve al reservar lo aceptado. Solo de una persona.
+   */
+  returnDay?: string | null
   /** Sus citas por venir que solo llevaban lo ya terminado (`freedAppointmentsOf`). Solo de una persona. */
   freed?: Array<{ id: string; version: number; startsAt: Date; professionalName: string | null; wasFor: string }>
 }
@@ -1101,6 +1115,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
             const origin = isTreatmentControl(row) ? controlOrigins?.get(row.id) : undefined
             return origin?.professionalName ? `lo indicó ${origin.professionalName}` : null
           }),
+          // El día que se dijo al cerrar (QA antes de entregar, entrega 12: no llegaba a recepción).
+          facts.returnDay ? `vuelve hacia el ${day(new Date(`${facts.returnDay}T12:00:00Z`))}` : null,
           bookedBy,
         ]
           .filter(Boolean)
@@ -1123,6 +1139,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
                 }
               : {}),
             ...(join ? { join } : {}),
+            // Se busca hora desde el día que se dijo, si nada pide otro.
+            ...(facts.returnDay && !(opens && control) ? { date: facts.returnDay } : {}),
           }
         : null,
       notice: recordedWarning,

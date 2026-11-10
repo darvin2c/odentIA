@@ -10,7 +10,7 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { and, asc, desc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm"
 import { listPatientDocuments } from "./clinical.js"
 import { withPlanItemParts } from "./plan.js"
 import type { ProductParts } from "./product-hooks.js"
@@ -238,7 +238,8 @@ export async function getTreatmentJourney(
   const replacedBy = await tx
     .select()
     .from(treatmentPlanItem)
-    .where(and(scope, eq(treatmentPlanItem.supersedesItemId, item.id)))
+    // Un reemplazo que se deshizo al anular su atención ya no lo reemplaza (QA antes de entregar, entrega 12).
+    .where(and(scope, eq(treatmentPlanItem.supersedesItemId, item.id), ne(treatmentPlanItem.status, "cancelado")))
   const budgetLines = await tx
     .select({ budget: treatmentBudget, line: treatmentBudgetItem })
     .from(treatmentBudgetItem)

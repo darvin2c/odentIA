@@ -165,6 +165,11 @@ it("M6 y B7: «En 1 semana» sin nada hecho hoy y con lo aceptado sin cita vuelv
   expect(done.controls.next).toBeNull()
   const controls = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.patientId, f.patient.id))
   expect(controls).toHaveLength(0)
+  // Recepción ve el día al reservar lo aceptado (QA antes de entregar).
+  const { steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  const book = steps.find((step) => step.kind === "agendar")
+  expect(book?.action?.date).toBe(closing.controls.shortcuts.week)
+  expect(book?.detail).toContain("vuelve hacia el")
 })
 
 it("A1: cambiado dos veces en la misma atención (A → B → C), anularla vuelve a A y anula B y C", async () => {
