@@ -185,7 +185,7 @@ export function AccountTab({
   // Lo aceptado, lo pagado y lo que falta de cada presupuesto (QA de la ficha del 8 nov):
   // caja lo veía en Plan, a otro clic. Pide caja y presupuesto a la vez.
   const canBudgets = usePermission("budgets.read")
-  // El costo del laboratorio junto a lo cobrado lo ve quien administra comisiones (ADR 0174).
+  // El costo del laboratorio junto a lo cobrado lo ve quien administra comisiones (ADR 0175).
   const canCosts = usePermission("commissions.write")
   const labInvoices = useQuery({
     queryKey: ["finance-payables", "patient", patientId],
@@ -626,7 +626,7 @@ export function AccountTab({
                       </div>
                     ))}
                   </dl>
-                  {/* El laboratorio de cada tratamiento, junto a lo acordado de ese tratamiento (ADR 0174). */}
+                  {/* El laboratorio de cada tratamiento, junto a lo acordado de ese tratamiento (ADR 0175). */}
                   {group.lines.map((line) => {
                     const all = (labInvoices.data?.data.payables ?? []).filter((row) => row.planItemId === line.planItemId)
                     if (all.length === 0) return null

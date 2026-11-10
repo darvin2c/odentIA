@@ -180,7 +180,7 @@ async function audit(
 }
 
 /**
- * Una factura por pagar con su saldo (ADR 0174), bloqueada mientras se paga: dos pagos a la vez no
+ * Una factura por pagar con su saldo (ADR 0175), bloqueada mientras se paga: dos pagos a la vez no
  * pasan de lo que falta. Lo pagado es la suma de sus gastos vigentes.
  */
 export async function lockPayable(tx: Db, orgId: string, payableId: string) {
@@ -1498,7 +1498,7 @@ export async function createExpense(
     cashConcept?: string
     /** Solo `correctExpense`: el gasto que este reemplaza, anulado en la misma operación. */
     replacesExpenseId?: string
-    /** El pago (o una parte) de una factura por pagar (ADR 0174). */
+    /** El pago (o una parte) de una factura por pagar (ADR 0175). */
     payableId?: string
   } = {},
   /**
@@ -2046,7 +2046,7 @@ export async function correctExpense(
   opts: { allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   if (!looksLikeId(expenseId)) throw notFound("Gasto")
-  // El pago de una factura se bloquea en el orden de pagarla: primero la factura (ADR 0174).
+  // El pago de una factura se bloquea en el orden de pagarla: primero la factura (ADR 0175).
   const [owedBy] = await tx
     .select({ payableId: expense.payableId })
     .from(expense)
@@ -2117,7 +2117,7 @@ export async function correctExpense(
         ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
         : {}),
       replacesExpenseId: original.id,
-      // El pago corregido sigue siendo de su factura: si no, quedaría otra vez por pagar (ADR 0174).
+      // El pago corregido sigue siendo de su factura: si no, quedaría otra vez por pagar (ADR 0175).
       ...(original.payableId ? { payableId: original.payableId } : {}),
       // El movimiento de caja de un sueldo no dice a quién, como al pagarlo (ADR 0166).
       ...(category === STAFF_PAY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
@@ -2183,7 +2183,7 @@ export async function voidExpense(
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
   if (!found) throw notFound("Gasto")
-  // El pago de una factura (ADR 0174): la factura se bloquea antes que la caja, como al pagarla.
+  // El pago de una factura (ADR 0175): la factura se bloquea antes que la caja, como al pagarla.
   if (found.payableId) await lockPayable(tx, orgId, found.payableId)
   // Lo pagado al personal lo anula quien lo ve (`commissions.write`, ADR 0166); el pago de una
   // comisión se anula con su pago, que ya pide ese permiso.

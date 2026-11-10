@@ -884,7 +884,7 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const [owedCommissions, owedNow] = await commissionsOwedMany(tx, orgId, [window.end, now], { currency, branchId })
   // Lo fijo vencido sin pagar al cierre (gastos que se repiten).
   const fixedOwed = await fixedOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId })
-  // Las facturas por pagar (ADR 0174): lo que se debía al cierre.
+  // Las facturas por pagar (ADR 0175): lo que se debía al cierre.
   const invoicesOwed = await payablesOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId, money: scope.money, timezone: scope.timezone })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingAdjustmentsValued(tx, orgId, currency, branchId)

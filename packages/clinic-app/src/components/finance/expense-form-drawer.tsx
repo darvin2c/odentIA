@@ -92,7 +92,7 @@ export type ExpenseDrawerMode =
   | { kind: "nuevo" }
   | { kind: "corregir"; expense: ExpenseRow }
   | { kind: "pagar"; due: RecurringDue }
-  /** Pagar (todo o una parte de) una factura por pagar (ADR 0174): el gasto queda enlazado a ella. */
+  /** Pagar (todo o una parte de) una factura por pagar (ADR 0175): el gasto queda enlazado a ella. */
   | { kind: "factura"; payable: Payable }
 
 const NEW: ExpenseDrawerMode = { kind: "nuevo" }
@@ -174,7 +174,7 @@ export function ExpenseFormDrawer({
   onClose: () => void
   initial?: ExpenseDraft | null
   mode?: ExpenseDrawerMode
-  /** Pagar una factura por pagar en vez de registrar un gasto suelto (ADR 0174). */
+  /** Pagar una factura por pagar en vez de registrar un gasto suelto (ADR 0175). */
   onPayInvoice?: (payable: Payable) => void
   /** «¿Todavía no lo pagas?»: anotar la factura en vez de un gasto. */
   onNoteInvoice?: () => void
@@ -643,7 +643,7 @@ export function ExpenseFormDrawer({
       }}
     >
       <div className="flex flex-col gap-5">
-        {/* Lo que llega para pagar después no es un gasto todavía: se anota la factura (ADR 0174). */}
+        {/* Lo que llega para pagar después no es un gasto todavía: se anota la factura (ADR 0175). */}
         {!fixed && !correcting && onNoteInvoice ? (
           <p className="text-sm text-muted-foreground">
             ¿Todavía no lo pagas?{" "}

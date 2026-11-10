@@ -1,5 +1,5 @@
 /**
- * La factura por pagar (ADR 0174): anotarla no paga; cada pago es un gasto enlazado que nunca pasa de
+ * La factura por pagar (ADR 0175): anotarla no paga; cada pago es un gasto enlazado que nunca pasa de
  * lo que falta; anular o corregir un pago la deja como debe quedar; se anula solo sin pagos; y lo que
  * se debía en un momento sale en Reportes › Lo que debes.
  */

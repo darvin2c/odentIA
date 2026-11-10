@@ -134,7 +134,7 @@ export function ExpensesTab({
   // El detalle de un gasto (el cajón para corregirlo o pagar lo que se repite lo abre Finanzas).
   const [viewing, setViewing] = useState<ExpenseRow | null>(null)
   const place = { branchId, branchName, currency, locale, orgTimeZone }
-  // Las facturas por pagar de la sede (ADR 0174); el cajón para anotarlas vive en Finanzas.
+  // Las facturas por pagar de la sede (ADR 0175); el cajón para anotarlas vive en Finanzas.
   const payables = useOpenPayables(branchId)
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
@@ -629,7 +629,7 @@ export function ExpensesTab({
               : "Queda en el historial con su motivo y deja de sumar en el mes.",
           // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
           !adminVoids && voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
-          // Es el pago de una factura por pagar: vuelve a deber lo que este pago cubría (ADR 0174).
+          // Es el pago de una factura por pagar: vuelve a deber lo que este pago cubría (ADR 0175).
           !adminVoids && voiding?.payableId ? `La factura vuelve a deber ${formatMoney(voiding.amountCents, voiding.currency, locale)}.` : "",
           // Es el pago de una compra: la compra vuelve a deber lo que este pago cubría de lo recibido (ADR 0061).
           !adminVoids && voiding?.purchaseOrderNumber != null

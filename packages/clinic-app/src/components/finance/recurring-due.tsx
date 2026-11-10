@@ -210,7 +210,7 @@ export function RecurringDueSection({
   canWrite: boolean
   /** «Pagar»: abre el cajón del gasto lleno con lo de siempre. */
   onPay: (row: RecurringDue) => void
-  /** Las facturas por pagar de la sede (ADR 0174): van primero, por lo que vence antes. */
+  /** Las facturas por pagar de la sede (ADR 0175): van primero, por lo que vence antes. */
   payables?: Payable[]
   payablesToday?: string
   onPayInvoice?: (payable: Payable) => void

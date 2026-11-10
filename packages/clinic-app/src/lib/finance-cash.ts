@@ -857,7 +857,7 @@ export interface ExpenseRow {
   history?: ExpenseBefore[]
   /** `false` si la cadena se cortó (en un sueldo, para quien no los ve): lo último no es lo primero. */
   historyComplete?: boolean
-  /** El pago (o una parte) de una factura por pagar (ADR 0174). */
+  /** El pago (o una parte) de una factura por pagar (ADR 0175). */
   payableId?: string | null
   notes: string | null
   voidedAt: string | null
@@ -958,7 +958,7 @@ export function createExpenseApi(body: {
   }
   /** La clave del formulario abierto: reintentar después de un corte devuelve el mismo gasto. */
   requestId?: string
-  /** El pago (o una parte) de una factura por pagar (ADR 0174). */
+  /** El pago (o una parte) de una factura por pagar (ADR 0175). */
   payableId?: string
 } & ExpensePaper): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
@@ -967,7 +967,7 @@ export function createExpenseApi(body: {
   })
 }
 
-/** Una factura por pagar (ADR 0174), con lo pagado y lo que falta. */
+/** Una factura por pagar (ADR 0175), con lo pagado y lo que falta. */
 export interface Payable {
   id: string
   branchId: string

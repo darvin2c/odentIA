@@ -645,7 +645,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
           })
           .strict()
           .optional(),
-        // El pago (o una parte) de una factura por pagar (ADR 0174).
+        // El pago (o una parte) de una factura por pagar (ADR 0175).
         payableId: z.uuid().optional(),
       })
       .strict()
@@ -662,7 +662,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  // --- Facturas por pagar (ADR 0174): la del laboratorio que se paga después -----------------
+  // --- Facturas por pagar (ADR 0175): la del laboratorio que se paga después -----------------
   app.get("/payables", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     const parsed = z
@@ -670,7 +670,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { open, ...query } = parsed.data
-    // Las facturas de una paciente son el costo de su tratamiento: lo ve quien administra comisiones (ADR 0174).
+    // Las facturas de una paciente son el costo de su tratamiento: lo ve quien administra comisiones (ADR 0175).
     if (query.patientId && !canAccess(memberRole, "commissions.write")) return forbid(c)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPayables(tx, orgId, { ...query, open: open === "1" })))
   })

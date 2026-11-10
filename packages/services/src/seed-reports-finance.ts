@@ -573,7 +573,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       and i.decision = 'aceptado' and b.status in ('aceptado','parcial') and b.decided_at < now() - interval '60 days'
       and exists (select 1 from encounter_procedure ep where ep.organization_id = pi.organization_id
         and ep.plan_item_id = pi.id and ep.voided_at is null)`)
-  // --- Facturas del laboratorio por pagar (ADR 0174) ---------------------------------------
+  // --- Facturas del laboratorio por pagar (ADR 0175) ---------------------------------------
   // La corona de una paciente: una factura que vence a fin de mes y otra ya vencida, pagada en parte.
   // Se anotan con el servicio, como en la pantalla, y el pago es un gasto enlazado.
   const crowns = await tx

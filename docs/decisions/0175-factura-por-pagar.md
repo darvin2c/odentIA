@@ -1,4 +1,4 @@
-# 0174. La factura por pagar: el papel aparte, sus pagos enlazados
+# 0175. La factura por pagar: el papel aparte, sus pagos enlazados
 
 - Estado: aceptada (9 nov 2026)
 - Contexto: QA de Gastos del 8 nov (G20, G21, P-ODO-24, caso C10b) y lienzo «Gastos: lo que falta» (opción A).

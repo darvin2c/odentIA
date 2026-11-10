@@ -1,5 +1,5 @@
 /**
- * Facturas por pagar (ADR 0174): la del laboratorio que llega hoy y se paga a fin de mes. Se anotan
+ * Facturas por pagar (ADR 0175): la del laboratorio que llega hoy y se paga a fin de mes. Se anotan
  * en Gastos › Por pagar con «Anotar una factura» (no pagan ni tocan la caja) y se pagan con «Pagar»,
  * que abre el cajón del gasto lleno: se puede pagar una parte. Pueden decir de qué paciente y de qué
  * tratamiento son; su costo junto a lo cobrado lo ve quien administra comisiones, en la cuenta de la

@@ -1,4 +1,4 @@
--- Factura por pagar (ADR 0174): lo que TS no declara. Nace cerrada al rol de la aplicación
+-- Factura por pagar (ADR 0175): lo que TS no declara. Nace cerrada al rol de la aplicación
 -- (ADR 0063) y aislada por clínica; no se borra y, una vez anotada, solo cambia al anularla.
 -- La sede es de la misma clínica (vínculo compuesto, como en lo que se repite, 0055).
 ALTER TABLE ONLY public.expense_payable

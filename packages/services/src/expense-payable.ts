@@ -1,5 +1,5 @@
 /**
- * Factura por pagar (ADR 0174): la del laboratorio que llega hoy y se paga a fin de mes, en una vez o
+ * Factura por pagar (ADR 0175): la del laboratorio que llega hoy y se paga a fin de mes, en una vez o
  * en partes. Anotarla no paga ni toca la caja: queda en «Por pagar» con su saldo hasta que sus pagos
  * (gastos enlazados, `createExpense` con `payableId`) la cubren. Puede decir de qué paciente y de qué
  * tratamiento es; su costo se ve junto a lo cobrado solo para quien administra comisiones (la ruta lo
