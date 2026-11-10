@@ -32,6 +32,11 @@ export interface DemoServiceRecipe {
   who?: DemoWho
   /** Se cobra por unidad (una resina por pieza, una radiografía por placa): a veces van dos o tres. */
   perUnit?: boolean
+  /**
+   * Sesiones habituales de esta clínica (ADR 0164), cuando no son las de la
+   * biblioteca: la endodoncia de molar en dos, como la semilla manual.
+   */
+  usualSessions?: number
 }
 
 /** A quién: edad cumplida el día de la cita y sexo. Vacío, a todos. */

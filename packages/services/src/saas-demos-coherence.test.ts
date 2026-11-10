@@ -33,8 +33,11 @@ import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 const admin = { userId: "coherencia-admin", role: "admin" as const }
 const DAY = 86_400_000
-/** El rango de ficción de Ofcom: ningún teléfono de la demo es de una persona real. */
-const FICTION_PHONE = /^\+447700900\d{3}$/
+/**
+ * El rango de ficción de Ofcom: ningún teléfono de la demo es de una persona real. Solo el tramo de
+ * las semillas, de 900000 a 900799: de 900800 a 900999 queda para la QA.
+ */
+const FICTION_PHONE = /^\+447700900[0-7]\d\d$/
 
 beforeAll(async () => {
   await ownerDb

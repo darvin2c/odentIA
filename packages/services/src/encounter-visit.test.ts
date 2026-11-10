@@ -157,6 +157,26 @@ it("sin cita, la sesión 2 viene a la atención: «Continuar hoy» la trae con m
   })
 })
 
+it("la sesión 2 el mismo día de la 1 avisa la espera de su servicio, con sus días, y «Continuar hoy» sigue (QA del 10 nov, B6)", async () => {
+  const f = await clinicalFixture()
+  await f.ready(f.encounter.id)
+  const item = await accepted(f, 2)
+  await ownerDb.execute(
+    sql`update service_catalog set session_gap_days = 7 where id = ${f.service.id}`,
+  )
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  const today = await secondVisit(f)
+  const detail = () => f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect((await detail()).visit?.treatments[0]).toMatchObject({
+    started: true,
+    wait: { days: 7, sinceDays: 0 },
+  })
+  // Avisa, no frena: se trae igual y, registrada la de hoy, ya no hay nada que esperar.
+  await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, item.id))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, today, { planItemId: item.id }))
+  expect((await detail()).visit?.treatments[0]).toMatchObject({ registered: true, wait: null })
+})
+
 it("«Hoy no» saca lo traído y el motivo escrito no se pisa", async () => {
   const f = await clinicalFixture()
   await f.ready(f.encounter.id)

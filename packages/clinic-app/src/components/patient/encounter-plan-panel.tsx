@@ -248,27 +248,72 @@ export function EncounterPlanPanel({
   const [removing, setRemoving] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ itemId: string; message: string } | null>(null)
   const queryClient = useQueryClient()
+  const refreshPlan = async () => {
+    await Promise.all(
+      [
+        "treatment-plans",
+        "treatment-plan",
+        "plan-items",
+        "patient-summary",
+        "plan-next",
+        "budget",
+        "budgets",
+      ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+    )
+    await onChanged()
+  }
+  /**
+   * «Deshacer» de «Quitar» (QA del 10 nov, B12): quitar no se deshace en el servidor (lo quitado
+   * queda cancelado en la auditoría), así que se vuelve a indicar con lo mismo, por la misma
+   * operación de «Indicar»: servicio, sitio, hallazgo, diagnóstico, detalle y sesiones. Vuelve
+   * con el precio de la tarifa y sin la opción del presupuesto en que estaba.
+   */
+  const indicateAgain = async (item: PlanItem) => {
+    if (!item.serviceId) return
+    const body: Record<string, unknown> = {
+      serviceId: item.serviceId,
+      sourceEncounterId: encounterId,
+      detail: item.detail,
+      diagnosisCode: item.diagnosisCode ?? null,
+      odontogramEntryId: item.odontogramEntryId ?? null,
+      ...(item.plannedSessions != null ? { plannedSessions: item.plannedSessions } : {}),
+    }
+    if (item.toothNumber != null) body.toothNumber = item.toothNumber
+    if (item.toothNumber != null && item.surfaces.length > 0) body.surfaces = item.surfaces
+    if (item.quadrant != null) body.quadrant = item.quadrant
+    if (item.arch) body.arch = item.arch
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await apiFetch(`/api/patients/${patientId}/plan/items`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      })
+      await refreshPlan()
+      toast.success(`${item.title} vuelve a estar indicado`)
+    } catch (err) {
+      toast.error(submitErrorMessage(err))
+    } finally {
+      onPendingChange(false)
+    }
+  }
   /** «Quitar»: sale del plan y de su presupuesto en borrador (el servidor dice si aún se puede). */
   const remove = async (itemId: string) => {
     if (removing) return
+    const removed = brief.find((item) => item.id === itemId) ?? null
     setRemoving(itemId)
     setRowError(null)
     onPendingChange(true)
     try {
       await beforeWrite()
       await removeIndicatedApi(patientId, encounterId, itemId)
-      await Promise.all(
-        [
-          "treatment-plans",
-          "treatment-plan",
-          "plan-items",
-          "patient-summary",
-          "plan-next",
-          "budget",
-          "budgets",
-        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
-      )
-      await onChanged()
+      await refreshPlan()
+      // Un clic lo quitaba sin vuelta atrás: el aviso ofrece «Deshacer», como al quitar una alergia.
+      toast.success(removed ? `Quitado: ${removed.title}` : "Quitado", {
+        ...(removed?.serviceId
+          ? { action: { label: "Deshacer", onClick: () => void indicateAgain(removed) } }
+          : {}),
+      })
     } catch (err) {
       setRowError({ itemId, message: submitErrorMessage(err) })
     } finally {
@@ -404,6 +449,7 @@ export function EncounterPlanPanel({
         <toothFit.Notice
           service={{ name: item.title, toothAnatomy: service?.toothAnatomy ?? null }}
           place={item.toothNumber}
+          diagnosisCode={item.diagnosisCode}
           pending={switching !== null || removing !== null}
           onUse={
             editable
@@ -470,10 +516,13 @@ export function EncounterPlanPanel({
             {rows.length > 0 ? (
               <ul className="flex flex-col divide-y">
                 {rows.map((item) => {
-                  const question =
-                    canPlace && !dismissed.has(item.id)
-                      ? pathQuestion(item, brief, today, pathGroups)
-                      : null
+                  // Sin responder «¿otro camino o va también?» no se sabe si va después de lo otro de
+                  // la pieza: la exodoncia que es otro camino no «va después de la endodoncia» (QA del
+                  // 10 nov, B2). Se calla hasta responder, también para quien no puede responderlo.
+                  const unanswered = !dismissed.has(item.id)
+                    ? pathQuestion(item, brief, today, pathGroups)
+                    : null
+                  const question = canPlace ? unanswered : null
                   const error = placeError?.itemId === item.id ? placeError.message : null
                   return (
                     <li
@@ -492,7 +541,9 @@ export function EncounterPlanPanel({
                         <span className="text-xs text-muted-foreground">
                           {[
                             treatmentSiteLabel(item),
-                            item.waitsFor ? `va después de ${item.waitsFor.title}` : "",
+                            item.waitsFor && !unanswered
+                              ? `va después de ${item.waitsFor.title}`
+                              : "",
                             // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
                             quotedPriceOf(item).priceCents != null && orgLocale
                               ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
@@ -1216,6 +1267,7 @@ function IndicationForm({
   const tooth = useStore(form.store, (state) => state.values.teeth[0] ?? null)
   const entryId = useStore(form.store, (state) => state.values.odontogramEntryId)
   const service = useStore(form.store, (state) => state.values.service)
+  const chosenDiagnosis = useStore(form.store, (state) => state.values.diagnosisCode)
   const toothFit = productUi().services.toothFit
   // Al cambiar sin elegir otro servicio, el aviso de la pieza mira el que ya tiene: mover la
   // endodoncia anterior a la 46 también avisa.
@@ -1445,6 +1497,8 @@ function IndicationForm({
                 onBlur={control.onBlur}
                 value={field.state.value?.id ?? ""}
                 disabled={blocked}
+                // Lo que encaja en la pieza, primero (la endodoncia posterior en la 46).
+                place={scope === "tooth" || scope === "surfaces" ? tooth : null}
                 onChange={(next) => {
                   field.handleChange(next)
                   if (next.scope) form.setFieldValue("scope", next.scope)
@@ -1471,6 +1525,7 @@ function IndicationForm({
         <toothFit.Notice
           service={fitService}
           place={tooth}
+          diagnosisCode={chosenDiagnosis || null}
           pending={blocked || switching}
           onUse={(sibling) => void switchToSibling(sibling.id)}
         />

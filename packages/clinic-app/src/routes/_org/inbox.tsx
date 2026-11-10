@@ -12,13 +12,13 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  ListSearchScope,
   PageHeader,
   PageShell,
   ScrollingTabsList,
   SideDockScopeProvider,
 
   useDetailMode,
-  useListSearch,
   useMediaQuery,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -48,6 +48,7 @@ import {
   usePermission,
   useMyUserId,
 } from "../../lib/crm"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { inboxPrimary } from "../../lib/screen-rules"
 import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 
@@ -140,7 +141,8 @@ function InboxPage() {
   const canReadCrm = usePermission("crm.read")
   const [newConversation, setNewConversation] = useState(false)
   const navigate = useNavigate({ from: Route.fullPath })
-  const listSearch = useListSearch()
+  // Lo buscado (un nombre, un teléfono, un documento) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const channel = listSearch.get("channel")
   // «Solo las mías»: los temas de quien mira y los que nadie tomó (ADR 0050).
   const mine = listSearch.get("mine") === "1"
@@ -559,24 +561,26 @@ function InboxPage() {
           {/* En la misma fila que las pestañas: acotan la lista y no compiten con ellas. El buscador
               se angosta si falta lugar: nunca tapa «Spam» ni «Bloqueados». */}
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-            <FilterBar
-              filters={[
-                {
-                  key: "channel",
-                  label: "Canal",
-                  type: "select",
-                  options: CHANNEL_FILTER_OPTIONS.map((channel) => ({
-                    value: channel,
-                    label: channelLabel(channel),
-                  })),
-                },
-              ]}
-              className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end [&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:min-w-28 [&_[data-filter-row=desktop]>div:first-child]:shrink [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-72"
-              sortOptions={[]}
-              searchPlaceholder="Nombre, teléfono, documento o lo que escribió" searchLabel="Buscar en la Bandeja"
-              searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
-              resetKeys={["channel", "q"]}
-            />
+            <ListSearchScope value={listSearch}>
+              <FilterBar
+                filters={[
+                  {
+                    key: "channel",
+                    label: "Canal",
+                    type: "select",
+                    options: CHANNEL_FILTER_OPTIONS.map((channel) => ({
+                      value: channel,
+                      label: channelLabel(channel),
+                    })),
+                  },
+                ]}
+                className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end [&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:min-w-28 [&_[data-filter-row=desktop]>div:first-child]:shrink [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-72"
+                sortOptions={[]}
+                searchPlaceholder="Nombre, teléfono, documento o lo que escribió" searchLabel="Buscar en la Bandeja"
+                searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
+                resetKeys={["channel", "q"]}
+              />
+            </ListSearchScope>
             {/* Es de uso diario: un botón a la vista. Los temas de quien mira y los que nadie tomó (ADR 0050). */}
             <Button
               type="button"

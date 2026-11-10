@@ -6,6 +6,7 @@
  * (motivo, diagnóstico que sigue, el tratamiento en «Realizado hoy»); nada se da
  * por hecho: la sesión cuenta al registrarla y el control se cumple al firmar.
  */
+import { gapWords } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useState } from "react"
@@ -33,6 +34,19 @@ export function visitTreatmentWords(item: VisitTreatment): string {
   ]
     .filter(Boolean)
     .join(" · ")
+}
+
+/**
+ * La espera entre sesiones que aún no se cumple (QA del 10 nov, B6), con los días que pide su
+ * servicio: «La sesión anterior fue hoy: la medicación suele dejarse una semana.». Avisa y no
+ * traba: «Continuar hoy» sigue. Null si no hay espera pendiente.
+ */
+export function visitWaitWords(item: Pick<VisitTreatment, "wait">): string | null {
+  const wait = item.wait
+  if (!wait) return null
+  const when =
+    wait.sinceDays === 0 ? "hoy" : wait.sinceDays === 1 ? "ayer" : `hace ${wait.sinceDays} días`
+  return `La sesión anterior fue ${when}: la medicación suele dejarse ${gapWords(wait.days)}.`
 }
 
 /** «vencido el 4 may · lo indicó Dr. Hugo». */
@@ -194,6 +208,9 @@ export function EncounterVisitStrip({
                               `Aceptado · va después de terminar ${item.after.title}${item.after.today ? ", que se hace hoy" : ""}`
                             : "Aceptado, sin empezar"}
                   </span>
+                  {!item.registered && visitWaitWords(item) ? (
+                    <span className="text-xs text-warning">{visitWaitWords(item)}</span>
+                  ) : null}
                 </span>
                 {item.registered ? null : item.linked ? (
                   <span className="flex flex-wrap gap-2">

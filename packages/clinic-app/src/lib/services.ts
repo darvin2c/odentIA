@@ -1,4 +1,4 @@
-import { currencyFractionDigits, type PatientGuide } from "@odentia/clinical"
+import { currencyFractionDigits, type FinishControl, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { appWords } from "./product-words"
 import { amountFromCents } from "./workspace"
@@ -25,6 +25,12 @@ export interface ServiceCatalogItem {
   usualSessions: number
   /** Las que puso la clínica; null = las que sugiere la biblioteca. */
   ownUsualSessions?: number | null
+  /** Días de espera entre sesiones de la clínica; null = los de la guía (`librarySessionGapDays`). */
+  ownSessionGapDays?: number | null
+  librarySessionGapDays?: number | null
+  /** Los controles al terminar de la clínica; null = los de la guía (`libraryFinishControls`). */
+  ownFinishControls?: FinishControl[] | null
+  libraryFinishControls?: FinishControl[] | null
   /** Cómo dice el precio el agente; caja y presupuesto usan siempre la tarifa. */
   priceDisclosure: PriceDisclosure
   /** La evaluación que ofrece el agente cuando el precio no es exacto. */
@@ -93,6 +99,8 @@ export interface ServiceToothAnatomy {
   family: string
   /** Los servicios activos de la clínica de la misma familia: lo que se puede ofrecer en su lugar. */
   siblings: ToothAnatomySibling[]
+  /** De una endodoncia vital, las no vitales activas: el aviso las ofrece con un diagnóstico de necrosis. */
+  nonVital?: ToothAnatomySibling[]
 }
 
 export interface ToothAnatomySibling {
@@ -288,6 +296,10 @@ export interface UpdateServiceBody {
   billingMode?: "treatment" | "session"
   /** Sesiones habituales; null vuelve a las de la biblioteca. */
   usualSessions?: number | null
+  /** Días de espera entre sesiones (0 = sin espera); null vuelve a los de la guía. */
+  sessionGapDays?: number | null
+  /** Controles al terminar (`[]` = ninguno); null vuelve a los de la guía. */
+  finishControls?: FinishControl[] | null
   priceDisclosure?: PriceDisclosure
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null

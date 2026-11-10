@@ -2241,6 +2241,17 @@ const seedOffers: Array<{
     leavesFinding: { condition: "root_canal_treatment", variant: "pulpectomy" },
   },
   {
+    code: "PULPECTOMIA_ANTERIOR_DECIDUO",
+    templateKey: "pulpectomia-anterior-deciduo",
+    name: "Pulpectomía anterior, deciduo",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 25000,
+    durationMin: 60,
+    priceDisclosure: "exacto",
+    leavesFinding: { condition: "root_canal_treatment", variant: "pulpectomy" },
+  },
+  {
     code: "CORONA",
     officialCode: "D2740",
     name: "Corona cerámica",

@@ -2,6 +2,7 @@ import {
   appendDictated,
   formatMoney,
   formatVitals,
+  gapWords,
   moneyTotalsText,
   parseVitals,
   VITAL_SIGNS,
@@ -103,6 +104,7 @@ import {
   useDictationSession,
 } from "./dictation-session"
 import { DictationSignDialog } from "./dictation-sign-dialog"
+import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
@@ -134,7 +136,7 @@ import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { EncounterVisitStrip } from "./encounter-visit"
-import { CollectButton } from "./collect-flow"
+import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { PatientClinicalStrip } from "./patient-header"
 import { BudgetSendButton } from "./plan/budget-send"
@@ -557,6 +559,14 @@ export function EncounterEditor({
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
+  // «Cobrar» de «Atención finalizada»: el cajón y el ticket viven aquí, no en la fila de la deuda.
+  // La fila se oculta mientras la cuenta se vuelve a leer, y cobrar la vuelve a leer: el cajón se
+  // desmontaba con el cobro en curso y el ticket nunca se veía (QA del 10 nov, B7).
+  const finalizedCollect = useCollectFlow({
+    patientId,
+    patientName: patient.patient.displayName,
+    enabled: finalizedBilling !== null,
+  })
   // El presupuesto que quedó armado al firmar (decisión 12): el cierre pregunta si enviarlo ya.
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
   // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
@@ -573,6 +583,7 @@ export function EncounterEditor({
   const [finalizedWaiting, setFinalizedWaiting] = useState<Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>>([])
   /** Lo que sigue en curso tras firmar, con su próxima sesión: «Reservar la sesión 2» ahí mismo. */
   const [finalizedNext, setFinalizedNext] = useState<NextSession[]>([])
+  const [finalizedFreed, setFinalizedFreed] = useState<FreedAppointment[]>([])
   /** Los tratamientos con que se abrió «Nueva cita» desde «Atención finalizada». */
   const [bookingNext, setBookingNext] = useState<string[] | null>(null)
   /** Desde qué día conviene la sesión que se reserva desde el cierre (la endodoncia, una semana). */
@@ -1179,6 +1190,7 @@ export function EncounterEditor({
     setFinalizedBookedAfter([])
     setFinalizedWaiting([])
     setFinalizedNext([])
+    setFinalizedFreed([])
     setBookingNext(null)
     setBudgetLater(false)
     setCorrectingMaterials(false)
@@ -1260,6 +1272,7 @@ export function EncounterEditor({
           bookedAfter?: FinalizedBookedAfter[]
           waitingAfter?: Array<{ planItemId: string; title: string; place?: string; beforeTitle: string }>
           nextSessions?: NextSession[]
+          freedAppointments?: FreedAppointment[]
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1293,6 +1306,7 @@ export function EncounterEditor({
       setFinalizedBookedAfter(result.data.bookedAfter ?? [])
       setFinalizedWaiting(result.data.waitingAfter ?? [])
       setFinalizedNext(result.data.nextSessions ?? [])
+      setFinalizedFreed(result.data.freedAppointments ?? [])
       setFinalizedBilling(result.data.billing)
       // «Debe en total» cuenta lo que este cierre acaba de cargar.
       if (canReadFinance) void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
@@ -1636,6 +1650,15 @@ export function EncounterEditor({
   const unsaved = saveState !== "saved"
   // Lo que falta registrar no apaga «Finalizar y firmar»: lleva a su bloque y lo marca (`requestSign`).
   const canSign = !(locked || !closingQuery.isSuccess || dictation.busy || unsaved)
+  // El botón del pie no espera al guardado: `requestSign` guarda lo último y vuelve a comprobar
+  // antes de abrir el cierre. Si se apagara mientras se guarda, el primer clic justo después de
+  // escribir la evolución no haría nada. Sin conexión sí espera: no se podría guardar.
+  const canRequestSign = !(
+    locked ||
+    !closingQuery.isSuccess ||
+    dictation.busy ||
+    saveState === "offline"
+  )
   const signBlockedReason =
     saveState === "offline"
       ? "Sin conexión: lo escrito se guarda al volver y recién entonces se puede firmar."
@@ -2671,16 +2694,19 @@ export function EncounterEditor({
         </div>
       </MasterDetail>
 
-      {/* Pie fijo: lo que falta y «Finalizar y firmar», en escritorio, tablet y teléfono. */}
+      {/* Pie fijo: lo que falta y «Finalizar y firmar», en escritorio, tablet y teléfono.
+          El botón no se mueve cuando cambia el texto (de «Falta 1…» a «Listo para firmar»): el texto
+          ocupa lo que queda y se parte en líneas, sin empujar el botón a otra fila; si el texto crece,
+          el botón queda abajo, pegado al borde del pie. */}
       {canWrite && attending ? (
         <div
           className={cn(
-            "sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border",
+            "sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border",
             // En el teléfono, mientras se dicta, el pie es la barra del dictado (que también firma).
             dictationMobileBarVisible(dictation) && "max-sm:hidden",
           )}
         >
-          <span id={`${uid}-footer`} className="text-sm text-muted-foreground">
+          <span id={`${uid}-footer`} className="min-w-0 flex-1 text-sm text-muted-foreground">
             {footerMissing.length > 0 ? (
               // Cada cosa que falta lleva a su bloque, como «Registrar» en el cierre.
               <>
@@ -2704,7 +2730,13 @@ export function EncounterEditor({
               footerText
             )}
           </span>
-          <Button type="button" disabled={!canSign} aria-describedby={`${uid}-footer`} onClick={requestSign}>
+          <Button
+            type="button"
+            className="shrink-0 self-end"
+            disabled={!canRequestSign}
+            aria-describedby={`${uid}-footer`}
+            onClick={requestSign}
+          >
             Finalizar y firmar
           </Button>
         </div>
@@ -2852,6 +2884,21 @@ export function EncounterEditor({
                   : "Caja ya lo ve en su lista de por cobrar."}
             </DialogDescription>
           </DialogHeader>
+          {/* La cita reservada para lo que hoy quedó hecho: usarla para lo que sigue o liberarla (M1). */}
+          <FinalizedFreedAppointments
+            appointments={finalizedFreed}
+            next={(() => {
+              const first = finalizedNext.find((session) => session.toBook && !session.booked)
+              return first ? { planItemId: first.planItemId, title: first.title } : null
+            })()}
+            canBook={canBook}
+            // Su Plan, «Qué sigue» y sus citas cambian: lo de esta persona se vuelve a leer.
+            onChanged={() =>
+              void queryClient.invalidateQueries({
+                predicate: (query) => query.queryKey.includes(patientId),
+              })
+            }
+          />
           {finalizedNext.length > 0 ? (
             <FinalizedNextSessions
               sessions={finalizedNext}
@@ -2882,22 +2929,25 @@ export function EncounterEditor({
                 // «Qué sigue»), desde que ese control se puede hacer (repaso del 9 nov, N6).
                 // Y no antes de lo que su tratamiento deja entre sesiones: la endodoncia con medicación,
                 // una semana (QA del 9 nov, repaso 3).
+                // Lo aceptado no espera la ventana del control (decisión B3 del 10 nov): el control se
+                // suma a la cita solo si su día cae en ella (lo decide el servidor al reservar).
                 date: [
                   addDays(zonedDateOf(new Date().toISOString(), activeOrgTimeZone()), 1),
-                  finalizedControls?.next?.joinsNext?.from ?? "",
                   gapFrom ?? "",
                 ].sort().at(-1)!,
                 ...(gapFrom && !finalizedControls?.next?.joinsNext
-                  ? { note: "Entre sesiones se deja actuar la medicación: se busca hora desde una semana después de hoy." }
+                  ? {
+                      note: `Entre sesiones se espera ${gapWords(
+                        finalizedNext.find((session) => session.planItemId === bookingNext[0])?.toBook?.gapDays ?? 7,
+                      )}: se busca hora desde ese día.`,
+                    }
                   : {}),
                 ...(finalizedControls?.next?.joinsNext
                   ? {
                       followUpIds: [finalizedControls.next.id],
-                      // Por qué empieza ese día, como en «Qué sigue» (QA antes de entregar).
                       note: `${finalizedControls.next.title} toca el ${controlDaySaid(
                         new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(finalizedControls.next.dueAt)),
-                      )}; se puede hacer desde el ${controlDaySaid(finalizedControls.next.joinsNext.from)}.`,
-                      notBefore: finalizedControls.next.joinsNext.from,
+                      )}: se suma a esta cita si es desde el ${controlDaySaid(finalizedControls.next.joinsNext.from)}; si no, queda por reservar.`,
                     }
                   : {}),
               }}
@@ -2977,9 +3027,10 @@ export function EncounterEditor({
                 {owedSameAsToday ? " · lo de hoy" : null}
               </span>
               {/* Secundario: la acción de quien atiende es reservar lo que sigue. */}
-              <CollectButton patientId={patientId} patientName={patient.patient.displayName} size="sm" variant="outline" />
+              {finalizedCollect.button({ size: "sm", variant: "outline" })}
             </div>
           ) : null}
+          {finalizedCollect.surfaces}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
           ) : null}

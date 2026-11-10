@@ -104,7 +104,28 @@ export function VisitPanel({
                     )
                   }
                 >
-                  {status.isPending ? "Guardando…" : "No vino"}
+                  {status.isPending && status.variables?.status === "no_asistio"
+                    ? "Guardando…"
+                    : "No vino"}
+                </Button>
+              ) : null}
+              {/* «Vino» sin abrir otra atención (decisión B1 del 10 nov): queda atendida. */}
+              {canWrite ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={ACTION}
+                  disabled={status.isPending}
+                  onClick={() =>
+                    status.mutate(
+                      { id: row.id, status: "atendida" },
+                      { onSuccess: () => onChanged() },
+                    )
+                  }
+                >
+                  {status.isPending && status.variables?.status === "atendida"
+                    ? "Guardando…"
+                    : "Vino"}
                 </Button>
               ) : null}
               {canAttend ? (

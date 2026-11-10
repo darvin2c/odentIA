@@ -44,6 +44,8 @@ import {
   type ClosingResolvable,
   type ClosingSession,
   controlDaySaid,
+  type FinishingControl,
+  type FinishingControlChange,
   keepsDiagnosis,
   type HealthGap,
   type NextSession,
@@ -99,6 +101,11 @@ export interface ClosingValues extends SignatureRegistration {
    * ortodoncia que sigue).
    */
   askControl?: boolean
+  /**
+   * Lo cambiado de los controles que dejan los tratamientos de hoy (`controls.finishing`), por su
+   * `key`: otro día o quitarlo. Vale solo para esta persona.
+   */
+  finishChanges?: Record<string, { dueDay?: string; remove?: boolean }>
 }
 
 /** Los datos de `/finalize` que la pantalla llama de otro modo. */
@@ -113,6 +120,7 @@ const EMPTY_CLOSING: ClosingValues = {
   nextControl: "",
   nextControlDate: "",
   fulfill: {},
+  finishChanges: {},
 }
 
 /** Un control de Clío marcado para entrar con la firma: ya dice cuándo vuelve. */
@@ -277,13 +285,139 @@ export function closingControlsBody(
   controls: ClosingControls | null,
   dictated: DictatedControl | null,
   continuing = false,
-): { followUpIds?: string[]; nextControl?: { dueAt: string } | { none: true } } {
+): {
+  followUpIds?: string[]
+  nextControl?: { dueAt: string } | { none: true }
+  finishControlChanges?: FinishingControlChange[]
+} {
   if (!controls) return {}
   const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
-  if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds }
-  if (value.nextControl === "none") return { followUpIds, nextControl: { none: true } }
+  const changes = finishingChanges(value, controls)
+  const extra = changes.length > 0 ? { finishControlChanges: changes } : {}
+  if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds, ...extra }
+  if (value.nextControl === "none") return { followUpIds, nextControl: { none: true }, ...extra }
   const day = chosenDay(value, controls)
-  return day ? { followUpIds, nextControl: { dueAt: day } } : { followUpIds }
+  return day ? { followUpIds, nextControl: { dueAt: day }, ...extra } : { followUpIds, ...extra }
+}
+
+/** Lo cambiado de los controles que van a quedar, como lo pide `/finalize`. */
+function finishingChanges(value: Pick<ClosingValues, "finishChanges">, controls: ClosingControls): FinishingControlChange[] {
+  return (controls.finishing ?? []).flatMap((control): FinishingControlChange[] => {
+    const change = value.finishChanges?.[control.key]
+    if (change?.remove) return [{ key: control.key, remove: true }]
+    if (change?.dueDay && change.dueDay !== control.dueDay) return [{ key: control.key, dueDay: change.dueDay }]
+    return []
+  })
+}
+
+/**
+ * «Controles que quedan» (decisión B5 del 10 nov): los que dejan los tratamientos que terminan al
+ * firmar, cada uno con «Cambiar fecha» y «Quitar» (solo para esta persona), y los que ya tiene
+ * abiertos, que se cambian en «Plan y controles» o moviendo su cita. Arriba de «¿Cuándo vuelve?».
+ */
+function ClosingControlsLeft({
+  form,
+  controls,
+  busy,
+}: {
+  form: ClosingForm
+  controls: ClosingControls
+  busy: boolean
+}): React.JSX.Element | null {
+  const ids = useId()
+  const changes = useStore(form.store, (state) => state.values.finishChanges ?? {})
+  const finishing = controls.finishing ?? []
+  const open = (controls.open ?? []).filter((control) => !controls.due.some((due) => due.id === control.id))
+  if (finishing.length === 0 && open.length === 0) return null
+  const tomorrow = dayOf(new Date(Date.now() + 86_400_000).toISOString())
+  const set = (control: FinishingControl, next: { dueDay?: string; remove?: boolean } | null) => {
+    const rest = { ...changes }
+    if (next) rest[control.key] = next
+    else delete rest[control.key]
+    form.setFieldValue("finishChanges", rest)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-medium">Controles que quedan</p>
+      <ul className="flex flex-col gap-2">
+        {finishing.map((control) => {
+          const change = changes[control.key]
+          const day = change?.dueDay || control.dueDay
+          const editing = change?.dueDay !== undefined && !change.remove
+          return (
+            <li key={control.key} className="flex flex-col gap-1.5 rounded-md border px-3 py-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <span className={change?.remove ? "text-sm text-muted-foreground line-through" : "text-sm"}>
+                  {control.title}
+                  <span className="text-muted-foreground"> · {controlDaySaid(day)}</span>
+                </span>
+                <span className="flex gap-1">
+                  {change?.remove ? (
+                    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => set(control, null)}>
+                      Deshacer
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        aria-expanded={editing}
+                        onClick={() => set(control, editing ? null : { dueDay: day })}
+                      >
+                        {editing ? "Dejar la sugerida" : "Cambiar fecha"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => set(control, { remove: true })}
+                      >
+                        Quitar
+                      </Button>
+                    </>
+                  )}
+                </span>
+              </div>
+              {editing ? (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor={`${ids}-${control.afterDays}`} className="text-xs text-muted-foreground">
+                    Día del control
+                  </label>
+                  <DatePickerButton
+                    id={`${ids}-${control.afterDays}`}
+                    className="w-56"
+                    min={tomorrow}
+                    openAt={day}
+                    disabled={busy}
+                    value={day}
+                    onChange={(next: string) => set(control, { dueDay: next })}
+                  />
+                </div>
+              ) : null}
+            </li>
+          )
+        })}
+        {open.map((control) => (
+          <li key={control.id} className="rounded-md border px-3 py-2 text-sm">
+            {control.title}
+            <span className="text-muted-foreground">
+              {control.scheduledAt
+                ? ` · con su cita el ${controlDaySaid(dayOf(control.scheduledAt))}: se cambia moviendo la cita`
+                : ` · ${controlDaySaid(dayOf(control.dueAt))} · se cambia en Plan y controles`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {finishing.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Los sugiere su servicio y quedan al firmar. Lo que cambies o quites vale solo para esta persona.
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 /** El día de un instante en la zona de la clínica. */
@@ -353,6 +487,7 @@ export function ClosingNextVisit({
   const beside = values.askControl ? controlBesideAccepted(continuing, day) : null
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
+      <ClosingControlsLeft form={form} controls={controls} busy={busy} />
       {/* El control que trae su cita de hoy se cumple al firmar: se dice cuál y de quién (QA del 9 nov, repaso 3). */}
       {controls.byAppointment.map((control) => (
         <p key={control.id} className="text-sm">

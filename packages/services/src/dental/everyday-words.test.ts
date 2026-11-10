@@ -15,3 +15,9 @@ it("odentIA: «extrac» ya busca la exodoncia y «endo» no cambia nada (QA del 
   // Con menos de cuatro letras no se ensancha: «con» es de consulta, no de conducto.
   expect(everydayServiceVariants("con", dentalCatalog.everydayWords)).toEqual([])
 })
+
+// Repaso final de la ficha del 10 nov (B10): «evalua» decía «Ningún servicio activo coincide».
+it("odentIA: «evaluación», con o sin tilde y a medio escribir, también busca la consulta", () => {
+  for (const q of ["evaluación", "evaluacion", "evalua"])
+    expect(everydayServiceVariants(q, dentalCatalog.everydayWords)).toContain("consulta")
+})

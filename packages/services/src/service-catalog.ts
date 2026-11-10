@@ -1,7 +1,10 @@
 import {
+  type FinishControl,
   type PatientGuide,
   type ProcedureCodingSnapshot,
+  parseFinishControls,
   parsePatientGuide,
+  parseSessionGapDays,
   type ServiceListProfile,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -87,6 +90,44 @@ export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & Templ
  */
 export const usualSessionsSql = sql<number>`coalesce("service_catalog"."usual_sessions",
   (select tpl."usual_sessions" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id"), 1)`.mapWith(Number)
+
+/**
+ * Los días de espera entre sesiones de un servicio (decisión B5 del 10 nov): los que puso la
+ * clínica, o los que trae la guía para su tratamiento de la biblioteca; 0 es sin espera.
+ */
+export const sessionGapSql = sql<number>`coalesce("service_catalog"."session_gap_days",
+  (select tpl."session_gap_days" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id"), 0)`.mapWith(
+  Number,
+)
+
+/** Los controles que deja un servicio al terminar: los de la clínica o los de la biblioteca. */
+export const finishControlsSql = sql<FinishControl[]>`coalesce("service_catalog"."finish_controls",
+  (select tpl."finish_controls" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id"), '[]'::jsonb)`
+
+/** Lo que sugiere la biblioteca, para decir «Sugerido» y volver a él. */
+const librarySessionGapSql = sql<
+  number | null
+>`(select tpl."session_gap_days" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id")`
+const libraryFinishControlsSql = sql<
+  FinishControl[] | null
+>`(select tpl."finish_controls" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id")`
+
+function assertSessionGap(value: number | null | undefined): number | null {
+  try {
+    return parseSessionGapDays(value ?? null)
+  } catch (error) {
+    throw invalidField("sessionGapDays", (error as Error).message)
+  }
+}
+
+function assertFinishControls(value: unknown): FinishControl[] | null {
+  if (value === undefined || value === null) return null
+  try {
+    return parseFinishControls(value)
+  } catch (error) {
+    throw invalidField("finishControls", (error as Error).message)
+  }
+}
 
 /** Las sesiones habituales que se escriben: 1 a 60, o nulo para volver a las de la biblioteca. */
 function assertUsualSessions(value: number | null | undefined): number | null {
@@ -702,6 +743,10 @@ const serviceListColumns = () => ({
   billingMode: serviceCatalog.billingMode,
   ownUsualSessions: serviceCatalog.ownUsualSessions,
   usualSessions: usualSessionsSql,
+  ownSessionGapDays: serviceCatalog.ownSessionGapDays,
+  librarySessionGapDays: librarySessionGapSql,
+  ownFinishControls: serviceCatalog.ownFinishControls,
+  libraryFinishControls: libraryFinishControlsSql,
   priceDisclosure: serviceCatalog.priceDisclosure,
   evaluationServiceId: serviceCatalog.evaluationServiceId,
   patientGuide: serviceCatalog.patientGuide,
@@ -995,6 +1040,10 @@ export interface UpdateServicePatch {
   billingMode?: string
   /** Sesiones habituales; `null` vuelve a las de la biblioteca (o 1 si es propio). */
   usualSessions?: number | null
+  /** Días de espera entre sesiones; `null` vuelve a los de la biblioteca, 0 es sin espera. */
+  sessionGapDays?: number | null
+  /** Controles al terminar; `null` vuelve a los de la biblioteca, `[]` es ninguno. */
+  finishControls?: FinishControl[] | null
   priceDisclosure?: string
   evaluationServiceId?: string | null
   /** Qué deja en la pieza al completarse; `null` = nada. */
@@ -1159,6 +1208,14 @@ export async function updateService(
   if (patch.usualSessions !== undefined) {
     set.ownUsualSessions = assertUsualSessions(patch.usualSessions)
     fields.push("usualSessions")
+  }
+  if (patch.sessionGapDays !== undefined) {
+    set.ownSessionGapDays = assertSessionGap(patch.sessionGapDays)
+    fields.push("sessionGapDays")
+  }
+  if (patch.finishControls !== undefined) {
+    set.ownFinishControls = assertFinishControls(patch.finishControls)
+    fields.push("finishControls")
   }
   if (patch.priceDisclosure !== undefined) {
     set.priceDisclosure = assertPriceDisclosure(patch.priceDisclosure)

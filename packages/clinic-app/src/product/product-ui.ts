@@ -378,6 +378,16 @@ export interface ProductToothFitUi {
    * tiene anatomía no pinta nada. Con `onUse`, ofrece el hermano que encaja.
    */
   Notice(props: ToothFitNoticeProps): ReactNode
+  /**
+   * Al buscar un servicio para un lugar, su orden: menor va antes (lo que encaja primero,
+   * lo que no tiene anatomía después y lo de otro grupo al final). Solo ordena.
+   */
+  rank(anatomy: ServiceToothAnatomy | null | undefined, place: number): number
+  /** El hermano que encaja en el lugar cuando el servicio no encaja; null si encaja o no hay. */
+  sibling(
+    anatomy: ServiceToothAnatomy | null | undefined,
+    place: number,
+  ): ToothAnatomySibling | null
 }
 
 export interface ToothFitNoticeProps {
@@ -385,6 +395,8 @@ export interface ToothFitNoticeProps {
   place: number
   /** Cambiar al hermano que encaja; sin él solo se avisa. */
   onUse?: (sibling: ToothAnatomySibling) => void
+  /** El diagnóstico del tratamiento: con necrosis, la endodoncia vital ofrece la no vital (B2). */
+  diagnosisCode?: string | null
   pending?: boolean
 }
 

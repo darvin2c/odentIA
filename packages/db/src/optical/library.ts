@@ -3,8 +3,10 @@ import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
 import {
   type CatalogLibrary,
+  libraryFollowUpRules,
   librarySessions,
   type ProcedureLists,
+  seedFollowUpRules,
   splitHead,
   strictLines,
 } from "../procedure-codes.js"
@@ -77,6 +79,7 @@ export const opticalLibrary: CatalogLibrary = {
 
     const ownKeys = templates.map((t) => t.key)
     const sessions = librarySessions("biblioteca_optica_sesiones.csv", keys)
+    const followUpRules = libraryFollowUpRules("biblioteca_optica_controles.csv", keys)
     const ours = eq(treatmentTemplate.product, "optical")
     return {
       keys: ownKeys,
@@ -139,6 +142,7 @@ export const opticalLibrary: CatalogLibrary = {
             `Conciliación falló (servicios ópticos): ${active.length} frente a ${templates.length}`,
           )
         }
+        await seedFollowUpRules(tx, "optical", followUpRules)
       },
     }
   },

@@ -22,6 +22,7 @@ import {
 } from "./diagnosis-codes.js"
 import { assertAttending } from "./encounter-attending.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { createFinishControls } from "./finish-controls.js"
 import { orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
@@ -1488,7 +1489,19 @@ export async function setPlanItemStatus(
       encounterId: input.encounterId,
       planItemId: updated.id,
     })
-  return { ...(await withPlanItemParts(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
+  // Y los controles que deja su servicio al terminar (B5), en todos los productos.
+  if (input.status === "realizado")
+    await createFinishControls(tx, {
+      orgId,
+      actorUserId,
+      patientId,
+      encounterId: input.encounterId ?? null,
+      planItemId: updated.id,
+    })
+  return {
+    ...(await withPlanItemParts(tx, orgId, updated)),
+    decision: updated.decisionStatus as PlanItemDecision,
+  }
 }
 
 /**

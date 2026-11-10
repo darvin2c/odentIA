@@ -39,6 +39,7 @@ import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { nextSessionGapOf } from "./session-gap.js"
 import { goesBeforeSql, planItemSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy. */
@@ -64,6 +65,13 @@ export interface VisitTreatment {
    * hoy» sigue, como segunda opción (entrega 8).
    */
   after: { title: string; today: boolean } | null
+  /**
+   * Su servicio pide esperar entre sesiones y aún no se cumple (la regla de la reserva,
+   * `nextSessionGapOf`): `days` los que pide, `sinceDays` los que pasaron desde la última
+   * sesión (0 = hoy) y `from` desde qué día convendría. Es un aviso, no un freno: «Continuar hoy»
+   * sigue (QA del 10 nov, B6). Null si no espera nada o ya se cumplió.
+   */
+  wait: { days: number; sinceDays: number; from: string } | null
 }
 
 /** Un control con su ventana abierta: esta visita puede cumplirlo. */
@@ -114,6 +122,21 @@ function linkableSql(orgId: string, patientId: string, budgetRequired: boolean) 
               and done.plan_item_id = i.id and done.voided_at is null)))`
         : sql``
     }`
+}
+
+/** `YYYY-MM-DD` en la zona de la clínica. */
+function dayIn(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(date)
+}
+
+/** Días de `from` a `to` (`YYYY-MM-DD`). */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
 }
 
 /** «Hoy viene a…» de un borrador. Una atención firmada o anulada no lo tiene. */
@@ -175,8 +198,19 @@ export async function encounterVisitOf(
   // Lo que va después de otro, al final (salvo que ya se eligió para hoy): primero lo que toca.
   const place = (item: (typeof rows)[number]) => (item.linked ? 0 : item.after_title ? 2 : 1)
   const ordered = [...rows].sort((x, y) => place(x) - place(y))
-  const treatments = ordered.slice(0, VISIT_TREATMENTS).map((item) => {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  // La espera entre sesiones de lo que ya empezó y aún no se registra hoy (B6): la misma regla
+  // con que la reserva busca la próxima sesión.
+  const shown = ordered.slice(0, VISIT_TREATMENTS)
+  const gaps = await nextSessionGapOf(
+    tx,
+    orgId,
+    shown.filter((item) => Number(item.done_before) > 0 && !item.registered).map((item) => item.id),
+  )
+  const today = dayIn(new Date(), timezone)
+  const treatments = shown.map((item) => {
     const done = Number(item.done_before)
+    const gap = gaps.get(item.id)
     return {
       planItemId: item.id,
       title: item.title,
@@ -190,9 +224,15 @@ export async function encounterVisitOf(
       after: item.after_title
         ? { title: item.after_title, today: Boolean(item.after_today) }
         : null,
+      wait: gap
+        ? {
+            days: gap.days,
+            sinceDays: Math.max(0, gap.days - daysBetween(today, gap.from)),
+            from: gap.from,
+          }
+        : null,
     }
   })
-  const { timezone } = await findOrgLocale(tx, orgId)
   const due = await dueControlsOf(tx, orgId, row.professionalUserId, row, timezone)
   // El control reservado en la cita de hoy no está «por cumplir» (ya tiene cita): es a lo que viene.
   const booked = row.appointmentId
@@ -326,9 +366,12 @@ function continuesWords(title: string, tooth: number | null): string {
 }
 
 /**
- * El diagnóstico que sigue con el tratamiento: el suyo con el tipo de la última
- * vez (la misma propuesta que «Usar»), o el de la atención donde se indicó en
- * su mismo sitio, con su tipo. Sin uno de los dos, nada: el clínico lo elige.
+ * El diagnóstico que sigue con el tratamiento, nunca uno ya resuelto (QA del 10 nov, A2: la
+ * corona después de la endodoncia traía la pulpitis que la endodoncia había resuelto):
+ * 1. el de su sesión anterior, en su mismo sitio y aún activo;
+ * 2. el suyo, con el tipo de la última vez (la misma propuesta que «Usar»), si sigue activo;
+ * 3. el de la atención donde se indicó, en su mismo sitio y aún activo.
+ * Sin ninguno, nada: el clínico lo elige.
  */
 async function continuingDiagnosis(
   tx: Db,
@@ -339,7 +382,95 @@ async function continuingDiagnosis(
   item: typeof treatmentPlanItem.$inferSelect,
 ): Promise<boolean> {
   const { site } = await productHooks(tx, orgId)
+  const sameSite = item.siteCode
+    ? and(
+        eq(encounterDiagnosis.siteSystem, item.siteSystem ?? ""),
+        eq(encounterDiagnosis.siteCode, item.siteCode),
+      )
+    : isNull(encounterDiagnosis.siteCode)
+  /** El último diagnóstico activo, con tipo, de esa atención en el sitio del tratamiento. */
+  const activeIn = async (fromEncounterId: string) => {
+    const [found] = await tx
+      .select()
+      .from(encounterDiagnosis)
+      .innerJoin(
+        encounter,
+        and(
+          eq(encounter.id, encounterDiagnosis.encounterId),
+          eq(encounter.organizationId, encounterDiagnosis.organizationId),
+        ),
+      )
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.encounterId, fromEncounterId),
+          isNull(encounterDiagnosis.voidedAt),
+          isNotNull(encounterDiagnosis.diagnosisType),
+          eq(encounterDiagnosis.status, "activo"),
+          sql`${encounter.status} <> 'anulada'`,
+          sameSite,
+        ),
+      )
+      .orderBy(desc(encounterDiagnosis.createdAt), desc(encounterDiagnosis.id))
+      .limit(1)
+    return found?.encounter_diagnosis ?? null
+  }
+  const record = async (diagnosis: typeof encounterDiagnosis.$inferSelect) => {
+    if (!diagnosis.diagnosisType) return false
+    await recordEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
+      diagnosisCode: diagnosis.diagnosisCode,
+      diagnosisSystem: diagnosis.diagnosisSystem,
+      diagnosisType: diagnosis.diagnosisType,
+      ...siteInput(withSite(site, diagnosis)),
+    })
+    return true
+  }
+  // 1. La sesión anterior de este mismo tratamiento (otra atención, no anulada).
+  const previous = await tx.execute<{ encounter_id: string }>(sql`
+    select done.encounter_id from encounter_procedure done
+    join encounter e on e.organization_id = done.organization_id and e.id = done.encounter_id
+    where done.organization_id = ${orgId} and done.plan_item_id = ${item.id}
+      and done.voided_at is null and done.encounter_id <> ${encounterId} and e.status <> 'anulada'
+    order by done.created_at desc, done.id desc
+    limit 1`)
+  const previousEncounterId = previous[0]?.encounter_id
+  if (previousEncounterId) {
+    const found = await activeIn(previousEncounterId)
+    if (found) return record(found)
+  }
   if (item.diagnosisCode) {
+    // Ya resuelto en ese sitio (y sin ninguno activo): no se trae (A2).
+    const [stillActive] = await tx
+      .select({ id: encounterDiagnosis.id })
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.patientId, patientId),
+          eq(encounterDiagnosis.diagnosisCode, item.diagnosisCode),
+          isNull(encounterDiagnosis.voidedAt),
+          eq(encounterDiagnosis.status, "activo"),
+          sameSite,
+        ),
+      )
+      .limit(1)
+    const [resolved] = stillActive
+      ? []
+      : await tx
+          .select({ id: encounterDiagnosis.id })
+          .from(encounterDiagnosis)
+          .where(
+            and(
+              eq(encounterDiagnosis.organizationId, orgId),
+              eq(encounterDiagnosis.patientId, patientId),
+              eq(encounterDiagnosis.diagnosisCode, item.diagnosisCode),
+              isNull(encounterDiagnosis.voidedAt),
+              eq(encounterDiagnosis.status, "resuelto"),
+              sameSite,
+            ),
+          )
+          .limit(1)
+    if (resolved) return false
     const suggestions = await getDiagnosisSuggestions(tx, orgId, { patientId, encounterId })
     const where = withSite(site, item)
     const proposal = suggestions.proposed.find(
@@ -358,43 +489,8 @@ async function continuingDiagnosis(
     return true
   }
   if (!item.sourceEncounterId || item.sourceEncounterId === encounterId) return false
-  const [found] = await tx
-    .select()
-    .from(encounterDiagnosis)
-    .innerJoin(
-      encounter,
-      and(
-        eq(encounter.id, encounterDiagnosis.encounterId),
-        eq(encounter.organizationId, encounterDiagnosis.organizationId),
-      ),
-    )
-    .where(
-      and(
-        eq(encounterDiagnosis.organizationId, orgId),
-        eq(encounterDiagnosis.encounterId, item.sourceEncounterId),
-        isNull(encounterDiagnosis.voidedAt),
-        isNotNull(encounterDiagnosis.diagnosisType),
-        sql`${encounter.status} <> 'anulada'`,
-        item.siteCode
-          ? and(
-              eq(encounterDiagnosis.siteSystem, item.siteSystem ?? ""),
-              eq(encounterDiagnosis.siteCode, item.siteCode),
-            )
-          : isNull(encounterDiagnosis.siteCode),
-      ),
-    )
-    .orderBy(desc(encounterDiagnosis.createdAt), desc(encounterDiagnosis.id))
-    .limit(1)
-  const diagnosis = found?.encounter_diagnosis
-  if (!diagnosis?.diagnosisType) return false
-  const fields = withSite(site, diagnosis)
-  await recordEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
-    diagnosisCode: diagnosis.diagnosisCode,
-    diagnosisSystem: diagnosis.diagnosisSystem,
-    diagnosisType: diagnosis.diagnosisType,
-    ...siteInput(fields),
-  })
-  return true
+  const found = await activeIn(item.sourceEncounterId)
+  return found ? record(found) : false
 }
 
 /**

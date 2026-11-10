@@ -808,9 +808,12 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=seguimiento`))
   await expect(page.getByRole("heading", { name: "Conversaciones y oportunidades" })).toBeVisible()
 
-  // Quién habla por ella se gestiona en Datos; la propia persona no se ofrece para desvincular.
+  // Quién habla en su nombre se gestiona en Datos; la propia persona no se ofrece para desvincular.
+  // Sin sexo registrado, el texto es neutro (repaso final de la ficha, B1).
   await openSection(page, "Datos", "Familia y responsables")
-  await expect(page.getByRole("heading", { name: "Quién habla por ella" })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: /^Quién habla (por ella|en su nombre)$/ }),
+  ).toBeVisible()
   await expect(page.getByRole("button", { name: /^Acciones de Madre de Lucía/ })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Acciones de Lucía Quispe/ })).toHaveCount(0)
   await page.setViewportSize({ width: 390, height: 844 })

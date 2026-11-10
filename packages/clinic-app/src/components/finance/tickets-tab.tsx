@@ -16,8 +16,8 @@ import {
   ErrorState,
   FilterBar,
   type FilterDef,
+  ListSearchScope,
   SkeletonRegion,
-  useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
@@ -25,6 +25,7 @@ import { useEffect, useMemo } from "react"
 import { PersonLink } from "../person-link"
 import { TicketRowsSkeleton } from "../skeletons/finance"
 import { apiFetch } from "../../lib/api"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { plainAmount } from "../../lib/commissions"
 import { financeErrorMessage } from "../../lib/finance"
 import { COUNTER_SALE_LABEL } from "../../lib/finance-collect"
@@ -93,7 +94,8 @@ export function TicketsTab({
   onListChange: (ids: string[]) => void
   onCollect: () => void
 }) {
-  const listSearch = useListSearch()
+  // Lo buscado (el nombre de una persona) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const params: TicketListParams = {
     q: listSearch.get("q") ?? "",
     from: listSearch.get("fecha_from") ?? "",
@@ -285,14 +287,16 @@ export function TicketsTab({
 
   return (
     <div className="flex flex-col gap-3">
-      <FilterBar
-        filters={filters}
-        sortOptions={[...TICKET_SORT_OPTIONS]}
-        searchPlaceholder="Buscar por paciente, documento o N.º de ticket"
-        searchLabel="Buscar en cobros"
-        searchPending={tickets.isFetching && !tickets.isFetchingNextPage && filtered}
-        resetKeys={[...TICKET_LIST_KEYS]}
-      />
+      <ListSearchScope value={listSearch}>
+        <FilterBar
+          filters={filters}
+          sortOptions={[...TICKET_SORT_OPTIONS]}
+          searchPlaceholder="Buscar por paciente, documento o N.º de ticket"
+          searchLabel="Buscar en cobros"
+          searchPending={tickets.isFetching && !tickets.isFetchingNextPage && filtered}
+          resetKeys={[...TICKET_LIST_KEYS]}
+        />
+      </ListSearchScope>
       {first && line && rows.length > 0 ? (
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1 text-sm text-muted-foreground" role="status">
           <p>

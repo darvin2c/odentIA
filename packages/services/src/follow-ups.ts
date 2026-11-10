@@ -10,6 +10,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { type CreateAppointmentInput, createAppointment } from "./appointments.js"
+import { zonedTimeToUtc } from "./availability.js"
 import { assertOpenDraft, requireEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
@@ -17,6 +18,7 @@ import { requirePatient } from "./patients.js"
 import {
   appointmentServesControl,
   controlWindowStart,
+  dayKeyIn,
   isOverdueToday,
   LIVE_APPOINTMENT_STATUSES,
   servedToday,
@@ -421,6 +423,80 @@ export async function stopFollowUpRepeat(
   })
   return detail(tx, orgId, patientId, id)
 }
+/**
+ * Cambia el plazo de un control pendiente (decisión B5 del 10 nov): el radiográfico del año
+ * a otra fecha, solo para esta persona. La misma operación para la pantalla y el agente. El
+ * que ya tiene su cita no se cambia aquí: se mueve la cita, y el control la sigue (ADR 0152).
+ * `dueAt` es el día (`YYYY-MM-DD`, en la zona de la clínica) o un instante ISO; se anota a la
+ * hora de los controles. Desde mañana: hoy es lo que se atiende ahora.
+ */
+export async function changeFollowUpDue(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  id: string,
+  input: { dueAt: string },
+) {
+  const current = await lock(tx, orgId, patientId, id)
+  if (current.status === "programado") {
+    const [booked] = current.appointmentId
+      ? await tx
+          .select({ startsAt: appointment.startsAt })
+          .from(appointment)
+          .where(
+            and(eq(appointment.organizationId, orgId), eq(appointment.id, current.appointmentId)),
+          )
+      : []
+    const { timezone, locale } = await findOrgLocale(tx, orgId)
+    const when = booked
+      ? new Intl.DateTimeFormat(locale, {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          timeZone: timezone,
+        }).format(booked.startsAt)
+      : null
+    throw new ServiceError(
+      "FOLLOW_UP_BOOKED",
+      409,
+      when
+        ? `Tiene su cita el ${when}: para cambiarlo, mueve la cita.`
+        : "Tiene su cita: para cambiarlo, mueve la cita.",
+    )
+  }
+  if (current.status !== "pendiente")
+    throw new ServiceError("FOLLOW_UP_STATUS", 409, "El control está cerrado")
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const raw = input.dueAt?.trim() ?? ""
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? raw
+    : /^\d{4}-\d{2}-\d{2}T/.test(raw)
+      ? dayKeyIn(instant(raw, "dueAt"), timezone)
+      : null
+  if (!day) throw invalidField("dueAt", "Elige la fecha en el calendario.")
+  if (day <= dayKeyIn(new Date(), timezone))
+    throw invalidField("dueAt", "Elige un día desde mañana.")
+  const dueAt = zonedTimeToUtc(day, FOLLOW_UP_MINUTES, timezone)
+  if (dueAt.getTime() === current.dueAt.getTime()) return detail(tx, orgId, patientId, id)
+  await tx
+    .update(clinicalFollowUp)
+    .set({ dueAt, updatedAt: new Date() })
+    .where(scoped(orgId, patientId, id))
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    entity: "clinical_follow_up",
+    entityId: id,
+    action: "follow_up.due_changed",
+    metadata: { patientId, from: current.dueAt.toISOString(), to: dueAt.toISOString() },
+  })
+  return detail(tx, orgId, patientId, id)
+}
+
+/** La hora a la que se anota el día de un control, como «¿Cuándo vuelve?» y «Indicar control». */
+const FOLLOW_UP_MINUTES = 9 * 60
+
 export async function cancelFollowUp(
   tx: Db,
   orgId: string,

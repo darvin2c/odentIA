@@ -98,6 +98,23 @@ export interface AgendaAppointment {
   test?: { conversationId: string | null; byUserId: string | null; byName: string | null; deletesAt: string | null } | null
   /** En qué sesión va cada tratamiento de varias que la cita lleva (calculado por el servidor). */
   sessions?: AppointmentSession[]
+  /** Todo lo que se le sumó y aún no se hizo, también lo de una sesión (la resina sumada a su consulta). */
+  brings?: Array<{ planItemId: string; title: string }>
+  /** Solo al reservar: los controles pedidos que no se sumaron porque su día no cae en su ventana. */
+  controlsLeftOut?: Array<{ id: string; title: string; from: string }>
+  /** Los minutos que suele pedir lo que lleva, si son más que los reservados; null si alcanza. */
+  needsMinutes?: number | null
+}
+
+/** «Reservada 30 min; lo que lleva suele necesitar unos 90»: solo cuando no alcanza. */
+export function appointmentShortWords(
+  appointment: Pick<AgendaAppointment, "startsAt" | "endsAt" | "needsMinutes">,
+): string | null {
+  if (!appointment.needsMinutes) return null
+  const reserved = Math.round(
+    (new Date(appointment.endsAt).getTime() - new Date(appointment.startsAt).getTime()) / 60_000,
+  )
+  return `Reservada ${reserved} min; lo que lleva suele necesitar unos ${appointment.needsMinutes}`
 }
 
 /** «Endodoncia · sesión 2 de 2»: lo que la cita viene a hacer de un tratamiento de varias sesiones. */

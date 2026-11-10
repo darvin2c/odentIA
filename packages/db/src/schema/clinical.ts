@@ -1,6 +1,7 @@
 import type {
   BloodGroup,
   ContactRelationship,
+  FinishControl,
   PatientGuide,
   ProcedureCodingSnapshot,
   RegistrationAnswers,
@@ -1135,6 +1136,16 @@ export const treatmentTemplate = catalogSchema.table(
      * versión: no cambia qué es el tratamiento.
      */
     usualSessions: smallint("usual_sessions").notNull().default(1),
+    /**
+     * Días que la guía clínica deja entre una sesión y la siguiente (la endodoncia con
+     * medicación, 7); nula, ninguna. Como las sesiones habituales: no sube la versión.
+     */
+    sessionGapDays: smallint("session_gap_days"),
+    /** Los controles que deja al terminar, según la guía (`FinishControl`); vacío, ninguno. */
+    finishControls: jsonb("finish_controls")
+      .$type<FinishControl[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
     /**
@@ -1148,6 +1159,14 @@ export const treatmentTemplate = catalogSchema.table(
     uniqueIndex("treatment_template_key_uidx").on(table.key),
     check("treatment_template_product_check", sql`${table.product} IN ('dental','medical','optical')`),
     check("treatment_template_usual_sessions_check", sql`${table.usualSessions} BETWEEN 1 AND 60`),
+    check(
+      "treatment_template_session_gap_check",
+      sql`${table.sessionGapDays} IS NULL OR ${table.sessionGapDays} BETWEEN 1 AND 120`,
+    ),
+    check(
+      "treatment_template_finish_controls_check",
+      sql`jsonb_typeof(${table.finishControls}) = 'array'`,
+    ),
   ],
 )
 
@@ -1247,6 +1266,16 @@ export const serviceCatalog = pgTable(
      */
     ownUsualSessions: smallint("usual_sessions"),
     /**
+     * Días de espera entre sesiones que puso la clínica (decisión B5 del 10 nov): nula es
+     * «la de la biblioteca», 0 es «sin espera». Se lee con `sessionGapSql`.
+     */
+    ownSessionGapDays: smallint("session_gap_days"),
+    /**
+     * Los controles que deja al terminar, de la clínica: nula es «los de la biblioteca» y
+     * vacío, «ninguno». Se lee con `finishControlsSql`.
+     */
+    ownFinishControls: jsonb("finish_controls").$type<FinishControl[]>(),
+    /**
      * Cómo dice el precio el agente (`PRICE_DISCLOSURES`). Solo cambia lo que
      * se le dice a una persona: caja y presupuesto usan siempre la tarifa.
      * Un servicio nuevo nace «solo con evaluación».
@@ -1297,6 +1326,14 @@ export const serviceCatalog = pgTable(
     check(
       "service_catalog_usual_sessions_check",
       sql`${table.ownUsualSessions} IS NULL OR ${table.ownUsualSessions} BETWEEN 1 AND 60`,
+    ),
+    check(
+      "service_catalog_session_gap_check",
+      sql`${table.ownSessionGapDays} IS NULL OR ${table.ownSessionGapDays} BETWEEN 0 AND 120`,
+    ),
+    check(
+      "service_catalog_finish_controls_check",
+      sql`${table.ownFinishControls} IS NULL OR jsonb_typeof(${table.ownFinishControls}) = 'array'`,
     ),
     check(
       "service_catalog_price_disclosure_check",
@@ -2070,6 +2107,11 @@ export const clinicalFollowUp = pgTable(
     repeatEveryMonths: smallint("repeat_every_months"),
     /** El control de la serie que lo dejó indicado; uno solo por control. */
     repeatsFromId: uuid("repeats_from_id").references((): AnyPgColumn => clinicalFollowUp.id),
+    /**
+     * El control que dejó un tratamiento al terminar, por su servicio (`finish_controls`): a
+     * cuántos días. Con él se juntan los del mismo día (decisión B4) y se retira al deshacer.
+     */
+    finishAfterDays: smallint("finish_after_days"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -2095,6 +2137,11 @@ export const clinicalFollowUp = pgTable(
       sql`${table.status} <> 'programado' OR ${table.appointmentId} IS NOT NULL`,
     ),
     index("clinical_follow_up_org_patient_idx").on(table.organizationId, table.patientId),
+    uniqueIndex("clinical_follow_up_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
+    ),
     index("clinical_follow_up_item_idx").on(table.organizationId, table.planItemId),
     index("clinical_follow_up_due_idx").on(table.organizationId, table.dueAt),
     check("clinical_follow_up_kind_check", sql`${table.kind} IN ('tratamiento','mantenimiento')`),
@@ -2106,6 +2153,44 @@ export const clinicalFollowUp = pgTable(
       "clinical_follow_up_treatment_check",
       sql`${table.kind} <> 'tratamiento' OR ${table.planItemId} IS NOT NULL`,
     ),
+  ],
+)
+
+/**
+ * Los tratamientos que cumple un control (decisión B4 del 10 nov): el radiográfico del año
+ * es uno por fecha aunque terminen dos endodoncias, y nombra todas sus piezas. El primero
+ * sigue en `clinical_follow_up.plan_item_id`; aquí van todos, también ese.
+ */
+export const clinicalFollowUpItem = pgTable(
+  "clinical_follow_up_item",
+  {
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    followUpId: uuid("follow_up_id").notNull(),
+    planItemId: uuid("plan_item_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.followUpId, table.planItemId] }),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.followUpId],
+      foreignColumns: [
+        clinicalFollowUp.organizationId,
+        clinicalFollowUp.patientId,
+        clinicalFollowUp.id,
+      ],
+      name: "clinical_follow_up_item_follow_up_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.planItemId],
+      foreignColumns: [
+        treatmentPlanItem.organizationId,
+        treatmentPlanItem.patientId,
+        treatmentPlanItem.id,
+      ],
+      name: "clinical_follow_up_item_plan_item_fk",
+    }),
+    index("clinical_follow_up_item_plan_item_idx").on(table.organizationId, table.planItemId),
   ],
 )
 

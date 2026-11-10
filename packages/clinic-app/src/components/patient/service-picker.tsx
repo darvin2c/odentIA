@@ -36,6 +36,12 @@ interface ServicePickerProps {
   "aria-describedby"?: string
   /** Al salir del selector entero (especialidad y buscador). */
   onBlur?: () => void
+  /**
+   * El lugar para el que se busca (odentIA: la pieza). Con él, lo que encaja en su anatomía va
+   * primero y, si un resultado es para otro grupo, se suma el hermano que encaja (la pulpectomía
+   * al buscar «endodoncia» en una temporal). Solo ordena y suma: nada se esconde.
+   */
+  place?: number | null
 }
 
 const NO_SPECIALTY = "todas"
@@ -55,6 +61,7 @@ export function ServicePicker({
   invalid = false,
   "aria-describedby": describedBy,
   onBlur,
+  place = null,
 }: ServicePickerProps) {
   const fallbackId = useId()
   const id = idProp ?? fallbackId
@@ -83,8 +90,38 @@ export function ServicePicker({
     staleTime: 30_000,
   })
 
-  const items = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data])
+  const found = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data])
   const total = servicesQuery.data?.total ?? 0
+  // Lo que encaja en la pieza, primero (QA del 10 nov, B3): con la anatomía de la biblioteca, la
+  // misma del aviso «La 46 es un molar…». Sin lugar, o en un producto sin anatomía, el orden del servidor.
+  const toothFit = place != null ? productUi().services.toothFit : null
+  const kinIds = useMemo(() => {
+    // Con una especialidad elegida, solo se ordena: sumar uno de otra contradiría el filtro.
+    if (!toothFit || place == null || specialty !== NO_SPECIALTY) return []
+    const have = new Set(found.map((row) => row.id))
+    const ids = found.flatMap((row) => {
+      const sibling = toothFit.sibling(row.toothAnatomy, place)
+      return sibling && !have.has(sibling.id) ? [sibling.id] : []
+    })
+    return [...new Set(ids)].sort().slice(0, 30)
+  }, [found, toothFit, place, specialty])
+  const kinQuery = useQuery({
+    queryKey: ["services", "ids", kinIds],
+    queryFn: () => fetchServices({ ids: kinIds, limit: kinIds.length }),
+    enabled: canRead && !disabled && kinIds.length > 0,
+    staleTime: 30_000,
+  })
+  const items = useMemo(() => {
+    if (!toothFit || place == null) return found
+    const have = new Set(found.map((row) => row.id))
+    const kin = (kinIds.length > 0 ? (kinQuery.data?.data ?? []) : []).filter(
+      (row) => row.isActive && !have.has(row.id),
+    )
+    // `sort` es estable: entre los del mismo rango queda el orden del servidor.
+    return [...found, ...kin].sort(
+      (a, b) => toothFit.rank(a.toothAnatomy, place) - toothFit.rank(b.toothAnatomy, place),
+    )
+  }, [found, kinIds, kinQuery.data, toothFit, place])
 
   const selectedItem = items.find((row) => row.id === value) ?? (chosen?.id === value ? chosen : null)
 

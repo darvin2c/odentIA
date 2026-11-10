@@ -15,8 +15,8 @@ import {
   ErrorState,
   FilterBar,
   type FilterDef,
+  ListSearchScope,
   SkeletonRegion,
-  useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
@@ -25,6 +25,7 @@ import { PersonLink } from "../person-link"
 import { DebtRowsSkeleton } from "../skeletons/finance"
 import { WriteToPersonDialog } from "../write-to-person"
 import { plainAmount } from "../../lib/commissions"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage } from "../../lib/finance"
 import {
@@ -72,7 +73,8 @@ export function DebtsTab({
   canWrite: boolean
   onCollect: (patient?: { id: string; name: string; currency?: string } | null) => void
 }) {
-  const listSearch = useListSearch()
+  // Lo buscado (el nombre de una persona) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const canMessage = usePermission("conversations.write")
   // Sin conversación abierta: se elige por dónde escribirle.
   const [writeTo, setWriteTo] = useState<DebtListRow | null>(null)
@@ -236,14 +238,16 @@ export function DebtsTab({
 
   return (
     <div className="flex flex-col gap-3">
-      <FilterBar
-        filters={filters}
-        sortOptions={[...DEBT_SORT_OPTIONS]}
-        searchPlaceholder="Buscar por paciente o documento"
-        searchLabel="Buscar en deudas"
-        searchPending={debts.isFetching && !debts.isFetchingNextPage && filtered}
-        resetKeys={[...DEBT_LIST_KEYS]}
-      />
+      <ListSearchScope value={listSearch}>
+        <FilterBar
+          filters={filters}
+          sortOptions={[...DEBT_SORT_OPTIONS]}
+          searchPlaceholder="Buscar por paciente o documento"
+          searchLabel="Buscar en deudas"
+          searchPending={debts.isFetching && !debts.isFetchingNextPage && filtered}
+          resetKeys={[...DEBT_LIST_KEYS]}
+        />
+      </ListSearchScope>
       {summary && summary.people > 0 ? (
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1 text-sm text-muted-foreground">
           <p>

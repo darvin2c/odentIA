@@ -648,6 +648,8 @@ export interface VisitTreatment {
   broughtByAppointment: boolean
   /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia); `today`: ese se hace hoy. */
   after?: { title: string; today: boolean } | null
+  /** Su servicio pide esperar entre sesiones y aún no se cumple: `sinceDays` desde la última (0 = hoy). */
+  wait?: { days: number; sinceDays: number; from: string } | null
 }
 
 /** Un control con su ventana abierta: esta visita lo cumple si se marca. */

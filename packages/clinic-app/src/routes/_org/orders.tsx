@@ -5,12 +5,12 @@ import {
   DraftKeptInPage,
   EmptyState,
   FilterBar,
+  ListSearchScope,
   normalizeSearchText,
   PageHeader,
   PageShell,
   ScrollingTabsList,
   SkeletonRegion,
-  useListSearch,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
@@ -35,6 +35,7 @@ import {
   orderViewOf,
 } from "../../lib/orders"
 import { useOrgProfile } from "../../lib/org"
+import { usePrivateListSearch } from "../../lib/private-list-search"
 import { QueryErrorState } from "../../lib/query-error"
 import { canSellOrders, ordersPrimary } from "../../lib/screen-rules"
 import { productUi } from "../../product/product-ui"
@@ -137,7 +138,8 @@ function OrdersWorkspace() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const profile = useOrgProfile().data
-  const listSearch = useListSearch()
+  // Lo buscado (un nombre, un teléfono) no va en la dirección (repaso final de la ficha, M4).
+  const listSearch = usePrivateListSearch()
   const view = orderViewOf(listSearch.get("vista"))
   const q = listSearch.get("q") ?? ""
   const openId = listSearch.get("pedido") ?? null
@@ -300,13 +302,15 @@ function OrdersWorkspace() {
             ))}
           </ScrollingTabsList>
         </Tabs>
-        <FilterBar
-          filters={[]}
-          sortOptions={[]}
-          searchPlaceholder="Número, persona, qué es o quién lo hace"
-          searchLabel="Buscar en pedidos"
-          resetKeys={["q"]}
-        />
+        <ListSearchScope value={listSearch}>
+          <FilterBar
+            filters={[]}
+            sortOptions={[]}
+            searchPlaceholder="Número, persona, qué es o quién lo hace"
+            searchLabel="Buscar en pedidos"
+            resetKeys={["q"]}
+          />
+        </ListSearchScope>
         {list.isPending ? (
           <SkeletonRegion message="Cargando los pedidos…">
             <OrdersSkeleton />

@@ -430,12 +430,6 @@ export interface ProductHooks {
   /** La fase que propone un tipo de tratamiento de la biblioteca. */
   phaseFor(kind: string | null): string
   /**
-   * Cuántos días, como mínimo, entre una sesión y la siguiente de un tipo de tratamiento de la
-   * biblioteca (odentIA: la endodoncia con medicación intraconducto, una semana). Sin él, o sin
-   * nada que decir, la siguiente se propone desde mañana.
-   */
-  sessionGapDays?(kind: string | null): number | null
-  /**
    * Los tipos de tratamiento de la biblioteca que se hacen de una vez y nunca piden otra sesión
    * (odentIA: consultas, evaluaciones y radiografías). Sin él, ninguno.
    */

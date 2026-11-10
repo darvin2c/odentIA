@@ -440,6 +440,21 @@ const finalizeInput = z
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
     // Los diagnósticos que el cierre proponía resolver y quien firma dejó marcados.
     resolveDiagnosisIds: z.array(z.uuid()).max(100).optional(),
+    // Los controles que dejan los tratamientos de hoy, como quedaron en el cierre: otro día o quitarlo.
+    finishControlChanges: z
+      .array(
+        z.union([
+          z
+            .object({
+              key: z.string().max(200),
+              dueDay: z.iso.date({ error: "Elige un día del calendario" }),
+            })
+            .strict(),
+          z.object({ key: z.string().max(200), remove: z.literal(true) }).strict(),
+        ]),
+      )
+      .max(20)
+      .optional(),
     // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
     nextControl: z
       .union([

@@ -57,6 +57,8 @@ import {
 import { acceptedBudgetLines } from "./agreed-lines.js"
 import {
   appointmentSessionsOf,
+  type FreedAppointment,
+  freedAppointmentsOf,
   markArrivedOnAttend,
   notifyAppointmentChanged,
   setAppointmentStatus,
@@ -103,6 +105,14 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
+import {
+  applyFinishingControlChanges,
+  createFinishControls,
+  type FinishingControl,
+  type FinishingControlChange,
+  finishingControlsOf,
+  undoFinishControls,
+} from "./finish-controls.js"
 import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
@@ -125,7 +135,7 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { nextSessionFromOf } from "./session-gap.js"
+import { nextSessionGapOf } from "./session-gap.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
@@ -1716,8 +1726,10 @@ export async function addEncounterProcedure(
         procedureId: row.id,
         plannedSessions: acceptedPlannedSessions,
       })
-      if (done)
+      if (done) {
         await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+        await createFinishControls(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+      }
     } else if (item && (item.status === "pendiente" || item.status === "programado")) {
       await setPlanItemStatus(tx, orgId, actorUserId, patientId, planItemIdParam, {
         status: "en_curso",
@@ -1774,8 +1786,10 @@ export async function addEncounterProcedure(
     // El servicio directo de una sesión nace realizado: lo que su producto hace con
     // un tratamiento realizado (odentIA: lo tratado queda dibujado). El de varias se
     // dibuja al terminarlo.
-    if (directDone)
+    if (directDone) {
       await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+      await createFinishControls(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+    }
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -1914,6 +1928,11 @@ export interface FinalizeEncounterBase {
    * lleva o la que falta reservar. «Atención finalizada» ofrece reservarla ahí mismo.
    */
   nextSessions: NextSession[]
+  /**
+   * Las citas por venir que se reservaron para lo que hoy quedó hecho (la sesión 2 hecha antes):
+   * «Atención finalizada» ofrece liberarlas o usarlas para lo que sigue (QA del 10 nov, M1).
+   */
+  freedAppointments: FreedAppointment[]
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
@@ -2067,7 +2086,7 @@ export interface NextSession {
    * La sesión que falta reservar (`canBookAnother`), con las previstas; nula si ya tiene cita o no
    * le falta. `from`: desde qué día conviene (`nextSessionFromOf`), si no es mañana.
    */
-  toBook: { n: number; m: number; from?: string } | null
+  toBook: { n: number; m: number; from?: string; gapDays?: number } | null
 }
 
 /** Lo aceptado que va después de otro tratamiento sin terminar y ya tiene su cita. */
@@ -2200,7 +2219,7 @@ export async function nextSessionsOf(
       firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt, professionalUserId: row.professionalUserId })
   }
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
-  const fromOf = await nextSessionFromOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
+  const fromOf = await nextSessionGapOf(tx, orgId, items.filter((item) => !firstOf.has(item.id)).map((item) => item.id))
   const out: NextSession[] = []
   for (const item of items) {
     const id = item.id
@@ -2211,7 +2230,11 @@ export async function nextSessionsOf(
     const from = fromOf.get(id)
     const toBook =
       !booked && canBookAnother(item, count)
-        ? { n: count.done + count.booked + 1, m: item.plannedSessions, ...(from ? { from } : {}) }
+        ? {
+            n: count.done + count.booked + 1,
+            m: item.plannedSessions,
+            ...(from ? { from: from.from, gapDays: from.days } : {}),
+          }
         : null
     if (booked || toBook) out.push({ planItemId: id, title: item.title, serviceId: item.serviceId, booked, toBook })
   }
@@ -2374,6 +2397,24 @@ export interface ClosingControls {
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
   next: ClosingNextControl | null
+  /**
+   * Los controles que dejan los tratamientos que terminan al firmar (B5 del 10 nov), por su
+   * servicio: el cierre los muestra y quien firma los cambia o los quita para esta persona
+   * (`FinalizeEncounterInput.finishControlChanges`).
+   */
+  finishing: FinishingControl[]
+  /** Los controles que ya tiene abiertos (sin el de la cita de hoy): lo que va a quedar. */
+  open: ClosingOpenControl[]
+}
+
+/** Un control abierto de la persona, como lo dice el cierre: pendiente o con su cita. */
+export interface ClosingOpenControl {
+  id: string
+  title: string
+  dueAt: Date
+  status: string
+  /** La hora de su cita, si la tiene en pie: se cambia moviendo la cita. */
+  scheduledAt: Date | null
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -2432,7 +2473,16 @@ export async function checkEncounterClosing(
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
-  const controls = await closingControlsOf(tx, orgId, actorUserId, row)
+  const controls = {
+    ...(await closingControlsOf(tx, orgId, actorUserId, row)),
+    finishing: await finishingControlsOf(
+      tx,
+      orgId,
+      sessions.finishing
+        .map((session) => session.planItemId)
+        .filter((id) => !keepOpenPlanItemIds.includes(id)),
+    ),
+  }
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,
     patientId: row.patientId,
@@ -2510,7 +2560,7 @@ async function closingControlsOf(
   orgId: string,
   actorUserId: string,
   row: EncounterRow,
-): Promise<ClosingControls> {
+): Promise<Omit<ClosingControls, "finishing">> {
   const { timezone } = await findOrgLocale(tx, orgId)
   const { recallMonths } = await productHooks(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
@@ -2569,6 +2619,20 @@ async function closingControlsOf(
     })),
     shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
     due,
+    open: open
+      .filter((control) => !byAppointment.includes(control))
+      .map((control) => ({
+        id: control.id,
+        title: control.title,
+        dueAt: control.dueAt,
+        status: control.status,
+        scheduledAt:
+          control.startsAt &&
+          control.appointmentStatus &&
+          ["programada", "confirmada"].includes(control.appointmentStatus)
+            ? control.startsAt
+            : null,
+      })),
     next: first
       ? {
           id: first.id,
@@ -2724,6 +2788,11 @@ export interface FinalizeEncounterInput {
    * pantalla mostró marcados: quedan resueltos con su tratamiento. Sin él, ninguno.
    */
   resolveDiagnosisIds?: string[]
+  /**
+   * Lo que quien firma cambió de los controles que dejan los tratamientos de hoy
+   * (`closing.controls.finishing`, por su `key`): otro día o quitarlo, solo para esta persona.
+   */
+  finishControlChanges?: FinishingControlChange[]
 }
 
 /**
@@ -2860,6 +2929,8 @@ export async function finalizeEncounter(
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
   const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  // Los controles que dejó lo terminado, como quedaron en el cierre (otro día, o quitados).
+  await applyFinishingControlChanges(tx, { orgId, actorUserId, patientId, encounterId }, input.finishControlChanges ?? [])
   // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
   await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], now)
   const procedures = await tx
@@ -3200,6 +3271,14 @@ export async function finalizeEncounter(
     },
     keptOpen,
     bookedAfter,
+    freedAppointments: await freedAppointmentsOf(
+      tx,
+      orgId,
+      patientId,
+      [...closing.sessions.finishing, ...closing.sessions.continuing].map(
+        (session) => session.planItemId,
+      ),
+    ),
     waitingAfter:
       continuingNext.length > 0
         ? closing.sessions.accepted
@@ -3383,8 +3462,10 @@ async function voidProcedureRow(
           .where(eq(treatmentPlanItem.id, item.id))
       }
       // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
-      if (direct || item.status === "realizado")
+      if (direct || item.status === "realizado") {
         await (await productHooks(tx, orgId)).treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+        await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
+      }
     }
   }
   await audit(
@@ -3578,6 +3659,7 @@ async function undoCompletionsOf(
       encounterId,
     })
     await hooks.treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+    await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
   }
 }
 

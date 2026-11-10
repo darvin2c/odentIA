@@ -273,18 +273,25 @@ function PlanPhasesGroup({
                                 : null,
                             !closed && bookedAt && (next === "iniciar" || next === "continuar")
                               ? `${planned > 1 ? `Sesión ${sessions + 1}` : "Su cita"}: ${formatDateTime(bookedAt)}`
-                              : !closed && next
-                                ? NEXT_ACTION_LABELS[next]
-                                : null,
+                              : // Lo que espera a otro de la misma pieza no se empieza todavía: dice
+                                // tras qué va (repaso final de la atención, B14), como «Qué sigue».
+                                !closed && next === "iniciar" && item.waitsFor
+                                ? `Va después de ${lowerFirst(item.waitsFor.title)}`
+                                : !closed && next
+                                  ? NEXT_ACTION_LABELS[next]
+                                  : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
                         </span>
                       </div>
-                      {/* «Pendiente» junto a «Aceptado · Iniciar la primera sesión» eran dos etiquetas
-                          para lo mismo: lo que no empezó lo dice su renglón. */}
-                      {item.status === "pendiente" && item.decisionStatus === "aceptado" ? null : (
-                        <Badge variant={statusVariant(item.status)}>{planStatusLabel(item.status)}</Badge>
+                      {/* «Pendiente» junto a «Aceptado · Iniciar la primera sesión» o a «Lo está
+                          pensando · Registrar la decisión» eran dos etiquetas para lo mismo: lo que
+                          no empezó lo dice su renglón (repaso final de la ficha, B12). */}
+                      {item.status === "pendiente" ? null : (
+                        <Badge variant={statusVariant(item.status)}>
+                          {planStatusLabel(item.status)}
+                        </Badge>
                       )}
                       <div className="ml-auto flex flex-wrap items-center gap-1">
                         {canWrite && !closed ? (
@@ -319,12 +326,14 @@ function PlanPhasesGroup({
                             </Button>
                           </>
                         ) : null}
-                        {/* Lo que se terminó al llegar a sus sesiones previstas puede necesitar otra (ADR 0164). */}
+                        {/* Lo que se terminó al llegar a sus sesiones previstas puede necesitar otra (ADR 0164).
+                            Es la excepción, no lo que sigue: va como acción secundaria, sin borde
+                            (repaso final de la atención, B14). */}
                         {canWrite && item.canAddSession ? (
                           <Button
                             type="button"
                             size="sm"
-                            variant="outline"
+                            variant="ghost"
                             aria-label={`Falta otra sesión en «${item.title}${site(item)}»`}
                             onClick={() => setReopening(item)}
                           >

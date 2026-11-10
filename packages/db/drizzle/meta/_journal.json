@@ -603,6 +603,20 @@
       "when": 1794262445836,
       "tag": "0085_factura_por_pagar_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794278357079,
+      "tag": "0086_controles_configurables",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794278368844,
+      "tag": "0087_controles_configurables_reglas",
+      "breakpoints": true
     }
   ]
 }

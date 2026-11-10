@@ -45,8 +45,16 @@ import { appWords } from "../../lib/product-words"
 import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
-import { whenSaid } from "./shared"
-import { type AgendaException, EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
+import { dayShort, whenSaid } from "./shared"
+import {
+  type AgendaException,
+  EMPTY_WHEN,
+  exceptionFlags,
+  useWhen,
+  WHEN_FIELD_MAP,
+  WhenFields,
+  type WhenValues,
+} from "./when"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -390,6 +398,11 @@ export function BookingDrawer({
         for (const note of [whatsappNote.current, consentNote.current]) {
           if (note) toast.warning(note, { duration: Number.POSITIVE_INFINITY, closeButton: true })
         }
+        // El control pedido en esta cita que no se sumó: su día no cae en su ventana (decisión B3).
+        for (const control of result.data.controlsLeftOut ?? [])
+          toast.info(
+            `${control.title} no va en esta cita: se puede hacer desde el ${dayShort(control.from)}. Queda por reservar.`,
+          )
         await onSaved(result.data)
       } catch (cause) {
         // Si alguien tomó el hueco, lo libre se vuelve a pedir.

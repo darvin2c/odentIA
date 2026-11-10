@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { PatientHealth } from "../../lib/patients"
-import { HealthReviewNotice } from "./health-review-notice"
+import { askWhom, HealthReviewNotice } from "./health-review-notice"
 
 vi.mock("../../lib/crm", () => ({ usePermission: () => true, useMemberName: () => () => "Dra. Ana" }))
 
@@ -50,5 +50,47 @@ describe("«Pregúntale» en la atención", () => {
     expect(
       render({ ...health, allergyReviewDue: false, reviewStatus: { allergies: "none", conditions: "none", medications: "none" } }),
     ).toBe("")
+  })
+})
+
+// QA del 10 nov (B11): en un niño decía «Pregúntale a QA por sus alergias», y la ficha ya decía quién habla por él.
+describe("«Pregúntale» con representante", () => {
+  const guardian = {
+    contactId: "c1",
+    displayName: "Luis Ríos",
+    phone: null,
+    email: null,
+    isActive: true,
+    relationship: "guardian" as const,
+    relationshipDetail: "Padre",
+    kinship: "FTH",
+    isPreferred: true,
+    isEmergency: false,
+  }
+  it("se le pregunta a su representante, con su parentesco y su nombre", () => {
+    expect(askWhom([guardian])).toBe("su padre (Luis Ríos)")
+    expect(askWhom([{ ...guardian, kinship: null, relationshipDetail: "Tutora" }])).toBe(
+      "su tutora (Luis Ríos)",
+    )
+    expect(askWhom([{ ...guardian, kinship: null, relationshipDetail: null }])).toBe(
+      "su representante (Luis Ríos)",
+    )
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice
+          patientId="p1"
+          patientName="Mateo Ríos"
+          health={health}
+          askTo={askWhom([guardian])}
+        />
+      </QueryClientProvider>,
+    )
+    expect(page).toContain(
+      "Pregúntale a su padre (Luis Ríos) por sus alergias, sus enfermedades y su medicación",
+    )
+  })
+  it("un familiar que no es su representante, o uno que ya no está vigente, no cambia a quién se pregunta", () => {
+    expect(askWhom([{ ...guardian, relationship: "family" }])).toBeNull()
+    expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
 })

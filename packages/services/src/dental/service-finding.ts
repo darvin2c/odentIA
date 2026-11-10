@@ -76,7 +76,14 @@ export interface ToothAnatomySibling {
  * servicios activos de la clínica de su familia (los hermanos que se ofrecen si
  * no encaja en la pieza). Un servicio propio no tiene: nunca avisa.
  */
-export type ServiceToothAnatomy = TemplateToothAnatomy & { siblings: ToothAnatomySibling[] }
+export type ServiceToothAnatomy = TemplateToothAnatomy & {
+  siblings: ToothAnatomySibling[]
+  /**
+   * De una endodoncia vital, las no vitales activas de la clínica (decisión B2 del 10 nov): con un
+   * diagnóstico de necrosis, el aviso las ofrece. Vacío en lo demás.
+   */
+  nonVital?: ToothAnatomySibling[]
+}
 
 function asJson<T>(value: unknown): T | null {
   if (value === null || value === undefined) return null
@@ -110,6 +117,16 @@ export const serviceToothAnatomy = sql<ServiceToothAnatomy | null>`(
             COUNTERPART_PAIRS.map((pair) => sql`${pair}`),
             sql`, `,
           )}))
+    ), '[]'::jsonb),
+    'nonVital', coalesce((
+      select jsonb_agg(jsonb_build_object(
+          'id', other."id", 'name', other."name", 'priceCents', other."price_cents", 'currency', other."currency",
+          'groups', to_jsonb(kin."tooth_groups"), 'dentition', kin."dentition"
+        ) order by other."name")
+      from "service_catalog" other
+      join ${dentalTemplateRule} kin on kin."template_id" = other."template_id"
+      where own_rule."family" = 'endodoncia-vital' and kin."family" = 'endodoncia-no-vital'
+        and other."organization_id" = ${serviceCatalog.organizationId} and other."is_active"
     ), '[]'::jsonb))
   from ${dentalTemplateRule} own_rule
   where own_rule."template_id" = ${serviceCatalog.templateId} and own_rule."family" is not null
