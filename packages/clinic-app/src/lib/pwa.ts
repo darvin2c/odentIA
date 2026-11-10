@@ -264,3 +264,30 @@ export function subscribeOnline(listener: () => void): () => void {
     window.removeEventListener("offline", listener)
   }
 }
+
+/**
+ * Las barras del teléfono (arriba la hora, abajo los botones) del color del fondo de
+ * la app, también cuando la persona eligió claro u oscuro distinto al del teléfono:
+ * lee `--canvas` ya calculado y lo vuelve a leer al cambiar el tema.
+ */
+export function syncThemeColor(): () => void {
+  if (!browser) return () => undefined
+  const root = document.documentElement
+  const apply = () => {
+    const canvas = getComputedStyle(root).getPropertyValue("--canvas").trim()
+    if (!canvas) return
+    for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+      meta.content = canvas
+      meta.removeAttribute("media")
+    }
+  }
+  apply()
+  const observer = new MutationObserver(apply)
+  observer.observe(root, { attributes: true, attributeFilter: ["class", "style", "data-theme"] })
+  const scheme = window.matchMedia?.("(prefers-color-scheme: dark)")
+  scheme?.addEventListener("change", apply)
+  return () => {
+    observer.disconnect()
+    scheme?.removeEventListener("change", apply)
+  }
+}

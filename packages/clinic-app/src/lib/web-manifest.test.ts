@@ -3,12 +3,12 @@ import { applicationServerKey, isInternalPath } from "./pwa"
 import { clinicWebManifest } from "./web-manifest"
 
 describe("la app instalada de la clínica", () => {
-  it("se llama como la clínica, con el ícono y el color de su producto", () => {
+  it("se llama como la clínica, con el ícono de su producto y las barras del color del fondo de la app", () => {
     const manifest = clinicWebManifest({ brandColor: "#1d5fa8", name: "Pediatría Los Olivos", product: "medical" })
-    expect(manifest).toMatchObject({ name: "Pediatría Los Olivos", short_name: "Pediatría Los Olivos", start_url: "/home", scope: "/", display: "standalone", theme_color: "#1d5fa8" })
+    expect(manifest).toMatchObject({ name: "Pediatría Los Olivos", short_name: "Pediatría Los Olivos", start_url: "/home", scope: "/", display: "standalone", theme_color: "#f8f8f8", background_color: "#f8f8f8" })
     expect(manifest.icons.map((icon) => icon.src)).toEqual(["/pwa/latidia-192.png", "/pwa/latidia-512.png", "/pwa/latidia-maskable-512.png"])
     // Bajo el ícono va el nombre de la clínica: dos clínicas no quedan iguales.
-    expect(clinicWebManifest({ brandColor: null, name: "Dental Smile", product: "dental" })).toMatchObject({ short_name: "Dental Smile", theme_color: "#ffffff" })
+    expect(clinicWebManifest({ brandColor: null, name: "Dental Smile", product: "dental" })).toMatchObject({ short_name: "Dental Smile", theme_color: "#f8f8f8" })
   })
 
   it("sin datos de la clínica queda la del producto base", () => {

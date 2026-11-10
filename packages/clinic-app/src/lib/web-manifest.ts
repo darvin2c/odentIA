@@ -1,6 +1,10 @@
 import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { ClinicAppearance } from "./clinic-color"
 
+/** `--canvas` de `globals.css`, en claro y en oscuro: las barras del sistema van de ese color. */
+export const CANVAS_LIGHT = "#f8f8f8"
+export const CANVAS_DARK = "#111111"
+
 /** Los íconos de cada producto en `public/pwa/` (los genera `scripts/pwa-icons.mjs`). */
 const ICON_NAMES: Record<ClinicalProduct, string> = { dental: "odentia", medical: "latidia", optical: "vistia" }
 
@@ -25,8 +29,10 @@ export function clinicWebManifest(appearance: ClinicAppearance, appProduct?: Cli
     start_url: "/home",
     scope: "/",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: appearance.brandColor ?? "#ffffff",
+    // El fondo de la app (`--canvas` en claro): las barras del teléfono no quedan blancas.
+    // En oscuro lo cambian los `theme-color` de la página (`syncThemeColor`).
+    background_color: CANVAS_LIGHT,
+    theme_color: CANVAS_LIGHT,
     icons: [
       { src: `/pwa/${icon}-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
       { src: `/pwa/${icon}-512.png`, sizes: "512x512", type: "image/png", purpose: "any" },
