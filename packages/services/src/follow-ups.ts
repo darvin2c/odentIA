@@ -474,7 +474,12 @@ export async function changeFollowUpDue(
     : /^\d{4}-\d{2}-\d{2}T/.test(raw)
       ? dayKeyIn(instant(raw, "dueAt"), timezone)
       : null
-  if (!day) throw invalidField("dueAt", "Elige la fecha en el calendario.")
+  // Un día que existe (no el 45 de un mes 13) y, como mucho, a cinco años.
+  const real = day ? new Date(`${day}T12:00:00Z`) : null
+  if (!day || !real || Number.isNaN(real.getTime()) || real.toISOString().slice(0, 10) !== day)
+    throw invalidField("dueAt", "Elige la fecha en el calendario.")
+  if (real.getTime() > Date.now() + 5 * 366 * 86_400_000)
+    throw invalidField("dueAt", "Elige un día en los próximos cinco años.")
   if (day <= dayKeyIn(new Date(), timezone))
     throw invalidField("dueAt", "Elige un día desde mañana.")
   const dueAt = zonedTimeToUtc(day, FOLLOW_UP_MINUTES, timezone)

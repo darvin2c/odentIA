@@ -40,7 +40,18 @@ function writeStateQuery(query: string | undefined): void {
 export function usePrivateListSearch(): ListSearchController {
   const url = useListSearch()
   const fromUrl = url.get("q")
-  const [query, setQuery] = useState<string | undefined>(() => fromUrl ?? readStateQuery())
+  // El historial solo existe en el navegador: se lee después de hidratar, para que el servidor y el
+  // cliente pinten lo mismo (QA antes de entregar: error de hidratación al recargar con búsqueda).
+  const [query, setQuery] = useState<string | undefined>(fromUrl)
+  const [restored, setRestored] = useState(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al montar.
+  useEffect(() => {
+    if (fromUrl === undefined) {
+      const saved = readStateQuery()
+      if (saved) setQuery(saved)
+    }
+    setRestored(true)
+  }, [])
   const {
     get: getUrl,
     setParam: setUrlParam,
@@ -59,7 +70,9 @@ export function usePrivateListSearch(): ListSearchController {
   // Cada navegación de la lista (otra vista, un atajo) reescribe la entrada del historial: se
   // vuelve a guardar la búsqueda en ella para que «Atrás» la encuentre.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `urlSearch` cambia con cada navegación
-  useEffect(() => writeStateQuery(query), [query, urlSearch])
+  useEffect(() => {
+    if (restored) writeStateQuery(query)
+  }, [query, urlSearch, restored])
 
   const setParams = useCallback<ListSearchController["setParams"]>(
     (patch, options) => {

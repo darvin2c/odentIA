@@ -2473,15 +2473,27 @@ export async function checkEncounterClosing(
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
+  // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
+  // control: se muestra con lo que termina al firmar, para cambiarlo o quitarlo igual (QA antes de
+  // entregar); no como uno que ya tenía.
+  const doneToday = await tx.execute<{ id: string; plan_item_id: string }>(sql`
+    select f.id, link.plan_item_id from clinical_follow_up f
+    join clinical_follow_up_item link on link.organization_id = f.organization_id and link.follow_up_id = f.id
+    join encounter_procedure today on today.organization_id = link.organization_id and today.plan_item_id = link.plan_item_id
+      and today.encounter_id = ${row.id} and today.voided_at is null
+    where f.organization_id = ${orgId} and f.patient_id = ${row.patientId}
+      and f.finish_after_days is not null and f.status = 'pendiente'`)
+  const fromToday = new Set(doneToday.map((link) => link.id))
+  const base = await closingControlsOf(tx, orgId, actorUserId, row)
   const controls = {
-    ...(await closingControlsOf(tx, orgId, actorUserId, row)),
-    finishing: await finishingControlsOf(
-      tx,
-      orgId,
-      sessions.finishing
-        .map((session) => session.planItemId)
-        .filter((id) => !keepOpenPlanItemIds.includes(id)),
-    ),
+    ...base,
+    open: base.open.filter((control) => !fromToday.has(control.id)),
+    finishing: await finishingControlsOf(tx, orgId, [
+      ...new Set([
+        ...sessions.finishing.map((session) => session.planItemId).filter((id) => !keepOpenPlanItemIds.includes(id)),
+        ...doneToday.map((link) => link.plan_item_id),
+      ]),
+    ]),
   }
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,
