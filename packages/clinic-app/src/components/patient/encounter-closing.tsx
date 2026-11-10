@@ -1316,11 +1316,13 @@ export function EncounterClosingDialog({
                   {blockedReason}
                 </p>
               ) : null}
-              {mayCharge ? (
+              {mayCharge || seesFinance ? (
                 <p className="text-xs text-muted-foreground">
-                  {seesFinance
-                    ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
-                    : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
+                  {!mayCharge
+                    ? "Después: lo que debe, para avisar a caja."
+                    : seesFinance
+                      ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
+                      : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
                 </p>
               ) : null}
               {nextVisit}

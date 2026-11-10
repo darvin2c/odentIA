@@ -1450,7 +1450,7 @@ export interface BudgetDecisionSignature {
   declaration: string
   /** Lo que aceptó al firmar: lo que se responda después no queda bajo esta firma. */
   accepted: string[]
-  /** El alcance de la firma («Firma electrónica simple…»), como se leyó al firmar. */
+  /** Lo que leyó al pie al firmar, tal como se leyó (desde la entrega 11, `BUDGET_SIGNATURE_NOTE`; antes, «Firma electrónica simple…»). */
   note: string
 }
 

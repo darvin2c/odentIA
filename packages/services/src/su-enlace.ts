@@ -2053,7 +2053,11 @@ export async function consentPhoneSignBlock(
     throw e
   })
   if (!recipient) return "sin-destinatario"
-  return remoteSignBlock(tx, orgId, patientId, recipient.contactId)
+  // Un representante cuyo vínculo se quitó sigue en sus responsabilidades: no hay a quién.
+  return remoteSignBlock(tx, orgId, patientId, recipient.contactId).catch((e: unknown) => {
+    if (e instanceof ServiceError) return "sin-destinatario" as const
+    throw e
+  })
 }
 
 /**

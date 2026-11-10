@@ -2832,7 +2832,7 @@ export function EncounterEditor({
         who={signer}
         // Se cobra lo que tiene precio, propio o de su línea del presupuesto (`finalizeEncounter`).
         mayCharge={detail.procedures.some(
-          (proc) => !proc.voidedAt && ((proc.priceCents ?? 0) > 0 || proc.planItemId !== null),
+          (proc) => !proc.voidedAt && proc.serviceId !== null && ((proc.priceCents ?? 0) > 0 || proc.planItemId !== null),
         )}
         consents={unsignedConsents}
         closing={closingQuery.data?.data ?? null}
