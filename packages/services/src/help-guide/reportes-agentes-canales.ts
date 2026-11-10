@@ -26,8 +26,8 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "reportes-argos-preguntas-quedan",
         q: "¿Cuántas preguntas a Argos me quedan?",
-        a: "El panel de Argos lo dice bajo su nombre: cuántas llevas de las del mes. Cuando se acaban, quien administra la clínica puede sumar más ahí mismo, con su precio a la vista, o tocar «Ahora no»; los demás se lo piden. Reportes y lo fijado siguen funcionando: solo se detienen las preguntas nuevas.",
-        forms: ["se me acabaron las preguntas de argos", "como sumo mas preguntas para argos"],
+        a: "El panel de Argos lo dice bajo su nombre: cuántas llevas de las del mes; también está en Configuración › Plan y pagos, en «Preguntas a Argos». Cuando se acaban, quien administra la clínica puede sumar más ahí mismo, con su precio a la vista, o tocar «Ahora no»; los demás se lo piden. Con el interruptor de sumar solas encendido, en Plan y pagos, Argos suma un paquete sin preguntar. Reportes y lo fijado siguen funcionando: solo se detienen las preguntas nuevas.",
+        forms: ["se me acabaron las preguntas de argos", "como sumo mas preguntas para argos", "que pasa cuando se acaban las preguntas a argos"],
       },
       {
         id: "reportes-lo-que-deja",
@@ -129,16 +129,9 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "agente-recuerda-persona",
         q: "¿Qué recuerda Sofi de una persona?",
-        a: "En su conversación de la Bandeja, en el panel de contexto, abre «Lo que recuerda Sofi»: pocos datos prácticos (el horario que le viene bien, cómo quiere que la llamen, por quién escribe), cada uno con quién lo dijo y cuándo. Toca un dato para corregirlo, la X lo quita y «Agregar un dato» suma otro; en la ficha de la persona solo se lee. Nunca guarda síntomas, diagnósticos ni nada de la historia clínica.",
-        forms: ["donde veo lo que sofi sabe de un paciente", "sofi anoto mal un dato de la persona", "como corrijo lo que recuerda sofi"],
-        needs: ["crm.write", "conversations.write"],
-      },
-      {
-        id: "agente-quien-corrige",
-        q: "¿Quién puede corregir a Sofi?",
-        a: "Quien administra el agente y también recepción. Recepción corrige desde la Bandeja, debajo del mensaje, en «En qué se basó» › «Corregir»; Agente › Aprender lo abre quien administra el agente. La lección que sale de una corrección no cambia nada hasta que la aprueba quien administra el agente, con «Ver y aprobar».",
-        forms: ["recepcion puede corregir a sofi", "quien aprueba las lecciones"],
-        needs: ["agent.decide", "agent.write"],
+        a: "En su conversación de la Bandeja, en el panel de contexto, abre «Lo que recuerda Sofi»: pocos datos prácticos (el horario que le viene bien, cómo quiere que la llamen, por quién escribe), cada uno con quién lo dijo y cuándo. Toca un dato para corregirlo, la X lo quita y «Agregar un dato» suma otro. También está en su página, en el Resumen, dentro de «Notas»: ahí solo se lee. Nunca guarda síntomas, diagnósticos ni nada de la historia clínica.",
+        forms: ["donde veo lo que sofi sabe de un paciente", "sofi anoto mal un dato de la persona", "como corrijo lo que recuerda sofi", "que sabe sofi de este paciente", "de donde saco el agente ese dato de la persona"],
+        needs: ["conversations.read", "crm.read"],
       },
       {
         id: "agente-por-revisar",
@@ -212,13 +205,6 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
         q: "¿Cómo deshago algo que le enseñé a Sofi?",
         a: "En Agente › Aprender, en «Lo aprendido», toca «Retirar» en la lección: deja de usarla al instante. Antes puedes abrir «Ver cómo respondería sin ella» y marcar «Retirar también su caso de prueba». Queda en «Retiradas», de donde vuelve con «Restaurar» cuando quieras.",
         forms: ["sofi aprendio algo mal como lo quito", "como retiro una leccion", "como restauro una leccion retirada"],
-      },
-      {
-        id: "agente-urgencias",
-        q: "¿Qué dice Sofi si alguien escribe con una urgencia?",
-        a: "Le da el teléfono de urgencias de la clínica, junto al número de emergencias del país. Si la clínica no lo tiene, solo puede decirle a qué número de emergencias llamar o que vaya a la emergencia más cercana, y su página avisa «Sin teléfono para urgencias.»: se agrega en Configuración › Datos de la clínica.",
-        forms: ["donde pongo el telefono de urgencias de la clinica", "sofi dice sin telefono para urgencias"],
-        needs: "settings.write",
       },
       {
         id: "agente-registro-tecnico",

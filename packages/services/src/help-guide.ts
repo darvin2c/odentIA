@@ -103,7 +103,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Inicio",
     parent: null,
     purpose:
-      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), cuántos tienen algo aceptado sin cita (para quien ve Reportes, con «Ver en Pacientes», que abre «Por agendar»; si Argos ya te recomienda «Presupuesto aceptado sin cita», va en esa fila), los controles vencidos sin ninguna cita (para quien ve la agenda de la sede, como recepción, la dueña o la administración, con la lista de la línea de Argos «Avisar un control»; si Argos ya te la recomienda, va en esa fila), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y, con el Administrador encendido, las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder, o te lleva a la pantalla donde se resuelve; en una tarea («Hecha») y en quien terminó su registro («Llegó») el botón lo hace ahí mismo y tocar el resto de la fila abre el detalle: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), cuántos tienen algo aceptado sin cita (para quien ve Reportes, con «Ver en Pacientes», que abre «Por agendar»; si Argos ya te recomienda «Presupuesto aceptado sin cita», va en esa fila), los controles vencidos sin ninguna cita (para quien ve la agenda de la sede, como recepción, la dueña o la administración, con la lista de la línea de Argos «Avisar un control»; si Argos ya te la recomienda, va en esa fila), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y, con el Administrador encendido, las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
     terms: [
       "resumen del día",
       "pendientes",
@@ -221,7 +221,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "dice-mensaje-automatico-llega-todos",
         q: "¿Por qué dice que un mensaje automático no le llega a todos?",
-        a: "Porque WhatsApp lo clasificó como publicidad y solo sale a quien aceptó novedades. «Arreglar» te lleva a sus mensajes para cambiarle el texto.",
+        a: "Porque WhatsApp lo clasificó como publicidad y solo sale a quien aceptó novedades. «Arreglar» abre al lado un texto solo de aviso ya preparado: «Enviar a revisión de WhatsApp» lo pide; WhatsApp decide y puede tardar hasta un día, y mientras tanto sigue saliendo el texto actual. En cada mensaje, «Editar» (o «Cambiar el texto», si es un mensaje propio de la clínica) te lleva a sus mensajes para cambiarlo a mano.",
       },
       {
         id: "cambio-contrasena",
@@ -252,7 +252,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -297,7 +297,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "escribo-alguien-nunca-escribio",
         q: "¿Cómo le escribo a alguien que nunca me escribió?",
-        a: "En la Bandeja pulsa «Nueva conversación», búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle». En la ficha se abre ahí mismo, sin ir a la Bandeja.",
+        a: "En la Bandeja pulsa «Nueva conversación» (la tienen recepción, el propietario y el administrador), búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle». En la ficha se abre ahí mismo, sin ir a la Bandeja.",
+        needs: "crm.read",
       },
       {
         id: "respondo-yo-vez-sofi",
@@ -398,7 +399,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "aparece-profesional-agenda",
         q: "¿Por qué no aparece un profesional en la agenda?",
-        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista. Recepción y caja no atienden, así que no aparecen; un propietario o administrador aparece cuando le pones horario.",
+        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, en la computadora y en la vista «Día», elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista. Recepción y caja no atienden, así que no aparecen; un propietario o administrador aparece cuando le pones horario.",
       },
       {
         id: "dar-cita-fuera-horario-hora-ocupada",
@@ -423,7 +424,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "marco-llego",
         q: "¿Cómo marco que llegó?",
-        a: "Con «Llegó» en la cita, en la Agenda o en Inicio. Queda la hora y quien atiende lo ve en su sala de espera. Si estaba por confirmar, queda confirmada y ya no se le envían recordatorios. Si fue un error, «Deshacer» la devuelve como estaba mientras no haya empezado su atención.",
+        a: "Con «Llegó» en la cita, en la Agenda o en Inicio. Queda la hora y quien atiende lo ve en su sala de espera. Si estaba por confirmar, queda confirmada y ya no se le envían recordatorios. Si fue un error, «Deshacer» en la cita (en la vista «Agenda», «…» › «Deshacer la llegada») la devuelve como estaba mientras no haya empezado su atención.",
       },
       {
         id: "quedo-atendida",
@@ -459,7 +460,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Tareas",
     parent: null,
     purpose:
-      "Los pendientes del equipo, con páginas y búsqueda: se abre en «Mías y de mi área» (las tuyas y las sin responsable de tu parte del equipo); «Vencidas» y «Hechas» las filtran, y «Toda la clínica» la ven el propietario y el administrador. Cada tarea dice de quién es y lleva a su persona. Las que dejó Argos se cierran solas cuando ya no hacen falta (la cita pasó, la persona confirmó, el presupuesto se decidió) y dicen por qué. Completar la tarea de un tema de Sofi lo da por resuelto, igual que «Marcar resuelto» en la conversación: Sofi sigue con lo demás. Lo que deja el sistema por su cuenta no está aquí: se decide en su fila de «Te espera».",
+      "Los pendientes del equipo, con páginas y búsqueda. Se crean con «Nueva tarea», aquí o desde la página de una persona, su oportunidad o «Contexto» de la Bandeja, y en cada una se elige quién la lleva. Se abre en «Mías y de mi área» (las tuyas y las sin responsable de tu parte del equipo); «Vencidas» y «Hechas» las filtran, y «Toda la clínica» la ven el propietario y el administrador. Cada tarea dice de quién es y lleva a su persona. Las que dejó Argos se cierran solas cuando ya no hacen falta (la cita pasó, la persona confirmó, el presupuesto se decidió) y dicen por qué. Completar la tarea de un tema de Sofi lo da por resuelto, igual que «Marcar resuelto» en la conversación: Sofi sigue con lo demás. Lo que deja el sistema por su cuenta no está aquí: se decide en su fila de «Te espera».",
     terms: [
       "pendientes",
       "to do",
@@ -628,7 +629,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "archivo-persona",
         q: "¿Cómo archivo a una persona?",
-        a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha, y se recupera igual desde la vista «Archivados». Si vuelve a escribir o se registra desde su enlace, sale sola del archivo y se le responde como a cualquiera. A quien no es paciente se le puede «Bloquear» desde la conversación para no responderle; a un paciente, no.",
+        a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha: deja de aparecer en las listas y, mientras está archivada, su página no ofrece escribirle, reservarle cita ni atenderla. Para recuperarla, búscala en la vista «Archivados», abre su página y, en «Más acciones», «Recuperar». Si vuelve a escribir o se registra desde su enlace, sale sola del archivo y se le responde como a cualquiera. A quien no es paciente se le puede «Bloquear» desde la conversación para no responderle; a un paciente, no.",
+        forms: ["como recupero a un paciente archivado", "como desarchivo a un paciente", "archive a un paciente por error"],
       },
       {
         id: "enviarle-registro-quien-paciente",
@@ -654,6 +656,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "alergias-toca-ultima-atencion",
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
         a: "Su próxima cita está arriba de su página, en todas las pestañas (si ya llegó, dice que está en la sala de espera). En el Resumen, «Qué sigue» dice en una sola lista todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo (si tiene más, dice cuántos controles más tiene: están todos en Controles). Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. Si una cita suya de otro día quedó sin cerrar, va primero con «¿Vino?», que abre la cita para registrar la atención o marcar que no vino; y si una cita que llevaba lo aceptado se atendió sin registrar lo que se hizo, la fila de lo aceptado lo dice, para preguntarle a quien atendió antes de reservar. El Plan muestra la misma lista y la lista de Pacientes dice su primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles, y donde falta reservar una cita dice que la reserva recepción.",
+        area: "plan",
       },
       {
         id: "tengo-cambiar-pestana-revisar-firmar-cobrar",
@@ -663,7 +666,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quedaron-atenciones-recetas-u-ordenes",
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
-        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
+        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (presupuestos, recetas, órdenes, consentimientos, formularios, imágenes, otros archivos y, en clínicas de Perú, odontogramas); «Nuevo» abre directo el formulario.",
+        area: "clinica",
       },
       {
         id: "llevo-tratamiento-varias-sesiones",
@@ -679,104 +683,125 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "se termino y faltaba otra sesion",
           "reabrir un tratamiento",
         ],
+        area: "plan",
       },
       {
         id: "atencion-queda-unida-cita",
         q: "¿La atención queda unida a su cita?",
         a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y su control, hecho. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: arriba, «Hoy viene a…» dice lo que tiene por hacer (un tratamiento en curso, un control por cumplir) para elegirlo con un toque, o «Es una urgencia»; el motivo se escribe en «Consulta» y lo pide el cierre.",
+        area: "clinica",
       },
       {
         id: "registro-hallazgo-odontograma",
         q: "¿Dónde registro un hallazgo del odontograma?",
         a: "Dentro de la atención, en el Odontograma, que siempre está a la vista con lo registrado hoy debajo (una caries de varias caras es un solo hallazgo; en la ficha, bajo el dibujo, está la lista de todo lo que tiene la boca, y tocar un renglón abre esa pieza): eliges la pieza y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
+        area: "clinica",
       },
       {
         id: "avisa-tratamiento-en-otro-sitio",
         q: "¿Por qué me avisa que el tratamiento es para otras piezas?",
         a: "Los tratamientos de la biblioteca saben para qué piezas son: la endodoncia anterior vital es para dientes anteriores y la posterior, para molares. Si indicas uno en una pieza de otro grupo (la anterior en la 46), te lo dice sin frenarte debajo del tratamiento elegido, en el panel de la pieza o en «Indicar un tratamiento», y en su fila de «Indicado hoy»; si tu lista tiene el que encaja, ofrece «Usar» con su nombre y su precio, y tocarlo cambia el servicio. Si no lo tiene, te dice que el consentimiento llevará el nombre del que elegiste y, a quien configura los servicios, ofrece «Agregarla en Servicios y precios». Un servicio propio, sin biblioteca, no avisa. El paciente no ve el aviso. Lo mismo con la vitalidad: una endodoncia vital con un diagnóstico de necrosis en la pieza avisa «Con necrosis pulpar suele indicarse la endodoncia no vital» y ofrece la no vital de esa pieza, si tu lista la tiene.",
+        area: "plan",
       },
       {
         id: "pieza-quedo-dibujada-despues-tratamiento",
         q: "¿Por qué la pieza quedó dibujada después del tratamiento?",
         a: "Lo tratado queda dibujado: al completar un tratamiento cuyo servicio dice qué deja en la pieza (la resina deja una restauración; la exodoncia, una pieza ausente), eso se registra solo en la atención, en buen estado (azul), y lo que se trató deja de estar pendiente al cerrar. Los servicios de la biblioteca de odentIA ya lo traen; en uno propio se elige en Servicios › «Deja en la pieza».",
+        area: "clinica",
       },
       {
         id: "firma-odontograma",
         q: "¿Cómo se firma el odontograma?",
-        a: "En clínicas de Perú (NTS 188) se firma solo al cerrar la atención que cambió el gráfico, con tu perfil profesional y sin dibujar nada: el cierre te dice el momento («Inicio del plan de tratamiento», «Nuevos hallazgos» o «Culminación del plan de tratamiento») y los hallazgos. Queda en Clínica › Odontograma y en Documentos, para verlo e imprimirlo en el gráfico de la norma, con la firma electrónica y un código QR para comprobarlo; «Ver como la norma» muestra el de hoy. «Firmar odontograma» queda para un pedido judicial o de la persona y para el reingreso. En otros países el odontograma no se firma: «Imprimir odontograma» da una hoja con la numeración FDI y los hallazgos por pieza.",
+        a: "En clínicas de Perú (NTS 188) se firma solo al cerrar la atención que cambió el gráfico, con tu perfil profesional y sin dibujar nada: el cierre te dice el momento («Inicio del plan de tratamiento», «Nuevos hallazgos» o «Culminación del plan de tratamiento») y los hallazgos. Queda en Clínica › Odontograma y en Documentos, para verlo e imprimirlo en el gráfico de la norma, con la firma electrónica y un código QR para comprobarlo; «Ver como la norma» muestra el de hoy. «Firmar odontograma» queda para un pedido judicial o de la persona y para el reingreso: eliges «Para qué se firma» y, si hace falta, observaciones y especificaciones; si a tu perfil le falta la colegiatura, «Completar perfil» te lleva a ponerla. En Clínica › Odontograma, abajo, «Odontogramas firmados» los lista, cada uno con «Ver» e «Imprimir». En otros países el odontograma no se firma: «Imprimir odontograma» da una hoja con la numeración FDI y los hallazgos por pieza.",
+        forms: ["imprimir odontograma firmado", "me piden el odontograma para un juicio", "firmar el odontograma a mano"],
+        area: "clinica",
       },
       {
         id: "receta-consentimiento-orden-atencion",
         q: "¿Dónde hago la receta, el consentimiento o la orden de la atención?",
         a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, formulario o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
+        area: "clinica",
       },
       {
         id: "puede-cambiar-receta-emitida-comprueba-qr",
         q: "¿Se puede cambiar una receta ya emitida? ¿Qué comprueba el QR?",
         a: "Receta, orden y descanso quedan guardados como archivo al emitirse: aunque después cambien los datos de la persona o de la clínica, siempre se abre, se envía y se descarga ese mismo papel. Para corregirlo, anúlalo con su motivo y emite otro; el anulado se ve con «ANULADA» encima. El QR dice si sigue vigente, quién lo firmó y las iniciales del paciente, sin nada de salud. Si a alguien le llegó como PDF, ahí mismo comprueba que es el original, sin subir el archivo. Un papel impreso no se puede comparar así: ante una duda sobre lo que dice, que llame a la clínica. La foto de un consentimiento firmado en papel tampoco se retira; si se cargó por error, revoca ese consentimiento, retírala y vuelve a firmar.",
+        area: "clinica",
       },
       {
         id: "doy-paciente-seguro",
         q: "¿Qué le doy al paciente para su seguro?",
         a: "Abre la atención firmada y, en «Documentos», «Hoja de atención»: lleva el diagnóstico, la fecha, lo que se hizo, los exámenes y el tratamiento sugerido, con tu firma y tu sello, sin la nota de evolución. Envíala con la receta y la orden; el odontograma, a color. La boleta o factura electrónica la emites aparte: el ticket de caja no la reemplaza. Cada aseguradora decide qué acepta: si no admite el sello impreso, imprime el papel, séllalo a mano y que suba la foto.",
+        area: "clinica",
       },
       {
         id: "pongo-firma-papeles",
         q: "¿Cómo pongo mi firma en los papeles?",
         a: "Dibújala una vez en tu perfil profesional: al finalizar una atención, con «Agregar mi firma», o en Configuración › Equipo › «Mi perfil profesional» si puedes entrar ahí. Sale sola en los papeles que emites, junto a un sello con tu nombre, tu título y tu colegiatura, y cambiarla no toca lo ya emitido. Sin ella, el papel lleva una línea para firmar a mano. Solo tú puedes guardarla. Es el dibujo que se ve, no una firma digital certificada: el papel sigue diciendo «Firmado electrónicamente».",
+        area: "clinica",
       },
       {
         id: "firma-persona-consentimiento",
         q: "¿Cómo firma la persona su consentimiento?",
         a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si está en la clínica, «Firmar en su teléfono» muestra un código para que lo escanee (o «Copiar enlace» para pegarlo en su chat), sin enviarle ningún mensaje. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, no se firma desde el teléfono: en la atención no se ofrece enviarlo ni el código, y la fila dice qué falta («falta el documento de…»); desde su página, «Enviar para que lo lea» le llega para leerlo antes y lo firma en la cita. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención, aunque la atención sea de otro día: queda el día real y a quién informaste. Confírmalo con quien firmó delante; si vino otra persona, o si firmó hace meses, «Firmar de nuevo aquí» lo firma en la tablet y lo del enlace queda en su historia. El consentimiento va con su tratamiento: el Plan y «Hoy viene a…» dicen si falta, si falta firmarlo o si ya está, en cualquier atención donde se haga. Si cambias dónde se hace, el servicio o el diagnóstico, lo firmado deja de contar y se prepara con el texto nuevo. Al pie de la hoja dice cómo se firma («Firma en la clínica», «Firma en papel» o «Firma por enlace») y que queda en la historia clínica con la fecha y la hora, sin advertencias; el PDF firmado dice el nivel real en letra chica: firma electrónica simple (en el Perú, Ley 27269), no firma digital. Si es menor, «Falta la firma de…» nombra a su representante; «Firmar en su teléfono» no se ofrece si su enlace no lo dejaría firmar (menor, sin fecha de nacimiento o sin su documento en la ficha).",
+        area: "clinica",
       },
       {
         id: "atencion-dice-necesita-consentimiento",
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
         a: "Porque hoy haces un servicio (lo registraste, o lo trajo su cita o «Hacerla hoy») para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo indicado para otro día no lo pide: se firma antes de hacerlo (si lo quieres firmar hoy, «Nuevo» › Consentimiento). Al firmar la atención, solo avisa de lo que hiciste hoy sin consentimiento firmado: elige «Urgencia», «Firmado en papel» (con la foto de la hoja) u «Otro motivo»; la constancia queda en la atención y, si después lo firma, se agrega con su fecha. Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
+        area: "clinica",
       },
       {
         id: "dejo-dicho-vuelve",
         q: "¿Cómo dejo dicho cuándo vuelve?",
         a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si hoy no registraste nada y tiene algo por hacer sin cita (lo aceptado, o lo que indicaste hoy), vuelve para eso: no se crea un control aparte y recepción lo ve en «Qué sigue» para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso y «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte; «Indicar también un control» lo pide igual. Lo aceptado se reserva sin esperar al control: el control va en esa cita solo si su día cae cuando ya se puede hacer; si no, queda por reservar y te lo dice. Arriba de «¿Cuándo vuelve?», «Controles que quedan» muestra los que deja lo que terminas hoy según su servicio (por ejemplo, el control al año que pide su servicio, uno solo aunque terminen dos el mismo día) y los que ya tenía: los de hoy se cambian de fecha o se quitan ahí, solo para esta persona; los que ya tenía, con «Cambiar fecha» en Plan y controles, y el que tiene cita, moviendo la cita.",
+        area: "plan",
       },
       {
         id: "tratamiento-va-despues-de-otro",
         q: "¿Por qué la corona dice «va después de terminar» la endodoncia?",
         a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, «Hacerla hoy» y «Reservar» siguen ahí.",
+        area: "plan",
       },
       {
         id: "firmar-cargo-hoy-cuenta-debe-total",
         q: "Al firmar, ¿qué es «Se cargó hoy a su cuenta» y qué es «Debe en total»?",
         a: "«Se cargó hoy a su cuenta» es lo que esta atención sumó a su cuenta y no cambia. «Debe en total» es lo que le falta pagar, con lo de antes y con lo que pague ahí mismo con «Cobrar». Un tratamiento que se cobra una vez se carga en su primera sesión: en las siguientes, el cierre dice que ya se cargó.",
+        area: "clinica",
       },
       {
         id: "queda-hecho-control-vino-otra-cosa",
         q: "¿Cuándo queda hecho un control si vino por otra cosa?",
         a: "Cualquier atención desde unos días antes de su fecha le sirve, aunque la cita no fuera la del control: arriba de la atención, «Hoy viene a…» lo muestra con «Viene a su control»: tócalo y el cierre lo trae marcado, aunque lo haya indicado otro doctor. Al firmar, el cierre muestra su control como casilla, marcada si lo indicaste tú o si dijiste que viene a él. Desmárcala antes de firmar si esta visita no lo cumple y sigue pendiente. Si se cumplió por error, indica otro control.",
+        area: "plan",
       },
       {
         id: "cerrar-sin-consentimiento-firmado",
         q: "¿Puedo cerrar sin el consentimiento firmado?",
         a: "Sí, pero el cierre te lo dice y te pide por qué (por ejemplo, una urgencia). El motivo queda en la atención. Lo mejor es «Firmar ahora» desde el mismo cierre.",
+        area: "clinica",
       },
       {
         id: "quien-envia-receta-orden",
         q: "¿A quién se le envía una receta o una orden?",
         a: "Solo a la propia persona o, si es menor, a su representante legal: nunca a otro número. «Enviar» le manda el PDF por WhatsApp o, si no, por correo, y queda en su conversación. El cajón dice por cada canal qué le llega y, si ninguno sirve, el botón pasa a «Imprimir» y puedes agregarle un correo. El nombre del archivo no dice nada clínico: se ve en la notificación de su teléfono.",
         forms: ["enviar la receta", "mandar la orden", "enviar el pdf", "como le mando su receta"],
+        area: "clinica",
       },
       {
         id: "llega-documento-escribio-ultimas-24-horas",
         q: "¿Le llega el documento si no me escribió en las últimas 24 horas?",
         a: "Sí, si WhatsApp ya aprobó el mensaje de la clínica para enviar documentos: le llega con el PDF aunque hoy no haya escrito. Mientras no esté aprobado, el cajón lo dice y te deja enviarlo por correo o imprimirlo; si te escribe, ya sale por su chat. El estado del mensaje está en Configuración › Integraciones › WhatsApp, «Documento listo».",
         forms: ["pasaron 24 horas y no sale la receta", "no puedo enviar el documento por whatsapp", "documento listo"],
+        area: "clinica",
       },
       {
         id: "anulo-receta-envie",
         q: "¿Qué hago si anulo una receta que ya le envié?",
         a: "Al anularla, la pantalla te dice cuándo y por dónde se le envió: avísale que no la use, porque el PDF que tiene en su chat no lleva el sello. Si ya emitiste la nueva, la receta anulada te ofrece «Enviar la receta N.º …». En su portal la anulada se ve marcada como «Anulada».",
         forms: ["anule una receta que ya envie", "receta anulada enviada"],
+        area: "clinica",
       },
       {
         id: "llega-comprobante-pago",
@@ -787,63 +812,74 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "esta-plan-tratamiento",
         q: "¿Dónde está el plan de tratamiento?",
         a: "En su página, en la pestaña Plan: arriba «Qué sigue» (la misma lista del Resumen, cada fila con su botón: lo aceptado y los controles se reservan ahí, en un solo lugar), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles («Reservar» solo en el que no está ya en «Qué sigue») (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
+        area: "plan",
       },
       {
         id: "arma-envia-presupuesto",
         q: "¿Cómo se arma y se envía el presupuesto?",
         a: "Lo que indicas en la atención se suma solo al presupuesto por enviar de la persona y queda armado al firmarla; el cierre te pregunta «¿Enviárselo ahora?». En su Plan, «Revisar y enviar» muestra lo que encontraron, lo que se propone, hasta cuándo vale y cómo se explica cada tratamiento (la explicación sale de cada servicio y se puede cambiar solo para este paciente), con «Ver el PDF» antes de enviar. «Enviar por WhatsApp» (o por correo, si no tiene WhatsApp) dice antes a quién le llega. Si nadie lo envía, al día siguiente aparece en «Te espera» de recepción. Recepción lo envía y anota la respuesta, pero no cambia precios.",
+        area: "plan",
       },
       {
         id: "ofrecer-dos-opciones",
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
         a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno es el recomendado. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
         forms: ["dos caminos", "conservar o extraer", "otro camino para la pieza", "alternativas de tratamiento"],
+        area: "plan",
       },
       {
         id: "anoto-acepto-parte-otro-esta-pensando",
         q: "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?",
         a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
         forms: ["acepta una parte", "aceptación parcial", "lo piensa con la muela", "no eligió opción"],
+        area: "plan",
       },
       {
         id: "anoto-dijo-consulta-sin-imprimir-ni",
         q: "¿Cómo anoto que dijo que sí en la consulta, sin imprimir ni enviar?",
         a: "En la atención, el presupuesto por enviar tiene «Anotar su respuesta», también al mostrárselo en pantalla y en su Plan. Abre un solo cajón: con caminos, eliges el camino, «Lo piensa» o «No acepta»; sin caminos, «Acepta todo», «Lo piensa» o «No acepta», y si acepta solo una parte cambias cada tratamiento. Al guardar queda entregado y con su respuesta, sin enviarle nada. Si acepta algo, «Que lo firme en la tablet» es opcional: quien decide (la persona o, si es menor, su representante legal) lee su decisión en pantalla completa y firma con el dedo, y después tú guardas. Con firma, su presupuesto dice que aceptó y firmó en la clínica, con su firma; sin firma, quién decide y quién lo anotó. Lo aceptado no se cambia ahí: se corrige con una revisión, que se entrega primero y después se anota su respuesta.",
         forms: ["dijo que si en la consulta", "acepto en el sillon", "firmar el presupuesto", "firma del presupuesto en la tablet", "anotar la respuesta sin imprimir"],
+        area: "plan",
       },
       {
         id: "pasa-cambio-precio-despues-enviarlo",
         q: "¿Qué pasa si cambio un precio después de enviarlo?",
         a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Si todavía no eligió camino, la revisión lleva todos los caminos: desmarca solo lo que ya no le ofreces. Mientras no responda, se cobra lo que ya había aceptado.",
         forms: ["revisión del presupuesto", "subir un precio", "cambiar el precio", "nuevo precio"],
+        area: "plan",
       },
       {
         id: "ver-presupuesto-preparo-colega",
         q: "¿Puedo ver el presupuesto que preparó una colega?",
         a: "Sí, completo, para leer: el de cualquier profesional del paciente. Cambiar precios, enviarlo o anularlo es de quien lo preparó (o de recepción, que lo envía y anota la respuesta).",
         forms: ["presupuesto de otro doctor", "presupuesto de una colega", "no veo el presupuesto"],
+        area: "plan",
       },
       {
         id: "presupuesto-puede-tener-lineas-dolares-soles",
         q: "¿Un presupuesto puede tener líneas en dólares y en soles?",
         a: "Sí. Es un solo presupuesto: cada línea va en la moneda de su servicio y el total sale por moneda, como S/ 300.00 + USD 1,000.00; entre monedas no se suma ni se convierte. La persona lo ve igual en su enlace, en el portal y en el papel, y responde una sola vez. Lo aceptado se cobra después, cada moneda con su ticket.",
         forms: ["presupuesto en dos monedas", "presupuesto en dolares", "presupuesto con dolares y soles", "dos totales en el presupuesto"],
+        area: "plan",
       },
       {
         id: "quiere-decir-cada-estado-presupuesto",
         q: "¿Qué quiere decir cada estado del presupuesto?",
         a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo está pensando»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después que eligió la opción A, con lo que cuesta esa opción. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
+        area: "plan",
       },
       {
         id: "anular-atencion-prepare-presupuesto",
         q: "¿Puedo anular una atención si ya preparé su presupuesto?",
         a: "Sí. Al tocar «Anular esta atención…» te dice antes de confirmar qué pasa con su presupuesto. Si no se le entregó, se anula con ella; si además lleva tratamientos de otras atenciones, solo se le quita lo de esta. Si ya se le entregó, aunque lo haya aceptado, el botón dice «Anular atención y presupuesto» y lo hace en el mismo paso; si tenía una cita para eso, sigue en la agenda y le avisas a recepción. Si en ella cambiaste un tratamiento por otro («Cambiar» o «Revisar indicación»), se deshace el cambio: el anterior vuelve como estaba, con su respuesta y su consentimiento, y el diálogo lo dice. No se puede si caja ya cobró algo de ese presupuesto (primero se anula el cobro), si algo ya se hizo en otra atención, si quien decide firmó que lo acepta o si ya respondió y lleva otros tratamientos: te dice por qué y, cuando hay dónde, te lleva a resolverlo.",
         forms: ["anular atencion con presupuesto", "no me deja anular la atencion", "anular borrador con presupuesto enviado"],
+        area: "clinica",
       },
       {
         id: "guarda-escribo-atencion",
         q: "¿Se guarda lo que escribo en la atención?",
         a: "Sí, solo, mientras escribes: todo se escribe en la misma página, sin abrir nada, y arriba dice «Guardado» con la hora o «Guardando…». Si no se pudo guardar, el aviso dice por qué, con «Reintentar». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
+        area: "clinica",
       },
       {
         id: "va-cada-campo-consulta",
@@ -855,12 +891,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "que va en el relato de la enfermedad",
           "tiempo de enfermedad",
         ],
+        area: "clinica",
       },
       {
         id: "atiendo-paciente",
         q: "¿Cómo atiendo a un paciente?",
         a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice «Cierre de la atención», cada cosa con «Registrar»; cuando no falta nada, dice «Lista para firmar». Solo lo ve quien escribe en la historia clínica.",
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
+        area: "clinica",
       },
       {
         id: "atencion-pide-enfermedades-medicacion",
@@ -874,6 +912,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "niega enfermedades",
           "no toma medicacion",
         ],
+        area: "clinica",
       },
       {
         id: "dicto-atencion",
@@ -887,6 +926,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "como funciona el dictado",
         ],
         general: true,
+        area: "clinica",
       },
       {
         id: "corrijo-nombre-persona",
@@ -897,7 +937,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "borro-paciente",
         q: "¿Cómo borro a un paciente?",
-        a: "Normalmente se archiva. Borrar de verdad es de Administración y responde a un pedido: en su página, Datos › «Privacidad y pedidos», «Revisar y borrar…» dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y se confirma escribiendo BORRAR.",
+        a: "Normalmente se archiva. Borrar de verdad responde a un pedido: en su página › Datos › «Privacidad y pedidos», «Registrar un pedido» con «Borrar sus datos» y, al abrirlo, «Comprobé que es ella»; eso lo hace recepción o Administración. Después Administración pulsa «Revisar y borrar…», que dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y confirma escribiendo BORRAR.",
         forms: ["quiero borrar a un paciente", "como elimino a un paciente", "eliminar paciente", "borrar paciente"],
       },
       {
@@ -911,24 +951,28 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Dónde subo una radiografía?",
         a: "En su página › Clínica › Documentos, con «Nuevo», o en el bloque «Documentos» de la atención: imagen o archivo, con su tipo y la fecha de toma. Es una fila más de la lista y «Ver» la abre a toda la ventana: dos dedos, Ctrl + rueda o doble clic la acercan, «Más» la gira, la voltea o la pone en negativo, y «Informe y datos» trae «Comparar con».",
         forms: ["donde subo una radiografia", "subir imagen", "subir radiografia", "subir examen"],
+        area: "clinica",
       },
       {
         id: "tomografia",
         q: "¿Cómo veo una tomografía?",
         a: "En su página › Clínica › Documentos, «Ver» la abre a toda la ventana. «Panorámica» arma la panorámica con cinco cortes de la pieza: «Ir a la pieza» lleva a la pieza de la orden, también a las terceras molares, y la barra «Cortes» recorre el arco. «Cortes» la muestra desde arriba, de frente y de lado, y «3D» sirve para explicarla, no para medir. «Medir» marca dos puntos y «Ángulo», tres, con un clic o con el teclado (las flechas mueven la mira y Enter marca): quedan con tu nombre y son orientativas; para planificar una cirugía, confírmalas en el programa del tomógrafo. Si quitas una medida, «Deshacer» la vuelve a poner. Si el arco no sigue los dientes, «Más» › «Ajustar el arco» y «Terminar y guardar»: queda guardado con la tomografía. «Informe y datos» muestra el informe, la toma y las piezas sin salir de la imagen. Si el estudio trae más de una serie, «Serie» arriba elige cuál ver. En el celular, la pieza y las medidas van en la hoja de abajo.",
         forms: ["como veo una tomografia", "tomografia en 3d", "ir a la pieza", "como mido en la tomografia", "ajustar el arco", "cbct"],
+        area: "clinica",
       },
       {
         id: "guardar-tu-atencion-hoy-tomografia",
         q: "¿Para qué es «Guardar en tu atención de hoy» en la tomografía?",
         a: "Guarda como imagen lo que estás viendo (la panorámica, los cinco cortes y tus medidas) en la nota de tu atención de hoy con ese paciente, para que quede a la vista sin abrir la tomografía. Aparece solo si tienes una atención tuya abierta hoy; si no, la pantalla te dice que la abras.",
         forms: ["guardar vista en la atencion", "guardar en tu atencion de hoy", "para que sirve guardar vista"],
+        area: "clinica",
       },
       {
         id: "cierro-orden-imagen-resultado",
         q: "¿Cómo cierro una orden de imagen con su resultado?",
         a: "En su página › Clínica › Documentos › Órdenes, «Subir resultado». «Ya está en la ficha» elige la tomografía o la radiografía que ya se subió (por ejemplo, la del CD que trajo) y la une a la orden sin copiarla. «Archivo nuevo» sube una imagen, un PDF o el archivo DICOM de una radiografía. Una tomografía (la carpeta del CD) se sube primero en Documentos y después se elige. La orden queda «Con resultado».",
         forms: ["como cierro una orden", "subir resultado de la orden", "resultado de la tomografia", "cerrar la orden de imagen"],
+        area: "clinica",
       },
       {
         id: "son-agendar-deben-demas-atajos",
@@ -950,7 +994,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "ve-paciente-portal",
         q: "¿Qué ve el paciente en su portal?",
-        a: "Todo lo suyo, sin que nadie lo elija: sus citas, sus presupuestos, su cuenta y sus documentos terminados. Recetas, órdenes (con su resultado) y descansos desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; los archivos subidos; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». No ve las notas de sus atenciones, la tomografía ni los archivos DICOM (no se abren en el teléfono), ni lo que es de otra persona o de un pago (la prueba de una representación, un voucher). Si representa a un menor, ve lo de su representado. Cada archivo dice en «Su portal» si se ve.",
+        a: "Todo lo suyo que la clínica deja ver en Configuración › Portal del paciente («Citas», «Presupuestos», «Cuenta y saldo» y «Documentos»): sus citas, sus presupuestos, su cuenta y sus documentos terminados. Vale para toda la clínica; no se elige por persona. Recetas, órdenes (con su resultado) y descansos desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; los archivos subidos; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». No ve las notas de sus atenciones, la tomografía ni los archivos DICOM (no se abren en el teléfono), ni lo que es de otra persona o de un pago (la prueba de una representación, un voucher). Si representa a un menor, ve lo de su representado. Cada archivo dice en «Su portal» si se ve.",
         forms: ["que ve el paciente en el portal", "que documentos ve en el portal", "el paciente ve sus radiografias"],
       },
       {
@@ -1123,7 +1167,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "cambio-nombre-sofi",
         q: "¿Cómo cambio el nombre de Sofi?",
-        a: "En Agente › Sofi, abre «La base» y cambia «Se presenta como». Vale solo para tu clínica; si lo dejas vacío, se llama Sofi.",
+        a: "En Agente › Sofi, toca «Editar la base» y cambia «Se presenta como». Vale solo para tu clínica; si lo dejas vacío, se llama Sofi.",
         forms: ["como le cambio el nombre a sofi", "como le pongo otro nombre a sofi"],
       },
       {
@@ -1135,8 +1179,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "corrijo-respuesta-sofi",
         q: "¿Cómo corrijo una respuesta de Sofi?",
-        a: "Debajo de su mensaje, «En qué se basó» › «Corregir», o en Agente › Aprender, «Por revisar». Tu corrección queda como una lección y Sofi la usa cuando alguien la aprueba.",
-        forms: ["por que sofi respondio mal", "sofi respondio mal", "sofi se equivoco", "corregir a sofi"],
+        a: "Debajo de su mensaje, «En qué se basó» › «Corregir», o en Agente › Aprender, «Por revisar». Tu corrección queda como una lección y Sofi la usa cuando alguien la aprueba. Corrigen recepción, desde la Bandeja, y quien administra el agente, que es quien abre Agente › Aprender y aprueba cada lección con «Ver y aprobar».",
+        forms: ["por que sofi respondio mal", "sofi respondio mal", "sofi se equivoco", "corregir a sofi", "quien puede corregir a sofi", "recepcion puede corregir a sofi", "quien aprueba las lecciones"],
       },
     ],
   },
@@ -1193,7 +1237,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Finanzas",
     parent: "Gestión",
     purpose:
-      "La caja y lo cobrado, por sede: Caja (el día, con lo que hay por cobrar ahora), Cobros (todos los tickets, con búsqueda y filtros), Deudas, Gastos y, para quien administra, Comisiones.",
+      "La caja y lo cobrado, por sede: Caja (el día, con lo que hay por cobrar ahora, el efectivo que entra o sale y los cierres), Cobros (todos los tickets, con búsqueda y filtros), Deudas, Gastos y, para quien administra, Comisiones.",
     terms: [
       "caja",
       "cobros",
@@ -1463,7 +1507,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "creo-promocion",
         q: "¿Dónde creo una promoción?",
-        a: "En Servicios y precios › Promociones. Con «Informar» encendido, Sofi ofrece la promoción vigente que aplica, con su precio, el ahorro y la fecha de fin.",
+        a: "En Servicios y precios › Promociones, «Nueva promoción». Sofi ofrece la promoción vigente que aplica, con su precio, el ahorro y la fecha de fin, mientras tenga encendida su función «Informar», en Agente › «Qué hace».",
         forms: ["como hago una promocion", "crear promocion", "como pongo un descuento"],
       },
       {
@@ -1599,12 +1643,12 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "cargo-mis-productos-primera-vez",
         q: "¿Cómo cargo mis productos la primera vez?",
-        a: "En Inventario › Productos, «Pegar mi lista»: copia de tu Excel o Google Sheets las columnas Nombre, Unidad, Hay y Mínimo y pégalas. Lo dudoso se marca en su fila (un nombre casi igual a otro, un número mal escrito) y lo demás entra como «Inventario inicial» en la sede elegida.",
+        a: "En Inventario › Productos, «Pegar mi lista» (si ya hay productos, está en «…»): copia de tu Excel o Google Sheets las columnas Nombre, Unidad, Hay y Mínimo y pégalas. Lo dudoso se marca en su fila (un nombre casi igual a otro, un número mal escrito) y lo demás entra como «Inventario inicial» en la sede elegida.",
       },
       {
         id: "cuento-hay-fin-mes",
         q: "¿Cómo cuento lo que hay a fin de mes?",
-        a: "Con «Contar»: la lista se vuelve editable y escribes lo que hay de cada producto. odentIA calcula la diferencia y la guarda como un ajuste con el motivo «Conteo»; lo que no cuentas no cambia.",
+        a: "En Inventario › Productos, abre «…» y elige «Contar»: la lista se vuelve editable y escribes lo que hay de cada producto. Al tocar «Guardar el conteo», odentIA calcula la diferencia y la guarda como un ajuste con el motivo «Conteo»; lo que no cuentas no cambia. Si sales sin guardar, lo escrito queda en ese navegador para seguir después.",
       },
       {
         id: "significa-usaron-sin-haber",
@@ -1614,7 +1658,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "registro-compra-traje-tienda",
         q: "¿Cómo registro una compra que ya traje de la tienda?",
-        a: "En Compras, «+ Compra» y elige «Ya la tengo»: queda registrada como llegada, con sus lotes, en un paso. Si la pagaste, se abre «Registrar pago» con el total puesto.",
+        a: "En Inventario › Compras, «Compra» y elige «Ya la tengo»: queda registrada como llegada, con sus lotes, en un paso. Si la pagaste, se abre «Registrar pago» con el total puesto.",
       },
       {
         id: "quien-puede-recibir-llega",
@@ -1639,7 +1683,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Reportes",
     parent: "Gestión",
     purpose:
-      "Cómo va la clínica en un periodo, comparado con el anterior: el Resumen, Finanzas, Pacientes, Agenda y el Agente. Las cifras que tienen una lista detrás la abren al tocarlas, y cada lista y tabla se descarga. Arriba, «Pregúntale a Argos» responde con esas mismas cifras.",
+      "Cómo va la clínica en un periodo, comparado con el anterior: el Resumen, Finanzas, Pacientes, Agenda y el Agente. Arriba, bajo el título, eliges el periodo y la sede, que valen para todas las pestañas. Las cifras que tienen una lista detrás la abren al tocarlas, y cada lista y tabla se descarga. Arriba, «Pregúntale a Argos» responde con esas mismas cifras.",
     terms: [
       "estadísticas",
       "indicadores",
@@ -1730,7 +1774,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Datos de la clínica",
     parent: SETTINGS,
     purpose:
-      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo y el color de su marca, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
+      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo y el color de su marca, la razón social, el documento fiscal, el país, la moneda y la zona horaria, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
     terms: [
       "organización",
       "nombre de la clínica",
@@ -1880,8 +1924,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "pido-verificacion-dos-pasos-equipo",
         q: "¿Cómo pido la verificación en dos pasos al equipo?",
-        a: "La activa cada persona en Mi perfil. Quien configura el equipo puede pedírsela a todos desde Configuración › Equipo. A quien cambió de teléfono y no puede entrar, «…» › «Restablecer verificación en dos pasos».",
-        forms: ["verificacion en dos pasos", "dos factores", "doble factor"],
+        a: "La activa cada persona en Mi perfil. Quien configura el equipo puede pedírsela a todos desde Configuración › Equipo: enciende «Pedir verificación en dos pasos a todo el equipo» y confirma con «Pedirla desde ahora». Antes tiene que tenerla activa él mismo: «Activarla en Mi perfil». «Avisarles ahora por correo» les manda los pasos; a quien le falte se le pide en su próxima acción en la clínica, y la columna «Verificación en dos pasos» dice quién sigue «Sin activar». Se apaga con el mismo interruptor. A quien cambió de teléfono y no puede entrar, «…» › «Restablecer verificación en dos pasos».",
+        forms: ["verificacion en dos pasos", "dos factores", "doble factor", "obligar a todos a usar los dos pasos", "quien no tiene la verificacion en dos pasos", "no me deja pedir los dos pasos al equipo"],
       },
       {
         id: "significa-comparte-agenda",
@@ -2057,7 +2101,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Registro de pacientes",
     parent: SETTINGS,
     purpose:
-      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
+      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Aquí están también el enlace público y el código QR del registro, y el interruptor «Que se registren solos», que lo apaga o lo enciende. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
     terms: [
       "formulario de registro",
       "enlace de registro",
@@ -2122,7 +2166,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Medios de pago y ticket",
     parent: SETTINGS,
     purpose:
-      "Con qué puede pagar un paciente en tu clínica y cómo sale el ticket. Los medios que enciendas son los que ofrece caja al cobrar, en el orden que les des, y los que Sofi puede mencionar. Ahí también eliges el ancho del ticket, el tamaño de hoja del presupuesto, la frase al pie y las condiciones del presupuesto: sus días de vigencia, cómo se paga y qué pasa si el importe cambia.",
+      "Con qué puede pagar un paciente en tu clínica y cómo sale el ticket. Los medios que enciendas son los que ofrece caja al cobrar, en el orden que les des, y los que Sofi puede mencionar. Ahí también eliges el ancho del ticket (en él sale también la hoja de cierre de caja), el tamaño de hoja del presupuesto, la frase al pie y las condiciones del presupuesto: sus días de vigencia, cómo se paga y qué pasa si el importe cambia.",
     terms: [
       "efectivo",
       "tarjeta",
@@ -2161,8 +2205,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "puede-comisionar-solo-algunos-servicios",
         q: "¿Puede comisionar solo por algunos servicios?",
-        a: "Sí. Agrégale sus servicios con «Comisión por un servicio», sin ponerle porcentaje; si ya tenía uno, agrégalos y en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga.",
-        forms: ["comisión solo por servicio", "solo por procedimiento", "sin porcentaje general"],
+        a: "Sí. Agrégale sus servicios con «Comisión por un servicio», sin ponerle porcentaje; si ya tenía uno, agrégalos y en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga. A quien está en «No cobra comisión», su tarjeta ofrece «Cobrar solo por un servicio»: eliges el servicio y su comisión, y pasa a comisionar solo por ese.",
+        forms: ["comisión solo por servicio", "solo por procedimiento", "sin porcentaje general", "cobrar solo por un servicio", "no cobra comision pero si por un servicio"],
       },
       {
         id: "historial-comision-profesional",
@@ -2340,7 +2384,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "prueba-cobra",
         q: "¿La prueba se cobra?",
-        a: "No. La conversación de prueba lleva «Prueba» en la Bandeja, no se cobra, no crea a nadie en Pacientes y no cuenta en Reportes. Sofi responde de verdad, pero no reserva nada. Se borra con «Borrar esta prueba» o sola a los 7 días.",
+        a: "No. La conversación de prueba lleva «Prueba» en la Bandeja, no se cobra, no crea a nadie en Pacientes y no cuenta en Reportes. Sofi responde de verdad y, si reserva, la cita sale en la Agenda con «Prueba»: no ocupa el horario, no envía recordatorios y no cuenta en Reportes. Se borra con «Borrar esta prueba» o sola a los 7 días.",
       },
     ],
   },

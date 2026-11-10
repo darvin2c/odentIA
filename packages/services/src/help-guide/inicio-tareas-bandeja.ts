@@ -38,8 +38,8 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "tareas-de-una-oportunidad",
         q: "¿Cómo le pongo una tarea a una oportunidad?",
-        a: "Abre la oportunidad y pulsa «Nueva tarea»: queda como su próxima acción, a nombre de quien lleva la oportunidad o, si nadie la lleva, del equipo de recepción. Es una sola a la vez: «Hecha» la completa y deja poner la siguiente, y «Cambiar» la abre para editarla. Al crear una tarea desde Tareas con su persona elegida, «Es la próxima acción de» la une a una de sus oportunidades abiertas.",
-        forms: ["cual es la proxima accion de una oportunidad", "puedo tener dos tareas en una oportunidad", "cambiar la tarea de una oportunidad"],
+        a: "Abre la oportunidad y pulsa «Nueva tarea»: queda como su próxima acción, a nombre de quien lleva la oportunidad o, si nadie la lleva, del equipo de recepción. Es una sola a la vez: «Hecha» la completa y deja poner la siguiente, y «Cambiar» la abre para editarla. Abajo, en la oportunidad, «Historial» dice qué pasó, quién y cuándo. Al crear una tarea desde Tareas con su persona elegida, «Es la próxima acción de» la une a una de sus oportunidades abiertas.",
+        forms: ["cual es la proxima accion de una oportunidad", "puedo tener dos tareas en una oportunidad", "cambiar la tarea de una oportunidad", "como le pongo un recordatorio a una oportunidad", "por que no puedo crear otra tarea en la oportunidad", "quien movio esta oportunidad"],
       },
       {
         id: "tareas-desde-la-conversacion",
@@ -166,7 +166,7 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "inicio-caja-de-hoy",
         q: "¿Dónde veo a quién falta cobrar de lo atendido hoy?",
-        a: "Sí, si tu trabajo es la caja: «Caja de hoy» dice lo cobrado en el día y lista a quién falta cobrar de lo atendido hoy. «Cobrar» abre el mismo cobro de Finanzas y al terminar muestra su ticket; «Ir a la Caja» abre la caja de esa sede. Quien no puede cobrar ve «Ver su cuenta».",
+        a: "En Inicio, si tu trabajo es la caja: «Caja de hoy» dice lo cobrado en el día y lista a quién falta cobrar de lo atendido hoy. «Cobrar» abre el mismo cobro de Finanzas y al terminar muestra su ticket; «Ir a la Caja» abre la caja de esa sede. Quien no puede cobrar ve «Ver su cuenta».",
         forms: ["puedo cobrar desde inicio", "que es caja de hoy", "cobrar sin entrar a finanzas"],
         needs: "finance.write",
       },
@@ -176,13 +176,6 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
         a: "En ese mismo panel, bajo «¿Qué te dijo?», pulsa «Escríbele» para mandarle un mensaje, o vuelve a llamar más tarde: sigue en la lista. Desde el teléfono, «Llamar al» con su número marca directo.",
         forms: ["no me contesto el telefono", "el paciente no contesta la llamada"],
         needs: "appointments.write",
-      },
-      {
-        id: "inicio-falta-colegiatura",
-        q: "¿Por qué me pide mi colegiatura para cerrar la atención?",
-        a: "Porque a esa atención le falta tu colegiatura para firmarse y aún no la tienes guardada. En «Te espera», «Revisar» en esa atención muestra «Falta tu colegiatura»: escribe el número y «Guardar». Se escribe una vez y sirve para todas tus atenciones.",
-        forms: ["inicio me pide mi colegiatura", "falta tu colegiatura en te espera"],
-        needs: "clinical.write",
       },
       {
         id: "inicio-siguiente-persona",
@@ -234,8 +227,8 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "bandeja-sacar-de-spam-desbloquear",
         q: "¿Cómo saco a alguien de Spam o lo desbloqueo?",
-        a: "En la Bandeja, la pestaña «Spam» muestra los últimos 30 días y tiene «No es spam» en cada fila. Los bloqueados están en la pestaña del círculo tachado, al final: «Desbloquear» y confirma; podrá volver a escribir y Sofi le responderá. Desbloquear lo hacen recepción, el propietario y el administrador.",
-        forms: ["marque spam por error", "donde estan los bloqueados", "como desbloqueo a alguien"],
+        a: "En la Bandeja, la pestaña «Spam» muestra los últimos 30 días y tiene «No es spam» en cada fila. Los bloqueados están en la pestaña del círculo tachado, al final: «Desbloquear» y confirma; podrá volver a escribir y Sofi le responderá. También desde Pacientes › «Todos»: la columna «Qué es» lo marca con «Spam» o «Bloqueado», y el aviso de arriba de su página tiene «No es spam» o «Desbloquear». Desbloquear lo hacen recepción, el propietario y el administrador.",
+        forms: ["marque spam por error", "donde estan los bloqueados", "como desbloqueo a alguien", "donde estan los que marcamos como spam", "quitar a alguien de spam"],
       },
       {
         id: "bandeja-filtrar-ordenar",

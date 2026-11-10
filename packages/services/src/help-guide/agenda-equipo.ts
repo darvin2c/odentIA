@@ -178,12 +178,6 @@ export const AGENDA_EQUIPO: readonly HelpMore[] = [
         a: "Sale en la columna «Atiende» de quien ya no atiende y aún tiene citas por venir: tócalo y la Agenda te las muestra para pasarlas a otra persona. Los días de esa columna y «Sin horario» abren el horario de la persona en Horarios y ausencias.",
         forms: ["citas por mover", "citas de alguien que ya no atiende", "pasar las citas de un profesional a otro"],
       },
-      {
-        id: "equipo-dos-pasos-todos",
-        q: "¿Por qué no puedo pedir la verificación en dos pasos a todo el equipo?",
-        a: "Porque primero tienes que tenerla activa tú: «Activarla en Mi perfil». Después, en Configuración › Equipo, enciende «Pedir verificación en dos pasos a todo el equipo» y confirma con «Pedirla desde ahora»; «Avisarles ahora por correo» les manda los pasos. A quien le falte se le pide en su próxima acción en la clínica, y la columna «Verificación en dos pasos» dice quién sigue «Sin activar». Se apaga con el mismo interruptor.",
-        forms: ["obligar a todos a usar los dos pasos", "quien no tiene la verificacion en dos pasos", "no me deja pedir los dos pasos al equipo"],
-      },
     ],
   },
   {
@@ -227,8 +221,8 @@ export const AGENDA_EQUIPO: readonly HelpMore[] = [
       {
         id: "organizacion-telefono-urgencias",
         q: "¿Qué número da Sofi si hay una urgencia?",
-        a: "El que pongas en Datos de la clínica › «Identidad» › «Teléfono para urgencias»: Sofi lo da ante una urgencia junto con el número de emergencias del país. Si lo dejas vacío, solo da ese número o dice que vaya a la emergencia más cercana. Ahí mismo va la «Dirección fiscal».",
-        forms: ["telefono de emergencias de la clinica", "donde pongo la direccion fiscal", "telefono para urgencias"],
+        a: "El que pongas en Datos de la clínica › «Identidad» › «Teléfono para urgencias»: Sofi lo da ante una urgencia junto con el número de emergencias del país. Si lo dejas vacío, solo da ese número o dice que vaya a la emergencia más cercana, y la página de Sofi avisa «Sin teléfono para urgencias.». En «Identidad» va también la «Dirección fiscal».",
+        forms: ["telefono de emergencias de la clinica", "donde pongo la direccion fiscal", "telefono para urgencias", "que dice sofi si alguien escribe con una urgencia", "donde pongo el telefono de urgencias de la clinica", "sofi dice sin telefono para urgencias"],
       },
       {
         id: "organizacion-idioma",

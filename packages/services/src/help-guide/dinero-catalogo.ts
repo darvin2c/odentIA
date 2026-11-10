@@ -58,8 +58,8 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
       {
         id: "finanzas-otro-concepto",
         q: "¿Cómo cobro algo que no es un servicio ni un producto?",
-        a: "En «Cobrar», «Agregar otro concepto»: escribes el concepto y su importe. Para dejarlo por cobrar otro día, en su página › Cobros, en «Pendiente», toca «Agregar un concepto por cobrar»: queda pendiente en su cuenta.",
-        forms: ["cobrar algo que no esta en mis servicios", "agregar un cargo a su cuenta", "agregar otro concepto"],
+        a: "En «Cobrar», «Agregar otro concepto»: escribes el concepto y su importe. Para dejarlo por cobrar otro día, en su página › Cobros, en «Pendiente», toca «Agregar un concepto por cobrar»: queda pendiente en su cuenta. Desde cualquier pestaña de su página, «Ver Cobros», junto a lo que debe o tiene a favor, te lleva ahí. Lo hacen caja y Administración.",
+        forms: ["cobrar algo que no esta en mis servicios", "agregar un cargo a su cuenta", "agregar otro concepto", "agregar un concepto por cobrar", "cobrar algo suelto a un paciente"],
       },
       {
         id: "finanzas-promocion-al-cobrar",
@@ -83,8 +83,8 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
       {
         id: "finanzas-devolver-saldo-a-favor",
         q: "¿Cómo le devuelvo el dinero que tiene a favor?",
-        a: "En su página › Cobros, junto a su saldo, «Devolver dinero»: cuánto devuelves, cómo se lo devuelves y el motivo; en efectivo sale de la caja de la sede. Al terminar se puede imprimir la constancia. Solo se devuelve lo que está a favor: lo ya cobrado se devuelve desde su ticket, con «Devolver».",
-        forms: ["devolverle su adelanto", "devolver saldo a favor", "quiere que le devuelva lo que dejo"],
+        a: "En su página › Cobros, junto a su saldo, «Devolver dinero»: cuánto devuelves, cómo se lo devuelves y el motivo; en efectivo sale de la caja de la sede. Al terminar, «Imprimir constancia» la saca en papel. Solo se devuelve lo que está a favor: lo ya cobrado se devuelve desde su ticket, con «Devolver».",
+        forms: ["devolverle su adelanto", "devolver saldo a favor", "quiere que le devuelva lo que dejo", "tiene plata a favor y la quiere de vuelta"],
       },
       {
         id: "finanzas-sede-del-cobro",
@@ -289,17 +289,6 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
     ],
   },
   {
-    topic: "comisiones-de-cada-profesional",
-    faqs: [
-      {
-        id: "comisiones-de-cada-profesional-cobrar-solo-por-un-servicio",
-        q: "¿Cómo hago que quien no cobra comisión cobre solo por un servicio?",
-        a: "En Configuración › Comisiones por profesional, en su tarjeta, «Cobrar solo por un servicio»: eliges el servicio y su comisión, y pasa a comisionar solo por ese.",
-        forms: ["cobrar solo por un servicio", "no cobra comision pero si por un servicio"],
-      },
-    ],
-  },
-  {
     topic: "medios-de-pago",
     faqs: [
       {
@@ -342,12 +331,6 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
         q: "¿Cómo cambio de plan?",
         a: "En Configuración › Plan y pagos, en «Planes»: «Activar plan» si aún no tienes uno, o «Pasarme a este plan» para cambiar. Solo propietario y administrador.",
         forms: ["pasarme a otro plan", "activar un plan"],
-      },
-      {
-        id: "plan-y-pagos-preguntas-argos",
-        q: "¿Qué pasa cuando se acaban las preguntas a Argos?",
-        a: "En Configuración › Plan y pagos, «Preguntas a Argos» dice cuántas llevas. Con el interruptor de sumar solas encendido, al acabarse Argos suma un paquete sin preguntar; apagado, te pregunta antes de sumarlo.",
-        forms: ["se me acabaron las preguntas a argos", "sumar mas preguntas a argos"],
       },
     ],
   },

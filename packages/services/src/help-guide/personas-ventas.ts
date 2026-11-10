@@ -133,14 +133,6 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
         needs: "patients.write",
       },
       {
-        id: "pacientes-cobros-concepto-y-devolver",
-        q: "¿Cómo le cobro algo que no es de una atención o le devuelvo lo que tiene a favor?",
-        a: "En su página › Cobros; desde cualquier pestaña, «Ver Cobros» junto a lo que debe o tiene a favor te lleva ahí. En «Pendiente», «Agregar un concepto por cobrar» deja pendiente algo que se cobra fuera de una atención. «Devolver dinero» devuelve solo lo que tiene a favor y al terminar deja «Imprimir constancia»; para devolver algo ya cobrado, abre su ticket con «Ver ticket» y usa «Devolver». Lo hacen caja y Administración.",
-        forms: ["agregar un concepto por cobrar", "tiene plata a favor y la quiere de vuelta", "cobrar algo suelto a un paciente"],
-        area: "ficha",
-        needs: "finance.write",
-      },
-      {
         id: "pacientes-consultas-a-la-historia",
         q: "¿Puedo ver quién abrió la historia clínica de un paciente?",
         a: "Sí, si eres la dueña o el administrador. En su página › Datos › Privacidad y pedidos, «Consultas a la historia clínica» dice quién la consultó y qué consultó. Los cambios están aparte, en Configuración › Actividad del equipo.",
@@ -165,14 +157,6 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
         needs: "patients.erase",
       },
       {
-        id: "pacientes-spam-y-bloqueados",
-        q: "¿Dónde encuentro a quien marcamos como spam o bloqueamos, y cómo lo deshago?",
-        a: "En Pacientes › «Todos»: la columna «Qué es» lo marca con «Spam» o «Bloqueado». Abre su página: el aviso de arriba tiene «No es spam» o «Desbloquear». Lo hacen recepción y Administración.",
-        forms: ["como desbloqueo a una persona", "donde estan los que marcamos como spam", "quitar a alguien de spam"],
-        area: "ficha",
-        needs: ["conversations.write", "crm.write"],
-      },
-      {
         id: "pacientes-recepcion-sube-tomografia",
         q: "El paciente trajo su tomografía en un CD, ¿la puede subir recepción?",
         a: "Sí. En su página, en el Resumen, la tarjeta «Tomografías» tiene «Subir tomografía»: sirve para la que trae en CD, USB o ZIP, y la verá el equipo clínico. La fila dice cómo va la subida y, si quedó sin terminar, «Subir lo que falta» la retoma. Recepción la sube sin abrirla; abrirla es de quien lee la historia clínica.",
@@ -181,14 +165,6 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
         needs: "clinical.receive",
         // La tarjeta solo existe donde el producto guarda tomografías: vistIA no la tiene.
         own: true,
-      },
-      {
-        id: "pacientes-lo-que-recuerda-sofi",
-        q: "¿Dónde veo lo que Sofi recuerda de una persona?",
-        a: "En su página, en el Resumen, dentro de «Notas» está «Lo que recuerda Sofi»: cada dato dice si lo dijo la persona o quién del equipo lo anotó. Ahí solo se lee; se corrige desde «Contexto», en su conversación de la Bandeja.",
-        forms: ["que sabe sofi de este paciente", "sofi recuerda algo que esta mal como lo corrijo", "de donde saco el agente ese dato de la persona"],
-        area: "ficha",
-        needs: ["conversations.read", "crm.read"],
       },
     ],
   },
@@ -213,13 +189,6 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
         q: "¿Cómo muevo una oportunidad de paso sin arrastrarla o reabro una que cerré?",
         a: "En el «…» de la tarjeta o de la fila, «Mover a…» con el nombre del paso la cambia sin arrastrar; ahí están también «Ganada» y «Perdida». Una cerrada tiene «Reabrir» en ese menú, o en «Más» dentro de la oportunidad. Con el teclado: espacio levanta la tarjeta, las flechas eligen el paso, espacio la suelta y Escape cancela.",
         forms: ["cerre una oportunidad como perdida por error", "como reabro una oportunidad", "mover una oportunidad con el teclado"],
-      },
-      {
-        id: "oportunidades-tarea-e-historial",
-        q: "¿Cómo le dejo una tarea a una oportunidad y veo quién la movió?",
-        a: "Abre la oportunidad: «Nueva tarea» le deja su próxima acción, una sola a la vez. Cuando ya tiene una, «Hecha» la completa y «Cambiar» la abre para corregirla. Abajo, «Historial» dice qué pasó, quién y cuándo. La tarea la deja cualquiera que lleve tareas y vea las oportunidades.",
-        forms: ["como le pongo un recordatorio a una oportunidad", "quien movio esta oportunidad", "por que no puedo crear otra tarea en la oportunidad"],
-        needs: "tasks.write",
       },
     ],
   },
