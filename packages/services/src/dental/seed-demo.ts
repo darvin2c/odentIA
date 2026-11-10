@@ -2359,7 +2359,8 @@ await db.transaction(async (tx) => {
   })
   // Su primera comisión, de cuando empieza la historia de la demo (24 meses de cobros y pagos): así su
   // historial en Configuración empieza antes que los cambios de este mes, no el día en que se siembra.
-  const historyStart = new Date(Date.UTC(new Date().getUTCFullYear() - 2, new Date().getUTCMonth(), 1))
+  // A mediodía en UTC: es el día 1 también en la zona de la clínica (medianoche en UTC sería el 31 en Lima).
+  const historyStart = new Date(Date.UTC(new Date().getUTCFullYear() - 2, new Date().getUTCMonth(), 1, 12))
   await tx.insert(commissionRate).values(
     [
       { professionalUserId: ANA_ID, rateBps: 4000 },

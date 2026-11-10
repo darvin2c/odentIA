@@ -22,6 +22,7 @@ import {
   type CommissionException,
   dayLabel,
   historyLines,
+  hourLabel,
   percentInput,
   percentLabel,
   rateBpsFromPercent,
@@ -182,6 +183,8 @@ function AgreementCard({
   const name = agreement.professionalName
   const titleId = `comision-${agreement.professionalUserId}`
   const day = (iso: string) => dayLabel(iso, locale, timeZone)
+  // Desde cuándo: el día y la hora, porque vale desde que se guardó (lo atendido esa mañana conserva lo de antes).
+  const sinceWords = (iso: string) => `desde el ${day(iso)} a las ${hourLabel(iso, locale, timeZone)}`
   const none = undecided(agreement)
   const summary = agreementWords(
     { hasRate: agreement.hasRate, rateBps: agreement.rateBps, exceptionCount: agreement.exceptions.length },
@@ -191,7 +194,7 @@ function AgreementCard({
   // Desde cuándo vale lo de hoy; lo que tenía antes, con quién lo cambió, va en su historial.
   const since = [
     !agreement.attends ? "Ya no atiende pacientes" : null,
-    agreement.rateSince ? `desde el ${day(agreement.rateSince)}` : null,
+    agreement.rateSince ? sinceWords(agreement.rateSince) : null,
   ]
     .filter(Boolean)
     .join(" · ")
@@ -295,7 +298,7 @@ function AgreementCard({
                     <span className="font-medium text-foreground tabular-nums">
                       {exceptionWords(exception, locale, currency)}
                     </span>
-                    {exception.effectiveFrom ? ` · desde el ${day(exception.effectiveFrom)}` : ""}
+                    {exception.effectiveFrom ? ` · ${sinceWords(exception.effectiveFrom)}` : ""}
                   </span>
                   {exceptionStale(exception) ? (
                     // Nunca se convierte: lo atendido desde el cambio queda sin comisión hasta escribirlo.
@@ -354,11 +357,7 @@ function AgreementCard({
           <summary className="min-h-11 cursor-pointer content-center font-medium text-primary-soft-foreground sm:min-h-8">
             Ver historial<span className="sr-only"> de {name}</span> ({history.length})
           </summary>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Cada cambio vale para lo que se atienda desde el momento en que se guardó; lo atendido antes conserva lo
-            que tenía. «La primera» fue su primera comisión: valió también para lo que ya había atendido y no se le
-            había pagado.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Cada cambio vale desde que se guardó.</p>
           <ol className="mt-1 flex min-w-0 flex-col">
             {history.map((line) => (
               <li key={line.key} className="py-1.5">

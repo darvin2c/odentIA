@@ -91,6 +91,14 @@ export function dayLabel(
   }).format(date)
 }
 
+/** «7:53 p. m.» en la zona de la clínica: un cambio de comisión vale desde esa hora, no desde el día. */
+export function hourLabel(iso: string | null | undefined, locale: string, timeZone: string | undefined): string {
+  if (!iso) return ""
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timeZone || undefined }).format(date)
+}
+
 /** Puntos básicos a «40 %» o «37,5 %» según el formato de la clínica. */
 export function percentLabel(rateBps: number, locale: string): string {
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(rateBps / 100)} %`
@@ -647,11 +655,13 @@ export function historyLines(
   /** La moneda de la clínica, para un monto fijo que llegue sin la suya. */
   currency: string,
 ): CommissionHistoryLine[] {
-  const date = (iso: string) => {
+  // Con la hora: el cambio vale desde que se guardó, y lo atendido esa mañana conserva lo de antes. La
+  // primera no la necesita: vale desde siempre.
+  const date = (iso: string, withHour: boolean) => {
     const at = new Date(iso)
-    return Number.isNaN(at.getTime())
-      ? ""
-      : new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: timeZone || undefined }).format(at)
+    if (Number.isNaN(at.getTime())) return ""
+    const day = new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: timeZone || undefined }).format(at)
+    return withHour ? `${day} a las ${hourLabel(iso, locale, timeZone)}` : day
   }
   // Del más antiguo al más nuevo, para saber qué general y qué servicios regían en cada cambio. Lo que
   // vale desde siempre es lo primero que tuvo (la primera comisión de alguien sin ninguna antes).
@@ -699,7 +709,12 @@ export function historyLines(
       key: `${event.at}:${index}`,
       at: event.at,
       what: parts.join(" · "),
-      detail: [date(event.at), event.byName ? `por ${event.byName}` : "sin registro de quién", antes, event.fromStart ? "la primera" : null]
+      detail: [
+        date(event.at, !event.fromStart),
+        event.byName ? `por ${event.byName}` : "sin registro de quién",
+        antes,
+        event.fromStart ? "la primera: valió también para lo ya atendido sin pagar" : null,
+      ]
         .filter(Boolean)
         .join(" · "),
     })
