@@ -499,6 +499,27 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     alsoAt: ["/patients", "/contacts"],
     title: "Pacientes",
     itemLabel: "la ficha de una persona",
+    // El tema más grande de la guía: Jev lo busca por partes (`help.v2`).
+    areas: [
+      {
+        id: "ficha",
+        label: "la lista y los datos de la persona",
+        about:
+          "La lista de pacientes y contactos, registrar a alguien, buscarlo, archivarlo, sus datos personales, su contacto, su seguro, sus responsables y familia, sus conversaciones, sus citas, sus cobros, sus notas, sus mensajes, su enlace, el portal y los pedidos sobre sus datos.",
+      },
+      {
+        id: "clinica",
+        label: "la historia clínica y la atención",
+        about:
+          "Atender a un paciente: la atención y su firma, antecedentes y alergias, el odontograma, el examen, diagnósticos, lo realizado, la historia, las recetas, órdenes, consentimientos, imágenes y demás documentos, y el dictado.",
+      },
+      {
+        id: "plan",
+        label: "el plan, el presupuesto y los controles",
+        about:
+          "Lo que se le va a hacer y lo que cuesta: los tratamientos del plan y sus sesiones, armar, enviar y responder un presupuesto, sus opciones y descuentos, agendar lo aceptado y los controles.",
+      },
+    ],
     parent: "Personas",
     purpose:
       "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver. Arriba, en todas las pestañas, sus alergias (o si niega o no se le preguntó), su próxima cita si ves la agenda y lo que debe o tiene a favor si ves la caja; si lees la historia, también sus enfermedades y lo que toma. Sus conversaciones y oportunidades están en su Resumen.",
