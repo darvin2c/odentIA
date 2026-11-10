@@ -265,6 +265,8 @@ export interface WorkspaceAppointment {
   encounter: { id: string; startedAt: string; professionalUserId: string; professionalName: string } | null
   /** La siguiente que aún no llega. */
   next: boolean
+  /** Lo que llevaba y ya se terminó: la cita quedó sin objeto. */
+  doneFor?: string | null
 }
 /** Cuántas citas hay hoy: en sala, en atención, atendidas y por venir (las que aún no llegan). */
 export interface WorkspaceTodaySummary {

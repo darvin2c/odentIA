@@ -2,11 +2,15 @@
  * Repaso final 2 de la atención y la ficha (10 nov, entrega 12): anular la atención donde se cambió
  * un tratamiento lo deja como estaba, y lo demás de los dos informes que vive en los servicios.
  */
+import { randomUUID } from "node:crypto"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { treatmentPlanItem } from "@odentia/db/schema/clinical"
-import { auditEvent } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { createAppointment, getAppointment } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import { getPlanNextSteps } from "./plan-next.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { getEncounterVoidPreview, voidEncounter } from "./encounters.js"
 import { addPlanItem, listPlanItems, revisePlanItem } from "./plan.js"
@@ -76,4 +80,55 @@ it("A1: anular la atención donde se cambió un tratamiento deshace el cambio; e
     .from(auditEvent)
     .where(and(eq(auditEvent.entityId, item.id), eq(auditEvent.action, "plan.item_revision_undone")))
   expect(trace).toHaveLength(1)
+})
+
+const DAY = 86_400_000
+const all = () => true
+
+/** Reserva para la persona de la fixture, en una sede nueva, a tantos días. */
+async function booker(f: Fixture) {
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}`, timezone: "America/Lima" })
+    .returning()
+  await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" })
+  const base = new Date(Date.now() + 2 * DAY)
+  base.setUTCMinutes(0, 0, 0)
+  return (days: number, planItemIds: string[]) =>
+    f.run((tx) =>
+      createAppointment(tx, "org_a", f.actor, {
+        patientId: f.patient.id,
+        professionalUserId: f.actor,
+        branchId: site!.id,
+        startsAt: new Date(base.getTime() + days * DAY).toISOString(),
+        durationMin: 30,
+        outsideSchedule: true,
+        notice: false,
+        planItemIds,
+      }),
+    )
+}
+
+it("M1: la cita que solo llevaba lo ya terminado lo sigue diciendo en la cita y en «Qué sigue», con «Usarla para…»", async () => {
+  const f = await clinicalFixture()
+  const crown = await accepted(f)
+  const book = await booker(f)
+  const visit = await book(5, [crown.id])
+  // La corona se terminó antes (en otra cita); queda otro tratamiento aceptado sin cita.
+  await ownerDb.update(treatmentPlanItem).set({ status: "realizado", completedAt: new Date() }).where(eq(treatmentPlanItem.id, crown.id))
+  const other = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, other.id))
+  const read = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
+  expect(read.doneFor).toBe(crown.title)
+  const { steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  const freed = steps.find((step) => step.kind === "sin_objeto")
+  expect(freed?.text).toContain(`era para ${crown.title}, que ya se terminó`)
+  expect(freed?.action).toMatchObject({ appointmentId: visit.id, reuse: { planItemId: other.id } })
+  // Sin permiso de reservar, se dice igual, sin botón.
+  const { steps: seen } = await f.run((tx) =>
+    getPlanNextSteps(tx, "org_a", f.patient.id, (permission) => permission !== "appointments.write"),
+  )
+  expect(seen.find((step) => step.kind === "sin_objeto")?.action).toBeNull()
 })

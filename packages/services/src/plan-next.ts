@@ -79,7 +79,16 @@ import {
  * lista de la ficha (`getPlanNextSteps`), con «¿Vino?», que abre la cita para registrar la atención
  * o decir que no vino. La frase única y la fila de Pacientes no la dicen.
  */
-export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "reservado" | "control" | "cerrar" | "ninguno"
+export type PlanNextKind =
+  | "enviar"
+  | "agendar"
+  | "respuesta"
+  | "continuar"
+  | "reservado"
+  | "control"
+  | "cerrar"
+  | "sin_objeto"
+  | "ninguno"
 
 export interface PlanNextAction {
   /** «Enviar», «Reservar cita» o «¿Qué respondió?». */
@@ -106,6 +115,10 @@ export interface PlanNextAction {
    * (QA de la ficha del 9 nov). El botón principal pasa a ser «Otra cita».
    */
   join?: { appointmentId: string; label: string }
+  /** La cita sin objeto: su versión, para usarla o liberarla sin pisar otro cambio. */
+  appointmentVersion?: number
+  /** «Usarla para la exodoncia»: lo aceptado que falta reservar y podría ir en esa cita. */
+  reuse?: { planItemId: string; title: string }
 }
 
 export interface PlanNextStep {
@@ -402,9 +415,13 @@ async function planFactsOf(
     select idempotency_key as key, due_at as "dueAt", reason from task
     where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'open'
       and idempotency_key like ${`${BUDGET_CALLBACK_KEY}%`}`)
+  const freed = !forList
+    ? []
+    : await (await import("./appointments.js")).freedAppointmentsOf(tx, orgId, patientId, null)
   return {
     facts: {
       name: firstName(person),
+      freed,
       budgets,
       items,
       openEncounters: await openEncountersOf(tx, orgId, [patientId], viewerUserId),
@@ -691,6 +708,8 @@ interface PlanFacts {
   sessionFrom?: ReadonlyMap<string, string>
   /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
+  /** Sus citas por venir que solo llevaban lo ya terminado (`freedAppointmentsOf`). Solo de una persona. */
+  freed?: Array<{ id: string; version: number; startsAt: Date; professionalName: string | null; wasFor: string }>
 }
 
 /** Sin nada que hacer en el plan. */
@@ -1238,8 +1257,34 @@ function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNe
   // Una cita que ya pasó y que nadie cerró va primero en la lista de la ficha: decir si vino
   // registra lo que se hizo o devuelve lo que llevaba a «por reservar» (QA de la ficha del 8 nov).
   // Solo a quien ve la agenda; la frase única no la dice (es de la ficha, no del plan).
-  if (!(can("appointments.read") || can("clinical.read")) || !facts.unclosed?.length) return steps
+  if (!(can("appointments.read") || can("clinical.read"))) return steps
   const { locale, timezone } = context
+  // La cita que quedó sin objeto, hasta que alguien elige usarla o liberarla (QA del 10 nov, M1).
+  const reusable = facts.items.find(
+    (item) =>
+      item.decisionStatus === "aceptado" &&
+      ["pendiente", "programado", "en_curso"].includes(item.status) &&
+      !facts.withAppointment.has(item.id),
+  )
+  const freed = (facts.freed ?? []).map((row): PlanNextStep => {
+    const day = dayWords(row.startsAt, locale, timezone)
+    return {
+      kind: "sin_objeto",
+      text: `Su cita del ${day} era para ${row.wasFor}, que ya se terminó`,
+      detail: [row.professionalName ? `con ${row.professionalName}` : null, "no tiene nada que hacer: úsala para otra cosa o libérala"]
+        .filter(Boolean)
+        .join(" · "),
+      action: can("appointments.write")
+        ? {
+            label: "Liberarla",
+            appointmentId: row.id,
+            appointmentVersion: row.version,
+            ...(reusable ? { reuse: { planItemId: reusable.id, title: reusable.title } } : {}),
+          }
+        : null,
+    }
+  })
+  if (!facts.unclosed?.length) return [...freed, ...steps]
   const closing = facts.unclosed.map((row): PlanNextStep => {
     const day = dayWords(row.startsAt, locale, timezone)
     return {
@@ -1249,7 +1294,7 @@ function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNe
       action: can("appointments.read") ? { label: "¿Vino?", appointmentId: row.id } : null,
     }
   })
-  return [...closing, ...steps]
+  return [...closing, ...freed, ...steps]
 }
 
 function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {

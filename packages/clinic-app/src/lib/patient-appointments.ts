@@ -141,9 +141,12 @@ export function appointmentLine(
  * cabecera solo decía el servicio). «Corona metal-cerámica y Control» o «… y 2 más».
  */
 export function appointmentWhat(
-  appointment: Pick<AgendaAppointment, "serviceName" | "reason" | "sessions" | "brings">,
+  appointment: Pick<AgendaAppointment, "serviceName" | "reason" | "sessions" | "brings" | "serviceDone" | "doneFor">,
 ): string | null {
-  const main = appointment.serviceName ?? appointment.reason
+  // Sin nada por hacer, dice para qué era (QA del 10 nov, M1); su servicio ya terminado no se
+  // nombra como lo que viene a hacer (B4: «Endodoncia y Corona» con la endodoncia hecha).
+  if (appointment.doneFor) return `era para ${appointment.doneFor}, que ya se terminó`
+  const main = appointment.serviceDone ? null : (appointment.serviceName ?? appointment.reason)
   // También lo de una sola sesión que se le sumó (la resina a su consulta, QA del 10 nov, M3).
   const others = [
     ...new Set(

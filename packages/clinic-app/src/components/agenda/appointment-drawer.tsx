@@ -45,6 +45,7 @@ import {
   type AppointmentStatus,
   appointmentSessionsText,
   appointmentShortWords,
+  doneForWords,
   professionalSaid,
   visitLabel,
   visitState,
@@ -54,10 +55,12 @@ import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
+import { fetchPlanNextSteps } from "../../lib/budgets"
 import { appointmentWhat } from "../../lib/patient-appointments"
 import { attendWord } from "../../lib/patient-overview"
 import { filiationGapsText, type PatientFull } from "../../lib/patients"
 import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
+import { FreedAppointmentButtons } from "../patient/freed-appointments"
 import { CoordinationControls } from "../patient/plan/plan-coordination"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
@@ -550,8 +553,13 @@ function RealAppointmentDrawer({
                 </span>
               ) : null}
 
-              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. */}
-              {canWrite && before && isToday ? (
+              {/* Para lo que ya se terminó: se dice y se ofrece usarla o liberarla (QA del 10 nov, M1). */}
+              {active && appointment.doneFor && !appointment.encounter ? (
+                <DoneForNotice appointment={appointment} canWrite={canWrite} />
+              ) : null}
+              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. Ya pasada, «Llegó» no aplica:
+                  queda «Vino» (QA de la ficha del 10 nov, U4). */}
+              {canWrite && before && isToday && !unclosed ? (
                 <SubmitButton
                   className="h-11"
                   disabled={busy}
@@ -873,5 +881,41 @@ function RealAppointmentDrawer({
         </div>
       </ConfirmDialog>
     </>
+  )
+}
+
+/** «Era para la corona, que ya se terminó»: con «Usarla para…» y «Liberarla», como «Qué sigue». */
+function DoneForNotice({
+  appointment,
+  canWrite,
+}: {
+  appointment: AgendaAppointment
+  canWrite: boolean
+}): React.JSX.Element {
+  const steps = useQuery({
+    queryKey: ["plan-next", appointment.patientId, "lista"],
+    queryFn: () => fetchPlanNextSteps(appointment.patientId),
+    enabled: canWrite,
+  })
+  const step = steps.data?.data.find(
+    (row) => row.kind === "sin_objeto" && row.action?.appointmentId === appointment.id,
+  )
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+      <p>
+        Esta cita {doneForWords(appointment)}: no tiene nada que hacer.
+        {canWrite ? "" : " Recepción la verá para usarla o liberarla."}
+      </p>
+      {canWrite ? (
+        <div className="flex flex-wrap gap-2">
+          <FreedAppointmentButtons
+            appointmentId={appointment.id}
+            version={appointment.version}
+            startsAt={appointment.startsAt}
+            reuse={step?.action?.reuse ?? null}
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }

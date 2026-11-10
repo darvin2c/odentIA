@@ -111,6 +111,8 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
         : null
     }
     if (!canWrite) return null
+    // Para lo que ya se terminó no se confirma: se abre la cita para usarla o liberarla (M1).
+    if (item.doneFor) return { label: "Ver la cita", primary: false, run: () => openAppointmentAnywhere(item.id) }
     if (step === "confirmar") {
       return { label: "Confirmar cita", primary: true, run: () => visitStatus.mutate({ id: item.id, status: "confirmada" }) }
     }
@@ -146,7 +148,7 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
                       <span className="w-12 shrink-0 font-semibold tabular-nums">{formatClock(item.startsAt, locale, today.timezone)}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate font-semibold">{item.patientName}</span>
-                        <span className="truncate text-[13px] text-muted-foreground">{detailOf([item.professionalName, item.serviceName])}</span>
+                        <span className="truncate text-[13px] text-muted-foreground">{detailOf([item.professionalName, item.doneFor ? `era para ${item.doneFor}, que ya se terminó` : item.serviceName])}</span>
                         {/* Debajo, no al lado: un estado largo no le quita el sitio al nombre. */}
                         <VisitText item={item} now={now} timeZone={today.timezone} />
                       </span>
@@ -193,7 +195,7 @@ function PatientRow({
   multiBranch: boolean
   action: ReactNode
 }) {
-  const what = detailOf([item.serviceName, multiBranch && item.branchName])
+  const what = detailOf([item.doneFor ? `era para ${item.doneFor}, que ya se terminó` : item.serviceName, multiBranch && item.branchName])
   const later = item.visit === "por_confirmar" || item.visit === "confirmada"
   return (
     <li className="flex items-center gap-2 py-0.5">

@@ -28,6 +28,7 @@ import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { errorMessage } from "../../agenda/shared"
 import { FollowUpScheduler } from "../follow-up-scheduler"
+import { FreedAppointmentButtons } from "../freed-appointments"
 import { useBudgetFormat } from "./budget-parts"
 import { BudgetNoAnswer } from "./budget-no-answer"
 import { BudgetResponse } from "./budget-response"
@@ -53,6 +54,16 @@ export function NextStepButton({
   const archived = usePersonArchived()
   const action = step.action
   if (!action || archived) return null
+  // La cita que quedó sin objeto: usarla para lo aceptado o liberarla, sin avisar salvo que se marque.
+  if (step.kind === "sin_objeto" && action.appointmentId && action.appointmentVersion != null)
+    return (
+      <FreedAppointmentButtons
+        appointmentId={action.appointmentId}
+        version={action.appointmentVersion}
+        reuse={action.reuse ?? null}
+        size={size}
+      />
+    )
   if (step.kind === "enviar" && action.budgetId)
     return (
       <BudgetSendButton
