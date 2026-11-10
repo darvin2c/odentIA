@@ -659,6 +659,13 @@
       "when": 1794331837148,
       "tag": "0093_app_instalable_avisos_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1794339915167,
+      "tag": "0094_controles_que_faltan",
+      "breakpoints": true
     }
   ]
 }

@@ -54,6 +54,7 @@ import { z } from "zod"
 import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
 import { canAccess, canAccessAny, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
+import { searchFromHeader } from "./lib/search-header.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
 import { lockedRecordGuard } from "./lib/record-lock.js"
 import { createAccountRoute } from "./routes/account.js"
@@ -363,6 +364,8 @@ export function createApp(deps: AppDeps) {
   const app = new Hono()
 
   app.use("*", requestId())
+  // Lo buscado llega en una cabecera, no en la dirección (QA de la ficha del 10 nov, M4).
+  app.use("*", searchFromHeader())
   app.use(
     "*",
     cors({

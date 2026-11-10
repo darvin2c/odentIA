@@ -39,8 +39,9 @@ Los archivos de la ronda van fuera del repositorio, porque es público, en `~/od
 ## 2. Preparar la demo
 
 1. **Por defecto, la ronda corre en local** con `pnpm dev` y `pnpm --filter @odentia/services seed:dev`: no pide 2FA, no hay canales reales y no se toca producción. Antes de empezar, comprobar que hay memoria libre para levantar la app, dependencias instaladas y que Podman responde; si algo falta, el informe lo dice y la ronda no se atasca. Producción queda para una comprobación final, solo cuando el usuario lo pida: entonces se crea una demo para la ronda desde la administración (nombre con `QA` y la fecha), nunca una clínica existente, y se borra al terminar.
-2. Con la cuenta de propietario, comprobar las dos barreras: el WhatsApp deshabilitado y ningún otro canal conectado. Si algo está conectado, la ronda no empieza.
-3. Anotar el commit que está en producción. Desarrollo y la confirmación leen el código de ese commit (`git show <commit>:<ruta>`), no el de la rama local.
+2. Comprobar que el modelo es el real: en `infra/dev/.env`, que `LLM_MODEL` no sea `fake` y que estén las claves del modelo y del modelo de decisión (`docs/development.md`, «Modelo real» y «Modelo de decisión»). Un `.env` copiado de otra entrega suele venir con el modelo de prueba. Si no se puede, el informe lo dice arriba y nada de lo que contesten la Ayuda, Sofi, Clío o Argos cuenta como hallazgo.
+3. Con la cuenta de propietario, comprobar las dos barreras: el WhatsApp deshabilitado y ningún otro canal conectado. Si algo está conectado, la ronda no empieza.
+4. Anotar el commit que está en producción. Desarrollo y la confirmación leen el código de ese commit (`git show <commit>:<ruta>`), no el de la rama local.
 
 **El aislamiento entre clínicas se prueba en local**, con `pnpm dev` y `pnpm --filter @odentia/services seed:dev` (`docs/development.md`, contraseña `Demo1234`). En producción, intentar entrar a otra clínica leería historias reales si el fallo existiera. Encender la app en local consume memoria: mirar antes la memoria libre disponible.
 
@@ -113,6 +114,7 @@ Cuando la llama `odentia-entrega` (su etapa 7), con el cambio ya implementado, p
 - **Dónde.** En local, con `pnpm dev` sobre la rama y `pnpm --filter @odentia/services seed:dev`, en cada producto al que llega si el cambio es común (vistIA, en su rama mientras no esté en `main`). Desarrollo lee el código de la rama, no el de producción. No se crea demo en producción.
 - **Qué área.** Lo que el cambio toca y los recorridos vecinos que puede haber roto. La entrega le pasa el acta de la mesa y la lista de lo cambiado, pero no al novato.
 - **Los criterios del acta.** Las voces recorren en la pantalla cada caso del acta y marcan su criterio: cumple, no cumple o no se pudo ver. Ese es el piso; después cada voz recorre lo suyo, con sus propios casos. El novato recibe los casos como tareas, sin el criterio.
+- **La Ayuda.** Nadie más lo comprueba, así que es parte del piso: el novato le pregunta cómo se hace cada caso, y el auditor compara lo que contesta con la pantalla y con lo que el acta dijo en «En la Ayuda». Si el auditor no entra por el tamaño del cambio, lo hace desarrollo. Una función nueva que la Ayuda no explica es algo que este cambio dejó a medias.
 - **Qué voces.** Las de la tabla «Por dónde entra cada cambio» de `odentia-entrega`, y clínica siempre que toque datos o decisiones clínicas. El modelo y el esfuerzo de cada una se eligen como dice `references/mesa.md`. Si el cambio no tiene efecto visible, entra al menos desarrollo, que recorre en la pantalla lo que el cambio podría haber roto.
 - **Confirmar**, igual que en el apartado 4, con agentes nuevos.
 - **Informe.** Sin lienzo ni issues: un informe en `~/odentia-qa/<fecha>-entrega-<rama>/` y un resumen para el PR. Cada hallazgo confirmado va a uno de estos grupos:

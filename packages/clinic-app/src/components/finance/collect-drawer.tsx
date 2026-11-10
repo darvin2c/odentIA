@@ -93,6 +93,7 @@ import {
   fetchPaymentMethods,
   fetchSaleProducts,
   formatAmountPlain,
+  pendingCostWords,
   type PaymentMethodOption,
   type ProductCharge,
   type PromotionItem,
@@ -1729,10 +1730,9 @@ export function CollectDrawer({
                                           {saleDeductionWords(sold.quantity, sold.branchName)}
                                         </span>
                                       ) : null}
-                                      {item.paidCents > 0 ? (
+                                      {item.paidCents > 0 || (item.advancePaidCents ?? 0) > 0 ? (
                                         <span className="block text-xs text-muted-foreground">
-                                          Costó {formatAmountPlain(item.totalCents, debt, locale)} ·
-                                          pagó {formatAmountPlain(item.paidCents, debt, locale)}
+                                          {pendingCostWords(item, (cents) => formatAmountPlain(cents, debt, locale))}
                                         </span>
                                       ) : null}
                                       {!editable && item.promotionName ? (
@@ -1899,7 +1899,9 @@ export function CollectDrawer({
                                   }
                                 }}
                               >
-                                Cobrar lo pendiente
+                                {/* Con la cifra: el cajón del adelanto no decía que además debía (QA de la ficha del 10 nov, U3). */}
+                                Cobrar lo que debe:{" "}
+                                {owedByCurrency.map((row) => formatMoney(row.cents, row.code, locale)).join(" y ")}
                               </Button>
                             ) : null
                           ) : (

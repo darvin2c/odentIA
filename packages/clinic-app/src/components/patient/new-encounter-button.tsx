@@ -148,8 +148,11 @@ function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppoint
     retry: false,
   })
   const now = Date.now()
+  // Una cita para lo que ya se terminó no se ofrece atender, salvo que haya llegado (QA del 10 nov, M1).
   const attendable = (query.data?.data ?? []).filter(
-    (item) => item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "llego",
+    (item) =>
+      item.visit === "llego" ||
+      ((item.visit === "por_confirmar" || item.visit === "confirmada") && !item.doneFor),
   )
   return (
     attendable.find((item) => item.visit === "llego") ??

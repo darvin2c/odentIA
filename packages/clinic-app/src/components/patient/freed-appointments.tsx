@@ -1,9 +1,21 @@
-import { Button, toast } from "@odentia/ui"
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Button,
+  Checkbox,
+  toast,
+} from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { type ComponentProps, useId, useState } from "react"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
+import { PLAN_QUERY_KEYS } from "../../lib/budgets"
 import { activeOrgTimeZone } from "../../lib/locale"
 import { whenSaid } from "../agenda/shared"
 
@@ -43,7 +55,8 @@ export function FinalizedFreedAppointments({
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(
     new Date(),
   )
-  const act = async (appointment: FreedAppointment, how: "usada" | "liberada") => {
+  const [releasing, setReleasing] = useState<FreedAppointment | null>(null)
+  const act = async (appointment: FreedAppointment, how: "usada" | "liberada", notify = false) => {
     setBusy(appointment.id)
     try {
       if (how === "usada" && next)
@@ -54,11 +67,7 @@ export function FinalizedFreedAppointments({
             planItemId: next.planItemId,
           }),
         })
-      else
-        await apiFetch(`/api/appointments/${appointment.id}/status`, {
-          method: "POST",
-          body: JSON.stringify({ status: "cancelada", cancelReason: "clinica" }),
-        })
+      else await releaseAppointment(appointment.id, notify)
       setDone((current) => ({ ...current, [appointment.id]: how }))
       if (how === "usada" && next) setUsedFor((current) => ({ ...current, [appointment.id]: next.title }))
       onChanged(appointment.id, how)
@@ -106,7 +115,7 @@ export function FinalizedFreedAppointments({
                       size="sm"
                       variant="outline"
                       disabled={busy !== null}
-                      onClick={() => void act(appointment, "liberada")}
+                      onClick={() => setReleasing(appointment)}
                     >
                       Liberarla
                     </Button>
@@ -116,17 +125,149 @@ export function FinalizedFreedAppointments({
                     Recepción la verá para liberarla o usarla.
                   </p>
                 )}
-                {canBook ? (
-                  <p className="text-xs text-muted-foreground">
-                    Liberarla la cancela como cualquier cita que cancela la clínica; si tiene los
-                    avisos prendidos, se le avisa.
-                  </p>
-                ) : null}
               </>
             )}
           </div>
         )
       })}
+      <ReleaseDialog
+        // Uno por cita: «Avisarle» no queda marcado de la anterior (revisión de la entrega 12).
+        key={releasing?.id ?? "ninguna"}
+        open={releasing !== null}
+        when={releasing ? whenSaid(releasing.startsAt, activeOrgTimeZone(), today) : ""}
+        busy={busy !== null}
+        onCancel={() => setReleasing(null)}
+        onConfirm={(notify) => {
+          const appointment = releasing
+          setReleasing(null)
+          if (appointment) void act(appointment, "liberada", notify)
+        }}
+      />
     </div>
+  )
+}
+
+/**
+ * Liberar la cita sin objeto la cancela por la clínica. No se le avisa salvo que el equipo lo
+ * marque (mesa de la entrega 12: ningún mensaje sale sin que el equipo lo elija), y se dice.
+ */
+async function releaseAppointment(id: string, notify: boolean): Promise<void> {
+  await apiFetch(`/api/appointments/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status: "cancelada", cancelReason: "clinica", ...(notify ? {} : { notice: false }) }),
+  })
+}
+
+function ReleaseDialog({
+  open,
+  when,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean
+  when: string
+  busy: boolean
+  onCancel: () => void
+  onConfirm: (notify: boolean) => void
+}): React.JSX.Element {
+  const id = useId()
+  const [notify, setNotify] = useState(false)
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Liberar su cita {when}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Se cancela y la hora queda libre para otra persona. Si no marcas «Avisarle», no le llega
+            nada: avísale tú si hace falta.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <label htmlFor={id} className="flex min-h-11 items-center gap-2 text-sm">
+          <Checkbox id={id} checked={notify} onCheckedChange={(next) => setNotify(next === true)} />
+          Avisarle que se canceló (si la clínica tiene cómo escribirle)
+        </label>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
+          <Button type="button" disabled={busy} onClick={() => onConfirm(notify)}>
+            Liberarla
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/**
+ * «Usarla para la exodoncia» y «Liberarla» de la cita sin objeto, desde «Qué sigue» y la cita
+ * (QA del 10 nov, M1): lo mismo que ofrece el cierre, mientras nadie elija.
+ */
+export function FreedAppointmentButtons({
+  appointmentId,
+  version,
+  startsAt,
+  reuse,
+  size = "sm",
+  onDone,
+}: {
+  appointmentId: string
+  version: number
+  startsAt?: string
+  reuse?: { planItemId: string; title: string } | null
+  size?: ComponentProps<typeof Button>["size"]
+  onDone?: () => void
+}): React.JSX.Element {
+  const queryClient = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [releasing, setReleasing] = useState(false)
+  const run = async (how: "usada" | "liberada", notify = false) => {
+    setBusy(true)
+    try {
+      if (how === "usada" && reuse)
+        await apiFetch(`/api/appointments/${appointmentId}/reuse`, {
+          method: "POST",
+          body: JSON.stringify({ expectedVersion: version, planItemId: reuse.planItemId }),
+        })
+      else await releaseAppointment(appointmentId, notify)
+      toast.success(how === "usada" ? `Su cita ahora es para ${reuse?.title ?? "lo que sigue"}` : "Cita liberada")
+      await invalidateAppointmentQueries(queryClient)
+      await Promise.all(
+        [...PLAN_QUERY_KEYS, "patient-appointments"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })),
+      )
+      onDone?.()
+    } catch (cause) {
+      toast.error(submitErrorMessage(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date())
+  return (
+    <>
+      {reuse ? (
+        <Button type="button" size={size} disabled={busy} onClick={() => void run("usada")}>
+          Usarla para {reuse.title}
+        </Button>
+      ) : null}
+      <Button type="button" size={size} variant={reuse ? "outline" : "default"} disabled={busy} onClick={() => setReleasing(true)}>
+        Liberarla
+      </Button>
+      <ReleaseDialog
+        key={releasing ? "abierto" : "cerrado"}
+        open={releasing}
+        when={startsAt ? whenSaid(startsAt, activeOrgTimeZone(), today) : ""}
+        busy={busy}
+        onCancel={() => setReleasing(false)}
+        onConfirm={(notify) => {
+          setReleasing(false)
+          void run("liberada", notify)
+        }}
+      />
+    </>
   )
 }

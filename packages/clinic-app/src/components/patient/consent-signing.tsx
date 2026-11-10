@@ -116,7 +116,9 @@ export function useConsentSignerWord(patientId: string, patientFirstName: string
   const { choices, isMinor } = useSignerChoices(patientId)
   if (!isMinor) return patientFirstName
   const [only, ...others] = choices.filter((choice) => choice.kind === "representante")
-  return only && others.length === 0 ? firstName(only.name) : "su representante"
+  if (!only || others.length > 0) return "su representante"
+  // Si se llama como el menor, el primer nombre no dice quién firma: va entero (QA del 10 nov, B10).
+  return firstName(only.name) === patientFirstName ? only.name : firstName(only.name)
 }
 
 /** Primer nombre de quien firma, como lo dice la pantalla: «Firma de Lucía». */
@@ -577,7 +579,9 @@ function SigningFlow({
                 professional={{
                   name: signAs.name,
                   detail: signAs.detail,
-                  note: "Falta su confirmación: lo confirma al terminar.",
+                  // Lo lee quien firma en la tablet: le dice qué pasa, no una tarea del profesional
+                  // (pendiente de la entrega 11).
+                  note: "Firma después de ti, con su perfil profesional.",
                 }}
                 signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
                 signatureNote={frame.data?.data.signatureNote ?? null}

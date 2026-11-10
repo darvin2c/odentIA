@@ -38,14 +38,40 @@ function contextHeaders(): Record<string, string> {
   }
 }
 
+/** La cabecera que lleva lo buscado (`SEARCH_HEADER` de la API): nunca en la dirección. */
+export const SEARCH_HEADER = "x-odentia-q"
+
+/**
+ * Lo que se busca (un nombre, un teléfono, un documento) no viaja en la dirección de la petición:
+ * la dirección queda en los registros del proxy y del servidor (QA de la ficha del 10 nov, M4). Se
+ * saca `q` de una lectura y va en una cabecera, codificado; la API lo vuelve a poner antes de
+ * leerlo, así cada ruta sigue igual.
+ */
+export function searchOutOfPath(path: string, method?: string): { path: string; headers: Record<string, string> } {
+  if (method && method.toUpperCase() !== "GET") return { path, headers: {} }
+  const at = path.indexOf("?")
+  if (at < 0) return { path, headers: {} }
+  const params = new URLSearchParams(path.slice(at + 1))
+  const q = params.get("q")
+  if (q === null) return { path, headers: {} }
+  params.delete("q")
+  const rest = params.toString()
+  return {
+    path: `${path.slice(0, at)}${rest ? `?${rest}` : ""}`,
+    headers: { [SEARCH_HEADER]: encodeURIComponent(q) },
+  }
+}
+
 /** Fetch a la API con cookies de sesión y slug de tenant del host; errores en forma ApiErrorShape. */
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(rawPath: string, init?: RequestInit): Promise<T> {
+  const { path, headers: search } = searchOutOfPath(rawPath, init?.method)
   const response = await apiTransport(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: {
       "content-type": "application/json",
       ...contextHeaders(),
+      ...search,
       ...init?.headers,
     },
   })

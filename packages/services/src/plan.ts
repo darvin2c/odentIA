@@ -3,6 +3,7 @@ import {
   encounter,
   encounterPlanItem,
   encounterProcedure,
+  patientCharge,
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
@@ -1613,6 +1614,25 @@ export async function revisePlanItem(
   const { item } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
   if (CLOSED_STATUSES.includes(item.status))
     throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
+  // Un adelanto «Para» este tratamiento quedaría en el reemplazado y el nuevo se cobraría entero
+  // (mesa de la entrega 12): primero caja lo anula o lo devuelve.
+  const [advance] = await tx
+    .select({ id: patientCharge.id })
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.planItemId, item.id),
+        isNull(patientCharge.voidedAt),
+        sql`${patientCharge.requestKey} like 'adelanto:%'`,
+      ),
+    )
+    .limit(1)
+  if (advance)
+    throw conflict(
+      "ITEM_HAS_ADVANCE",
+      "Tiene un adelanto pagado para este tratamiento: pídele a caja que anule ese cobro antes de cambiarlo, para que no se cobre dos veces",
+    )
   const next = await addPlanItem(tx, orgId, actorUserId, patientId, {
     ...input,
     sourceEncounterId: input.encounterId,
@@ -1639,8 +1659,158 @@ export async function revisePlanItem(
     patientId,
     reason,
     supersededBy: revised.id,
+    encounterId: input.encounterId,
+    // Cómo estaba: anular la atención donde se hizo el cambio lo deja así (`undoRevisionsOf`).
+    before: {
+      status: item.status,
+      decisionStatus: item.decisionStatus,
+      statusReason: item.statusReason,
+      consentResetAt: item.consentResetAt?.toISOString() ?? null,
+    },
   })
   return { ...(await withPlanItemParts(tx, orgId, revised)), decision: revised.decisionStatus as PlanItemDecision }
+}
+
+/** Lo que vuelve a decir el tratamiento cuyo cambio se deshizo al anular la atención. */
+export interface UndoneRevision {
+  /** El que vuelve a quedar como estaba. */
+  restoredId: string
+  restored: string
+  /** El que lo había reemplazado y se anula con la atención. */
+  replacement: string
+}
+
+/**
+ * Los cambios de tratamiento («Revisar indicación», «Cambiar» lo aceptado) hechos en esta atención:
+ * el nuevo nació en ella y reemplazó a otro que sigue «reemplazado» por él. Sin efectos.
+ */
+export async function revisionsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<Array<{ newId: string; newTitle: string; oldId: string; oldTitle: string; oldTooth: string | null }>> {
+  const rows = await tx
+    .select({
+      newId: treatmentPlanItem.id,
+      newTitle: treatmentPlanItem.title,
+      oldId: treatmentPlanItem.supersedesItemId,
+    })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        sql`${treatmentPlanItem.supersedesItemId} is not null`,
+        // Lo que `voidEncounter` anula con la atención, y el del medio de una cadena cambiada dos
+        // veces en ella (A → B → C: se vuelve a A; revisión de la entrega 12).
+        inArray(treatmentPlanItem.status, ["pendiente", "programado", "suspendido", "reemplazado"]),
+      ),
+    )
+  if (rows.length === 0) return []
+  const olds = await tx
+    .select({ id: treatmentPlanItem.id, title: treatmentPlanItem.title, siteCode: treatmentPlanItem.siteCode })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        inArray(treatmentPlanItem.id, rows.map((row) => row.oldId!)),
+        eq(treatmentPlanItem.status, "reemplazado"),
+        // El que nació en esta misma atención también se anula: se vuelve al de antes.
+        sql`${treatmentPlanItem.sourceEncounterId} is distinct from ${encounterId}::uuid`,
+      ),
+    )
+  const byId = new Map(olds.map((row) => [row.id, row]))
+  return rows.flatMap((row) => {
+    const old = byId.get(row.oldId!)
+    return old ? [{ newId: row.newId, newTitle: row.newTitle, oldId: old.id, oldTitle: old.title, oldTooth: old.siteCode }] : []
+  })
+}
+
+/**
+ * Anular la atención donde se cambió un tratamiento deshace el cambio: el nuevo se anula con ella
+ * (lo hace `voidEncounter`) y el anterior vuelve a como estaba —su estado, su decisión y su
+ * consentimiento firmado— en vez de quedar «reemplazado» por algo que ya no existe (QA del 10 nov,
+ * A1). Lo que había antes sale de la auditoría del cambio; uno anterior a guardarla vuelve a
+ * «pendiente» con la decisión de su presupuesto.
+ */
+export async function undoRevisionsOf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  reason: string,
+  at: Date,
+): Promise<void> {
+  const revisions = await revisionsOf(tx, orgId, patientId, encounterId)
+  for (const revision of revisions) {
+    const [event] = await tx
+      .select({ metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(
+        and(
+          eq(auditEvent.organizationId, orgId),
+          eq(auditEvent.entity, "treatment_plan_item"),
+          eq(auditEvent.entityId, revision.oldId),
+          eq(auditEvent.action, "plan.item_revised"),
+        ),
+      )
+      .orderBy(desc(auditEvent.createdAt))
+      .limit(1)
+    const before = (event?.metadata as { before?: RevisionBefore } | null)?.before
+    const decision = before?.decisionStatus ?? (await budgetDecisionOf(tx, orgId, revision.oldId))
+    await tx
+      .update(treatmentPlanItem)
+      .set({
+        status: before?.status ?? "pendiente",
+        decisionStatus: decision,
+        statusReason: before ? before.statusReason : null,
+        ...(before ? { consentResetAt: before.consentResetAt ? new Date(before.consentResetAt) : null } : {}),
+        updatedAt: at,
+      })
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, revision.oldId)))
+    await audit(tx, orgId, actorUserId, "plan.item_revision_undone", "treatment_plan_item", revision.oldId, {
+      patientId,
+      encounterId,
+      replacement: revision.newId,
+      reason,
+      restoredTo: { status: before?.status ?? "pendiente", decisionStatus: decision },
+    })
+  }
+  // Lo del medio de una cadena (nació aquí y ya estaba reemplazado) se anula con la atención.
+  if (revisions.length > 0)
+    await tx
+      .update(treatmentPlanItem)
+      .set({ status: "cancelado", statusReason: reason, updatedAt: at })
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          eq(treatmentPlanItem.sourceEncounterId, encounterId),
+          eq(treatmentPlanItem.status, "reemplazado"),
+        ),
+      )
+}
+
+interface RevisionBefore {
+  status: string
+  decisionStatus: string
+  statusReason: string | null
+  consentResetAt: string | null
+}
+
+/** La decisión que dice su presupuesto (para un cambio guardado antes de anotar cómo estaba). */
+async function budgetDecisionOf(tx: Db, orgId: string, itemId: string): Promise<string> {
+  const [line] = await tx
+    .select({ decision: treatmentBudgetItem.decision })
+    .from(treatmentBudgetItem)
+    .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.planItemId, itemId)))
+    .orderBy(desc(treatmentBudgetItem.createdAt))
+    .limit(1)
+  const decision = line?.decision
+  return decision && ["aceptado", "pospuesto", "rechazado"].includes(decision) ? decision : "pendiente"
 }
 
 /** Lo firmado del tratamiento deja de contar y lo pendiente se anula: se firma el texto nuevo. */

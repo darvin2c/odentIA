@@ -190,7 +190,9 @@ export async function renderConsentPdf(
           ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }]
           : []),
         { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
-        { text: "Firmado electrónicamente" },
+        // En papel, «Firmado electrónicamente» al lado de «Firmado a mano en papel» se leía como que
+        // la persona firmó de las dos formas (pendiente de la entrega 11): el profesional lo confirmó.
+        { text: method === "papel" ? "Lo confirmó con su perfil profesional" : "Firmado electrónicamente" },
       ]
   const signatures = [
     { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
@@ -267,7 +269,7 @@ export async function renderConsentPdf(
   // La firma en papel es manuscrita: no se llama firma electrónica (la línea de quien firma ya dice que su foto queda en Documentos).
   const kind = signatureKindWords(clinicalProfileFor(data.establishment?.country).signatureLaw)
   const channel = method === "enlace" ? "por enlace" : "en la clínica"
-  const words = method === "papel" ? "Firmado a mano en papel" : `${kind} · ${channel}`
+  const words = method === "papel" ? `${signerHeading === "Paciente" ? "El paciente" : "Su representante"} firmó a mano en papel` : `${kind} · ${channel}`
   const qrSize = CHECK_QR_SIZE
   // Con QR, el código y sus textos no se separan de página.
   const needed = 44 + (checkUrl ? 26 : 0)

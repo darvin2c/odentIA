@@ -29,9 +29,27 @@ const ssrCookie = createIsomorphicFn()
   .server(() => getRequestHeaders().get("cookie"))
   .client(() => null)
 
+/**
+ * Lo buscado (un nombre, un correo, un teléfono) no viaja en la dirección, que queda en los
+ * registros del proxy: va en la cabecera que la API vuelve a leer como `q` (QA de la ficha del
+ * 10 nov, M4; la misma regla que `searchOutOfPath` del panel).
+ */
+function searchOutOfPath(path: string, method?: string): { path: string; q: string | null } {
+  if ((method && method.toUpperCase() !== "GET") || !path.includes("?")) return { path, q: null }
+  const at = path.indexOf("?")
+  const params = new URLSearchParams(path.slice(at + 1))
+  const q = params.get("q")
+  if (q === null) return { path, q: null }
+  params.delete("q")
+  const rest = params.toString()
+  return { path: `${path.slice(0, at)}${rest ? `?${rest}` : ""}`, q }
+}
+
 /** Solo reenvía la cookie en SSR, nunca cabeceras de tenant o de autoridad del cliente. */
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(rawPath: string, init?: RequestInit): Promise<T> {
+  const { path, q } = searchOutOfPath(rawPath, init?.method)
   const headers = new Headers(init?.headers)
+  if (q !== null) headers.set("x-odentia-q", encodeURIComponent(q))
   if (!(init?.body instanceof FormData)) headers.set("content-type", "application/json")
   const cookie = ssrCookie()
   if (cookie) headers.set("cookie", cookie)

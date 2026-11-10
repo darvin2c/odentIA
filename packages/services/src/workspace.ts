@@ -361,6 +361,8 @@ export interface WorkspaceAppointment {
   encounter: { id: string; startedAt: string; professionalUserId: string; professionalName: string } | null
   /** La siguiente cita en pie que aún no llega; a lo sumo una. */
   next: boolean
+  /** Lo que llevaba y ya se terminó, si no le queda nada: la cita quedó sin objeto (QA del 10 nov, M1). */
+  doneFor?: string | null
 }
 
 /**
@@ -511,8 +513,21 @@ async function workspaceToday(
     branch: own || !branch ? null : { id: branch.id, name: branch.name },
     timezone: zone,
     summary,
-    appointments: shown.map(({ open: _open, ...row }) => ({ ...row, next: row.id === nextId })),
+    appointments: await withDoneFor(
+      tx,
+      orgId,
+      shown.map(({ open: _open, ...row }) => ({ ...row, next: row.id === nextId })),
+    ),
   }
+}
+
+/** La cita de hoy para lo que ya se terminó lo dice en Inicio, con la regla de la Agenda. */
+async function withDoneFor(tx: Db, orgId: string, rows: WorkspaceAppointment[]): Promise<WorkspaceAppointment[]> {
+  const live = rows.filter((row) => row.visit === "por_confirmar" || row.visit === "confirmada")
+  if (live.length === 0) return rows
+  const { appointmentsDoneForOf } = await import("./appointments.js")
+  const done = await appointmentsDoneForOf(tx, orgId, live.map((row) => ({ id: row.id, serviceId: null })))
+  return rows.map((row) => (done.doneFor.has(row.id) ? { ...row, doneFor: done.doneFor.get(row.id)! } : row))
 }
 
 /**
