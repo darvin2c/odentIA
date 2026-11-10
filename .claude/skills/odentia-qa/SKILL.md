@@ -1,6 +1,6 @@
 ---
 name: odentia-qa
-description: Recorrer odentIA, latidIA y vistIA como QA, en un navegador real y con cinco voces (novato, clínica, desarrollo, auditor y diseño UX), para encontrar errores y mejoras que las pruebas no ven, supervisar cada proceso clínico contra su catálogo, proponer cómo simplificar lo que cuesta, confirmarlos y dejarlos listos para corregir. Usar para una ronda periódica o cuando pidan «haz QA», «revisa esta pantalla buscando problemas», «revisa la atención como un odontólogo», «revisa el examen de la vista», «¿esto sirve para atender?» o «navega por la app a ver qué falla», aunque no haya un cambio nuevo. También la llama odentia-entrega antes de pedir el sí, y sus voces son la mesa de odentia-entrega. No usar sola para probar un cambio propio (eso lo hace odentia-entrega, que la llama) ni para medir la calidad de Sofi, Clío o Argos.
+description: Recorrer odentIA, latidIA y vistIA como QA, en un navegador real y con cinco voces (novato, clínica, desarrollo, auditor y diseño UX), para encontrar errores y mejoras que las pruebas no ven, supervisar cada proceso clínico contra su catálogo, proponer cómo simplificar lo que cuesta, confirmarlos y dejarlos listos para corregir. Usar para una ronda periódica o cuando pidan «haz QA», «revisa esta pantalla buscando problemas», «revisa la atención como un odontólogo», «revisa el examen de la vista», «¿esto sirve para atender?», «navega por la app a ver qué falla» o «lanza la mesa sobre…» un área, aunque no haya un cambio nuevo. También la llama odentia-entrega antes de pedir el sí, y sus voces son la mesa de odentia-entrega. No usar sola para probar un cambio propio (eso lo hace odentia-entrega, que la llama) ni para medir la calidad de Sofi, Clío o Argos.
 ---
 
 # QA de odentIA, latidIA y vistIA
@@ -12,7 +12,7 @@ Se corre de dos maneras:
 - **Ronda**, la que pide el usuario o la periódica: un área, en local o en una demo de producción, con informe en un lienzo privado. Son los apartados 1 a 6.
 - **Antes de entregar**, la que llama `odentia-entrega` con el cambio ya hecho y antes de pedir el sí: sobre la rama, en local. Usa las mismas voces y la misma confirmación, con lo que cambia en el apartado 7.
 
-Las voces y su método están en `references/voces.md`. La voz clínica supervisa cada proceso con los catálogos `references/clinica/odontologia.md` (odentIA), `references/clinica/medicina.md` (latidIA), `references/clinica/optica.md` (vistIA) y `references/clinica/comunes.md` (lo que rodea a la atención en todos), y en cada revisión busca los flujos que los catálogos todavía no tienen.
+Las voces y su método están en `references/voces.md`. Cómo se las convoca y se las conduce está en `references/mesa.md`: una ronda es la mesa sobre un área, sin cambio, y por eso también responde a «lanza la mesa sobre…». La voz clínica supervisa cada proceso con los catálogos `references/clinica/odontologia.md` (odentIA), `references/clinica/medicina.md` (latidIA), `references/clinica/optica.md` (vistIA) y `references/clinica/comunes.md` (lo que rodea a la atención en todos), y en cada revisión busca los flujos que los catálogos todavía no tienen.
 
 ## Reglas de toda ronda
 
@@ -46,7 +46,9 @@ Los archivos de la ronda van fuera del repositorio, porque es público, en `~/od
 
 ## 3. Recorrer
 
-Las voces entran una a una, cada una como subagente aparte, en este orden: novato, clínica, desarrollo, auditor y diseño UX. Comparten la demo, cada una con su propia sesión del navegador. El novato no sabe lo que los demás encontraron, y diseño UX va al final porque trabaja sobre los tropiezos de las demás. Qué hace cada una, y con qué método, está en `references/voces.md`: cada subagente recibe «Para todas» y su apartado enteros, más `comun.md`, no un resumen, porque el resumen es lo que vuelve genérica a una voz. Diseño UX recibe además los informes de las demás.
+La ronda la conduce un moderador, que es la sesión principal, como dice `references/mesa.md`: lee antes el código del área, arma el expediente, guarda los pendientes conocidos sin pasarlos a las voces, elige qué voces entran y con qué modelo y esfuerzo cada una, y les da una ficha neutra, sin sospechas ni preguntas. Cada voz arma sus propios casos, recorre de punta a punta y hace sus giras: así encuentra por su cuenta, y no solo lo que se le pidió mirar. Al terminar la confirmación, el moderador cruza lo encontrado con los pendientes guardados: los que la ronda no volvió a encontrar se informan igual, marcados «no visto por la ronda».
+
+Las voces entran una a una, cada una como subagente aparte, en este orden: novato, clínica, desarrollo, auditor y diseño UX. Comparten la demo, cada una con su propia sesión del navegador. El novato no sabe lo que los demás encontraron, y diseño UX va al final porque trabaja sobre los tropiezos de las demás. Qué hace cada una, y con qué método, está en `references/voces.md`: cada subagente recibe «Para todas» y su apartado enteros, las reglas de las voces de `mesa.md` y `comun.md`, no un resumen, porque el resumen es lo que vuelve genérica a una voz. Diseño UX recibe además los informes de las demás.
 
 **La voz clínica entra siempre que el área toque datos o decisiones clínicas** y recibe además el catálogo de su producto y `comunes.md`. Antes de empezar, la ronda le pasa la lista de procesos del catálogo que el área toca, para que ninguno quede sin revisar, y la voz hace su barrido de flujos que faltan.
 
@@ -90,9 +92,9 @@ Nada se hace público hasta que el usuario decida. Un error clínico también da
 - **Errores de la demo**, con su causa en la semilla.
 - **Descartadas**, para no volver a reportarlas: solo las falsas alarmas y lo que es a propósito y está bien, cada una con su motivo.
 - **Propuestas de diseño UX**, con el antes y el después en pasos y saltos. No se reproducen, pero se confirma que el permiso y el servicio que suponen existen.
-- **Para el catálogo:** los procesos y comprobaciones clínicas que la ronda encontró y el catálogo no tiene, con el texto listo para sumarlo.
+- **Para el catálogo:** los procesos y comprobaciones clínicas que la ronda encontró y el catálogo no tiene, con el texto listo para sumarlo. Igual para el catálogo de cada una de las otras voces (`references/catalogos/`): flujos, comprobaciones y medidas nuevas, y lo que se le escapó a cada una.
 
-**`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, procesos clínicos por estado, cuántos solo vio la pantalla, tropiezos del entorno y tokens gastados. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
+**`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, procesos clínicos por estado, cuántos solo vio la pantalla, tropiezos del entorno y, por voz, modelo, esfuerzo, tokens y hallazgos confirmados. Lleva también lo que pide «La mesa aprende» de `references/mesa.md`. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
 
 El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Nombra cada decisión que produce un problema y cómo debería ser. Lista qué sigue para corregir y qué candidatos a issue hay. Cierra con las decisiones que esperan del usuario, cada una como pregunta y con la opción sugerida. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
 
@@ -110,11 +112,12 @@ Cuando la llama `odentia-entrega` (su etapa 7), con el cambio ya implementado, p
 
 - **Dónde.** En local, con `pnpm dev` sobre la rama y `pnpm --filter @odentia/services seed:dev`, en cada producto al que llega si el cambio es común (vistIA, en su rama mientras no esté en `main`). Desarrollo lee el código de la rama, no el de producción. No se crea demo en producción.
 - **Qué área.** Lo que el cambio toca y los recorridos vecinos que puede haber roto. La entrega le pasa el acta de la mesa y la lista de lo cambiado, pero no al novato.
-- **Qué voces.** Las de la tabla «Por dónde entra cada cambio» de `odentia-entrega`, y clínica siempre que toque datos o decisiones clínicas. Si el cambio no tiene efecto visible, entra al menos desarrollo, que recorre en la pantalla lo que el cambio podría haber roto.
+- **Los criterios del acta.** Las voces recorren en la pantalla cada caso del acta y marcan su criterio: cumple, no cumple o no se pudo ver. Ese es el piso; después cada voz recorre lo suyo, con sus propios casos. El novato recibe los casos como tareas, sin el criterio.
+- **Qué voces.** Las de la tabla «Por dónde entra cada cambio» de `odentia-entrega`, y clínica siempre que toque datos o decisiones clínicas. El modelo y el esfuerzo de cada una se eligen como dice `references/mesa.md`. Si el cambio no tiene efecto visible, entra al menos desarrollo, que recorre en la pantalla lo que el cambio podría haber roto.
 - **Confirmar**, igual que en el apartado 4, con agentes nuevos.
 - **Informe.** Sin lienzo ni issues: un informe en `~/odentia-qa/<fecha>-entrega-<rama>/` y un resumen para el PR. Cada hallazgo confirmado va a uno de estos grupos:
   - **Lo rompió o lo dejó a medias este cambio:** la entrega lo corrige en el mismo PR. Después, un verificador nuevo repite en pantalla solo esos pasos, hasta que todos pasan.
   - **Ya estaba antes:** queda como pendiente en el PR y en la memoria, sin mezclarlo con lo pedido. Un fallo de permisos, de aislamiento o de datos no se escribe en el PR, porque el repositorio es público: va solo al informe privado y se le avisa al usuario.
   - **Decisión de producto:** va a la parada del sí, como pregunta con su recomendación.
-  - **Para el catálogo:** se suma a `references/clinica/` en el mismo PR.
+  - **Para el catálogo:** se suma a `references/clinica/` o al catálogo de la voz en `references/catalogos/`, en el mismo PR.
 - **Una fila en `~/odentia-qa/recorrido.md`**, marcada «antes de entregar» y con el número del PR.
