@@ -425,6 +425,9 @@ export interface FinalizeBilling {
     currency: string | null
     status: "charged" | "skipped"
     reason: string | null
+    /** Con un adelanto para este tratamiento: lo acordado entero y lo adelantado. */
+    agreedCents?: number
+    advanceCents?: number
   }>
 }
 
@@ -3049,6 +3052,12 @@ export function EncounterEditor({
               onSaved={(appointment) => {
                 // Lo que la cita de verdad lleva (lo que el servidor devolvió), no lo que se pidió.
                 const carried = new Map((appointment.sessions ?? []).map((session) => [session.planItemId, session]))
+                // Lo que espera a otro tratamiento y se sumó a esta cita ya no está «sin cita» (QA del 10 nov, B3).
+                const brought = new Set([
+                  ...carried.keys(),
+                  ...(appointment.brings ?? []).map((row) => row.planItemId),
+                ])
+                setFinalizedWaiting((current) => current.filter((row) => !brought.has(row.planItemId)))
                 setFinalizedNext((current) =>
                   current.map((session) => {
                     const booked = carried.get(session.planItemId)
@@ -3082,7 +3091,16 @@ export function EncounterEditor({
               <ul className="flex flex-col gap-1">
                 {chargedLines.map((line) => (
                   <li key={line.procedureId} className="flex items-baseline justify-between gap-3 text-sm">
-                    <span>{line.description}</span>
+                    <span>
+                      {line.description}
+                      {/* Con un adelanto, hoy se carga el resto: se dice lo que costó (QA del 10 nov, M7). */}
+                      {line.agreedCents && line.advanceCents && line.currency && orgLocale ? (
+                        <span className="block text-muted-foreground">
+                          Costó {formatMoney(line.agreedCents, line.currency, orgLocale)} ·{" "}
+                          {formatMoney(line.advanceCents, line.currency, orgLocale)} los dejó de adelanto
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="tabular-nums">
                       {line.currency && orgLocale && line.amountCents != null
                         ? formatMoney(line.amountCents, line.currency, orgLocale)
@@ -3125,7 +3143,7 @@ export function EncounterEditor({
             </div>
           ) : null}
           {finalizedCollect.surfaces}
-          {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
+          {finalizedControls && (finalizedControls.next || finalizedControls.returnsTo || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
           ) : null}
           {/* La corona sin cita mientras la endodoncia pide otra sesión: no se pierde; se reserva cuando

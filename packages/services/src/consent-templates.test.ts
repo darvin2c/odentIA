@@ -120,7 +120,7 @@ it("una clínica nace con lo sugerido activo, sin revisar y unido a sus servicio
   expect(await linkedKeys(orgId, later.id)).toEqual(["implante"])
 })
 
-it("se elige por la familia del tratamiento: la pulpectomía pide el de odontopediatría y la corona el suyo, no el de prótesis (QA del 10 nov, A1 y M2)", async () => {
+it("se elige por la familia del tratamiento: la pulpectomía pide el suyo (M3) y la corona el suyo, no el de prótesis (QA del 10 nov, A1 y M2)", async () => {
   const { orgId, run } = await newClinic()
   // Lo dental de la biblioteca se escribe en SQL: lo común no importa el esquema dental (ADR 0079).
   const withFamily = async (
@@ -144,7 +144,7 @@ it("se elige por la familia del tratamiento: la pulpectomía pide el de odontope
   const crown = await withFamily("Corona", "corona-de-porcelana-x-", { leaves: "crown" })
   const bridge = await service(orgId, "Puente", "puente-x-")
   await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
-  expect(await linkedKeys(orgId, pulpectomy.id)).toEqual(["odontopediatria"])
+  expect(await linkedKeys(orgId, pulpectomy.id)).toEqual(["pulpectomia"])
   expect(await linkedKeys(orgId, rootCanal.id)).toEqual(["endodoncia"])
   expect(await linkedKeys(orgId, crown.id)).toEqual(["corona"])
   expect(await linkedKeys(orgId, bridge.id)).toEqual(["protesis"])
@@ -317,10 +317,10 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
   })
   const rows = await run((tx) => listConsentTemplates(tx, orgId))
   const byKey = new Map(rows.map((row) => [row.key, row]))
-  // La corona sobre la propia pieza (entrega 10) no está en la 0028: la crea el worker como toda
-  // plantilla sugerida nueva (`ensureSuggestedConsentsEverywhere`).
+  // La corona sobre la propia pieza (entrega 10) y la pulpectomía (entrega 12) no están en la
+  // 0028: las crea el worker como toda plantilla sugerida nueva (`ensureSuggestedConsentsEverywhere`).
   expect(byKey.size).toBe(
-    SUGGESTED_CONSENT_TEMPLATES.filter((row) => row.key !== "corona").length + 1,
+    SUGGESTED_CONSENT_TEMPLATES.filter((row) => row.key !== "corona" && row.key !== "pulpectomia").length + 1,
   )
   expect(await linkedKeys(orgId, surgical.id)).toEqual(["mi-extraccion"])
   expect(byKey.get("implante")).toMatchObject({ title: "Mi implante", version: 1, status: "publicado" })
@@ -356,4 +356,23 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
     }),
   )
   expect(await run((tx) => patientHealthToAsk(tx, orgId, other.id))).toBe(false)
+})
+
+it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nunca sin ninguno (M3)", async () => {
+  const { orgId, run } = await newClinic()
+  const row = await service(orgId, "Pulpectomía", "pulpectomia-y-")
+  await ownerDb.execute(sql`insert into catalog.dental_template_rule (template_id, leaves_condition, tooth_groups, family)
+    values (${row.templateId}, 'root_canal_treatment', array['molar'], 'pulpectomia-deciduo')`)
+  await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
+  // Como antes de esta entrega: sin el suyo y con el de odontopediatría que puso la migración 0089.
+  await ownerDb
+    .delete(consentTemplateService)
+    .where(and(eq(consentTemplateService.organizationId, orgId), eq(consentTemplateService.templateKey, "pulpectomia")))
+  await ownerDb
+    .delete(consentTemplate)
+    .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, "pulpectomia")))
+  await ownerDb.insert(consentTemplateService).values({ organizationId: orgId, templateKey: "odontopediatria", serviceId: row.id })
+  expect(await linkedKeys(orgId, row.id)).toEqual(["odontopediatria"])
+  await run((tx) => ensureClinicConsents(tx, orgId, null))
+  expect(await linkedKeys(orgId, row.id)).toEqual(["pulpectomia"])
 })

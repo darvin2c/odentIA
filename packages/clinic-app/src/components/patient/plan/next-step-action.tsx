@@ -28,6 +28,7 @@ import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { errorMessage } from "../../agenda/shared"
 import { FollowUpScheduler } from "../follow-up-scheduler"
+import { FreedAppointmentButtons } from "../freed-appointments"
 import { useBudgetFormat } from "./budget-parts"
 import { BudgetNoAnswer } from "./budget-no-answer"
 import { BudgetResponse } from "./budget-response"
@@ -53,6 +54,17 @@ export function NextStepButton({
   const archived = usePersonArchived()
   const action = step.action
   if (!action || archived) return null
+  // La cita que quedó sin objeto: usarla para lo aceptado o liberarla, sin avisar salvo que se marque.
+  if (step.kind === "sin_objeto" && action.appointmentId && action.appointmentVersion != null)
+    return (
+      <FreedAppointmentButtons
+        appointmentId={action.appointmentId}
+        version={action.appointmentVersion}
+        startsAt={action.appointmentStartsAt}
+        reuse={action.reuse ?? null}
+        size={size}
+      />
+    )
   if (step.kind === "enviar" && action.budgetId)
     return (
       <BudgetSendButton
@@ -106,7 +118,10 @@ export function NextStepButton({
         // La cita no se alarga sola: si lo que lleva suele durar más, se dice y el aviso se queda
         // hasta cerrarlo (segunda mesa del 9 nov: se iba solo y no se entendía «105»).
         description: [outsideWords, tooShortWords].filter(Boolean).join(" ") || undefined,
-        ...(stays ? { duration: Number.POSITIVE_INFINITY, closeButton: true } : {}),
+        // Se cierra solo (se pausa con el puntero o el foco encima) para no quedar sobre la cabecera
+        // donde va el siguiente clic; «Deshacer» sigue en el cajón de la cita (QA de la ficha del 10 nov, U2).
+        duration: stays ? 15_000 : 8_000,
+        closeButton: true,
         action: {
           label: "Deshacer",
           onClick: () =>

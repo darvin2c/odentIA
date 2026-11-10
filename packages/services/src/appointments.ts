@@ -34,6 +34,7 @@ import { requireCanAttend } from "./attending.js"
 import {
   appointmentConfirmationPlan,
   type ConfirmationPlan,
+  appointmentRemindersVia,
   cancelPendingForAppointment,
   enqueueAppointmentNotice,
   invalidateAppointmentTokens,
@@ -214,6 +215,14 @@ export interface AppointmentItem {
    * más que los reservados: «Reservada 30 min; lo que lleva necesita unos 90». Null si alcanza.
    */
   needsMinutes?: number | null
+  /**
+   * Lo que llevaba y ya se terminó, cuando no le queda nada por hacer (ni tratamiento ni control):
+   * «Corona». La cita quedó sin objeto y la ficha, Inicio y la Agenda lo dicen hasta que se use para
+   * otra cosa o se libere (QA del 10 nov, M1). Null si le queda algo.
+   */
+  doneFor?: string | null
+  /** Su servicio era el de un tratamiento que ya se terminó: no se nombra como lo que viene a hacer. */
+  serviceDone?: boolean
 }
 
 /**
@@ -467,6 +476,8 @@ export async function getAppointment(tx: Db, orgId: string, id: string): Promise
   item.sessions = what.sessions.get(item.id) ?? []
   item.brings = what.brings.get(item.id) ?? []
   item.needsMinutes = what.needs.get(item.id) ?? null
+  item.doneFor = what.doneFor.get(item.id) ?? null
+  item.serviceDone = what.serviceDone.has(item.id)
   return item
 }
 
@@ -499,13 +510,13 @@ async function appointmentLinesOf(
   sessions: Map<string, AppointmentSession[]>
   brings: Map<
     string,
-    Array<{ planItemId: string; title: string; serviceId: string | null; minutes: number | null }>
+    Array<{ planItemId: string; title: string; serviceId: string | null; minutes: number | null; defaultMinutes: number | null }>
   >
 }> {
   const out = new Map<string, AppointmentSession[]>()
   const brings = new Map<
     string,
-    Array<{ planItemId: string; title: string; serviceId: string | null; minutes: number | null }>
+    Array<{ planItemId: string; title: string; serviceId: string | null; minutes: number | null; defaultMinutes: number | null }>
   >()
   const ids = [...new Set(appointmentIds)]
   if (ids.length === 0) return { sessions: out, brings }
@@ -519,11 +530,15 @@ async function appointmentLinesOf(
     m: number
     service_id: string | null
     minutes: number | null
+    default_minutes: number | null
   }>(sql`
     select session_link.appointment_id, session_item.id as plan_item_id, session_item.title,
       session_item.planned_sessions as m, session_item.service_id,
       (select s.duration_min from service_catalog s where s.organization_id = session_item.organization_id
         and s.id = session_item.service_id) as minutes,
+      -- Lo sumado sin duración cuenta lo que dura una cita de su sede, no cero (QA del 10 nov, M5).
+      (select b.appointment_default_minutes from branch b where b.organization_id = session_appointment.organization_id
+        and b.id = session_appointment.branch_id) as default_minutes,
       ${sessionsDoneSql(item, sql`session_appointment.id`)} as done,
       (select count(*)::int from appointment_plan_item earlier_link
         join appointment earlier on earlier.organization_id = earlier_link.organization_id and earlier.id = earlier_link.appointment_id
@@ -564,6 +579,7 @@ async function appointmentLinesOf(
       title: row.title,
       serviceId: row.service_id,
       minutes: row.minutes == null ? null : Number(row.minutes),
+      defaultMinutes: row.default_minutes == null ? null : Number(row.default_minutes),
     })
     brings.set(row.appointment_id, all)
     if (!showsSession(n, m)) continue
@@ -589,12 +605,15 @@ async function appointmentLoadOf(
   sessions: Map<string, AppointmentSession[]>
   brings: Map<string, Array<{ planItemId: string; title: string }>>
   needs: Map<string, number>
+  doneFor: Map<string, string>
+  serviceDone: Set<string>
 }> {
   const lines = await appointmentLinesOf(
     tx,
     orgId,
     items.map((item) => item.id),
   )
+  const done = await appointmentsDoneFor(tx, orgId, items)
   const brings = new Map<string, Array<{ planItemId: string; title: string }>>()
   const needs = new Map<string, number>()
   for (const item of items) {
@@ -606,7 +625,7 @@ async function appointmentLoadOf(
     const own = all.find((row) => row.serviceId && row.serviceId === item.serviceId)
     const extra = all
       .filter((row) => row.serviceId !== item.serviceId)
-      .reduce((sum, row) => sum + (row.minutes ?? 0), 0)
+      .reduce((sum, row) => sum + (row.minutes ?? row.defaultMinutes ?? 0), 0)
     if (extra <= 0) continue
     const reserved = Math.round(
       (new Date(item.endsAt).getTime() - new Date(item.startsAt).getTime()) / 60_000,
@@ -614,7 +633,59 @@ async function appointmentLoadOf(
     const usual = (own?.minutes ?? item.durationMin) + extra
     if (usual > reserved) needs.set(item.id, usual)
   }
-  return { sessions: lines.sessions, brings, needs }
+  return { sessions: lines.sessions, brings, needs, ...done }
+}
+
+/**
+ * Las citas en pie, sin atención, cuyo tratamiento ya se terminó: `doneFor` cuando no les queda
+ * nada (ni otro tratamiento ni un control reservado en ellas) y `serviceDone` cuando su servicio
+ * es el de lo ya terminado. La misma regla que el cierre (`freedAppointmentsOf`), al leer la cita:
+ * por venir, sin atención que no esté anulada y con su servicio propio entre lo terminado.
+ */
+export { appointmentsDoneFor as appointmentsDoneForOf }
+
+async function appointmentsDoneFor(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<Pick<AppointmentItem, "id" | "serviceId">>,
+): Promise<{ doneFor: Map<string, string>; serviceDone: Set<string> }> {
+  const doneFor = new Map<string, string>()
+  const serviceDone = new Set<string>()
+  const ids = [...new Set(items.map((item) => item.id))]
+  if (ids.length === 0) return { doneFor, serviceDone }
+  const rows = await tx.execute<{ appointment_id: string; title: string; status: string; service_id: string | null; control: boolean; own_service: string | null }>(sql`
+    select link.appointment_id, item.title, item.status, item.service_id, a.service_id as own_service,
+      exists (select 1 from clinical_follow_up f where f.organization_id = a.organization_id
+        and f.appointment_id = a.id and f.status = 'programado') as control
+    from appointment_plan_item link
+    join appointment a on a.organization_id = link.organization_id and a.id = link.appointment_id
+    join treatment_plan_item item on item.organization_id = link.organization_id and item.id = link.plan_item_id
+    where link.organization_id = ${orgId}
+      and link.appointment_id in (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})
+      and a.status in ('programada', 'confirmada') and a.starts_at > now() and not a.is_test
+      and item.status <> 'cancelado'
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id
+        and e.appointment_id = a.id and e.status <> 'anulada')
+    order by item.sort_order, item.created_at, item.id`)
+  type Row = { appointment_id: string; title: string; status: string; service_id: string | null; control: boolean; own_service: string | null }
+  const byAppointment = new Map<string, Row[]>()
+  for (const row of rows as Row[]) byAppointment.set(row.appointment_id, [...(byAppointment.get(row.appointment_id) ?? []), row])
+  for (const item of items) {
+    const links = byAppointment.get(item.id) ?? []
+    const finished = links.filter((row) => row.status === "realizado")
+    if (finished.length === 0) continue
+    // Su servicio, de la cita misma (Inicio no lo trae).
+    const own = links[0]?.own_service ?? item.serviceId
+    if (own && finished.some((row) => row.service_id === own)) serviceDone.add(item.id)
+    // La regla de `freedAppointmentsOf`: su servicio propio, si lo tiene, es el de lo terminado.
+    const ownDone = !own || serviceDone.has(item.id)
+    if (ownDone && finished.length === links.length && !links.some((row) => row.control))
+      doneFor.set(item.id, [...new Set(finished.map((row) => row.title))].join(" y "))
+  }
+  return { doneFor, serviceDone }
 }
 
 /** Lo que el cajón de la cita dice de la persona y de dónde salió la cita. */
@@ -698,19 +769,39 @@ export async function appointmentReminderReach(
   tx: Db,
   orgId: string,
   patientId: string,
-): Promise<{ name: string; whatsapp: PhoneWhatsApp; hasEmail: boolean } | null> {
+): Promise<{
+  name: string
+  whatsapp: PhoneWhatsApp
+  hasEmail: boolean
+  /** Por dónde le llegará de verdad (la línea, la recepción, su permiso y el canal conectado); null: no le llega. */
+  via: "whatsapp" | "correo" | null
+  /** Quien lo recibe no es el paciente (su madre, quien habla por él). */
+  forOther: boolean
+} | null> {
   const contactId = await preferredContact(tx, orgId, patientId)
   if (!contactId) return null
   const [person] = await tx
-    .select({ name: contact.displayName, givenNames: contact.givenNames, email: contact.email })
+    .select({ name: contact.displayName, email: contact.email, relationship: patientContact.relationship })
     .from(contact)
+    .leftJoin(
+      patientContact,
+      and(
+        eq(patientContact.contactId, contact.id),
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+      ),
+    )
     .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
     .limit(1)
   if (!person) return null
   return {
-    name: person.givenNames?.trim().split(/\s+/)[0] || person.name,
+    // El nombre entero: con el nombre de pila, el niño y su madre «QA» se confundían (QA del 10 nov, M3).
+    name: person.name,
     whatsapp: await phoneWhatsAppState(tx, orgId, contactId),
     hasEmail: !!person.email?.trim(),
+    // La misma regla con que salen (`appointmentRemindersVia`): no se promete un correo que la clínica no envía.
+    via: await appointmentRemindersVia(tx, orgId, contactId, patientId),
+    forOther: !!person.relationship && person.relationship !== "self",
   }
 }
 
@@ -828,6 +919,8 @@ export async function listAppointments(
     item.sessions = what.sessions.get(item.id) ?? []
     item.brings = what.brings.get(item.id) ?? []
     item.needsMinutes = what.needs.get(item.id) ?? null
+    item.doneFor = what.doneFor.get(item.id) ?? null
+    item.serviceDone = what.serviceDone.has(item.id)
   }
   return items
 }
@@ -1739,7 +1832,15 @@ export async function setAppointmentPlanItems(
         .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, wanted)))
     : []
   const own = current.serviceId ? services.find((row) => row.serviceId === current.serviceId) : undefined
-  const extra = services.filter((row) => row.serviceId !== current.serviceId).reduce((sum, row) => sum + (row.minutes ?? 0), 0)
+  // Sin duración en su servicio, lo que dura una cita de la sede (M5): no cero.
+  const [site] = await tx
+    .select({ minutes: branch.appointmentDefaultMinutes })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.id, current.branchId)))
+    .limit(1)
+  const extra = services
+    .filter((row) => row.serviceId !== current.serviceId)
+    .reduce((sum, row) => sum + (row.minutes ?? site?.minutes ?? 0), 0)
   const usualMinutes = extra > 0 ? (own?.minutes ?? current.durationMin) + extra : null
   // Lo sumado cuyo servicio atiende otra especialidad, no la de quien tiene la cita.
   const outsideService: string[] = []
@@ -1781,10 +1882,11 @@ export async function freedAppointmentsOf(
   tx: Db,
   orgId: string,
   patientId: string,
-  planItemIds: readonly string[],
+  /** Los tratamientos que se terminaron (el cierre); null, todos los de la persona (la ficha). */
+  planItemIds: readonly string[] | null,
 ): Promise<FreedAppointment[]> {
-  const ids = [...new Set(planItemIds)]
-  if (ids.length === 0) return []
+  const ids = planItemIds ? [...new Set(planItemIds)] : null
+  if (ids?.length === 0) return []
   const rows = await tx.execute<{
     id: string
     version: number
@@ -1800,10 +1902,10 @@ export async function freedAppointmentsOf(
     left join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and a.patient_id = ${patientId}::uuid
       and a.status in ('programada', 'confirmada') and a.starts_at > now()
-      and link.plan_item_id in (${sql.join(
+      and ${ids ? sql`link.plan_item_id in (${sql.join(
         ids.map((id) => sql`${id}::uuid`),
         sql`, `,
-      )})
+      )})` : sql`true`}
       and item.status = 'realizado'
       and not exists (select 1 from appointment_plan_item other
         join treatment_plan_item open_item on open_item.organization_id = other.organization_id and open_item.id = other.plan_item_id
@@ -1811,7 +1913,15 @@ export async function freedAppointmentsOf(
           and open_item.status not in ('realizado', 'cancelado'))
       and not exists (select 1 from clinical_follow_up f where f.organization_id = a.organization_id
         and f.appointment_id = a.id and f.status = 'programado')
-      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id)
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id
+        and e.status <> 'anulada')
+      and not a.is_test
+      -- Una cita con su propio servicio (la limpieza a la que se sumó la corona) no queda sin objeto
+      -- porque la corona se hizo antes: solo si su servicio era el de lo terminado (revisión de la entrega 12).
+      and (a.service_id is null or exists (select 1 from appointment_plan_item own_link
+        join treatment_plan_item own_item on own_item.organization_id = own_link.organization_id and own_item.id = own_link.plan_item_id
+        where own_link.organization_id = a.organization_id and own_link.appointment_id = a.id
+          and own_item.status = 'realizado' and own_item.service_id = a.service_id))
     group by a.id, a.version, a.starts_at, u.name
     order by a.starts_at`)
   return rows.map((row) => ({

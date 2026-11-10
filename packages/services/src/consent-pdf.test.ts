@@ -172,8 +172,10 @@ it("el pie dice el nivel de la firma en letra discreta, y en papel no la llama e
   expect(written()).toContain("Firma electrónica simple · por enlace")
   text.mockClear()
   await renderConsentPdf(consent("papel", "PE"), clinic)
-  expect(written()).toContain("Firmado a mano en papel")
-  expect(written().join(" ")).not.toMatch(/electrónica simple/)
+  expect(written()).toContain("El paciente firmó a mano en papel")
+  // Ni «electrónica» al lado de lo firmado en papel (pendiente de la entrega 11).
+  expect(written().join(" ")).not.toMatch(/electrónica simple|Firmado electrónicamente/)
+  expect(written()).toContain("Lo confirmó con su perfil profesional")
 })
 
 it("lo que se calcula de antemano es lo que de verdad ocupa", async () => {

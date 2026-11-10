@@ -104,6 +104,15 @@ export interface AgendaAppointment {
   controlsLeftOut?: Array<{ id: string; title: string; from: string }>
   /** Los minutos que suele pedir lo que lleva, si son más que los reservados; null si alcanza. */
   needsMinutes?: number | null
+  /** Lo que llevaba y ya se terminó, si no le queda nada por hacer: la cita quedó sin objeto. */
+  doneFor?: string | null
+  /** Su servicio era el de un tratamiento ya terminado: no se nombra como lo que viene a hacer. */
+  serviceDone?: boolean
+}
+
+/** «Era para Corona, que ya se terminó»: la cita quedó sin objeto (QA del 10 nov, M1). */
+export function doneForWords(appointment: Pick<AgendaAppointment, "doneFor">): string | null {
+  return appointment.doneFor ? `era para ${appointment.doneFor}, que ya se terminó` : null
 }
 
 /** «Reservada 30 min; lo que lleva suele necesitar unos 90»: solo cuando no alcanza. */

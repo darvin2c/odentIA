@@ -260,6 +260,16 @@ export function EncounterVoidDialog({
                   ))}
                 </ul>
               ) : null}
+              {!blocked && (data?.revisions?.length ?? 0) > 0 ? (
+                <ul className="flex flex-col gap-1 text-sm">
+                  {data!.revisions!.map((revision) => (
+                    <li key={`${revision.restored}-${revision.replacement}`}>
+                      Se deshace el cambio a «{revision.replacement}»: «{revision.restored}» vuelve a quedar
+                      como estaba, con su respuesta y su consentimiento.
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {!blocked && appointments.length > 0 ? (
                 <p className="text-sm">
                   {appointments.length === 1

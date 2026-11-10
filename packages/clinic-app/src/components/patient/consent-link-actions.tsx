@@ -71,7 +71,8 @@ export function ConsentLinkActions({
         <>
           <Button type="button" size={size} variant="outline" onClick={() => setAsking(true)}>
             {/* Pudo solo mostrarse con el código: no se dice «otra vez». */}
-            {document.linkSentAt ? "Enviarlo por mensaje" : "Enviar para firmar"}
+            {/* Sin poder firmar a distancia, se envía para que lo lea: no promete firmar (M2). */}
+            {document.phoneSignBlock ? "Enviar para que lo lea" : document.linkSentAt ? "Enviarlo por mensaje" : "Enviar para firmar"}
           </Button>
           {/* Si su enlace no lo dejaría firmar (menor, sin fecha o sin documento), no se ofrece. */}
           {document.phoneSignBlock ? null : (

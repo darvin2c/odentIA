@@ -65,6 +65,7 @@ import {
   useOrgFinanceProfile,
   accountBalances,
   accountBalanceTitle,
+  pendingCostWords,
   type AccountCobro,
   type CollectResultBody,
   type RefundResult,
@@ -704,8 +705,7 @@ export function AccountTab({
                       : ""}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Costó {plain(item.totalCents, item.currency)} · pagó{" "}
-                    {plain(item.paidCents, item.currency)}
+                    {pendingCostWords(item, (cents) => plain(cents, item.currency))}
                     {item.since ? ` · desde el ${formatDayLongLocale(item.since, locale, timeZone)}` : ""}
                   </p>
                   {item.promotionName ? (

@@ -12,8 +12,8 @@ test("consentimientos: nacen activos; se leen, se cambian sobre la hoja, se ve e
   // La clínica nació con lo sugerido activo: no hay pantalla vacía ni nada que publicar.
   const row = page.getByRole("listitem").filter({ hasText: "Exodoncia simple o quirúrgica" })
   await expect(row.getByText("Sin revisar")).toBeVisible()
-  await expect(page.getByRole("switch", { name: /activo$/ })).toHaveCount(11)
-  await expect(page.getByText("0 de 11 revisados", { exact: false })).toBeVisible()
+  await expect(page.getByRole("switch", { name: /activo$/ })).toHaveCount(12)
+  await expect(page.getByText("0 de 12 revisados", { exact: false })).toBeVisible()
   await shot("lista")
 
   // La vista previa desde la fila: el PDF real, y lo que lee el paciente.

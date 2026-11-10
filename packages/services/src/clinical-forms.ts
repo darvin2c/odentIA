@@ -2051,6 +2051,15 @@ export async function ensureClinicConsents(
     created.push(await publishConsentTemplate(tx, orgId, actorUserId, draft.id))
   }
   await linkServicesToSuggestedConsents(tx, orgId, actorUserId, { templateKeys: created.map((row) => row.key) })
+  // La pulpectomía llega con su propio consentimiento (QA del 10 nov, M3): el vínculo con el de
+  // odontopediatría que puso la migración 0089 (sin autor) se quita solo donde ya pide el suyo, en
+  // el mismo paso, para que nunca quede sin ninguno. Lo que unió una persona no se toca.
+  if (created.some((row) => row.key === "pulpectomia"))
+    await tx.execute(sql`
+      delete from consent_template_service old
+      where old.organization_id = ${orgId} and old.template_key = 'odontopediatria' and old.created_by is null
+        and exists (select 1 from consent_template_service own where own.organization_id = old.organization_id
+          and own.template_key = 'pulpectomia' and own.service_id = old.service_id)`)
   return created
 }
 

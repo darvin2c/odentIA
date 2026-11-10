@@ -232,9 +232,12 @@ export const ConditionRows = withForm({
                           onBlur={control.onBlur}
                           value={field.state.value}
                           system={row.diagnosisSystem}
-                          onChange={(code, _description, system) => {
+                          onChange={(code, description, system) => {
                             field.handleChange(code)
                             form.setFieldValue(`conditions[${index}].diagnosisSystem`, system)
+                            // El nombre vacío toma el del código; lo escrito no se pisa (QA de la ficha del 10 nov, B3).
+                            if (code && description && !form.getFieldValue(`conditions[${index}].name`)?.trim())
+                              form.setFieldValue(`conditions[${index}].name`, description.slice(0, HEALTH_NAME_MAX))
                           }}
                           disabled={readOnly}
                         />

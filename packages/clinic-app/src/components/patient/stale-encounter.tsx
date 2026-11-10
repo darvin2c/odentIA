@@ -14,10 +14,12 @@ import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { History } from "lucide-react"
+import { useState } from "react"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { discardEncounterApi, fetchOpenEncounter, type OpenEncounterRef } from "../../lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { usePersonArchived } from "../../lib/person-archived"
+import { EncounterVoidDialog } from "./encounter-void-dialog"
 
 /** «el lunes 9 de noviembre», en la zona de la clínica. */
 export function encounterDayWords(iso: string): string {
@@ -88,6 +90,8 @@ function StaleEncounterActions({
     })
   // Descartar es de quien la lleva (el servidor lo exige); otro la abre y toma el relevo.
   const mine = open.professionalUserId === myUserId
+  const queryClient = useQueryClient()
+  const [voiding, setVoiding] = useState(false)
   return (
     <span className="flex flex-wrap gap-2">
       <Button type="button" size={size} onClick={go}>
@@ -96,6 +100,28 @@ function StaleEncounterActions({
       <Button type="button" size={size} variant="outline" onClick={go}>
         Cerrarla
       </Button>
+      {/* El texto la nombra: «Anularla» va aquí mismo, no solo dentro (QA del 10 nov, B12). */}
+      {!open.empty && mine ? (
+        <>
+          <Button type="button" size={size} variant="ghost" onClick={() => setVoiding(true)}>
+            Anularla
+          </Button>
+          <EncounterVoidDialog
+            open={voiding}
+            patientId={patientId}
+            encounterId={open.id}
+            onClose={() => setVoiding(false)}
+            onVoided={async () => {
+              setVoiding(false)
+              await Promise.all(
+                ["open-encounter", "patient-summary", "encounters", "stale-encounters", "appointments", "plan-next"].map(
+                  (key) => queryClient.invalidateQueries({ queryKey: [key] }),
+                ),
+              )
+            }}
+          />
+        </>
+      ) : null}
       {open.empty && mine ? (
         <Button
           type="button"

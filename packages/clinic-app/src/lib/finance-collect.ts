@@ -727,6 +727,25 @@ export interface AccountPendingItem {
   /** Producto vendido desde «Cobrar» y cuántas unidades: ya salió de la sede. */
   productId?: string | null
   productQuantity?: number | null
+  /** Lo pagado con un adelanto «Para» este tratamiento: no está en `totalCents` ni en `paidCents`. */
+  advancePaidCents?: number
+}
+
+/**
+ * «Costó 900 · pagó 300 de adelanto»: con un adelanto para el tratamiento, lo que costó entero y lo
+ * pagado contando el adelanto; sin él, las cifras del concepto (QA del 10 nov, M7).
+ */
+export function pendingCostWords(
+  item: Pick<AccountPendingItem, "totalCents" | "paidCents" | "advancePaidCents">,
+  money: (cents: number) => string,
+): string {
+  const advance = item.advancePaidCents ?? 0
+  const cost = `Costó ${money(item.totalCents + advance)}`
+  if (advance <= 0) return `${cost} · pagó ${money(item.paidCents)}`
+  const paid = item.paidCents + advance
+  return paid === advance
+    ? `${cost} · pagó ${money(advance)} de adelanto`
+    : `${cost} · pagó ${money(paid)}, ${money(advance)} de adelanto`
 }
 
 export interface AccountCobroPayment {

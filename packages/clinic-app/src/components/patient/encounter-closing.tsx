@@ -627,15 +627,25 @@ export function ClosingNextVisit({
                   ? "Elige el día en el calendario."
                   : beside
                     ? beside.line
-                    : day
-                      ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
-                      : "No indicaste cuándo vuelve: recepción no lo verá"}
+                    : day && (controls.returnsTo?.length ?? 0) > 0 && day <= controls.shortcuts.month
+                      ? // Vuelve para lo que falta hacer, no a un control aparte (QA del 10 nov, M6 y B7).
+                        `Vuelve hacia el ${controlDaySaid(day)} para ${joinTitles(controls.returnsTo ?? [])} · recepción lo verá en «Qué sigue»`
+                      : day
+                        ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
+                        : "No indicaste cuándo vuelve: recepción no lo verá"}
             </p>
           </>
         )}
       </div>
     </div>
   )
+}
+
+/** «la exodoncia simple y la resina»: lo que falta hacer, en una frase. */
+function joinTitles(titles: readonly string[]): string {
+  const lowered = titles.map((title) => title.charAt(0).toLowerCase() + title.slice(1))
+  if (lowered.length <= 1) return lowered[0] ?? ""
+  return `${lowered.slice(0, -1).join(", ")} y ${lowered.at(-1)}`
 }
 
 /** Las constancias de un toque para seguir sin el consentimiento de lo que se hizo hoy. */
@@ -1319,7 +1329,8 @@ export function EncounterClosingDialog({
               {mayCharge || seesFinance ? (
                 <p className="text-xs text-muted-foreground">
                   {!mayCharge
-                    ? "Después: lo que debe, para avisar a caja."
+                    ? // Hoy no se carga nada: solo lo que ya debía (QA de la ficha del 10 nov, B6).
+                      "Hoy no se carga nada. Después: si debe algo de antes, para avisar a caja."
                     : seesFinance
                       ? "Después: lo que se cargó hoy a su cuenta y lo que debe, para avisar a caja."
                       : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}

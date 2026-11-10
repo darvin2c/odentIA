@@ -124,6 +124,29 @@ export interface ConsentTemplate {
   updatedAt: string
 }
 
+/**
+ * Por qué no se ofrece firmar desde su teléfono, para decirlo donde se ocultó (QA del 10 nov, M2):
+ * «Para firmar desde su teléfono falta la fecha de nacimiento de Ana».
+ */
+export function phoneSignBlockWords(
+  block: NonNullable<ConsentDocument["phoneSignBlock"]>,
+  /** Quien firma: «Ana» o «su madre, Rosa». */
+  who: string,
+  /** El paciente, de quien es la fecha de nacimiento. */
+  patient: string,
+): string {
+  switch (block) {
+    case "sin-fecha":
+      return `Para firmar desde su teléfono falta la fecha de nacimiento de ${patient}: complétala en Datos.`
+    case "sin-documento":
+      return `Para firmar desde su teléfono falta el documento de ${who}: complétalo en Datos.`
+    case "menor":
+      return `No se firma desde el teléfono: ${patient} es menor de edad y firma su representante.`
+    case "sin-destinatario":
+      return "No se firma desde el teléfono: no tiene a quién enviárselo (un celular o su representante)."
+  }
+}
+
 export interface ConsentDocument {
   id: string
   /**

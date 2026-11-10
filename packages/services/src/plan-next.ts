@@ -79,7 +79,17 @@ import {
  * lista de la ficha (`getPlanNextSteps`), con «¿Vino?», que abre la cita para registrar la atención
  * o decir que no vino. La frase única y la fila de Pacientes no la dicen.
  */
-export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "reservado" | "control" | "cerrar" | "ninguno"
+export type PlanNextKind =
+  | "enviar"
+  | "agendar"
+  | "respuesta"
+  | "continuar"
+  | "reservado"
+  | "control"
+  | "cerrar"
+  | "sin_objeto"
+  | "suspendido"
+  | "ninguno"
 
 export interface PlanNextAction {
   /** «Enviar», «Reservar cita» o «¿Qué respondió?». */
@@ -106,6 +116,11 @@ export interface PlanNextAction {
    * (QA de la ficha del 9 nov). El botón principal pasa a ser «Otra cita».
    */
   join?: { appointmentId: string; label: string }
+  /** La cita sin objeto: su versión, para usarla o liberarla sin pisar otro cambio, y su hora. */
+  appointmentVersion?: number
+  appointmentStartsAt?: string
+  /** «Usarla para la exodoncia»: lo aceptado que falta reservar y podría ir en esa cita. */
+  reuse?: { planItemId: string; title: string }
 }
 
 export interface PlanNextStep {
@@ -377,7 +392,18 @@ async function planFactsOf(
     left join "user" u on u.id = a.professional_user_id
     where link.organization_id = ${orgId} and link.patient_id = ${patientId}::uuid and not a.is_test
       and link.created_at <= a.starts_at
-      and item.status in ('pendiente', 'programado') and item.decision_status = 'aceptado'
+      and item.status in ('pendiente', 'programado', 'en_curso') and item.decision_status = 'aceptado'
+      -- Con una atención firmada en esa cita, lo que se hizo (o no) quedó registrado: decir que no se
+      -- registró nombraba a otro doctor en el «lo piensa» (QA del 10 nov, B1). Queda la cita cerrada
+      -- con «Vino» (M4: la sesión 2 de la endodoncia).
+      and not exists (select 1 from encounter signed where signed.organization_id = a.organization_id
+        and signed.appointment_id = a.id and signed.status = 'finalizada')
+      -- Y nada de ese tratamiento se registró desde ese día.
+      and not exists (select 1 from encounter_procedure proc
+        join encounter done on done.organization_id = proc.organization_id and done.id = proc.encounter_id
+        where proc.organization_id = item.organization_id and proc.plan_item_id = item.id
+          and proc.voided_at is null and done.status <> 'anulada'
+          and done.started_at >= a.starts_at - interval '12 hours')
     order by link.plan_item_id, a.starts_at desc`)
   ).filter((row) => row.status === "atendida" && new Date(row.startsAt).getTime() < Date.now())
   // Quién indicó cada control y cuándo: el profesional y el día de la atención donde nació
@@ -402,9 +428,22 @@ async function planFactsOf(
     select idempotency_key as key, due_at as "dueAt", reason from task
     where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'open'
       and idempotency_key like ${`${BUDGET_CALLBACK_KEY}%`}`)
+  // El día de la vuelta que se dijo al cerrar, de su última atención firmada (no anulada).
+  const [returned] = await tx.execute<{ day: string }>(sql`
+    select ev.metadata->'returnsTo'->>'day' as day from audit_event ev
+    join encounter e on e.organization_id = ev.organization_id and e.id::text = ev.entity_id and e.status = 'finalizada'
+    where ev.organization_id = ${orgId} and ev.action = 'encounter.finalized' and ev.entity = 'encounter'
+      and e.patient_id = ${patientId}::uuid and ev.metadata ? 'returnsTo'
+    order by ev.created_at desc limit 1`)
+  const returnDay = returned?.day && returned.day >= dayKeyIn(new Date(), context.timezone) ? returned.day : null
+  const freed = !forList
+    ? []
+    : await (await import("./appointments.js")).freedAppointmentsOf(tx, orgId, patientId, null)
   return {
     facts: {
       name: firstName(person),
+      freed,
+      returnDay,
       budgets,
       items,
       openEncounters: await openEncountersOf(tx, orgId, [patientId], viewerUserId),
@@ -419,8 +458,9 @@ async function planFactsOf(
           { said: row.reason, dueAt: row.dueAt ? new Date(row.dueAt) : null },
         ]),
       ),
-      nextAppointmentAt: next?.startsAt ?? null,
-      nextAppointmentId: next?.id ?? null,
+      // La cita sin objeto no es «su cita» para lo que falta: se dice aparte (revisión de la entrega 12).
+      nextAppointmentAt: next && !freed.some((row) => row.id === next.id) ? next.startsAt : null,
+      nextAppointmentId: next && !freed.some((row) => row.id === next.id) ? next.id : null,
       today,
       unclosed: unclosed.map((row) => ({ ...row, startsAt: new Date(row.startsAt) })),
       unrecorded: new Map(
@@ -691,6 +731,13 @@ interface PlanFacts {
   sessionFrom?: ReadonlyMap<string, string>
   /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
+  /**
+   * «¿Cuándo vuelve? En 1 semana» para lo aceptado, sin control (M6): el día que se dijo al cerrar
+   * (`YYYY-MM-DD`), si aún no pasó. Recepción lo ve al reservar lo aceptado. Solo de una persona.
+   */
+  returnDay?: string | null
+  /** Sus citas por venir que solo llevaban lo ya terminado (`freedAppointmentsOf`). Solo de una persona. */
+  freed?: Array<{ id: string; version: number; startsAt: Date; professionalName: string | null; wasFor: string }>
 }
 
 /** Sin nada que hacer en el plan. */
@@ -840,15 +887,25 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
           !!row.at && waitingFor(row.later, items, phases)?.id === item.id,
       )
       .sort((a, b) => a.at.getTime() - b.at.getTime())[0]
+    // Su cita se cerró con «Vino» y nadie registró la sesión (QA del 10 nov, M4): se avisa a quien
+    // atendió, sin quitar «Reservar» (recepción puede tener al paciente delante; mesa de la entrega 12).
+    const seen = facts.unrecorded?.get(item.id)
+    const unrecordedWords = seen && seesAgenda
+      ? seen.mine
+        ? `Su cita contigo del ${day(seen.startsAt)} quedó atendida sin registrar ${lower(item.title)}: regístralo si se hizo esa sesión.`
+        : `Su cita del ${day(seen.startsAt)} quedó atendida sin registrar ${lower(item.title)}${seen.professionalName ? `: pregúntale a ${seen.professionalName} si se hizo esa sesión` : ""}.`
+      : null
     return {
       kind: "continuar",
       text: `Falta la cita de la próxima sesión: ${item.title}${session}`,
       detail: bookedBy,
-      ...(laterBooked && seesAgenda
-        ? {
-            notice: `${laterBooked.later.title} ya tiene cita el ${day(laterBooked.at)}, y va después: revisa esa cita.`,
-          }
-        : {}),
+      ...(unrecordedWords
+        ? { notice: unrecordedWords }
+        : laterBooked && seesAgenda
+          ? {
+              notice: `${laterBooked.later.title} ya tiene cita el ${day(laterBooked.at)}, y va después: revisa esa cita.`,
+            }
+          : {}),
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
         ? {
@@ -902,7 +959,18 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
    * («Corona metal-cerámica, metal base») y una «y» entre ellos no se leía (segunda mesa del 9 nov).
    */
   const namesOf = (list: PlanItemRow[]) => {
-    const titles = list.map((item) => item.title)
+    // El mismo tratamiento en dos piezas va una vez, con sus piezas: «Exodoncia simple · piezas 46
+    // y 48», no «Exodoncia simple · Exodoncia simple» (QA del 10 nov, B6).
+    const groups = new Map<string, PlanItemRow[]>()
+    for (const item of list) groups.set(item.title, [...(groups.get(item.title) ?? []), item])
+    const titles = [...groups].map(([title, rows]) => {
+      if (rows.length === 1) return title
+      const teeth = rows
+        .map((row) => (row.siteSystem === "ISO-3950" && /^[1-8][1-8]$/.test(row.siteCode ?? "") ? row.siteCode : null))
+        .filter((code): code is string => !!code)
+      if (teeth.length !== rows.length) return `${title} (${rows.length})`
+      return `${title} · piezas ${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
+    })
     return titles.length > 3 ? `${titles.slice(0, 3).join(" · ")} · y ${titles.length - 3} más` : titles.join(" · ")
   }
   const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
@@ -1047,6 +1115,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
             const origin = isTreatmentControl(row) ? controlOrigins?.get(row.id) : undefined
             return origin?.professionalName ? `lo indicó ${origin.professionalName}` : null
           }),
+          // El día que se dijo al cerrar (QA antes de entregar, entrega 12: no llegaba a recepción).
+          facts.returnDay ? `vuelve hacia el ${day(new Date(`${facts.returnDay}T12:00:00Z`))}` : null,
           bookedBy,
         ]
           .filter(Boolean)
@@ -1069,6 +1139,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
                 }
               : {}),
             ...(join ? { join } : {}),
+            // Se busca hora desde el día que se dijo, si nada pide otro.
+            ...(facts.returnDay && !(opens && control) ? { date: facts.returnDay } : {}),
           }
         : null,
       notice: recordedWarning,
@@ -1234,12 +1306,39 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
  * 7. El próximo control que queda (con cita, por venir o se cumple hoy).
  */
 function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep[] {
-  const steps = stepsOf(planPieces(facts, context, can))
+  const steps = [...stepsOf(planPieces(facts, context, can)), ...suspendedSteps(facts)]
   // Una cita que ya pasó y que nadie cerró va primero en la lista de la ficha: decir si vino
   // registra lo que se hizo o devuelve lo que llevaba a «por reservar» (QA de la ficha del 8 nov).
   // Solo a quien ve la agenda; la frase única no la dice (es de la ficha, no del plan).
-  if (!(can("appointments.read") || can("clinical.read")) || !facts.unclosed?.length) return steps
+  if (!(can("appointments.read") || can("clinical.read"))) return steps
   const { locale, timezone } = context
+  // La cita que quedó sin objeto, hasta que alguien elige usarla o liberarla (QA del 10 nov, M1).
+  const reusable = facts.items.find(
+    (item) =>
+      item.decisionStatus === "aceptado" &&
+      ["pendiente", "programado", "en_curso"].includes(item.status) &&
+      !facts.withAppointment.has(item.id),
+  )
+  const freed = (facts.freed ?? []).map((row): PlanNextStep => {
+    const day = dayWords(row.startsAt, locale, timezone)
+    return {
+      kind: "sin_objeto",
+      text: `Su cita del ${day} era para ${row.wasFor}, que ya se terminó`,
+      detail: [row.professionalName ? `con ${row.professionalName}` : null, "no tiene nada que hacer: úsala para otra cosa o libérala"]
+        .filter(Boolean)
+        .join(" · "),
+      action: can("appointments.write")
+        ? {
+            label: "Liberarla",
+            appointmentId: row.id,
+            appointmentVersion: row.version,
+            appointmentStartsAt: row.startsAt.toISOString(),
+            ...(reusable ? { reuse: { planItemId: reusable.id, title: reusable.title } } : {}),
+          }
+        : null,
+    }
+  })
+  if (!facts.unclosed?.length) return [...freed, ...steps]
   const closing = facts.unclosed.map((row): PlanNextStep => {
     const day = dayWords(row.startsAt, locale, timezone)
     return {
@@ -1249,7 +1348,7 @@ function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNe
       action: can("appointments.read") ? { label: "¿Vino?", appointmentId: row.id } : null,
     }
   })
-  return [...closing, ...steps]
+  return [...closing, ...freed, ...steps]
 }
 
 function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
@@ -1294,10 +1393,22 @@ function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
  * cuando es lo único que se ve (el Plan, la fila de Pacientes, lo que lee el
  * agente). Sin consultas: decide con lo cargado.
  */
+/** Lo suspendido, en una fila cada uno, con su motivo. */
+function suspendedSteps(facts: PlanFacts): PlanNextStep[] {
+  return facts.items
+    .filter((item) => item.status === "suspendido")
+    .map((item) => ({
+      kind: "suspendido" as const,
+      text: `Suspendido: ${item.title}`,
+      detail: [item.statusReason?.trim() || null, "se retoma desde su Plan"].filter(Boolean).join(" · "),
+      action: null,
+    }))
+}
+
 function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
   const p = planPieces(facts, context, can)
   const [first] = stepsOf(p)
-  if (!first) return NOTHING
+  if (!first) return suspendedSteps(facts)[0] ?? NOTHING
   // La sesión de lo empezado gana a lo aceptado sin empezar: lo aceptado sigue «por agendar» (la
   // lista lo ofrece en su fila).
   if (first.kind === "continuar" && p.toStart.length > 0)
