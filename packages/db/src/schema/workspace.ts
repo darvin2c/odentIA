@@ -85,11 +85,17 @@ export const helpAsk = pgTable("help_ask", {
   /** La probabilidad de lo más probable que dijo Jev. */
   probability: real("probability"),
   helpful: boolean("helpful"),
+  /** La categoría de la guía donde Jev buscó primero (`help.v2`, ADR 0178); nula si no decidió él. */
+  area: text("area"),
+  /** La respuesta se redactó con varias de la guía; `topic_id` y `faq` son las de la primera. */
+  written: boolean("written").notNull().default(false),
+  /** En la duda, la persona tocó «Ninguna es lo que busco». */
+  noneFits: boolean("none_fits").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   index("help_ask_user_date_idx").on(table.organizationId, table.userId, table.createdAt),
   check("help_ask_via_check", sql`${table.via} is null or ${table.via} in ('exacta','jev','respaldo')`),
-  check("help_ask_verdict_check", sql`${table.verdict} is null or ${table.verdict} in ('seguro','duda','ninguna','datos')`),
+  check("help_ask_verdict_check", sql`${table.verdict} is null or ${table.verdict} in ('seguro','duda','ninguna','datos','redactada')`),
   check("help_ask_probability_check", sql`${table.probability} is null or (${table.probability} >= 0 and ${table.probability} <= 1)`),
 ])
 
