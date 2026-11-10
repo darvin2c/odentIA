@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { CalendarClock, CalendarX2, CheckCircle2, ChevronDown, FileText, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, SquareCheckBig, UserRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { dayKeyOf } from "../../lib/finance-cash"
-import { alsoWords, type HomeTextContext, PHONE_ROWS, waitingKey, waitingText } from "../../lib/home"
+import { alsoLine, type HomeTextContext, PHONE_ROWS, waitingKey, waitingText } from "../../lib/home"
 import type { WaitingBand, WaitingEntry, WaitingRow } from "../../lib/workspace"
 
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
@@ -78,7 +78,7 @@ function iconOf(row: WaitingRow, title: string): ReactNode {
  * A dónde lleva la fila cuando se resuelve navegando. Lo que navega es un
  * enlace, no un botón: así lo anuncia el lector de pantalla.
  */
-function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: string; "aria-label": string; children: ReactNode }): ReactElement | null {
+function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: string; "aria-label": string; "aria-describedby"?: string; children: ReactNode }): ReactElement | null {
   // «y N más» abre Tareas con lo de quien mira: toda la clínica para quien dirige; para los demás, lo suyo y lo de su área.
   const tasksSearch = { task: undefined, alcance: context.allTasks ? "clinica" : undefined }
   switch (row.kind) {
@@ -155,6 +155,8 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingEnt
   const primary = row.band === "ahora"
   const variant = primary ? "default" : "secondary"
   const also = row.also ?? []
+  // El control dice qué hace; el detalle (y lo plegado) se oye con él.
+  const detailId = useId()
   const conversationId = row.kind === "case" || row.kind === "person" ? row.conversationId : null
   const body = (
     <>
@@ -162,8 +164,8 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingEnt
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
         <span className="font-bold">{text.title}</span>
         {text.ask ? <span className="line-clamp-2 text-foreground">{text.ask}</span> : null}
-        <span className="text-[13px] text-muted-foreground">
-          {[text.detail, ...also.slice(0, 1).map((item) => `también ${alsoWords(item)}`), conversationId && handlers.hasDraft?.(conversationId) ? "tienes un borrador sin enviar" : null]
+        <span id={detailId} className="text-[13px] text-muted-foreground">
+          {[text.detail, alsoLine(also), conversationId && handlers.hasDraft?.(conversationId) ? "tienes un borrador sin enviar" : null]
             .filter(Boolean)
             .join(" · ")}
         </span>
@@ -181,10 +183,11 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingEnt
         <button
           type="button"
           aria-label={`Abrir: ${text.title}`}
+          aria-describedby={detailId}
           className={cn("absolute inset-0 rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", !handlers.opensBeside(row) && "hidden")}
           onClick={() => handlers.onOpen(row)}
         />
-        <Button type="button" size="sm" variant={variant} className={SMALL} disabled={busy} aria-label={`${direct.label}: ${text.title}`} onClick={direct.run}>
+        <Button type="button" size="sm" variant={variant} className={SMALL} disabled={busy} aria-label={`${direct.label}: ${text.title}`} aria-describedby={detailId} onClick={direct.run}>
           {busy ? "Guardando…" : direct.label}
         </Button>
       </>
@@ -195,18 +198,19 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingEnt
       <button
         type="button"
         aria-label={`Ver el caso: ${text.title}`}
+        aria-describedby={detailId}
         className="absolute inset-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         onClick={() => handlers.onOpen(row)}
       />
     )
   } else if (handlers.opensBeside(row)) {
     control = (
-      <Button type="button" size="sm" variant={variant} className={cn(SMALL, "static", stretched)} disabled={busy} aria-label={aria} onClick={() => handlers.onOpen(row)}>
+      <Button type="button" size="sm" variant={variant} className={cn(SMALL, "static", stretched)} disabled={busy} aria-label={aria} aria-describedby={detailId} onClick={() => handlers.onOpen(row)}>
         {busy ? "Guardando…" : text.action}
       </Button>
     )
   } else {
-    control = linkOf(row, context, { className: cn(buttonVariants({ size: "sm", variant }), SMALL, "static", stretched), "aria-label": aria, children: text.action })
+    control = linkOf(row, context, { className: cn(buttonVariants({ size: "sm", variant }), SMALL, "static", stretched), "aria-label": aria, "aria-describedby": detailId, children: text.action })
   }
   return (
     <li className={cn("relative flex items-center gap-3 px-2 py-2 text-sm hover:bg-muted/50", className)}>

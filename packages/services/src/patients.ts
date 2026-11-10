@@ -314,6 +314,8 @@ export interface RegistrationHold {
    * ellas si es la misma persona («¿Es la misma persona?»).
    */
   answers?: unknown
+  /** El aviso de privacidad que vio y aceptó al registrarse: al decidir vale este. */
+  notice?: { version: number; text: string }
 }
 
 /** Texto neutro para quien se registra: no confirma que el documento exista. */

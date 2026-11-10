@@ -763,6 +763,9 @@ export function payMonthCommissionApi(
     expectedCents?: number
     /** Salió del efectivo de la caja de la sede. */
     fromCash?: boolean
+    /** Con qué se pagó (ADR 0167): el efectivo sale de la caja. */
+    paymentMethodId?: string
+    paymentReference?: string
   },
 ): Promise<{ data: { settlement: CommissionPayment; expense: { id: string } | null } }> {
   return apiFetch("/api/commissions/pay", { method: "POST", body: JSON.stringify(body) })

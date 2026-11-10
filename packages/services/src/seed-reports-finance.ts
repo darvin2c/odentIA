@@ -16,10 +16,13 @@ import { orgCounter, treatmentBudget, treatmentBudgetItem, treatmentBudgetOption
 import { product, supplier } from "@odentia/db/schema/inventory"
 import { commissionRate } from "@odentia/db/schema/finance"
 import { and, asc, eq, sql } from "drizzle-orm"
-import { payPurchaseOrder } from "./finance.js"
+import { createExpense, payPurchaseOrder } from "./finance.js"
+import { notePayable } from "./expense-payable.js"
 import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, receivePurchaseOrder } from "./inventory.js"
 import { defaultWarehouse } from "./inventory-stock.js"
 import { getOrgLocale } from "./locale.js"
+import { expenseReceiptTypes } from "@odentia/clinical"
+import { listPaymentMethods } from "./payment-methods.js"
 import { createPromotion } from "./promotions.js"
 import { addMonths, currentMonthIn, monthStart } from "./report-periods.js"
 
@@ -110,13 +113,23 @@ function localDay(date: Date, timezone: string): string {
 
 export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) {
   const { orgId, ownerUserId } = seed
-  const { timezone, currency, locale } = await getOrgLocale(tx, orgId)
+  const { timezone, currency, locale, countryCode } = await getOrgLocale(tx, orgId)
+  // La factura del país de la clínica: la de SUNAT en el Perú, la factura sin código en otro país.
+  const invoiceType = expenseReceiptTypes(countryCode).find((type) => type.asksTaxId)?.code ?? null
   const input = await readHistory(tx, seed, timezone)
   if (input.branches.length === 0 || input.professionals.length === 0) return { settlements: 0, orders: 0, budgets: 0 }
   const random = generator(20_261_103)
   const now = Date.now()
   const current = currentMonthIn(timezone)
   const today = localDay(new Date(now), timezone)
+  // Con qué se pagó cada gasto (ADR 0167): una clínica paga comisiones, impuestos y compras por
+  // transferencia, y lo chico en efectivo. Sin medio, la demo diría «Otro medio» en todo.
+  const methods = await listPaymentMethods(tx, orgId, { activeOnly: true })
+  const transfer = methods.find((method) => method.typeCode === "30") ?? null
+  const cashMethod = methods.find((method) => method.typeCode === "10") ?? null
+  const byTransfer = transfer
+    ? sql`${transfer.id}::uuid, ${transfer.name}, ${transfer.typeCode}`
+    : sql`null::uuid, null, null`
 
   // --- Horarios con su historia ------------------------------------------------------------
   // El horario de hoy lo dejó la semilla de disponibilidad; el de antes es el que
@@ -220,9 +233,10 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       const commission = Number(totals?.commission ?? 0)
       if (!totals || totals.lines === 0 || commission <= 0) continue
       await tx.execute(sql`
-        insert into expense (id, organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, created_by, created_at, updated_at)
+        insert into expense (id, organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, receipt_type,
+          payment_method_id, method_name, method_type_code, created_by, created_at, updated_at)
         values (${expenseId}::uuid, ${orgId}, ${professional.branchId}::uuid, ${`Comisión de ${label} — ${professional.name}`.slice(0, 500)}, 'Personal', ${commission},
-          ${currency}, ${paidAt.toISOString()}::timestamptz, 'ninguno', ${ownerUserId}, ${paidAt.toISOString()}::timestamptz, ${paidAt.toISOString()}::timestamptz)`)
+          ${currency}, ${paidAt.toISOString()}::timestamptz, 'ninguno', 'sin', ${byTransfer}, ${ownerUserId}, ${paidAt.toISOString()}::timestamptz, ${paidAt.toISOString()}::timestamptz)`)
       await tx.execute(sql`
         insert into commission_settlement (id, organization_id, professional_user_id, period_year, period_month, base, currency, rate_bps, base_cents,
           commission_cents, status, settled_by, settled_at, expense_id, created_at, updated_at)
@@ -253,9 +267,10 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     const month = addMonths(current, -back)
     const spentAt = new Date(monthStart(timezone, month.year, month.month).getTime() + 17 * DAY_MS + 15 * 3_600_000)
     await tx.execute(sql`
-      insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, created_by, created_at, updated_at)
+      insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, payment_method_id, method_name, method_type_code,
+        created_by, created_at, updated_at)
       values (${orgId}, ${input.branches[0]?.id}::uuid, 'Impuesto a la renta (pago a cuenta)', 'Impuestos', ${1_900_00 + Math.round(random() * 4) * 50_00}, ${currency},
-        ${spentAt.toISOString()}::timestamptz, 'Formulario', ${ownerUserId}, ${spentAt.toISOString()}::timestamptz, ${spentAt.toISOString()}::timestamptz)`)
+        ${spentAt.toISOString()}::timestamptz, 'Formulario', ${byTransfer}, ${ownerUserId}, ${spentAt.toISOString()}::timestamptz, ${spentAt.toISOString()}::timestamptz)`)
     // Y el impuesto de lo cobrado el mes anterior (ADR 0083): un gasto de Impuestos que no resta de lo que deja.
     const before = addMonths(month, -1)
     const [owed] = await tx.execute<{ cents: string | null }>(sql`
@@ -266,9 +281,10 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     const taxCents = Number(owed?.cents ?? 0)
     if (taxCents > 0) {
       await tx.execute(sql`
-        insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, sales_tax, created_by, created_at, updated_at)
+        insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, sales_tax, payment_method_id, method_name,
+          method_type_code, created_by, created_at, updated_at)
         values (${orgId}, ${input.branches[0]?.id}::uuid, 'Impuesto de lo cobrado del mes anterior', 'Impuestos', ${taxCents}, ${currency},
-          ${spentAt.toISOString()}::timestamptz, 'Formulario', true, ${ownerUserId}, ${spentAt.toISOString()}::timestamptz, ${spentAt.toISOString()}::timestamptz)`)
+          ${spentAt.toISOString()}::timestamptz, 'Formulario', true, ${byTransfer}, ${ownerUserId}, ${spentAt.toISOString()}::timestamptz, ${spentAt.toISOString()}::timestamptz)`)
     }
   }
 
@@ -282,7 +298,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     const [found] = await tx.select({ id: supplier.id }).from(supplier).where(and(eq(supplier.organizationId, orgId), eq(supplier.name, name))).limit(1)
     return found?.id ?? (await createSupplier(tx, orgId, ownerUserId, { name, docType: "RUC", docNumber })).id
   }
-  const dentalPeru = await supplierOf("Dental Perú SAC", "20456789123")
+  const dentalPeru = await supplierOf("Dental Perú SAC", "20456789120")
   const insumosLima = await supplierOf("Insumos Lima EIRL", "20567891234")
   const odontoSur = await supplierOf("Odonto Sur SAC", "20678912345")
   const dentalAndina = await supplierOf("Dental Andina SAC", "20123456789")
@@ -373,6 +389,10 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
         amountCents: payment.cents,
         spentAt: ago(payment.daysAgo, 15).toISOString(),
         fromCash: payment.fromCash ?? false,
+        // Lo chico sale de la caja; lo demás, por transferencia, con su número de operación.
+        paymentMethodId: (payment.fromCash ? cashMethod : transfer)?.id ?? null,
+        ...(payment.fromCash ? {} : { paymentReference: String(400_000 + (payment.cents % 99_991)) }),
+        ...(payment.receipt?.startsWith("F") && invoiceType ? { receiptType: invoiceType } : {}),
         receiptKind: payment.receipt?.startsWith("F") ? "Factura" : "Recibo",
         receiptNumber: payment.receipt ?? null,
       })
@@ -569,5 +589,65 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       and i.decision = 'aceptado' and b.status in ('aceptado','parcial') and b.decided_at < now() - interval '60 days'
       and exists (select 1 from encounter_procedure ep where ep.organization_id = pi.organization_id
         and ep.plan_item_id = pi.id and ep.voided_at is null)`)
+  // --- Facturas del laboratorio por pagar (ADR 0175) ---------------------------------------
+  // La corona de una paciente: una factura que vence a fin de mes y otra ya vencida, pagada en parte.
+  // Se anotan con el servicio, como en la pantalla, y el pago es un gasto enlazado.
+  const crowns = await tx
+    .select({ id: treatmentPlanItem.id, patientId: treatmentPlanItem.patientId })
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.decisionStatus, "aceptado"), sql`${treatmentPlanItem.title} ilike '%corona%'`))
+    .orderBy(asc(treatmentPlanItem.createdAt))
+    .limit(2)
+  const lab = { supplierName: "Laboratorio Dental Andino S.A.C.", supplierTaxId: "20512345671" }
+  const dayOf = (date: Date) => localDay(date, timezone)
+  const endOfMonth = (() => {
+    const next = addMonths(current, 1)
+    return dayOf(new Date(monthStart(timezone, next.year, next.month).getTime() - 12 * 3_600_000))
+  })()
+  const [firstCrown, secondCrown] = crowns
+  await notePayable(tx, orgId, ownerUserId, {
+    branchId: main.id,
+    category: "Laboratorio",
+    ...lab,
+    ...(invoiceType ? { receiptType: invoiceType } : {}),
+    receiptNumber: "E001-512",
+    issuedOn: dayOf(ago(2)),
+    dueOn: endOfMonth >= dayOf(ago(2)) ? endOfMonth : null,
+    currency,
+    amountCents: 430_00,
+    ...(firstCrown ? { patientId: firstCrown.patientId, planItemId: firstCrown.id } : {}),
+  })
+  const late = await notePayable(tx, orgId, ownerUserId, {
+    branchId: main.id,
+    category: "Laboratorio",
+    ...lab,
+    ...(invoiceType ? { receiptType: invoiceType } : {}),
+    receiptNumber: "E001-498",
+    issuedOn: dayOf(ago(20)),
+    dueOn: dayOf(ago(5)),
+    currency,
+    amountCents: 380_00,
+    ...(secondCrown ? { patientId: secondCrown.patientId, planItemId: secondCrown.id } : {}),
+  })
+  await createExpense(
+    tx,
+    orgId,
+    ownerUserId,
+    {
+      branchId: main.id,
+      category: "Laboratorio",
+      concept: `Pago de ${late.concept}`,
+      amountCents: 200_00,
+      currency,
+      spentAt: ago(3, 16).toISOString(),
+      paymentMethodId: transfer?.id ?? null,
+      paymentReference: "771390",
+      ...(invoiceType ? { receiptType: invoiceType } : {}),
+      receiptNumber: "E001-498",
+      ...lab,
+    },
+    { payableId: late.id },
+  )
+
   return { settlements, orders, budgets }
 }

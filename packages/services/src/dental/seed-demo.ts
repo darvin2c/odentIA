@@ -471,6 +471,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     // El gasto que se repite: su «este mes no» y sus pagos van antes que la plantilla.
     "expense_recurring_skip",
     "expense",
+    "expense_payable",
     "expense_recurring",
     "cash_shift",
     "stock_movement",

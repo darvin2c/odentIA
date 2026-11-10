@@ -224,12 +224,16 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
         notes: z.string().max(2000).nullish(),
         expectedCents: z.number().int().nonnegative().optional(),
         fromCash: z.boolean().optional(),
+        // Con qué se pagó (ADR 0167): el efectivo sale de la caja; lo demás, no.
+        paymentMethodId: z.uuid().nullish(),
+        paymentReference: z.string().max(60).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    // Sacar de la caja es mover efectivo: pide lo mismo que un gasto de la caja.
-    if (parsed.data.fromCash && !canAccess(memberRole, "finance.write")) return forbid(c)
+    // Sacar de la caja es mover efectivo: pide lo mismo que un gasto de la caja. Un medio también
+    // es lo de un gasto (el efectivo sale de la caja), así que pide lo mismo.
+    if ((parsed.data.fromCash || parsed.data.paymentMethodId) && !canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => payMonthCommission(tx, orgId, userId, parsed.data)),
     )

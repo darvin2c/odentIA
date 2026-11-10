@@ -370,6 +370,19 @@ export function caseAdds(
 /** Cierra una frase sin repetir el punto: «09:00 a. m.» y «¿es la misma persona?» ya terminan. */
 export const sentence = (words: string): string => (/[.?!]$/.test(words) ? words : `${words}.`)
 
+/**
+ * Lo plegado en una fila, dicho entero: hasta dos cosas por su nombre («también
+ * su cita sin cerrar y una tarea»); desde la tercera, o si se repite, la
+ * primera y cuántas más («también su cita sin cerrar y 2 más»). Nombrar solo la
+ * primera escondía lo demás (QA del registro en línea, 9 nov).
+ */
+export function alsoLine(also: readonly WaitingRow[]): string | null {
+  if (also.length === 0) return null
+  const words = also.map(alsoWords)
+  if (words.length <= 2 && new Set(words).size === words.length) return `también ${words.join(" y ")}`
+  return `también ${words[0]} y ${words.length - 1} más`
+}
+
 /** Lo que se dice de una fila plegada en otra: «también su cita sin cerrar». */
 export function alsoWords(row: WaitingRow): string {
   switch (row.kind) {
