@@ -4,7 +4,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
-import { appointmentPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { appointmentPlanItem, clinicalFollowUp, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -12,7 +12,7 @@ import { createAppointment, getAppointment, markAppointmentCame } from "./appoin
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { getPlanNextSteps } from "./plan-next.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { getEncounterVoidPreview, voidEncounter } from "./encounters.js"
+import { finalizeEncounter, getEncounterClosing, getEncounterVoidPreview, voidEncounter } from "./encounters.js"
 import { addPlanItem, listPlanItems, revisePlanItem } from "./plan.js"
 import { encounter } from "@odentia/db/schema/clinical"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -150,4 +150,19 @@ it("M4: «Vino» en la cita de la sesión 2 deja el aviso para quien atendió, s
   const next = steps.find((step) => step.kind === "continuar")
   expect(next?.notice).toContain("quedó atendida sin registrar")
   expect(next?.action?.label).toMatch(/^Reservar/)
+})
+
+it("M6 y B7: «En 1 semana» sin nada hecho hoy y con lo aceptado sin cita vuelve para eso, sin control de mantenimiento", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f)
+  await f.ready(f.encounter.id)
+  const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))
+  expect(closing.controls.returnsTo).toEqual([item.title])
+  const done = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, f.encounter.id, { nextControl: { dueAt: closing.controls.shortcuts.week } }),
+  )
+  expect(done.controls.returnsTo).toEqual({ day: closing.controls.shortcuts.week, titles: [item.title] })
+  expect(done.controls.next).toBeNull()
+  const controls = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.patientId, f.patient.id))
+  expect(controls).toHaveLength(0)
 })

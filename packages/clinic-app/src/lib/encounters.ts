@@ -158,6 +158,8 @@ export interface ClosingControls {
   finishing?: FinishingControl[]
   /** Los controles que ya tiene abiertos, salvo el de la cita de hoy. */
   open?: ClosingOpenControl[]
+  /** Lo que falta hacer sin cita, si hoy no se hizo nada: la vuelta es para eso, sin control aparte. */
+  returnsTo?: string[]
 }
 
 /** Un control que va a quedar al firmar, por el servicio de lo que termina hoy. */
@@ -210,6 +212,8 @@ export interface FinalizedControls {
   /** `joinsNext`: va en la misma cita que lo aceptado que «Reservar» ofrece, desde `from` (`YYYY-MM-DD`). */
   next: { id: string; title: string; dueAt: string; joinsNext?: { from: string } } | null
   fulfilled: Array<{ id: string; title: string }>
+  /** «En 1 semana» para lo que falta hacer, sin control aparte. */
+  returnsTo?: { day: string; titles: string[] } | null
 }
 
 /** «6 may 2027», o «3 may» si es de este año: un día civil (`yyyy-MM-dd`), sin corrimiento de zona. */
@@ -240,6 +244,12 @@ export function finalizedControlsWords(controls: FinalizedControls, now = new Da
         ? `${controls.next.title} (toca el ${controlDaySaid(day, now)}): «Reservar su próxima cita» lo trae en la misma cita.`
         : `Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`,
     )
+  }
+  if (controls.returnsTo) {
+    // «En 1 semana» con lo aceptado por hacer: vuelve para eso, sin control aparte (QA del 10 nov, M6).
+    const titles = controls.returnsTo.titles.map((title) => title.charAt(0).toLowerCase() + title.slice(1))
+    const what = titles.length <= 1 ? (titles[0] ?? "") : `${titles.slice(0, -1).join(", ")} y ${titles.at(-1)}`
+    words.push(`Vuelve hacia el ${controlDaySaid(controls.returnsTo.day, now)} para ${what} · recepción lo verá para reservarlo.`)
   }
   if (controls.fulfilled.length > 0) {
     const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")

@@ -3137,7 +3137,7 @@ export function EncounterEditor({
             </div>
           ) : null}
           {finalizedCollect.surfaces}
-          {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
+          {finalizedControls && (finalizedControls.next || finalizedControls.returnsTo || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
           ) : null}
           {/* La corona sin cita mientras la endodoncia pide otra sesión: no se pierde; se reserva cuando

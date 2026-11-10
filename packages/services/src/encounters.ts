@@ -2092,6 +2092,8 @@ export interface FinalizeEncounterBase {
      */
     next: { id: string; title: string; dueAt: Date; joinsNext?: { from: string } } | null
     fulfilled: Array<{ id: string; title: string }>
+    /** «En 1 semana» para lo que falta hacer, sin control aparte. */
+    returnsTo: { day: string; titles: string[] } | null
   }
 }
 
@@ -2529,6 +2531,12 @@ export interface ClosingControls {
   finishing: FinishingControl[]
   /** Los controles que ya tiene abiertos (sin el de la cita de hoy): lo que va a quedar. */
   open: ClosingOpenControl[]
+  /**
+   * Lo que falta hacer y no tiene cita (lo aceptado, o lo indicado hoy), cuando hoy no se hizo
+   * nada: «¿Cuándo vuelve? En 1 semana» es para eso, no un control de mantenimiento aparte (QA del
+   * 10 nov, M6 y B7). Firmar con una fecha no crea el control: lo que sigue es reservarlo.
+   */
+  returnsTo: string[]
 }
 
 /** Un control abierto de la persona, como lo dice el cierre: pendiente o con su cita. */
@@ -2783,7 +2791,26 @@ async function closingControlsOf(
           own: first.originEncounterId === row.id,
         }
       : null,
+    returnsTo: await returnsToOf(tx, orgId, row),
   }
+}
+
+/** Lo que falta hacer, sin cita, si hoy no se registró ningún procedimiento (`ClosingControls.returnsTo`). */
+async function returnsToOf(tx: Db, orgId: string, row: EncounterRow): Promise<string[]> {
+  const rows = await tx.execute<{ title: string }>(sql`
+    select item.title from treatment_plan_item item
+    where item.organization_id = ${orgId} and item.patient_id = ${row.patientId}
+      and item.status in ('pendiente', 'programado')
+      and (item.decision_status = 'aceptado' or (item.decision_status = 'pendiente' and item.source_encounter_id = ${row.id}))
+      and not exists (select 1 from encounter_procedure today where today.organization_id = item.organization_id
+        and today.encounter_id = ${row.id} and today.voided_at is null)
+      and not exists (select 1 from appointment_plan_item link
+        join appointment a on a.organization_id = link.organization_id and a.id = link.appointment_id
+        where link.organization_id = item.organization_id and link.plan_item_id = item.id
+          and a.status in ('programada', 'confirmada') and a.starts_at > now())
+    order by item.sort_order, item.created_at, item.id
+    limit 4`)
+  return [...new Set(rows.map((item) => item.title))]
 }
 
 /** La hora a la que se anota el día de un control, como «Indicar control» en la pantalla. */
@@ -3088,8 +3115,12 @@ export async function finalizeEncounter(
     fulfilling.some((control) => control.repeatEveryMonths) ||
     closing.controls.byAppointment.some((control) => control.repeatEveryMonths)
   const stays = closing.controls.due.some((control) => control.mine && !fulfilling.includes(control))
+  // Sin nada hecho hoy y con algo por hacer sin cita, la vuelta es para eso: no un control aparte
+  // (M6 y B7). «En N meses» sigue siendo el mantenimiento.
+  const returnsToPlan =
+    nextDay !== null && nextDay !== closing.controls.shortcuts.recall && closing.controls.returnsTo.length > 0
   const nextControl =
-    nextDay !== null && !closing.controls.next && !repeats && !stays
+    nextDay !== null && !closing.controls.next && !repeats && !stays && !returnsToPlan
       ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
       : null
   const [row] = await tx
@@ -3367,7 +3398,9 @@ export async function finalizeEncounter(
     // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
     nextControl: nextControl
       ? "fecha"
-      : input.nextControl && "none" in input.nextControl
+      : returnsToPlan
+        ? "vuelve_a_lo_por_hacer"
+        : input.nextControl && "none" in input.nextControl
         ? "no_hace_falta"
         : closing.controls.next || repeats || stays
           ? "ya_tenia"
@@ -3410,6 +3443,8 @@ export async function finalizeEncounter(
             }
           : nextControl,
       fulfilled,
+      // «En 1 semana» para lo que falta hacer: el día que se dijo y para qué, sin control (M6).
+      returnsTo: returnsToPlan && nextDay ? { day: nextDay, titles: closing.controls.returnsTo } : null,
     },
     keptOpen,
     bookedAfter,
