@@ -358,7 +358,7 @@ it("cada consentimiento sugerido de odentIA se une a tratamientos que existen en
     false,
   )
   expect(
-    SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "odontopediatria")?.serviceFamilies,
+    SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "pulpectomia")?.serviceFamilies,
   ).toContain("pulpectomia-deciduo")
 })
 
