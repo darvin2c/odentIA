@@ -516,8 +516,9 @@ export function EncounterDocumentsBlock({
         ) : null}
         {/* Lo que se le envió a firmar desde su enlace: espera su firma o tu confirmación. */}
         {docs.pendingSignatures
-          // Lo que solo tiene en su enlace sigue en «Firmar ahora» (arriba): aquí, lo que ya firmó allí.
-          .filter((doc) => doc.personSignedAt)
+          // Lo que solo tiene en su enlace y se pide hoy sigue en «Firmar ahora» (arriba): aquí, lo
+          // que ya firmó allí y lo que tiene en su enlace sin pedirse hoy.
+          .filter((doc) => doc.personSignedAt || (doc.linkSentAt && !docs.toSign.includes(doc)))
           .map((doc) => (
             <li
               key={`enlace-${doc.id}`}
