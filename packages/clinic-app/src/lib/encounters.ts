@@ -249,7 +249,7 @@ export function finalizedControlsWords(controls: FinalizedControls, now = new Da
     // «En 1 semana» con lo aceptado por hacer: vuelve para eso, sin control aparte (QA del 10 nov, M6).
     const titles = controls.returnsTo.titles.map((title) => title.charAt(0).toLowerCase() + title.slice(1))
     const what = titles.length <= 1 ? (titles[0] ?? "") : `${titles.slice(0, -1).join(", ")} y ${titles.at(-1)}`
-    words.push(`Vuelve hacia el ${controlDaySaid(controls.returnsTo.day, now)} para ${what} · recepción lo verá para reservarlo.`)
+    words.push(`Vuelve hacia el ${controlDaySaid(controls.returnsTo.day, now)} para ${what} · recepción lo verá en «Qué sigue».`)
   }
   if (controls.fulfilled.length > 0) {
     const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")

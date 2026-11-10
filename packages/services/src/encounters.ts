@@ -3117,8 +3117,9 @@ export async function finalizeEncounter(
   const stays = closing.controls.due.some((control) => control.mine && !fulfilling.includes(control))
   // Sin nada hecho hoy y con algo por hacer sin cita, la vuelta es para eso: no un control aparte
   // (M6 y B7). «En N meses» sigue siendo el mantenimiento.
+  // Solo una vuelta corta (hasta «En 1 mes»): más lejos es un control, como siempre (revisión de la entrega 12).
   const returnsToPlan =
-    nextDay !== null && nextDay !== closing.controls.shortcuts.recall && closing.controls.returnsTo.length > 0
+    nextDay !== null && nextDay <= closing.controls.shortcuts.month && closing.controls.returnsTo.length > 0
   const nextControl =
     nextDay !== null && !closing.controls.next && !repeats && !stays && !returnsToPlan
       ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
@@ -3414,6 +3415,8 @@ export async function finalizeEncounter(
               ? "aceptado_por_empezar"
               : "sin_indicar",
     controlsFulfilled: fulfilled.length,
+    // El día que se dijo y para qué: no queda en un control (M6).
+    ...(returnsToPlan ? { returnsTo: { day: nextDay, titles: closing.controls.returnsTo } } : {}),
   })
   // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
   // borrador de la persona o nace uno. No se envía solo.

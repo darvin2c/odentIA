@@ -116,8 +116,9 @@ export interface PlanNextAction {
    * (QA de la ficha del 9 nov). El botón principal pasa a ser «Otra cita».
    */
   join?: { appointmentId: string; label: string }
-  /** La cita sin objeto: su versión, para usarla o liberarla sin pisar otro cambio. */
+  /** La cita sin objeto: su versión, para usarla o liberarla sin pisar otro cambio, y su hora. */
   appointmentVersion?: number
+  appointmentStartsAt?: string
   /** «Usarla para la exodoncia»: lo aceptado que falta reservar y podría ir en esa cita. */
   reuse?: { planItemId: string; title: string }
 }
@@ -448,8 +449,9 @@ async function planFactsOf(
           { said: row.reason, dueAt: row.dueAt ? new Date(row.dueAt) : null },
         ]),
       ),
-      nextAppointmentAt: next?.startsAt ?? null,
-      nextAppointmentId: next?.id ?? null,
+      // La cita sin objeto no es «su cita» para lo que falta: se dice aparte (revisión de la entrega 12).
+      nextAppointmentAt: next && !freed.some((row) => row.id === next.id) ? next.startsAt : null,
+      nextAppointmentId: next && !freed.some((row) => row.id === next.id) ? next.id : null,
       today,
       unclosed: unclosed.map((row) => ({ ...row, startsAt: new Date(row.startsAt) })),
       unrecorded: new Map(
@@ -1312,6 +1314,7 @@ function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNe
             label: "Liberarla",
             appointmentId: row.id,
             appointmentVersion: row.version,
+            appointmentStartsAt: row.startsAt.toISOString(),
             ...(reusable ? { reuse: { planItemId: reusable.id, title: reusable.title } } : {}),
           }
         : null,

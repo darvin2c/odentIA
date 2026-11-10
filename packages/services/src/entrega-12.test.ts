@@ -166,3 +166,25 @@ it("M6 y B7: «En 1 semana» sin nada hecho hoy y con lo aceptado sin cita vuelv
   const controls = await ownerDb.select().from(clinicalFollowUp).where(eq(clinicalFollowUp.patientId, f.patient.id))
   expect(controls).toHaveLength(0)
 })
+
+it("A1: cambiado dos veces en la misma atención (A → B → C), anularla vuelve a A y anula B y C", async () => {
+  const f = await clinicalFixture()
+  const a = await accepted(f)
+  await signFirst(f)
+  const today = await attention(f)
+  const b = await f.run((tx) =>
+    revisePlanItem(tx, ...f.args, a.id, { encounterId: today, reason: "Primero", serviceId: f.service.id }),
+  )
+  const c = await f.run((tx) =>
+    revisePlanItem(tx, ...f.args, b.id, { encounterId: today, reason: "Después", serviceId: f.service.id }),
+  )
+  const preview = await f.run((tx) => getEncounterVoidPreview(tx, ...f.args, today))
+  expect(preview.revisions).toHaveLength(1)
+  await f.run((tx) => voidEncounter(tx, ...f.args, today, { reason: "Era de prueba" }))
+  const rows = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.patientId, f.patient.id))
+  const status = Object.fromEntries(rows.map((row) => [row.id, row.status]))
+  expect(status[a.id]).not.toBe("reemplazado")
+  expect(rows.find((row) => row.id === a.id)?.decisionStatus).toBe("aceptado")
+  expect(status[b.id]).toBe("cancelado")
+  expect(status[c.id]).toBe("cancelado")
+})

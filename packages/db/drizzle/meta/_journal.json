@@ -663,15 +663,8 @@
     {
       "idx": 94,
       "version": "7",
-      "when": 1794339912252,
-      "tag": "0094_consentimiento_pulpectomia",
-      "breakpoints": true
-    },
-    {
-      "idx": 95,
-      "version": "7",
       "when": 1794339915167,
-      "tag": "0095_controles_que_faltan",
+      "tag": "0094_controles_que_faltan",
       "breakpoints": true
     }
   ]

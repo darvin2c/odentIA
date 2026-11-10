@@ -131,6 +131,8 @@ export function FinalizedFreedAppointments({
         )
       })}
       <ReleaseDialog
+        // Uno por cita: «Avisarle» no queda marcado de la anterior (revisión de la entrega 12).
+        key={releasing?.id ?? "ninguna"}
         open={releasing !== null}
         when={releasing ? whenSaid(releasing.startsAt, activeOrgTimeZone(), today) : ""}
         busy={busy !== null}
@@ -256,6 +258,7 @@ export function FreedAppointmentButtons({
         Liberarla
       </Button>
       <ReleaseDialog
+        key={releasing ? "abierto" : "cerrado"}
         open={releasing}
         when={startsAt ? whenSaid(startsAt, activeOrgTimeZone(), today) : ""}
         busy={busy}

@@ -1703,8 +1703,9 @@ export async function revisionsOf(
         eq(treatmentPlanItem.patientId, patientId),
         eq(treatmentPlanItem.sourceEncounterId, encounterId),
         sql`${treatmentPlanItem.supersedesItemId} is not null`,
-        // Lo que `voidEncounter` anula con la atención.
-        inArray(treatmentPlanItem.status, ["pendiente", "programado", "suspendido"]),
+        // Lo que `voidEncounter` anula con la atención, y el del medio de una cadena cambiada dos
+        // veces en ella (A → B → C: se vuelve a A; revisión de la entrega 12).
+        inArray(treatmentPlanItem.status, ["pendiente", "programado", "suspendido", "reemplazado"]),
       ),
     )
   if (rows.length === 0) return []
@@ -1716,6 +1717,8 @@ export async function revisionsOf(
         eq(treatmentPlanItem.organizationId, orgId),
         inArray(treatmentPlanItem.id, rows.map((row) => row.oldId!)),
         eq(treatmentPlanItem.status, "reemplazado"),
+        // El que nació en esta misma atención también se anula: se vuelve al de antes.
+        sql`${treatmentPlanItem.sourceEncounterId} is distinct from ${encounterId}::uuid`,
       ),
     )
   const byId = new Map(olds.map((row) => [row.id, row]))
@@ -1773,8 +1776,22 @@ export async function undoRevisionsOf(
       encounterId,
       replacement: revision.newId,
       reason,
+      restoredTo: { status: before?.status ?? "pendiente", decisionStatus: decision },
     })
   }
+  // Lo del medio de una cadena (nació aquí y ya estaba reemplazado) se anula con la atención.
+  if (revisions.length > 0)
+    await tx
+      .update(treatmentPlanItem)
+      .set({ status: "cancelado", statusReason: reason, updatedAt: at })
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          eq(treatmentPlanItem.sourceEncounterId, encounterId),
+          eq(treatmentPlanItem.status, "reemplazado"),
+        ),
+      )
 }
 
 interface RevisionBefore {

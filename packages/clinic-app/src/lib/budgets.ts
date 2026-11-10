@@ -763,6 +763,7 @@ export interface PlanNextStep {
     join?: { appointmentId: string; label: string }
     /** La cita sin objeto: su versión y lo aceptado que podría ir en ella. */
     appointmentVersion?: number
+    appointmentStartsAt?: string
     reuse?: { planItemId: string; title: string }
   } | null
   /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */

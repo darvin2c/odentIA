@@ -357,3 +357,22 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
   )
   expect(await run((tx) => patientHealthToAsk(tx, orgId, other.id))).toBe(false)
 })
+
+it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nunca sin ninguno (M3)", async () => {
+  const { orgId, run } = await newClinic()
+  const row = await service(orgId, "Pulpectomía", "pulpectomia-y-")
+  await ownerDb.execute(sql`insert into catalog.dental_template_rule (template_id, leaves_condition, tooth_groups, family)
+    values (${row.templateId}, 'root_canal_treatment', array['molar'], 'pulpectomia-deciduo')`)
+  await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
+  // Como antes de esta entrega: sin el suyo y con el de odontopediatría que puso la migración 0089.
+  await ownerDb
+    .delete(consentTemplateService)
+    .where(and(eq(consentTemplateService.organizationId, orgId), eq(consentTemplateService.templateKey, "pulpectomia")))
+  await ownerDb
+    .delete(consentTemplate)
+    .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, "pulpectomia")))
+  await ownerDb.insert(consentTemplateService).values({ organizationId: orgId, templateKey: "odontopediatria", serviceId: row.id })
+  expect(await linkedKeys(orgId, row.id)).toEqual(["odontopediatria"])
+  await run((tx) => ensureClinicConsents(tx, orgId, null))
+  expect(await linkedKeys(orgId, row.id)).toEqual(["pulpectomia"])
+})

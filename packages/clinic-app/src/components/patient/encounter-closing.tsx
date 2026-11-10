@@ -627,9 +627,9 @@ export function ClosingNextVisit({
                   ? "Elige el día en el calendario."
                   : beside
                     ? beside.line
-                    : day && (controls.returnsTo?.length ?? 0) > 0 && values.nextControl !== "recall"
+                    : day && (controls.returnsTo?.length ?? 0) > 0 && day <= controls.shortcuts.month
                       ? // Vuelve para lo que falta hacer, no a un control aparte (QA del 10 nov, M6 y B7).
-                        `Vuelve hacia el ${controlDaySaid(day)} para ${joinTitles(controls.returnsTo ?? [])} · recepción lo verá para reservarlo`
+                        `Vuelve hacia el ${controlDaySaid(day)} para ${joinTitles(controls.returnsTo ?? [])} · recepción lo verá en «Qué sigue»`
                       : day
                         ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
                         : "No indicaste cuándo vuelve: recepción no lo verá"}

@@ -60,6 +60,7 @@ export function NextStepButton({
       <FreedAppointmentButtons
         appointmentId={action.appointmentId}
         version={action.appointmentVersion}
+        startsAt={action.appointmentStartsAt}
         reuse={action.reuse ?? null}
         size={size}
       />

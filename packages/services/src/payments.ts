@@ -3695,6 +3695,16 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     const key = `${charge.planItemId}:${charge.currency}`
     advancePaidByLine[key] = (advancePaidByLine[key] ?? 0) + (appliedByCharge[charge.id] ?? 0)
   }
+  // El adelanto se dice una sola vez por tratamiento: en su primer concepto que sigue debiendo
+  // (con varios cargos del mismo tratamiento, cada uno lo sumaba; revisión de la entrega 12).
+  const advanceShownOn = new Set<string>()
+  const advanceTo = (charge: (typeof liveCharges)[number], saldo: number): number => {
+    if (!charge.planItemId || charge.requestKey?.startsWith(ADVANCE_KEY) || saldo <= 0) return 0
+    const key = `${charge.planItemId}:${charge.currency}`
+    if (advanceShownOn.has(key)) return 0
+    advanceShownOn.add(key)
+    return advancePaidByLine[key] ?? 0
+  }
   const pendiente: AccountPending[] = liveCharges
     .map((charge) => {
       const paid = appliedByCharge[charge.id] ?? 0
@@ -3729,10 +3739,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         promotionName: charge.promotionName,
         productId: charge.productId ?? null,
         productQuantity: charge.productQuantity ?? null,
-        advancePaidCents:
-          charge.planItemId && !charge.requestKey?.startsWith(ADVANCE_KEY)
-            ? (advancePaidByLine[`${charge.planItemId}:${charge.currency}`] ?? 0)
-            : 0,
+        advancePaidCents: advanceTo(charge, charge.amountCents - paid),
       }
     })
     .filter((row) => row.saldoCents > 0)
