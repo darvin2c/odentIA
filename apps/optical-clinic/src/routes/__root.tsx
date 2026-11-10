@@ -26,6 +26,8 @@ export const Route = createRootRoute({
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: favicon, type: "image/svg+xml" },
+      // El ícono en el inicio del iPhone (la app instalada, ADR 0176): opaco, iOS rellena de negro lo transparente.
+      { rel: "apple-touch-icon", href: "/pwa/vistia-apple-180.png" },
     ],
   }),
   component: RootComponent,

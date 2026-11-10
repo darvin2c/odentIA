@@ -140,6 +140,7 @@ beforeAll(async () => {
     adminURL: "https://admin.odentia.localhost",
     mailer: { send: async () => { throw new Error("Correo no esperado en este recorrido") } },
     listenUrl: "postgres://localhost:5432/dentalagent",
+    vapidPublicKey: "BPublicaDePrueba",
   })
 }, 180_000)
 
@@ -461,7 +462,7 @@ it("color de la marca: lo cambia quien configura, se guarda aparte y lo leen sus
   const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
   expect((await request("owner", "PUT", "/org-profile", { legalName: "Clínica Ajustes S.A.C.", ...region })).status).toBe(200)
   const appearance = async (slug: string) =>
-    data<{ brandColor: string | null }>(await app.request(`/api/public/appearance/${slug}`))
+    (await data<{ brandColor: string | null }>(await app.request(`/api/public/appearance/${slug}`))).brandColor
 
   // Recepción y caja no lo cambian: lo dice el servidor, no solo la pantalla.
   expect((await request("reception", "PUT", "/org-profile/brand-color", { color: "#1d5fa8" })).status).toBe(403)
@@ -472,15 +473,15 @@ it("color de la marca: lo cambia quien configura, se guarda aparte y lo leen sus
   expect(saved.status).toBe(200)
   expect(await data(saved)).toEqual({ brandColor: "#1d5fa8" })
   expect(await data<Record<string, unknown>>(await request("owner", "GET", "/org-profile"))).toMatchObject({ brandColor: "#1d5fa8" })
-  expect(await appearance(SLUG)).toEqual({ brandColor: "#1d5fa8" })
+  expect(await appearance(SLUG)).toBe("#1d5fa8")
   // Otra clínica sigue con el suyo, y una dirección que no es de una clínica no dice nada distinto.
-  expect(await appearance(OTHER_SLUG)).toEqual({ brandColor: null })
-  expect(await appearance("no-existe")).toEqual({ brandColor: null })
-  expect(await appearance("..%2Fajustes")).toEqual({ brandColor: null })
+  expect(await appearance(OTHER_SLUG)).toBe(null)
+  expect(await appearance("no-existe")).toBe(null)
+  expect(await appearance("..%2Fajustes")).toBe(null)
 
   // Guardar los datos de la clínica no lo pisa.
   expect((await request("owner", "PUT", "/org-profile", { fiscalAddress: "Av. Norte 2" })).status).toBe(200)
-  expect(await appearance(SLUG)).toEqual({ brandColor: "#1d5fa8" })
+  expect(await appearance(SLUG)).toBe("#1d5fa8")
 
   const wrong = await request("owner", "PUT", "/org-profile/brand-color", { color: "azul" })
   expect(wrong.status).toBe(400)
@@ -490,5 +491,27 @@ it("color de la marca: lo cambia quien configura, se guarda aparte y lo leen sus
   expect(await data(await request("owner", "GET", "/org-profile/logo-colors"))).toEqual({ colors: [] })
 
   expect((await request("owner", "DELETE", "/org-profile/brand-color")).status).toBe(200)
-  expect(await appearance(SLUG)).toEqual({ brandColor: null })
+  expect(await appearance(SLUG)).toBe(null)
+})
+
+it("la app instalada se llama como la clínica: su nombre y producto son públicos, como su color; una dirección ajena no dice nada", async () => {
+  const read = async (slug: string) => data<Record<string, unknown>>(await app.request(`/api/public/appearance/${slug}`))
+  expect(await read(SLUG)).toMatchObject({ name: expect.any(String), product: "dental" })
+  expect(await read("no-existe")).toEqual({ brandColor: null, name: null, product: null })
+})
+
+it("avisos en este equipo: cada persona activa y apaga los suyos, y el servidor nunca muestra los de otra clínica", async () => {
+  const endpoint = "https://push.example.com/send/equipo-de-prueba"
+  const subscription = { endpoint, keys: { p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" } }
+  expect(await data(await request("reception", "GET", "/push/key"))).toEqual({ publicKey: "BPublicaDePrueba" })
+  // Sin sesión no hay clave ni suscripción.
+  expect((await app.request("/api/push/key")).status).toBe(401)
+  expect((await request("reception", "POST", "/push/subscriptions", { endpoint: "http://inseguro", keys: subscription.keys })).status).toBe(400)
+  expect(await data(await request("reception", "POST", "/push/subscriptions", subscription))).toEqual({ active: true })
+  expect(await data(await request("reception", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: true })
+  // Otra persona de la clínica no lo ve como suyo, ni la de otra clínica.
+  expect(await data(await request("cashier", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: false })
+  expect(await data(await request("other", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: false })
+  expect(await data(await request("reception", "DELETE", "/push/subscriptions", { endpoint }))).toEqual({ active: false })
+  expect(await data(await request("reception", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: false })
 })

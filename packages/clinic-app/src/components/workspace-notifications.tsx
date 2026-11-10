@@ -6,6 +6,7 @@ import { Bell } from "lucide-react"
 import { apiFetch } from "../lib/api"
 import { timeAgo } from "../lib/crm"
 import type { WorkspaceNotice } from "../lib/workspace"
+import { DeviceNotices } from "./device-notices"
 import { type NoticesFrame, useNoticesColumn } from "./notices-column"
 
 /** «Hace 10 min», «Ayer»…: cuándo llegó, con mayúscula inicial. */
@@ -112,6 +113,7 @@ export function NoticesPanel({ overlay, onClose }: NoticesFrame) {
           </span>
         </Button>
       </div>
+      <DeviceNotices />
       {unread > 0 ? (
         <div className="flex items-center justify-between gap-2 border-b px-4 py-2 sm:px-5">
           <span className="text-sm text-muted-foreground">

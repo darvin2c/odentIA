@@ -34,6 +34,7 @@ import { consumeInbound } from "./inbound.js"
 import { runLegalNoticesTick } from "./legal-notices.js"
 import { tickMailboxes } from "./mailboxes.js"
 import { consumeOutbound } from "./outbound.js"
+import { runPushTick, webPushSender } from "./push.js"
 import { runReportDigestTick } from "./report-digests.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
@@ -412,6 +413,21 @@ queues.push({
     return false
   },
 })
+
+// Avisos en el equipo (push web): «Te espera» con la clínica abierta y el servicio cortado. Sin claves VAPID no se envía.
+if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) {
+  const sender = webPushSender({ publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: env.VAPID_SUBJECT })
+  let nextPushPoll = 0
+  queues.push({
+    name: "push_notices",
+    poll: async () => {
+      if (Date.now() < nextPushPoll) return false
+      nextPushPoll = Date.now() + 20_000
+      const result = await runPushTick({ ownerDb, appDb: db, sender })
+      return result.sent > 0
+    },
+  })
+} else console.log("worker: sin claves VAPID; los avisos en el equipo no se envían")
 
 // Producción: sin un backup verificado en 26 horas, o si el último falló, Soporte recibe el caso.
 if (env.NODE_ENV === "production") {

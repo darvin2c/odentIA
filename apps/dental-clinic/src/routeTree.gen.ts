@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './../../../packages/clinic-app/src/routes/public/index'
 import { Route as DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport } from './../../../packages/clinic-app/src/routes/_org'
+import { Route as AppChar91DotChar93webmanifestRouteImport } from './../../../packages/clinic-app/src/routes/public/app[.]webmanifest'
 import { Route as AvisoRouteImport } from './../../../packages/clinic-app/src/routes/public/aviso'
 import { Route as PendientesRouteImport } from './../../../packages/clinic-app/src/routes/public/pendientes'
 import { Route as PortalRouteImport } from './../../../packages/clinic-app/src/routes/public/portal'
@@ -97,6 +98,12 @@ const IndexRoute = IndexRouteImport.update({
 const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute =
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport.update({
     id: '/_org',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AppChar91DotChar93webmanifestRoute =
+  AppChar91DotChar93webmanifestRouteImport.update({
+    id: '/app.webmanifest',
+    path: '/app.webmanifest',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AvisoRoute = AvisoRouteImport.update({
@@ -540,6 +547,7 @@ const PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app.webmanifest': typeof AppChar91DotChar93webmanifestRoute
   '/aviso': typeof AvisoRoute
   '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
@@ -620,6 +628,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app.webmanifest': typeof AppChar91DotChar93webmanifestRoute
   '/aviso': typeof AvisoRoute
   '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
@@ -700,6 +709,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_org': typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
+  '/app.webmanifest': typeof AppChar91DotChar93webmanifestRoute
   '/aviso': typeof AvisoRoute
   '/pendientes': typeof PendientesRoute
   '/portal': typeof PortalRoute
@@ -782,6 +792,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app.webmanifest'
     | '/aviso'
     | '/pendientes'
     | '/portal'
@@ -862,6 +873,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/app.webmanifest'
     | '/aviso'
     | '/pendientes'
     | '/portal'
@@ -941,6 +953,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_org'
+    | '/app.webmanifest'
     | '/aviso'
     | '/pendientes'
     | '/portal'
@@ -1023,6 +1036,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
+  AppChar91DotChar93webmanifestRoute: typeof AppChar91DotChar93webmanifestRoute
   AvisoRoute: typeof AvisoRoute
   PendientesRoute: typeof PendientesRoute
   PortalRoute: typeof PortalRoute
@@ -1051,6 +1065,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app.webmanifest': {
+      id: '/app.webmanifest'
+      path: '/app.webmanifest'
+      fullPath: '/app.webmanifest'
+      preLoaderRoute: typeof AppChar91DotChar93webmanifestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/aviso': {
@@ -1779,6 +1800,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute:
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren,
+  AppChar91DotChar93webmanifestRoute: AppChar91DotChar93webmanifestRoute,
   AvisoRoute: AvisoRoute,
   PendientesRoute: PendientesRoute,
   PortalRoute: PortalRoute,

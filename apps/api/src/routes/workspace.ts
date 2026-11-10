@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { ALL_PERMISSIONS, canAttend } from "@odentia/auth/permissions"
+import { ALL_PERMISSIONS } from "@odentia/auth/permissions"
 import {
   AUDIT_AREAS,
   claimHandoff,
@@ -14,8 +14,7 @@ import {
   recordHomeVisit,
   readAllWorkspaceNotifications,
   readWorkspaceNotification,
-  taskAreasOfRole,
-  type WorkspaceAccess,
+  workspaceAccessFor,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -23,29 +22,7 @@ import { canAccess, canAccessAny, orgContextOf, type Permission } from "../lib/c
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
-function accessFor(role: string): WorkspaceAccess {
-  return {
-    patients: canAccess(role, "patients.read"), appointments: canAccess(role, "appointments.read"),
-    conversations: canAccess(role, "conversations.read"), tasks: canAccess(role, "tasks.read"),
-    finance: canAccess(role, "finance.read"), clinical: canAccess(role, "clinical.read"),
-    // Lo que el agente dejó en manos del equipo lo ve quien supervisa o quien
-    // decide; la configuración y el proveedor siguen en `agent.write`.
-    crm: canAccess(role, "crm.read"), agent: canAccessAny(role, ["agent.read", "agent.decide"]),
-    allTasks: canAccess(role, "tasks.all"),
-    // Las tareas sin responsable de un área llegan a quien trabaja en ella (la misma regla que Tareas).
-    taskAreas: taskAreasOfRole(role),
-    configure: canAccess(role, "settings.write"),
-    // El odontólogo ve solo su propio día, no la agenda de la sede.
-    ownAppointments: role === "clinician",
-    // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
-    // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
-    attends: canAttend(role),
-    // El presupuesto que nadie envió es de quien habla con la persona: envía y lleva el CRM (decisión 4).
-    sendsBudgets: canAccess(role, "budgets.send") && canAccess(role, "crm.read"),
-    // Caja responde desde aquí los temas de pagos que le pasa Sofi (decisión 3 del pulido).
-    topics: canAccess(role, "conversations.topics"),
-  }
-}
+const accessFor = workspaceAccessFor
 /**
  * Cada aviso declara el permiso que necesita quien lo lee y llega a quien lo
  * tiene: se pasan todos los permisos del rol (también `settings.write`,

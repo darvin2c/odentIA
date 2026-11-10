@@ -7,10 +7,11 @@
 import { type StripNotice, NoticeStrip } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi, useNavigate, useRouterState } from "@tanstack/react-router"
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { apiFetch } from "../lib/api"
 import { useReceptionName, withReceptionName } from "../lib/agent-names"
 import { PLAN_PATH } from "../lib/billing"
+import { isOnline, subscribeOnline } from "../lib/pwa"
 import { RouterLink } from "../lib/router-link"
 import type { Consumption } from "./billing/consumption"
 import { SpendCapDrawer } from "./billing/spend-cap"
@@ -130,6 +131,7 @@ function Strip({ userId }: { userId: string }) {
   const notices = useClinicNotices()
   const storageKey = `odentia:avisos-cerrados:${userId}`
   const [closed, setClosed] = useState(() => readClosed(storageKey))
+  const online = useSyncExternalStore(subscribeOnline, isOnline, () => true)
 
   const revoke = useMutation({
     retry: false,
@@ -147,7 +149,16 @@ function Strip({ userId }: { userId: string }) {
       writeClosed(storageKey, next)
       setClosed(next)
     }
-    return (notices.data ?? [])
+    // Sin conexión, primero: dice la verdad (nada se guarda solo) y no se cierra mientras dure.
+    const offline: StripNotice[] = online
+      ? []
+      : [{
+          id: "sin-conexion",
+          tone: "alarma",
+          message: "Sin conexión. Lo que escribiste sigue aquí: no recargues la página y guarda cuando vuelva.",
+          short: "Sin conexión · no recargues",
+        }]
+    return offline.concat((notices.data ?? [])
       .filter((notice) => !isClosed(notice, closed))
       .map((notice) => {
         const action = notice.action
@@ -168,8 +179,8 @@ function Strip({ userId }: { userId: string }) {
           action: stripAction,
           onDismiss: notice.dismiss ? () => close(notice.id) : undefined,
         }
-      })
-  }, [notices.data, closed, storageKey, raiseCap, revoke, navigate, pathname, receptionName])
+      }))
+  }, [notices.data, closed, storageKey, raiseCap, revoke, navigate, pathname, receptionName, online])
 
   return <NoticeStrip notices={items} LinkComponent={RouterLink} />
 }

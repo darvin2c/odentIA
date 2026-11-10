@@ -129,6 +129,7 @@ import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webc
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
+import { createPushRoute } from "./routes/push.js"
 
 export interface AppDeps {
   auth: Auth
@@ -138,6 +139,8 @@ export interface AppDeps {
    * Las rutas clínicas siguen usando db + withOrgContext, nunca esta conexión.
    */
   ownerDb: Db
+  /** La clave pública VAPID de los avisos en el equipo; sin ella no se ofrecen. */
+  vapidPublicKey?: string
   /** Clave AES-256-GCM para configs de conexión (SECRETS_KEY). */
   secretsKey: Buffer
   storage: Storage
@@ -686,7 +689,9 @@ export function createApp(deps: AppDeps) {
       isWebhook(c) ||
       c.req.method === "GET" ||
       c.req.method === "HEAD" ||
-      c.req.path.startsWith("/api/help/")
+      c.req.path.startsWith("/api/help/") ||
+      // Apagar los avisos en este equipo (también al cerrar sesión) vale siempre.
+      (c.req.method === "DELETE" && c.req.path === "/api/push/subscriptions")
     )
       return next()
     return requireSaasAccess(db, "operar")(c, next)
@@ -1127,6 +1132,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/search", createSearchRoute({ ...crmDeps, embedder: deps.embedder }))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
+  guarded.route("/push", createPushRoute({ ...crmDeps, vapidPublicKey: deps.vapidPublicKey }))
   guarded.route("/legal", createLegalRoute(crmDeps))
   guarded.route("/reports", createReportsRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/inventory", createInventoryRoute(crmDeps))

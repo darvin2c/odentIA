@@ -216,6 +216,23 @@ No tiene camino en el código.
 
 **Fuentes:** ADR 0061, 0150, 0151 y 0167. SUNAT: tabla 10 de comprobantes, RUC de 11 dígitos con verificador y el registro de compras (verificar los artículos antes de citarlos).
 
+## P-COM-21 Avisos en el equipo de cada persona
+
+**Dónde:** el interruptor «Recibir avisos en este equipo» en la campana (`packages/clinic-app/src/components/device-notices.tsx`), el envío del worker (`apps/worker/src/push.ts`, `packages/services/src/push.ts`) y la tabla `push_subscription`.
+
+- [ ] La pantalla bloqueada no muestra nombre, motivo, texto del mensaje, consentimiento ni resultado: solo la clínica y qué pasó.
+- [ ] Llega a quien le toca con la regla de Inicio: el clínico, solo lo suyo; con el permiso de ese momento.
+- [ ] Fuera del horario de la clínica no avisa lo de «Te espera»; lo de la noche llega al abrir.
+- [ ] Leer el aviso no resuelve nada: sigue en «Te espera» hasta que alguien lo atiende.
+- [ ] Nada aparece sobre la firma o el registro en la tablet que se le pasa al paciente (hoy: no se activa ahí, lo dice la ayuda).
+- [ ] Quien cierra sesión o deja la clínica deja de recibirlos en ese equipo.
+
+**Fuentes:** ADR 0176 y 0084. Ley 29733 de datos personales y su reglamento (datos sensibles de salud; verificar artículos), Ley 26842 (reserva del acto médico; verificar el artículo).
+
+## P-COM-22 Guardia de urgencias de la clínica
+
+- [ ] Una alarma de un paciente fuera de horario tiene un destinatario explícito, o queda dicho que nadie la verá hasta que la clínica abra (hoy no existe la guardia: lo de la noche llega al abrir).
+
 ---
 
 ## Casos
@@ -235,3 +252,4 @@ No tiene camino en el código.
 | CC11 | El paciente rechaza la exodoncia indicada y se va con la pieza infectada. | 13, 14 | Constancia del rechazo con los riesgos explicados; aviso si no vuelve. |
 | CC12 | La familia avisa que el paciente falleció. | 16 | Se marca; no salen más mensajes; la historia queda. |
 | CC13 | Fin de mes en una clínica de dos sedes: se paga la luz por otro importe, la factura del laboratorio y los honorarios del endodoncista visitante; se corrige un RUC mal escrito y se le entrega la lista al contador. | 20 | Todo con su comprobante y RUC; la corrección dice qué cambió; la lista se descarga; Gastos y Reportes cuadran. |
+| CC14 | A las 22:30 una paciente escribe «se me hinchó la cara y no puedo tragar» tres días después de una exodoncia, mientras otra paciente firma en la tablet de la unidad. | 09, 21, 22 | La paciente recibe el número de emergencias; el aviso al equipo no lleva su nombre y llega al abrir (no hay guardia); la tablet no muestra nada. |

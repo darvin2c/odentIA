@@ -1,3 +1,4 @@
+import { canAccess, canAccessAny, canAttend } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { encounter, patient } from "@odentia/db/schema/clinical"
@@ -34,6 +35,7 @@ import { registrationHoldDifferences } from "./patient-registration.js"
 import { productDictation, productHooks } from "./products.js"
 import { upcomingWork } from "./report-finance.js"
 import { patientsToSchedule } from "./to-schedule.js"
+import { taskAreasOfRole } from "./tasks.js"
 import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
   composeWaiting,
@@ -88,6 +90,34 @@ export interface WorkspaceAccess {
    * día sin cerrar llegan a «Te espera».
    */
   attends?: boolean
+}
+
+/**
+ * Lo que ve un rol en Inicio: la misma regla para la API y para los avisos en
+ * el equipo que envía el worker (ninguno la copia).
+ */
+export function workspaceAccessFor(role: string): WorkspaceAccess {
+  return {
+    patients: canAccess(role, "patients.read"), appointments: canAccess(role, "appointments.read"),
+    conversations: canAccess(role, "conversations.read"), tasks: canAccess(role, "tasks.read"),
+    finance: canAccess(role, "finance.read"), clinical: canAccess(role, "clinical.read"),
+    // Lo que el agente dejó en manos del equipo lo ve quien supervisa o quien
+    // decide; la configuración y el proveedor siguen en `agent.write`.
+    crm: canAccess(role, "crm.read"), agent: canAccessAny(role, ["agent.read", "agent.decide"]),
+    allTasks: canAccess(role, "tasks.all"),
+    // Las tareas sin responsable de un área llegan a quien trabaja en ella (la misma regla que Tareas).
+    taskAreas: taskAreasOfRole(role),
+    configure: canAccess(role, "settings.write"),
+    // El odontólogo ve solo su propio día, no la agenda de la sede.
+    ownAppointments: role === "clinician",
+    // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
+    // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
+    attends: canAttend(role),
+    // El presupuesto que nadie envió es de quien habla con la persona: envía y lleva el CRM (decisión 4).
+    sendsBudgets: canAccess(role, "budgets.send") && canAccess(role, "crm.read"),
+    // Caja responde desde aquí los temas de pagos que le pasa Sofi (decisión 3 del pulido).
+    topics: canAccess(role, "conversations.topics"),
+  }
 }
 
 /**
@@ -653,6 +683,24 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
  * dirige lo vea en «Te espera». Cada persona cuenta una vez, como su fila.
  */
 export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<number> {
+  const sources = waitingPeopleSources(orgId, userId, access)
+  if (sources.length === 0) return 0
+  const [row] = await tx.execute<{ people: number }>(sql`select count(distinct person)::int as people from (${sql.join(sources, sql` union all `)}) waiting`)
+  return row?.people ?? 0
+}
+
+/**
+ * Quiénes esperan a quien mira (los que cuenta `countWorkspaceWaiting`, con
+ * la misma regla): los avisos en el equipo avisan cuando aparece alguien nuevo.
+ */
+export async function listWorkspaceWaitingPeople(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<string[]> {
+  const sources = waitingPeopleSources(orgId, userId, access)
+  if (sources.length === 0) return []
+  const rows = await tx.execute<{ person: string }>(sql`select distinct person from (${sql.join(sources, sql` union all `)}) waiting order by person`)
+  return rows.map((row) => row.person)
+}
+
+function waitingPeopleSources(orgId: string, userId: string, access: WorkspaceAccess): SQL[] {
   const sources: SQL[] = []
   // Sin ver los casos del agente, los que le pasaron; caja, además, los pagos sin tomar.
   if (access.agent) sources.push(openHandoffPeopleSql(orgId, waitingCaseScope(userId, false, {})))
@@ -663,9 +711,7 @@ export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: strin
     const conv = sql.raw("c")
     sources.push(sql`select c.contact_id::text as person from conversation c where ${pendingConversationsWhere(orgId, access.agent ? null : userId)} and (${unansweredSql(conv)} or ${lastIsFailedOutSql(conv)})`)
   }
-  if (sources.length === 0) return 0
-  const [row] = await tx.execute<{ people: number }>(sql`select count(distinct person)::int as people from (${sql.join(sources, sql` union all `)}) waiting`)
-  return row?.people ?? 0
+  return sources
 }
 
 /**
