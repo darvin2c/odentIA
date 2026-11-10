@@ -338,6 +338,23 @@ export const dentalHooks: ProductHooks = {
 
   planPhases: TREATMENT_PHASES,
   phaseFor: (kind) => phaseForKind(kind),
+  async treatmentFamiliesOf(tx, templateIds) {
+    if (templateIds.length === 0) return new Map()
+    const rows = await tx
+      .select({
+        templateId: dentalTemplateRule.templateId,
+        leaves: dentalTemplateRule.leavesCondition,
+        family: dentalTemplateRule.family,
+      })
+      .from(dentalTemplateRule)
+      .where(inArray(dentalTemplateRule.templateId, [...templateIds]))
+    return new Map(
+      rows.map((row) => [
+        row.templateId,
+        [row.leaves, row.family].filter((tag): tag is string => !!tag),
+      ]),
+    )
+  },
   // Una consulta, una evaluación o una radiografía no piden «Falta otra sesión».
   oneOffKinds: ["diagnostico"],
   phaseWords: (phase) =>

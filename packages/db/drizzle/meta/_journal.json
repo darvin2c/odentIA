@@ -617,6 +617,13 @@
       "when": 1794278368844,
       "tag": "0087_controles_configurables_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794278371829,
+      "tag": "0088_consentimiento_por_familia",
+      "breakpoints": true
     }
   ]
 }

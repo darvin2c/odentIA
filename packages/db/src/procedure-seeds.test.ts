@@ -337,6 +337,29 @@ it("cada consentimiento sugerido de odentIA se une a tratamientos que existen en
     }
   }
   check(keysOf("biblioteca.csv"), SUGGESTED_CONSENT_TEMPLATES)
+  // Las familias (lo que deja en la pieza) también existen, y la corona no pide el de prótesis.
+  const linesOf = (file: string) =>
+    readFileSync(join(here, "..", "seeds", file), "utf8")
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .slice(1)
+      .filter(Boolean)
+  const rows = linesOf("biblioteca.csv")
+  const anatomy = linesOf("biblioteca_piezas.csv")
+  const leaves = new Set([
+    ...rows.map((line) => line.split(",")[5] ?? "").filter(Boolean),
+    ...anatomy.map((line) => line.split(",")[3] ?? "").filter(Boolean),
+  ])
+  for (const suggestion of SUGGESTED_CONSENT_TEMPLATES)
+    for (const family of suggestion.serviceFamilies ?? [])
+      expect(leaves.has(family), `${suggestion.key}: ${family}`).toBe(true)
+  const protesis = SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "protesis")!
+  expect(protesis.servicePrefixes?.some((prefix) => "corona-de-porcelana".startsWith(prefix))).toBe(
+    false,
+  )
+  expect(
+    SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "odontopediatria")?.serviceFamilies,
+  ).toContain("pulpectomia-deciduo")
 })
 
 it("las sesiones habituales: de tratamientos de su biblioteca, de 2 a 60, y nunca más visitas que las que se le explican al paciente", () => {

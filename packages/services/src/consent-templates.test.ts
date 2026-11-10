@@ -120,6 +120,36 @@ it("una clínica nace con lo sugerido activo, sin revisar y unido a sus servicio
   expect(await linkedKeys(orgId, later.id)).toEqual(["implante"])
 })
 
+it("se elige por la familia del tratamiento: la pulpectomía pide el de odontopediatría y la corona el suyo, no el de prótesis (QA del 10 nov, A1 y M2)", async () => {
+  const { orgId, run } = await newClinic()
+  // Lo dental de la biblioteca se escribe en SQL: lo común no importa el esquema dental (ADR 0079).
+  const withFamily = async (
+    name: string,
+    key: string,
+    rule: { leaves?: string; family?: string },
+  ) => {
+    const row = await service(orgId, name, key)
+    await ownerDb.execute(sql`insert into catalog.dental_template_rule (template_id, leaves_condition, tooth_groups, family)
+      values (${row.templateId}, ${rule.leaves ?? null}, ${rule.family ? sql`array['molar']` : sql`null`}, ${rule.family ?? null})`)
+    return row
+  }
+  const pulpectomy = await withFamily("Pulpectomía", "pulpectomia-x-", {
+    leaves: "root_canal_treatment",
+    family: "pulpectomia-deciduo",
+  })
+  const rootCanal = await withFamily("Endodoncia", "endo-x-", {
+    leaves: "root_canal_treatment",
+    family: "endodoncia-vital",
+  })
+  const crown = await withFamily("Corona", "corona-de-porcelana-x-", { leaves: "crown" })
+  const bridge = await service(orgId, "Puente", "puente-x-")
+  await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
+  expect(await linkedKeys(orgId, pulpectomy.id)).toEqual(["odontopediatria"])
+  expect(await linkedKeys(orgId, rootCanal.id)).toEqual(["endodoncia"])
+  expect(await linkedKeys(orgId, crown.id)).toEqual(["corona"])
+  expect(await linkedKeys(orgId, bridge.id)).toEqual(["protesis"])
+})
+
 it("lo que la clínica apagó o cambió no se vuelve a crear, y lo que ella unió no se toca", async () => {
   const { orgId, run } = await newClinic()
   const created = await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
@@ -287,7 +317,11 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
   })
   const rows = await run((tx) => listConsentTemplates(tx, orgId))
   const byKey = new Map(rows.map((row) => [row.key, row]))
-  expect(byKey.size).toBe(SUGGESTED_CONSENT_TEMPLATES.length + 1)
+  // La corona sobre la propia pieza (entrega 10) no está en la 0028: la crea el worker como toda
+  // plantilla sugerida nueva (`ensureSuggestedConsentsEverywhere`).
+  expect(byKey.size).toBe(
+    SUGGESTED_CONSENT_TEMPLATES.filter((row) => row.key !== "corona").length + 1,
+  )
   expect(await linkedKeys(orgId, surgical.id)).toEqual(["mi-extraccion"])
   expect(byKey.get("implante")).toMatchObject({ title: "Mi implante", version: 1, status: "publicado" })
   expect(byKey.get("implante")?.reviewedAt).toBeTruthy()

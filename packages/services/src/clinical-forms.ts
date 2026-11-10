@@ -12,6 +12,7 @@ import {
   LEFT_OUT_DECISIONS,
   normalizeDrugText,
   parseConsentSections,
+  type SuggestedConsentTemplate,
   typedIdentityDocument,
 } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
@@ -1943,6 +1944,20 @@ export async function markConsentTemplateReviewed(
   return row
 }
 
+/** Si un tratamiento de la biblioteca pide ese consentimiento sugerido: por su familia o por su clave. */
+export function suggestedConsentFits(
+  suggestion: Pick<
+    SuggestedConsentTemplate,
+    "servicePrefixes" | "serviceFamilies" | "exceptPrefixes"
+  >,
+  libraryKey: string,
+  families: readonly string[],
+): boolean {
+  if (suggestion.exceptPrefixes?.some((prefix) => libraryKey.startsWith(prefix))) return false
+  if (families.some((family) => suggestion.serviceFamilies?.includes(family))) return true
+  return suggestion.servicePrefixes?.some((prefix) => libraryKey.startsWith(prefix)) ?? false
+}
+
 /**
  * Une servicios de la biblioteca a los consentimientos sugeridos que los piden
  * (`servicePrefixes`). Solo agrega: nunca quita lo que la clínica decidió, y un
@@ -1955,12 +1970,19 @@ export async function linkServicesToSuggestedConsents(
   only: { serviceIds?: string[]; templateKeys?: string[] } = {},
 ): Promise<void> {
   if (only.serviceIds?.length === 0 || only.templateKeys?.length === 0) return
-  const suggestions = (await productHooks(tx, orgId)).consentSuggestions.filter(
-    (suggestion) => suggestion.servicePrefixes?.length && (!only.templateKeys || only.templateKeys.includes(suggestion.key)),
+  const hooks = await productHooks(tx, orgId)
+  const suggestions = hooks.consentSuggestions.filter(
+    (suggestion) =>
+      (suggestion.servicePrefixes?.length || suggestion.serviceFamilies?.length) &&
+      (!only.templateKeys || only.templateKeys.includes(suggestion.key)),
   )
   if (suggestions.length === 0) return
   const services = await tx
-    .select({ id: serviceCatalog.id, libraryKey: treatmentTemplate.key })
+    .select({
+      id: serviceCatalog.id,
+      libraryKey: treatmentTemplate.key,
+      templateId: treatmentTemplate.id,
+    })
     .from(serviceCatalog)
     .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
     .where(
@@ -1976,11 +1998,22 @@ export async function linkServicesToSuggestedConsents(
     .from(consentTemplate)
     .where(eq(consentTemplate.organizationId, orgId))
   const keys = new Set(owned.map((row) => row.key))
+  const families = hooks.treatmentFamiliesOf
+    ? await hooks.treatmentFamiliesOf(tx, [
+        ...new Set(services.map((service) => service.templateId)),
+      ])
+    : new Map<string, string[]>()
   const links = suggestions
     .filter((suggestion) => keys.has(suggestion.key))
     .flatMap((suggestion) =>
       services
-        .filter((service) => suggestion.servicePrefixes?.some((prefix) => service.libraryKey.startsWith(prefix)))
+        .filter((service) =>
+          suggestedConsentFits(
+            suggestion,
+            service.libraryKey,
+            families.get(service.templateId) ?? [],
+          ),
+        )
         .map((service) => ({
           organizationId: orgId,
           templateKey: suggestion.key,
