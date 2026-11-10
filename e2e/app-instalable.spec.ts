@@ -145,8 +145,11 @@ test("las barras del teléfono van del color del fondo de la app y un toque que 
   expect(await canvas()).toBe("#f8f8f8")
   await expect.poll(async () => new Set(await themeColor())).toEqual(new Set(["#f8f8f8"]))
   await page.emulateMedia({ colorScheme: "dark" })
-  await expect.poll(canvas).toBe("#111111")
-  await expect.poll(async () => new Set(await themeColor())).toEqual(new Set(["#111111"]))
+  // El navegador puede darlo corto (`#111`): se compara con el fondo que tiene la página.
+  await expect.poll(canvas).not.toBe("#f8f8f8")
+  const dark = await canvas()
+  expect(["#111", "#111111"]).toContain(dark)
+  await expect.poll(async () => new Set(await themeColor())).toEqual(new Set([dark]))
   await page.emulateMedia({ colorScheme: "light" })
 
   // Un toque que tarda (el código de la pantalla llega lento): la barra aparece y se va al llegar.
