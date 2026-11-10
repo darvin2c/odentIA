@@ -15,6 +15,11 @@ import { ConsentPaper } from "./document-papers"
  * el profesional mira antes de confirmar, en la lista y en la hoja. El documento llega abreviado
  * del servidor (`listLinkSignedToConfirm`): aquí no se enmascara nada.
  */
+/** Meses enteros desde que firmó en su enlace. */
+function monthsAgo(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (30 * 86_400_000))
+}
+
 export function linkSignedSummary(
   row: Pick<LinkSignedToConfirm, "signerName" | "signerKind" | "representativeRelation" | "signerDocument" | "personSignedAt" | "procedureRef">,
 ): string {
@@ -39,11 +44,14 @@ export function LinkSignedNotice({
   encounterId,
   disabled,
   onChanged,
+  onSignAgain,
 }: {
   patientId: string
   encounterId: string
   disabled: boolean
   onChanged: () => void | Promise<void>
+  /** «Firmar de nuevo aquí»: la persona prefiere firmarlo en la tablet. */
+  onSignAgain?: (documentId: string) => void
 }): React.JSX.Element | null {
   const canWrite = usePermission("clinical.write")
   const pending = useQuery({
@@ -92,16 +100,32 @@ export function LinkSignedNotice({
             <div className="flex min-w-0 flex-col">
               <span className="text-sm">{row.title}</span>
               <span className="text-xs text-muted-foreground">{linkSignedSummary(row)}</span>
+              {/* Se informa a quien firmó: si vino otra persona, que firme de nuevo aquí quien corresponde. */}
+              <span className="text-xs text-muted-foreground">
+                Confírmalo con {row.signerName} delante; si vino otra persona, fírmalo de nuevo aquí.
+              </span>
+              {monthsAgo(row.personSignedAt) >= 3 ? (
+                <span className="text-xs text-warning">
+                  Lo firmó hace {monthsAgo(row.personSignedAt)} meses: vuelve a informarle antes de confirmarlo.
+                </span>
+              ) : null}
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={disabled}
-              onClick={() => setOpenId(row.id)}
-            >
-              Revisar y confirmar
-            </Button>
+            <span className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => setOpenId(row.id)}
+              >
+                Revisar y confirmar
+              </Button>
+              {onSignAgain ? (
+                <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => onSignAgain(row.id)}>
+                  Firmar de nuevo aquí
+                </Button>
+              ) : null}
+            </span>
           </li>
         ))}
       </ul>

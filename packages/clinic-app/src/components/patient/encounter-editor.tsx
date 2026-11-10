@@ -90,7 +90,7 @@ import { BookingHere } from "../agenda/schedule-host"
 import { useNoticesColumnDockBlocker } from "../notices-column"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
-import { ConsentSigningScreen, useSignAs } from "./consent-signing"
+import { ConsentSigningScreen, PaperSignDrawer, useSignAs } from "./consent-signing"
 import {
   DictationHeaderButton,
   DictationMobileBar,
@@ -1726,8 +1726,13 @@ export function EncounterEditor({
         queryFn: () => fetchConsents({ patientId }),
         staleTime: 0,
       })
+      // También el preparado en otra atención para el tratamiento que se hace hoy: el pendiente va
+      // con el tratamiento, no con la atención (consentimientos, 10 nov: «Firmar ahora» no hacía nada).
       const pending = list.data.filter(
-        (doc) => doc.encounterId === encounterId && doc.status === "pendiente" && !doc.personSignedAt,
+        (doc) =>
+          (doc.encounterId === encounterId || doc.id === need.documentId || (need.planItemId != null && doc.planItemId === need.planItemId)) &&
+          doc.status === "pendiente" &&
+          !doc.personSignedAt,
       )
       // Primero el que se pulsó (QA del 8 nov: «Firmar ahora» de la endodoncia abría la prótesis).
       const pressed = (doc: ConsentDocument) =>
@@ -1740,6 +1745,32 @@ export function EncounterEditor({
       // Desde el cierre, el aviso va en el cierre (el diálogo tapa la página).
       if (confirmOpen) setSubmitErrors(closingForm, { form: submitErrorMessage(err) })
       else setSaveError(submitErrorMessage(err))
+    }
+  }
+  /** «Firmado en papel» desde el cierre: la foto de la hoja firmada. */
+  const [paperDoc, setPaperDoc] = useState<ConsentDocument | null>(null)
+  const openPaper = async (need: ConsentNeed) => {
+    if (!need.documentId) return
+    const list = await queryClient.fetchQuery({
+      queryKey: ["consents", patientId],
+      queryFn: () => fetchConsents({ patientId }),
+      staleTime: 0,
+    })
+    const doc = list.data.find((item) => item.id === need.documentId && item.status === "pendiente")
+    if (doc) setPaperDoc(doc)
+  }
+  /** «Firmar de nuevo aquí»: lo firmado en su enlace se firma en la tablet; la firma del enlace queda en la historia. */
+  const signAgainHere = async (documentId: string) => {
+    try {
+      const list = await queryClient.fetchQuery({
+        queryKey: ["consents", patientId],
+        queryFn: () => fetchConsents({ patientId }),
+        staleTime: 0,
+      })
+      const doc = list.data.find((item) => item.id === documentId && item.status === "pendiente")
+      if (doc) setSigningDocs([doc])
+    } catch (err) {
+      setSaveError(submitErrorMessage(err))
     }
   }
   /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
@@ -2246,6 +2277,7 @@ export function EncounterEditor({
         patientId={patientId}
         encounterId={encounterId}
         disabled={locked}
+        onSignAgain={(documentId) => void signAgainHere(documentId)}
         onChanged={async () => {
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
@@ -2797,6 +2829,7 @@ export function EncounterEditor({
         confirmLabel={needsRegistration ? "Guardar y firmar" : null}
         initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
+        onPaper={(need) => void openPaper(need)}
         onClose={() => {
           if (!finalizing) setConfirmOpen(false)
         }}
@@ -2819,6 +2852,22 @@ export function EncounterEditor({
         {finalizeDescription}
       </EncounterClosingDialog>
       {product.overlay}
+      <PaperSignDrawer
+        open={paperDoc !== null}
+        document={paperDoc}
+        patientId={patientId}
+        encounterId={encounterId}
+        onClose={() => setPaperDoc(null)}
+        onSigned={async () => {
+          setPaperDoc(null)
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
+            queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+            refreshClosing(),
+          ])
+          await onChanged()
+        }}
+      />
       <ConsentSigningScreen
         open={signingDocs !== null}
         documents={signingDocs ?? []}

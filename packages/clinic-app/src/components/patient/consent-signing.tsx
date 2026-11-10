@@ -233,6 +233,8 @@ function SigningFlow({
           signatureData: { strokes: value.docs[position]?.strokes ?? [] },
           comprehensionConfirmed: true,
           method: "clinica",
+          // Ya lo firmó en su enlace y prefiere firmarlo de nuevo aquí.
+          ...(document.personSignedAt ? { signAgain: true } : {}),
         })
         done.add(document.id)
         setSigned(new Set(done))

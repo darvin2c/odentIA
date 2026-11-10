@@ -12,7 +12,7 @@ import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useState } from "react"
 import { bringTreatmentApi, chooseVisitControlApi, leaveTreatmentApi } from "../../lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import type { EncounterVisit, VisitControl, VisitTreatment } from "../../lib/patients"
+import { type EncounterVisit, treatmentConsentWords, type VisitControl, type VisitTreatment } from "../../lib/patients"
 
 /** «4 may», en la zona de la clínica. */
 function shortDay(iso: string): string {
@@ -210,6 +210,10 @@ export function EncounterVisitStrip({
                   </span>
                   {!item.registered && visitWaitWords(item) ? (
                     <span className="text-xs text-warning">{visitWaitWords(item)}</span>
+                  ) : null}
+                  {/* El consentimiento va con el tratamiento: se firma antes de empezar, en Documentos. */}
+                  {!item.registered && treatmentConsentWords(item.consent) ? (
+                    <span className="text-xs text-warning">{treatmentConsentWords(item.consent)}</span>
                   ) : null}
                 </span>
                 {item.registered ? null : item.linked ? (

@@ -22,7 +22,6 @@ import {
   fetchFormResponses,
   fetchFormTemplates,
   fetchOrders,
-  sendConsentByLink,
 } from "../../lib/clinical-forms"
 import {
   fetchPrescriptionDetail,
@@ -36,7 +35,12 @@ import { fetchMedicalLeaves } from "../../lib/medical-leaves"
 import type { Encounter, EncounterDetail, PatientFull, PlanItem } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { RecetasPanel } from "./clinical-panels"
-import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import {
+  ConsentLinkActions,
+  ConsentPhoneDrawer,
+  consentLinkWords,
+  SendToSignDialog,
+} from "./consent-link-actions"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { DocumentOpenButton } from "./document-open-button"
@@ -146,9 +150,13 @@ export function useEncounterDocuments(
     queryFn: () => fetchMedicalLeaves(patientId),
     enabled: canRead && productUi().documents.medicalLeave,
   })
+  // Los de esta atención y los de los tratamientos que se hacen hoy, aunque se prepararan en otra:
+  // el pendiente va con el tratamiento (consentimientos, 10 nov).
+  const neededDocs = new Set((needs.data?.data ?? []).flatMap((need) => (need.documentId ? [need.documentId] : [])))
   const ownConsents = (consents.data?.data ?? []).filter(
     (doc) =>
-      doc.encounterId === encounterId && (doc.status === "pendiente" || doc.status === "firmado"),
+      (doc.encounterId === encounterId || neededDocs.has(doc.id)) &&
+      (doc.status === "pendiente" || doc.status === "firmado"),
   )
   // El PDF de un consentimiento firmado y la foto de una hoja en papel ya están
   // en su consentimiento: no salen dos veces.
@@ -251,6 +259,8 @@ export function EncounterDocumentsBlock({
   const [creating, setCreating] = useState<NewDocumentKind | null>(null)
   const [signing, setSigning] = useState<ConsentDocument[] | null>(null)
   const [paper, setPaper] = useState<ConsentDocument | null>(null)
+  const [sendingDoc, setSendingDoc] = useState<ConsentDocument | null>(null)
+  const [phoneDoc, setPhoneDoc] = useState<ConsentDocument | null>(null)
   const [viewing, setViewing] = useState<ViewedPaper | null>(null)
   const [openForm, setOpenForm] = useState<string | null>(null)
   const [paperFor, setPaperFor] = useState<ConsentNeed | null>(null)
@@ -477,21 +487,16 @@ export function EncounterDocumentsBlock({
                           key: `link-${doc.id}`,
                           label: `Enviar para firmar desde su teléfono: ${doc.titleSnapshot}`,
                           disabled,
-                          onSelect: () =>
-                            void sendConsentByLink(doc.id, crypto.randomUUID())
-                              .then(() => {
-                                toast.success("Se lo enviamos: aparece en «Su enlace»")
-                                return refresh()
-                              })
-                              .catch((error: unknown) =>
-                                toast.error(
-                                  error instanceof ApiError
-                                    ? (error.shape.message ?? "No se pudo enviar")
-                                    : "No se pudo enviar",
-                                ),
-                              ),
+                          // Con su confirmación, como en la ficha: dice qué le llega.
+                          onSelect: () => setSendingDoc(doc),
                         },
                       ]),
+                  {
+                    key: `phone-${doc.id}`,
+                    label: `Mostrar el código para firmarlo en su teléfono: ${doc.titleSnapshot}`,
+                    disabled,
+                    onSelect: () => setPhoneDoc(doc),
+                  },
                   {
                     key: `paper-${doc.id}`,
                     label: `Firmado en papel: ${doc.titleSnapshot}`,
@@ -766,6 +771,8 @@ export function EncounterDocumentsBlock({
         onClose={() => setSigning(null)}
         onSigned={refresh}
       />
+      <SendToSignDialog document={sendingDoc} onClose={() => setSendingDoc(null)} onSent={refresh} />
+      <ConsentPhoneDrawer document={phoneDoc} onClose={() => setPhoneDoc(null)} onShown={refresh} />
       <PaperSignDrawer
         open={paper !== null}
         document={paper}

@@ -11,6 +11,16 @@ import type { EncounterDiagnosis } from "./encounters"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
+/** El consentimiento de un tratamiento: falta, preparado sin firmar, firmado por enlace sin confirmar o firmado. */
+export type TreatmentConsentState = "falta" | "sin_firmar" | "por_confirmar" | "firmado"
+
+/** «Falta su consentimiento», para decirlo junto al tratamiento; nada si está firmado. */
+export function treatmentConsentWords(state: TreatmentConsentState | null | undefined): string | null {
+  if (state === "falta" || state === "sin_firmar") return "Falta firmar su consentimiento antes de hacerlo"
+  if (state === "por_confirmar") return "Firmó su consentimiento en su enlace: confírmalo antes de hacerlo"
+  return null
+}
+
 export interface Patient {
   id: string
   organizationId?: string
@@ -527,6 +537,8 @@ export interface PlanItem {
   diagnosisName?: string | null
   /** Va después de otro tratamiento de la misma pieza (la corona tras la endodoncia): lo dice el servidor. */
   waitsFor?: { id: string; title: string } | null
+  /** Su consentimiento, si su servicio lo pide (consentimientos, 10 nov). */
+  consent?: TreatmentConsentState | null
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
@@ -650,6 +662,8 @@ export interface VisitTreatment {
   after?: { title: string; today: boolean } | null
   /** Su servicio pide esperar entre sesiones y aún no se cumple: `sinceDays` desde la última (0 = hoy). */
   wait?: { days: number; sinceDays: number; from: string } | null
+  /** Su consentimiento, si su servicio lo pide; va con el tratamiento, aunque se preparara en otra atención. */
+  consent?: TreatmentConsentState | null
 }
 
 /** Un control con su ventana abierta: esta visita lo cumple si se marca. */

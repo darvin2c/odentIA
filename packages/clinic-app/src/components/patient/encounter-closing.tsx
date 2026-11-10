@@ -639,12 +639,14 @@ export function ClosingNextVisit({
 }
 
 /** Las constancias de un toque para seguir sin el consentimiento de lo que se hizo hoy. */
-const SKIP_REASONS = ["Urgencia", "Lo firmó en papel"] as const
+const SKIP_REASONS = ["Urgencia"] as const
 
 /**
  * Seguir sin el consentimiento de algo que se hizo hoy (producción, 10 nov): una constancia de un
- * toque («Urgencia», «Lo firmó en papel») u «Otro motivo» con su texto, no un campo vacío en rojo.
- * Lo indicado para otro día nunca llega aquí: se firma antes de hacerlo.
+ * toque («Urgencia») u «Otro motivo» con su texto, no un campo vacío en rojo. Lo firmado en papel
+ * no es una palabra: se sube la hoja con «Firmado en papel» en su fila. Lo indicado para otro día
+ * nunca llega aquí: se firma antes de hacerlo. La constancia queda en la atención para siempre; una
+ * firma posterior se agrega con su fecha.
  */
 function ConsentSkipReason({ form, disabled }: { form: ClosingForm; disabled: boolean }): React.JSX.Element {
   const ids = useId()
@@ -1098,6 +1100,7 @@ export function EncounterClosingDialog({
   canSign,
   blockedReason,
   onSignNow,
+  onPaper,
   onClose,
   signatureHint = null,
   registration = null,
@@ -1139,6 +1142,8 @@ export function EncounterClosingDialog({
   /** Por qué aún no se puede firmar (sin guardar, sin conexión…). */
   blockedReason: string | null
   onSignNow: (need: ConsentNeed) => void
+  /** «Firmado en papel»: sube la foto de la hoja firmada (la constancia lleva la hoja). */
+  onPaper?: (need: ConsentNeed) => void
   onClose: () => void
   /** Su firma dibujada: si la tiene y cómo agregarla o cambiarla. */
   signatureHint?: React.ReactNode
@@ -1261,9 +1266,17 @@ export function EncounterClosingDialog({
                       <span className="text-xs text-muted-foreground">{line.detail}</span>
                     </div>
                     {need.status !== "sin_publicar" ? (
-                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
-                        {need.personSigned ? "Confirmar" : "Firmar ahora"}
-                      </Button>
+                      <span className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
+                          {need.personSigned ? "Confirmar" : "Firmar ahora"}
+                        </Button>
+                        {/* Firmado en papel: con la foto de la hoja, no una palabra (consentimientos, 10 nov). */}
+                        {onPaper && need.documentId && !need.personSigned ? (
+                          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => onPaper(need)}>
+                            Firmado en papel
+                          </Button>
+                        ) : null}
+                      </span>
                     ) : null}
                   </div>
                 )

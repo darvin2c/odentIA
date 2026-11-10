@@ -27,7 +27,7 @@ import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { formatDateTime, NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
-import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
+import { type PlanItem, planStatusLabel, treatmentConsentWords, type TreatmentJourneySummary } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { useBudgetFormat } from "./plan/budget-parts"
 import {
@@ -280,6 +280,8 @@ function PlanPhasesGroup({
                                 : !closed && next
                                   ? NEXT_ACTION_LABELS[next]
                                   : null,
+                            // El consentimiento va con el tratamiento: lo que falta firmar se ve aquí también.
+                            !closed ? treatmentConsentWords(item.consent) : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
