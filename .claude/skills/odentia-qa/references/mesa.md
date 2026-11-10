@@ -2,9 +2,9 @@
 
 La mesa es la forma de convocar a las voces de `voces.md` y de conducirlas. Tiene un moderador, fases con una salida cada una y un acta que usan las etapas que siguen. Sirve para tres cosas:
 
-- **Sobre un área**, sin ningún cambio: «lanza la mesa sobre Cobros», o la ronda periódica. Encuentra problemas por su cuenta. Es la ronda de `SKILL.md`: usa la primera vuelta de este archivo y después confirma e informa como dicen sus apartados 4 a 6.
+- **Sobre un área**, sin ningún cambio: «lanza la mesa sobre Cobros», o la ronda periódica. Encuentra problemas por su cuenta. Es la ronda de `SKILL.md`: usa la primera vuelta de este archivo, confirma, y sigue con la propuesta, la segunda vuelta y el acta de cada entrega, hasta dejar todo listo para programar (su apartado 5).
 - **Sobre un cambio**, dentro de `odentia-entrega` (su etapa 1): las dos vueltas y el acta.
-- **Antes de entregar** (apartado 7 de `SKILL.md`): las voces recorren los criterios del acta sobre el cambio ya hecho.
+- **Antes de entregar** (apartado 8 de `SKILL.md`): las voces recorren los criterios del acta sobre el cambio ya hecho.
 
 Una voz simulada no es una clínica real. La mesa encuentra a tiempo lo que sería caro corregir después; no aprueba, y lo que diga nunca se presenta como evidencia de que una clínica lo encuentre fácil. Tampoco anticipa los errores del código que todavía no existe: esos los encuentra la QA antes de entregar. De la mesa se espera lo que es de diseño: un concepto que sobra, un rol sin permiso, un dato que no llega, el caso de otro día.
 
@@ -107,7 +107,7 @@ Sin ninguna solución a la vista. Entran quienes viven la tarea: el novato en el
 
 Sale de aquí dónde duele de verdad hoy y los casos de cada voz. El moderador los junta en el **banco de casos** (C1, C2…), sin repetir y con el resultado que la persona espera en cada uno.
 
-Sobre un área, la mesa termina aquí y sigue la confirmación de `SKILL.md`.
+Sobre un área, aquí sigue la confirmación de `SKILL.md` (su apartado 4). Después la mesa continúa con lo confirmado: una propuesta, una segunda vuelta y un acta por cada entrega. Una ronda que se queda en la lista de problemas no dejó nada listo.
 
 ### 2. La propuesta
 
@@ -196,6 +196,6 @@ Una voz que empieza de cero cada vez vuelve a encontrar lo mismo y vuelve a deja
 - **También se poda.** Una comprobación de algo que ya no existe se quita, y dos que dicen lo mismo se unen. Un catálogo que solo crece se deja de leer entero.
 - **Se escribe leyendo el código y la pantalla**, no un ADR ni la memoria: lo que dice «Dónde» se comprueba que existe.
 - **El repositorio es público.** Un fallo de permisos, de aislamiento o de datos nunca se escribe en un catálogo, ni datos de personas.
-- **Cuándo se escribe:** en una entrega, en el mismo PR. En una ronda, queda en el informe y lo suma la entrega siguiente que toque el área, como dice el apartado 6 de `SKILL.md`.
+- **Cuándo se escribe:** en una entrega, en el mismo PR. En una ronda, queda en el informe y lo suma la entrega siguiente que toque el área, como dice el apartado 7 de `SKILL.md`.
 
 El catálogo de desarrollo no es un inventario del código: la estructura se lee del código. Guarda lo que el código no dice solo, que es lo que cada operación debe cumplir y cómo ya falló.
