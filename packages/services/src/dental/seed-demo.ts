@@ -88,22 +88,15 @@ import {
   periodontalTooth,
   planItemFinding,
 } from "@odentia/db/schema/dental"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm"
-import { opportunity } from "@odentia/db/schema/opportunities"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
-import {
-  DEMO_CBCT,
-  DEMO_IMAGES,
-  type DemoImageSource,
-  demoImage,
-  readGipl,
-} from "./demo-imaging.js"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "../agent-operations.js"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "../allergies.js"
@@ -255,6 +248,13 @@ import { librarySpecialtyIds } from "../specialties.js"
 import { createStorage } from "../storage.js"
 import { completeTask, createTask, settleTask, updateTask } from "../tasks.js"
 import { makeImageThumbnail } from "../thumbnails.js"
+import {
+  DEMO_CBCT,
+  DEMO_IMAGES,
+  type DemoImageSource,
+  demoImage,
+  readGipl,
+} from "./demo-imaging.js"
 import type { DentalFinalizeParts } from "./hooks.js"
 import {
   addOdontogramEntries,
@@ -2149,7 +2149,12 @@ const seedOffers: Array<{
   /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
   leavesFinding?: { condition: string; variant?: string }
   /** En Perú cada servicio lleva su código CPMS, también el propio (ADR 0069). */
-  officialCode: string
+  officialCode?: string
+  /**
+   * De la biblioteca: toma el código y la anatomía de su tratamiento (no lleva
+   * código propio). Así la atención avisa si se indica en otro grupo de piezas.
+   */
+  templateKey?: string
 }> = [
   {
     code: "EVALUACION",
@@ -2171,10 +2176,12 @@ const seedOffers: Array<{
     durationMin: 45,
     priceDisclosure: "exacto",
   },
+  // De la biblioteca, como en una clínica real: la anterior y la posterior son hermanas, y la
+  // anterior indicada en la 46 avisa y ofrece la posterior (entrega 8 de la atención).
   {
     code: "ENDODONCIA",
-    officialCode: "D3310",
-    name: "Endodoncia unirradicular",
+    templateKey: "endodoncia-anterior-vital",
+    name: "Endodoncia anterior vital",
     specialty: "endodoncia",
     scope: "tooth",
     priceCents: 45000,
@@ -2185,7 +2192,7 @@ const seedOffers: Array<{
   // Un molar no es unirradicular: la endodoncia de la 46 es esta.
   {
     code: "ENDODONCIA_POSTERIOR",
-    officialCode: "D3330",
+    templateKey: "endodoncia-posterior-vital",
     name: "Endodoncia posterior vital",
     specialty: "endodoncia",
     scope: "tooth",
@@ -2258,11 +2265,28 @@ const seedOffers: Array<{
 const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_KIND_KEYS)
 const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_KIND_KEYS)
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
-for (const { specialty, ...offer } of seedOffers) {
+const offerTemplates = new Map(
+  (
+    await db
+      .select({ id: treatmentTemplate.id, key: treatmentTemplate.key })
+      .from(treatmentTemplate)
+      .where(
+        inArray(
+          treatmentTemplate.key,
+          seedOffers.flatMap((offer) => (offer.templateKey ? [offer.templateKey] : [])),
+        ),
+      )
+  ).map((row) => [row.key, row.id]),
+)
+for (const { specialty, templateKey, ...offer } of seedOffers) {
+  const templateId = templateKey ? offerTemplates.get(templateKey) : undefined
+  if (templateKey && !templateId)
+    throw new Error(`Falta ${templateKey} en la biblioteca: ejecuta seed:procedures`)
+  const input = templateId ? { ...offer, templateId } : offer
   catalogA.push(
-    await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }),
+    await createService(db, ORG_A, ANA_ID, { ...input, specialtyId: specialtiesA.get(specialty) }),
   )
-  await createService(db, ORG_B, CORA_ID, { ...offer, specialtyId: specialtiesB.get(specialty) })
+  await createService(db, ORG_B, CORA_ID, { ...input, specialtyId: specialtiesB.get(specialty) })
 }
 // Implantología sin nadie que la atienda (decisión 2 de la fase 4): la agenda
 // ofrece el implante a cualquiera y Especialidades lo avisa con «Elegir quién atiende».
@@ -4137,7 +4161,7 @@ const domainSeed = {
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
 await db.transaction((tx) => seedAvailability(tx, domainSeed))
 // La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
-// (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
+// (fase 4, tablero 2): «Endodoncia anterior vital» se ofrece solo en sus horas.
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: miraflores.id,
   professionalUserId: ROJAS_ID,

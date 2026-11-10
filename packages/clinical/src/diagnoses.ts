@@ -246,6 +246,58 @@ export function findingDiagnosisCodes(system: DiagnosisSystemKey): string[] {
   ]
 }
 
+/** Un diagnóstico pulpar que se ofrece, sin marcar, junto a una caries profunda. */
+export interface PulpDiagnosisChoice {
+  label: string
+  code: string
+  /** El título oficial en la lista («Necrosis de la pulpa»). */
+  title: string
+}
+
+/**
+ * Junto a la caries con compromiso pulpar (CDP), lo que se diagnostica por
+ * pruebas de vitalidad y síntomas, no por la profundidad: el odontograma
+ * propone la caries y estos quedan a un toque, sin marcar (segundo repaso del
+ * 9 nov, N8). La periodontitis apical se ofrece aguda y crónica: ninguna de
+ * las dos listas tiene un código único para ella sin elegir (la CIE-11 la
+ * agrupa en DA09.7, que no se codifica sin su subcódigo). Códigos y títulos de
+ * la CIE-10 del MINSA (2024-07) y de la CIE-11 MMS en español (2026-01),
+ * revisados contra los archivos oficiales de `@odentia/db`; la CIE-10 de la
+ * OMS trae los mismos. La CIE-10-ES los divide más (K04.01, K04.02…): sin
+ * atajos, se busca en la lista.
+ */
+const PULP_DIAGNOSES: Partial<Record<DiagnosisSystemKey, PulpDiagnosisChoice[]>> = {
+  "ICD-10": [
+    { label: "Pulpitis", code: "K04.0", title: "Pulpitis" },
+    { label: "Necrosis pulpar", code: "K04.1", title: "Necrosis de la pulpa" },
+    {
+      label: "Periodontitis apical aguda",
+      code: "K04.4",
+      title: "Periodontitis apical aguda originada en la pulpa",
+    },
+    { label: "Periodontitis apical crónica", code: "K04.5", title: "Periodontitis apical crónica" },
+  ],
+  "ICD-11": [
+    { label: "Pulpitis", code: "DA09.0", title: "Pulpitis" },
+    { label: "Necrosis pulpar", code: "DA09.1", title: "Necrosis de la pulpa" },
+    {
+      label: "Periodontitis apical aguda",
+      code: "DA09.70",
+      title: "Periodontitis apical aguda originada en la pulpa",
+    },
+    {
+      label: "Periodontitis apical crónica",
+      code: "DA09.71",
+      title: "Periodontitis apical crónica",
+    },
+  ],
+}
+
+/** Los diagnósticos pulpares de esa lista, o ninguno si no tiene atajos. */
+export function pulpDiagnosisChoices(system: DiagnosisSystemKey): readonly PulpDiagnosisChoice[] {
+  return PULP_DIAGNOSES[system === "ICD-10-PE" ? "ICD-10" : system] ?? []
+}
+
 export function findingDiagnosisCode(
   system: DiagnosisSystemKey,
   condition: string,

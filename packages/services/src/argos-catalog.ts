@@ -286,7 +286,7 @@ const WITH_OTHER_CURRENCY: Readonly<Record<string, { columns: string; about?: st
  */
 const TRAILING_COLUMNS: Partial<Record<string, string>> = {
   lineas_presupuesto:
-    "cita_lo_lleva (bool: una cita por venir lleva ese tratamiento; lo aceptado sin cita es decision 'aceptado', estado_presupuesto 'aceptado'|'parcial', estado_tratamiento 'pendiente'|'programado'|'en_curso' y not cita_lo_lleva, de un paciente no archivado, aunque tenga otra cita)",
+    "cita_lo_lleva (bool: una cita por venir lleva ese tratamiento; lo aceptado sin cita es decision 'aceptado', estado_presupuesto 'aceptado'|'parcial', estado_tratamiento 'pendiente'|'programado'|'en_curso' y not cita_lo_lleva, de un paciente no archivado, aunque tenga otra cita, y not espera_a_otro_con_cita), espera_a_otro_con_cita (bool: va después de otro tratamiento aceptado y sin terminar del mismo sitio, de una fase anterior del plan, que ya tiene su cita por venir; mientras tanto no cuenta como lo aceptado sin cita)",
 }
 
 export const ARGOS_CATALOG: readonly ArgosView[] = ONE_CURRENCY_CATALOG.map((base) => {

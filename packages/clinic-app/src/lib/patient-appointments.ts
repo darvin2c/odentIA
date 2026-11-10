@@ -129,9 +129,25 @@ export function appointmentLine(
   return [
     here ? `Hoy ${hourLabel(dayMinutesIn(appointment.startsAt, timeZone))}` : appointmentWhen(appointment),
     here ? visitLabel(appointment, { now: now.toISOString(), timeZone }) : null,
-    appointment.serviceName ?? appointment.reason,
+    appointmentWhat(appointment),
     appointment.professionalName,
   ]
     .filter(Boolean)
     .join(" · ")
+}
+
+/**
+ * A qué viene: su servicio y lo que se le sumó después («Sumar a su cita», repaso del 9 nov: la
+ * cabecera solo decía el servicio). «Corona metal-cerámica y Control» o «… y 2 más».
+ */
+export function appointmentWhat(
+  appointment: Pick<AgendaAppointment, "serviceName" | "reason" | "sessions">,
+): string | null {
+  const main = appointment.serviceName ?? appointment.reason
+  const others = [
+    ...new Set((appointment.sessions ?? []).map((session) => session.title.trim())),
+  ].filter((title) => !main || title.toLowerCase() !== main.trim().toLowerCase())
+  const all = [main, ...others].filter((title): title is string => !!title)
+  if (all.length <= 2) return all.join(" y ") || null
+  return `${all[0]} y ${all.length - 1} más`
 }

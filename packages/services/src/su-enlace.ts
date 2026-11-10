@@ -43,7 +43,6 @@ import {
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName } from "./automation-routing.js"
 import {
-  PERSONAL_LINK_TTL_DAYS,
   appointmentView,
   type BookingLinkAppointment,
   type BookingLinkBranch,
@@ -56,6 +55,7 @@ import {
   issuePersonalLink,
   linkContactFirstName,
   linkExpired,
+  PERSONAL_LINK_TTL_DAYS,
   patientFirstNameOf,
   type ResolvedPersonalLink,
   requireLinkDecider,
@@ -82,9 +82,9 @@ import {
   signConsentByLink,
 } from "./clinical-forms.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
+import { createContactNote } from "./crm-workspace.js"
 import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { chartNumber } from "./document-kit.js"
-import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
@@ -111,6 +111,8 @@ import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-ques
 import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
+import { productHooks } from "./products.js"
+import { waitingItemIds } from "./to-schedule.js"
 
 /**
  * Lo que tiene pendiente cada persona en «Su enlace» (decisión 8; ADR 0037):
@@ -683,6 +685,7 @@ function fieldsFor(missing: MissingPersonDatum[]): Set<DataField> {
       allowed.add("insuranceScheme")
       allowed.add("insurerName")
       allowed.add("affiliationNumber")
+    } else if (item.key === "representativeDoc") {
     } else {
       allowed.add(item.key)
     }
@@ -1299,12 +1302,25 @@ export async function decidePersonalLinkBudget(
     )
   }
   const context = await portalBudgetContext(tx, orgId, [budgetId], true)
+  // Lo común aceptado está en cada camino: cada tratamiento una vez.
+  const accepted = result.budget.items
+    .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
+    .filter(
+      (line, index, all) =>
+        all.findIndex((other) => other.planItemId === line.planItemId) === index,
+    )
+  // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia) no se
+  // reserva junto: se ofrece cuando lo de antes termine, como en «Qué sigue» (entrega 8).
+  const waiting = await waitingItemIds(
+    tx,
+    orgId,
+    accepted.map((line) => line.planItemId),
+    (await productHooks(tx, orgId)).planPhases,
+  )
   return {
     budget: toPortalBudget(result.budget, context),
-    // Lo común aceptado está en cada camino: cada tratamiento una vez.
-    toSchedule: result.budget.items
-      .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
-      .filter((line, index, all) => all.findIndex((other) => other.planItemId === line.planItemId) === index)
+    toSchedule: accepted
+      .filter((line) => !waiting.has(line.planItemId))
       .map((line) => ({ planItemId: line.planItemId, title: line.title })),
   }
 }

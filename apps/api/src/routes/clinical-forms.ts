@@ -10,7 +10,6 @@ import {
   clinicalOrderPatientId,
   confirmLinkSignedConsent,
   consentDocumentPatientId,
-  markConsentSentByLink,
   sendConsentToSign,
   createClinicalOrder,
   createConsentDocument,
@@ -20,29 +19,22 @@ import {
   createSpecialty,
   discardFormResponse,
   finalizeFormResponse,
+  findOrgCountry,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
-  keepIssuedPaper,
   getConsentPrint,
   getConsentSheetFrame,
   getEncounterConsentNeeds,
   getOrderPrint,
   getOwnProfessionalProfile,
   getProfessionalProfile,
+  keepIssuedPaper,
   listClinicalOrders,
   listConsentDocuments,
   listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
   listConsentTemplates,
-  findOrgCountry,
-  loadDocumentClinic,
-  markConsentTemplateReviewed,
-  parseConsentDraft,
-  renderConsentPreviewPdf,
-  saveConsentTemplate,
-  ServiceError,
-  setConsentTemplateActive,
   listFormAddenda,
   listFormResponses,
   listFormTemplates,
@@ -51,10 +43,18 @@ import {
   listSpecialties,
   listSpecialtiesOverview,
   listSpecialtyProfessionals,
+  loadDocumentClinic,
+  markConsentSentByLink,
+  markConsentTemplateReviewed,
+  parseConsentDraft,
   prepareEncounterConsents,
   publishConsentTemplate,
   publishFormTemplate,
+  renderConsentPreviewPdf,
   revokeConsentDocument,
+  ServiceError,
+  saveConsentTemplate,
+  setConsentTemplateActive,
   setConsentTemplateServices,
   setProfessionalProfile,
   setProfessionalSpecialties,
@@ -1043,9 +1043,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
         signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
-      // el PDF se reintenta con POST …/pdf (no se repite la firma).
+      // el PDF se reintenta con POST …/pdf (no se repite la firma). El aviso del
+      // documento del representante (si no quedó en su ficha) va con la respuesta.
       try {
-        return await generateConsentPdf(orgId, userId, signed.id)
+        const withPdf = await generateConsentPdf(orgId, userId, signed.id)
+        return signed.signerDocNotice
+          ? { ...withPdf, signerDocNotice: signed.signerDocNotice }
+          : withPdf
       } catch (e) {
         console.error("consent pdf", e)
         return signed

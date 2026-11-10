@@ -242,10 +242,15 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
       }
     case "possibleDuplicate":
       if (row.source === "registro") {
+        // Lo que escribió y espera: cuántos datos son distintos y por qué se parece (por el QR o por el enlace, da igual).
+        const differences =
+          row.differences === undefined ? "" : row.differences === 0 ? " · escribió lo mismo" : ` · ${row.differences} ${row.differences === 1 ? "dato distinto" : "datos distintos"}`
         return {
           title: row.patientName,
-          ask: row.held ? "Se registró por el código QR: ¿es la misma persona?" : "Alguien se registró con su documento: revisa si es la misma persona",
-          detail: `${row.held ? "Desde el código QR" : "Desde el registro en línea"} ${ago(row.createdAt)}`,
+          ask: row.held ? `Se registró en línea: ¿es la misma persona?${differences}` : "Alguien se registró con su documento: revisa si es la misma persona",
+          detail: row.held && row.match
+            ? `${row.match === "documento" ? "Mismo documento" : "Mismo celular"} · ${ago(row.createdAt)}`
+            : `Desde el registro en línea ${ago(row.createdAt)}`,
           action: "Revisar",
         }
       }

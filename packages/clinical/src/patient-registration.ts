@@ -1,5 +1,5 @@
-import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { z } from "zod"
+import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { CLINICAL_PRODUCTS, type ClinicalProduct } from "./products.js"
 import {
   type ClinicalCountryProfile,
@@ -14,8 +14,8 @@ import {
 import {
   DOC_TYPE_LABELS,
   EDUCATION_LEVELS,
-  identityDocumentError,
   ISO_COUNTRY_RE,
+  identityDocumentError,
   KINSHIP,
   MARITAL_STATUSES,
   normalizePhone,
@@ -438,13 +438,25 @@ export function contactCoveredByRepresentative(key: RegistrationFieldKey, repres
   return representativeContact && (key === "phone" || key === "email")
 }
 
-/** Un dato que le falta a la persona para atenderla, con su nombre en pantalla. */
+/**
+ * Un dato que le falta a la persona para atenderla, con su nombre en pantalla.
+ * `representativeDoc` no es de ella: un menor cuyo representante legal no tiene
+ * documento (lo pide la firma de su consentimiento). Solo lo ve el equipo: su
+ * enlace no lo pide (`getStaffMissingData` en los servicios).
+ */
 export interface MissingPersonDatum {
   key:
     | "givenNames" | "familyName" | "birthDate" | "phone" | "docType" | "docNumber"
     | "sex" | "nationality" | "birthPlace" | "email" | "address" | "emergencyContactName" | "emergencyContactPhone"
     | "insuranceType"
+    | "representativeDoc"
   label: string
+}
+
+/** Lo que falta de su representante legal, dicho como un dato más de «Faltan datos». */
+export const REPRESENTATIVE_DOC_GAP: MissingPersonDatum = {
+  key: "representativeDoc",
+  label: "Documento de su representante",
 }
 
 /**

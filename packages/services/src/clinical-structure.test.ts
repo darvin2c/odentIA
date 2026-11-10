@@ -1,5 +1,7 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { sql } from "drizzle-orm"
+import { contact } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { and, eq, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { beforeAll, expect, it } from "vitest"
@@ -31,6 +33,7 @@ import {
   voidEncounterDiagnosis,
 } from "./encounter-diagnoses.js"
 import { createEncounter } from "./encounters.js"
+import { getPatientMissingData, getStaffMissingData } from "./patient-registration.js"
 import { createPatient, getPatient } from "./patients.js"
 import { createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
@@ -252,6 +255,11 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
   await expect(
     sign(first.id, mother.id, "representante", { signatureData: null }),
   ).rejects.toMatchObject({ status: 400 })
+  // Se registró sin el documento de su madre: «Faltan datos» lo dice al equipo; su enlace no lo pide.
+  const keys = async (read: typeof getStaffMissingData) =>
+    (await run((tx) => read(tx, "org_a", child.id))).map((datum) => datum.key)
+  expect(await keys(getStaffMissingData)).toContain("representativeDoc")
+  expect(await keys(getPatientMissingData)).not.toContain("representativeDoc")
   // Con facultad vigente firma; el nombre sale de su registro, y queda quien informó.
   const signed = await sign(first.id, mother.id, "representante", {
     witness: { name: "Luis Testigo", doc: "DNI 11223344" },
@@ -266,6 +274,32 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     comprehensionConfirmed: true,
     witnessName: "Luis Testigo",
   })
+  // El documento escrito al firmar queda en su persona (la misma de todas partes), con quién lo
+  // escribió, y deja de faltar (pendiente del PR 558).
+  const motherDoc = () =>
+    ownerDb
+      .select({ docType: contact.docType, docNumber: contact.docNumber })
+      .from(contact)
+      .where(eq(contact.id, mother.id))
+  expect(await motherDoc()).toEqual([{ docType: "DNI", docNumber: "44556677" }])
+  const [trace] = await ownerDb
+    .select()
+    .from(auditEvent)
+    .where(and(eq(auditEvent.entityId, mother.id), eq(auditEvent.action, "contact.updated")))
+  expect(trace).toMatchObject({
+    actorUserId: ACTOR,
+    metadata: { fields: ["docType", "docNumber"] },
+  })
+  expect(signed.signerDocNotice).toBeUndefined()
+  expect(await keys(getStaffMissingData)).not.toContain("representativeDoc")
+  // Si su ficha ya tiene otro, no se cambia: firma con el suyo y se avisa.
+  const other = await consent()
+  const withOther = await sign(other.id, mother.id, "representante", { signerDoc: "DNI 99887766" })
+  expect(withOther).toMatchObject({ status: "firmado", signerDoc: "DNI 44556677" })
+  expect(withOther.signerDocNotice).toBe(
+    "La ficha de Marta Tutora ya tiene DNI 44556677: firmó con ese y el que escribiste no se guardó.",
+  )
+  expect(await motherDoc()).toEqual([{ docType: "DNI", docNumber: "44556677" }])
   // La lista dice que está firmado sin traer las firmas dibujadas; el documento sí las tiene.
   const listed = await run((tx) => listConsentDocuments(tx, "org_a", { patientId: child.id }))
   expect(listed.find((doc) => doc.id === first.id)).toMatchObject({ status: "firmado", signatureData: null, professionalSignature: null })

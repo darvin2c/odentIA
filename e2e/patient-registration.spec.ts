@@ -233,7 +233,7 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await acceptAndSubmit(anon)
 
     await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
-    await expect(anon.getByText(new RegExp(`${org.name} ya tiene tus datos`))).toBeVisible()
+    await expect(anon.getByText(new RegExp(`${org.name} recibió tus datos`))).toBeVisible()
     // Éxito sin sesión: no expone ficha, número clínico ni edición.
     await expect(anon).toHaveURL(/\/registro/)
     await expect(anon.locator('a[href*="/patients/"]')).toHaveCount(0)
@@ -321,6 +321,27 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   ])
   const stillUntouched = await call<{ patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
   expect(stillUntouched.patients).toEqual([])
+
+  // Recepción lo revisa en Inicio: cada dato distinto con lo de antes; quién es viene sin marcar.
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const waiting = page.getByRole("region", { name: "Te espera" })
+  await expect(waiting.getByText(/Se registró en línea: ¿es la misma persona\? · \d+ datos? distintos?/)).toBeVisible()
+  await expect(waiting.getByText(/Mismo celular/)).toBeVisible()
+  await waiting.getByRole("button", { name: "Revisar" }).first().click()
+  // En pantalla ancha se abre en la columna lateral; si no cabe, en cajón.
+  const review = page.getByRole("complementary", { name: "Panel lateral" }).or(page.getByRole("dialog", { name: "¿Es la misma persona?" }))
+  await expect(review.getByText(/márcalos solo si comprobaste que es la misma persona/)).toBeVisible()
+  const names = review.getByRole("checkbox", { name: /^Nombres y apellidos/ })
+  await expect(names).not.toBeChecked()
+  await expect(review.getByText("Antes: Contacto Previo")).toBeVisible()
+  await expect(review.getByRole("button", { name: "Sí, registrarla sin cambios" })).toBeVisible()
+  await names.click()
+  await review.getByRole("button", { name: "Sí, registrarla con 1 cambio" }).click()
+  await expect(page.getByText(`Listo: ${heldName} ya es paciente, con 1 cambio.`)).toBeVisible()
+  await expect(review).toBeHidden()
+  const joined = await call<{ contact: { displayName: string }; patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
+  expect(joined.patients).toHaveLength(1)
+  expect(joined.contact.displayName).toBe(heldName)
 })
 
 test("registro público QR en móvil: flujo completo en 390px sin cuenta", async ({
@@ -346,7 +367,7 @@ test("registro público QR en móvil: flujo completo en 390px sin cuenta", async
     await acceptAndSubmit(anon)
 
     await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
-    await expect(anon.getByText(new RegExp(`${org.name} ya tiene tus datos`))).toBeVisible()
+    await expect(anon.getByText(new RegExp(`${org.name} recibió tus datos`))).toBeVisible()
     // En el celular nada se sale de la pantalla.
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await expect(anon).toHaveURL(/\/registro/)

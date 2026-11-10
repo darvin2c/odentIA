@@ -130,6 +130,8 @@ export interface WhenState {
   seedNote: SeedNote | null
   /** «09:00 a 13:00» por cada turno de quien se eligió ese día. */
   hoursThatDay: string[]
+  /** Quien se mira (uno solo) no atiende ese día en la sede: su nombre; si no, null. */
+  offDuty: string | null
   loading: boolean
   failed: boolean
   ready: boolean
@@ -385,6 +387,7 @@ export function useWhen(input: WhenInput): WhenState {
               : []
           })
       : [],
+    offDuty: offDutyOn(lanes, open, date, timeZone),
     loading: availabilityQuery.isLoading || availabilityQuery.isPlaceholderData,
     failed: availabilityQuery.isError,
     ready: availability !== undefined,
@@ -425,6 +428,39 @@ export function seedNoteOf(
   if (!listed) return seedLabel ? { kind: "noSchedule", label: seedLabel, specialty } : null
   if (!listed.outsideService || !specialty) return null
   return { kind: "otherSpecialty", label: listed.label, specialty }
+}
+
+/**
+ * Quien se mira, si es uno solo y no tiene horario ese día en la sede: su
+ * nombre. Con «Cualquiera» (varias columnas), o si atiende ese día, null.
+ */
+export function offDutyOn(
+  lanes: ScheduleColumn[],
+  open: ScheduleAvailability[],
+  date: string,
+  timeZone: string,
+): string | null {
+  if (lanes.length !== 1) return null
+  const [only] = lanes
+  if (!only) return null
+  const works = open.some(
+    (item) =>
+      item.columnId === only.id && dayRangeOf(item.start, item.end, date, timeZone) !== null,
+  )
+  return works ? null : only.label
+}
+
+/**
+ * Lo que se dice de un día sin nada elegido ni libre: un solo mensaje. Si quien
+ * se eligió no atiende ese día, se puede reservar igual tocando una hora (queda
+ * fuera de su horario); «No queda nada libre» es solo para quien atiende y lo
+ * tiene todo ocupado (QA del 9 nov: salían los dos a la vez).
+ */
+export function emptyDaySaid(options: { moving: boolean; offDuty: string | null }): string {
+  if (options.moving) return "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
+  if (options.offDuty)
+    return `${options.offDuty} no atiende este día en esta sede. Toca una hora para reservar igual, o elige a otro profesional.`
+  return "No queda nada libre este día. Prueba otro día u otro profesional."
 }
 
 /** Lo que se le dice al servidor de una excepción ya avisada: solo lo que se avisó. */
@@ -569,16 +605,17 @@ function SeedNoteLine({ when }: { when: WhenState }) {
   const names = attending.map((item) => item.label)
   const who = names.length > 1 ? `la atienden ${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}` : `la atiende ${names[0]}`
   // Dice con quién queda la cita y por qué se avisa, sin sonar a error: quien atendió ya hizo la sesión anterior.
+  // Sin horario en la sede, eso lo dice el día («no atiende este día…»): aquí no se repite (QA del 9 nov).
   const said =
     note.kind === "noSchedule"
-      ? `${note.label} no tiene horario en esta sede: toca una hora y la cita queda con ${shortName(note.label)}, fuera de su horario.`
+      ? ""
       : `La cita queda con ${note.label}, aunque no figura en ${note.specialty?.name} en esta sede.`
+  const others =
+    note.specialty && names.length > 0 ? `En esta sede, ${note.specialty.name} ${who}.` : ""
+  if (!said && !others) return null
   return (
     <div role="status" className="grid gap-1 text-sm text-muted-foreground">
-      <p>
-        {said}
-        {note.specialty && names.length > 0 ? ` En esta sede, ${note.specialty.name} ${who}.` : ""}
-      </p>
+      <p>{[said, others].filter(Boolean).join(" ")}</p>
       {only && attending.length === 1 ? (
         <Button
           type="button"
@@ -687,11 +724,10 @@ function WhenSlot({ when }: { when: WhenState }) {
         </div>
       ) : when.loading ? (
         <DataRefreshMarker message="Buscando horas libres…" />
-      ) : (
+      ) : when.team.length === 0 && when.ready ? null : (
+        // Sin nadie con horario en la sede, eso ya se dijo arriba: un solo mensaje (QA antes de entregar).
         <p className="text-sm text-muted-foreground">
-          {moving
-            ? "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
-            : "No queda nada libre este día. Prueba otro día u otro profesional."}
+          {emptyDaySaid({ moving, offDuty: when.offDuty })}
         </p>
       )}
       {/* Tras enviar, lo que impide reservar o mover se dice aquí una sola vez, unido a las horas. */}

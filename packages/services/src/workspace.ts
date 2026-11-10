@@ -7,42 +7,52 @@ import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { countOverdueControls, getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { countOpenHandoffs, type HandoffScope, listHandoffs, openHandoffPeopleSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
-import { checkEncounterClosing } from "./encounters.js"
-import { alsoAuditWords, AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent, leadAuditCount, leadAuditIndex } from "./audit-words.js"
+import {
+  AUDIT_AREA_LABELS,
+  AUDIT_AREAS,
+  type AuditArea,
+  alsoAuditWords,
+  auditSubjectsOf,
+  describeAuditEvent,
+  leadAuditCount,
+  leadAuditIndex,
+} from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
+import { checkEncounterClosing } from "./encounters.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
+import { windowOpen } from "./message-window.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { registrationHoldDifferences } from "./patient-registration.js"
+import { productDictation, productHooks } from "./products.js"
 import { upcomingWork } from "./report-finance.js"
 import { patientsToSchedule } from "./to-schedule.js"
-import { windowOpen } from "./message-window.js"
 import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
   composeWaiting,
   WAITING_LIMITS,
+  type WaitingAcceptedUnbooked,
   type WaitingBudgets,
   type WaitingCase,
+  type WaitingOverdueControls,
   type WaitingPerson,
-  type WaitingStaleEncounter,
-  type WaitingStillOpen,
   type WaitingPortalReentry,
   type WaitingPossibleDuplicate,
   type WaitingRegistrationDone,
+  type WaitingStaleEncounter,
+  type WaitingStillOpen,
   type WaitingTask,
-  type WaitingUnconfirmed,
   type WaitingUnclosed,
-  type WaitingAcceptedUnbooked,
-  type WaitingOverdueControls,
+  type WaitingUnconfirmed,
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { productDictation } from "./products.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -743,7 +753,8 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string, professi
  * de la clínica (la cifra «No tienen cita» de Reportes › Finanzas).
  */
 async function acceptedUnbookedOf(tx: Db, orgId: string): Promise<WaitingAcceptedUnbooked | null> {
-  const patients = (await patientsToSchedule(tx, orgId)).length
+  const patients = (await patientsToSchedule(tx, orgId, (await productHooks(tx, orgId)).planPhases))
+    .length
   if (patients === 0) return null
   const { currency } = await getOrgLocale(tx, orgId)
   const work = await upcomingWork(tx, orgId, currency, new Date())
@@ -850,13 +861,17 @@ async function waitingSystemTasks(
     createdAt: string
     grantId: string | null
     held: boolean
+    holdMatch: "documento" | "celular" | null
+    holdAnswers: unknown
   }>(sql`
     select t.id, t.kind, t.patient_id as "patientId", pp.id as "patientPersonId", pp.display_name as "patientName",
       t.contact_id as "contactId", ct.display_name as "contactName", t.reason, ${iso(sql`t.created_at`)} as "createdAt",
       (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
         and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId",
-      exists (select 1 from registration_hold h where h.organization_id = t.organization_id and h.task_id = t.id) as held
+      hold.match is not null as held, hold.match as "holdMatch", hold.answers as "holdAnswers"
     from task t
+    left join lateral (select h.match, h.answers from registration_hold h
+      where h.organization_id = t.organization_id and h.task_id = t.id limit 1) hold on true
     left join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
     left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
@@ -869,28 +884,35 @@ async function waitingSystemTasks(
     registro_con_documento: "registro",
     confirmar_representante: "representante",
   }
+  const duplicates: WaitingPossibleDuplicate[] = []
+  for (const row of rows) {
+    const source = SOURCE[row.kind]
+    if (!source) continue
+    // En «registro» la fila es de quien tenía el documento (con ficha o sin ella).
+    const name = source === "registro" ? (row.contactName ?? row.patientName) : row.patientName
+    if (!name || (source !== "registro" && !row.patientId)) continue
+    // Lo que escribió y aún espera: por qué se parece y cuántos datos son distintos.
+    const held =
+      source === "registro" && row.held && row.contactId
+        ? {
+            match: row.holdMatch ?? undefined,
+            differences: (await registrationHoldDifferences(tx, orgId, row.contactId, row.holdAnswers)) ?? undefined,
+          }
+        : {}
+    duplicates.push({
+      id: row.id,
+      source,
+      patientId: row.patientId,
+      personId: source === "enlace" ? row.patientPersonId : row.contactId,
+      patientName: name,
+      personName: source === "representante" ? row.contactName : null,
+      detail: row.reason ?? "",
+      createdAt: row.createdAt,
+      ...(source === "registro" ? { held: row.held, ...held } : {}),
+    })
+  }
   return {
-    duplicates: rows
-      .flatMap((row): WaitingPossibleDuplicate[] => {
-        const source = SOURCE[row.kind]
-        if (!source) return []
-        // En «registro» la fila es de quien tenía el documento (con ficha o sin ella).
-        const name = source === "registro" ? (row.contactName ?? row.patientName) : row.patientName
-        if (!name || (source !== "registro" && !row.patientId)) return []
-        return [
-          {
-            id: row.id,
-            source,
-            patientId: row.patientId,
-            personId: source === "enlace" ? row.patientPersonId : row.contactId,
-            patientName: name,
-            personName: source === "representante" ? row.contactName : null,
-            detail: row.reason ?? "",
-            createdAt: row.createdAt,
-            ...(source === "registro" ? { held: row.held } : {}),
-          },
-        ]
-      }),
+    duplicates,
     reentries: rows
       .filter((row) => row.kind === "volver_al_portal" && row.patientId)
       .map((row) => ({

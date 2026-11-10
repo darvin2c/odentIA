@@ -25,6 +25,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] Un formulario clínico propio se publica en versiones y lo respondido no cambia.
 - [ ] La lista de diagnósticos de la clínica (CIE-10 del MINSA o CIE-11) se elige y no mezcla códigos.
 - [ ] Lo que se pregunta al registrar coincide con lo que la clínica pidió.
+- [ ] La lista de diagnósticos de la clínica trae los códigos que propone el odontograma (la caries con exposición pulpar, K02.5, en la CIE-10).
 
 **Ya falló:** la demo solo tenía «Endodoncia anterior vital» activa y se ofrecía para un molar.
 **Fuentes:** ADR 0039, 0069, 0093, 0117, 0141 y 0164.

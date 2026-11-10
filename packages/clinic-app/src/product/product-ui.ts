@@ -18,6 +18,7 @@ import type {
 import type { ClosingCheck } from "../lib/encounters"
 import type { PatientAreaId } from "../lib/patient-areas"
 import type { EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "../lib/patients"
+import type { ServiceToothAnatomy, ToothAnatomySibling } from "../lib/services"
 
 /**
  * Lo que cada producto aporta a las pantallas comunes (ADR 0079): la ficha, la
@@ -363,6 +364,28 @@ export interface ProductServicesUi {
   kinds: ReadonlyArray<{ key: string; name: string }>
   /** Lo que deja el servicio al completarse (odentIA: «Deja en la pieza»); null si el producto no lo registra. */
   leaves: ProductLeavesUi | null
+  /**
+   * El aviso cuando un servicio es para otro grupo de piezas (odentIA: la
+   * endodoncia anterior en la 46), con el hermano que encaja; null si el
+   * producto no tiene anatomía.
+   */
+  toothFit: ProductToothFitUi | null
+}
+
+export interface ProductToothFitUi {
+  /**
+   * Avisa, sin frenar, si el servicio no es para ese lugar; si encaja o no
+   * tiene anatomía no pinta nada. Con `onUse`, ofrece el hermano que encaja.
+   */
+  Notice(props: ToothFitNoticeProps): ReactNode
+}
+
+export interface ToothFitNoticeProps {
+  service: { name: string; toothAnatomy?: ServiceToothAnatomy | null }
+  place: number
+  /** Cambiar al hermano que encaja; sin él solo se avisa. */
+  onUse?: (sibling: ToothAnatomySibling) => void
+  pending?: boolean
 }
 
 export interface ProductLeavesUi {
@@ -575,7 +598,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
       budgetRequired: true,
       repeatingControls: false,
     },
-    services: { kinds: [], leaves: null },
+    services: { kinds: [], leaves: null, toothFit: null },
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },
     documents: {
       kind: null,

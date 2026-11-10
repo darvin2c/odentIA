@@ -183,3 +183,16 @@ it("lo que dejó el sistema va entero: no está en ninguna otra lista", () => {
   const items = ["a", "b", "c", "d", "e"].map(duplicateOf)
   expect(composeWaiting({ ...nothing, possibleDuplicates: items }).map((row) => ("id" in row ? row.id : null))).toEqual(["a", "b", "c", "d", "e"])
 })
+
+it("«¿Es la misma persona?» del registro en línea no se pliega en otra fila de esa persona: plegado no se veía", () => {
+  const unclosed: WaitingUnclosed = { id: "cita", patientId: "p", personId: "carlos", patientName: "Carlos", startsAt: "2026-10-25T15:00:00.000Z", professionalUserId: "u", professionalName: null, serviceName: null, branchName: "Centro" }
+  const review: WaitingPossibleDuplicate = { ...duplicateOf("revision"), source: "registro", personId: "carlos", patientName: "Carlos", held: true, match: "documento", differences: 2 }
+  const rows = composeWaiting({
+    ...nothing,
+    cases: [{ ...caseOf("ahora", "media"), contactId: "carlos", urgent: true }],
+    unclosed: { items: [unclosed], total: 1 },
+    possibleDuplicates: [review],
+  })
+  expect(rows.map((row) => [row.kind, row.band])).toEqual([["case", "ahora"], ["possibleDuplicate", "hoy"]])
+  expect(rows[0]?.also?.map((row) => row.kind)).toEqual(["unclosed"])
+})

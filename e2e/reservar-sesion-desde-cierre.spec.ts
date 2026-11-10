@@ -161,12 +161,10 @@ test("la sesión 2 viene con quien atendió aunque no tenga horario o no esté e
   const chips = booking.getByRole("group", { name: "Profesional" })
   const mine = chips.getByRole("button", { name: shortName(owner.user.name) })
   await expect(mine).toHaveAttribute("aria-pressed", "true")
-  const first = shortName(owner.user.name)
-  await expect(
-    booking.getByText(
-      `${owner.user.name} no tiene horario en esta sede: toca una hora y la cita queda con ${first}, fuera de su horario. En esta sede, Endodoncia la atiende Dra. Clara Viera.`,
-    ),
-  ).toBeVisible()
+  // Un solo mensaje del día (segundo repaso del 9 nov: salían dos que se contradecían) y, aparte, quién la atiende.
+  await expect(booking.getByText(/no atiende este día en esta sede. Toca una hora para reservar igual, o elige a otro profesional./)).toBeVisible()
+  await expect(booking.getByText("No queda nada libre este día. Prueba otro día u otro profesional.")).toHaveCount(0)
+  await expect(booking.getByText("En esta sede, Endodoncia la atiende Dra. Clara Viera.")).toBeVisible()
   await expect(booking.getByRole("button", { name: "Cambiar a Dra. Clara" })).toBeVisible()
   // La línea general de la especialidad no la contradice.
   await expect(booking.getByText("Solo se ofrecen las horas de quien atiende Endodoncia.")).toHaveCount(0)

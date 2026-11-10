@@ -1,4 +1,9 @@
-import { CONSENT_DECLARATION, diagnosisCodeLabel, documentText, documentTypeLabel } from "@odentia/clinical"
+import {
+  CONSENT_DECLARATION,
+  diagnosisCodeLabel,
+  documentText,
+  documentTypeLabel,
+} from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -88,7 +93,9 @@ export function useSignerChoices(patientId: string) {
         contactId: row.contact.id,
         name: row.contact.displayName,
         label: `${row.contact.displayName} · representante legal`,
-        doc: row.contact.docNumber ? documentText(row.contact.docType, row.contact.docNumber) : null,
+        doc: row.contact.docNumber
+          ? documentText(row.contact.docType, row.contact.docNumber)
+          : null,
       }),
     ),
   ]
@@ -107,12 +114,21 @@ function firstName(name: string): string {
 }
 
 /** «Firmas como Ana Torres · Cirujano dentista · COP 12345», de su perfil profesional. */
-export function useSignAs(): { text: string | null; name: string | null; detail: string | null; loading: boolean } {
-  const profile = useQuery({ queryKey: ["professional-profile", "me"], queryFn: fetchMyProfessionalProfile })
+export function useSignAs(): {
+  text: string | null
+  name: string | null
+  detail: string | null
+  loading: boolean
+} {
+  const profile = useQuery({
+    queryKey: ["professional-profile", "me"],
+    queryFn: fetchMyProfessionalProfile,
+  })
   const data = profile.data?.data
   if (!data) return { text: null, name: null, detail: null, loading: profile.isPending }
   const name = data.signatureName ?? data.accountName
-  const detail = [data.professionalTitle, registrationLabel(data)].filter(Boolean).join(" · ") || null
+  const detail =
+    [data.professionalTitle, registrationLabel(data)].filter(Boolean).join(" · ") || null
   return { text: [name, detail].filter(Boolean).join(" · "), name, detail, loading: false }
 }
 
@@ -175,7 +191,11 @@ function SigningFlow({
   const queryClient = useQueryClient()
   const { choices, isMinor, patient, loading } = useSignerChoices(patientId)
   // El membrete, la declaración y la nota de firma vienen del servidor: lo que se lee es lo que se guarda.
-  const frame = useQuery({ queryKey: ["consent-sheet"], queryFn: fetchConsentSheetFrame, staleTime: 5 * 60_000 })
+  const frame = useQuery({
+    queryKey: ["consent-sheet"],
+    queryFn: fetchConsentSheetFrame,
+    staleTime: 5 * 60_000,
+  })
   const titleRef = useRef<HTMLHeadingElement>(null)
   const [step, setStep] = useState<Step>({ kind: "sign", index: 0 })
   // Con más de una persona habilitada, primero se elige quién firma.
@@ -183,7 +203,9 @@ function SigningFlow({
   const choosing = choices.length > 1 && !whoChosen
   const [signed, setSigned] = useState<Set<string>>(new Set())
   // El rechazo del servidor espera a que su paso esté en pantalla para decirse junto a su campo.
-  const [rejected, setRejected] = useState<{ error: unknown; index: number; done: number } | null>(null)
+  const [rejected, setRejected] = useState<{ error: unknown; index: number; done: number } | null>(
+    null,
+  )
   const signAs = useSignAs()
   const total = documents.length
   const current = step.kind === "sign" && !choosing ? documents[step.index] : undefined
@@ -196,6 +218,7 @@ function SigningFlow({
   const finish = async (value: SigningValues, signer: SignerChoice): Promise<void> => {
     const done = new Set(signed)
     let index = 0
+    let docNotice: string | null = null
     try {
       for (const [position, document] of documents.entries()) {
         if (done.has(document.id)) continue
@@ -204,13 +227,16 @@ function SigningFlow({
           signerKind: signer.kind,
           signerContactId: signer.contactId,
           representativeRelation: signer.kind === "representante" ? "Representante legal" : null,
-          ...(signer.kind === "representante" && !signer.doc ? { signerDoc: value.signerDoc.trim() } : {}),
+          ...(signer.kind === "representante" && !signer.doc
+            ? { signerDoc: value.signerDoc.trim() }
+            : {}),
           signatureData: { strokes: value.docs[position]?.strokes ?? [] },
           comprehensionConfirmed: true,
           method: "clinica",
         })
         done.add(document.id)
         setSigned(new Set(done))
+        docNotice ??= result.data.signerDocNotice ?? null
         // El PDF queda en Documentos; si falla, la firma ya está y se genera después.
         if (!result.data.pdfDocumentId) await generateConsentPdf(document.id).catch(() => null)
       }
@@ -222,8 +248,14 @@ function SigningFlow({
         const first = documents.findIndex((document) => !done.has(document.id))
         documents.forEach((document, position) => {
           if (done.has(document.id)) return
-          form.setFieldValue(`docs[${position}].understood`, false, { dontUpdateMeta: true, dontValidate: true })
-          form.setFieldValue(`docs[${position}].strokes`, [], { dontUpdateMeta: true, dontValidate: true })
+          form.setFieldValue(`docs[${position}].understood`, false, {
+            dontUpdateMeta: true,
+            dontValidate: true,
+          })
+          form.setFieldValue(`docs[${position}].strokes`, [], {
+            dontUpdateMeta: true,
+            dontValidate: true,
+          })
         })
         setStep({ kind: "sign", index: Math.max(first, 0) })
         setWhoChosen(false)
@@ -234,11 +266,19 @@ function SigningFlow({
       return
     }
     await Promise.all(
-      [["consents", patientId], ["consent-needs", patientId], ["patient-documents", patientId]].map((queryKey) =>
-        queryClient.invalidateQueries({ queryKey }),
-      ),
+      [
+        ["consents", patientId],
+        ["consent-needs", patientId],
+        ["patient-documents", patientId],
+        // El documento escrito del representante queda en su ficha: «Faltan datos» y quién firma lo ven.
+        ["patient", patientId],
+        ["patient-summary", patientId],
+        ["responsibilities", patientId],
+      ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     )
     toast.success(total === 1 ? "Consentimiento firmado" : `${total} consentimientos firmados`)
+    if (docNotice)
+      toast.warning(docNotice, { duration: Number.POSITIVE_INFINITY, closeButton: true })
     await onSigned()
     onClose()
   }
@@ -248,31 +288,43 @@ function SigningFlow({
     validators: {
       // Cada paso pide lo suyo: quién firma, o la casilla y la firma del documento a la vista.
       onSubmit: ({ value }) => {
-        if (choosing) return value.signerContactId ? undefined : { fields: { signerContactId: "Elige quién firma" } }
+        if (choosing)
+          return value.signerContactId
+            ? undefined
+            : { fields: { signerContactId: "Elige quién firma" } }
         if (step.kind !== "sign") return undefined
         const doc = value.docs[step.index]
         const fields: Record<string, string> = {}
-        if (!doc?.understood) fields[`docs[${step.index}].understood`] = "Marca la casilla para seguir"
+        if (!doc?.understood)
+          fields[`docs[${step.index}].understood`] = "Marca la casilla para seguir"
         if (signer?.kind === "representante" && !signer.doc && !value.signerDoc.trim())
           fields.signerDoc = `Falta el documento de ${firstName(signer.name)} para firmar como su representante`
         if (!doc?.strokes.length)
-          fields[`docs[${step.index}].strokes`] = `Falta la firma de ${firstName(signer?.name ?? "la persona")}`
+          fields[`docs[${step.index}].strokes`] =
+            `Falta la firma de ${firstName(signer?.name ?? "la persona")}`
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
     onSubmit: async ({ value }) => {
       if (choosing) setWhoChosen(true)
       else if (step.kind === "sign")
-        setStep(step.index < total - 1 ? { kind: "sign", index: step.index + 1 } : { kind: "confirm" })
+        setStep(
+          step.index < total - 1 ? { kind: "sign", index: step.index + 1 } : { kind: "confirm" },
+        )
       else if (signer) await finish(value, signer)
     },
   })
   const signerContactId = useStore(form.store, (state) => state.values.signerContactId)
-  const signer: SignerChoice | null = choices.find((c) => c.contactId === signerContactId) ?? choices[0] ?? null
+  const signer: SignerChoice | null =
+    choices.find((c) => c.contactId === signerContactId) ?? choices[0] ?? null
   const saving = useStore(form.store, (state) => state.isSubmitting)
   // Lo marcado o firmado aquí no se guarda hasta que el profesional confirma: salir lo pide confirmar.
-  const drawn = useStore(form.store, (state) => state.values.docs.some((doc) => doc.understood || doc.strokes.length > 0))
-  const hasStrokes = useStore(form.store, (state) => state.values.docs.some((doc) => doc.strokes.length > 0))
+  const drawn = useStore(form.store, (state) =>
+    state.values.docs.some((doc) => doc.understood || doc.strokes.length > 0),
+  )
+  const hasStrokes = useStore(form.store, (state) =>
+    state.values.docs.some((doc) => doc.strokes.length > 0),
+  )
   const [leaving, setLeaving] = useState(false)
   const error = useFormSubmitError(form)
 
@@ -287,7 +339,10 @@ function SigningFlow({
   const shownIndex = current && step.kind === "sign" ? step.index : null
   useEffect(() => {
     if (typeof shownIndex === "number")
-      form.setFieldValue(`docs[${shownIndex}].strokes`, [], { dontUpdateMeta: true, dontValidate: true })
+      form.setFieldValue(`docs[${shownIndex}].strokes`, [], {
+        dontUpdateMeta: true,
+        dontValidate: true,
+      })
   }, [shownIndex, form])
   // Cada hoja se empieza a leer desde arriba: al pasar a la siguiente, la vista y el foco van a su título.
   useEffect(() => {
@@ -362,155 +417,177 @@ function SigningFlow({
           ) : null}
         </header>
         <DialogDescription id={`${ids}-desc`} className="sr-only">
-          Pantalla completa para que la persona lea y firme con el dedo; al final confirma el profesional.
+          Pantalla completa para que la persona lea y firme con el dedo; al final confirma el
+          profesional.
         </DialogDescription>
 
         <div ref={rootRef} className="flex w-full flex-1 flex-col bg-muted/40">
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-3 py-6 text-lg sm:px-6">
-          {loading || frame.isPending ? (
-            <LoadingState message="Preparando la hoja…" />
-          ) : !signer ? (
-            <p role="alert" className="rounded-md bg-warning-soft p-4 text-base">
-              {isMinor
-                ? "Es menor de edad y no tiene representante legal vigente. Regístralo en Datos para que pueda firmar por él, o fírmalo en papel."
-                : "No hay una persona habilitada para firmar. Revisa sus vínculos en Datos."}
-            </p>
-          ) : choosing ? (
-            <form.AppField name="signerContactId">
-              {(field) => (
-                <field.SelectField
-                  label="¿Quién firma?"
-                  triggerClassName="text-base"
-                  options={choices.map((c) => ({ value: c.contactId, label: c.label }))}
-                  description={
-                    isMinor
-                      ? "Es menor de edad: firma su representante legal vigente."
-                      : "Firma la propia persona o su representante legal vigente."
-                  }
-                />
-              )}
-            </form.AppField>
-          ) : current && step.kind === "sign" ? (
-            <ConsentSheet
-              large
-              titleRef={titleRef}
-              clinic={frame.data?.data.clinic ?? null}
-              title={current.titleSnapshot}
-              procedureRef={current.procedureRef}
-              facts={
-                patient
-                  ? [
-                      { label: "Paciente", value: patient.displayName, strong: true },
-                      ...(patient.docNumber
-                        ? [{ label: patient.docType ? documentTypeLabel(patient.docType) : "Documento", value: patient.docNumber }]
-                        : []),
-                      { label: "Historia clínica", value: hcLabel(patient.patientNumber) },
-                    ]
-                  : []
-              }
-              diagnosis={diagnosisOf(current)}
-              sections={current.sectionsSnapshot}
-              body={current.bodySnapshot}
-              declaration={current.declarationSnapshot ?? frame.data?.data.declaration ?? CONSENT_DECLARATION}
-              minor={isMinor}
-              accept={(declarationId) => (
-                <form.AppField key={`${current.id}-understood`} name={`docs[${step.index}].understood`}>
-                  {(field) => (
-                    <FormChoiceField label={<strong className="text-lg">Entendí lo que me explicaron y acepto</strong>}>
-                      {(control) => (
-                        <Checkbox
-                          className="mt-1 size-6 border-foreground"
-                          id={control.id}
-                          name={control.name}
-                          checked={field.state.value === true}
-                          aria-invalid={control.invalid || undefined}
-                          aria-describedby={[declarationId, control.describedBy].filter(Boolean).join(" ")}
-                          onCheckedChange={(value) => {
-                            field.handleChange(value === true)
-                            field.handleBlur()
-                          }}
-                        />
-                      )}
-                    </FormChoiceField>
-                  )}
-                </form.AppField>
-              )}
-              signer={{
-                heading: signer.kind === "representante" ? "Representante legal" : "Paciente",
-                name: signer.name,
-                // Como el papel: bajo quien firma, su documento.
-                detail:
-                  signer.kind === "representante"
-                    ? (signer.doc ?? null)
-                    : patient?.docNumber
-                      ? documentText(patient.docType, patient.docNumber)
-                      : null,
-                children: (
-                  <>
-                  {/* Se registró sin su documento: la firma lo pide aquí mismo (QA de la ficha del 9 nov). */}
-                  {signer.kind === "representante" && !signer.doc ? (
-                    <form.AppField name="signerDoc">
-                      {(field) => (
-                        <field.TextField
-                          label={`Documento de ${signer.name} (DNI u otro)`}
-                          description="Su ficha no lo tiene: escríbelo para firmar como su representante."
-                          maxLength={40}
-                        />
-                      )}
-                    </form.AppField>
-                  ) : null}
-                  <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
+            {loading || frame.isPending ? (
+              <LoadingState message="Preparando la hoja…" />
+            ) : !signer ? (
+              <p role="alert" className="rounded-md bg-warning-soft p-4 text-base">
+                {isMinor
+                  ? "Es menor de edad y no tiene representante legal vigente. Regístralo en Datos para que pueda firmar por él, o fírmalo en papel."
+                  : "No hay una persona habilitada para firmar. Revisa sus vínculos en Datos."}
+              </p>
+            ) : choosing ? (
+              <form.AppField name="signerContactId">
+                {(field) => (
+                  <field.SelectField
+                    label="¿Quién firma?"
+                    triggerClassName="text-base"
+                    options={choices.map((c) => ({ value: c.contactId, label: c.label }))}
+                    description={
+                      isMinor
+                        ? "Es menor de edad: firma su representante legal vigente."
+                        : "Firma la propia persona o su representante legal vigente."
+                    }
+                  />
+                )}
+              </form.AppField>
+            ) : current && step.kind === "sign" ? (
+              <ConsentSheet
+                large
+                titleRef={titleRef}
+                clinic={frame.data?.data.clinic ?? null}
+                title={current.titleSnapshot}
+                procedureRef={current.procedureRef}
+                facts={
+                  patient
+                    ? [
+                        { label: "Paciente", value: patient.displayName, strong: true },
+                        ...(patient.docNumber
+                          ? [
+                              {
+                                label: patient.docType
+                                  ? documentTypeLabel(patient.docType)
+                                  : "Documento",
+                                value: patient.docNumber,
+                              },
+                            ]
+                          : []),
+                        { label: "Historia clínica", value: hcLabel(patient.patientNumber) },
+                      ]
+                    : []
+                }
+                diagnosis={diagnosisOf(current)}
+                sections={current.sectionsSnapshot}
+                body={current.bodySnapshot}
+                declaration={
+                  current.declarationSnapshot ?? frame.data?.data.declaration ?? CONSENT_DECLARATION
+                }
+                minor={isMinor}
+                accept={(declarationId) => (
+                  <form.AppField
+                    key={`${current.id}-understood`}
+                    name={`docs[${step.index}].understood`}
+                  >
                     {(field) => (
-                      <field.Group legend="Firma aquí con el dedo">
+                      <FormChoiceField
+                        label={
+                          <strong className="text-lg">Entendí lo que me explicaron y acepto</strong>
+                        }
+                      >
                         {(control) => (
-                          <FirmaPad
-                            key={current.id}
-                            label={`Firma de ${signer.name}`}
+                          <Checkbox
+                            className="mt-1 size-6 border-foreground"
                             id={control.id}
-                            invalid={control.invalid}
-                            describedBy={control.describedBy}
-                            onChange={(value) => {
-                              field.handleChange(value)
+                            name={control.name}
+                            checked={field.state.value === true}
+                            aria-invalid={control.invalid || undefined}
+                            aria-describedby={[declarationId, control.describedBy]
+                              .filter(Boolean)
+                              .join(" ")}
+                            onCheckedChange={(value) => {
+                              field.handleChange(value === true)
                               field.handleBlur()
                             }}
                           />
                         )}
-                      </field.Group>
+                      </FormChoiceField>
                     )}
                   </form.AppField>
-                  </>
-                ),
-              }}
-              professional={{
-                name: signAs.name,
-                detail: signAs.detail,
-                note: "Falta su confirmación: lo confirma al terminar.",
-              }}
-              signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
-              signatureNote={frame.data?.data.signatureNote ?? null}
-            />
-          ) : step.kind === "confirm" ? (
-            <div className="flex flex-col gap-4">
-              <p>
-                <strong>Informé a {firstName(signer.name)} y resolví sus dudas.</strong>
-              </p>
-              <p className="text-base text-muted-foreground">
-                {signAs.text
-                  ? `Firmas como ${signAs.text} · de tu perfil, sin dibujar otra firma.`
-                  : signAs.loading
-                    ? "Buscando tu perfil profesional…"
-                    : "Registra tu colegiatura en tu perfil profesional para firmar."}
-              </p>
-              <ul className="flex flex-col gap-1 text-base">
-                {documents.map((document) => (
-                  <li key={document.id}>
-                    {signed.has(document.id) ? "✓ " : ""}
-                    {document.titleSnapshot}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+                )}
+                signer={{
+                  heading: signer.kind === "representante" ? "Representante legal" : "Paciente",
+                  name: signer.name,
+                  // Como el papel: bajo quien firma, su documento.
+                  detail:
+                    signer.kind === "representante"
+                      ? (signer.doc ?? null)
+                      : patient?.docNumber
+                        ? documentText(patient.docType, patient.docNumber)
+                        : null,
+                  children: (
+                    <>
+                      {/* Se registró sin su documento: la firma lo pide aquí mismo (QA de la ficha del 9 nov). */}
+                      {signer.kind === "representante" && !signer.doc ? (
+                        <form.AppField name="signerDoc">
+                          {(field) => (
+                            <field.TextField
+                              label={`Documento de ${signer.name} (DNI u otro)`}
+                              description="Su ficha no lo tiene: escríbelo para firmar como su representante. Queda guardado en su ficha."
+                              maxLength={40}
+                            />
+                          )}
+                        </form.AppField>
+                      ) : null}
+                      <form.AppField
+                        key={`${current.id}-strokes`}
+                        name={`docs[${step.index}].strokes`}
+                      >
+                        {(field) => (
+                          <field.Group legend="Firma aquí con el dedo">
+                            {(control) => (
+                              <FirmaPad
+                                key={current.id}
+                                label={`Firma de ${signer.name}`}
+                                id={control.id}
+                                invalid={control.invalid}
+                                describedBy={control.describedBy}
+                                onChange={(value) => {
+                                  field.handleChange(value)
+                                  field.handleBlur()
+                                }}
+                              />
+                            )}
+                          </field.Group>
+                        )}
+                      </form.AppField>
+                    </>
+                  ),
+                }}
+                professional={{
+                  name: signAs.name,
+                  detail: signAs.detail,
+                  note: "Falta su confirmación: lo confirma al terminar.",
+                }}
+                signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
+                signatureNote={frame.data?.data.signatureNote ?? null}
+              />
+            ) : step.kind === "confirm" ? (
+              <div className="flex flex-col gap-4">
+                <p>
+                  <strong>Informé a {firstName(signer.name)} y resolví sus dudas.</strong>
+                </p>
+                <p className="text-base text-muted-foreground">
+                  {signAs.text
+                    ? `Firmas como ${signAs.text} · de tu perfil, sin dibujar otra firma.`
+                    : signAs.loading
+                      ? "Buscando tu perfil profesional…"
+                      : "Registra tu colegiatura en tu perfil profesional para firmar."}
+                </p>
+                <ul className="flex flex-col gap-1 text-base">
+                  {documents.map((document) => (
+                    <li key={document.id}>
+                      {signed.has(document.id) ? "✓ " : ""}
+                      {document.titleSnapshot}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -529,7 +606,13 @@ function SigningFlow({
             ) : (
               <div className="flex flex-wrap gap-2">
                 {!choosing && back ? (
-                  <Button type="button" size="lg" variant="outline" disabled={saving} onClick={back}>
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant="outline"
+                    disabled={saving}
+                    onClick={back}
+                  >
                     Volver
                   </Button>
                 ) : null}
@@ -542,7 +625,12 @@ function SigningFlow({
                     {step.index < total - 1 ? "Siguiente" : "Listo"}
                   </Button>
                 ) : (
-                  <Button type="button" size="lg" disabled={saving || !signAs.text} onClick={advance}>
+                  <Button
+                    type="button"
+                    size="lg"
+                    disabled={saving || !signAs.text}
+                    onClick={advance}
+                  >
                     {saving ? "Guardando…" : "Confirmar"}
                   </Button>
                 )}
@@ -567,9 +655,11 @@ function SigningFlow({
             // Lo que ya quedó firmado se ve como firmado al volver a la ficha.
             if (signed.size > 0)
               await Promise.all(
-                [["consents", patientId], ["consent-needs", patientId], ["patient-documents", patientId]].map((queryKey) =>
-                  queryClient.invalidateQueries({ queryKey }),
-                ),
+                [
+                  ["consents", patientId],
+                  ["consent-needs", patientId],
+                  ["patient-documents", patientId],
+                ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
               )
             onClose()
           }}
@@ -626,7 +716,12 @@ export function PaperSignDrawer({
   // La foto ya subida no se sube otra vez si lo que falla es la firma.
   const uploaded = useRef<{ file: File; id: string } | null>(null)
   const firstChoice = choices[0]?.contactId ?? ""
-  const defaultValues: PaperSignValues = { signerContactId: "", signerDoc: "", file: null, informed: false }
+  const defaultValues: PaperSignValues = {
+    signerContactId: "",
+    signerDoc: "",
+    file: null,
+    informed: false,
+  }
   const form = useAppForm({
     defaultValues,
     validators: { onSubmit: paperSignSchema },
@@ -643,29 +738,43 @@ export function PaperSignDrawer({
         paperDocumentId = sheet.id
       }
       const signer = choices.find((c) => c.contactId === value.signerContactId)
-      await signConsent(document.id, {
+      const signedPaper = await signConsent(document.id, {
         signerKind: signer?.kind ?? "paciente",
         signerContactId: value.signerContactId,
         representativeRelation: signer?.kind === "representante" ? "Representante legal" : null,
-        ...(signer?.kind === "representante" && !signer.doc ? { signerDoc: value.signerDoc.trim() || null } : {}),
+        ...(signer?.kind === "representante" && !signer.doc
+          ? { signerDoc: value.signerDoc.trim() || null }
+          : {}),
         comprehensionConfirmed: true,
         method: "papel",
         paperDocumentId,
       })
       await generateConsentPdf(document.id).catch(() => null)
       await Promise.all(
-        [["consents", patientId], ["consent-needs", patientId], ["patient-documents", patientId]].map((queryKey) =>
-          queryClient.invalidateQueries({ queryKey }),
-        ),
+        [
+          ["consents", patientId],
+          ["consent-needs", patientId],
+          ["patient-documents", patientId],
+          ["patient", patientId],
+          ["patient-summary", patientId],
+          ["responsibilities", patientId],
+        ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
       )
       toast.success("Firma en papel guardada")
+      const paperNotice = signedPaper.data.signerDocNotice
+      if (paperNotice)
+        toast.warning(paperNotice, { duration: Number.POSITIVE_INFINITY, closeButton: true })
       form.reset({ ...defaultValues, signerContactId: firstChoice })
       await onSigned()
       onClose()
     },
   })
   const surface = useFormSurface(form, {
-    fieldMap: { paperDocumentId: "file", comprehensionConfirmed: "informed", signerDoc: "signerDoc" },
+    fieldMap: {
+      paperDocumentId: "file",
+      comprehensionConfirmed: "informed",
+      signerDoc: "signerDoc",
+    },
   })
   const signerContactId = useStore(form.store, (state) => state.values.signerContactId)
   const signer = choices.find((c) => c.contactId === signerContactId) ?? choices[0] ?? null
@@ -688,7 +797,11 @@ export function PaperSignDrawer({
       dock={false}
       onClose={close}
       title="Firmado en papel"
-      description={document ? `${document.titleSnapshot}: sube la foto de la hoja firmada y el pendiente se cierra.` : undefined}
+      description={
+        document
+          ? `${document.titleSnapshot}: sube la foto de la hoja firmada y el pendiente se cierra.`
+          : undefined
+      }
       submitLabel="Guardar firma en papel"
       // Sin nadie habilitado para firmar no hay qué guardar; el aviso dice por qué.
       submitDisabled={!signer}
@@ -716,7 +829,7 @@ export function PaperSignDrawer({
               {(field) => (
                 <field.TextField
                   label={`Documento de ${signer.name} (DNI u otro)`}
-                  description="Su ficha no lo tiene: escríbelo para firmar como su representante."
+                  description="Su ficha no lo tiene: escríbelo para firmar como su representante. Queda guardado en su ficha."
                   maxLength={40}
                 />
               )}
@@ -724,7 +837,10 @@ export function PaperSignDrawer({
           ) : null}
           <form.AppField name="file">
             {(field) => (
-              <field.Control label="Foto de la hoja firmada" description="Queda en Documentos como consentimiento.">
+              <field.Control
+                label="Foto de la hoja firmada"
+                description="Queda en Documentos como consentimiento."
+              >
                 {(control) => (
                   <Input
                     {...control.props}
@@ -741,7 +857,9 @@ export function PaperSignDrawer({
             {(field) => (
               <field.CheckboxField
                 label={`Informé a ${firstName(signer.name)} y resolví sus dudas.`}
-                description={signAs.text ? `Firmas como ${signAs.text}` : "Firmas con tu perfil profesional"}
+                description={
+                  signAs.text ? `Firmas como ${signAs.text}` : "Firmas con tu perfil profesional"
+                }
               />
             )}
           </form.AppField>

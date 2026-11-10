@@ -4,7 +4,7 @@ import type { Auth } from "@odentia/auth"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { contact, contactIdentity, conversation, crmTask } from "@odentia/db/schema/crm"
 import { patient, patientContact, patientDataConsent, patientRegistration } from "@odentia/db/schema/clinical"
 import {
   createConnection,
@@ -968,4 +968,42 @@ it("recepción opera CRM y member queda en solo tareas (403 sin efectos)", async
     body: JSON.stringify({ identityId: crypto.randomUUID() }),
   })
   expect(resolve.status).toBe(403)
+})
+
+it("«¿Es la misma persona?» por la API: lo público responde igual, guardar exige lo que se vio y descartar es de quien edita personas", async () => {
+  const app = buildApp("hold-api")
+  const lucia = await withOrgContext(appDb, ORG_A, (tx) =>
+    createContact(tx, ORG_A, { displayName: "Lucía Ramos", givenNames: "Lucía", familyName: "Ramos", phone: "+51977660001" }),
+  )
+  const answers = {
+    ...adultQrAnswers("Lucía Ramos Vega"),
+    demographics: { displayName: "Lucía Ramos Vega", givenNames: "Lucía", familyName: "Ramos Vega", birthDate: "1990-01-01", phone: "+51977660001" },
+  }
+  // Responde como cualquier registro recibido: no dice que ya estaba.
+  const res = await publicPost(app, SLUG_A, qrBody(answers))
+  expect(res.status).toBe(201)
+  expect(await res.json()).toEqual({ data: { registered: true } })
+  const [task] = await ownerDb
+    .select({ id: crmTask.id })
+    .from(crmTask)
+    .where(and(eq(crmTask.contactId, lucia.id), eq(crmTask.kind, "registro_con_documento")))
+  const url = `/api/tasks/${task!.id}/registration`
+  const view = await app.request(url, { headers: authed("owner", SLUG_A) })
+  expect(view.status).toBe(200)
+  const { data } = (await view.json()) as { data: { revision: string; rows: Array<{ key: string; checked: boolean }> } }
+  expect(data.rows.find((row) => row.key === "names")).toMatchObject({ checked: false })
+  // El contrato de antes (elegir solo los apellidos) ya no existe, y sin lo que se vio no se guarda.
+  const old = await app.request(url, { method: "POST", headers: authed("owner", SLUG_A), body: JSON.stringify({ same: true, familyName: "declared" }) })
+  expect(old.status).toBe(400)
+  // Quien no edita personas no lo descarta.
+  const memberDiscard = await app.request(`/api/tasks/${task!.id}/discard`, { method: "POST", headers: authed("member", SLUG_A), body: "{}" })
+  expect(memberDiscard.status).toBe(403)
+  const saved = await app.request(url, {
+    method: "POST",
+    headers: authed("owner", SLUG_A),
+    body: JSON.stringify({ same: true, apply: ["names"], revision: data.revision }),
+  })
+  expect(saved.status).toBe(200)
+  const [person] = await ownerDb.select().from(contact).where(eq(contact.id, lucia.id))
+  expect(person).toMatchObject({ familyName: "Ramos Vega" })
 })

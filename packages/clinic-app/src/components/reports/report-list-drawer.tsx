@@ -357,7 +357,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
     // el servidor. Si aún le queda algo sin cita, la fila sigue sin marcar.
     void fetchTreatmentCoordination(appointment.patientId)
       .then(({ data }) => {
-        if (!data.treatments.some((treatment) => treatment.toSchedule)) mark()
+        if (!data.treatments.some((treatment) => treatment.unbooked ?? treatment.toSchedule)) mark()
       })
       .catch(() => undefined)
   })

@@ -191,6 +191,10 @@ export interface WaitingPossibleDuplicate {
    * «Revisar» abre «¿Es la misma persona?» para decidir con ello.
    */
   held?: boolean
+  /** `registro` guardado: por qué se parece (el mismo documento o el mismo celular). */
+  match?: "documento" | "celular"
+  /** `registro` guardado: cuántos datos de lo que escribió no coinciden con lo que ya tiene. */
+  differences?: number
 }
 
 /**
@@ -477,9 +481,12 @@ function personOf(row: WaitingRow): string | null {
     case "unclosed":
     case "registrationDone":
     case "unsentBudget":
-    case "possibleDuplicate":
     case "portalReentry":
       return row.personId ?? null
+    // «¿Es la misma persona?» del registro en línea va siempre en su fila: plegado en
+    // la de una conversación no se veía ni se podía abrir, y nadie decidía.
+    case "possibleDuplicate":
+      return row.source === "registro" && row.held ? null : (row.personId ?? null)
     // La que cuenta las demás tareas no se pliega: con ella se irían su número y su enlace.
     case "task":
       return row.more > 0 ? null : (row.personId ?? null)
