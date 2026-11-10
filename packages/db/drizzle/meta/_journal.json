@@ -607,22 +607,29 @@
     {
       "idx": 86,
       "version": "7",
-      "when": 1794278357079,
-      "tag": "0086_controles_configurables",
+      "when": 1794275895229,
+      "tag": "0086_registro_guarda_su_aviso",
       "breakpoints": true
     },
     {
       "idx": 87,
       "version": "7",
-      "when": 1794278368844,
-      "tag": "0087_controles_configurables_reglas",
+      "when": 1794323237178,
+      "tag": "0087_controles_configurables",
       "breakpoints": true
     },
     {
       "idx": 88,
       "version": "7",
-      "when": 1794278371829,
-      "tag": "0088_consentimiento_por_familia",
+      "when": 1794323239852,
+      "tag": "0088_controles_configurables_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794323242573,
+      "tag": "0089_consentimiento_por_familia",
       "breakpoints": true
     }
   ]

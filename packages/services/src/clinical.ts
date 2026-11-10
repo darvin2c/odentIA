@@ -18,6 +18,7 @@ import {
   type RegistrationAnswers,
   REPORT_STATUSES,
   type ReportStatus,
+  DECLARED_ONLINE_NOTE,
   registrationAnswersSchema,
   DIAGNOSIS_VERIFICATION,
   FAMILY_KINSHIP,
@@ -322,6 +323,29 @@ const FORBIDDEN_ANAMNESIS_TOP = [
   "diagnosticoPresuntivo",
   "diagnosticoCie10",
 ]
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value)
+
+/** Lo declarado encima de la entrevista guardada, campo por campo: un grupo no reemplaza al otro entero. */
+function mergeInterview(saved: Record<string, unknown>, said: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...saved }
+  for (const [key, value] of Object.entries(said)) {
+    out[key] = isPlainObject(out[key]) && isPlainObject(value) ? mergeInterview(out[key], value) : value
+  }
+  return out
+}
+
+/** Sin lo que ya no pertenece a la entrevista (`assertNewInterview`): sigue en las versiones de antes. */
+function withoutRetiredInterview(answers: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...answers }
+  for (const key of FORBIDDEN_ANAMNESIS_TOP) delete out[key]
+  if (isPlainObject(out.antecedentesPersonales)) {
+    const { enfermedades: _enfermedades, medicacionHabitual: _medicacion, ...rest } = out.antecedentesPersonales
+    out.antecedentesPersonales = rest
+  }
+  return out
+}
 
 function assertNewInterview(answers: Record<string, unknown>): Record<string, unknown> {
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
@@ -920,6 +944,146 @@ export async function addDeclaredAllergies(
     revision: { before: locked.revision, after: locked.revision + 1 },
   })
   return fresh.length
+}
+
+/**
+ * Lo demás que declaró de su salud alguien cuya ficha ya tenía antecedentes
+ * (el registro en línea que recepción reconoce como la misma persona): sus
+ * enfermedades y su medicación se suman a Antecedentes con una nota de dónde
+ * vienen, sin repetir lo que sigue vigente por su nombre (lo suspendido que
+ * retoma sí entra: mejor repetido que perdido), y lo de la entrevista (el
+ * embarazo, con el día en que lo dijo) va como versión nueva. Su salud queda
+ * pendiente de revisión, como una primera declaración: lo clínico lo decide el
+ * profesional. La nota no dice «sin confirmar» porque nada la cambia al
+ * revisar: lo que dice de dónde vino sigue siendo cierto. Las alergias van
+ * aparte (`addDeclaredAllergies`), y el grupo sanguíneo guardado no se pisa.
+ */
+export async function addDeclaredHealth(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: DeclaredPatientHealthInput,
+  origin: { entity: string; entityId: string; at: Date },
+): Promise<{ conditions: number; medications: number; interview: boolean }> {
+  const parsed = registrationAnswersSchema.shape.health.safeParse(input)
+  if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
+  const declared = parsed.data
+  await requirePatient(tx, orgId, patientId)
+  const [locked] = await tx
+    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  const today = await clinicToday(tx, orgId)
+  const saidOn = await clinicToday(tx, orgId, origin.at)
+  const note = `${DECLARED_ONLINE_NOTE} el ${saidOn.split("-").reverse().join("/")}.`
+  const withNote = (notes: string | undefined) => (notes?.trim() ? `${note} ${notes.trim()}` : note).slice(0, 2000)
+
+  // Enfermedades: no se repite una activa con el mismo nombre.
+  const activeConditions = new Set(
+    (
+      await tx
+        .select({ name: patientCondition.name })
+        .from(patientCondition)
+        .where(and(eq(patientCondition.organizationId, orgId), eq(patientCondition.patientId, patientId), eq(patientCondition.status, "activa")))
+    ).map((row) => normalizeDrugText(row.name)),
+  )
+  const conditions = declared.conditions?.state === "recorded" ? declared.conditions.items : []
+  let addedConditions = 0
+  for (const item of conditions) {
+    const key = normalizeDrugText(item.name)
+    if (!key || activeConditions.has(key)) continue
+    activeConditions.add(key)
+    await tx.insert(patientCondition).values({ organizationId: orgId, patientId, name: item.name.trim().slice(0, 200), status: "activa", notes: withNote(item.notes), createdBy: actorUserId })
+    addedConditions += 1
+  }
+
+  // Medicación: no se repite la que sigue vigente (sin fin o con fin desde hoy).
+  const currentMedications = new Set(
+    (
+      await tx
+        .select({ name: patientMedication.name, endDate: patientMedication.endDate })
+        .from(patientMedication)
+        .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
+    )
+      .filter((row) => !row.endDate || row.endDate >= today)
+      .map((row) => normalizeDrugText(row.name)),
+  )
+  const medications = declared.medications?.state === "recorded" ? declared.medications.items : []
+  let addedMedications = 0
+  for (const item of medications) {
+    const key = normalizeDrugText(item.name)
+    if (!key || currentMedications.has(key)) continue
+    currentMedications.add(key)
+    await tx.insert(patientMedication).values({
+      organizationId: orgId,
+      patientId,
+      name: item.name.trim().slice(0, 200),
+      dose: item.dose?.trim() || null,
+      frequency: item.frequency?.trim() || null,
+      notes: withNote(item.notes),
+      createdBy: actorUserId,
+    })
+    addedMedications += 1
+  }
+
+  // La entrevista (embarazo con su fecha, operaciones…): lo que dijo encima de lo que había, campo por
+  // campo (nunca un grupo entero: las operaciones que anotó el profesional siguen), en una versión nueva
+  // validada como la del profesional. Lo que ya no se acepta en la entrevista queda en las versiones de antes.
+  const hooks = await productHooks(tx, orgId)
+  const said = hooks.interview.declared(declared, saidOn)
+  let interview = false
+  if (Object.keys(said).length) {
+    const [latest] = await tx
+      .select()
+      .from(patientAnamnesis)
+      .where(and(eq(patientAnamnesis.patientId, patientId), eq(patientAnamnesis.organizationId, orgId)))
+      .orderBy(desc(patientAnamnesis.version))
+      .limit(1)
+    const merged = withoutRetiredInterview(mergeInterview((latest?.answers ?? {}) as Record<string, unknown>, said))
+    let answers: Record<string, unknown> | null = null
+    try {
+      answers = hooks.interview.check(assertNewInterview(merged), today)
+    } catch (error) {
+      // Lo que no pasa la entrevista del profesional no se guarda a medias: queda la versión de antes.
+      if (!(error instanceof ServiceError)) throw error
+    }
+    if (answers && (!latest || canonicalJson(latest.answers) !== canonicalJson(answers))) {
+      await tx.insert(patientAnamnesis).values({ organizationId: orgId, patientId, version: (latest?.version ?? 0) + 1, answers, createdBy: actorUserId })
+      interview = true
+    }
+  }
+
+  if (!addedConditions && !addedMedications && !interview) return { conditions: 0, medications: 0, interview: false }
+  const reviewStatus = { ...((locked.reviewStatus ?? {}) as Record<string, unknown>) }
+  await tx
+    .update(patient)
+    .set({
+      healthRevision: locked.revision + 1,
+      // Con lo que sumó, el grupo queda «registrado»: un «niega» de antes ya no es cierto.
+      healthReviewStatus: {
+        allergies: reviewStatus.allergies ?? "unknown",
+        conditions: addedConditions ? "recorded" : (reviewStatus.conditions ?? "unknown"),
+        medications: addedMedications ? "recorded" : (reviewStatus.medications ?? "unknown"),
+      },
+      // Lo declarado espera la revisión de un profesional, como la primera declaración.
+      healthReviewedAt: null,
+      healthReviewedBy: null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // Sin copiar lo declarado: la auditoría dice qué pasó, no el dato clínico.
+  await audit(tx, orgId, actorUserId, "health.declared", "patient", patientId, {
+    origin: origin.entity,
+    originId: origin.entityId,
+    counts: { conditions: addedConditions, medications: addedMedications },
+    interview,
+    revision: { before: locked.revision, after: locked.revision + 1 },
+  })
+  return { conditions: addedConditions, medications: addedMedications, interview }
 }
 
 async function persistPatientHealth(

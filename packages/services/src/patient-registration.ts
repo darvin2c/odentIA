@@ -41,11 +41,12 @@ import {
   crmTask,
   registrationHold,
 } from "@odentia/db/schema/crm"
+import { automationConsent } from "@odentia/db/schema/automation"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
-import { and, eq, inArray, isNotNull, type SQL, sql } from "drizzle-orm"
+import { and, eq, gt, gte, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
-import { addDeclaredAllergies, getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
+import { addDeclaredAllergies, addDeclaredHealth, getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import {
   claimWhatsAppNumber,
   hasWhatsappNumber,
@@ -55,7 +56,7 @@ import {
   whatsappNumbersOf,
 } from "./contacts.js"
 import { createContactNote } from "./crm-workspace.js"
-import { applyMessagePermissions } from "./data-consents.js"
+import { applyMessagePermissions, MESSAGE_PERMISSION_OF } from "./data-consents.js"
 import {
   fieldsError,
   issueFields,
@@ -84,7 +85,7 @@ import {
   setPersonArchived,
   updatePersonIdentity,
 } from "./people.js"
-import { grantResponsibility, isMinorOn } from "./responsibilities.js"
+import { grantResponsibility, isMinorOn, requireDecisionContact } from "./responsibilities.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
 import {
   type HoldGroup,
@@ -214,6 +215,135 @@ async function registrationGrantor(
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId)))
   const wanted = byRepresentative ? "guardian" : "self"
   return (rows.find((row) => row.relationship === wanted) ?? rows.find((row) => row.relationship === "self"))?.contactId ?? null
+}
+
+/**
+ * Las finalidades del consentimiento del registro: la atención siempre y los
+ * permisos de mensajes que el registro de la clínica pregunta. Los mensajes de
+ * su cita no se preguntan: son parte del servicio (ADR 0030). Cuando el
+ * formulario le dice que le escribirán por WhatsApp sobre su cita
+ * (`acceptsReminders: true`), queda guardado como su permiso, con su fecha y de
+ * dónde vino; un «no» que llegue se guarda como baja.
+ */
+function registrationPurposes(answers: RegistrationAnswers, config: RegistrationConfig): { asked: string[]; purposes: string[] } {
+  const asked = [
+    ...(answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
+    ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
+  ]
+  const purposes = [
+    "atencion",
+    ...(asked.includes("recordatorios") && answers.acceptsReminders ? ["recordatorios"] : []),
+    ...(asked.includes("comunicaciones") && answers.acceptsMessages ? ["comunicaciones"] : []),
+  ]
+  return { asked, purposes }
+}
+
+/** Lo que pasó con su consentimiento al decidir «¿Es la misma persona?». */
+export type HeldConsent = "guardado" | "ya_estaba" | "pendiente" | "revocado" | "no_aplica"
+
+/**
+ * El consentimiento que dio en el registro en línea, guardado cuando recepción
+ * decide (`resolveRegistrationHold`): el aviso que vio (no el de hoy), con la
+ * fecha del registro, otorgado por la propia persona adulta. Nadie consiente
+ * por otro adulto, y lo de una menor lo decide su representante legal vigente:
+ * entonces queda «pendiente» y se pide en la clínica. Lo que dijo después
+ * manda: si revocó su consentimiento después de registrarse no se guarda, y un
+ * permiso de mensajes que cambió después no se pisa. `recordedBy` es nulo,
+ * como en el alta pública; quién decidió queda en la auditoría de la decisión.
+ */
+async function recordHeldConsent(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  answers: RegistrationAnswers,
+  hold: { noticeVersion: number | null; noticeText: string | null; createdAt: Date },
+): Promise<HeldConsent> {
+  if (!answers.privacyAccepted) return "no_aplica"
+  if (hold.noticeVersion === null || !hold.noticeText) return "pendiente"
+  if (answers.respondent !== "patient") return "pendiente"
+  const selfId = await registrationGrantor(tx, orgId, patientId, false)
+  if (!selfId) return "pendiente"
+  let grantor: { id: string; displayName: string }
+  try {
+    const decider = await requireDecisionContact(tx, orgId, patientId, selfId)
+    grantor = { id: decider.id, displayName: decider.displayName }
+  } catch (error) {
+    if (error instanceof ServiceError) return "pendiente"
+    throw error
+  }
+  // Lo vigente primero: si ya tiene ese aviso (o uno más nuevo), no se repite, aunque antes haya revocado otro.
+  const [current] = await tx
+    .select({ id: patientDataConsent.id })
+    .from(patientDataConsent)
+    .where(
+      and(
+        eq(patientDataConsent.organizationId, orgId),
+        eq(patientDataConsent.patientId, patientId),
+        isNull(patientDataConsent.revokedAt),
+        gte(patientDataConsent.noticeVersion, hold.noticeVersion),
+      ),
+    )
+    .limit(1)
+  const [revokedAfter] = current
+    ? []
+    : await tx
+        .select({ id: patientDataConsent.id })
+        .from(patientDataConsent)
+        .where(
+          and(
+            eq(patientDataConsent.organizationId, orgId),
+            eq(patientDataConsent.patientId, patientId),
+            gt(patientDataConsent.revokedAt, hold.createdAt),
+          ),
+        )
+        .limit(1)
+  if (revokedAfter) return "revocado"
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const { asked, purposes } = registrationPurposes(answers, config)
+  // Un permiso que cambió después de registrarse no se pisa: lo de después manda.
+  const changedAfter = new Set(
+    (
+      await tx
+        .select({ purpose: automationConsent.purpose })
+        .from(automationConsent)
+        .where(
+          and(
+            eq(automationConsent.organizationId, orgId),
+            eq(automationConsent.contactId, grantor.id),
+            gt(automationConsent.updatedAt, hold.createdAt),
+          ),
+        )
+    ).map((row) => row.purpose),
+  )
+  const keepsReminders = answers.acceptsReminders === true && (await consentStatusOf(tx, orgId, grantor.id, "recordatorio")) !== null
+  const toApply = asked.filter(
+    (purpose) => !changedAfter.has(MESSAGE_PERMISSION_OF[purpose] ?? purpose) && !(purpose === "recordatorios" && keepsReminders),
+  )
+  if (toApply.length > 0)
+    await applyMessagePermissions(tx, orgId, null, grantor.id, { accepted: purposes, asked: toApply, channel: "formulario_publico", at: hold.createdAt })
+  if (current) return "ya_estaba"
+  const [granted] = await tx.insert(patientDataConsent).values({
+    organizationId: orgId,
+    patientId,
+    noticeVersion: hold.noticeVersion,
+    noticeText: hold.noticeText,
+    purposes,
+    grantedByContactId: grantor.id,
+    grantedByName: grantor.displayName,
+    channel: "formulario_publico",
+    recordedBy: null,
+    grantedAt: hold.createdAt,
+  }).returning({ id: patientDataConsent.id })
+  // El mismo rastro que deja dar un consentimiento en la clínica; quién decidió va en la auditoría de la decisión.
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: null,
+    action: "patient.data_consent_granted",
+    entity: "patient_data_consent",
+    entityId: granted!.id,
+    metadata: { patientId, purposes, noticeVersion: hold.noticeVersion, origin: "registration_hold" },
+  })
+  return "guardado"
 }
 
 // --- Configuración ---
@@ -1076,6 +1206,7 @@ export async function registerPatient(
     if (owner) {
       const held = await heldByDocument(tx, orgId, owner, demographics)
       held.hold.answers = answers
+      held.hold.notice = { version: config.version, text: config.privacyNotice }
       throw held
     }
   }
@@ -1092,6 +1223,7 @@ export async function registerPatient(
         declared: { displayName: demographics.displayName, phone: demographics.phone ?? null, email: demographics.email ?? null },
         match: "celular",
         answers,
+        notice: { version: config.version, text: config.privacyNotice },
       })
     }
   }
@@ -1117,7 +1249,10 @@ export async function registerPatient(
     }
     if (isPublic && e instanceof ServiceError && e.code === "ALREADY_PATIENT") throw notCompleted()
     // Con sus respuestas, para que recepción decida con ellas.
-    if (e instanceof RegistrationHeld && isPublic) e.hold.answers = answers
+    if (e instanceof RegistrationHeld && isPublic) {
+      e.hold.answers = answers
+      e.hold.notice = { version: config.version, text: config.privacyNotice }
+    }
     throw e
   }
 
@@ -1188,21 +1323,7 @@ export async function registerPatient(
   // 7. Consentimiento de datos (la ley de cada país; en Perú, la Ley 29733) con la versión del aviso aceptada y
   // quién lo otorga; se atribuye en servidor (operador interno o null público).
   if (answers.privacyAccepted) {
-    // Los permisos de mensajes son finalidades de este mismo consentimiento:
-    // cuentan solo las que el registro de la clínica pregunta.
-    const asked = [
-      // Los mensajes de su cita no se preguntan: son parte del servicio (ADR 0030).
-      // Cuando el formulario le dice que le escribirán por WhatsApp sobre su cita
-      // (`acceptsReminders: true`), queda guardado como su permiso, con su fecha y
-      // de dónde vino; un «no» que llegue se guarda como baja.
-      ...(answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
-      ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
-    ]
-    const purposes = [
-      "atencion",
-      ...(asked.includes("recordatorios") && answers.acceptsReminders ? ["recordatorios"] : []),
-      ...(asked.includes("comunicaciones") && answers.acceptsMessages ? ["comunicaciones"] : []),
-    ]
+    const { asked, purposes } = registrationPurposes(answers, config)
     // Con el representante por confirmar no se escribe a nombre de nadie: el
     // consentimiento queda como lo dijo el formulario (M1).
     const grantorId = representativePending
@@ -1512,7 +1633,15 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
   if (!hold.answers) return
   // El mismo día, el último envío reemplaza al anterior: una fila, lo último que escribió.
   await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.taskId, task.id)))
-  await tx.insert(registrationHold).values({ organizationId: orgId, taskId: task.id, match: hold.match, answers: hold.answers })
+  await tx.insert(registrationHold).values({
+    organizationId: orgId,
+    taskId: task.id,
+    match: hold.match,
+    answers: hold.answers,
+    // Sin texto de aviso no hay consentimiento que guardar: se pedirá en la clínica.
+    noticeVersion: hold.notice?.text ? hold.notice.version : null,
+    noticeText: hold.notice?.text || null,
+  })
 }
 
 /** Quien ya está en la clínica con ese celular (su teléfono o su WhatsApp), o nulo. Una persona de prueba no es nadie. */
@@ -1681,7 +1810,7 @@ export async function resolveRegistrationHold(
   actorUserId: string,
   taskId: string,
   input: { same: boolean; apply?: readonly HoldGroup[]; revision: string },
-): Promise<{ patientId: string; personId: string; applied: number }> {
+): Promise<{ patientId: string; personId: string; applied: number; consent: HeldConsent }> {
   const { task, hold, answers, ownerId } = await lockedHold(tx, orgId, taskId)
   const declared = answers.demographics as Record<string, unknown>
   // La persona no cambia entre lo que se compara y lo que se guarda.
@@ -1742,7 +1871,8 @@ export async function resolveRegistrationHold(
   }
   // Su salud entra como declarada, solo si nadie la registró antes. Si ya
   // estaba, sus alergias se suman a Antecedentes sin confirmar (la receta
-  // avisa) y lo demás queda en una nota para revisarlo en sus antecedentes.
+  // avisa) y lo demás (enfermedades, medicación, la entrevista) también, con
+  // su nota de dónde vino y la salud pendiente de revisión del profesional.
   const personRow = await requirePatient(tx, orgId, patientId)
   const personId = (personRow as unknown as { personId?: string }).personId ?? ownerId
   if (answers.health && (await getPatientHealth(tx, orgId, patientId)).revision === 0) {
@@ -1757,18 +1887,24 @@ export async function resolveRegistrationHold(
       allergies.map((item) => ({ substance: item.substance, reaction: item.reaction ?? null })),
       { entity: "registration_hold", entityId: hold.id },
     )
-    // Lo demás de su salud no va con detalle a las notas de su persona: las lee
-    // quien no ve la historia clínica. Queda dicho que hay algo que preguntarle.
-    if (declaredHealthWords({ ...answers.health, allergies: undefined })) {
-      await createContactNote(
-        tx,
-        orgId,
-        personId,
-        { body: "Declaró en su registro en línea otros datos de su salud (enfermedades, medicamentos u otros): que el profesional se los pregunte en su próxima atención y actualice sus antecedentes." },
-        { userId: actorUserId },
-      )
-    }
+    await addDeclaredHealth(tx, orgId, actorUserId, patientId, answers.health, { entity: "registration_hold", entityId: hold.id, at: hold.createdAt })
   }
+  // El consentimiento que dio en el formulario, con el aviso que vio y su fecha.
+  const consent = await recordHeldConsent(tx, orgId, patientId, answers, hold)
+  // Lo que falta queda dicho en su página: el aviso flotante se va.
+  if (consent === "pendiente" || consent === "revocado")
+    await createContactNote(
+      tx,
+      orgId,
+      personId,
+      {
+        body:
+          consent === "pendiente"
+            ? "Falta su consentimiento de datos: el de su registro en línea no se pudo guardar (lo da la persona adulta o el representante legal de una menor). Pídeselo en la clínica."
+            : "Su consentimiento de datos del registro en línea no se guardó: lo revocó después de registrarse.",
+      },
+      { userId: actorUserId },
+    )
   await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.id, hold.id)))
   await settleTask(
     tx,
@@ -1787,9 +1923,9 @@ export async function resolveRegistrationHold(
     action: "registration_hold.resolved",
     entity: "patient",
     entityId: patientId,
-    metadata: { same: input.same, match: hold.match, applied: apply, notApplied: [...savable].filter((key) => !apply.includes(key as HoldGroup)) },
+    metadata: { same: input.same, match: hold.match, applied: apply, notApplied: [...savable].filter((key) => !apply.includes(key as HoldGroup)), consent },
   })
-  return { patientId, personId, applied: apply.length }
+  return { patientId, personId, applied: apply.length, consent }
 }
 
 /** Motivo con que queda cerrada cada fila del registro en línea al descartarla. */

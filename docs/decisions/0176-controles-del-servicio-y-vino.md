@@ -28,4 +28,4 @@ La espera entre sesiones (7 d√≠as en cualquier endodoncia) y el control radiogr√
 
 ## Referencias
 
-`packages/services/src/finish-controls.ts`, `follow-ups.ts` (`changeFollowUpDue`), `appointments.ts` (`markAppointmentCame`, `freedAppointmentsOf`, `reuseAppointment`), `session-gap.ts`, migraciones 0086 y 0087.
+`packages/services/src/finish-controls.ts`, `follow-ups.ts` (`changeFollowUpDue`), `appointments.ts` (`markAppointmentCame`, `freedAppointmentsOf`, `reuseAppointment`), `session-gap.ts`, migraciones 0087 y 0088 (y 0089 para los consentimientos).

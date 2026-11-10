@@ -808,6 +808,13 @@ export const registrationHold = pgTable(
     match: text("match").notNull(),
     /** Las respuestas del registro tal como llegaron (`RegistrationAnswers`). */
     answers: jsonb("answers").notNull(),
+    /**
+     * El aviso de privacidad que aceptó al registrarse, tal como lo vio: la
+     * configuración se sobrescribe, y al decidir vale este. Nulo en lo dejado
+     * antes de guardarlo: entonces su consentimiento se pide en la clínica.
+     */
+    noticeVersion: integer("notice_version"),
+    noticeText: text("notice_text"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

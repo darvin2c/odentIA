@@ -51,6 +51,19 @@ describe("«Pregúntale» en la atención", () => {
       render({ ...health, allergyReviewDue: false, reviewStatus: { allergies: "none", conditions: "none", medications: "none" } }),
     ).toBe("")
   })
+  it("lo que declaró en línea y nadie revisó se pide revisar en sus antecedentes (lo decide el servidor)", () => {
+    const answered = { ...health, allergyReviewDue: false, reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" } } as PatientHealth
+    const declared = {
+      ...answered,
+      reviewPending: true,
+      conditions: [{ id: "c1", name: "Hipertensión", status: "activa", notes: "Lo declaró en su registro en línea el 09/11/2026." }],
+      medications: [{ id: "m1", name: "Losartán", notes: "Lo declaró en su registro en línea el 09/11/2026." }],
+    } as unknown as PatientHealth
+    const page = render(declared)
+    expect(page).toContain("Revisa con Lucía lo que declaró de su salud")
+    expect(page).toContain("Hipertensión y Losartán.")
+    expect(render({ ...declared, reviewPending: false })).toBe("")
+  })
 })
 
 // QA del 10 nov (B11): en un niño decía «Pregúntale a QA por sus alergias», y la ficha ya decía quién habla por él.

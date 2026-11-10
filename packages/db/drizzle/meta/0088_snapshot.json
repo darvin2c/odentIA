@@ -1,6 +1,6 @@
 {
-  "id": "db21ca23-58e2-47b7-89c8-89d3eacb474b",
-  "prevId": "0224bfd6-ef2d-41fc-bf35-0c79d12c0c47",
+  "id": "b1c7128e-2869-4a07-9807-38bd420ec8d3",
+  "prevId": "8faaf813-4028-4fe2-b1e9-5f0ae6be83a8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -27235,6 +27235,18 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "notice_version": {
+          "name": "notice_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notice_text": {
+          "name": "notice_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

@@ -1,5 +1,5 @@
 {
-  "id": "92ed2bb5-1e62-4ec3-b893-691cfd032a02",
+  "id": "83cdb35e-7423-4c50-aba8-a8c02fc1c23d",
   "prevId": "7daa1ad8-2fa2-449b-ab51-304ff78c3e50",
   "version": "7",
   "dialect": "postgresql",
@@ -12133,12 +12133,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "finish_after_days": {
-          "name": "finish_after_days",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -12227,33 +12221,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "clinical_follow_up_org_patient_id_uidx": {
-          "name": "clinical_follow_up_org_patient_id_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -12450,128 +12417,6 @@
           "value": "\"clinical_follow_up\".\"kind\" <> 'tratamiento' OR \"clinical_follow_up\".\"plan_item_id\" IS NOT NULL"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.clinical_follow_up_item": {
-      "name": "clinical_follow_up_item",
-      "schema": "",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "follow_up_id": {
-          "name": "follow_up_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan_item_id": {
-          "name": "plan_item_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "clinical_follow_up_item_plan_item_idx": {
-          "name": "clinical_follow_up_item_plan_item_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "plan_item_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "clinical_follow_up_item_organization_id_organization_id_fk": {
-          "name": "clinical_follow_up_item_organization_id_organization_id_fk",
-          "tableFrom": "clinical_follow_up_item",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "clinical_follow_up_item_follow_up_fk": {
-          "name": "clinical_follow_up_item_follow_up_fk",
-          "tableFrom": "clinical_follow_up_item",
-          "tableTo": "clinical_follow_up",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "follow_up_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "clinical_follow_up_item_plan_item_fk": {
-          "name": "clinical_follow_up_item_plan_item_fk",
-          "tableFrom": "clinical_follow_up_item",
-          "tableTo": "treatment_plan_item",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "plan_item_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "clinical_follow_up_item_follow_up_id_plan_item_id_pk": {
-          "name": "clinical_follow_up_item_follow_up_id_plan_item_id_pk",
-          "columns": [
-            "follow_up_id",
-            "plan_item_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.clinical_note": {
@@ -21521,18 +21366,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "session_gap_days": {
-          "name": "session_gap_days",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "finish_controls": {
-          "name": "finish_controls",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "price_disclosure": {
           "name": "price_disclosure",
           "type": "text",
@@ -21796,14 +21629,6 @@
         "service_catalog_usual_sessions_check": {
           "name": "service_catalog_usual_sessions_check",
           "value": "\"service_catalog\".\"usual_sessions\" IS NULL OR \"service_catalog\".\"usual_sessions\" BETWEEN 1 AND 60"
-        },
-        "service_catalog_session_gap_check": {
-          "name": "service_catalog_session_gap_check",
-          "value": "\"service_catalog\".\"session_gap_days\" IS NULL OR \"service_catalog\".\"session_gap_days\" BETWEEN 0 AND 120"
-        },
-        "service_catalog_finish_controls_check": {
-          "name": "service_catalog_finish_controls_check",
-          "value": "\"service_catalog\".\"finish_controls\" IS NULL OR jsonb_typeof(\"service_catalog\".\"finish_controls\") = 'array'"
         },
         "service_catalog_price_disclosure_check": {
           "name": "service_catalog_price_disclosure_check",
@@ -23673,19 +23498,6 @@
           "notNull": true,
           "default": 1
         },
-        "session_gap_days": {
-          "name": "session_gap_days",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "finish_controls": {
-          "name": "finish_controls",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -23736,14 +23548,6 @@
         "treatment_template_usual_sessions_check": {
           "name": "treatment_template_usual_sessions_check",
           "value": "\"catalog\".\"treatment_template\".\"usual_sessions\" BETWEEN 1 AND 60"
-        },
-        "treatment_template_session_gap_check": {
-          "name": "treatment_template_session_gap_check",
-          "value": "\"catalog\".\"treatment_template\".\"session_gap_days\" IS NULL OR \"catalog\".\"treatment_template\".\"session_gap_days\" BETWEEN 1 AND 120"
-        },
-        "treatment_template_finish_controls_check": {
-          "name": "treatment_template_finish_controls_check",
-          "value": "jsonb_typeof(\"catalog\".\"treatment_template\".\"finish_controls\") = 'array'"
         }
       },
       "isRLSEnabled": false
@@ -27235,6 +27039,18 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "notice_version": {
+          "name": "notice_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notice_text": {
+          "name": "notice_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
