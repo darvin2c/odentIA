@@ -3,12 +3,12 @@
  * un tratamiento lo deja como estaba, y lo demás de los dos informes que vive en los servicios.
  */
 import { randomUUID } from "node:crypto"
-import { scheduleRoom } from "@odentia/db/schema/agenda"
-import { treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { appointmentPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { createAppointment, getAppointment } from "./appointments.js"
+import { createAppointment, getAppointment, markAppointmentCame } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { getPlanNextSteps } from "./plan-next.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -131,4 +131,23 @@ it("M1: la cita que solo llevaba lo ya terminado lo sigue diciendo en la cita y 
     getPlanNextSteps(tx, "org_a", f.patient.id, (permission) => permission !== "appointments.write"),
   )
   expect(seen.find((step) => step.kind === "sin_objeto")?.action).toBeNull()
+})
+
+it("M4: «Vino» en la cita de la sesión 2 deja el aviso para quien atendió, sin quitar «Reservar»; con su atención firmada, no (B1)", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f)
+  await ownerDb.update(treatmentPlanItem).set({ status: "en_curso", plannedSessions: 2 }).where(eq(treatmentPlanItem.id, item.id))
+  const book = await booker(f)
+  const visit = await book(1, [item.id])
+  const before = new Date(Date.now() - 3 * DAY)
+  await ownerDb
+    .update(appointment)
+    .set({ startsAt: new Date(Date.now() - DAY), endsAt: new Date(Date.now() - DAY + 30 * 60_000) })
+    .where(eq(appointment.id, visit.id))
+  await ownerDb.update(appointmentPlanItem).set({ createdAt: before }).where(eq(appointmentPlanItem.appointmentId, visit.id))
+  await f.run((tx) => markAppointmentCame(tx, "org_a", f.actor, visit.id))
+  const { steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all, { viewerUserId: f.actor }))
+  const next = steps.find((step) => step.kind === "continuar")
+  expect(next?.notice).toContain("quedó atendida sin registrar")
+  expect(next?.action?.label).toMatch(/^Reservar/)
 })

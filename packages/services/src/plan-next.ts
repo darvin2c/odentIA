@@ -390,7 +390,18 @@ async function planFactsOf(
     left join "user" u on u.id = a.professional_user_id
     where link.organization_id = ${orgId} and link.patient_id = ${patientId}::uuid and not a.is_test
       and link.created_at <= a.starts_at
-      and item.status in ('pendiente', 'programado') and item.decision_status = 'aceptado'
+      and item.status in ('pendiente', 'programado', 'en_curso') and item.decision_status = 'aceptado'
+      -- Con una atención firmada en esa cita, lo que se hizo (o no) quedó registrado: decir que no se
+      -- registró nombraba a otro doctor en el «lo piensa» (QA del 10 nov, B1). Queda la cita cerrada
+      -- con «Vino» (M4: la sesión 2 de la endodoncia).
+      and not exists (select 1 from encounter signed where signed.organization_id = a.organization_id
+        and signed.appointment_id = a.id and signed.status = 'finalizada')
+      -- Y nada de ese tratamiento se registró desde ese día.
+      and not exists (select 1 from encounter_procedure proc
+        join encounter done on done.organization_id = proc.organization_id and done.id = proc.encounter_id
+        where proc.organization_id = item.organization_id and proc.plan_item_id = item.id
+          and proc.voided_at is null and done.status <> 'anulada'
+          and done.started_at >= a.starts_at - interval '12 hours')
     order by link.plan_item_id, a.starts_at desc`)
   ).filter((row) => row.status === "atendida" && new Date(row.startsAt).getTime() < Date.now())
   // Quién indicó cada control y cuándo: el profesional y el día de la atención donde nació
@@ -859,15 +870,25 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
           !!row.at && waitingFor(row.later, items, phases)?.id === item.id,
       )
       .sort((a, b) => a.at.getTime() - b.at.getTime())[0]
+    // Su cita se cerró con «Vino» y nadie registró la sesión (QA del 10 nov, M4): se avisa a quien
+    // atendió, sin quitar «Reservar» (recepción puede tener al paciente delante; mesa de la entrega 12).
+    const seen = facts.unrecorded?.get(item.id)
+    const unrecordedWords = seen && seesAgenda
+      ? seen.mine
+        ? `Su cita contigo del ${day(seen.startsAt)} quedó atendida sin registrar ${lower(item.title)}: regístralo si se hizo esa sesión.`
+        : `Su cita del ${day(seen.startsAt)} quedó atendida sin registrar ${lower(item.title)}${seen.professionalName ? `: pregúntale a ${seen.professionalName} si se hizo esa sesión` : ""}.`
+      : null
     return {
       kind: "continuar",
       text: `Falta la cita de la próxima sesión: ${item.title}${session}`,
       detail: bookedBy,
-      ...(laterBooked && seesAgenda
-        ? {
-            notice: `${laterBooked.later.title} ya tiene cita el ${day(laterBooked.at)}, y va después: revisa esa cita.`,
-          }
-        : {}),
+      ...(unrecordedWords
+        ? { notice: unrecordedWords }
+        : laterBooked && seesAgenda
+          ? {
+              notice: `${laterBooked.later.title} ya tiene cita el ${day(laterBooked.at)}, y va después: revisa esa cita.`,
+            }
+          : {}),
       // El botón dice qué reserva (QA del 8 nov): «Reservar la sesión 2», como al firmar.
       action: can("appointments.write")
         ? {
