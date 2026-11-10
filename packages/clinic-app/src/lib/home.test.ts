@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { agendaSummary, attendedPercent, caseAdds, daysAgo, longDay, patientsSummary, repliable, waitingKey, waitingText, type HomeTextContext } from "./home"
+import { agendaSummary, alsoLine, attendedPercent, caseAdds, daysAgo, longDay, patientsSummary, repliable, waitingKey, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
 const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false, receptionName: "Sofi" }
@@ -220,4 +220,16 @@ describe("resumen de hoy", () => {
   it("escribe el día con mayúscula inicial y sin coma", () => {
     expect(longDay("2026-10-12", "es-PE")).toBe("Lunes 12 de octubre")
   })
+})
+
+it("lo plegado se dice entero: hasta dos por su nombre y, desde la tercera o si se repite, cuántas más", () => {
+  const createdAt = new Date().toISOString()
+  const unclosed = { kind: "unclosed", id: "c", patientId: "p", personId: "x", patientName: "X", startsAt: createdAt, professionalUserId: null, professionalName: null, serviceName: null, branchName: "Centro" } as unknown as WaitingRow
+  const review = { kind: "possibleDuplicate", id: "r", source: "registro", patientId: null, personId: "x", patientName: "X", personName: null, detail: "", createdAt, held: true } as unknown as WaitingRow
+  const task = { kind: "task", id: "t", title: "Llamar", dueAt: null, due: "none", mine: false, assigneeName: null, area: null, personId: "x", opportunityTitle: null, href: "/tasks", more: 0 } as unknown as WaitingRow
+  expect(alsoLine([])).toBeNull()
+  expect(alsoLine([unclosed])).toBe("también su cita sin cerrar")
+  expect(alsoLine([unclosed, review])).toBe("también su cita sin cerrar y una revisión")
+  expect(alsoLine([unclosed, review, task])).toBe("también su cita sin cerrar y 2 más")
+  expect(alsoLine([task, { ...task, id: "t2" } as WaitingRow])).toBe("también una tarea y 1 más")
 })

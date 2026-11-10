@@ -589,6 +589,13 @@
       "when": 1794253986044,
       "tag": "0083_argos_espera_a_otro",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794273710153,
+      "tag": "0084_registro_guarda_su_aviso",
+      "breakpoints": true
     }
   ]
 }

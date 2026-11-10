@@ -1,3 +1,4 @@
+import { DECLARED_ONLINE_NOTE } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -8,6 +9,7 @@ import { useMemberName, usePermission } from "../../lib/crm"
 import { clinicToday } from "../../lib/inventory"
 import {
   markAllergiesReviewedApi,
+  isHealthReviewPending,
   markHealthDeniedApi,
   type PatientHealth,
   unaskedHealthGroups,
@@ -79,7 +81,11 @@ export function HealthReviewNotice({
   })
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
-  if (!canWrite || (!allergiesDue && unasked.length === 0)) return null
+  // Lo que declaró en su registro en línea y nadie revisó todavía: se pide revisarlo aquí, donde se decide.
+  const declared = isHealthReviewPending(health)
+    ? [...health.conditions, ...health.medications].filter((row) => row.notes?.startsWith(DECLARED_ONLINE_NOTE)).map((row) => row.name)
+    : []
+  if (!canWrite || (!allergiesDue && unasked.length === 0 && declared.length === 0)) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const asked = active.length > 0 || health.reviewStatus.allergies === "none"
   const first = patientName.trim().split(/\s+/)[0] ?? patientName
@@ -89,7 +95,9 @@ export function HealthReviewNotice({
     unasked.includes("medications") ? "su medicación" : null,
   ].filter((topic): topic is string => topic !== null)
   const title =
-    unasked.length === 0
+    !allergiesDue && unasked.length === 0
+      ? `Revisa con ${first} lo que declaró en línea`
+      : unasked.length === 0
       ? asked
         ? `Pregúntale a ${first} si tiene alergias nuevas`
         : `Pregúntale a ${first} si tiene alergias`
@@ -162,6 +170,19 @@ export function HealthReviewNotice({
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => denied.mutate("medications")}>
               {denied.isPending && denied.variables === "medications" ? "Guardando…" : "No toma medicación"}
             </Button>
+          </li>
+        ) : null}
+        {declared.length > 0 ? (
+          <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-col gap-1">
+              <h3 className="text-sm font-medium">Lo que declaró en línea</h3>
+              <p className="text-sm text-muted-foreground">{listWords(declared)}. Confírmalo con {first} en sus antecedentes.</p>
+            </div>
+            {openWide ? (
+              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
+                Revisar antecedentes
+              </Button>
+            ) : null}
           </li>
         ) : null}
       </ul>
