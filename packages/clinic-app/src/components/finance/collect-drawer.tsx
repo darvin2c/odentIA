@@ -1116,9 +1116,10 @@ export function CollectDrawer({
     )
   }, [responsibilities.data])
   const payerDefaulted = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se repone al cerrar y con cada paciente.
   useEffect(() => {
-    if (!open) payerDefaulted.current = false
-  }, [open])
+    payerDefaulted.current = false
+  }, [open, effectiveId])
   useEffect(() => {
     if (!open || payerDefaulted.current || !payerByDefault) return
     payerDefaulted.current = true
