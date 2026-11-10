@@ -135,3 +135,28 @@ test("con los avisos bloqueados en el navegador, el interruptor dice cómo arreg
   await expect(page.getByText("El navegador los tiene bloqueados.", { exact: false })).toBeVisible()
   await expect(page.getByText("No tienes avisos")).toBeVisible()
 })
+
+test("las barras del teléfono van del color del fondo de la app y un toque que tarda muestra la barra de carga", async ({ createOwner }) => {
+  const { page, org } = await createOwner("barras")
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const themeColor = () => page.evaluate(() => [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((meta) => meta.content))
+  const canvas = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim())
+  // Ni blanco ni el color de la marca: el del fondo, en claro y en oscuro.
+  expect(await canvas()).toBe("#f8f8f8")
+  await expect.poll(async () => new Set(await themeColor())).toEqual(new Set(["#f8f8f8"]))
+  await page.emulateMedia({ colorScheme: "dark" })
+  await expect.poll(canvas).toBe("#111111")
+  await expect.poll(async () => new Set(await themeColor())).toEqual(new Set(["#111111"]))
+  await page.emulateMedia({ colorScheme: "light" })
+
+  // Un toque que tarda (el código de la pantalla llega lento): la barra aparece y se va al llegar.
+  await page.route("**/assets/**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await route.continue()
+  })
+  const progress = page.getByRole("progressbar", { name: "Cargando la página" })
+  await page.getByRole("link", { name: "Tareas", exact: true }).click()
+  await expect(progress).toBeVisible()
+  await expect(page).toHaveURL(/\/tasks/)
+  await expect(progress).toHaveCount(0, { timeout: 15_000 })
+})

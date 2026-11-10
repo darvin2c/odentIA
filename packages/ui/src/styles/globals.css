@@ -539,3 +539,36 @@
 .theme-light {
     color-scheme: light;
 }
+
+/*
+ * La app instalada (ADR 0177): el documento es del color del fondo de la app, así
+ * las barras del teléfono (que toman `theme-color`) y lo que asoma al desplazar no
+ * quedan blancas.
+ */
+@media (display-mode: standalone) {
+  html,
+  body {
+    background-color: var(--canvas);
+  }
+}
+
+/* La barra fina de arriba mientras se prepara la pantalla siguiente: avanza y nunca llega sola al final. */
+@keyframes nav-progress {
+  from {
+    transform: scaleX(0.05);
+  }
+  to {
+    transform: scaleX(0.85);
+  }
+}
+@utility nav-progress {
+  transform-origin: left;
+  animation: nav-progress 6s cubic-bezier(0.1, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress {
+    animation: none;
+    transform: none;
+    opacity: 0.6;
+  }
+}
