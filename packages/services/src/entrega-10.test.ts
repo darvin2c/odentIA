@@ -10,10 +10,12 @@ import {
   clinicalFollowUpItem,
   encounter,
   encounterDiagnosis,
+  patient,
   serviceCatalog,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { consentDocument, consentTemplateService } from "@odentia/db/schema/clinical-forms"
+import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -28,6 +30,7 @@ import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { createConsentDocument, createConsentTemplate, publishConsentTemplate } from "./clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { treatmentConsentStates } from "./consent-state.js"
+import { consentPhoneSignBlock } from "./su-enlace.js"
 import { bringTreatmentToEncounter } from "./encounter-visit.js"
 import {
   addEncounterProcedure,
@@ -406,8 +409,10 @@ it("consentimientos: el estado va con el tratamiento; «Cambiar» la pieza anula
   const f = await clinicalFixture()
   const template = await serviceAsksConsent(f)
   const item = await accepted(f, 46)
-  const state = async (id: string) => (await f.run((tx) => treatmentConsentStates(tx, "org_a", [id]))).get(id)
+  const state = async (id: string) => (await f.run((tx) => treatmentConsentStates(tx, "org_a", [id]))).get(id)?.state
   expect(await state(item.id)).toBe("falta")
+  // Dice cuál falta preparar, por su título (entrega 11).
+  expect((await f.run((tx) => treatmentConsentStates(tx, "org_a", [item.id]))).get(item.id)?.missing).toEqual(["Endodoncia"])
   await ownerDb.execute(
     sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`,
   )
@@ -465,4 +470,20 @@ it("«Descartar»: la atención sin nada registrado se borra sin motivo y deja s
   await expect(f.run((tx) => discardEmptyEncounter(tx, ...f.args, written))).rejects.toMatchObject({
     code: "ENCOUNTER_NOT_EMPTY",
   })
+})
+
+it("entrega 11: «Firmar en su teléfono» sigue la regla de la firma a distancia de quien recibe su enlace", async () => {
+  const f = await clinicalFixture()
+  const block = () => f.run((tx) => consentPhoneSignBlock(tx, "org_a", f.patient.id))
+  const [own] = await ownerDb.select({ personId: patient.personId }).from(patient).where(eq(patient.id, f.patient.id))
+  const person = (values: Partial<typeof contact.$inferInsert>) =>
+    ownerDb.update(contact).set(values).where(eq(contact.id, own!.personId))
+  // Sin fecha de nacimiento no se sabe si es mayor de edad: no se ofrece.
+  await person({ birthDate: null, docType: "DNI", docNumber: "41223355" })
+  expect(await block()).toBe("sin-fecha")
+  // Sin su documento en la ficha, lo que escriba no se compararía con nada.
+  await person({ birthDate: "1990-01-01", docNumber: null })
+  expect(await block()).toBe("sin-documento")
+  await person({ docNumber: "41223355" })
+  expect(await block()).toBeNull()
 })

@@ -1000,7 +1000,7 @@ export async function listPlanItems(
   const consents = await treatmentConsentStates(tx, orgId, withProgress.map((item) => item.id))
   return withProgress.map((item, index) => {
     const before = waitingFor(asDecided[index]!, asDecided, phases)
-    return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null, consent: consents.get(item.id) ?? null }
+    return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null, consent: consents.get(item.id)?.state ?? null, consentMissing: consents.get(item.id)?.missing ?? [] }
   })
 }
 

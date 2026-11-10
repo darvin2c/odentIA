@@ -108,6 +108,17 @@ export function useSignerChoices(patientId: string) {
   }
 }
 
+/**
+ * A quién le falta firmar, para «Falta la firma de…» (entrega 11): en un menor, su
+ * representante (por su nombre si hay uno solo), nunca el niño; si no, el paciente.
+ */
+export function useConsentSignerWord(patientId: string, patientFirstName: string): string {
+  const { choices, isMinor } = useSignerChoices(patientId)
+  if (!isMinor) return patientFirstName
+  const [only, ...others] = choices.filter((choice) => choice.kind === "representante")
+  return only && others.length === 0 ? firstName(only.name) : "su representante"
+}
+
 /** Primer nombre de quien firma, como lo dice la pantalla: «Firma de Lucía». */
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name

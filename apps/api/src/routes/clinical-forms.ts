@@ -12,6 +12,7 @@ import {
   consentDocumentPatientId,
   sendConsentToSign,
   showPersonalLink,
+  consentPhoneSignBlock,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -1013,9 +1014,14 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
     const patientId = query.patientId
     const response = await runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listConsentDocuments(tx, orgId, { patientId, status: query.status }),
-      ),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const rows = await listConsentDocuments(tx, orgId, { patientId, status: query.status })
+        // «Firmar en su teléfono» solo si su enlace lo dejaría firmar (entrega 11).
+        const phoneSignBlock = rows.some((row) => row.status === "pendiente" && !row.personSignedAt)
+          ? await consentPhoneSignBlock(tx, orgId, patientId)
+          : null
+        return rows.map((row) => ({ ...row, phoneSignBlock }))
+      }),
     )
     if (response.status === 200)
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })

@@ -90,7 +90,7 @@ import { BookingHere } from "../agenda/schedule-host"
 import { useNoticesColumnDockBlocker } from "../notices-column"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
-import { ConsentSigningScreen, PaperSignDrawer, useSignAs } from "./consent-signing"
+import { ConsentSigningScreen, PaperSignDrawer, useConsentSignerWord, useSignAs } from "./consent-signing"
 import {
   DictationHeaderButton,
   DictationMobileBar,
@@ -1702,7 +1702,7 @@ export function EncounterEditor({
     setConfirmWithDictation(dictationPending > 0)
     setConfirmOpen(true)
   }
-  const signer = firstNameOf(patient)
+  const signer = useConsentSignerWord(patientId, firstNameOf(patient))
   const confirmingRef = useRef(false)
   /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la unidad dental. */
   const signConsentsNow = async (need: ConsentNeed) => {
@@ -2830,6 +2830,10 @@ export function EncounterEditor({
         form={closingForm}
         signAs={signAs.text}
         who={signer}
+        // Se cobra lo que tiene precio, propio o de su línea del presupuesto (`finalizeEncounter`).
+        mayCharge={detail.procedures.some(
+          (proc) => !proc.voidedAt && proc.serviceId !== null && ((proc.priceCents ?? 0) > 0 || proc.planItemId !== null),
+        )}
         consents={unsignedConsents}
         closing={closingQuery.data?.data ?? null}
         materials={closingQuery.data?.data.materials ?? null}

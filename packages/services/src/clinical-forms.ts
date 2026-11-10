@@ -4,9 +4,9 @@ import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   type ConsentSections,
-  clinicalProfileFor,
   consentSectionsToText,
-  consentSignatureNote,
+  BUDGET_SIGNATURE_NOTE,
+  CONSENT_SIGNATURE_NOTES,
   documentText,
   isLeftOut,
   LEFT_OUT_DECISIONS,
@@ -2222,11 +2222,15 @@ export interface SignConsentInput {
   paperDocumentId?: string | null
 }
 
-/** Nivel real de la firma, siempre a la vista. */
+/**
+ * Cómo firmó, siempre a la vista: en la clínica, en papel o por enlace. El nivel legal de la
+ * firma («Firma electrónica simple», `signatureKindWords`) va en el PDF, no como advertencia
+ * al firmar (entrega 11).
+ */
 export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", string> = {
-  clinica: "Firma simple · en la clínica",
-  papel: "Firma simple · en papel",
-  enlace: "Firma simple · por enlace",
+  clinica: "Firma en la clínica",
+  papel: "Firma en papel",
+  enlace: "Firma por enlace",
 }
 
 /** `field`: el nombre del trazo en el cuerpo, para decir el rechazo junto a su recuadro. */
@@ -3196,16 +3200,13 @@ export async function consentDiagnosisTitles(
 export async function getConsentSheetFrame(
   tx: Db,
   orgId: string,
-): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
-  const [profile] = await tx
-    .select({ country: orgProfile.countryCode })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
+): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string; linkSignatureNote: string }> {
   return {
     clinic: await loadDocumentLetterhead(tx, orgId),
     declaration: CONSENT_DECLARATION,
-    signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+    // Lo que lee al pie quien firma en la tablet, y en su enlace (la vista previa de Configuración).
+    signatureNote: CONSENT_SIGNATURE_NOTES.clinica,
+    linkSignatureNote: CONSENT_SIGNATURE_NOTES.enlace,
   }
 }
 
@@ -3218,7 +3219,11 @@ export async function getBudgetSignFrame(
   tx: Db,
   orgId: string,
 ): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
-  return { ...(await getConsentSheetFrame(tx, orgId)), declaration: BUDGET_SIGN_DECLARATION }
+  return {
+    clinic: await loadDocumentLetterhead(tx, orgId),
+    declaration: BUDGET_SIGN_DECLARATION,
+    signatureNote: BUDGET_SIGNATURE_NOTE,
+  }
 }
 
 export async function listConsentDocuments(

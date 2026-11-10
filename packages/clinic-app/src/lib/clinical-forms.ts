@@ -126,6 +126,11 @@ export interface ConsentTemplate {
 
 export interface ConsentDocument {
   id: string
+  /**
+   * En la lista del paciente: por qué su enlace no lo dejaría firmar desde el teléfono
+   * (`remoteSignBlock`); entonces no se ofrece «Firmar en su teléfono». Null si puede.
+   */
+  phoneSignBlock?: "menor" | "sin-fecha" | "sin-documento" | "sin-destinatario" | null
   organizationId: string
   templateId: string
   templateVersion: number
@@ -238,11 +243,14 @@ export interface ConsentLetterhead {
   brandInk?: string | null
 }
 
-/** Lo fijo de la hoja que se firma: el membrete, la declaración que se guarda y la nota del nivel de firma. */
+/** Lo fijo de la hoja que se firma: el membrete, la declaración que se guarda y lo que dice el pie sobre la firma. */
 export interface ConsentSheetFrame {
   clinic: ConsentLetterhead
   declaration: string
+  /** Al pie, en la tablet. */
   signatureNote: string
+  /** Al pie, en su enlace (la vista previa de Configuración); no viene en el del presupuesto. */
+  linkSignatureNote?: string
 }
 
 export function fetchConsentSheetFrame(): Promise<{ data: ConsentSheetFrame }> {
@@ -620,11 +628,15 @@ export const ORDER_STATUS_LABELS: Record<ClinicalOrder["status"], string> = {
   cancelado: "Cancelada",
 }
 
-/** Nivel real de la firma, siempre a la vista. */
+/**
+ * Cómo firmó, siempre a la vista: en la clínica, en papel o por enlace. El nivel legal de la
+ * firma («Firma electrónica simple», `signatureKindWords`) va en el PDF, no como advertencia
+ * al firmar (entrega 11).
+ */
 export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", string> = {
-  clinica: "Firma simple · en la clínica",
-  papel: "Firma simple · en papel",
-  enlace: "Firma simple · por enlace",
+  clinica: "Firma en la clínica",
+  papel: "Firma en papel",
+  enlace: "Firma por enlace",
 }
 
 export function consentSignatureWords(
