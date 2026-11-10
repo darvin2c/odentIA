@@ -79,9 +79,11 @@ function checkKeys(keys: PushKeys): PushKeys {
   } catch {
     throw validation("La dirección del equipo no es válida")
   }
-  if (url.protocol !== "https:" || url.port !== "" || keys.endpoint.length > 1000 || !PUSH_HOSTS.some((host) => host.test(url.hostname)))
+  if (url.protocol !== "https:" || url.port !== "" || url.username || url.password || keys.endpoint.length > 1000
+    || !PUSH_HOSTS.some((host) => host.test(url.hostname)))
     throw validation("La dirección del equipo no es válida")
-  if (!KEY_PATTERN.test(keys.p256dh) || keys.p256dh.length > 200 || !KEY_PATTERN.test(keys.auth) || keys.auth.length > 100)
+  // Una clave P-256 sin comprimir (65 bytes) y el secreto de 16 bytes, en base64url (RFC 8291).
+  if (!KEY_PATTERN.test(keys.p256dh) || !/^[A-Za-z0-9_-]{86,87}=?$/.test(keys.p256dh) || !/^[A-Za-z0-9_-]{22}(==)?$/.test(keys.auth))
     throw validation("Las claves del equipo no son válidas")
   return keys
 }
@@ -98,8 +100,12 @@ export const PUSH_DEVICES_PER_PERSON = 10
  */
 export async function savePushSubscription(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, keys: PushKeys) {
   const { endpoint, p256dh, auth } = checkKeys(keys)
-  const [current] = await tx.select({ userId: pushSubscription.userId }).from(pushSubscription)
-    .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint))).limit(1)
+  const [current] = await tx.select({ userId: pushSubscription.userId, p256dh: pushSubscription.p256dh, auth: pushSubscription.auth })
+    .from(pushSubscription).where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint))).limit(1)
+  // El equipo pasa a otra persona solo desde ese mismo navegador, el único que tiene sus claves:
+  // con la dirección sola nadie se queda con los avisos de otro.
+  if (current && current.userId !== userId && (current.p256dh !== p256dh || current.auth !== auth))
+    throw validation("Este equipo ya recibe los avisos de otra persona")
   if (current?.userId === userId) {
     await tx.update(pushSubscription).set({ p256dh, auth })
       .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint)))

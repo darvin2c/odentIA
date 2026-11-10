@@ -148,23 +148,69 @@ export function applicationServerKey(base64url: string): Uint8Array<ArrayBuffer>
   return bytes
 }
 
+/** El navegador no deja suscribirse aquí (ventana privada o de invitado, o push apagado): no es la red. */
+export class PushBlockedError extends Error {}
+
+let availableKey: Promise<string | null> | null = null
+/** La clave pública del servidor, una vez por pestaña: sin ella los avisos no están disponibles. */
+function publicKey(): Promise<string | null> {
+  availableKey ??= apiFetch<{ data: { publicKey: string | null } }>("/api/push/key")
+    .then(({ data }) => data.publicKey)
+    .catch((error: unknown) => {
+      availableKey = null
+      throw error
+    })
+  return availableKey
+}
+
+/** Si el servidor ofrece los avisos en el equipo (tiene sus claves). */
+export async function devicePushAvailable(): Promise<boolean> {
+  return (await publicKey()) !== null
+}
+
+/** Cuando la persona cambia el permiso en el navegador con la página abierta. */
+export function subscribePermission(listener: () => void): () => void {
+  if (!browser || !navigator.permissions) return () => undefined
+  let status: PermissionStatus | null = null
+  let stopped = false
+  navigator.permissions
+    .query({ name: "notifications" })
+    .then((found) => {
+      if (stopped) return
+      status = found
+      status.addEventListener("change", listener)
+    })
+    .catch(() => undefined)
+  return () => {
+    stopped = true
+    status?.removeEventListener("change", listener)
+  }
+}
+
 /**
  * Activar los avisos en este equipo. El navegador pregunta solo aquí, después
  * del toque de la persona. Devuelve lo que decidió el navegador.
  */
 export async function enableDevicePush(): Promise<NotificationPermission | "no-disponible"> {
+  const serverKey = await publicKey()
+  if (!serverKey) return "no-disponible"
   const permission = await Notification.requestPermission()
   if (permission !== "granted") return permission
-  const { data } = await apiFetch<{ data: { publicKey: string | null } }>("/api/push/key")
-  if (!data.publicKey) return "no-disponible"
   const registration = await readyRegistration()
-  const key = applicationServerKey(data.publicKey)
+  const key = applicationServerKey(serverKey)
   let subscription = await registration.pushManager.getSubscription()
   if (subscription && !sameKey(subscription, key)) {
     await subscription.unsubscribe()
     subscription = null
   }
-  subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
+  subscription ??= await registration.pushManager
+    .subscribe({ userVisibleOnly: true, applicationServerKey: key })
+    .catch((error: unknown) => {
+      // Chrome en una ventana privada responde así aunque el permiso esté dado.
+      if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "AbortError"))
+        throw new PushBlockedError(error.message)
+      throw error
+    })
   const json = subscription.toJSON()
   await apiFetch("/api/push/subscriptions", {
     method: "POST",
@@ -204,7 +250,7 @@ export async function forgetDevicePushOnSignOut(): Promise<void> {
   }
 }
 
-/** En línea según el navegador; también se cae cuando una petición falla por la red. */
+/** En línea según el navegador (`navigator.onLine`): con wifi pero sin internet no se entera. */
 export function isOnline(): boolean {
   return !browser || navigator.onLine !== false
 }

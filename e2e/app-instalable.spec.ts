@@ -99,7 +99,7 @@ test("la clínica se instala con su nombre y avisa en el equipo: activar, sin co
   await expect(page.getByText("Sin conexión · no recargues")).toBeVisible()
   await testInfo.attach("sin-conexion-390", { body: await page.screenshot(), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
-  await expect(page.getByText("Sin conexión. Lo que escribiste sigue aquí: no recargues la página y guarda cuando vuelva.")).toBeVisible()
+  await expect(page.getByText("Sin conexión. Lo que escribiste sigue aquí y lo que ya tocaste guardar se guarda solo al volver: no recargues la página.")).toBeVisible()
   await testInfo.attach("sin-conexion-1440", { body: await page.screenshot(), contentType: "image/png" })
   await context.setOffline(false)
   await expect(page.getByText("Sin conexión. Lo que escribiste sigue aquí", { exact: false })).toHaveCount(0)

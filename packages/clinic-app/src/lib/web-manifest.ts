@@ -18,8 +18,8 @@ export function clinicWebManifest(appearance: ClinicAppearance, appProduct?: Cli
   return {
     id: "/home",
     name,
-    // Lo que cabe bajo el ícono del teléfono.
-    short_name: name.length > 12 ? brand : name,
+    // Bajo el ícono va el nombre de la clínica (el teléfono lo corta si no cabe): así se distinguen dos clínicas.
+    short_name: name,
     description: `${name} en ${brand}`,
     lang: "es",
     start_url: "/home",

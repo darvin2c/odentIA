@@ -134,6 +134,9 @@ it("quien deja la clínica no recibe nada y su equipo se olvida; el mismo equipo
   await subscribe("tomas", "reception", "mostrador")
   expect(await tx((db) => getPushSubscription(db, orgId, people.rita!, keys("mostrador").endpoint))).toEqual({ active: false })
   expect(await tx((db) => getPushSubscription(db, orgId, people.tomas!, keys("mostrador").endpoint))).toEqual({ active: true })
+  // Con la dirección sola, sin las claves de ese navegador, nadie se queda con el equipo de otro.
+  await expect(tx((db) => savePushSubscription(db, orgId, people.rita!, workspaceAccessFor("reception"), { ...keys("mostrador"), auth: "AAAAAAAAAAAAAAAAAAAAAA" })))
+    .rejects.toThrow(/otra persona/)
   // Rita no puede apagar el equipo de Tomás.
   await tx((db) => deletePushSubscription(db, orgId, people.rita!, keys("mostrador").endpoint))
   expect(await tx((db) => getPushSubscription(db, orgId, people.tomas!, keys("mostrador").endpoint))).toEqual({ active: true })
@@ -166,6 +169,8 @@ it("rechaza una dirección que no es de un servicio de push o claves que no son 
   await expect(save({ ...keys("x"), endpoint: "https://fcm.googleapis.com:8443/x" })).rejects.toThrow(/dirección/)
   await expect(save({ ...keys("apple"), endpoint: "https://web.push.apple.com/QGuQyavXut" })).resolves.toEqual({ active: true })
   await expect(save({ ...keys("x"), p256dh: "no es base64!" })).rejects.toThrow(/claves/)
+  await expect(save({ ...keys("x"), auth: "corto" })).rejects.toThrow(/claves/)
+  await expect(save({ ...keys("x"), endpoint: "https://alguien@fcm.googleapis.com/x" })).rejects.toThrow(/dirección/)
 })
 
 it("una clínica sin horario cargado no avisa de madrugada; volver a activar el mismo equipo no repite «Listo»; hay un tope de equipos por persona", async () => {

@@ -155,7 +155,7 @@ function Strip({ userId }: { userId: string }) {
       : [{
           id: "sin-conexion",
           tone: "alarma",
-          message: "Sin conexión. Lo que escribiste sigue aquí: no recargues la página y guarda cuando vuelva.",
+          message: "Sin conexión. Lo que escribiste sigue aquí y lo que ya tocaste guardar se guarda solo al volver: no recargues la página.",
           short: "Sin conexión · no recargues",
         }]
     return offline.concat((notices.data ?? [])
