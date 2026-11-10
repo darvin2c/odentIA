@@ -192,7 +192,14 @@ export function ClinicalAlertsCard({
               .join(" · ")}
           />
         ))}
-        {allergies.length === 0 ? (
+        {/* Sin el dato no se afirma nada de las alergias: «no preguntado» y «No tiene alergias»
+            se veían mientras cargaba a quien tiene una severa (QA de la ficha del 10 nov, M2). */}
+        {!health ? (
+          <li className="col-span-full rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground" aria-busy="true">
+            Consultando sus alergias y antecedentes…
+          </li>
+        ) : null}
+        {health && allergies.length === 0 ? (
           <li className="col-span-full flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
             <span className="text-sm font-medium">
               {allergyState === "none" ? "Alergias: niega" : "Alergias: no preguntado"}

@@ -81,7 +81,8 @@ export function clinicalAlerts(
     .map((a) => ({
       id: a.id,
       label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${allergyName(a)}${a.severity === "desconocida" ? "" : ` (${label("alergia", a.severity).toLowerCase()})`}`,
-      tone: "secondary" as const,
+      // Toda alergia alerta al menos como una enfermedad (QA de la ficha del 10 nov, B1).
+      tone: "warning" as const,
     }))
   const conditions = detail.activeConditions.map((c) => ({
     id: c.id,
