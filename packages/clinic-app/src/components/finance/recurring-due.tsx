@@ -2,7 +2,7 @@
  * Finanzas › Gastos: lo que se repite y toca pagar (el alquiler, los sueldos, la
  * luz). «Pagar» abre el cajón del gasto ya lleno, con el importe y el medio de
  * siempre, y nada se paga sin verlo (ADR 0167, que cambia el «pagar es un toque»
- * del ADR 0150). «Lo fijo del mes» va dentro de la tarjeta del total, y «Lo que se
+ * del ADR 0150). «Lo que se repite en <mes>» va dentro de la tarjeta del total, y «Lo que se
  * repite» lista todo, también lo que no toca este mes, para anotarlo, cambiarlo o
  * dejar de repetirlo.
  *
@@ -28,9 +28,11 @@ import {
   invalidateFinance,
   noteRecurringApi,
   parseAmount,
+  type Payable,
   type RecurringDue,
   type RecurringMonth,
   type RecurringTemplate,
+  similarRecurring,
   skipRecurringApi,
   todayIn,
   updateRecurringApi,
@@ -40,6 +42,7 @@ import { useTodayRate } from "../../lib/org"
 import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceChips } from "./cash-close-drawer"
+import { NotePayableButton, PayableRows, PayableVoidDrawer } from "./payables"
 import { PaymentMethodButtons } from "./collect-drawer"
 
 const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
@@ -81,7 +84,8 @@ export function useRecurringMonth(branchId: string, month: { year: number; month
 }
 
 /**
- * «Lo fijo del mes: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», en una línea bajo el total.
+ * «Lo que se repite en noviembre: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», en una línea bajo
+ * el total. Un solo nombre en Gastos y en Reportes: «Lo que se repite» (antes «Lo fijo» y «Gastos fijos»).
  * Con varias sedes dice también lo de toda la clínica, en la misma línea (QA de Gastos, G31).
  */
 export function FixedOfMonth({
@@ -98,7 +102,8 @@ export function FixedOfMonth({
   const { totalCents, paidCents, dueCents } = data.fixed
   return (
     <p className="mt-1 text-sm text-muted-foreground">
-      Lo fijo del mes{wholeClinic ? " en esta sede" : ""}:{" "}
+      Lo que se repite en {monthWord(`${data.year}-${String(data.month).padStart(2, "0")}`)}
+      {wholeClinic ? " en esta sede" : ""}:{" "}
       <span className="font-semibold text-foreground tabular-nums">{formatMoney(totalCents, data.currency, locale)}</span>
       {" · "}pagado {plainAmount(paidCents, data.currency, locale)}
       {dueCents > 0 ? ` · falta ${plainAmount(dueCents, data.currency, locale)}` : ""}
@@ -146,6 +151,8 @@ const editableOfTemplate = (row: RecurringTemplate): Editable => ({
 /** Dónde se anota lo que se repite: la sede y el formato de la clínica. */
 export interface RecurringPlace {
   branchId: string
+  /** El nombre de la sede: no cuenta al buscar lo que se parece. */
+  branchName?: string
   currency: string
   locale: string
   orgTimeZone: string
@@ -191,15 +198,32 @@ export function RecurringDueSection({
   locale,
   canWrite,
   onPay,
+  payables = [],
+  payablesToday = "",
+  onPayInvoice,
+  onNoteInvoice,
+  onCorrectInvoice,
+  onShowInvoicePayments,
 }: {
   data: RecurringMonth | undefined
   locale: string
   canWrite: boolean
   /** «Pagar»: abre el cajón del gasto lleno con lo de siempre. */
   onPay: (row: RecurringDue) => void
+  /** Las facturas por pagar de la sede (ADR 0175): van primero, por lo que vence antes. */
+  payables?: Payable[]
+  payablesToday?: string
+  onPayInvoice?: (payable: Payable) => void
+  /** «Anotar una factura». */
+  onNoteInvoice?: () => void
+  /** «Corregir la factura» (sin pagos). */
+  onCorrectInvoice?: (payable: Payable) => void
+  /** «Ver sus pagos»: la lista del mes filtrada por la factura. */
+  onShowInvoicePayments?: (payable: Payable) => void
 }) {
   const queryClient = useQueryClient()
   const [change, setChange] = useState<Editable | null>(null)
+  const [voidingInvoice, setVoidingInvoice] = useState<Payable | null>(null)
   const refresh = () => invalidateFinance(queryClient)
   const money = (cents: number, currency: string) => formatMoney(cents, currency, locale)
   // En el celular se ven los primeros tres; el resto, a pedido (QA de Gastos, UX 5).
@@ -219,14 +243,29 @@ export function RecurringDueSection({
     onError: (error) => toast.error(errorText(error, "No se pudo marcar")),
   })
 
-  if (!data || data.due.length === 0) return null
+  if (!data) return null
+  // Sin nada por pagar, quien puede anotar ve dónde anotar una factura; los demás, nada.
+  if (data.due.length === 0 && payables.length === 0) {
+    return canWrite && onNoteInvoice ? (
+      <section aria-labelledby="gastos-por-pagar" className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border bg-card px-4 py-3">
+        <h2 id="gastos-por-pagar" className="text-sm font-semibold">
+          Por pagar <span className="font-normal text-muted-foreground">· nada pendiente</span>
+        </h2>
+        <NotePayableButton onClick={onNoteInvoice} />
+      </section>
+    ) : null
+  }
   const current = `${data.year}-${String(data.month).padStart(2, "0")}`
   const inMain = data.due.filter((row) => row.currency === data.currency)
+  const invoicesInMain = payables.filter((row) => row.currency === data.currency)
   // Los sueldos juntos (de quien no los paga) van aparte del total: no son lo que le toca pagar.
-  const total = inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0)
+  const total =
+    inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0) +
+    invoicesInMain.reduce((sum, row) => sum + row.dueCents, 0)
   const salaries = inMain.filter((row) => row.group !== null).reduce((sum, row) => sum + row.amountCents, 0)
-  const otherCurrency = inMain.length < data.due.length
-  const earlier = data.due.some((row) => row.month !== current)
+  const otherCurrency = inMain.length < data.due.length || invoicesInMain.length < payables.length
+  // Una factura no es de un mes: con ellas el total es «Por pagar», sin mes.
+  const earlier = data.due.some((row) => row.month !== current) || payables.length > 0
   const FEW = 3
   const shown = all ? data.due : data.due.slice(0, FEW)
 
@@ -245,8 +284,28 @@ export function RecurringDueSection({
             </span>
           ) : null}
         </h2>
+        {canWrite && onNoteInvoice ? <NotePayableButton onClick={onNoteInvoice} /> : null}
+        {/* Con facturas y lo que se repite, el total dice de qué es cada parte. */}
+        {invoicesInMain.length > 0 && inMain.length > 0 ? (
+          <p className="w-full text-sm text-muted-foreground">
+            Facturas {formatMoney(invoicesInMain.reduce((sum, row) => sum + row.dueCents, 0), data.currency, locale)} · Lo que se repite{" "}
+            {formatMoney(inMain.filter((row) => row.group === null).reduce((sum, row) => sum + row.amountCents, 0), data.currency, locale)}
+          </p>
+        ) : null}
       </div>
       <ul className="flex min-w-0 flex-col divide-y">
+        {payables.length > 0 && onPayInvoice ? (
+          <PayableRows
+            payables={payables}
+            today={payablesToday}
+            locale={locale}
+            canWrite={canWrite}
+            onPay={onPayInvoice}
+            onVoid={setVoidingInvoice}
+            onCorrect={(payable) => onCorrectInvoice?.(payable)}
+            onShowPayments={(payable) => onShowInvoicePayments?.(payable)}
+          />
+        ) : null}
         {shown.map((row) => {
           // Lo que se paga al mes siguiente dice su mes: el sueldo de noviembre, «el 2 de diciembre».
           const dueMonth = row.dueOn.slice(0, 7)
@@ -296,11 +355,12 @@ export function RecurringDueSection({
       {!all && data.due.length > FEW ? (
         <div className="border-t px-4 py-2">
           <Button type="button" variant="link" className="h-auto p-0" onClick={() => setAll(true)}>
-            Ver todo lo por pagar ({data.due.length})
+            Ver {data.due.length - FEW} más de lo que se repite
           </Button>
         </div>
       ) : null}
       <ChangeRecurringDrawer row={change} locale={locale} onClose={() => setChange(null)} onDone={refresh} />
+      <PayableVoidDrawer payable={voidingInvoice} locale={locale} onClose={() => setVoidingInvoice(null)} />
     </section>
   )
 }
@@ -383,7 +443,17 @@ export function RepeatingList({
           )}
         </CollapsibleContent>
       </Collapsible>
-      <NoteRecurringDrawer place={place} open={noting} onClose={() => setNoting(false)} onDone={() => setOpen(true)} />
+      <NoteRecurringDrawer
+        place={place}
+        open={noting}
+        templates={templates}
+        onClose={() => setNoting(false)}
+        onDone={() => setOpen(true)}
+        onChangeExisting={(row) => {
+          setNoting(false)
+          setChange(editableOfTemplate(row))
+        }}
+      />
       <ChangeRecurringDrawer row={change} locale={locale} onClose={() => setChange(null)} onDone={() => invalidateFinance(queryClient)} />
     </>
   )
@@ -411,13 +481,18 @@ interface NoteValues {
 function NoteRecurringDrawer({
   place,
   open,
+  templates,
   onClose,
   onDone,
+  onChangeExisting,
 }: {
   place: RecurringPlace
   open: boolean
+  /** Lo que ya se repite en la sede: si se parece, se avisa (no frena). */
+  templates: RecurringTemplate[]
   onClose: () => void
   onDone: () => void
+  onChangeExisting: (row: RecurringTemplate) => void
 }) {
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
@@ -506,6 +581,7 @@ function NoteRecurringDrawer({
   }, [open, form])
   const day = Number(values.day)
   const validDay = Number.isInteger(day) && day >= 1 && day <= 31
+  const lookalikes = similarRecurring(templates, { concept: values.concept, category: values.category, day: validDay ? day : null }, place.branchName)
   const proposed = validDay ? firstOf(day, values.dueNext) : today.slice(0, 7)
   // Desde el mes pasado (una deuda que se anota) hasta un año: si no se elige, el primero que no vence.
   const months = Array.from({ length: 14 }, (_, index) => addMonth(today.slice(0, 7), index - 1)).map((key) => ({
@@ -525,6 +601,24 @@ function NoteRecurringDrawer({
         <form.AppField name="concept">
           {(field) => <field.TextField label="En qué se gasta" maxLength={500} placeholder="Alquiler del local, luz, sueldo de la asistente" />}
         </form.AppField>
+        {/* Puede ser otro de verdad (dos alquileres): se avisa y se anota igual. */}
+        {lookalikes.length > 0 ? (
+          <div role="status" className="flex flex-col gap-1 rounded-lg border border-dashed px-3 py-2 text-sm">
+            {lookalikes.map((row) => (
+              <p key={row.id} className="flex flex-wrap items-center gap-x-2">
+                <span>
+                  Ya se repite «{row.concept}» ({formatMoney(row.amountCents, row.currency, place.locale)}
+                  {row.group === null ? `, el ${row.day}` : ""}). ¿Es el mismo?
+                </span>
+                {row.group === null ? (
+                  <Button type="button" variant="link" className="h-auto p-0" onClick={() => onChangeExisting(row)}>
+                    Cambiar ese
+                  </Button>
+                ) : null}
+              </p>
+            ))}
+          </div>
+        ) : null}
         <form.AppField name="category">
           {(field) => (
             <field.Group legend="Tipo" description={field.state.value ? expenseCategoryHint(field.state.value) : undefined}>

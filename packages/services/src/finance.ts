@@ -51,6 +51,7 @@ import {
   commissionSettlementLine,
   expense,
   expenseGapDismissal,
+  expensePayable,
   expenseRecurring,
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
@@ -176,6 +177,26 @@ async function audit(
   await tx
     .insert(auditEvent)
     .values({ organizationId: orgId, actorUserId, entity, entityId: id, action, metadata: metadata ?? null })
+}
+
+/**
+ * Una factura por pagar con su saldo (ADR 0175), bloqueada mientras se paga: dos pagos a la vez no
+ * pasan de lo que falta. Lo pagado es la suma de sus gastos vigentes.
+ */
+export async function lockPayable(tx: Db, orgId: string, payableId: string) {
+  if (!looksLikeId(payableId)) throw invalidField("payableId", "Esa factura no existe")
+  const [row] = await tx
+    .select()
+    .from(expensePayable)
+    .where(and(eq(expensePayable.organizationId, orgId), eq(expensePayable.id, payableId)))
+    .for("update")
+  if (!row) throw invalidField("payableId", "Esa factura no existe")
+  const [paid] = await tx
+    .select({ cents: sql<string>`coalesce(sum(${expense.amountCents}), 0)::text` })
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.payableId, payableId), isNull(expense.voidedAt)))
+  const paidCents = Number(paid?.cents ?? 0)
+  return { ...row, paidCents, dueCents: Math.max(0, row.amountCents - paidCents) }
 }
 
 export async function requireBranch(tx: Db, orgId: string, branchId: string) {
@@ -1306,7 +1327,7 @@ const CASH_METHOD = "10"
  * Lo que dice la persona del comprobante y del proveedor, con el tipo del país y el proveedor de
  * Inventario si lo eligió (su nombre y su documento se congelan).
  */
-async function expensePaper(
+export async function expensePaper(
   tx: Db,
   orgId: string,
   input: Pick<CreateExpenseInput, "receiptType" | "receiptKind" | "supplierId" | "supplierName" | "supplierTaxId">,
@@ -1421,7 +1442,7 @@ export async function replayedExpense(
     CreateExpenseInput,
     "requestId" | "branchId" | "amountCents" | "concept" | "currency" | "category" | "fromCash" | "salesTax" | "paymentMethodId"
   >,
-  link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string; replacesExpenseId?: string } = {},
+  link: { purchaseOrderId?: string; recurringId?: string; recurringMonth?: string; replacesExpenseId?: string; payableId?: string } = {},
 ) {
   const requestId = requestKey(input.requestId)
   if (!requestId) return null
@@ -1444,6 +1465,7 @@ export async function replayedExpense(
     row.replacesExpenseId !== (link.replacesExpenseId ?? null) ||
     (input.salesTax !== undefined && row.salesTax !== input.salesTax) ||
     row.purchaseOrderId !== (link.purchaseOrderId ?? null) ||
+    row.payableId !== (link.payableId ?? null) ||
     row.recurringId !== (link.recurringId ?? null) ||
     row.recurringMonth !== (link.recurringMonth ?? null)
   )
@@ -1476,6 +1498,8 @@ export async function createExpense(
     cashConcept?: string
     /** Solo `correctExpense`: el gasto que este reemplaza, anulado en la misma operación. */
     replacesExpenseId?: string
+    /** El pago (o una parte) de una factura por pagar (ADR 0175). */
+    payableId?: string
   } = {},
   /**
    * Quien registra: lo que se le paga al personal (el tipo «Personal») lo anota quien administra
@@ -1510,6 +1534,24 @@ export async function createExpense(
   const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
   const fromCash = method ? method.typeCode === CASH_METHOD : input.fromCash === true
   const amountCents = assertCents(input.amountCents, "El gasto", "amountCents")
+  // El pago de una factura por pagar: de su sede, su tipo y su moneda, y nunca más de lo que falta.
+  if (link.payableId) {
+    if (link.purchaseOrderId) throw validation("Un pago es de una compra o de una factura, no de las dos")
+    const owed = await lockPayable(tx, orgId, link.payableId)
+    if (owed.voidedAt) throw conflict("PAYABLE_VOIDED", "Esa factura se anuló: ya no se paga")
+    if (owed.branchId !== branchRow.id) throw invalidField("branchId", "Esa factura es de otra sede: se paga en la suya")
+    if (owed.category !== category) throw invalidField("category", `Esa factura es de ${owed.category}: su pago va en ese tipo`)
+    if (owed.currency !== unit) throw invalidField("currency", `Esa factura es en ${owed.currency}: se paga en esa moneda`)
+    if (amountCents > owed.dueCents) {
+      const { locale } = await getOrgLocale(tx, orgId)
+      throw invalidField(
+        "amountCents",
+        owed.dueCents === 0
+          ? "Esa factura ya está pagada"
+          : `Es más de lo que falta: de esa factura queda ${formatMoney(owed.dueCents, owed.currency, locale)} por pagar`,
+      )
+    }
+  }
   const tender = link.tender
     ? {
         cents: assertCents(link.tender.cents, "Lo que salió", "tenderCents"),
@@ -1560,6 +1602,7 @@ export async function createExpense(
       replacesExpenseId: link.replacesExpenseId ?? null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
       purchaseOrderId: link.purchaseOrderId ?? null,
+      payableId: link.payableId ?? null,
       salesTax,
       recurringId: link.recurringId ?? null,
       recurringMonth: link.recurringMonth ?? null,
@@ -1727,6 +1770,8 @@ function withoutCommissionNames<
         ...("fromCash" in row ? { fromCash: false } : {}),
         ...("shiftClosed" in row ? { shiftClosed: false } : {}),
         ...("replaced" in row ? { replaced: null } : {}),
+        ...("history" in row ? { history: [] } : {}),
+        ...("payableId" in row ? { payableId: null } : {}),
       }
       merged.set(key, first)
       out.push(first)
@@ -1830,28 +1875,63 @@ export async function getMonthExpenses(
         ).map((row) => row.id)
       : [],
   )
-  const replacing = rows.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null)
-  const before = new Map(
-    replacing.length
-      ? (
-          await tx
-            .select({
-              id: expense.id,
-              amountCents: expense.amountCents,
-              currency: expense.currency,
-              category: expense.category,
-              concept: expense.concept,
-              spentAt: expense.spentAt,
-              methodName: expense.methodName,
-              shiftId: expense.shiftId,
-              voidReason: expense.voidReason,
-              voidedBy: expense.voidedBy,
-            })
-            .from(expense)
-            .where(and(eq(expense.organizationId, orgId), inArray(expense.id, replacing)))
-        ).map((row) => [row.id, row] as const)
-      : [],
-  )
+  // La cadena entera de correcciones: lo de antes, y lo de antes de eso (hasta 10 vueltas).
+  type Before = {
+    id: string
+    amountCents: number
+    currency: string
+    category: string
+    concept: string
+    spentAt: Date
+    methodName: string | null
+    shiftId: string | null
+    voidReason: string | null
+    replacesExpenseId: string | null
+  }
+  const before = new Map<string, Before>()
+  let pendingIds = rows.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null)
+  for (let turn = 0; turn < 10 && pendingIds.length > 0; turn += 1) {
+    const found = await tx
+      .select({
+        id: expense.id,
+        amountCents: expense.amountCents,
+        currency: expense.currency,
+        category: expense.category,
+        concept: expense.concept,
+        spentAt: expense.spentAt,
+        methodName: expense.methodName,
+        shiftId: expense.shiftId,
+        voidReason: expense.voidReason,
+        replacesExpenseId: expense.replacesExpenseId,
+      })
+      .from(expense)
+      .where(and(eq(expense.organizationId, orgId), inArray(expense.id, pendingIds)))
+    for (const row of found) before.set(row.id, row)
+    pendingIds = found.map((row) => row.replacesExpenseId).filter((id): id is string => id !== null && !before.has(id))
+  }
+  const chainOf = (id: string | null): Before[] => {
+    const out: Before[] = []
+    for (let at = id; at && out.length < 10; at = before.get(at)?.replacesExpenseId ?? null) {
+      const row = before.get(at)
+      if (!row) break
+      out.push(row)
+    }
+    return out
+  }
+  const untilSalary = (chain: Before[], seesPeople: boolean) => {
+    if (seesPeople) return chain
+    const cut = chain.findIndex((item) => item.category === STAFF_PAY_CATEGORY)
+    return cut === -1 ? chain : chain.slice(0, cut)
+  }
+  const beforeWords = (was: Before) => ({
+    amountCents: was.amountCents,
+    currency: was.currency,
+    category: was.category,
+    concept: was.concept,
+    spentAt: was.spentAt,
+    methodName: was.methodName ?? (was.shiftId ? "Efectivo de la caja" : null),
+    reason: was.voidReason,
+  })
   // De quién es cada sueldo pagado de lo que se repite: solo para quien administra comisiones (ADR 0166).
   const persons = new Map<string, string>()
   if (viewer.seesCommissions) {
@@ -1868,12 +1948,26 @@ export async function getMonthExpenses(
       }
     }
   }
+  // Lo anulado para convertirlo en un sueldo no dice su motivo a quien no ve los sueldos: el motivo
+  // cuenta lo que se pagaba y a quién (ADR 0166).
+  const voidedIds = rows.filter((row) => row.voidedAt !== null).map((row) => row.id)
+  const intoSalary = new Set(
+    viewer.seesCommissions || voidedIds.length === 0
+      ? []
+      : (
+          await tx
+            .select({ id: expense.replacesExpenseId })
+            .from(expense)
+            .where(and(eq(expense.organizationId, orgId), inArray(expense.replacesExpenseId, voidedIds), eq(expense.category, STAFF_PAY_CATEGORY)))
+        ).map((row) => row.id),
+  )
   const detailed = rows.filter((row) => !replacedIds.has(row.id)).map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
     const was = row.replacesExpenseId ? before.get(row.replacesExpenseId) : undefined
     return {
       ...row,
+      voidReason: intoSalary.has(row.id) ? null : row.voidReason,
       // El tipo con que se ve y se filtra: el mismo que su cifra del mes (`byCategory`).
       category: settlement !== undefined ? COMMISSION_PAYMENTS_CONCEPT : row.category,
       fromCash: row.shiftId !== null,
@@ -1886,17 +1980,15 @@ export async function getMonthExpenses(
       personName: row.recurringId ? (persons.get(row.recurringId) ?? null) : null,
       /** Lo que era antes de corregirlo: el importe, el tipo, la fecha y cómo se pagó. */
       // Lo de antes de un sueldo no se le dice a quien no administra comisiones (ADR 0166).
-      replaced: was && (viewer.seesCommissions || was.category !== STAFF_PAY_CATEGORY)
-        ? {
-            amountCents: was.amountCents,
-            currency: was.currency,
-            category: was.category,
-            concept: was.concept,
-            spentAt: was.spentAt,
-            methodName: was.methodName ?? (was.shiftId ? "Efectivo de la caja" : null),
-            reason: was.voidReason,
-          }
-        : null,
+      replaced: was && (viewer.seesCommissions || was.category !== STAFF_PAY_CATEGORY) ? beforeWords(was) : null,
+      /**
+       * Toda la cadena de correcciones, de la más reciente a la primera. Para quien no ve los
+       * sueldos se corta en el primero: el motivo de la versión anterior a un sueldo podría
+       * contar lo que se pagaba (ADR 0166).
+       */
+      history: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).map(beforeWords),
+      /** La cadena llega a su primer gasto (no se cortó en un sueldo para quien no los ve). */
+      historyComplete: untilSalary(chainOf(row.replacesExpenseId), viewer.seesCommissions).length === chainOf(row.replacesExpenseId).length,
       commission: settlement !== undefined,
       salary: salaries.has(row.id),
       /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */
@@ -1954,6 +2046,12 @@ export async function correctExpense(
   opts: { allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   if (!looksLikeId(expenseId)) throw notFound("Gasto")
+  // El pago de una factura se bloquea en el orden de pagarla: primero la factura (ADR 0175).
+  const [owedBy] = await tx
+    .select({ payableId: expense.payableId })
+    .from(expense)
+    .where(and(eq(expense.organizationId, orgId), eq(expense.id, expenseId)))
+  if (owedBy?.payableId) await lockPayable(tx, orgId, owedBy.payableId)
   const [original] = await tx
     .select()
     .from(expense)
@@ -1966,6 +2064,7 @@ export async function correctExpense(
     ...(original.recurringId && original.recurringMonth
       ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
       : {}),
+    ...(original.payableId ? { payableId: original.payableId } : {}),
     replacesExpenseId: original.id,
   })
   if (replay) return replay
@@ -2018,6 +2117,8 @@ export async function correctExpense(
         ? { recurringId: original.recurringId, recurringMonth: original.recurringMonth }
         : {}),
       replacesExpenseId: original.id,
+      // El pago corregido sigue siendo de su factura: si no, quedaría otra vez por pagar (ADR 0175).
+      ...(original.payableId ? { payableId: original.payableId } : {}),
       // El movimiento de caja de un sueldo no dice a quién, como al pagarlo (ADR 0166).
       ...(category === STAFF_PAY_CATEGORY ? { cashConcept: SALARY_PAYMENT_CONCEPT } : {}),
     },
@@ -2033,11 +2134,30 @@ export async function correctExpense(
  * aunque no vea Inventario.
  */
 export async function listExpenseSuppliers(tx: Db, orgId: string) {
-  return tx
+  const listed = await tx
     .select({ id: supplier.id, name: supplier.name, docType: supplier.docType, docNumber: supplier.docNumber })
     .from(supplier)
     .where(and(eq(supplier.organizationId, orgId), eq(supplier.isActive, true)))
     .orderBy(asc(supplier.name))
+  // Los que se escribieron a mano en un gasto o una factura (el laboratorio), con el último RUC dicho:
+  // así se sugieren igual y el contador no ve dos nombres para el mismo proveedor.
+  const written = await tx.execute<{ name: string; taxId: string | null }>(sql`
+    select distinct on (lower(name)) name, tax_id as "taxId" from (
+      -- Nunca lo pagado al personal: su recibo por honorarios dice el nombre y el RUC de la persona (ADR 0166).
+      select supplier_name as name, supplier_tax_id as tax_id, created_at from expense
+        where organization_id = ${orgId} and supplier_id is null and supplier_name is not null and voided_at is null
+          and category <> ${STAFF_PAY_CATEGORY}
+      union all
+      select supplier_name, supplier_tax_id, created_at from expense_payable
+        where organization_id = ${orgId} and supplier_id is null and voided_at is null
+    ) s
+    order by lower(name), (tax_id is null), created_at desc
+    limit 200`)
+  const known = new Set(listed.map((row) => row.name.toLocaleLowerCase("es")))
+  const extra = [...written]
+    .filter((row) => !known.has(row.name.toLocaleLowerCase("es")))
+    .map((row) => ({ id: null as string | null, name: row.name, docType: row.taxId ? "RUC" : null, docNumber: row.taxId }))
+  return [...listed.map((row) => ({ ...row, id: row.id as string | null })), ...extra].sort((a, b) => a.name.localeCompare(b.name, "es"))
 }
 
 /**
@@ -2059,10 +2179,12 @@ export async function voidExpense(
   opts: { fromCommission?: boolean; allowPostClose?: boolean; seesPeople?: boolean } = {},
 ) {
   const [found] = await tx
-    .select({ purchaseOrderId: expense.purchaseOrderId })
+    .select({ purchaseOrderId: expense.purchaseOrderId, payableId: expense.payableId })
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
   if (!found) throw notFound("Gasto")
+  // El pago de una factura (ADR 0175): la factura se bloquea antes que la caja, como al pagarla.
+  if (found.payableId) await lockPayable(tx, orgId, found.payableId)
   // Lo pagado al personal lo anula quien lo ve (`commissions.write`, ADR 0166); el pago de una
   // comisión se anula con su pago, que ya pide ese permiso.
   if (!opts.fromCommission && opts.seesPeople !== true && (await salaryPaymentsOf(tx, orgId, [expenseId])).size > 0)
@@ -4069,6 +4191,9 @@ export interface PayMonthCommissionInput {
    * gasto, para que el cierre cuadre. Sin esto queda «fuera de la caja».
    */
   fromCash?: boolean
+  /** Con qué se pagó (ADR 0167), como un gasto: manda sobre `fromCash`; solo el efectivo sale de la caja. */
+  paymentMethodId?: string | null
+  paymentReference?: string | null
 }
 
 /**
@@ -4198,8 +4323,11 @@ export async function payMonthCommission(
       })
     return { settlement, expense: null }
   }
+  // Con qué se pagó, como en un gasto: el medio manda, y solo el efectivo sale de la caja.
+  const method = input.paymentMethodId ? await expenseMethod(tx, orgId, input.paymentMethodId) : null
+  const fromCash = method ? method.typeCode === CASH_METHOD : input.fromCash === true
   // Como un gasto de la caja (`createExpense`): la abre si hace falta y no la deja en negativo.
-  const shift = input.fromCash
+  const shift = fromCash
     ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
     : null
   // En otra moneda, el gasto guarda su valor en la del negocio con el cambio de hoy, como cualquier gasto.
@@ -4221,6 +4349,10 @@ export async function payMonthCommission(
       category: COMMISSION_EXPENSE_CATEGORY,
       spentAt: paidAt,
       receiptKind: "ninguno",
+      paymentMethodId: method?.id ?? null,
+      methodName: method?.name ?? null,
+      methodTypeCode: method?.typeCode ?? null,
+      paymentReference: method && method.typeCode !== CASH_METHOD ? input.paymentReference?.trim().slice(0, 60) || null : null,
       createdBy: actorUserId,
     })
     .returning()

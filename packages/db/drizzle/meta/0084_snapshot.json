@@ -1,5 +1,5 @@
 {
-  "id": "a0df45ea-25f1-4a3a-b444-9a69051e3e41",
+  "id": "730fe051-c780-404a-af55-0a6524ec933f",
   "prevId": "4016672e-a814-4bc2-a8ad-30ad1db4d885",
   "version": "7",
   "dialect": "postgresql",
@@ -27040,18 +27040,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "notice_version": {
-          "name": "notice_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notice_text": {
-          "name": "notice_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -30325,6 +30313,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payable_id": {
+          "name": "payable_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "sales_tax": {
           "name": "sales_tax",
           "type": "boolean",
@@ -30585,6 +30579,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "expense_org_payable_idx": {
+          "name": "expense_org_payable_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payable_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"expense\".\"payable_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -30715,6 +30731,21 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "expense_payable_org_fk": {
+          "name": "expense_payable_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "expense_payable",
+          "columnsFrom": [
+            "organization_id",
+            "payable_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "expense_organization_id_purchase_order_id_purchase_order_organization_id_id_fk": {
           "name": "expense_organization_id_purchase_order_id_purchase_order_organization_id_id_fk",
           "tableFrom": "expense",
@@ -30742,6 +30773,10 @@
         "expense_recurring_link_check": {
           "name": "expense_recurring_link_check",
           "value": "(\"expense\".\"recurring_id\" IS NULL) = (\"expense\".\"recurring_month\" IS NULL) AND (\"expense\".\"recurring_month\" IS NULL OR \"expense\".\"recurring_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')"
+        },
+        "expense_payable_or_purchase_check": {
+          "name": "expense_payable_or_purchase_check",
+          "value": "\"expense\".\"payable_id\" IS NULL OR \"expense\".\"purchase_order_id\" IS NULL"
         },
         "expense_amount_check": {
           "name": "expense_amount_check",
@@ -30865,6 +30900,374 @@
         "expense_gap_dismissal_month_check": {
           "name": "expense_gap_dismissal_month_check",
           "value": "\"expense_gap_dismissal\".\"month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.expense_payable": {
+      "name": "expense_payable",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Laboratorio'"
+        },
+        "concept": {
+          "name": "concept",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supplier_id": {
+          "name": "supplier_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_name": {
+          "name": "supplier_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supplier_tax_id": {
+          "name": "supplier_tax_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "receipt_type": {
+          "name": "receipt_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "receipt_number": {
+          "name": "receipt_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "issued_on": {
+          "name": "issued_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "due_on": {
+          "name": "due_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plan_item_id": {
+          "name": "plan_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "void_reason": {
+          "name": "void_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "expense_payable_org_id_uidx": {
+          "name": "expense_payable_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_payable_org_request_uidx": {
+          "name": "expense_payable_org_request_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"expense_payable\".\"request_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_payable_org_branch_open_idx": {
+          "name": "expense_payable_org_branch_open_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "branch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"expense_payable\".\"voided_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_payable_org_patient_idx": {
+          "name": "expense_payable_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"expense_payable\".\"patient_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "expense_payable_organization_id_organization_id_fk": {
+          "name": "expense_payable_organization_id_organization_id_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_payable_branch_id_branch_id_fk": {
+          "name": "expense_payable_branch_id_branch_id_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "branch",
+          "columnsFrom": [
+            "branch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_payable_created_by_user_id_fk": {
+          "name": "expense_payable_created_by_user_id_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_payable_voided_by_user_id_fk": {
+          "name": "expense_payable_voided_by_user_id_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_payable_supplier_org_fk": {
+          "name": "expense_payable_supplier_org_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "supplier",
+          "columnsFrom": [
+            "organization_id",
+            "supplier_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_payable_patient_org_fk": {
+          "name": "expense_payable_patient_org_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "patient",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_payable_plan_item_org_fk": {
+          "name": "expense_payable_plan_item_org_fk",
+          "tableFrom": "expense_payable",
+          "tableTo": "treatment_plan_item",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "plan_item_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "expense_payable_amount_check": {
+          "name": "expense_payable_amount_check",
+          "value": "\"expense_payable\".\"amount_cents\" > 0"
+        },
+        "expense_payable_due_check": {
+          "name": "expense_payable_due_check",
+          "value": "\"expense_payable\".\"due_on\" IS NULL OR \"expense_payable\".\"due_on\" >= \"expense_payable\".\"issued_on\""
+        },
+        "expense_payable_plan_item_check": {
+          "name": "expense_payable_plan_item_check",
+          "value": "\"expense_payable\".\"plan_item_id\" IS NULL OR \"expense_payable\".\"patient_id\" IS NOT NULL"
+        },
+        "expense_payable_category_check": {
+          "name": "expense_payable_category_check",
+          "value": "\"expense_payable\".\"category\" <> 'Personal'"
         }
       },
       "isRLSEnabled": false

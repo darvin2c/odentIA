@@ -1,0 +1,12 @@
+{
+  "descripcion": "Lo que se repite (ADR 0150) en Argos: preguntas del dueño sobre los gastos fijos, escritas el 2026-11-09 al corregir que la vista de gastos decía «no hay costos fijos». Lo pagado de lo que se repite está en `gastos`; lo que aún está por pagar no está en las vistas (trampa: decirlo y ofrecer dónde se ve, sin inventar). El costo por tratamiento sigue sin registrarse.",
+  "preguntas": [
+    { "id": "x1", "texto": "¿Cuánto me cuesta mantener la clínica al mes?", "espera": "responde", "debe": "Los gastos pagados del mes (o del último mes cerrado), sin decir que los gastos fijos no se registran." },
+    { "id": "x2", "texto": "¿Cuánto pagué de alquiler y servicios este mes?", "espera": "responde", "debe": "Lo pagado este mes en Alquiler y Servicios." },
+    { "id": "x3", "texto": "¿Cuáles son mis gastos fijos?", "espera": "responde", "debe": "Los gastos que se repiten pagados (alquiler, luz, agua, internet, sueldos) con su monto, sin decir que no existen." },
+    { "id": "x4", "texto": "¿Cuánto me falta pagar de los gastos fijos de este mes?", "espera": "trampa", "debe": "Lo por pagar no está en sus datos: decir que se ve en Finanzas › Gastos, sin inventar una cifra." },
+    { "id": "x5", "texto": "¿Cuánto gasté en sueldos el mes pasado?", "espera": "responde", "debe": "Lo pagado en Personal (sueldos) el mes pasado." },
+    { "id": "x6", "texto": "¿Cuánto me cuesta el laboratorio de cada corona?", "espera": "trampa", "debe": "El laboratorio por tratamiento no se registra: ofrecer el total de Laboratorio del periodo." },
+    { "id": "x7", "texto": "¿Mis gastos fijos subieron comparado con el mes pasado?", "espera": "responde", "debe": "Comparar lo pagado en gastos (o en Alquiler, Servicios y Personal) entre los dos meses, sin decir que no se registran." }
+  ]
+}

@@ -10,10 +10,10 @@
  */
 import type { PurchaseBalance, PurchasesToPay } from "./reports"
 import { currencyWord, expenseCategoryWord, parseMoney, upperFirst } from "@odentia/clinical"
-import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
+import { minutesToInstant, normalizeSearchText, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { ApiError, apiFetch } from "./api"
+import { ApiError, apiDownload, apiFetch } from "./api"
 import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
 import { useOrgSecondCurrency } from "./org"
@@ -812,6 +812,17 @@ export function expenseCategoryHint(category: string): string | undefined {
 /** Valor con que el servidor guarda «sin comprobante». */
 export const NO_RECEIPT = "ninguno"
 
+/** Lo que era un gasto antes de corregirlo. */
+export interface ExpenseBefore {
+  amountCents: number
+  currency: string
+  category: string
+  concept: string
+  spentAt: string
+  methodName: string | null
+  reason: string | null
+}
+
 export interface ExpenseRow {
   id: string
   branchId: string
@@ -841,15 +852,13 @@ export interface ExpenseRow {
   personName?: string | null
   /** Corrige a otro gasto: lo que era antes. */
   replacesExpenseId?: string | null
-  replaced?: {
-    amountCents: number
-    currency: string
-    category: string
-    concept: string
-    spentAt: string
-    methodName: string | null
-    reason: string | null
-  } | null
+  replaced?: ExpenseBefore | null
+  /** Toda la cadena de correcciones, de la más reciente a la primera. */
+  history?: ExpenseBefore[]
+  /** `false` si la cadena se cortó (en un sueldo, para quien no los ve): lo último no es lo primero. */
+  historyComplete?: boolean
+  /** El pago (o una parte) de una factura por pagar (ADR 0175). */
+  payableId?: string | null
   notes: string | null
   voidedAt: string | null
   voidReason: string | null
@@ -913,6 +922,14 @@ export function fetchMonthExpenses(query: {
   return apiFetch<{ data: MonthExpenses }>(`/api/finance/expenses/month?${params}`)
 }
 
+/** La lista del mes para el contador (CSV), con lo que se busca y el tipo elegido, como en la pantalla. */
+export function downloadMonthExpenses(query: { branchId: string; year: number; month: number; q?: string; category?: string }): Promise<void> {
+  const params = new URLSearchParams({ branchId: query.branchId, year: String(query.year), month: String(query.month) })
+  if (query.q?.trim()) params.set("q", query.q.trim())
+  if (query.category) params.set("category", query.category)
+  return apiDownload(`/api/finance/expenses/month/download?${params}`, `gastos-${query.year}-${String(query.month).padStart(2, "0")}.csv`)
+}
+
 export function createExpenseApi(body: {
   branchId: string
   concept: string
@@ -941,11 +958,76 @@ export function createExpenseApi(body: {
   }
   /** La clave del formulario abierto: reintentar después de un corte devuelve el mismo gasto. */
   requestId?: string
+  /** El pago (o una parte) de una factura por pagar (ADR 0175). */
+  payableId?: string
 } & ExpensePaper): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+/** Una factura por pagar (ADR 0175), con lo pagado y lo que falta. */
+export interface Payable {
+  id: string
+  branchId: string
+  category: string
+  concept: string
+  supplierId: string | null
+  supplierName: string
+  supplierTaxId: string | null
+  receiptType: string | null
+  receiptNumber: string | null
+  issuedOn: string
+  dueOn: string | null
+  currency: string
+  amountCents: number
+  paidCents: number
+  dueCents: number
+  overdue: boolean
+  patientId: string | null
+  patientName: string | null
+  planItemId: string | null
+  planItemTitle: string | null
+  planItemSite: string | null
+  notes: string | null
+}
+
+export function fetchPayables(query: { branchId?: string; patientId?: string; open?: boolean }): Promise<{ data: { today: string; payables: Payable[] } }> {
+  const params = new URLSearchParams()
+  if (query.branchId) params.set("branchId", query.branchId)
+  if (query.patientId) params.set("patientId", query.patientId)
+  if (query.open) params.set("open", "1")
+  return apiFetch(`/api/finance/payables?${params}`)
+}
+
+/** Anota una factura por pagar: no paga ni toca la caja. */
+export function notePayableApi(body: {
+  requestId: string
+  branchId: string
+  category: string
+  supplierId?: string
+  supplierName?: string
+  supplierTaxId?: string
+  receiptType?: string
+  receiptNumber?: string
+  issuedOn?: string
+  dueOn?: string
+  currency?: string
+  amountCents: number
+  patientId?: string
+  planItemId?: string
+}): Promise<{ data: { id: string } }> {
+  return apiFetch("/api/finance/payables", { method: "POST", body: JSON.stringify(body) })
+}
+
+/** «Corregir la factura» (sin pagos): anula la anotada con lo que cambió y anota esta. */
+export function correctPayableApi(id: string, body: Parameters<typeof notePayableApi>[0]): Promise<{ data: { id: string } }> {
+  return apiFetch(`/api/finance/payables/${id}/correct`, { method: "POST", body: JSON.stringify(body) })
+}
+
+export function voidPayableApi(id: string, reason: string): Promise<{ data: { id: string } }> {
+  return apiFetch(`/api/finance/payables/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) })
 }
 
 /** Con qué se pagó, el comprobante del país y a quién (ADR 0167). */
@@ -965,8 +1047,9 @@ export function correctExpenseApi(id: string, body: Parameters<typeof createExpe
 }
 
 /** A quién se pagó: los proveedores de la clínica, con su documento. */
+/** Los proveedores para decir a quién se pagó: los de Inventario (con `id`) y los ya escritos (sin él). */
 export function fetchExpenseSuppliers(): Promise<{
-  data: Array<{ id: string; name: string; docType: string | null; docNumber: string | null }>
+  data: Array<{ id: string | null; name: string; docType: string | null; docNumber: string | null }>
 }> {
   return apiFetch("/api/finance/suppliers")
 }
@@ -1042,10 +1125,43 @@ export interface RecurringMonth {
   currency: string
   timezone: string
   today: string
-  /** «Lo fijo del mes»: lo que cae en el mes, lo pagado y lo que falta. */
+  /** Lo que se repite y cae en el mes: cuánto, lo pagado y lo que falta. */
   fixed: { totalCents: number; paidCents: number; dueCents: number; count: number }
   due: RecurringDue[]
   templates: RecurringTemplate[]
+}
+
+/** Palabras que no distinguen un gasto de otro: «sueldo de la asistente», «luz del local». */
+const LINKING_WORDS = new Set(["del", "las", "los", "para", "con", "por", "una", "uno", "que", "mes", "pago", "sede", "local", "clinica", "consultorio"])
+
+function conceptWords(text: string, ignored: ReadonlySet<string> = new Set()): Set<string> {
+  return new Set(
+    normalizeSearchText(text)
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length >= 3 && !LINKING_WORDS.has(word) && !ignored.has(word)),
+  )
+}
+
+/**
+ * Lo que ya se repite y se parece a lo que se está por anotar: comparte una palabra del concepto
+ * («Luz» y «Luz sede Centro»), o es del mismo tipo y se paga el mismo día. Solo avisa: puede ser
+ * otro de verdad (dos alquileres), y quien anota decide.
+ */
+export function similarRecurring(
+  templates: readonly RecurringTemplate[],
+  draft: { concept: string; category: string; day: number | null },
+  /** El nombre de la sede: «Luz Centro» y «Agua Centro» no se parecen por «Centro». */
+  branchName = "",
+): RecurringTemplate[] {
+  const ignored = conceptWords(branchName)
+  const words = conceptWords(draft.concept, ignored)
+  return templates
+    .filter((row) => {
+      const sharesWord = [...conceptWords(row.concept, ignored)].some((word) => words.has(word))
+      const sameSlot = draft.category !== "" && row.category === draft.category && draft.day !== null && row.day === draft.day
+      return sharesWord || sameSlot
+    })
+    .slice(0, 2)
 }
 
 export function fetchRecurringMonth(query: { year: number; month: number; branchId?: string }): Promise<{ data: RecurringMonth }> {
@@ -1232,6 +1348,7 @@ export const financeKeys = {
   expenses: (branchId: string, ref: MonthRef, q = "", category = "") =>
     ["finance-expenses", branchId, ref.year, ref.month, q, category] as const,
   purchases: (branchId: string | null) => ["finance-purchases", branchId] as const,
+  payables: (branchId: string | null, patientId: string | null = null) => ["finance-payables", branchId, patientId] as const,
   tickets: (branchId: string, params: TicketListParams) => ["finance-tickets", branchId, params] as const,
   ticket: (id: string) => ["finance-ticket", id] as const,
 }
@@ -1245,6 +1362,7 @@ export function invalidateFinance(queryClient: QueryClient): void {
     "finance-closures",
     "finance-expenses",
     "finance-purchases",
+    "finance-payables",
     "finance-tickets",
     "finance-ticket",
     // Un gasto o el pago de una compra cambian Inventario y Reportes.
