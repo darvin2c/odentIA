@@ -58,6 +58,10 @@ async function readSignPhoto(file: File): Promise<SignPhoto> {
   canvas.height = Math.max(1, Math.round(bitmap.height * scale))
   const context = canvas.getContext("2d")
   if (!context) throw new Error("El navegador no deja leer la foto")
+  // Lo transparente (un PNG sin fondo) se ve y se lee sobre blanco, como el papel; si no,
+  // queda negro y tocarlo elegía negro.
+  context.fillStyle = "#ffffff"
+  context.fillRect(0, 0, canvas.width, canvas.height)
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
   bitmap.close()
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
@@ -295,7 +299,7 @@ export function ClinicBrandColorSettings({
                     value={chosen}
                     onChange={(event) => pick(event.target.value.toLowerCase())}
                     disabled={save.isPending}
-                    className="h-11 w-16 cursor-pointer rounded-lg border border-input bg-card p-0.5"
+                    className="h-11 w-16 cursor-pointer rounded-lg border border-input-border bg-card p-0.5"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -315,7 +319,7 @@ export function ClinicBrandColorSettings({
                     spellCheck={false}
                     className={cn(
                       "h-11 w-36 rounded-lg border bg-card px-3 text-base uppercase",
-                      codeError ? "border-destructive" : "border-input",
+                      codeError ? "border-destructive" : "border-input-border",
                     )}
                   />
                 </div>
@@ -338,7 +342,9 @@ export function ClinicBrandColorSettings({
               />
               {photoColors.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {photoColors.map((hex) => swatch(hex, brandColorName(hex), true))}
+                  {photoColors.map((hex) =>
+                    swatch(hex, hex === photo.picked ? `${brandColorName(hex)}, donde tocaste` : brandColorName(hex), true),
+                  )}
                 </div>
               ) : null}
               <p className="text-sm text-muted-foreground">
