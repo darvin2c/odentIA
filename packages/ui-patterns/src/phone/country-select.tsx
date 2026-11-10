@@ -114,7 +114,7 @@ export function CountrySelect({
         onBlur={onBlur}
         disabled={disabled}
         className={cn(
-          "flex h-9 w-28 shrink-0 items-center justify-between gap-1.5 rounded-3xl border border-transparent bg-input/50 px-3 py-2 text-sm whitespace-nowrap text-foreground transition-[color,box-shadow,background-color] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20",
+          "flex h-9 w-28 shrink-0 items-center justify-between gap-1.5 rounded-3xl border border-input-border bg-input/50 px-3 py-2 text-sm whitespace-nowrap text-foreground transition-[color,box-shadow,background-color] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20",
         )}
       >
         {`${value} +${getCountryCallingCode(value)}`}

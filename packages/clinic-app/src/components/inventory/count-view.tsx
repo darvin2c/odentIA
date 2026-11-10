@@ -313,7 +313,7 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
           submit(event)
         }}
       >
-        <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
+        <div className="flex flex-wrap items-center gap-2">
           <SearchInput label="Buscar en productos" placeholder="Buscar por nombre o código" expandable />
           <ViewTabs label="Qué productos ver" value={filter} options={filters} onValueChange={pick} />
         </div>

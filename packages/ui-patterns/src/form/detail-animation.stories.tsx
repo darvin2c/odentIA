@@ -18,7 +18,7 @@ import { FormPanel } from "./form-panel.js"
  * montaría un `FormDrawer`), así que hay que ver la story en el viewport ancho.
  *
  * Nota: la barra de filtros es una maqueta con las clases exactas del root de
- * `FilterBar` (`flex p-3 bg-card rounded-md`): el componente real exige el router
+ * `FilterBar` (`flex`, sin caja propia): el componente real exige el router
  * de TanStack y no monta en Storybook.
  */
 const meta = {
@@ -59,7 +59,7 @@ export const EntradaYSalida: Story = {
               onClick: () => setOpen(true),
             }}
           />
-          <div className="flex p-3 bg-card rounded-md">
+          <div className="flex">
             <div className="flex min-w-0 flex-1 items-center gap-2 p-1">
               <span className="text-sm text-muted-foreground">Buscar sucursal</span>
               <span className="ml-auto shrink-0 text-sm text-muted-foreground">Estado: Todas</span>

@@ -165,7 +165,7 @@ export function CountRowsSkeleton({ systemLabel }: { systemLabel: string }) {
   )
 }
 
-const BAR = "flex flex-wrap items-center gap-2 rounded-md bg-card p-3"
+const BAR = "flex flex-wrap items-center gap-2"
 
 function ProductsSkeleton() {
   return (
