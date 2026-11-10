@@ -381,3 +381,30 @@ it("la clave reusada en otro cobro se rechaza", async () => {
     ),
   ).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
 })
+
+it("el ticket dice cómo queda su cuenta: el adelanto de quien ya debe dice cuánto le falta y lo que queda a favor (QA del 9 nov, repaso 3)", async () => {
+  const f = await clinicalFixture()
+  const { branchId, cash } = await seedCashbox(f)
+  await f.run((tx) =>
+    createCharge(tx, ...f.args, { description: "Endodoncia", amountCents: 30000, currency: "PEN" }),
+  )
+  const advance = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      advanceCents: 10000,
+      payments: [{ paymentMethodId: cash.id, amountCents: 10000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  expect(advance.ticket.snapshot).toMatchObject({ accountDueCents: 30000, accountCreditCents: 10000 })
+  // Pagar lo que debe usa primero lo que tiene a favor: queda al día, sin nada a favor.
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 15000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  expect(paid.creditAppliedCents).toBe(10000)
+  expect(paid.ticket.snapshot).toMatchObject({ accountDueCents: 5000, accountCreditCents: 0 })
+})

@@ -39,6 +39,9 @@ const scheduleInput = z.union([
           startsAt: z.iso.datetime({ offset: true }),
           endsAt: z.iso.datetime({ offset: true }).optional(),
           durationMin: z.number().int().positive().optional(),
+          // Fuera de su horario u ocupado, solo si la pantalla lo avisó (como en «Nueva cita»).
+          outsideSchedule: z.literal(true).optional(),
+          overrideBusy: z.literal(true).optional(),
         })
         .strict(),
     })

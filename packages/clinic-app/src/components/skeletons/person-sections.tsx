@@ -566,7 +566,7 @@ export function AccountSkeleton({ canWrite }: { canWrite: boolean }) {
     <div className="flex flex-col gap-4 sm:gap-6">
       <section className="elevated rounded-xl border bg-card p-4 sm:p-6">
         <dl className="grid grid-cols-3 gap-3">
-          {["Debe", "A favor", "Saldo"].map((label) => (
+          {["Debe", "A favor", "Falta pagar"].map((label) => (
             <div key={label} className="min-w-0">
               <dt className="text-xs text-muted-foreground">{label}</dt>
               <dd className="my-0.5">

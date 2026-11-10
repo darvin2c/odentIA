@@ -54,6 +54,7 @@ export function EncounterVisitStrip({
   encounterId,
   visit,
   offeredReason,
+  bookedReason,
   onUseReason,
   reasonEmpty,
   onUrgency,
@@ -67,6 +68,8 @@ export function EncounterVisitStrip({
   visit: EncounterVisit | null | undefined
   /** El motivo que trae la cita, mientras no haya otro. */
   offeredReason: string | null
+  /** El de la cita aunque ya se usó: lo usado sigue a la vista (QA del 9 nov, repaso 3). */
+  bookedReason?: string | null
   onUseReason: () => void
   reasonEmpty: boolean
   /** «Es una urgencia»: deja el motivo listo para escribir. */
@@ -81,7 +84,9 @@ export function EncounterVisitStrip({
   const [error, setError] = useState<string | null>(null)
   const treatments = visit?.treatments ?? []
   const controls = visit?.controls ?? []
-  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason
+  // Ya usado como motivo, «Su cita» sigue a la vista, sin botón.
+  const usedReason = !offeredReason && bookedReason?.trim() ? bookedReason.trim() : null
+  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason && !usedReason
 
   const run = async (key: string, write: () => Promise<unknown>) => {
     if (busy) return
@@ -135,6 +140,14 @@ export function EncounterVisitStrip({
         </p>
       ) : (
         <ul className="flex flex-col divide-y text-sm">
+          {usedReason ? (
+            <li className={row}>
+              <span className="min-w-0">
+                <span className="text-muted-foreground">Su cita: </span>«{usedReason}»
+                <span className="block text-xs text-muted-foreground">Ya es el motivo de hoy</span>
+              </span>
+            </li>
+          ) : null}
           {offeredReason ? (
             <li className={row}>
               <span className="min-w-0">
@@ -243,10 +256,14 @@ export function EncounterVisitStrip({
                   }
                 >
                   {controlWords(control)}
-                  {control.chosen ? " · viene a este control: se cumple al firmar" : ""}
+                  {control.byAppointment
+                    ? " · su cita de hoy es este control: se cumple al firmar"
+                    : control.chosen
+                      ? " · viene a este control: se cumple al firmar"
+                      : ""}
                 </span>
               </span>
-              {control.chosen ? (
+              {control.byAppointment ? null : control.chosen ? (
                 <Button
                   type="button"
                   size="sm"

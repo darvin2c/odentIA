@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { clinicalProfileFor } from "./country-profiles.js"
 import {
+  healsAtFollowUp,
   diagnosisCodeLabel,
   findingDiagnosisCode,
   findingDiagnosisCodes,
@@ -139,4 +140,14 @@ describe("demografía con códigos internacionales", () => {
     expect(hl7DocumentTypeCode("CNV", "PE")).toBe("BCT")
     expect(hl7DocumentTypeCode("OTRO", "PE")).toBeNull()
   })
+})
+
+it("la lesión periapical sana en su control, no al terminar: la pulpitis sí se resuelve (QA del 9 nov, repaso 3)", () => {
+  expect(healsAtFollowUp("ICD-11", "DA09.70")).toBe(true)
+  expect(healsAtFollowUp("ICD-11", "DA09.61")).toBe(true)
+  expect(healsAtFollowUp("ICD-11", "DA09.0")).toBe(false)
+  expect(healsAtFollowUp("ICD-10", "K04.4")).toBe(true)
+  expect(healsAtFollowUp("ICD-10-PE", "K04.7")).toBe(true)
+  expect(healsAtFollowUp("ICD-10", "K04.0")).toBe(false)
+  expect(healsAtFollowUp("ICD-10", null)).toBe(false)
 })

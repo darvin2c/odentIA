@@ -386,6 +386,7 @@ const planPatchInput = z
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
+    plannedSessions: z.number().int().min(1).max(60).nullish(),
     encounterId: z.uuid(),
     status: z
       .enum([
@@ -610,6 +611,9 @@ const coordinationScheduleInput = z.union([
           startsAt: z.iso.datetime({ offset: true }),
           endsAt: z.iso.datetime({ offset: true }).optional(),
           durationMin: z.number().int().positive().optional(),
+          // Fuera de su horario u ocupado, solo si la pantalla lo avisó (como en «Nueva cita»).
+          outsideSchedule: z.literal(true).optional(),
+          overrideBusy: z.literal(true).optional(),
         })
         .strict(),
     })

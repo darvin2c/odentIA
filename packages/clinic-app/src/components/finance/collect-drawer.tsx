@@ -79,6 +79,7 @@ import {
   type AccountPendingItem,
   acceptedTotalsKey,
   amountHelpText,
+  partialSplitWords,
   CASH_TYPE_CODE,
   type CollectInput,
   type CollectResultBody,
@@ -562,6 +563,10 @@ interface ConceptJob {
 /** Lo que el servidor llama distinto en los bloques de un concepto. */
 const CONCEPT_FIELDS = { amountCents: "amount" }
 
+
+/** El adelanto que quedó escrito para después de cobrar lo que debe, por persona (solo en esta pestaña). */
+const carriedAdvance = new Map<string, { amount: string; advanceFor: string; debtCurrency: string; payCurrency: string }>()
+
 export function CollectDrawer({
   patientId,
   patientName,
@@ -676,6 +681,9 @@ export function CollectDrawer({
       void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
       void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
       requestId.current = crypto.randomUUID()
+      // El adelanto que quedó escrito para después («va en un cobro aparte») vuelve al abrir el
+      // próximo cobro de esta persona: no se pierde al cerrar (QA antes de entregar, entrega 9).
+      if (advanceDraft && !form.state.values.advance) carriedAdvance.set(id, advanceDraft)
       onCollected(result, id)
       onClose()
     },
@@ -778,7 +786,10 @@ export function CollectDrawer({
     form.reset()
     setSelectInit(false)
     setAmountTouched(false)
-    setAdvanceDraft(null)
+    // Lo que se dejó para «Cobrar un adelanto» en el cobro anterior de esta persona vuelve escrito.
+    const carried = patientId ? carriedAdvance.get(patientId) : undefined
+    if (patientId) carriedAdvance.delete(patientId)
+    setAdvanceDraft(carried ?? null)
     setPendingDraft(null)
     setEditor(null)
     setAdding(false)
@@ -864,6 +875,8 @@ export function CollectDrawer({
       }),
     [data, orgCurrencies],
   )
+  /** Lo que debe en la moneda del adelanto: sin «Para», ese dinero no lo pagaría. */
+  const owedInDebt = owedByCurrency.find((row) => row.code === debt) ?? null
   const otherCurrencyCount = useMemo(
     () =>
       (data?.pendiente ?? []).filter(
@@ -1305,6 +1318,17 @@ export function CollectDrawer({
     locale,
     owesOther: owedByCurrency.some((row) => row.code !== debt),
   })
+  // Un pago parcial de varios conceptos dice a cuál va, antes de cobrar.
+  const splitHelp =
+    values.advance || pay !== debt
+      ? null
+      : partialSplitWords(
+          pending.filter((item) => values.chargeIds.includes(item.chargeId)),
+          figures.cancels,
+          debt,
+          locale,
+          favor,
+        )
   const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
   const rateHelp = !second
     ? ""
@@ -1554,11 +1578,57 @@ export function CollectDrawer({
                               }}
                             />
                           ) : null}
-                          <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                            {chosenTarget
-                              ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
-                              : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
-                          </p>
+                          {!chosenTarget && owedInDebt && owedInDebt.cents > favor ? (
+                            // Con deuda, un adelanto suelto la dejaba igual y la ficha mostraba tres cifras
+                            // (QA del 9 nov, repaso 3): se avisa y se ofrece pagar lo que debe, sin frenar.
+                            <div role="status" className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+                              <p>
+                                Debe {formatMoney(owedInDebt.cents - favor, owedInDebt.code, locale)}. Este adelanto no
+                                paga esa deuda: queda a favor, aparte, hasta su próximo cobro.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="self-start"
+                                disabled={busy}
+                                onClick={() => {
+                                  // Lo escrito va a lo que debe, empezando por lo más antiguo. Lo que pase de lo que
+                                  // debe no cabe en ese cobro: queda escrito como adelanto, para después.
+                                  const written = form.state.values.amount.trim()
+                                  const writtenCents = written ? parseMoneyOrNull(written, debt, locale) : null
+                                  const owedCents = Math.max(0, owedInDebt.cents - favor)
+                                  form.setFieldValue("advance", false)
+                                  form.setFieldValue("advanceFor", "")
+                                  form.setFieldValue("chargeIds", owedInDebt.ids)
+                                  setPendingDraft(null)
+                                  if (writtenCents !== null && writtenCents > owedCents && owedCents > 0) {
+                                    setAdvanceDraft({
+                                      amount: formatMoneyInput(writtenCents - owedCents, debt, locale),
+                                      advanceFor: "",
+                                      debtCurrency: form.state.values.debtCurrency,
+                                      payCurrency: form.state.values.payCurrency,
+                                    })
+                                    form.setFieldValue("amount", formatMoneyInput(owedCents, debt, locale))
+                                    setAmountTouched(true)
+                                  } else {
+                                    setAdvanceDraft(null)
+                                    if (written) {
+                                      form.setFieldValue("amount", written)
+                                      setAmountTouched(true)
+                                    } else setAmountTouched(false)
+                                  }
+                                }}
+                              >
+                                Mejor, a lo que debe
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                              {chosenTarget
+                                ? `Queda pagado en ${chosenTarget.name}, del que faltan ${formatMoney(chosenTarget.toChargeCents, chosenTarget.currency, locale)} por cobrar. Al hacerlo se cobra solo lo que falta, y no se usa en otro cobro. Si se devuelve, es entero.`
+                                : "Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el próximo cobro."}
+                            </p>
+                          )}
                           {second !== null && !values.advanceFor ? (
                             <div className="flex flex-col gap-1.5">
                               <span id={`${uid}-a-cuenta`} className="text-sm font-medium">
@@ -1947,7 +2017,11 @@ export function CollectDrawer({
                 ) : null}
                 <form.AppField name="amount">
                   {(field) => (
-                    <field.Control label="Importe" id={`${uid}-importe`} description={amountHelp}>
+                    <field.Control
+                      label="Importe"
+                      id={`${uid}-importe`}
+                      description={splitHelp ? `${amountHelp} ${splitHelp}` : amountHelp}
+                    >
                       {(control) => (
                         <MoneyInput
                           id={control.id}

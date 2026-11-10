@@ -19,3 +19,16 @@ export function sessionWords(n: number, m: number): string {
 export function showsSession(n: number, m: number): boolean {
   return m > 1 || n > m
 }
+
+/**
+ * Cómo se dice una sesión ya hecha en la historia (la tarjeta de la atención,
+ * la historia de la pieza): «sesión 1 de 2» mientras el tratamiento sigue, y
+ * «sesión 2 de 2 · tratamiento terminado» en la que lo terminó (también si se
+ * terminó antes de sus previstas). Una sesión de un tratamiento en curso nunca
+ * se dice «Realizado» a secas (tercer repaso del 9 nov, E8 y E12). Lo de una
+ * sola sesión no dice su sesión: `null`.
+ */
+export function doneSessionWords(n: number, m: number, finished: boolean): string | null {
+  if (!showsSession(n, m)) return null
+  return finished ? `${sessionWords(n, m)} · tratamiento terminado` : sessionWords(n, m)
+}

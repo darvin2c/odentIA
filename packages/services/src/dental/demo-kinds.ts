@@ -212,6 +212,22 @@ const DENTAL_INVENTORY: DemoKindRecipe["inventory"] = {
       { sku: "INS-ANESTESIA-LIDO", quantity: 2 },
       { sku: "INS-ALGODON-ROLLO", quantity: 4 },
     ],
+    // Sin pulpa vital la anestesia suele hacer menos falta: una sola carpule.
+    "endodoncia-posterior-no-vital": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "endodoncia-anterior-no-vital": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "pulpectomia-posterior-deciduo": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
     "radiografia-periapical": [{ sku: "INS-PELICULA-RX", quantity: 1 }],
     "fluor-barniz": [
       { sku: "INS-GUANTE-NITRILO", quantity: 2 },
@@ -411,6 +427,11 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       // estaba la anterior y una endodoncia de la 36 salía como «anterior»).
       { template: "endodoncia-posterior-vital", price: 650, durationMin: 90, weight: 4 },
       { template: "endodoncia-anterior-vital", price: 450, durationMin: 90, weight: 2 },
+      // La necrosis (no vital) también llega: sin ella, quien atiende una pieza necrótica en la demo
+      // solo tenía la vital (QA del 9 nov, repaso 3). La pulpectomía es la de una temporal.
+      { template: "endodoncia-posterior-no-vital", price: 700, durationMin: 90, weight: 2 },
+      { template: "endodoncia-anterior-no-vital", price: 500, durationMin: 90, weight: 1 },
+      { template: "pulpectomia-posterior-deciduo", price: 280, durationMin: 60, weight: 1 },
       { template: "corona-metal-ceramica-metal-base", price: 900, durationMin: 60, weight: 5 },
       { template: "blanqueamiento-externo-por-arcada", price: 600, durationMin: 60, weight: 4 },
       { template: "radiografia-periapical", price: 30, durationMin: 10, weight: 6, perUnit: true },

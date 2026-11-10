@@ -295,7 +295,8 @@ export function BookingDrawer({
           method: "POST",
           body: JSON.stringify({ tipo, recibir, source: "telefono" }),
         })
-      if (remindersByWhatsApp) await permission("recordatorio", true)
+      // Sin teléfono no se le prometió nada por WhatsApp: no se anota.
+      if (remindersByWhatsApp && value.phone) await permission("recordatorio", true)
       if (value.generalConsent !== null) await permission("novedades", value.generalConsent)
     })().catch(() => {
       consentNote.current = "No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes."
@@ -305,7 +306,7 @@ export function BookingDrawer({
     return registered.data
   }
 
-  // Quien registra escribe nombres y apellidos (y su teléfono si es alguien nuevo); quien elige, elige.
+  // Quien registra escribe nombres y apellidos (y su teléfono, si lo tiene); quien elige, elige.
   const schema = z.object({
     patientId: registering ? z.string() : z.string().min(1, "Elige un paciente."),
     givenNames: registering
@@ -314,13 +315,9 @@ export function BookingDrawer({
     surname: registering
       ? z.string().trim().min(1, "Escribe los apellidos.").max(200, "Escribe los apellidos en 200 caracteres o menos.")
       : z.string(),
-    phone:
-      registering && !seed.person
-        ? z
-            .string()
-            .nullable()
-            .refine((phone) => Boolean(phone), "Escribe su teléfono: por ahí le llegan los avisos de la cita.")
-        : z.string().nullable(),
+    // Sin teléfono también se reserva (una urgencia, alguien sin celular): el campo avisa que
+    // no le llegarán los avisos de la cita, sin frenar. Un número a medias lo dice el campo.
+    phone: z.string().nullable(),
     // A quien se registra se le pregunta por novedades: sin su respuesta no se guarda.
     generalConsent: registering
       ? z
@@ -713,6 +710,11 @@ export function BookingDrawer({
                     id="cita-nuevo-telefono"
                     label="Teléfono"
                     defaultCountry={normalizeCountry(profile.data?.countryCode)}
+                    description={
+                      seed.person || field.state.value
+                        ? undefined
+                        : "Sin teléfono no le llegan los avisos de la cita; puedes agregarlo después."
+                    }
                   />
                 )}
               </form.AppField>
@@ -743,10 +745,13 @@ export function BookingDrawer({
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
               {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. Solo si saldrán. */}
+              {/* Sin teléfono no hay nada que decirle: lo avisa el campo. */}
               {remindersByWhatsApp ? (
-                <p className="text-xs text-muted-foreground">
-                  Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
-                </p>
+                seed.person || values.phone ? (
+                  <p className="text-xs text-muted-foreground">
+                    Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
+                  </p>
+                ) : null
               ) : remindersQuery.isSuccess ? (
                 <p className="text-xs text-muted-foreground">
                   Esta clínica no envía hoy los recordatorios por WhatsApp: no se lo prometas.

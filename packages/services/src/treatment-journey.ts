@@ -17,6 +17,7 @@ import type { ProductParts } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { notFound } from "./errors.js"
 import { getPatientAccount } from "./payments.js"
+import { carriedAtOf } from "./plan-next.js"
 import { requirePatient } from "./patients.js"
 
 export type TreatmentNextAction =
@@ -123,6 +124,9 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
+  // La cita por venir que ya lleva cada uno: el Plan dice «Sesión 1: mar 10 nov» en vez de
+  // «Iniciar la primera sesión» (QA del 9 nov, repaso 3).
+  const carried = await carriedAtOf(tx, orgId, [patientId])
   // Resumen clínico: estado y próxima acción de cada tratamiento, sin saldos.
   // La caja se consulta con `finance.read` en la cuenta del paciente.
   return rows.map((row) => {
@@ -142,6 +146,7 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       lastSession,
       nextFollowUp,
       nextAction,
+      nextAppointmentAt: carried.get(row.item.id) ?? null,
     }
   })
 }

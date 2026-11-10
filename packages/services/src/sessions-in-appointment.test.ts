@@ -185,11 +185,13 @@ it("D3: «puede llevar otra cita» es otra regla; «aceptó y no tiene cita» no
   })
   expect(await f.run((tx) => patientsToSchedule(tx, "org_a", PHASES))).not.toContain(f.patient.id)
   const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  // «Qué sigue» no pide la sesión 2 antes de hacer la 1, que ya tiene cita: dice cuándo es y que la
+  // 2 se reserva en esa cita (QA del 9 nov, repaso 3). La agenda sí deja llevarla (`another`).
   expect(next).toMatchObject({
-    kind: "continuar",
-    text: "Falta la cita de la próxima sesión: Tratamiento propio · sesión 2 de 2",
-    // El botón dice qué reserva (QA del 8 nov).
-    action: { label: "Reservar la sesión 2", planItemIds: [item.id] },
+    kind: "reservado",
+    text: expect.stringMatching(/^Tratamiento propio · sesión 1 de 2: /),
+    detail: "Con su cita · la sesión 2 se reserva en esa cita",
+    action: null,
   })
   expect((await f.run((tx) => planNextStepsOf(tx, "org_a", [f.patient.id], all))).get(f.patient.id)).toEqual(next)
 
