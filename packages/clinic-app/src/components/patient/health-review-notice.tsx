@@ -9,7 +9,6 @@ import { useMemberName, usePermission } from "../../lib/crm"
 import { clinicToday } from "../../lib/inventory"
 import {
   markAllergiesReviewedApi,
-  isHealthReviewPending,
   markHealthDeniedApi,
   type PatientHealth,
   unaskedHealthGroups,
@@ -84,7 +83,8 @@ export function HealthReviewNotice({
   // Lo que declaró la persona y nadie revisó todavía (lo dice el servidor): se pide revisarlo aquí, donde se
   // decide. Se nombra lo que vino de su registro en línea; si no, lo que hay; si es solo su entrevista
   // (un embarazo, una operación), se dice sin nombre.
-  const pending = isHealthReviewPending(health)
+  // Solo lo que dice el servidor (sabe si lo anotó un clínico o lo declaró la persona): sin el dato, no se pide.
+  const pending = health.reviewPending === true
   const rows = [...health.conditions, ...health.medications]
   const online = rows.filter((row) => row.notes?.startsWith(DECLARED_ONLINE_NOTE)).map((row) => row.name)
   const declared = pending ? (online.length ? online : rows.map((row) => row.name)) : []
