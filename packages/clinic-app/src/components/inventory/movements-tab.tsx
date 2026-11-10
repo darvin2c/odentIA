@@ -111,7 +111,7 @@ export function MovementsTab() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
         <SearchInput label="Buscar en movimientos" placeholder="Buscar producto" expandable isFetching={query.isFetching && !query.isPending && q !== ""} />
         <ChoiceSelect
           aria-label="Qué pasó"

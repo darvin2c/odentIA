@@ -51,6 +51,12 @@ export interface DataTableProps<TData> {
   isFetching?: boolean
   /** Texto del indicador de revalidación. Default `Actualizando…`. */
   refreshMessage?: string
+  /**
+   * Va dentro de una tarjeta que ya tiene borde: la tabla no pone el suyo y, en
+   * el teléfono, las filas se separan con una línea en vez de ser tarjetas dentro
+   * de la tarjeta. Default `false`.
+   */
+  inCard?: boolean
   className?: string
 }
 
@@ -66,6 +72,8 @@ export interface DataTableSkeletonProps {
   rowCount?: number
   showPagination?: boolean
   label?: string
+  /** Igual que en `DataTable`: el hueco de una tabla que va dentro de una tarjeta. */
+  inCard?: boolean
 }
 
 const skeletonWidths = ["w-40", "w-20", "w-24", "w-16", "w-8"] as const
@@ -88,6 +96,7 @@ interface LayoutProps<TData> {
   isRowActive?: (row: TData) => boolean
   isFetching: boolean
   refreshMessage?: string
+  inCard?: boolean
   className?: string
 }
 
@@ -114,6 +123,7 @@ export function DataTable<TData>({
   view = "table",
   isFetching = false,
   refreshMessage,
+  inCard = false,
   className,
 }: DataTableProps<TData>) {
   const resolved = useResolvedView(view)
@@ -126,6 +136,7 @@ export function DataTable<TData>({
         isRowActive={isRowActive}
         isFetching={isFetching}
         refreshMessage={refreshMessage}
+        inCard={inCard}
         className={className}
       />
     )
@@ -149,6 +160,7 @@ export function DataTable<TData>({
       isRowActive={isRowActive}
       isFetching={isFetching}
       refreshMessage={refreshMessage}
+      inCard={inCard}
       className={className}
     />
   )
@@ -168,9 +180,9 @@ function RefreshBar({ isFetching, refreshMessage }: { isFetching: boolean; refre
   )
 }
 
-function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, className }: LayoutProps<TData>) {
+function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, inCard, className }: LayoutProps<TData>) {
   return (
-    <div className={cn("overflow-hidden rounded-md border bg-card", className)}>
+    <div className={cn("overflow-hidden rounded-md bg-card", !inCard && "border", className)}>
       <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       {/* La tabla que no entra se recorre con la barra del sistema de diseño:
           el contenedor del registry deja de scrollear (`overflow-visible`) para
@@ -221,14 +233,14 @@ function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refres
   )
 }
 
-function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, className }: LayoutProps<TData>) {
+function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, inCard, className }: LayoutProps<TData>) {
   const columns = resolveViewColumns(table)
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       <SelectionBar table={table} columns={columns} />
-      <div className="flex flex-col gap-2">
+      <div className={cn("flex flex-col", !inCard && "gap-2")}>
         {table.getRowModel().rows.map((row) => {
           const cells = cellsByColumn(row)
           const active = isRowActive?.(row.original) ?? false
@@ -237,7 +249,8 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refresh
               key={row.id}
               variant="outline"
               className={cn(
-                "rounded-md bg-card",
+                // Dentro de una tarjeta, filas separadas por una línea, no tarjetas dentro de la tarjeta.
+                inCard ? "rounded-none border-x-0 border-t-0 px-0 last:border-b-0" : "rounded-md bg-card",
                 onRowClick && "cursor-pointer",
                 active && activeRowClass,
               )}
@@ -434,6 +447,7 @@ interface SkeletonShape {
   rowCount: number
   showPagination: boolean
   label: string
+  inCard: boolean
 }
 
 /**
@@ -448,9 +462,10 @@ export function DataTableSkeleton({
   rowCount = 6,
   showPagination = false,
   label = common.states.loading,
+  inCard = false,
 }: DataTableSkeletonProps) {
   const resolved = useResolvedView(view)
-  const shape: SkeletonShape = { columnCount, rowCount, showPagination, label }
+  const shape: SkeletonShape = { columnCount, rowCount, showPagination, label, inCard }
 
   if (resolved === "list") return <ListSkeleton {...shape} />
   if (resolved === "card") return <CardSkeleton {...shape} />
@@ -474,12 +489,12 @@ function SkeletonPagination({ className }: { className?: string }) {
   )
 }
 
-function TableSkeleton({ columnCount, rowCount, showPagination, label }: SkeletonShape) {
+function TableSkeleton({ columnCount, rowCount, showPagination, label, inCard }: SkeletonShape) {
   const columns = slotKeys(columnCount, "column")
   const rows = slotKeys(rowCount, "row")
 
   return (
-    <div {...statusProps(label)} className="overflow-hidden rounded-md border bg-card">
+    <div {...statusProps(label)} className={cn("overflow-hidden rounded-md bg-card", !inCard && "border")}>
       <Table aria-hidden="true">
         <TableHeader>
           <TableRow>
