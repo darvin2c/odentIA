@@ -34,9 +34,9 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await ask("¿Dónde configuro los horarios?")
   const first = help.getByRole("listitem").filter({ hasText: "¿Dónde configuro los horarios?" })
   await expect(first).toContainText("En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención.")
-  // El destino va resaltado en el texto y el botón solo dice «Llévame».
+  // El destino va resaltado en el texto y escrito en el botón.
   await expect(first.locator("strong")).toHaveText("Configuración › Horarios y ausencias")
-  await expect(first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" })).toHaveText("Llévame")
+  await expect(first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" })).toHaveText("Llévame a Configuración › Horarios y ausencias")
   await expect(first).toContainText("En qué se basó")
   await expect(first).toContainText("El mapa del sistema: Configuración › Horarios y ausencias.")
   await first.getByRole("button", { name: "Sí" }).click()
@@ -217,8 +217,8 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(phoneDoubt).toContainText("No encontré tu respuesta en la guía.")
   await expect(phoneDoubt.getByLabel("Tu pregunta · puedes cambiarla")).toBeFocused()
   await askOnPhone(UNKNOWN)
-  // La primera fila con esa pregunta es la de la conversación; la de «Tus casos con soporte» va después.
-  await expect(sheet.getByRole("listitem").filter({ hasText: UNKNOWN }).first()).toContainText("Esto no está en la guía, y no quiero inventarlo.")
+  // La última fila con esa pregunta es la de la conversación; la de «Tus casos con soporte» queda arriba.
+  await expect(sheet.getByRole("listitem").filter({ hasText: UNKNOWN }).last()).toContainText("Esto no está en la guía, y no quiero inventarlo.")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("ayuda-movil-duda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
