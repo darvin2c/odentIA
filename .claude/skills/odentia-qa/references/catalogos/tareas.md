@@ -10,6 +10,14 @@ En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (
 
 ---
 
+## En toda tarea
+
+- [ ] La Ayuda contesta cómo se hace esta tarea, preguntada con mis palabras, y con esa respuesta sola la termino.
+- [ ] La Ayuda nombra los botones y las pantallas como los veo.
+- [ ] La Ayuda no me dice que no se puede algo que sí puedo hacer.
+
+**Ya falló:** la Ayuda contestó sobre otra pantalla.
+
 ## Recepción
 
 ### T-REC-01 Registrar a un paciente nuevo y darle cita

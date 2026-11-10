@@ -149,6 +149,7 @@ Una página. Es lo único de la mesa que usan las etapas siguientes, y por eso l
   - C1 · <quién y qué hace, con sus datos>: al terminar, <lo que se ve y lo que quedó guardado>.
   - C2 · …
 - **El mismo dato en:** <los lugares donde debe verse igual>
+- **En la Ayuda:** <los temas que cambian y la pregunta que debe poder contestar, dicha como la haría la persona>
 - **Procesos clínicos que toca:** … (lo que mejora o se rompe en cada uno)
 - **Pendientes de antes:** <cuáles se resuelven aquí y cuáles siguen>
 - **Fuera de este cambio:** …
@@ -163,7 +164,8 @@ Al usuario se le muestra en lo posible en menos de 10 líneas: los criterios com
 - **Implementar** sigue el acta punto por punto.
 - **Probar:** los criterios que se puedan volver prueba automática, se vuelven.
 - **La QA antes de entregar** recorre cada caso del acta en la pantalla y marca cada criterio (cumple, no cumple, no se pudo ver), además de lo suyo.
-- **El PR** lista los criterios con su resultado.
+- **La Ayuda** va en el mismo cambio, con lo que dice la línea «En la Ayuda» del acta. En la QA antes de entregar, el novato le hace esa pregunta y el auditor comprueba la respuesta contra la pantalla (sus apartados en `voces.md`).
+- **El PR** lista los criterios con su resultado, y qué se le preguntó a la Ayuda y qué contestó.
 
 ### 7. La mesa aprende
 
