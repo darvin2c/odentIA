@@ -49,9 +49,10 @@ import {
   helpWritePermissions,
   matchHelpTopics,
 } from "./help-guide.js"
+import { type HelpAnswerVideo, helpTopicTarget, helpVideosFor } from "./help-videos.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { AGENT_NAMES, RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
-import { roomWord } from "./locale.js"
+import { orgProduct, roomWord } from "./locale.js"
 import type { ProductAgentTexts } from "./product-agent.js"
 import { productAgentTexts, productHelpTopics } from "./products.js"
 import { getArgosPanelAllowance } from "./saas-included.js"
@@ -80,6 +81,8 @@ export interface HelpAnswer {
   path: string | null
   /** Por qué no puede ir o cambiarlo, y quién sí, cuando su rol no alcanza. */
   restriction: string | null
+  /** Los videos unidos a esa respuesta (ADR 0178), los más nuevos primero; vacío si no tiene. */
+  videos: HelpAnswerVideo[]
 }
 
 /** Una respuesta para elegir cuando Ariadna duda: tocarla la pregunta escrita como en la guía, sin modelo. */
@@ -137,6 +140,22 @@ const canChange = (topic: HelpTopic, asker: HelpAsker): boolean => {
 }
 
 const whoCanChange = (topic: HelpTopic, asker: HelpAsker): string[] => [...new Set(helpWritePermissions(topic).flatMap((permission) => asker.whoCan(permission)))]
+
+/**
+ * Lo que explica una respuesta puede pedir otro permiso que el de su pantalla
+ * (`HelpFaq.needs`): quien entra y cambia cosas ahí, pero no puede hacer eso,
+ * lo sabe antes de ir.
+ */
+function needsFor(
+  option: HelpOption,
+  access: { path: string | null; restriction: string | null },
+  asker: HelpAsker,
+): { path: string | null; restriction: string | null } {
+  const needed = option.kind === "faq" && option.faq.needs ? [option.faq.needs].flat() : []
+  if (needed.length === 0 || access.restriction || needed.some((permission) => asker.can(permission))) return access
+  const roles = [...new Set(needed.flatMap((permission) => asker.whoCan(permission)))]
+  return { path: access.path, restriction: `Tu rol (${asker.roleLabel}) no puede hacer esto.${roles.length ? ` Pueden hacerlo: ${list(roles)}.` : ""}` }
+}
 
 function restrictionFor(topic: HelpTopic, asker: HelpAsker): { path: string | null; restriction: string | null } {
   if (!asker.canOpen(topic.path)) {
@@ -556,13 +575,17 @@ export async function askHelp(
     }
 
     if (selection.verdict === "seguro" && first) {
+      // Los videos son de odentIA y públicos: se muestran aunque el rol no abra esa pantalla.
+      const videoTarget = (option: HelpOption) => (option.kind === "faq" ? option.faq.id : helpTopicTarget(option.topic.id))
+      const videos = await helpVideosFor(tx, await orgProduct(tx, orgId), selection.shown.map(videoTarget))
       const answers = selection.shown.map((option): HelpAnswer => {
+        const seen = videos.get(videoTarget(option)) ?? []
         // Lo que no es de una pantalla (quién es Ariadna, su contraseña) no lleva a ninguna.
-        if (option.kind === "faq" && option.faq.general) return { topicId: option.topic.id, where: "", text: option.faq.a, path: null, restriction: null }
-        const access = restrictionFor(option.topic, asker)
+        if (option.kind === "faq" && option.faq.general) return { topicId: option.topic.id, where: "", text: option.faq.a, path: null, restriction: null, videos: seen }
+        const access = needsFor(option, restrictionFor(option.topic, asker), asker)
         // Quien solo ve lo suyo la encuentra con el nombre de su menú: «Gestión › Mis honorarios».
         const where = helpTopicLabel(option.topic, { own: asker.canOpen(option.topic.path) && !canChange(option.topic, asker) })
-        return { topicId: option.topic.id, where, text: helpAnswerText(option, where), ...access }
+        return { topicId: option.topic.id, where, text: helpAnswerText(option, where), ...access, videos: seen }
       })
       const places = [...new Set(answers.map((answer) => answer.where).filter(Boolean))]
       return reply("guia", {
@@ -599,7 +622,7 @@ export async function askHelp(
         return reply("datos", {
           askId,
           say: `Eso es de las cifras de tu clínica, y no está en la guía. Las ves en Reportes; ${AGENT_NAMES.administrador}, que las responde, está apagado.`,
-          answers: [{ topicId: reports.id, where: helpTopicLabel(reports), text: "", ...access }],
+          answers: [{ topicId: reports.id, where: helpTopicLabel(reports), text: "", ...access, videos: [] }],
         })
       }
       const roles = asker.whoCan("reports.read")
