@@ -4,7 +4,7 @@
  * o que no cobra comisión). Es lo que se fija al contratar y cambia poco; el mes se liquida y se
  * paga en Finanzas › Comisiones, que solo la muestra.
  *
- * Siempre parte de lo que vale hoy: un cambio vale para lo que se atienda desde ese día y lo
+ * Siempre parte de lo que vale hoy: un cambio vale para lo que se atienda desde que se guarda y lo
  * atendido antes conserva lo que tenía. La primera comisión vale también para lo ya cobrado que aún
  * no se paga. Importes, vigencias y permisos los decide el servidor.
  */
@@ -21,6 +21,8 @@ import {
   type CommissionAgreement,
   type CommissionException,
   dayLabel,
+  historyLines,
+  hourLabel,
   percentInput,
   percentLabel,
   rateBpsFromPercent,
@@ -181,24 +183,23 @@ function AgreementCard({
   const name = agreement.professionalName
   const titleId = `comision-${agreement.professionalUserId}`
   const day = (iso: string) => dayLabel(iso, locale, timeZone)
+  // Desde cuándo: el día y la hora, porque vale desde que se guardó (lo atendido esa mañana conserva lo de antes).
+  const sinceWords = (iso: string) => `desde el ${day(iso)} a las ${hourLabel(iso, locale, timeZone)}`
   const none = undecided(agreement)
   const summary = agreementWords(
     { hasRate: agreement.hasRate, rateBps: agreement.rateBps, exceptionCount: agreement.exceptions.length },
     locale,
   )
   const noCommission = agreement.hasRate && agreement.rateBps === 0 && agreement.exceptions.length === 0
-  // Desde cuándo vale lo de hoy y lo que tenía antes: lo que dice si el cambio ya rige.
+  // Desde cuándo vale lo de hoy; lo que tenía antes, con quién lo cambió, va en su historial.
   const since = [
     !agreement.attends ? "Ya no atiende pacientes" : null,
-    agreement.rateSince ? `desde el ${day(agreement.rateSince)}` : null,
-    agreement.previousRateBps !== null && agreement.previousRateBps !== agreement.rateBps
-      ? agreement.previousRateBps > 0
-        ? `antes tenía ${percentLabel(agreement.previousRateBps, locale)}`
-        : "antes no tenía porcentaje"
-      : null,
+    agreement.rateSince ? sinceWords(agreement.rateSince) : null,
   ]
     .filter(Boolean)
     .join(" · ")
+  // Con un solo cambio, el historial repetiría la tarjeta: aparece cuando hubo cambios.
+  const history = (agreement.history ?? []).length > 1 ? historyLines(agreement.history ?? [], locale, timeZone, currency) : []
 
   const remove = async (exception: CommissionException) => {
     setRemoving(exception.serviceId)
@@ -207,8 +208,8 @@ function AgreementCard({
       void queryClient.invalidateQueries({ queryKey: COMMISSIONS_KEY })
       toast.success(
         agreement.rateBps > 0
-          ? `${exception.serviceName}: desde hoy vuelve a su ${percentLabel(agreement.rateBps, locale)}`
-          : `${exception.serviceName}: desde hoy ya no comisiona`,
+          ? `${exception.serviceName}: desde ahora vuelve a su ${percentLabel(agreement.rateBps, locale)}`
+          : `${exception.serviceName}: desde ahora ya no comisiona`,
       )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo quitar")
@@ -297,7 +298,7 @@ function AgreementCard({
                     <span className="font-medium text-foreground tabular-nums">
                       {exceptionWords(exception, locale, currency)}
                     </span>
-                    {exception.effectiveFrom ? ` · desde el ${day(exception.effectiveFrom)}` : ""}
+                    {exception.effectiveFrom ? ` · ${sinceWords(exception.effectiveFrom)}` : ""}
                   </span>
                   {exceptionStale(exception) ? (
                     // Nunca se convierte: lo atendido desde el cambio queda sin comisión hasta escribirlo.
@@ -348,6 +349,24 @@ function AgreementCard({
                   : "Comisión por un servicio"}
           </Button>
         </div>
+      ) : null}
+
+      {history.length > 0 ? (
+        // Plegado, como lo demás que se consulta poco: quién cambió su comisión, cuándo y qué había antes.
+        <details className="border-t pt-1 text-sm">
+          <summary className="min-h-11 cursor-pointer content-center font-medium text-primary-soft-foreground sm:min-h-8">
+            Ver historial<span className="sr-only"> de {name}</span> ({history.length})
+          </summary>
+          <p className="mt-1 text-xs text-muted-foreground">Cada cambio vale desde que se guardó.</p>
+          <ol className="mt-1 flex min-w-0 flex-col">
+            {history.map((line) => (
+              <li key={line.key} className="py-1.5">
+                <span className="block break-words font-medium">{line.what}</span>
+                <span className="block text-xs text-muted-foreground">{line.detail}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
       ) : null}
     </section>
   )
@@ -423,15 +442,15 @@ function RateDrawer({
   const percentHelp = first
     ? "Es su primer porcentaje: vale también para lo ya cobrado de lo que atendió que aún no se paga."
     : current > 0
-      ? `Hoy tiene ${percentLabel(current, locale)}. El nuevo vale para lo que se atienda desde hoy; lo atendido antes conserva el ${percentLabel(current, locale)}, aunque se cobre después. Se le avisa del cambio.`
-      : "Vale para lo que se atienda desde hoy; lo atendido antes conserva lo que tenía. Se le avisa del cambio."
+      ? `Hoy tiene ${percentLabel(current, locale)}. El nuevo vale para lo que se atienda desde ahora; lo atendido antes conserva lo que tenía, aunque se cobre después. Se le avisa del cambio.`
+      : "Vale para lo que se atienda desde ahora; lo atendido antes conserva lo que tenía. Se le avisa del cambio."
   const keeps =
     current > 0
-      ? ` Lo que atendió hasta hoy conserva su ${percentLabel(current, locale)} y se le paga en Finanzas › Comisiones.`
+      ? " Lo que atendió hasta ahora conserva lo que tenía y se le paga en Finanzas › Comisiones."
       : ""
   const noneHelp = hasServices
-    ? `Desde hoy comisiona solo por sus servicios con comisión; lo demás que atienda no comisiona.${keeps}`
-    : `${current > 0 ? "Desde hoy no" : "No"} comisiona por lo que atiende, y deja de aparecer en el mes cuando no tenga nada por pagar.${keeps} Si tiene un sueldo, se paga en Gastos.`
+    ? `Desde ahora comisiona solo por sus servicios con comisión; lo demás que atienda no comisiona.${keeps}`
+    : `${current > 0 ? "Desde ahora no" : "No"} comisiona por lo que atiende, y deja de aparecer en el mes cuando no tenga nada por pagar.${keeps} Si tiene un sueldo, se paga en Gastos.`
 
   return (
     <FormDrawer
@@ -558,7 +577,7 @@ function ServiceCommissionDrawer({
           : { rateBps: rateBpsFromPercent(value.percent) ?? 0 }),
       })
       void queryClient.invalidateQueries({ queryKey: COMMISSIONS_KEY })
-      toast.success(firstForService ? "Guardado: vale también para lo ya cobrado de ese servicio que aún no se paga" : "Guardado: vale para lo que se atienda desde hoy")
+      toast.success(firstForService ? "Guardado: vale también para lo ya cobrado de ese servicio que aún no se paga" : "Guardado: vale para lo que se atienda desde ahora")
       onClose()
     },
   })
@@ -601,7 +620,7 @@ function ServiceCommissionDrawer({
       description={`Para ${name}${instead}. ${
         firstForService
           ? "Es la primera para este servicio: vale también para lo ya cobrado de él que aún no se paga. Lo demás que atiende no comisiona; si además se lleva un porcentaje de todo, ponlo primero con «Poner su porcentaje»."
-          : "Vale para lo que se atienda desde hoy: lo atendido antes conserva lo que tenía, aunque se cobre después."
+          : "Vale para lo que se atienda desde ahora: lo atendido antes conserva lo que tenía, aunque se cobre después."
       }`}
       submitLabel="Guardar"
     >

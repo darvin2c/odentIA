@@ -91,6 +91,14 @@ export function dayLabel(
   }).format(date)
 }
 
+/** «7:53 p. m.» en la zona de la clínica: un cambio de comisión vale desde esa hora, no desde el día. */
+export function hourLabel(iso: string | null | undefined, locale: string, timeZone: string | undefined): string {
+  if (!iso) return ""
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timeZone || undefined }).format(date)
+}
+
 /** Puntos básicos a «40 %» o «37,5 %» según el formato de la clínica. */
 export function percentLabel(rateBps: number, locale: string): string {
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(rateBps / 100)} %`
@@ -205,6 +213,12 @@ export interface CommissionLine {
   fixedCents: number | null
   /** El porcentaje o el monto fue una excepción para ese servicio. */
   forService: boolean
+  /**
+   * El servicio del cobro y su nombre de hoy: «Cómo se calcula» junta el mismo servicio aunque se haya
+   * cobrado con textos distintos. Nulo (o ausente, en una respuesta anterior) cuando no tiene uno.
+   */
+  serviceId?: string | null
+  serviceName?: string | null
   /** Sin ninguna comisión decidida aún: da 0 y, cuando se fije la primera, se calcula. */
   unruled?: boolean
   /** Ya entró en un pago registrado. */
@@ -255,6 +269,9 @@ export function calculationGroups(
     if (line.voidedAfterPaid) continue
     const fixed = line.fixedCents !== null
     const rate = line.rateBps ?? 0
+    // El servicio por su id y con su nombre del catálogo; lo que no tiene uno, por el texto del cobro.
+    const service = line.serviceId ?? `texto:${line.description}`
+    const serviceLabel = line.serviceName ?? line.description
     // El orden: lo general (de mayor a menor), lo de cada servicio y al final lo que no comisiona.
     const [key, label, order] = line.unruled
       ? decided
@@ -262,12 +279,12 @@ export function calculationGroups(
         : ["sin-decidir", "Sin comisión decidida", 3]
       : fixed
         ? [
-            `monto:${line.description}:${line.fixedCents}`,
-            `${line.description} · ${formatMoney(line.fixedCents ?? 0, currency, locale)} por cada uno`,
+            `monto:${service}:${line.fixedCents}`,
+            `${serviceLabel} · ${formatMoney(line.fixedCents ?? 0, currency, locale)} por cada uno`,
             1,
           ]
         : line.forService
-          ? [`servicio:${line.description}:${rate}`, `${line.description} · ${percentLabel(rate, locale)}`, 1]
+          ? [`servicio:${service}:${rate}`, `${serviceLabel} · ${percentLabel(rate, locale)}`, 1]
           : rate > 0
             ? [`general:${rate}`, `${percentLabel(rate, locale)} de lo cobrado`, 0]
             : ["sin-comision", "Sin comisión", 2]
@@ -453,7 +470,7 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   } | null
   /** Desde cuándo vale el porcentaje general (nulo si desde siempre) y el anterior. */
   rateSince?: string | null
-  /** Ya tiene un porcentaje general (cambiarlo vale desde hoy; el primero, también para lo ya cobrado). */
+  /** Ya tiene un porcentaje general (cambiarlo vale desde ahora; el primero, también para lo ya cobrado). */
   hasRate?: boolean
   previousRateBps?: number | null
   /** Otro porcentaje o un monto fijo para un servicio, lo que rige hoy. */
@@ -589,12 +606,121 @@ export interface CommissionAgreement {
   attends: boolean
   /** Porcentaje general de hoy; 0 si no tiene o si no cobra. */
   rateBps: number
-  /** Ya tiene un porcentaje general, aunque sea 0: cambiarlo vale desde hoy. Sin él, el primero vale también para lo cobrado sin pagar. */
+  /** Ya tiene un porcentaje general, aunque sea 0: cambiarlo vale desde ahora. Sin él, el primero vale también para lo cobrado sin pagar. */
   hasRate: boolean
   /** Desde cuándo vale el porcentaje (nulo si desde siempre). */
   rateSince: string | null
   previousRateBps: number | null
   exceptions: CommissionException[]
+  /** Todos sus cambios, lo más nuevo primero (ausente en una respuesta anterior). */
+  history?: CommissionHistoryEvent[]
+}
+
+/** Una versión guardada: la general (`serviceId` nulo) o la de un servicio; sin los dos montos, se quitó. */
+export interface CommissionChange {
+  serviceId: string | null
+  serviceName: string | null
+  rateBps: number | null
+  fixedCents: number | null
+  fixedCurrency: string | null
+}
+
+/** Un cambio de la comisión: lo que se guardó a la vez, cuándo y quién. */
+export interface CommissionHistoryEvent {
+  at: string
+  byName: string | null
+  /** Fue la primera: valió también para lo atendido antes que aún no se pagaba. */
+  fromStart: boolean
+  changes: CommissionChange[]
+}
+
+/** Un cambio dicho en dos líneas: lo que quedó, y cuándo, quién y lo que había antes. */
+export interface CommissionHistoryLine {
+  key: string
+  at: string
+  what: string
+  detail: string
+}
+
+/**
+ * El historial de una comisión en palabras, lo más nuevo primero: «40 % de lo cobrado» con «8 de
+ * noviembre de 2026 · Ana Torres · antes 35 %»; «Endodoncia: 50 % · lo demás no comisiona»; al quitar
+ * la de un servicio, «Endodoncia: vuelve a su 40 %» o «Endodoncia: ya no comisiona», según el general
+ * que regía entonces. El «antes» solo va en el porcentaje general: los cambios de servicios se intercalan.
+ */
+export function historyLines(
+  events: ReadonlyArray<CommissionHistoryEvent>,
+  locale: string,
+  timeZone: string | undefined,
+  /** La moneda de la clínica, para un monto fijo que llegue sin la suya. */
+  currency: string,
+): CommissionHistoryLine[] {
+  // Con la hora: el cambio vale desde que se guardó, y lo atendido esa mañana conserva lo de antes. La
+  // primera no la necesita: vale desde siempre.
+  const date = (iso: string, withHour: boolean) => {
+    const at = new Date(iso)
+    if (Number.isNaN(at.getTime())) return ""
+    const day = new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: timeZone || undefined }).format(at)
+    return withHour ? `${day} a las ${hourLabel(iso, locale, timeZone)}` : day
+  }
+  // Del más antiguo al más nuevo, para saber qué general y qué servicios regían en cada cambio. Lo que
+  // vale desde siempre es lo primero que tuvo (la primera comisión de alguien sin ninguna antes).
+  const oldestFirst = [...events].sort((a, b) => Number(b.fromStart) - Number(a.fromStart) || a.at.localeCompare(b.at))
+  let general: number | null = null
+  const withCommission = new Set<string>()
+  const out: CommissionHistoryLine[] = []
+  for (const [index, event] of oldestFirst.entries()) {
+    const generalChange = event.changes.find((change) => change.serviceId === null)
+    const services = event.changes.filter((change) => change.serviceId !== null)
+    const servicesBefore = withCommission.size
+    for (const change of services)
+      if (change.rateBps !== null || change.fixedCents !== null) withCommission.add(change.serviceId as string)
+      else withCommission.delete(change.serviceId as string)
+    const before = general
+    const now: number | null = generalChange ? (generalChange.rateBps ?? 0) : general
+    const parts = services.map((change) => {
+      const name = change.serviceName ?? "Un servicio"
+      if (change.fixedCents !== null)
+        return `${name}: ${formatMoney(change.fixedCents, change.fixedCurrency ?? currency, locale)} por cada uno`
+      if (change.rateBps !== null) return `${name}: ${percentLabel(change.rateBps, locale)}`
+      return now && now > 0 ? `${name}: vuelve a su ${percentLabel(now, locale)}` : `${name}: ya no comisiona`
+    })
+    if (generalChange) {
+      const rate = generalChange.rateBps ?? 0
+      if (rate > 0) parts.unshift(`${percentLabel(rate, locale)} de lo cobrado`)
+      else
+        parts.push(
+          services.length > 0
+            ? "lo demás no comisiona"
+            : withCommission.size > 0
+              ? `Solo por ${withCommission.size === 1 ? "1 servicio" : `${withCommission.size} servicios`}`
+              : "No cobra comisión",
+        )
+    }
+    const antes =
+      generalChange && before !== null && before !== now
+        ? before > 0
+          ? `antes ${percentLabel(before, locale)}`
+          : servicesBefore > 0
+            ? `antes solo por ${servicesBefore === 1 ? "1 servicio" : `${servicesBefore} servicios`}`
+            : "antes no cobraba comisión"
+        : null
+    out.push({
+      key: `${event.at}:${index}`,
+      at: event.at,
+      what: parts.join(" · "),
+      detail: [
+        date(event.at, !event.fromStart),
+        event.byName ? `por ${event.byName}` : "sin registro de quién",
+        antes,
+        event.fromStart ? "la primera: valió también para lo ya atendido sin pagar" : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    })
+    general = now
+  }
+  return out.reverse()
 }
 
 /** La comisión de cada persona que puede atender, la tenga o no (solo quien administra comisiones). */

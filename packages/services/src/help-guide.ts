@@ -1309,7 +1309,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Si cambio el porcentaje, cambia lo que ya se cobró?",
-        a: "No. El porcentaje nuevo vale para lo que se atienda desde ese día; lo atendido antes conserva el que tenía, aunque se cobre después o en cuotas. Se cambia en Configuración › Comisiones por profesional, que siempre parte del porcentaje de hoy y dice desde cuándo vale y el anterior; en la liquidación, cada cobro con otro porcentaje lo dice, y al profesional se le avisa del cambio.",
+        a: "No. El porcentaje nuevo vale para lo que se atienda desde que se guarda; lo atendido antes conserva el que tenía, aunque se cobre después o en cuotas. Se cambia en Configuración › Comisiones por profesional, que siempre parte del porcentaje de hoy y dice desde cuándo vale y el anterior; en la liquidación, cada cobro con otro porcentaje lo dice, y al profesional se le avisa del cambio.",
         forms: ["cambiar porcentaje de comisión", "subir la comisión", "desde cuándo vale la comisión"],
       },
       {
@@ -1891,7 +1891,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Comisiones por profesional",
     parent: SETTINGS,
     purpose:
-      "Lo que se lleva cada profesional de lo cobrado por lo que atiende: su porcentaje, los servicios con una comisión distinta (otro porcentaje o un monto fijo por cada uno) o que no cobra comisión. Aparece cada persona del equipo que puede atender, aunque aún no haya atendido. Es un acuerdo con la persona: se fija al contratarla. La primera comisión vale también para lo ya cobrado que aún no se paga; un cambio después vale para lo que se atienda desde ese día. Lo de cada mes se liquida y se paga en Finanzas › Comisiones. Solo lo ve y lo cambia quien administra las comisiones.",
+      "Lo que se lleva cada profesional de lo cobrado por lo que atiende: su porcentaje, los servicios con una comisión distinta (otro porcentaje o un monto fijo por cada uno) o que no cobra comisión. Aparece cada persona del equipo que puede atender, aunque aún no haya atendido. Es un acuerdo con la persona: se fija al contratarla. La primera comisión vale también para lo ya cobrado que aún no se paga; un cambio después vale para lo que se atienda desde que se guarda. Lo de cada mes se liquida y se paga en Finanzas › Comisiones. Solo lo ve y lo cambia quien administra las comisiones.",
     terms: ["fijar comisión", "poner porcentaje", "no cobra comisión", "configurar comisiones"],
     writePermission: "commissions.write",
     faqs: [
@@ -1899,6 +1899,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Puede comisionar solo por algunos servicios?",
         a: "Sí. Agrégale sus servicios con «Comisión por un servicio», sin ponerle porcentaje; si ya tenía uno, agrégalos y en «Cambiar» elige «Solo por sus servicios». Comisiona solo por esos y lo demás que atiende no comisiona. La primera comisión de un servicio, sin porcentaje general, vale también para lo ya cobrado de ese servicio que aún no se paga.",
         forms: ["comisión solo por servicio", "solo por procedimiento", "sin porcentaje general"],
+      },
+      {
+        q: "¿Dónde veo el historial de la comisión de un profesional?",
+        a: "Debajo de su comisión, en «Ver historial»: cada cambio con lo que quedó, la fecha, quién lo hizo y el porcentaje que tenía antes. Aparece cuando su comisión cambió al menos una vez. Cada cambio vale para lo que se atienda desde que se guardó; lo ya atendido conserva lo que tenía.",
+        forms: ["historial de comisiones", "quién modificó la comisión"],
       },
     ],
   },

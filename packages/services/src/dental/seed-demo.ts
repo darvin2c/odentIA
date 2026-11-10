@@ -159,7 +159,8 @@ import {
   updateEncounterDraft,
   voidEncounter,
 } from "../encounters.js"
-import { setCommissionException, setCommissionRate } from "../finance.js"
+import { commissionRate } from "@odentia/db/schema/finance"
+import { setCommissionException } from "../finance.js"
 import {
   cancelFollowUp,
   completeFollowUp,
@@ -2409,8 +2410,22 @@ await db.transaction(async (tx) => {
     conditions: "El odontólogo confirma el precio final en el presupuesto.",
     items: [{ serviceId: serviceIdA("CORONA"), mode: "from", priceCents: 65000 }],
   })
-  await setCommissionRate(tx, ORG_A, ANA_ID, { professionalUserId: ANA_ID, rateBps: 4000 })
-  await setCommissionRate(tx, ORG_A, ANA_ID, { professionalUserId: LUIS_ID, rateBps: 3500 })
+  // Su primera comisión, de cuando empieza la historia de la demo (24 meses de cobros y pagos): así su
+  // historial en Configuración empieza antes que los cambios de este mes, no el día en que se siembra.
+  // A mediodía en UTC: es el día 1 también en la zona de la clínica (medianoche en UTC sería el 31 en Lima).
+  const historyStart = new Date(Date.UTC(new Date().getUTCFullYear() - 2, new Date().getUTCMonth(), 1, 12))
+  await tx.insert(commissionRate).values(
+    [
+      { professionalUserId: ANA_ID, rateBps: 4000 },
+      { professionalUserId: LUIS_ID, rateBps: 3500 },
+    ].map((rate) => ({
+      ...rate,
+      organizationId: ORG_A,
+      effectiveFrom: sql`'-infinity'::timestamptz`,
+      createdBy: ANA_ID,
+      createdAt: historyStart,
+    })),
+  ).onConflictDoNothing()
 })
 // De la biblioteca: la resina posterior de una superficie (en Perú, CPMS
 // D2391). El mismo snapshot se conserva en plan, presupuesto y atención.

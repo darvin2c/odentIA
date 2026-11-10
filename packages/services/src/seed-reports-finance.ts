@@ -16,7 +16,7 @@ import { orgCounter, treatmentBudget, treatmentBudgetItem, treatmentBudgetOption
 import { product, supplier } from "@odentia/db/schema/inventory"
 import { commissionRate } from "@odentia/db/schema/finance"
 import { and, asc, eq, sql } from "drizzle-orm"
-import { createExpense, payPurchaseOrder, setCommissionRate } from "./finance.js"
+import { createExpense, payPurchaseOrder } from "./finance.js"
 import { notePayable } from "./expense-payable.js"
 import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, receivePurchaseOrder } from "./inventory.js"
 import { defaultWarehouse } from "./inventory-stock.js"
@@ -171,7 +171,22 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   }
 
   // --- Comisiones: porcentajes y pagos -----------------------------------------------------
-  for (const professional of input.professionals) await setCommissionRate(tx, orgId, ownerUserId, { professionalUserId: professional.userId, rateBps: professional.rateBps })
+  // La primera comisión de cada uno, de cuando empieza su historia (24 meses): su historial en
+  // Configuración empieza ahí y no el día en que se siembra. Quien ya la tiene la conserva.
+  const historyStart = monthStart(timezone, addMonths(current, -24).year, addMonths(current, -24).month)
+  await tx
+    .insert(commissionRate)
+    .values(
+      input.professionals.map((professional) => ({
+        organizationId: orgId,
+        professionalUserId: professional.userId,
+        effectiveFrom: sql`'-infinity'::timestamptz`,
+        rateBps: professional.rateBps,
+        createdBy: ownerUserId,
+        createdAt: historyStart,
+      })),
+    )
+    .onConflictDoNothing()
   // Excepciones por servicio (ADR 0151) para la dueña, desde el inicio de este mes: la corona con un
   // monto fijo por cada una y el blanqueamiento con otro porcentaje. Así lo cobrado este mes muestra
   // las tres reglas («35 %», «45 % · para este servicio», «monto fijo de 150.00 por cada uno»).
@@ -179,8 +194,9 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   if (owner) {
     const since = monthStart(timezone, current.year, current.month)
     await tx.insert(commissionRate).values([
-      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.CORONA.id, effectiveFrom: since, fixedCents: 15000, createdBy: ownerUserId },
-      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.BLANQUEAMIENTO.id, effectiveFrom: since, rateBps: 4500, createdBy: ownerUserId },
+      // Puestas ese día: el historial de Configuración las cuenta como un cambio del 1, no de hoy.
+      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.CORONA.id, effectiveFrom: since, fixedCents: 15000, createdBy: ownerUserId, createdAt: since },
+      { organizationId: orgId, professionalUserId: owner.userId, serviceId: input.services.BLANQUEAMIENTO.id, effectiveFrom: since, rateBps: 4500, createdBy: ownerUserId, createdAt: since },
     ])
   }
   // Cada mes se paga el día 10 del siguiente, como lo haría «Pagar comisiones»: congela
