@@ -48,10 +48,11 @@ export const CONSENT_DECLARATION =
  * recién ahí se guarda, por eso el enlace lo dice. La copia la ve en su enlace o se la envía
  * el equipo. No dice «sin cambios» (eso lo prueban la huella y el QR del PDF) ni insinúa firma
  * digital: el nivel legal va en el PDF (`signatureKindWords`), no como advertencia al firmar.
- * «La historia clínica», sin «su»: quien firma puede ser el representante.
+ * «La historia clínica», sin «su»: quien firma puede ser el representante. De tú, como el resto
+ * de la hoja que lee quien firma («Firma aquí con el dedo»).
  */
 export const CONSENT_SIGNATURE_NOTES = {
-  clinica: "Queda en la historia clínica, con la fecha y la hora de su firma. Puede pedir una copia cuando quiera.",
+  clinica: "Tu firma queda en la historia clínica, con la fecha y la hora. Puedes pedir una copia cuando quieras.",
   enlace:
     "Tu firma queda en la historia clínica, con la fecha y la hora, cuando el profesional la confirme contigo. Puedes pedir una copia cuando quieras.",
 } as const satisfies Record<"clinica" | "enlace", string>
@@ -60,7 +61,7 @@ export const CONSENT_SIGNATURE_NOTES = {
  * Al pie del presupuesto que se firma en la tablet: se guardan la firma, el nombre, lo que
  * aceptó y la fecha y hora (`BudgetDecisionSignature`). Se guarda con la firma, tal como se leyó.
  */
-export const BUDGET_SIGNATURE_NOTE = "Su respuesta queda guardada con la fecha y la hora de su firma."
+export const BUDGET_SIGNATURE_NOTE = "Tu respuesta queda guardada con la fecha y la hora de tu firma."
 
 /**
  * El nivel de la firma dibujada, para el PDF en letra discreta: firma electrónica simple, con
