@@ -16,8 +16,10 @@ export type TreatmentConsentState = "falta" | "sin_firmar" | "por_confirmar" | "
 
 /** «Falta su consentimiento», para decirlo junto al tratamiento; nada si está firmado. */
 export function treatmentConsentWords(state: TreatmentConsentState | null | undefined): string | null {
-  if (state === "falta" || state === "sin_firmar") return "Falta firmar su consentimiento antes de hacerlo"
+  if (state === "falta") return "Falta preparar su consentimiento y firmarlo antes de hacerlo"
+  if (state === "sin_firmar") return "Su consentimiento está listo: falta firmarlo antes de hacerlo"
   if (state === "por_confirmar") return "Firmó su consentimiento en su enlace: confírmalo antes de hacerlo"
+  if (state === "firmado") return "Consentimiento firmado"
   return null
 }
 

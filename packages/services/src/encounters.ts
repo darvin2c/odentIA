@@ -114,6 +114,7 @@ import {
   undoFinishControls,
 } from "./finish-controls.js"
 import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
+import { treatmentConsentStates } from "./consent-state.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
@@ -1059,10 +1060,13 @@ export async function getEncounterDetail(
     row.status === "borrador"
       ? await removableFromEncounter(tx, orgId, encounterId, row.professionalUserId)
       : new Set<string>()
+  // El consentimiento va con el tratamiento: el Plan de la atención también lo dice.
+  const consents = await treatmentConsentStates(tx, orgId, [...attention.keys()])
   const withProgress = <T extends { id: string }>(item: T) => ({
     ...item,
     sessionsDone: counts.get(item.id)?.done ?? 0,
     removable: removable.has(item.id),
+    consent: consents.get(item.id) ?? null,
   })
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),

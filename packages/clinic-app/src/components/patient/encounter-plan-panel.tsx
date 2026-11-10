@@ -45,7 +45,7 @@ import { usePermission } from "../../lib/crm"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
 import { removeIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
-import { type PlanItem, planStatusLabel, quotedPriceOf } from "../../lib/patients"
+import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
 import {
   fetchService,
   fetchServices,
@@ -548,6 +548,8 @@ export function EncounterPlanPanel({
                             quotedPriceOf(item).priceCents != null && orgLocale
                               ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
                               : "",
+                            // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
+                            treatmentConsentWords(item.consent) ?? "",
                           ]
                             .filter(Boolean)
                             .join(" · ")}

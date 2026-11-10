@@ -466,6 +466,7 @@ export function EncounterDocumentsBlock({
                 {pendingTitles.length === 1
                   ? `Falta la firma de ${who}`
                   : `Faltan las firmas de ${who}`}
+                {docs.toSign.some((doc) => doc.linkSentAt) ? " · lo tiene en su enlace" : ""}
               </span>
             </div>
             <div className="flex items-center gap-1">
@@ -515,7 +516,8 @@ export function EncounterDocumentsBlock({
         ) : null}
         {/* Lo que se le envió a firmar desde su enlace: espera su firma o tu confirmación. */}
         {docs.pendingSignatures
-          .filter((doc) => doc.linkSentAt || doc.personSignedAt)
+          // Lo que solo tiene en su enlace sigue en «Firmar ahora» (arriba): aquí, lo que ya firmó allí.
+          .filter((doc) => doc.personSignedAt)
           .map((doc) => (
             <li
               key={`enlace-${doc.id}`}

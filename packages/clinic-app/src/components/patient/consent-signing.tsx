@@ -271,6 +271,7 @@ function SigningFlow({
       [
         ["consents", patientId],
         ["consent-needs", patientId],
+        ["consents-to-confirm", patientId],
         ["patient-documents", patientId],
         // El documento escrito del representante queda en su ficha: «Faltan datos» y quién firma lo ven.
         ["patient", patientId],

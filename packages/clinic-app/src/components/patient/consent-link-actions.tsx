@@ -14,7 +14,7 @@ import { formatDate } from "../../lib/clinical-journey"
 /** Lo que dice el consentimiento sobre «Su enlace»: enviado, firmado por la persona o nada. */
 export function consentLinkWords(document: Pick<ConsentDocument, "status" | "linkSentAt" | "personSignedAt">): string | null {
   if (document.status !== "pendiente") return null
-  if (document.personSignedAt) return `Lo firmó desde su enlace el ${formatDate(document.personSignedAt)}: confírmalo en su atención, antes de empezar.`
+  if (document.personSignedAt) return `Lo firmó desde su enlace el ${formatDate(document.personSignedAt)}: confírmalo con la persona delante, antes de empezar.`
   if (document.linkSentAt) return `Lo tiene en su enlace desde el ${formatDate(document.linkSentAt)}: espera su firma.`
   return null
 }
@@ -70,7 +70,8 @@ export function ConsentLinkActions({
       ) : (
         <>
           <Button type="button" size={size} variant="outline" onClick={() => setAsking(true)}>
-            {document.linkSentAt ? "Enviar otra vez" : "Enviar para firmar"}
+            {/* Pudo solo mostrarse con el código: no se dice «otra vez». */}
+            {document.linkSentAt ? "Enviarlo por mensaje" : "Enviar para firmar"}
           </Button>
           <ConsentPhoneButton document={document} size={size} onShown={onChanged} />
         </>
