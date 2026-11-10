@@ -3,6 +3,7 @@ import {
   encounter,
   encounterPlanItem,
   encounterProcedure,
+  patientCharge,
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
@@ -1613,6 +1614,25 @@ export async function revisePlanItem(
   const { item } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
   if (CLOSED_STATUSES.includes(item.status))
     throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
+  // Un adelanto «Para» este tratamiento quedaría en el reemplazado y el nuevo se cobraría entero
+  // (mesa de la entrega 12): primero caja lo anula o lo devuelve.
+  const [advance] = await tx
+    .select({ id: patientCharge.id })
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.planItemId, item.id),
+        isNull(patientCharge.voidedAt),
+        sql`${patientCharge.requestKey} like 'adelanto:%'`,
+      ),
+    )
+    .limit(1)
+  if (advance)
+    throw conflict(
+      "ITEM_HAS_ADVANCE",
+      "Tiene un adelanto pagado para este tratamiento: pídele a caja que anule ese cobro antes de cambiarlo, para que no se cobre dos veces",
+    )
   const next = await addPlanItem(tx, orgId, actorUserId, patientId, {
     ...input,
     sourceEncounterId: input.encounterId,
