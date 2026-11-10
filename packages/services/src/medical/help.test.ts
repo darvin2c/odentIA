@@ -5,7 +5,8 @@ import { MEDICAL_HELP_TOPICS } from "./help.js"
 
 /** La Ayuda de latidIA (issue 229): las mismas pantallas, con lo que tiene un consultorio. */
 describe("la guía de latidIA", () => {
-  const text = JSON.stringify(MEDICAL_HELP_TOPICS)
+  // El nombre fijo de cada respuesta no lo lee nadie en la app: se hereda igual en todos los productos.
+  const text = JSON.stringify(MEDICAL_HELP_TOPICS, (key, value) => (key === "id" ? undefined : value))
 
   it("no habla de lo que un consultorio no tiene", () => {
     for (const word of [

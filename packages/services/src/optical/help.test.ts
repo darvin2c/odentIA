@@ -82,7 +82,8 @@ const OWN_QUOTED = [
 
 /** La Ayuda de vistIA: las mismas pantallas, con lo que tiene una óptica. */
 describe("la guía de vistIA", () => {
-  const text = JSON.stringify(OPTICAL_HELP_TOPICS)
+  // El nombre fijo de cada respuesta no lo lee nadie en la app: se hereda igual en todos los productos.
+  const text = JSON.stringify(OPTICAL_HELP_TOPICS, (key, value) => (key === "id" ? undefined : value))
 
   it("no habla de lo que una óptica no tiene", () => {
     for (const word of [

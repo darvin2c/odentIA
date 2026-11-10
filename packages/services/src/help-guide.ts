@@ -657,7 +657,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Dentro de la atención, en el Odontograma, que siempre está a la vista con lo registrado hoy debajo (una caries de varias caras es un solo hallazgo; en la ficha, bajo el dibujo, está la lista de todo lo que tiene la boca, y tocar un renglón abre esa pieza): eliges la pieza y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
       },
       {
-        id: "avisa-tratamiento-otras-piezas",
+        id: "avisa-tratamiento-en-otro-sitio",
         q: "¿Por qué me avisa que el tratamiento es para otras piezas?",
         a: "Los tratamientos de la biblioteca saben para qué piezas son: la endodoncia anterior vital es para dientes anteriores y la posterior, para molares. Si indicas uno en una pieza de otro grupo (la anterior en la 46), te lo dice sin frenarte debajo del tratamiento elegido, en el panel de la pieza o en «Indicar un tratamiento», y en su fila de «Indicado hoy»; si tu lista tiene el que encaja, ofrece «Usar» con su nombre y su precio, y tocarlo cambia el servicio. Si no lo tiene, te dice que el consentimiento llevará el nombre del que elegiste y, a quien configura los servicios, ofrece «Agregarla en Servicios y precios». Un servicio propio, sin biblioteca, no avisa. El paciente no ve el aviso. Lo mismo con la vitalidad: una endodoncia vital con un diagnóstico de necrosis en la pieza avisa «Con necrosis pulpar suele indicarse la endodoncia no vital» y ofrece la no vital de esa pieza, si tu lista la tiene.",
       },
@@ -707,7 +707,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si hoy no registraste nada y tiene algo por hacer sin cita (lo aceptado, o lo que indicaste hoy), vuelve para eso: no se crea un control aparte y recepción lo ve en «Qué sigue» para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso y «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte; «Indicar también un control» lo pide igual. Lo aceptado se reserva sin esperar al control: el control va en esa cita solo si su día cae cuando ya se puede hacer; si no, queda por reservar y te lo dice. Arriba de «¿Cuándo vuelve?», «Controles que quedan» muestra los que deja lo que terminas hoy según su servicio (por ejemplo, el control al año que pide su servicio, uno solo aunque terminen dos el mismo día) y los que ya tenía: los de hoy se cambian de fecha o se quitan ahí, solo para esta persona; los que ya tenía, con «Cambiar fecha» en Plan y controles, y el que tiene cita, moviendo la cita.",
       },
       {
-        id: "corona-dice-va-despues-terminar-endodoncia",
+        id: "tratamiento-va-despues-de-otro",
         q: "¿Por qué la corona dice «va después de terminar» la endodoncia?",
         a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, «Hacerla hoy» y «Reservar» siguen ahí.",
       },
@@ -760,7 +760,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Lo que indicas en la atención se suma solo al presupuesto por enviar de la persona y queda armado al firmarla; el cierre te pregunta «¿Enviárselo ahora?». En su Plan, «Revisar y enviar» muestra lo que encontraron, lo que se propone, hasta cuándo vale y cómo se explica cada tratamiento (la explicación sale de cada servicio y se puede cambiar solo para este paciente), con «Ver el PDF» antes de enviar. «Enviar por WhatsApp» (o por correo, si no tiene WhatsApp) dice antes a quién le llega. Si nadie lo envía, al día siguiente aparece en «Te espera» de recepción. Recepción lo envía y anota la respuesta, pero no cambia precios.",
       },
       {
-        id: "ofrecer-dos-opciones-ejemplo-resina-corona",
+        id: "ofrecer-dos-opciones",
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
         a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno es el recomendado. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
         forms: ["dos caminos", "conservar o extraer", "otro camino para la pieza", "alternativas de tratamiento"],
@@ -1422,7 +1422,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "No. Responde el precio de los servicios por los que le preguntan, hasta tres distintos por conversación, y después ofrece una evaluación. Si la persona ya tiene un presupuesto, ese sí se lo reenvía.",
       },
       {
-        id: "deja-pieza",
+        id: "deja-el-servicio",
         q: "¿Qué es «Deja en la pieza»?",
         a: "Lo que el servicio deja dibujado en el odontograma al completarse: la resina, una restauración de resina; la corona, su corona; la exodoncia, una pieza ausente. Solo aplica a servicios por pieza o por superficies, y lo que va en las caras pide un servicio por superficies. Los de la biblioteca ya lo traen; en uno propio lo eliges al crearlo o editarlo. En clínicas de Perú se elige también el material o el tipo, con su sigla; la causa de una ausencia se deduce al completarla.",
       },
