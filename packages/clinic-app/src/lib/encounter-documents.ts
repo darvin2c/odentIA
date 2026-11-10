@@ -26,6 +26,8 @@ export interface ConsentNeed {
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
   services: string[]
+  /** Lo pide algo que se hizo hoy: solo eso se pide al cerrar. */
+  doneToday?: boolean
 }
 
 const FORMS = "/api/clinical-forms"

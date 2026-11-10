@@ -2463,8 +2463,9 @@ export async function checkEncounterClosing(
       throw e
     missing.push("signature")
   }
+  // Solo lo de lo que se hizo hoy: lo indicado o traído para otro día se firma cuando se haga.
   const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
-    (need) => need.status !== "firmado",
+    (need) => need.status !== "firmado" && need.doneToday,
   )
   const materials = await closingMaterialsOf(tx, orgId, row)
   const health = {

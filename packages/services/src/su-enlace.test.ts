@@ -534,9 +534,11 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     .returning({ id: encounter.id })
   await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: stale!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_NOT_TODAY" })
   await ownerDb.delete(encounter).where(eq(encounter.id, stale!.id))
+  // La de ayer que sigue abierta porque la persona volvió sí sirve: la constancia dice el día real
+  // (producción, 10 nov: el cierre quedaba trabado sin salida).
   const [attention] = await ownerDb
     .insert(encounter)
-    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia" })
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia", startedAt: new Date(Date.now() - 86_400_000) })
     .returning({ id: encounter.id })
   // La atención lo muestra arriba al abrirla, aunque se haya enviado desde Documentos: quién firmó, su documento abreviado, cuándo y qué.
   expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([
@@ -559,7 +561,7 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([])
   // La historia dice en qué atención.
   const history = await f.run((tx) => listConsentEvents(tx, ORG, consent.id))
-  expect(history.find((event) => event.toStatus === "informado")?.reason).toMatch(/en la atención del /)
+  expect(history.find((event) => event.toStatus === "informado")?.reason).toMatch(/en la atención del .+, confirmado el .+ con la persona delante/)
   expect(await pendingInSummary()).toBeUndefined()
 })
 

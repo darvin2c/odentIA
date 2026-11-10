@@ -2757,9 +2757,12 @@ export async function confirmLinkSignedConsent(
   )
   if (attention.status !== "borrador")
     throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: confírmalo en su atención de hoy")
-  // Delante de la persona: una atención en borrador de hace semanas no sirve (S2).
-  if (!(await attentionIsToday(tx, orgId, attention)))
-    throw conflict("ENCOUNTER_NOT_TODAY", "Esa atención no es de hoy: confírmalo en su atención de hoy, con la persona delante")
+  // Delante de la persona: una atención en borrador de hace semanas no sirve (S2). La de otro día
+  // de esta semana, que sigue abierta porque la persona volvió, sí: se confirma hoy y la constancia
+  // dice el día real (producción, 10 nov: el cierre quedaba trabado sin salida).
+  const today = await attentionIsToday(tx, orgId, attention)
+  if (!today && !attentionIsRecent(attention))
+    throw conflict("ENCOUNTER_NOT_TODAY", "Esa atención es de hace más de una semana: confírmalo en su atención de hoy, con la persona delante")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const savedSignature = await currentDrawnSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -2787,7 +2790,9 @@ export async function confirmLinkSignedConsent(
       fromStatus: "pendiente",
       toStatus: "informado",
       actorUserId,
-      reason: `${informer.name} · ${informer.registration} · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}`,
+      reason: `${informer.name} · ${informer.registration} · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}${
+        today ? "" : `, confirmado el ${await attentionDay(tx, orgId, now)} con la persona delante`
+      }`,
       createdAt: now,
     },
     {
@@ -2830,6 +2835,11 @@ async function attentionIsToday(
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, attention.appointmentId)))
     .limit(1)
   return booked !== undefined && day(booked.startsAt) === today
+}
+
+/** La atención en borrador empezó en los últimos 7 días de la clínica: la persona volvió a terminarla. */
+function attentionIsRecent(attention: { startedAt: Date }): boolean {
+  return Date.now() - attention.startedAt.getTime() <= 7 * 86_400_000
 }
 
 /** «8 de noviembre de 2026», con el formato y la zona de la clínica: el día de la atención en la historia. */
@@ -3397,6 +3407,11 @@ export interface ConsentNeed {
   diagnosisSystem: string | null
   /** Nombres de los servicios de la atención que lo piden; vacío en uno preparado a mano. */
   services: string[]
+  /**
+   * Lo pide algo que se hizo hoy (un procedimiento registrado en esta atención). Solo eso se pide
+   * al cerrar: lo traído y no hecho, o preparado para otro día, se firma el día que se haga.
+   */
+  doneToday: boolean
 }
 
 interface NeedSource {
@@ -3411,6 +3426,8 @@ interface NeedSource {
   whereShort: string | null
   planItemId: string | null
   diagnosis: { code: string; system: string | null } | null
+  /** Viene de un procedimiento registrado hoy, no de algo traído o indicado. */
+  done: boolean
 }
 
 /**
@@ -3523,6 +3540,7 @@ export async function getEncounterConsentNeeds(
       whereShort: site.words(proc, "short"),
       planItemId: proc.planItemId,
       diagnosis: proc.diagnosisCode ? { code: proc.diagnosisCode, system: proc.diagnosisSystem } : null,
+      done: true,
     })
   }
   for (const item of indicated) {
@@ -3538,6 +3556,7 @@ export async function getEncounterConsentNeeds(
       whereShort: site.words(item, "short"),
       planItemId: item.id,
       diagnosis: item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null,
+      done: false,
     })
   }
   const serviceIds = [...new Set(sources.map((source) => source.serviceId))]
@@ -3664,6 +3683,7 @@ export async function getEncounterConsentNeeds(
             diagnosisSystem: diagnosisFor(first)?.system ?? null,
           }),
       services: [...new Set(mine.map((source) => source.serviceName))],
+      doneToday: mine.some((source) => source.done),
     })
   }
   // Los pendientes que se prepararon a mano en esta atención también faltan al cerrar.
@@ -3687,6 +3707,7 @@ export async function getEncounterConsentNeeds(
       diagnosisCode: doc.diagnosisCode,
       diagnosisSystem: doc.diagnosisSystem,
       services: [],
+      doneToday: doc.planItemId ? sources.some((source) => source.done && source.planItemId === doc.planItemId) : false,
     })
   }
   return needs.sort((a, b) => NEED_RANK[a.status] - NEED_RANK[b.status])
