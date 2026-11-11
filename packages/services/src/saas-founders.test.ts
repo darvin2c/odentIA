@@ -1,28 +1,48 @@
 import { randomUUID } from "node:crypto"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
-import { saasCommercialTerms, saasPlan, saasSignupPolicy, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
-import { eq } from "drizzle-orm"
+import {
+  saasCommercialTerms,
+  saasFollowUp,
+  saasPayment,
+  saasPlan,
+  saasSignupPolicy,
+  saasSubscription,
+  saasWaitlistRequest,
+} from "@odentia/db/schema/saas-billing"
+import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
+import type { AdminActor } from "./admin-core.js"
 import { getActionPricing } from "./saas-actions.js"
 import { chooseSaasPlan, createSaasPlan, getPublicTrialOffer, listClinicPlans, startSaasTrial, updateSaasPlan } from "./saas-billing.js"
 import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import {
+  addWaitlistFollowUp,
   claimFounderInvitation,
   clearExpiredDiscounts,
   completeFounderInvitation,
+  countWaitlistToReview,
   discardWaitlistRequest,
   endFounderGuarantees,
+  followUpChoices,
   getPublicPricing,
   getSignupMode,
   getSignupModes,
+  getWaitlistRequest,
+  hideWaitlistFollowUp,
   inviteFromWaitlist,
   listExpiringTerms,
+  listWaitlist,
   readFounderInvitation,
   releaseFounderInvitation,
   setSignupMode,
+  setWaitlistNote,
   submitWaitlistRequest,
+  WAITLIST_STAGES,
   type WaitlistInput,
+  waitlistHomeRows,
+  waitlistStage,
 } from "./saas-founders.js"
 import { decideSaasNegotiation, getSaasAlerts, setSaasDiscount } from "./saas-terms.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -397,6 +417,211 @@ describe("una lista de precios por producto (ADR 0093)", () => {
     expect(await endFounderGuarantees(ownerDb)).toContain(orgId)
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
     expect(sub).toMatchObject({ planId: medicalListId, guaranteedUntil: null })
+  })
+})
+
+describe("el seguimiento de un prospecto", () => {
+  // Mar 10 y mié 11 nov 2026 a las 10:00 de Lima (UTC-5, sin horario de verano).
+  const TUE = new Date("2026-11-10T15:00:00Z")
+  const WED = new Date("2026-11-11T15:00:00Z")
+  // Jue 12 nov a las 9:00 de Lima.
+  const THU = new Date("2026-11-12T14:00:00Z")
+
+  async function waiting(email: string, createdAt = new Date(WED.getTime() - DAY)) {
+    const { id } = await submitWaitlistRequest(ownerDb, request(email))
+    await ownerDb.update(saasWaitlistRequest).set({ createdAt }).where(eq(saasWaitlistRequest.id, id))
+    return id
+  }
+  const homeOf = async (actor: AdminActor, now: Date, id: string) => (await waitlistHomeRows(ownerDb, actor, now)).filter((row) => row.id === id)
+  const entered = async (email: string, organizationId: string | null) => {
+    const [row] = await ownerDb
+      .insert(saasWaitlistRequest)
+      .values({ ...request(email), phone: "+51987654321", countryCode: "PE", status: "entro", planId: foundersPlanId, enteredAt: WED, organizationId })
+      .returning({ id: saasWaitlistRequest.id })
+    return row!.id
+  }
+
+  it("las fechas para volver salen del día de Lima", () => {
+    expect(followUpChoices(WED)).toEqual({
+      today: "2026-11-11",
+      tomorrow: "2026-11-12",
+      inThreeBusinessDays: "2026-11-16",
+      nextWeek: "2026-11-18",
+      latest: "2027-11-11",
+    })
+    // Las 19:30 del miércoles en Lima ya son jueves en UTC: «hoy» sigue siendo miércoles.
+    expect(followUpChoices(new Date("2026-11-12T00:30:00Z")).today).toBe("2026-11-11")
+  })
+
+  it("una invitación vencida está en «Invitación vencida» y sale en Inicio", async () => {
+    const id = await waiting("vencio@andes.test")
+    await inviteFromWaitlist(ownerDb, admin, id, {}, new Date(WED.getTime() - 15 * DAY))
+    const expired = await listWaitlist(ownerDb, { stage: "invitacion_vencida", search: "vencio@andes.test" }, WED)
+    expect(expired.rows.map((row) => [row.id, row.stage])).toEqual([[id, "invitacion_vencida"]])
+    expect((await listWaitlist(ownerDb, { stage: "invitada", search: "vencio@andes.test" }, WED)).rows).toEqual([])
+    expect(await homeOf(admin, WED, id)).toEqual([expect.objectContaining({ reason: "invitacion", stage: "invitacion_vencida", overdue: true })])
+    expect(waitlistStage({ status: "invitada", inviteExpiresAt: WED }, false, WED)).toBe("invitacion_vencida")
+  })
+
+  it("entró sin un pago confirmado es «Entró», aunque la suscripción esté activa; con uno, «Paga»", async () => {
+    const orgId = await clinic({ planId: listPlanId, status: "activa" })
+    await entered("paga@andes.test", orgId)
+    const stageOf = async (email: string) => (await listWaitlist(ownerDb, { stage: "todas", search: email }, WED)).rows[0]?.stage
+    expect(await stageOf("paga@andes.test")).toBe("entro")
+    const payment = (status: "pendiente" | "confirmado") =>
+      ownerDb.insert(saasPayment).values({
+        organizationId: orgId,
+        amountCents: 2900,
+        currency: "USD",
+        methodCode: "transferencia",
+        status,
+        idempotencyKey: randomUUID(),
+        ...(status === "confirmado" ? { confirmedAt: WED, confirmedBy: admin.userId } : {}),
+      })
+    // Un comprobante por revisar todavía no es un pago.
+    await payment("pendiente")
+    expect(await stageOf("paga@andes.test")).toBe("entro")
+    await payment("confirmado")
+    expect(await stageOf("paga@andes.test")).toBe("paga")
+    expect((await listWaitlist(ownerDb, { stage: "paga", search: "paga@andes.test" }, WED)).rows).toHaveLength(1)
+    // La clínica borrada sigue en «Entró».
+    await entered("borrada@andes.test", null)
+    expect(await stageOf("borrada@andes.test")).toBe("entro")
+  })
+
+  it("los conteos por etapa suman «Todas» y cada etapa trae solo las suyas", async () => {
+    const page = await listWaitlist(ownerDb, { stage: "todas" }, WED)
+    const { todas, ...stages } = page.counts
+    expect(Object.keys(stages).sort()).toEqual([...WAITLIST_STAGES].sort())
+    expect(Object.values(stages).reduce((sum, n) => sum + n, 0)).toBe(todas)
+    const [all] = await ownerDb.select({ n: sql<number>`count(*)::int` }).from(saasWaitlistRequest)
+    expect(todas).toBe(all?.n)
+    for (const stage of WAITLIST_STAGES) {
+      const { rows } = await listWaitlist(ownerDb, { stage }, WED)
+      expect(rows.every((row) => row.stage === stage)).toBe(true)
+      expect(rows).toHaveLength(Math.min(stages[stage], 200))
+    }
+  })
+
+  it("un seguimiento para el jueves no sale el miércoles a las 19:30 de Lima y sí el jueves a las 9:00", async () => {
+    const id = await waiting("jueves@andes.test")
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Pide que la llame el jueves", followUpOn: "2026-11-12" }, TUE)
+    expect(await homeOf(admin, new Date("2026-11-12T00:30:00Z"), id)).toEqual([])
+    expect(await homeOf(admin, THU, id)).toEqual([
+      expect.objectContaining({
+        reason: null,
+        followUp: expect.objectContaining({ on: "2026-11-12", overdue: false, body: "Pide que la llame el jueves", authorName: "Administración" }),
+      }),
+    ])
+  })
+
+  it("una solicitud sale una sola vez en Inicio: el seguimiento va en su fila", async () => {
+    // Nadie le respondió: sale por su plazo, de lunes a viernes.
+    const late = await waiting("plazo@andes.test", new Date("2026-11-06T15:00:00Z"))
+    expect(await homeOf(admin, THU, late)).toEqual([
+      expect.objectContaining({ reason: "por_responder", overdue: true, answer: expect.objectContaining({ due: "vencida", day: "2026-11-10" }) }),
+    ])
+    const onTime = await waiting("a-tiempo@andes.test", WED)
+    expect((await getWaitlistRequest(ownerDb, admin, onTime, WED)).request.answer).toEqual(
+      expect.objectContaining({ kind: "por_responder", due: "hasta", day: "2026-11-13" }),
+    )
+    // Anotar un contacto cuenta como haberle respondido (decisión 1 del acta).
+    const before = await countWaitlistToReview(ownerDb, THU)
+    await addWaitlistFollowUp(ownerDb, admin, late, { body: "La llamé, lo piensa" }, THU)
+    expect(await homeOf(admin, THU, late)).toEqual([])
+    expect(await countWaitlistToReview(ownerDb, THU)).toBe(before - 1)
+    // Invitada que vence en dos días y con un seguimiento para hoy: una fila, con el seguimiento como segunda línea.
+    const invited = await waiting("doble@andes.test")
+    await inviteFromWaitlist(ownerDb, admin, invited, {}, new Date(THU.getTime() - 12 * DAY))
+    await addWaitlistFollowUp(ownerDb, admin, invited, { body: "Lo ve con su socia", followUpOn: "2026-11-12" }, WED)
+    const rows = await homeOf(admin, THU, invited)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ reason: "invitacion", stage: "invitada", followUp: { on: "2026-11-12", body: "Lo ve con su socia" } })
+  })
+
+  it("una descartada no sale en Inicio aunque tenga una fecha pendiente", async () => {
+    const id = await waiting("descarta@andes.test")
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "No contestó", followUpOn: "2026-11-12" }, WED)
+    expect(await homeOf(admin, THU, id)).toHaveLength(1)
+    await discardWaitlistRequest(ownerDb, admin, id, "Vende insumos")
+    expect(await homeOf(admin, THU, id)).toEqual([])
+    expect((await getWaitlistRequest(ownerDb, admin, id, THU)).request).toMatchObject({ stage: "descartada", nextFollowUpOn: null, answer: null })
+    await expect(addWaitlistFollowUp(ownerDb, admin, id, { body: "Volvió a escribir", followUpOn: "2026-11-13" }, THU)).rejects.toMatchObject({
+      fields: { followUpOn: expect.any(String) },
+    })
+  })
+
+  it("soporte no lee lo que es solo de administración ni lo ve en Inicio, y lo suyo nunca es solo de administración", async () => {
+    const id = await waiting("solo-admin@andes.test")
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Debe dos meses en su otro sistema", followUpOn: "2026-11-12", adminOnly: true }, TUE)
+    const forSupport = await getWaitlistRequest(ownerDb, support, id, WED)
+    expect(forSupport.entries).toEqual([
+      expect.objectContaining({ adminOnly: true, body: null, followUpOn: "2026-11-12", authorName: "Administración" }),
+    ])
+    expect(JSON.stringify(forSupport)).not.toContain("Debe dos meses")
+    expect((await getWaitlistRequest(ownerDb, admin, id, WED)).entries[0]?.body).toBe("Debe dos meses en su otro sistema")
+    expect(await homeOf(support, THU, id)).toEqual([])
+    expect(await homeOf(admin, THU, id)).toHaveLength(1)
+
+    const own = await addWaitlistFollowUp(ownerDb, support, id, { body: "Le escribí por WhatsApp", adminOnly: true }, WED)
+    expect(own.adminOnly).toBe(false)
+    // Ocultar a soporte es de la administración y no se deshace.
+    await expect(hideWaitlistFollowUp(ownerDb, support, own.id)).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await hideWaitlistFollowUp(ownerDb, admin, own.id)
+    expect((await getWaitlistRequest(ownerDb, support, id, WED)).entries[0]).toMatchObject({ id: own.id, adminOnly: true, body: null })
+    await expect(ownerDb.update(saasFollowUp).set({ adminOnly: false }).where(eq(saasFollowUp.id, own.id))).rejects.toThrow()
+  })
+
+  it("la nota de una pestaña vieja se agrega como entrada y no cierra el recordatorio", async () => {
+    const id = await waiting("pestana@andes.test")
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Pide que la llame el jueves", followUpOn: "2026-11-12" }, TUE)
+    await setWaitlistNote(ownerDb, support, id, "  Preguntó el precio  ", WED)
+    // Sin texto no hace nada.
+    await setWaitlistNote(ownerDb, support, id, null, WED)
+    const { request: row, entries } = await getWaitlistRequest(ownerDb, admin, id, WED)
+    expect(entries.map((entry) => [entry.body, entry.followUpOn, entry.authorName])).toEqual([
+      ["Preguntó el precio", "2026-11-12", "Soporte"],
+      ["Pide que la llame el jueves", "2026-11-12", "Administración"],
+    ])
+    expect(row.nextFollowUpOn).toBe("2026-11-12")
+    const [stored] = await ownerDb.select({ note: saasWaitlistRequest.note }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
+    expect(stored?.note).toBeNull()
+  })
+
+  it("la base no deja reescribir una entrada", async () => {
+    const id = await waiting("inmutable@andes.test")
+    const entry = await addWaitlistFollowUp(ownerDb, admin, id, { body: "La llamé" }, WED)
+    await expect(ownerDb.update(saasFollowUp).set({ body: "Otra cosa" }).where(eq(saasFollowUp.id, entry.id))).rejects.toThrow()
+  })
+
+  it("«Mantener» guarda la misma fecha y anotar sin fecha cierra el seguimiento", async () => {
+    const id = await waiting("mantener@andes.test")
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Pide que la llame el jueves", followUpOn: "2026-11-12" }, TUE)
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Preguntó el precio", followUpOn: "2026-11-12" }, WED)
+    expect((await getWaitlistRequest(ownerDb, admin, id, WED)).request).toMatchObject({
+      nextFollowUpOn: "2026-11-12",
+      answer: { kind: "volver", day: "2026-11-12" },
+    })
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "No contestó" }, THU)
+    expect((await getWaitlistRequest(ownerDb, admin, id, THU)).request).toMatchObject({
+      nextFollowUpOn: null,
+      answer: { kind: "contactada", day: "2026-11-12" },
+    })
+    expect(await homeOf(admin, THU, id)).toEqual([])
+    // Un día pasado, uno a más de un año o un texto vacío no se guardan.
+    for (const followUpOn of ["2026-11-11", "2027-11-13", "12/11/2026"]) {
+      await expect(addWaitlistFollowUp(ownerDb, admin, id, { body: "Otra vez", followUpOn }, THU)).rejects.toMatchObject({
+        fields: { followUpOn: expect.any(String) },
+      })
+    }
+    await expect(addWaitlistFollowUp(ownerDb, admin, id, { body: "   " }, THU)).rejects.toMatchObject({ fields: { body: expect.any(String) } })
+    // La auditoría dice qué pasó, nunca el texto.
+    const audits = await ownerDb
+      .select({ metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(and(eq(adminAudit.action, "saas.waitlist_follow_up"), eq(adminAudit.entityId, id)))
+    expect(audits).toHaveLength(3)
+    expect(JSON.stringify(audits)).not.toContain("precio")
   })
 })
 
