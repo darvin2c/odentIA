@@ -99,6 +99,8 @@ export interface WaitingPerson {
   windowClosed: boolean
   /** Lo último que se le quiso decir no salió: nadie se lo dijo todavía. */
   undelivered: boolean
+  /** De eso, el canal no confirmó si salió (`unknown`). */
+  uncertain: boolean
 }
 
 export interface WaitingTask {

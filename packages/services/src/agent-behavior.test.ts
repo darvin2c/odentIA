@@ -14,9 +14,10 @@ import {
   getProposal,
   proposalReplyOf,
   chosenBeforeProposalOf,
+  retractsYes,
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
-import { getConversationDetail, type IngestDeps, ingestInbound, listMessages } from "./conversations.js"
+import { getConversationDetail, type IngestDeps, ingestInbound, listMessages, sendOutbound } from "./conversations.js"
 import { createOpportunity, getOpportunity, listOpportunities, setOpportunityTask } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -108,6 +109,17 @@ function run<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
   return withOrgContext(appDb, ORG, fn)
 }
 
+
+describe("lo que retira un sí", () => {
+  it("retira «no», «mejor no», «espera» u «otro día»; una pregunta o un «otra cosa» no", () => {
+    for (const text of ["No", "Mejor no, gracias", "Ya no puedo", "Espera, reviso mi agenda", "Mejor otro día", "Cancela por favor", "Cámbiala a la tarde"]) {
+      expect(retractsYes(text), text).toBe(true)
+    }
+    for (const text of ["¿Tengo que llevar otra cosa?", "¿No hay problema si llego 5 min antes?", "ana@example.com", "Gracias, nos vemos", "Llevo otra radiografía", "Sí, no hay problema"]) {
+      expect(retractsYes(text), text).toBe(false)
+    }
+  })
+})
 
 describe("clave de idempotencia", () => {
   it("es estable ante el mismo trigger y cambia con otro trigger", () => {
@@ -451,6 +463,57 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     expect(message.result).toMatchObject({ kind: "text" })
     // Un mensaje no reemplaza nada: la última cita sigue esperando su sí.
     expect((await run((tx) => getProposal(tx, ORG, (moved as { id: string }).id))).status).toBe("propuesta")
+  })
+
+  it("un sí retirado, o dado a otra pregunta que vino después, no confirma la cita", async () => {
+    const { conversationId, contactId, connectionId: connId } = await openConversation("retira-1", "evt-ret-1")
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:retira-1" }),
+    )
+    await inbound("retira-1", connId, "evt-ret-1b", "Sí")
+    await inbound("retira-1", connId, "evt-ret-1c", "Mejor no, espera que reviso mi agenda")
+    await expect(run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id))).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
+
+    const other = await openConversation("retira-2", "evt-ret-2")
+    const second = await run((tx) =>
+      createProposal(tx, ORG, { conversationId: other.conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:retira-2" }),
+    )
+    // Primero pregunta otra cosa; el «sí» llega a la pregunta siguiente de la clínica, no a la cita.
+    await inbound("retira-2", other.connectionId, "evt-ret-2b", "¿Dónde quedan?")
+    await run((tx) => sendOutbound(tx, ORG, { conversationId: other.conversationId, senderKind: "agent", content: { type: "text", text: "En Miraflores. ¿Te mando la ubicación?" } }))
+    await inbound("retira-2", other.connectionId, "evt-ret-2c", "Sí")
+    await expect(
+      run((tx) => confirmProposalByContact(tx, ORG, other.contactId, second.id)),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
+
+    // Lo que la clínica escribe después del sí (pedirle su correo) no lo borra.
+    const third = await openConversation("retira-3", "evt-ret-3")
+    const asked = await run((tx) =>
+      createProposal(tx, ORG, { conversationId: third.conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:retira-3" }),
+    )
+    await inbound("retira-3", third.connectionId, "evt-ret-3b", "Sí, gracias")
+    await run((tx) => sendOutbound(tx, ORG, { conversationId: third.conversationId, senderKind: "agent", content: { type: "text", text: "Para dejarla lista, ¿me dejas tu correo?" } }))
+    await inbound("retira-3", third.connectionId, "evt-ret-3c", "ana@example.com")
+    const done = await run((tx) => confirmProposalByContact(tx, ORG, third.contactId, asked.id))
+    expect(done.status).not.toBe("propuesta")
+  })
+
+  it("reintentar con la clave de una propuesta vencida no deja dos citas esperando el mismo sí", async () => {
+    const { conversationId } = await openConversation("reintento-1", "evt-rein-1")
+    const old = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:rein-1" }),
+    )
+    await run((tx) =>
+      tx.update(agentProposal).set({ status: "expirada" }).where(eq(agentProposal.id, old.id)),
+    )
+    const waiting = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking("2026-11-03T15:00:00.000Z"), idempotencyKey: "test:crm-agent:rein-2" }),
+    )
+    const retried = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking("2026-11-04T15:00:00.000Z"), idempotencyKey: "test:crm-agent:rein-1" }),
+    )
+    expect(retried.status).toBe("propuesta")
+    expect((await run((tx) => getProposal(tx, ORG, waiting.id))).status).toBe("expirada")
   })
 
   it("las propuestas viejas caducan, persisten y no bloquean la conversación", async () => {

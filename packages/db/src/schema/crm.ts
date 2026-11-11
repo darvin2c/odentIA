@@ -616,6 +616,14 @@ export const message = pgTable(
     // el worker al aceptar el proveedor y applyStatus al primer sent/delivered/read
     // si sigue nulo. Histórico sin timestamp queda nulo (sin backfill inventado).
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    /**
+     * Cuándo el worker empezó a entregarlo al proveedor (outbound), anotado y
+     * confirmado antes de llamarlo. Si el worker se detiene en medio, el mensaje
+     * sigue `queued` con esta marca: al volver a verlo no lo reenvía, lo deja
+     * `unknown` (no se sabe si salió). Vuelve a nulo si el proveedor dijo que no
+     * salió por un límite de ritmo.
+     */
+    sendAttemptedAt: timestamp("send_attempted_at", { withTimezone: true }),
     // Invocación de plantilla (solo content_type 'template'): lo necesario
     // para que el worker reenvíe sin acoplar el body.
     templateName: text("template_name"),

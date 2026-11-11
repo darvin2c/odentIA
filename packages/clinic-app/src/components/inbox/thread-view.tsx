@@ -455,6 +455,26 @@ export function ThreadView({
     },
   })
 
+  // «Salió» / «No salió»: el canal no confirmó un envío y la persona dice lo que comprobó.
+  const deliveryMutation = useMutation({
+    retry: false,
+    mutationFn: ({ messageId, outcome }: { messageId: string; outcome: "sent" | "failed" }) =>
+      apiFetch(`/api/conversations/${id}/messages/${messageId}/delivery`, { method: "POST", body: JSON.stringify({ outcome }) }),
+    onSuccess: (_result, variables) => {
+      toast.success(variables.outcome === "sent" ? "Anotado: el mensaje salió." : "Anotado: el mensaje no salió.")
+      // Los botones desaparecen: el foco no se pierde, queda donde se escribe.
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')?.focus()
+      invalidate()
+      invalidateAgentWork(queryClient)
+      for (const key of ["person-panel", "crm-context", "workspace-home"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError && error.shape.message ? error.shape.message : "No se pudo anotar. Inténtalo de nuevo.")
+    },
+  })
+
   /**
    * Un envío que no salió. Si WhatsApp cerró la ventana de 24 horas mientras se
    * escribía, la zona pasa a ofrecer los mensajes aprobados y lo escrito se
@@ -993,6 +1013,13 @@ export function ThreadView({
                         senderName={entry.msg.senderUserId ? (members.find((member) => member.userId === entry.msg.senderUserId)?.user.name ?? null) : null}
                         personFirstName={firstName}
                         onShowTrace={traceByMessage.has(entry.msg.id) ? () => setOpenTrace(traceByMessage.get(entry.msg.id) ?? null) : undefined}
+                        {...(canWrite && entry.msg.direction === "out" && entry.msg.status === "unknown"
+                          ? {
+                              onResolveDelivery: (outcome: "sent" | "failed") =>
+                                deliveryMutation.mutate({ messageId: entry.msg.id, outcome }),
+                              resolvingDelivery: deliveryMutation.isPending,
+                            }
+                          : {})}
                       />
                     </div>
                   </MessageScrollerItem>

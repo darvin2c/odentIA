@@ -820,6 +820,8 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
     // Un aviso de cita no busca que reserve otra: solo se dice si llegó.
     if (row.kind !== "recordatorio_cita" && !isAppointmentNotice(row.kind) && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
     if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Sofi.`, fix: null, cause: null }
+    // El canal no confirmó si lo aceptó: no se reenvía solo y lo resuelve una persona en la Bandeja.
+    if (row.message_status === "unknown") return { outcome: "enviando", text: `No se sabe si salió ${via}: el canal no lo confirmó. Revísalo en la Bandeja.`, fix: null, cause: null }
     const delivery: JobDelivery | null = deliveryOf(row.message_status)
     if (delivery === "entregado" || delivery === "leido") return { outcome: "entregado", text: `Entregado ${via}${delivery === "leido" ? "; lo leyó" : ""}. Sin respuesta todavía.`, fix: null, cause: null }
     return { outcome: "enviando", text: `Enviado ${via}; todavía sin confirmación de entrega.`, fix: null, cause: null }

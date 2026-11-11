@@ -252,7 +252,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar o no se sabe si salió), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -291,9 +291,17 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "facebook",
       "correos de pacientes",
       "sin responder",
+      "no sabemos si llegó",
+      "no se sabe si llegó",
+      "no se sabe si salió",
     ],
     writePermission: "conversations.write",
     faqs: [
+      {
+        id: "no-se-sabe-si-salio",
+        q: "Un mensaje dice «No se sabe si salió», ¿qué hago?",
+        a: "El canal no confirmó si aceptó el mensaje, y no se reenvía solo para que la persona no lo reciba dos veces. La conversación queda en «Por atender». Compruébalo por otra vía (en el celular de la clínica o preguntándole a la persona) y, debajo del mensaje, pulsa «Salió» o «No salió». Si no salió, escríbele de nuevo si hace falta; si era la respuesta de un tema, el tema vuelve a quedar pendiente.",
+      },
       {
         id: "escribo-alguien-nunca-escribio",
         q: "¿Cómo le escribo a alguien que nunca me escribió?",
