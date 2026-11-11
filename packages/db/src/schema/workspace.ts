@@ -52,6 +52,8 @@ export const pushSubscription = pgTable("push_subscription", {
   waitingPushedAt: timestamp("waiting_pushed_at", { withTimezone: true }),
   /** Los avisos del servicio creados después de esto todavía no salieron a este equipo. */
   noticesSince: timestamp("notices_since", { withTimezone: true }).notNull().defaultNow(),
+  /** «Llegó tu paciente»: las llegadas desde aquí ya se avisaron a este equipo. */
+  arrivalsSince: timestamp("arrivals_since", { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   uniqueIndex("push_subscription_endpoint_uidx").on(table.organizationId, table.endpoint),
   index("push_subscription_user_idx").on(table.organizationId, table.userId),
