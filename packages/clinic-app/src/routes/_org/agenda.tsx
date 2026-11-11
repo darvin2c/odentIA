@@ -97,6 +97,7 @@ import { dayShort, shortName } from "../../components/agenda/shared"
 import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
+import { AbsenceForm, type AbsenceScope } from "../../components/agenda/absence-form"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { AgendaPageSkeleton, AgendaSkeleton } from "../../components/skeletons/agenda"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -108,6 +109,7 @@ import {
   appointmentSessionsText,
   invalidateAppointmentQueries,
   isUnclosed,
+  movedNote,
   visitLabel,
   visitStage,
   stepBeforeArrival,
@@ -202,6 +204,8 @@ interface MoveRequest {
   why?: string
   /** Dónde estaba, para «Deshacer». */
   back?: { startsAt: string; endsAt: string; professionalUserId: string; roomId: string }
+  /** Cómo estaba antes de moverla: el aviso dice si se quitó «Llegó» o quedó por confirmar. */
+  was?: Pick<AgendaAppointment, "status" | "arrivedAt">
   /** Este movimiento ya es un «Deshacer»: no ofrece otro. */
   undoOf?: string
 }
@@ -271,6 +275,9 @@ function AgendaPage() {
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
   const canAttend = usePermission("clinical.write")
+  // Anotar la ausencia de cualquier profesional; quien atiende anota la suya.
+  const canAbsences = usePermission("appointments.absences")
+  const [absence, setAbsence] = React.useState<AbsenceScope | null>(null)
   const myUserId = useMyUserId()
   const requested = Route.useSearch()
   const navigate = useNavigate()
@@ -925,7 +932,9 @@ function AgendaPage() {
     onSuccess: async (result, input) => {
       const text = input.undoOf ? `Cita de ${result.data.patientName} de vuelta en su sitio` : `Cita de ${result.data.patientName} reprogramada`
       const back = input.back
+      const note = input.was ? movedNote(input.was, result.data) : undefined
       toast.success(text, {
+        description: note,
         // Arrastrar se hace rápido: volver atrás es un toque, sin buscar la hora de antes.
         action: back
           ? {
@@ -937,11 +946,12 @@ function AgendaPage() {
                   expectedVersion: result.data.version,
                   exception: moveException(result.data, back.startsAt, back.endsAt, back.professionalUserId),
                   undoOf: input.id,
+                  was: { status: result.data.status, arrivedAt: result.data.arrivedAt },
                 }),
             }
           : undefined,
       })
-      setMessage(text)
+      setMessage(note ? `${text}. ${note}` : text)
       await invalidate()
     },
     // El servicio rechazó el hueco: se dice por qué y la cita vuelve a su sitio.
@@ -1302,6 +1312,7 @@ function AgendaPage() {
     const full: MoveRequest = {
       ...request,
       back: { startsAt: item.startsAt, endsAt: item.endsAt, professionalUserId: item.professionalUserId, roomId: item.roomId },
+      was: { status: item.status, arrivedAt: item.arrivedAt },
     }
     if (exception) setPendingMove({ ...full, exception, why: exception.why })
     else moveMutation.mutate(full)
@@ -1440,10 +1451,44 @@ function AgendaPage() {
             </>
           ) : undefined
         }
-        {...agendaHeader(can, { book: () => openBooking(), calendar: () => setParam("calendario", "1") })}
+        {...agendaHeader(can, {
+          book: () => openBooking(),
+          calendar: () => setParam("calendario", "1"),
+          // Quien lleva la agenda elige de quién (el que se está mirando, si es uno); quien atiende, la suya.
+          absence: () =>
+            canAbsences
+              ? setAbsence({
+                  kind: "person",
+                  professionalUserId: group === "professionals" && onlyChosen ? onlyChosen.id : "",
+                  name: "",
+                })
+              : myUserId
+                ? setAbsence({
+                    kind: "person",
+                    professionalUserId: myUserId,
+                    name: team.find((item) => item.id === myUserId)?.label ?? "tu agenda",
+                  })
+                : undefined,
+        })}
       />
       {canAttend ? (
         <MyCalendarDrawer open={get("calendario") === "1"} onClose={() => setParam("calendario", undefined)} />
+      ) : null}
+      {absence && resources ? (
+        <AbsenceForm
+          branchId={resources.branchId}
+          timeZone={resources.timeZone}
+          today={today}
+          scope={absence}
+          rooms={resources.rooms}
+          people={canAbsences ? resources.professionals.map(({ id, label }) => ({ id, label })) : undefined}
+          branches={sede.branches}
+          onClose={() => setAbsence(null)}
+          onSaved={async () => {
+            setAbsence(null)
+            await queryClient.invalidateQueries({ queryKey: ["agenda"] })
+          }}
+        />
       ) : null}
 
       {((requested.patientId &&

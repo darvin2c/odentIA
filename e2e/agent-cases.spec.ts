@@ -104,7 +104,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await expect(page.locator("header").getByRole("button", { name: /^Agente/ })).toHaveCount(0)
   const nav = page.getByRole("navigation")
   const homeEntry = nav.getByRole("link", { name: "Inicio", exact: true }).locator("..")
-  await expect(homeEntry).toContainText("1 persona espera")
+  await expect(homeEntry).toContainText("1 persona por responder")
   await expect(nav.getByRole("link", { name: "Agente", exact: true }).locator("..")).not.toContainText("1")
   await info.attach("inicio-con-numero", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -153,7 +153,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
     .toBe("tomada")
   // Tomado no es resuelto: el caso sigue en la lista y contando para quien lo tomó hasta que lo resuelve.
   await expect(caseRow).toHaveCount(1)
-  await expect(homeEntry).toContainText("1 persona espera")
+  await expect(homeEntry).toContainText("1 persona por responder")
 
   // Issue 93: donde cabe la columna, Avisos se abre en ella sin tapar la página y Esc devuelve el foco a la campana.
   await page.setViewportSize({ width: 1680, height: 900 })
@@ -218,7 +218,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   )
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
-  await expect(page.locator("main").getByText("1 persona espera")).toBeAttached()
+  await expect(page.locator("main").getByText("1 persona por responder")).toBeAttached()
   await page.setViewportSize({ width: 1440, height: 900 })
 
   // «Esperan su sí» se retiró (ADR 0118): la cita propuesta se ve en su conversación, y la dirección vieja lleva a la Bandeja.
@@ -234,7 +234,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   const menu = page.getByRole("button", { name: "Alternar menú lateral" })
   const menuBox = await menu.boundingBox()
   // El número es el del icono; el grupo de la lista cuenta asuntos («1 asunto»), no personas.
-  const number = menu.locator("..").getByText("1 persona espera")
+  const number = menu.locator("..").getByText("1 persona por responder")
   await expect(number).toBeVisible()
   const numberBox = await number.boundingBox()
   expect(numberBox!.x).toBeGreaterThanOrEqual(menuBox!.x - 1)

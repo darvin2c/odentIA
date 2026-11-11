@@ -356,14 +356,29 @@ export function createAgendaRoute(deps: CrmDeps) {
     )
   })
 
-  // Configuración de bloqueos.
+  // Bloqueos y ausencias. Quien configura, todo; quien lleva la agenda anota la ausencia de
+  // cualquier profesional; quien atiende, solo la suya (mesa del 10 nov, decisiones 1 y 4).
   app.post("/blocks", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
-    }
     const parsed = blockInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const absence = parsed.data.kind === "ausencia" && Boolean(parsed.data.professionalUserId)
+    const allowed =
+      canAccess(memberRole, "settings.write") ||
+      (absence && canAccess(memberRole, "appointments.absences")) ||
+      (absence && parsed.data.professionalUserId === userId && canAccess(memberRole, "clinical.write"))
+    if (!allowed) {
+      return c.json(
+        errorBody(
+          c,
+          "FORBIDDEN",
+          absence && canAccess(memberRole, "clinical.write")
+            ? "Solo puedes anotar tu propia ausencia"
+            : "No tienes permiso para anotar ausencias ni bloqueos",
+        ),
+        403,
+      )
+    }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         createScheduleBlock(tx, orgId, userId, parsed.data),
@@ -373,12 +388,20 @@ export function createAgendaRoute(deps: CrmDeps) {
 
   app.delete("/blocks/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
+    const configures = canAccess(memberRole, "settings.write")
+    const scope = configures
+      ? undefined
+      : canAccess(memberRole, "appointments.absences")
+        ? { absenceOf: null }
+        : canAccess(memberRole, "clinical.write")
+          ? { absenceOf: userId }
+          : null
+    if (scope === null) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        await deleteScheduleBlock(tx, orgId, c.req.param("id"), userId)
+        await deleteScheduleBlock(tx, orgId, c.req.param("id"), userId, scope)
         return { ok: true }
       }),
     )

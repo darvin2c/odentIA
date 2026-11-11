@@ -955,3 +955,46 @@ export function PromotionPanel({ items, onClose, onChanged }: { items: WaitingPr
     </DetailDrawer>
   )
 }
+
+/**
+ * Los controles vencidos que indicó quien atiende (QA del 10 nov, C45): quién y
+ * desde cuándo; cada nombre abre su ficha, donde se reserva o se le avisa.
+ */
+export function MyControlsPanel({ row, onClose }: { row: RowOf<"overdueControls">; onClose: () => void }) {
+  const list = useQuery({
+    queryKey: ["workspace", "my-overdue-controls"],
+    queryFn: () =>
+      apiFetch<{ data: { items: Array<{ controlId: string; patientId: string; personName: string; line: string }> } }>(
+        "/api/workspace/my-overdue-controls",
+      ),
+  })
+  const items = list.data?.data.items ?? []
+  return (
+    <DetailDrawer
+      open
+      title="Tus controles vencidos"
+      description={`${row.controls} ${row.controls === 1 ? "control" : "controles"} sin cita`}
+      onClose={onClose}
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-sm">Desde su ficha se reserva el control o se le escribe.</p>
+        {list.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
+        {list.isError ? <p className="text-sm text-destructive">{submitErrorMessage(list.error)}</p> : null}
+        <ul aria-label="Controles vencidos" className="flex flex-col divide-y">
+          {items.map((item) => (
+            <li key={item.controlId} className="flex flex-col py-2 text-sm">
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId: item.patientId }}
+                className="font-semibold underline-offset-4 hover:underline"
+              >
+                {item.personName}
+              </Link>
+              <span className="text-[13px] text-muted-foreground">{item.line}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </DetailDrawer>
+  )
+}
