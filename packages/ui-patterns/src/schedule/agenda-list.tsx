@@ -135,12 +135,14 @@ function AgendaRow({
   primaryAction,
   menuItems,
   onOpen,
+  onActed,
 }: {
   item: ScheduleAgendaItem
   timeZone: string
   primaryAction?: ScheduleAgendaListProps["primaryAction"]
   menuItems?: ScheduleAgendaListProps["menuItems"]
   onOpen?: ScheduleAgendaListProps["onOpen"]
+  onActed?: (id: string) => void
 }) {
   const { entry } = item
   const action = primaryAction?.(item) ?? null
@@ -148,23 +150,8 @@ function AgendaRow({
   const start = hourLabel(dayMinutesIn(entry.start, timeZone))
   const state = entryState(entry)
   const status = entryStateLabel(entry)
-  // Tras «Llegó» el botón cambia («Atender») o se va: el foco vuelve a la fila, no al cuerpo
-  // de la página, para seguir con el teclado desde la misma cita.
-  const rowRef = React.useRef<HTMLLIElement>(null)
-  const refocus = React.useRef(false)
-  React.useEffect(() => {
-    if (!refocus.current || action?.pending) return
-    refocus.current = false
-    const active = document.activeElement
-    if (active && active !== document.body && !rowRef.current?.contains(active)) return
-    const target =
-      rowRef.current?.querySelector<HTMLElement>("[data-row-actions] button:not(:disabled)") ??
-      rowRef.current?.querySelector<HTMLElement>("[data-row-open]")
-    target?.focus()
-  }, [action?.pending, action?.label])
   return (
     <li
-      ref={rowRef}
       data-entry={entry.id}
       data-status={entry.status}
       data-state={state}
@@ -250,7 +237,7 @@ function AgendaRow({
               // Con el nombre: diez «Llegó» iguales no le dicen al lector de pantalla de quién es cada uno.
               aria-label={`${action.label}: ${entry.title}`}
               onClick={() => {
-                refocus.current = true
+                onActed?.(entry.id)
                 action.onSelect()
               }}
             >
@@ -285,6 +272,30 @@ export function ScheduleAgendaList({
 }: ScheduleAgendaListProps) {
   const [showPast, setShowPast] = React.useState(false)
   const pastId = React.useId()
+  // Tras «Llegó» la cita cambia de grupo («En la clínica») y su fila se vuelve a crear: el foco
+  // caería al cuerpo de la página. Unos segundos después de actuar, vuelve a esa fila.
+  const rootRef = React.useRef<HTMLElement>(null)
+  const acted = React.useRef<{ id: string; until: number } | null>(null)
+  const onActed = React.useCallback((id: string) => {
+    acted.current = { id, until: Date.now() + 4000 }
+  }, [])
+  React.useEffect(() => {
+    const want = acted.current
+    if (!want) return
+    if (Date.now() > want.until) {
+      acted.current = null
+      return
+    }
+    const active = document.activeElement
+    if (active && active !== document.body) {
+      // Siguió con otra cosa: no se le quita el foco.
+      if (!rootRef.current?.contains(active)) acted.current = null
+      return
+    }
+    const row = rootRef.current?.querySelector<HTMLElement>(`[data-entry="${CSS.escape(want.id)}"]`)
+    if (!row || row.querySelector("[data-row-actions] button:disabled")) return
+    ;(row.querySelector<HTMLElement>("[data-row-actions] button") ?? row.querySelector<HTMLElement>("[data-row-open]"))?.focus()
+  })
 
   const sorted = React.useMemo(
     () => [...items].sort((a, b) => a.entry.start.localeCompare(b.entry.start)),
@@ -331,16 +342,21 @@ export function ScheduleAgendaList({
       primaryAction={primaryAction}
       menuItems={menuItems}
       onOpen={onOpen}
+      onActed={onActed}
     />
   )
 
   // Otro día (sin «ahora») o uno que ya pasó entero se lee completo: no hay nada «por venir» que priorizar.
   if (now === undefined || (current.length === 0 && upcoming.length === 0)) {
-    return <ul className={cn("flex flex-col gap-2", className)}>{sorted.map(row)}</ul>
+    return (
+      <ul ref={rootRef as React.RefObject<HTMLUListElement>} className={cn("flex flex-col gap-2", className)}>
+        {sorted.map(row)}
+      </ul>
+    )
   }
 
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    <div ref={rootRef as React.RefObject<HTMLDivElement>} className={cn("flex flex-col gap-2", className)}>
       {current.length > 0 ? (
         <>
           <h3 className="px-1 pt-1 text-sm font-bold text-muted-foreground">
