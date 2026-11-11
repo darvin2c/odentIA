@@ -22,7 +22,10 @@ export function createFakeDecisionModel(): DecisionModel {
                   ? !has("gracias", "ok", "listo")
                   : q.id === "interest"
                     ? has("cuánto", "cuanto", "precio", "cuesta", "quiero", "me interesa") && !has("lista de precios", "todos sus precios")
-                    : q.id === "help_join"
+                    : q.id === "help_data"
+                      ? // Lo mismo que hace `fakeHelp` con «cuánto»: es de las cifras de la clínica.
+                        /^pregunta: .*cu[aá]nt[oa]s?/m.test(text)
+                      : q.id === "help_join"
                       ? // La Ayuda redacta (ADR 0178) cuando la pregunta trae dos partes: «…y…».
                         /^pregunta: .* y /m.test(text)
                       : false

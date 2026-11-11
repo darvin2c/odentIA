@@ -1108,7 +1108,6 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "te lo pasó el agente",
       "conocimiento",
       "aprender",
-      "tope diario",
       "autonomía",
       "cerrar conversaciones",
       "horario de recontacto",

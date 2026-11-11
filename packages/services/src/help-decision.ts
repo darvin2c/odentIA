@@ -207,7 +207,7 @@ export function helpAnswerText(option: HelpOption, place: string = helpTopicLabe
   return `En ${place}. ${option.topic.purpose}`
 }
 
-/* ---------- `help.v2`: Jev decide en dos pasos, y se redacta solo si hace falta (ADR 0178) ---------- */
+/* ---------- `help.v3`: Jev decide en dos pasos, pregunta aparte si piden un dato y se redacta solo si hace falta (ADR 0178 y 0179) ---------- */
 
 /**
  * Con la guía completa las respuestas ya no caben en una pregunta (el tope del
@@ -216,9 +216,12 @@ export function helpAnswerText(option: HelpOption, place: string = helpTopicLabe
  * elegidas. Cambiar la redacción de cualquiera de las tres preguntas, el orden
  * de sus opciones o un umbral invalida lo medido con `eval:ayuda`.
  */
-export const HELP_FLOW_VERSION = "help.v2"
+export const HELP_FLOW_VERSION = "help.v3"
 export const HELP_AREA_QUESTION = "help_area"
 export const HELP_JOIN_QUESTION = "help_join"
+export const HELP_DATA_QUESTION = "help_data"
+/** Desde esta probabilidad se cree que pide un dato de su clínica. Medido: con 0,90 no confundió ninguna pregunta de la guía. */
+export const HELP_DATA_CONFIDENT = 0.9
 /** La categoría de lo que no es de ninguna pantalla (quién es Ariadna, la contraseña, el celular). */
 export const HELP_GENERAL_AREA = "general"
 /** En cuántas categorías se busca como mucho antes de buscar en toda la guía. */
@@ -431,10 +434,34 @@ export function helpJoinQuestion(texts: ProductAgentTexts): AdminQuestion {
   }
 }
 
+/**
+ * ¿Pide un dato de su clínica? Se pregunta aparte y a la vez que la categoría
+ * (ADR 0179): entre las categorías, «datos» casi nunca llegaba a la certeza,
+ * porque la pregunta se parece a la pantalla donde está esa cifra.
+ */
+export function helpDataQuestion(texts: ProductAgentTexts): AdminQuestion {
+  return {
+    id: HELP_DATA_QUESTION,
+    kind: "yesno",
+    instructions: `Alguien del equipo de una ${clinicWord(texts)} escribió esto en la Ayuda de ${productName(texts)}, el sistema que usa para trabajar. ¿Pide una cifra, una lista o un dato de su propia ${clinicWord(texts)}, o pregunta cómo se usa el sistema?`,
+    criteria: {
+      yes: "Pide un número, una lista o un dato concreto de su clínica, de un paciente o de alguien del equipo (cuánto se cobró, cuántos pacientes hubo, quién debe, cuánto queda, qué citas faltan), o por qué una cifra suya es la que es o no cuadra. Para responderlo habría que mirar sus datos.",
+      no: "Pregunta cómo se hace algo, dónde está una pantalla o un botón, qué significa algo o por qué no puede hacer algo en el sistema; o es otra cosa (un saludo, un tema ajeno). Se responde sin mirar los datos de su clínica.",
+    },
+  }
+}
+
+const yesOf = (result: { answers: readonly AdminAnswer[] }, id: string): number => {
+  const answer = result.answers.find((item) => item.id === id)
+  return answer && "probability" in answer && typeof answer.probability === "number" ? answer.probability : 0
+}
+
+/** Lee el sí/no de `help_data`; sin respuesta, no. */
+export const readHelpData = (result: { answers: readonly AdminAnswer[] }): number => yesOf(result, HELP_DATA_QUESTION)
+
 /** Lee el sí/no de `help_join`; sin respuesta, no. */
 export function readHelpJoin(result: { answers: readonly AdminAnswer[] }): number {
-  const answer = result.answers.find((item) => item.id === HELP_JOIN_QUESTION)
-  return answer && "probability" in answer && typeof answer.probability === "number" ? answer.probability : 0
+  return yesOf(result, HELP_JOIN_QUESTION)
 }
 
 /** Quien redacta: recibe las instrucciones y lo que tiene delante, y devuelve el texto o nulo si no pudo. */
