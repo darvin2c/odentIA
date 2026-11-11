@@ -3,8 +3,18 @@ import type { Mailer } from "@odentia/mail"
 import type { Storage } from "@odentia/services"
 import type { Context, Next } from "hono"
 import { Hono } from "hono"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 import { createSaasBillingRoute } from "./saas-billing.js"
+
+// El rechazo en sí lo prueba services: aquí se sustituye para ver qué audita la ruta.
+const service = vi.hoisted(() => ({ repeated: false, audited: [] as string[] }))
+vi.mock("@odentia/services", async (original) => ({
+  ...(await original<typeof import("@odentia/services")>()),
+  rejectSaasReceipt: async () => ({ payment: { id: "pago-1", status: "rechazado" }, repeated: service.repeated }),
+  writeAdminAudit: async (_tx: Db, _actor: unknown, entry: { action: string }) => {
+    service.audited.push(entry.action)
+  },
+}))
 
 /**
  * «Rechazar» un comprobante pendiente es de la administración (C11): soporte
@@ -56,4 +66,28 @@ it("el motivo es obligatorio y va de 1 a 500 caracteres, junto a su campo", asyn
   expect(long.status).toBe(400)
   expect(await long.json()).toMatchObject({ error: { fields: { reason: "Escribe el motivo en 500 caracteres como mucho" } } })
   expect(touched).toEqual([])
+})
+
+it("un rechazo repetido con el mismo motivo no deja otra auditoría a nombre de quien lo repite", async () => {
+  // Una base que solo abre la transacción: lo demás lo hace el servicio sustituido.
+  const ownerDb = { transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({}) } as unknown as Db
+  const app = new Hono()
+  app.use("*", async (c: Context, next: Next) => {
+    c.set("adminActor", { userId: "staff-1", role: "admin" })
+    await next()
+  })
+  app.route("/api/admin/billing", createSaasBillingRoute({ ownerDb, storage: {} as Storage, mailer: {} as Mailer }))
+  const reject = () =>
+    app.request("/api/admin/billing/payments/pago-1/reject", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId: "org-1", reason: "No se ve el número de operación" }),
+    })
+
+  service.repeated = false
+  expect((await reject()).status).toBe(200)
+  expect(service.audited).toEqual(["saas.payment_rejected"])
+  service.repeated = true
+  expect((await reject()).status).toBe(200)
+  expect(service.audited).toEqual(["saas.payment_rejected"])
 })

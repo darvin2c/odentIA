@@ -204,10 +204,13 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
       metadata?: Record<string, unknown>
     },
     fn: (tx: Db) => Promise<T>,
+    /** ¿Hizo algo? Un reintento que no cambió nada no deja auditoría a nombre de quien llamó. */
+    changed: (result: T) => boolean = () => true,
   ) {
     return runService(c, status, () =>
       deps.ownerDb.transaction(async (tx) => {
         const result = await fn(tx)
+        if (!changed(result)) return result
         await writeAdminAudit(tx, actor, {
           action: audit.action,
           organizationId: audit.organizationId,
@@ -719,6 +722,8 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
         metadata: { reason: body.reason },
       },
       (tx) => rejectSaasReceipt(tx, body.organizationId, actor.userId, paymentId, body.reason),
+      // Rechazarlo otra vez con el mismo motivo no rechaza nada: la auditoría ya tiene el primero.
+      (result) => !result.repeated,
     )
   })
 
@@ -1108,6 +1113,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
           pauseReason: summary.pauseReason,
           trialEndsAt: summary.trialEndsAt,
           graceEndsAt: summary.graceEndsAt,
+          // El día en que pasa a solo lectura: el de la franja, el correo de la víspera y el ciclo.
+          readOnlyAt: summary.readOnlyAt,
           currentPeriodEnd: summary.currentPeriodEnd,
           planCode: summary.plan?.code ?? null,
           planName: summary.plan?.name ?? null,

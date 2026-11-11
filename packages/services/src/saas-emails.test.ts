@@ -6,6 +6,7 @@ import {
   saasOverdueEmail,
   saasPlanStartedEmail,
   saasRestrictedEmail,
+  saasRestrictionSoonEmail,
   saasSettlementEmail,
   saasTrialEndedEmail,
   waitlistTeamNoticeEmail,
@@ -120,6 +121,18 @@ describe("correos de Plan y pagos", () => {
     expect(mail.text).toContain("Total a pagarte: 118,45 USD")
     expect(mail.text).toContain("si algo no cuadra, escríbele a tu contacto en la administración")
     expect(mail.text).not.toContain("escríbenos desde Ayuda")
+  })
+
+  it("la víspera de la solo lectura con un comprobante en revisión no pide registrar otro", () => {
+    const due = saasRestrictionSoonEmail({ clinic: "Clínica Sonrisa", amounts: ["S/ 100.00"], url })
+    expect(due.text).toContain("sigue sin pagar")
+    expect(due.html).toContain("Registrar mi comprobante")
+    const review = saasRestrictionSoonEmail({ clinic: "Consultorio San Martín", amounts: ["S/ 100.00"], url, brand: "latidia", inReview: true })
+    expect(review.subject).toBe("Mañana tu clínica pasa a solo lectura")
+    expect(review.text).toContain("latidIA está revisando el comprobante de Consultorio San Martín")
+    expect(review.text).toContain("Monto pendiente: S/ 100.00")
+    expect(review.html).not.toContain("Registrar mi comprobante")
+    expect(review.html).toContain("Ver Plan y pagos")
   })
 })
 

@@ -152,13 +152,36 @@ export function saasChargeIssuedEmail(input: {
   })
 }
 
-/** Mañana termina la gracia (ADR 0065): el último aviso antes de pasar a solo lectura. */
+/**
+ * Mañana termina la gracia (ADR 0065): el último aviso antes de pasar a solo
+ * lectura. Con un comprobante en revisión (`inReview`) no pide registrar otro
+ * (el cargo no lo acepta mientras ese espera) y dice lo mismo que la franja:
+ * se está revisando y, si no se confirma antes, mañana pasa a solo lectura.
+ */
 export function saasRestrictionSoonEmail(input: {
   clinic: string
   amounts: readonly string[]
   url: string | null
   brand?: MailBrand
+  inReview?: boolean
 }): MailTemplate {
+  if (input.inReview) {
+    const who = mailBrandName(input.brand)
+    return renderEmail({
+      brand: input.brand,
+      subject: "Mañana tu clínica pasa a solo lectura",
+      preview: `${who} está revisando tu comprobante: si no se confirma hoy, mañana la clínica pasa a solo lectura.`,
+      title: "Mañana tu clínica pasa a solo lectura",
+      band: { tone: "vencido", text: "Comprobante en revisión" },
+      paragraphs: [
+        `${who} está revisando el comprobante de ${input.clinic}. Si no se confirma antes, mañana el equipo podrá ver todo, pero no guardar, y Sofi no responderá.`,
+      ],
+      facts: input.amounts.map((value) => ({ label: "Monto pendiente", value })),
+      ...action("Ver Plan y pagos", input.url),
+      note: "No tienes que registrar otro comprobante. No se pierde ningún dato.",
+      reason: reason(input.clinic, input.brand),
+    })
+  }
   return renderEmail({
     brand: input.brand,
     subject: "Mañana tu clínica pasa a solo lectura",

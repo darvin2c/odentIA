@@ -116,7 +116,7 @@ function PlanContent() {
     queryKey: ["billing", organizationId, "subscription"],
     // `readOnlyAt`: en gracia, el día en que pasa a solo lectura, el mismo de la franja y del correo.
     queryFn: () =>
-      apiFetch<{ data: BillingSummary & { readOnlyAt?: string | null } }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
+      apiFetch<{ data: BillingSummary }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
     retry: false,
   })
   const consumption = useQuery({
