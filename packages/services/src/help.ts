@@ -66,7 +66,7 @@ import { getArgosPanelAllowance } from "./saas-included.js"
 /**
  * Ariadna responde con la guía del sistema (ADR 0146 y 0178): lo escrito igual
  * que en la guía responde sin modelo; lo demás lo elige Jev en dos pasos
- * (`help.v2`: la categoría y la respuesta) y se muestra tal cual. Solo si la
+ * (`help.v3`: la categoría y la respuesta) y se muestra tal cual. Solo si la
  * respuesta está repartida entre dos o tres de la guía que se completan, el
  * modelo que escribe las une, y lo redactado se comprueba sin modelo. Si Jev
  * duda, ofrece las más parecidas; si no está en la guía, lo dice; si es de las
@@ -383,7 +383,7 @@ const errorCodeOf = (error: unknown): string => {
 }
 
 /**
- * Jev decide en dos pasos (`help.v2`, ADR 0178): la categoría y, dentro de las
+ * Jev decide en dos pasos (`help.v3`, ADR 0178): la categoría y, dentro de las
  * elegidas, la respuesta. Con la categoría se pregunta aparte si pide un dato
  * de su clínica (ADR 0179): si la guía no lo responde segura, va a Argos. Si la categoría no fue segura se busca en toda la
  * guía, por tandas; y antes de decir que algo no está, también: una categoría
@@ -401,6 +401,8 @@ export async function decideHelp(
   writer: HelpWriter | null = null,
   previous: HelpPrevious | null = null,
 ): Promise<HelpDecided> {
+  // Pide un dato de su clínica: lo dice Jev aparte, y vale aunque después no se pueda buscar en la guía.
+  let figures: HelpDecided | null = null
   if (decider) {
     try {
       const state = helpState(question, screenName, previous)
@@ -412,8 +414,7 @@ export async function decideHelp(
         decider.decide(state, [helpDataQuestion(texts)]).then(readHelpData, () => 0),
       ])
       // Una respuesta segura de la guía gana («¿quién me espera?» también es un dato, y la guía dice dónde verlo). Sin ella, va a Argos.
-      const figures: HelpDecided | null =
-        data >= HELP_DATA_CONFIDENT ? { via: "jev", selection: { verdict: "datos", shown: [], offered: [], top: data }, why: "ninguna", area: null } : null
+      if (data >= HELP_DATA_CONFIDENT) figures = { via: "jev", selection: { verdict: "datos", shown: [], offered: [], top: data }, why: "ninguna", area: null }
       const where = readHelpAreas(located, areas)
       if (where.verdict !== "areas") {
         return figures ?? { via: "jev", selection: { verdict: where.verdict, shown: [], offered: [], top: where.top }, why: "ninguna", area: null }
@@ -428,6 +429,7 @@ export async function decideHelp(
       }
       if (picked) {
         const { selection, parts } = picked
+        // También antes de redactar: unir dos textos de la guía no responde una cifra.
         if (figures && selection.verdict !== "seguro") return figures
         if (selection.verdict === "duda" && parts.length >= 2 && writer) {
           const written = await writeFromParts(question, parts, texts, decider, writer)
@@ -440,6 +442,7 @@ export async function decideHelp(
       console.warn(`La Ayuda respondió sin Jev: ${errorCodeOf(error)}`)
     }
   }
+  if (figures) return figures
   return { via: "respaldo", selection: byWords(question, topics), why: "sin_jev" }
 }
 

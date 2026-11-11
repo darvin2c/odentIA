@@ -10,7 +10,7 @@
  *
  * - `fake`: el modelo de decisión de demostración; sirve para ver el recorrido,
  *   no para medir.
- * - `jev`: llama a Jev (cuesta): entre 2 y unas 6 llamadas por pregunta.
+ * - `jev`: llama a Jev (cuesta): entre 3 y unas 7 llamadas por pregunta.
  * - `--redactar`: además llama al modelo que escribe cuando las partes se
  *   completan (cuesta más) y lista lo redactado, para leerlo: aquí no hay juez.
  *   Sin él, solo se cuenta cuántas se habrían redactado.

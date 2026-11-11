@@ -207,7 +207,7 @@ export function helpAnswerText(option: HelpOption, place: string = helpTopicLabe
   return `En ${place}. ${option.topic.purpose}`
 }
 
-/* ---------- `help.v2`: Jev decide en dos pasos, y se redacta solo si hace falta (ADR 0178) ---------- */
+/* ---------- `help.v3`: Jev decide en dos pasos, pregunta aparte si piden un dato y se redacta solo si hace falta (ADR 0178 y 0179) ---------- */
 
 /**
  * Con la guía completa las respuestas ya no caben en una pregunta (el tope del

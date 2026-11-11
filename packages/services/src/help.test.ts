@@ -445,6 +445,20 @@ describe("con Jev (ADR 0146)", () => {
     for (const data of [0.85, "falla"] as const) {
       expect((await askHelp(appDb, org, owner, question, jev(doubt, { data }).decider)).kind, String(data)).toBe("duda")
     }
+    // La categoría fue segura pero la respuesta no está en ella: no se busca en el resto de la guía.
+    const elsewhere = jev({ none: 0.97 }, { areas: { agenda: 0.95 }, data: 0.95 })
+    expect((await askHelp(appDb, org, owner, question, elsewhere.decider)).kind).toBe("datos")
+    expect(elsewhere.seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help"])
+    // Tampoco se redacta: unir dos textos de la guía no responde una cifra.
+    const parts = jev({ "tareas-crear": 0.55, "tareas-asignar": 0.38, none: 0.07 }, { join: 0.95, data: 0.95 })
+    expect((await askHelp(appDb, org, owner, question, parts.decider, async () => "Algo redactado.")).kind).toBe("datos")
+    expect(parts.seen.map((item) => item.id)).not.toContain("help_join")
+    // Si después no se puede buscar en la guía, lo que ya dijo Jev vale: no responden las palabras.
+    const broken = jev(doubt, { data: 0.95 })
+    const half: HelpDecider = { decide: (state, questions) => (questions[0]?.id === HELP_SELECT_QUESTION ? Promise.reject(new Error("plazo")) : broken.decider.decide(state, questions)) }
+    expect((await askHelp(appDb, org, owner, question, half)).kind).toBe("datos")
+    // Queda anotado como una pregunta de cifras que decidió Jev, sin tema ni redacción.
+    expect((await logOf(org)).at(-1)).toMatchObject({ via: "jev", verdict: "datos", topicId: null, written: false })
     // Y una respuesta segura de la guía gana: también es un dato, pero la guía dice dónde verlo.
     const sure = await askHelp(appDb, org, owner, question, jev({ "tema:finanzas": 0.95 }, { data: 0.95 }).decider)
     expect(sure.kind).toBe("guia")

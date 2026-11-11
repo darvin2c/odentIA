@@ -1,36 +1,36 @@
-Nota: misma regla que se unió (ADR 0179), pero con dos respuestas de Reportes que después se sacaron (guía de 459). La corrida con la guía final no terminó: la cuenta de Jev se quedó sin crédito.
+Nota: es la configuración que se unió (ADR 0179): la guía de 457 respuestas, y una respuesta segura de la guía gana a «datos».
 Ayuda · help.v3 · proveedor jev (jev-1.13.0)
-  guía odentia: 30 pantallas, 459 preguntas frecuentes, 33 categorías; la mayor tiene 53 opciones
-  guía latidia: 30 pantallas, 457 preguntas frecuentes, 33 categorías; la mayor tiene 51 opciones
-  guía vistia: 31 pantallas, 473 preguntas frecuentes, 34 categorías; la mayor tiene 48 opciones
+  guía odentia: 30 pantallas, 457 preguntas frecuentes, 33 categorías; la mayor tiene 53 opciones
+  guía latidia: 30 pantallas, 455 preguntas frecuentes, 33 categorías; la mayor tiene 51 opciones
+  guía vistia: 31 pantallas, 471 preguntas frecuentes, 34 categorías; la mayor tiene 48 opciones
   bancos: desarrollo 244 · control 180 · final 150
 
 Por banco:
   banco          n  seguro bien  seguro mal  redactadas  duda c/correcta  duda sin  duda calla  ninguna bien  ninguna mal  datos bien  datos mal  sin Jev
-  desarrollo   244          144           2          14               59         5           9            14            3           8          0        3
-  control      180           60           2           6               63         9           9            28            2           6          1        5
-  final        150           36           4           2               64         6           5            26            3           6          0        5
+  desarrollo   244          141           3          13               61         7           9            13            2           8          0        3
+  control      180           61           2           6               62         9           9            28            2           6          1        5
+  final        150           34           3           4               67         6           5            26            3           6          0        5
   «redactadas»: Jev dijo que dos o tres respuestas se completan. Sin --redactar cuentan como duda; con él, como seguro si todas sus partes corresponden.
 
 Ajuste (desarrollo + control + final), n = 574:
-  De lo que muestra como respuesta, corresponde: 96.8 % (cota inferior 95 %: 93.8 %; mínimo 95.0 %)
-  Lo que la guía no responde y no recibe una respuesta: 96.5 % (mínimo 95.0 %)
+  De lo que muestra como respuesta, corresponde: 96.7 % (cota inferior 95 %: 93.7 %; mínimo 95.0 %)
+  Lo que la guía no responde y no recibe una respuesta: 95.7 % (mínimo 95.0 %)
   Lo que la guía responde y se resuelve solo o con un toque: 92.8 % (mínimo 70.0 %)
   Seguro y mal: 8 · «datos» bien dicho: 74.1 %
-  Primer paso: de 372 con categoría segura, acertó 359 (96.5 %); en 155 buscó en toda la guía o dijo «ninguna» en el primer paso
+  Primer paso: de 368 con categoría segura, acertó 355 (96.5 %); en 157 buscó en toda la guía o dijo «ninguna» en el primer paso
   Cumple los mínimos: sí
 
-Llamadas a Jev por pregunta: habitual 3 · máximo 6 (1912 en total)
-Demora por pregunta, con todos sus pasos: p50 472 ms · p95 665 ms (mínimo para salir ≤ 2000 ms)
-Costo de Jev por pregunta: habitual USD 0.000355 · máximo USD 0.001437 · esta corrida USD 0.321286 (561 preguntas con precio, de 561)
+Llamadas a Jev por pregunta: habitual 3 · máximo 6 (1918 en total)
+Demora por pregunta, con todos sus pasos: p50 475 ms · p95 669 ms (mínimo para salir ≤ 2000 ms)
+Costo de Jev por pregunta: habitual USD 0.000355 · máximo USD 0.001433 · esta corrida USD 0.324246 (561 preguntas con precio, de 561)
 1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.461500, sin contar lo redactado
 
 Seguro y se equivoca (8):
   - [desarrollo · odentia] «¿Cómo subo una foto del paciente?» → seguro en clinica: FAQ «¿Dónde subo una radiografía?»; esperado: FAQ «¿Cómo pongo la foto de un paciente?»
+  - [desarrollo · vistia] «como mando el pedido al laboratorio por correo desde aca» → seguro en pedidos: FAQ «¿Cómo vendo unos lentes?»; esperado: ninguna
   - [desarrollo · odentia] «a que horas tenemos mas huecos en la agenda» → seguro en agenda: FAQ «¿Cómo veo los huecos libres de la semana?»; esperado: FAQ «¿A qué hora queda más libre la agenda?»
   - [control · odentia] «quien me debe plata» → seguro: FAQ «¿Dónde veo quiénes deben?»; esperado: datos
   - [control · odentia] «no me aparece el comprobante del pago que hice» → seguro en plan-y-pagos: FAQ «¿Cómo registro el comprobante de mi pago?»; esperado: ninguna
-  - [final · odentia] «quiero cerrar de 1 a 3 el miercoles porque el doctor tiene reunion» → seguro en disponibilidad: FAQ «¿Cómo pongo un feriado?»; esperado: FAQ «¿Cómo bloqueo un horario?» o FAQ «¿Cómo registro las vacaciones de un profesional?» o párrafo de disponibilidad
   - [final · odentia] «no me deja poner una cita a las 8 de la noche» → seguro en agenda: FAQ «¿Cómo doy una cita más temprano o más tarde de lo que muestra la agenda?»; esperado: FAQ «¿Puedo dar una cita fuera de horario o a una hora ocupada?»
   - [final · odentia] «cuales citas de mañana faltan confirmar» → seguro: FAQ «¿Cómo veo las citas que faltan confirmar?»; esperado: datos
   - [final · odentia] «por que me rechazaron la plantilla del recordatorio» → seguro en whatsapp: FAQ «¿Cómo cambio el texto del recordatorio de WhatsApp?»; esperado: ninguna
