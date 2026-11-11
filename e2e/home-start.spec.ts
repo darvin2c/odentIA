@@ -192,7 +192,11 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
       // La agenda de la sede, en una línea con su resumen, igual al de la Agenda de ese día.
       const agendaLine = page.getByRole("link", { name: /^Agenda de / })
-      await expect(agendaLine).toContainText(`2 citas · 0 en sala · 0 atendidas · ${upcoming.all} por venir`)
+      // Lo que ya pasó sin llegada se cuenta aparte: así las cifras suman el total.
+      const unclosedAll = 2 - upcoming.all
+      await expect(agendaLine).toContainText(
+        `2 citas · 0 en sala · 0 atendidas · ${unclosedAll > 0 ? `${unclosedAll} sin cerrar · ` : ""}${upcoming.all} por venir`,
+      )
       // La caja del día, en una línea que lleva a Finanzas.
       const cash = page.getByRole("link", { name: /^Caja de hoy/ })
       await expect(cash).toContainText("1 persona por cobrar")
@@ -241,7 +245,9 @@ for (const width of [1440, 390]) {
 
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const mine = page.getByRole("region", { name: "Mis pacientes de hoy" })
-      await expect(mine).toContainText(`1 paciente · 0 atendidos · ${upcoming.mine} por venir`)
+      await expect(mine).toContainText(
+        `1 paciente · 0 atendidos · ${upcoming.mine === 0 ? "1 sin cerrar · " : ""}${upcoming.mine} por venir`,
+      )
       await expect(mine).not.toContainText("Paciente de otra profesional")
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
       await expect(page.getByRole("link", { name: /^Caja de hoy/ })).toHaveCount(0)
