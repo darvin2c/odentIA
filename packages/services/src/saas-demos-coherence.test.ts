@@ -562,8 +562,11 @@ function medical(demo: () => Built) {
         (365.25 * DAY)
       const talla = Number(after.talla) - Number(before.talla)
       const peso = Number(after.peso) - Number(before.peso)
-      // Nadie se encoge; un niño crece a lo más unos 30 cm al año; el peso cambia poco en días.
-      if (talla < -1 || talla > 1 + 30 * years)
+      // Nadie se encoge; un niño crece a lo más unos 30 cm al año, y un bebé de menos de un año
+      // (menos de 75 cm) hasta unos 46: la OMS da de 49,9 a 61,4 cm en sus tres primeros meses.
+      // El peso cambia poco en días.
+      const cmPerYear = Number(before.talla) < 75 ? 46 : 30
+      if (talla < -1 || talla > 1 + cmPerYear * years)
         wrong.push(`talla ${before.talla} → ${after.talla} en ${Math.round(years * 365)} días`)
       if (Math.abs(peso) > 1.5 + Math.max(Number(after.peso), Number(before.peso)) * years)
         wrong.push(`peso ${before.peso} → ${after.peso} en ${Math.round(years * 365)} días`)
