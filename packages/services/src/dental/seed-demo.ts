@@ -1749,8 +1749,8 @@ const convAndres = await seedConversation({
   thread: "seed-thread-andres",
   unreadCount: 1,
   lastInboundAt: hoursAgo(1),
-  lastOutboundAt: new Date(hoursAgo(1).getTime() + 60_000),
-  lastMessageAt: new Date(hoursAgo(1).getTime() + 60_000),
+  lastOutboundAt: new Date(hoursAgo(1).getTime() + 120_000),
+  lastMessageAt: new Date(hoursAgo(1).getTime() + 120_000),
 })
 const andresAsked = await seedMessage({
   orgId: ORG_A,
@@ -1780,6 +1780,18 @@ await seedMessage({
   externalId: "seed-msg-andres-2",
   status: "read",
   createdAt: new Date(hoursAgo(1).getTime() + 60_000),
+})
+// El canal no confirmó si salió el aviso siguiente: no se reenvía solo y
+// recepción lo resuelve con «Salió» o «No salió» (auditoría de estados del 11 nov).
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convAndres.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Apenas caja lo confirme, te escribo por aquí.",
+  externalId: "seed-msg-andres-3",
+  status: "unknown",
+  createdAt: new Date(hoursAgo(1).getTime() + 120_000),
 })
 
 // R1: Ana respondió a Patricia pasadas las 24 horas. La respuesta queda «Por

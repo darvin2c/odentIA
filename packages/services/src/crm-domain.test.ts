@@ -12,6 +12,7 @@ import { createConnection } from "./connections.js"
 import { createContact, listContacts } from "./contacts.js"
 import { applyStatus, listConversations, setAgentStatus } from "./conversations.js"
 import { listContactActivity } from "./crm-workspace.js"
+import { resolveUncertainMessage } from "./message-delivery.js"
 import {
   closeOpportunity,
   createOpportunity,
@@ -658,6 +659,14 @@ it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran
   await addMessage("org_a", convFailed, { direction: "in", status: "received", createdAt: t0 })
   await addMessage("org_a", convFailed, { direction: "out", senderKind: "agent", status: "sent", createdAt: t1 })
   await addMessage("org_a", convFailed, { direction: "out", senderKind: "agent", status: "failed", createdAt: t2 })
+  // Lo que no se sabe si salió también: nadie confirma que le llegó.
+  const cUnknown = await makeContact("org_a", `${prefix} Duda`)
+  const convUnknown = await makeConversationDirect("org_a", cUnknown.id)
+  await addMessage("org_a", convUnknown, { direction: "in", status: "received", createdAt: t0 })
+  const [doubtful] = await ownerDb
+    .insert(message)
+    .values({ organizationId: "org_a", conversationId: convUnknown, direction: "out", senderKind: "agent", body: "Hola", status: "unknown", createdAt: t2 })
+    .returning({ id: message.id })
   // «Por atender» (ADR 0050): sin responder y sin el agente a cargo; un
   // saliente que sigue en cola todavía no es respuesta.
   await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convUn, false))
@@ -669,7 +678,21 @@ it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran
   expect(unIds).toContain(convUn)
   expect(unIds).toContain(convQueued)
   expect(unIds).toContain(convFailed)
+  expect(unIds).toContain(convUnknown)
   expect(unIds).not.toContain(convOk)
+  // «Salió»: quien lo comprobó lo dice y deja de pedir a una persona; nadie lo marca dos veces.
+  await withOrgContext(appDb, "org_a", (tx) =>
+    resolveUncertainMessage(tx, "org_a", { conversationId: convUnknown, messageId: doubtful!.id, userId: "owner-1", outcome: "sent" }),
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      resolveUncertainMessage(tx, "org_a", { conversationId: convUnknown, messageId: doubtful!.id, userId: "owner-1", outcome: "failed" }),
+    ),
+  ).rejects.toMatchObject({ code: "MESSAGE_NOT_UNCERTAIN", status: 409 })
+  const settled = await withOrgContext(appDb, "org_a", (tx) =>
+    listConversations(tx, "org_a", { view: "attend", q: prefix, limit: 100 }),
+  )
+  expect(settled.items.map((c) => c.id)).not.toContain(convUnknown)
   // Esperan al paciente: una propuesta espera su sí, o se le respondió y no contesta;
   // un saliente que sigue en cola todavía no es respuesta.
   await ownerDb.insert(agentProposal).values({

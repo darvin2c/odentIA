@@ -80,16 +80,20 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       // Sin timestamp en NormalizedStatus: el par (mensaje, estado) es único
       // por transición; los reintentos del proveedor traen el mismo estado.
       const eventId = `status:${status.externalMessageId}:${status.status}`
-      const inserted = await deps.ownerDb
-        .insert(inboundEvent)
-        .values({ provider, externalEventId: eventId })
-        .onConflictDoNothing()
-        .returning({ id: inboundEvent.id })
-      if (inserted.length === 0) continue
+      const [seen] = await deps.ownerDb
+        .select({ id: inboundEvent.id })
+        .from(inboundEvent)
+        .where(and(eq(inboundEvent.provider, provider), eq(inboundEvent.externalEventId, eventId)))
+        .limit(1)
+      if (seen) continue
+      // Se anota como visto recién después de aplicarlo: si aplicar falla, el
+      // reintento del proveedor no se descarta. Aplicar dos veces el mismo
+      // estado no cambia nada (`applyStatus` no retrocede ni repite).
       // Un fallo que llega después (un número sin WhatsApp) deja pendiente el tema que esa respuesta resolvió.
       await withOrgContext(deps.db, orgId, (tx) =>
         applyStatus(tx, orgId, [status], (inner, messageId) => reopenTopicOfFailedReplySafely(inner, orgId, messageId)).then(() => {}),
       )
+      await deps.ownerDb.insert(inboundEvent).values({ provider, externalEventId: eventId }).onConflictDoNothing()
     }
 
     if (parsed.templateStatuses?.length) {
@@ -122,14 +126,18 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       await withOrgContext(deps.db, orgId, (tx) => applyAccountEvents(tx, orgId, connection.id, events))
     }
 
+    // El libro de duplicados y la cola, en una sola transacción: si encolar
+    // falla, el evento tampoco queda como visto y el reintento del proveedor entra.
     for (const event of parsed.messages) {
-      const inserted = await deps.ownerDb
-        .insert(inboundEvent)
-        .values({ provider, externalEventId: event.externalEventId })
-        .onConflictDoNothing()
-        .returning({ id: inboundEvent.id })
-      if (inserted.length === 0) continue
-      await sendInboundMessage(deps.ownerDb, { orgId, connectionId: connection.id, event })
+      await deps.ownerDb.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(inboundEvent)
+          .values({ provider, externalEventId: event.externalEventId })
+          .onConflictDoNothing()
+          .returning({ id: inboundEvent.id })
+        if (inserted.length === 0) return
+        await sendInboundMessage(tx, { orgId, connectionId: connection.id, event })
+      })
     }
   }
 

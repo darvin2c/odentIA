@@ -191,6 +191,28 @@ it("telegram válido encola; repetido dedupea; secreto malo da 401", async () =>
   expect(await queueDepth()).toBe(1)
 })
 
+it("si encolar falla, el mensaje no queda como visto: el reintento del proveedor entra", async () => {
+  const app = route()
+  const headers = { "x-telegram-bot-api-secret-token": "tg-secret", "content-type": "application/json" }
+  const update = JSON.stringify({
+    update_id: 7002,
+    message: { message_id: 12, date: 1735689700, chat: { id: 556 }, from: { id: 556, first_name: "Beto" }, text: "Hola" },
+  })
+  const before = await queueDepth()
+  await ownerDb.execute(sql`alter table pgmq.q_inbound_messages rename to q_inbound_messages_apagada`)
+  try {
+    const failed = await app.request(`/channels/telegram_bot_api/${tgConn}`, { method: "POST", headers, body: update })
+    expect(failed.status).toBe(500)
+  } finally {
+    await ownerDb.execute(sql`alter table pgmq.q_inbound_messages_apagada rename to q_inbound_messages`)
+  }
+  const retried = await app.request(`/channels/telegram_bot_api/${tgConn}`, { method: "POST", headers, body: update })
+  expect(retried.status).toBe(200)
+  expect(await queueDepth()).toBe(before + 1)
+  // Las pruebas siguientes cuentan la cola desde lo que dejó la primera.
+  await ownerDb.execute(sql`delete from pgmq.q_inbound_messages where msg_id = (select max(msg_id) from pgmq.q_inbound_messages)`)
+})
+
 it("conexión inexistente o proveedor distinto responde 200 sin encolar", async () => {
   const app = route()
   const res = await app.request("/channels/telegram_bot_api/00000000-0000-0000-0000-000000000000", {
