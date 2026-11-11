@@ -288,6 +288,37 @@ export async function voidLensPrescription(
   return toView(updated!, await clinicToday(tx, orgId))
 }
 
+/**
+ * Anular una atención anula la receta de lentes que se emitió en ella, como la
+ * receta de medicamentos, el descanso y la orden (ADR 0002): si no, el QR seguía
+ * diciendo «vigente» y la venta podía copiarla al pedido. Una receta externa
+ * transcrita no es de la atención y no cambia. Un pedido ya hecho guarda su copia.
+ */
+export async function voidLensPrescriptionsOfEncounter(
+  tx: Db,
+  input: { orgId: string; actorUserId: string; patientId: string; encounterId: string; at: Date; reason: string },
+): Promise<void> {
+  const voided = await tx
+    .update(lensPrescription)
+    .set({ voidedAt: input.at, voidedBy: input.actorUserId, voidReason: input.reason, updatedAt: input.at })
+    .where(
+      and(
+        eq(lensPrescription.organizationId, input.orgId),
+        eq(lensPrescription.patientId, input.patientId),
+        eq(lensPrescription.encounterId, input.encounterId),
+        isNull(lensPrescription.voidedAt),
+      ),
+    )
+    .returning({ id: lensPrescription.id })
+  for (const row of voided) {
+    await audit(tx, input.orgId, input.actorUserId, "lens_prescription.voided", row.id, {
+      patientId: input.patientId,
+      reason: input.reason,
+      encounterId: input.encounterId,
+    })
+  }
+}
+
 /** Las recetas de la persona, la más reciente primero. */
 export async function listLensPrescriptions(tx: Db, orgId: string, patientId: string): Promise<LensPrescriptionView[]> {
   await requireOptical(tx, orgId)

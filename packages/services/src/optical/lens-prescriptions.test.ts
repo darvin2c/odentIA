@@ -4,7 +4,7 @@ import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clinicalFixture } from "../clinical-test-fixture.js"
-import { updateEncounterDraft } from "../encounters.js"
+import { updateEncounterDraft, voidEncounter } from "../encounters.js"
 import { insertOrg, ownerDb, setupTestDb } from "../test-setup.js"
 import { productHooks } from "../products.js"
 import {
@@ -268,6 +268,21 @@ describe("la receta de lentes de vistIA (entrega 3)", () => {
     expect((await f.run((tx) => lensPrescriptionCheck(tx, OPTICA, issued.id)))?.state).toBe("anulado")
     const hook = await f.run(async (tx) => (await productHooks(tx, OPTICA)).documentCheck?.(tx, OPTICA, "lens_prescription", issued.id))
     expect(hook?.state).toBe("anulado")
+  })
+
+  it("anular la atención anula su receta: el QR dice «anulada», la venta no la ofrece y la externa sigue", async () => {
+    const f = await examined()
+    const issued = await f.run((tx) => issueLensPrescription(tx, ...f.args, { encounterId: f.encounter.id, kind: "anteojos" }))
+    const brought = await f.run((tx) =>
+      transcribeLensPrescription(tx, ...f.args, { kind: "contacto", lenses: { od: { esfera: -1 } }, issuedOn: "2026-10-01", prescriberName: "Dra. Ruiz" }),
+    )
+    await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Era de otro cliente" }))
+    expect((await f.run((tx) => lensPrescriptionCheck(tx, OPTICA, issued.id)))?.state).toBe("anulado")
+    const [row] = await ownerDb.select().from(lensPrescription).where(eq(lensPrescription.id, issued.id))
+    expect(row?.voidReason).toBe("Atención anulada: Era de otro cliente")
+    // La venta copia al pedido solo lo vigente: la externa, no la de la atención anulada.
+    const current = await f.run((tx) => currentLensPrescriptions(tx, OPTICA, f.patient.id))
+    expect(Object.values(current).map((item) => item?.id)).toEqual([brought.id])
   })
 
   it("la receta se imprime en PDF, la de la óptica y la externa", async () => {

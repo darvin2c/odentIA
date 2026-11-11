@@ -18,6 +18,7 @@ import {
   prescriptionRecordLines,
   saleLensPrescriptions,
   seedDemoLensPrescriptions,
+  voidLensPrescriptionsOfEncounter,
 } from "./lens-prescriptions.js"
 
 /**
@@ -58,6 +59,9 @@ export const opticalHooks: ProductHooks = {
   portalPapers: { list: portalLensPrescriptions, pdf: renderLensPrescriptionPdf },
   // La venta de lentes copia en el pedido la receta vigente (entrega 4, ADR 0171).
   saleReference: { current: saleLensPrescriptions, snapshot: lensPrescriptionSnapshot },
+  // Anular la atención anula su receta de lentes: el QR y la venta ya no la dan por vigente.
+  encounterVoided: (tx, { orgId, actorUserId, patientId, encounterId, at, reason }) =>
+    voidLensPrescriptionsOfEncounter(tx, { orgId, actorUserId, patientId, encounterId, at, reason }),
   // El QR de la receta de lentes dice si está vigente, vencida o anulada.
   documentCheck: (tx, orgId, type, id) => (type === "lens_prescription" ? lensPrescriptionCheck(tx, orgId, id) : Promise.resolve(null)),
   async recordSections(tx, { orgId, patientId }) {
