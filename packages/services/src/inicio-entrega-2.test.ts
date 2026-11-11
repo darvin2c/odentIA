@@ -238,7 +238,7 @@ it("«Deshacer» el movimiento a otro día le devuelve la confirmación y la lle
   expect(again.status).toBe("programada")
 })
 
-it("devolverla a su hora la deja confirmada aunque entre medias la confirmaran para el otro día", async () => {
+it("si la confirmaron para el otro día, devolverla a su hora la deja por confirmar, salvo que vuelva con su llegada", async () => {
   const c = await clinic()
   const person = await c.patient("Julia Paredes")
   const move = (id: string, version: number, at: Date) =>
@@ -257,10 +257,10 @@ it("devolverla a su hora la deja confirmada aunque entre medias la confirmaran p
   const back = await move(arrived.id, await confirm(arrived.id), startsAt)
   expect(back.status).toBe("confirmada")
   expect(back.arrivedAt).not.toBeNull()
-  // Sin llegada: confirmó esa hora, y vuelve a ella.
+  // Sin llegada: su último sí fue al día nuevo, así que volver es otro cambio y queda por confirmar.
   const later = new Date(Date.now() + 3 * 86_400_000)
   const plain = await c.book({ patientId: person.id, professional: c.ids.luis, branchId: c.branches.first, roomId: c.rooms.a, startsAt: later })
   const moved = await move(plain.id, plain.version, new Date(later.getTime() + 86_400_000))
   expect(moved.status).toBe("programada")
-  expect((await move(plain.id, await confirm(plain.id), later)).status).toBe("confirmada")
+  expect((await move(plain.id, await confirm(plain.id), later)).status).toBe("programada")
 })

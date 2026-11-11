@@ -1711,14 +1711,15 @@ export async function moveAppointment(
   // Confirmó otro día: el nuevo no lo confirmó. Vuelve a «por confirmar» y el recordatorio
   // se lo pide (QA del 10 nov, C31).
   // También si había llegado (esa llegada se borra): la del día nuevo nadie la confirmó.
-  // «Deshacer» ese movimiento le devuelve lo que le quitó: la llegada y la confirmación. Vuelve a
-  // la hora que la persona confirmó (o a la que llegó), así que queda confirmada aunque entre
-  // medias alguien la haya confirmado para el otro día; y con llegada no puede quedar sin confirmar.
+  // «Deshacer» ese movimiento le devuelve lo que le quitó: la llegada y la confirmación. Si entre
+  // medias confirmó el día nuevo, su último sí fue a ese y la vuelta sigue la regla de siempre
+  // (como en #585); pero con su llegada de vuelta está en la clínica, y una llegada siempre va
+  // confirmada (`appointment_arrival_check`).
   const restoredArrival =
     undone?.arrivalCleared && undone.arrivedAt && undone.arrivedBy && current.arrivedAt === null
       ? { arrivedAt: new Date(undone.arrivedAt), arrivedBy: undone.arrivedBy }
       : null
-  const backConfirmed = undone?.unconfirmed === true || restoredArrival !== null
+  const backConfirmed = (undone?.unconfirmed === true && current.status === "programada") || restoredArrival !== null
   const unconfirmed = current.status === "confirmada" && otherDay && !options.byPatient && !backConfirmed
   const reconfirmed = backConfirmed && current.status === "programada"
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
