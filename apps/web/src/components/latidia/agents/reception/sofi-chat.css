@@ -143,6 +143,7 @@
   outline-offset: 2px;
 }
 
+/* Los mensajes van pegados al fondo, como en WhatsApp: el espacio reservado queda arriba. */
 .lsc-chat {
   flex: 1 0 auto;
   background: #efeaf7;
@@ -150,6 +151,7 @@
   min-height: 380px;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 10px;
 }
 .lsc-day {
@@ -179,9 +181,19 @@
 .lsc-msg {
   transition: opacity 0.45s ease, transform 0.45s ease, box-shadow 0.45s ease;
 }
-.lsc-msg.off {
-  opacity: 0;
-  transform: translateY(8px);
+/* Cada mensaje entra con un fundido, en su lugar. */
+.lsc-slot {
+  animation: lsc-in 0.4s ease both;
+}
+@keyframes lsc-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lsc-slot {
+    animation: none;
+  }
 }
 .lsc-msg[data-kind="in"],
 .lsc-msg[data-kind="out"] {

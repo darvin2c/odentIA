@@ -1,5 +1,6 @@
 // «Actúan, no solo conversan»: registro de lo que los agentes cambian en el sistema (ejemplo).
-// Cada pocos segundos entra una acción nueva arriba; en teléfono se ven cuatro.
+// Cada pocos segundos entra una acción nueva arriba; en teléfono se ven cuatro. Da dos vueltas por las
+// ocho acciones y se queda quieto, como llegó del servidor (WCAG 2.2.2).
 import { type CSSProperties, useState } from "react"
 import { useSteadyHeight } from "../../lib/steady"
 import { useInterval, useMoving } from "./motion"
@@ -51,13 +52,16 @@ const ACTS = [
   },
 ]
 const ACOL = ["#0e7490", "#1f9d7a", "#c98a1c"]
+/** Vueltas por las ocho acciones antes de quedarse quieto. */
+const ROUNDS = 2
 
 export default function ActsLog() {
   const steady = useSteadyHeight<HTMLOListElement>()
   const moving = useMoving()
+  // Cuántas acciones entraron; la de arriba es la `al % 8`. Al terminar sus vueltas vuelve a la primera.
   const [al, setAl] = useState(0)
   useInterval(() => {
-    if (moving) setAl((al + 1) % 8)
+    if (moving && al < ROUNDS * ACTS.length) setAl(al + 1)
   }, 2300)
 
   return (

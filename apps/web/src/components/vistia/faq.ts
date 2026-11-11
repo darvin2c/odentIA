@@ -1,8 +1,10 @@
 // Las preguntas del inicio de vistIA. Las usa la página y sus datos estructurados (FAQPage en
 // index.astro). El regalo sale del plan que se muestra, nunca del código.
 import type { FaqItem } from "../../lib/faq"
+import { trialFaq } from "../../lib/offer"
+import type { Pricing } from "../../lib/pricing"
 
-export function homeFaq(gift: string | null): FaqItem[] {
+export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
   return [
     {
       q: "¿Sirve para una óptica que solo vende?",
@@ -52,5 +54,7 @@ export function homeFaq(gift: string | null): FaqItem[] {
       q: "¿Sirve en mi país?",
       a: "Está hecho para ópticas de habla hispana. La moneda y la zona horaria se ajustan a tu país, y los diagnósticos usan CIE-10 o CIE-11.",
     },
+    // La prueba, igual que en odentIA y en Precios.
+    ...trialFaq(pricing, "óptica"),
   ]
 }

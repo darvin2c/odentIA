@@ -61,12 +61,15 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
         lTime: `${v.teamHours} horas de tu equipo en mensajes y notas`,
         tryIt: `Prueba con los números de ${WORDS.yourClinic}`,
       }
-  // La cuenta del mes: cada fila por su tipo, como llega en la cuenta de la clínica.
+  // La cuenta del mes: cada fila por su tipo, con las palabras de la tabla de precios. La conversación
+  // en que Sofi reservó y el paciente vino se dice con su precio entero («Agenda»), como en la tabla: es
+  // lo que se cobró al reservar más la diferencia cuando vino (ADR 0085). La suma es la misma.
   const b = r.byType
+  const booked = b.gestiona.count - b.agenda.count
   const bill: Array<{ label: string; value: string; sub?: boolean }> = [
-    { label: `${b.informa.count} conversaciones que informan × ${fig(T.informa)}`, value: fig(b.informa.cost) },
-    { label: `${b.gestiona.count} que gestionan una cita × ${fig(T.gestiona)}`, value: fig(b.gestiona.cost) },
-    { label: `${b.agenda.count} citas que se dieron × ${fig(T.agenda - T.gestiona)} más`, value: fig(b.agenda.cost) },
+    { label: `${b.informa.count} conversaciones en que Sofi respondió o confirmó × ${fig(T.informa)}`, value: fig(b.informa.cost) },
+    { label: `${booked} en que reservó, movió o canceló × ${fig(T.gestiona)}`, value: fig(booked * T.gestiona) },
+    { label: `${b.agenda.count} en que reservó y el ${WORDS.patient} vino × ${fig(T.agenda)}`, value: fig(b.agenda.count * T.agenda) },
     { label: `${v.consultations} consultas por su tipo`, value: fig(r.consultations) },
     { label: `${r.recovered} citas recuperadas × ${fig(RECOVERED)}`, value: fig(r.recoveredCost) },
     ...(hasPlan
@@ -185,7 +188,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
               <span>
                 Pierdes <span>{usd(r.withoutUs)}</span> · pagas <span>{usd(r.withUs)}</span>
               </span>
-              <b>{r.worthIt ? "Recuperas por cada dólar que pagas" : "con estos números todavía no conviene"}</b>
+              <b>{r.worthIt ? "Por cada dólar que pagas, dejas de perder" : "Con estos números todavía no conviene"}</b>
             </span>
             <strong className="vc-dock-n">
               {r.worthIt ? (
@@ -235,15 +238,14 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
               </div>
             </div>
           </div>
+          {/* Lo que pierdes sin agentes dividido por lo que pagas, dicho en palabras de todos los días. */}
           <div className="vc-ratio" aria-live="polite">
-            <span className="vc-rt">Recuperas</span>
+            <span className="vc-rt">{r.worthIt ? "Por cada dólar que pagas," : "Con estos números"}</span>
             <strong>
               <span className="vc-cur">{r.worthIt ? "USD" : ""}</span>
               <span className="vc-n">{r.worthIt ? ratio : "—"}</span>
             </strong>
-            <span className="vc-rl">
-              {r.worthIt ? "por cada dólar que pagas" : "con estos números todavía no conviene"}
-            </span>
+            <span className="vc-rl">{r.worthIt ? "dejas de perder" : "todavía no conviene"}</span>
             <span className="vc-fav">
               {r.worthIt ? (
                 <>

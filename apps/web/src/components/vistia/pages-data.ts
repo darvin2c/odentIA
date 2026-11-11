@@ -130,7 +130,7 @@ export const VISTIA_PAGES = {
           { when: "Sábado · 10:00", title: "Andrea Quispe la examina.", text: "Anota la agudeza visual y la refracción de cada ojo, y emite su receta de anteojos, firmada." },
           { when: "Sábado · 10:40", channel: "Ventas", title: "Rosa elige su montura y deja un adelanto.", text: "«Vender lentes» arma el pedido con su receta. La montura sale del stock de Lucero Centro y el adelanto entra a la caja, con su ticket." },
           { when: "Miércoles · 18:20", channel: "WhatsApp", title: "Rosa pregunta si ya están sus lentes.", text: "Sofi le dice en qué paso está su pedido y para cuándo se le prometió.", agent: SOFI },
-          { when: "Jueves · 11:00", channel: "WhatsApp", title: "«Tus lentes ya están listos para recoger».", text: "El aviso le llega cuando tu equipo marca el pedido listo." },
+          { when: "Jueves · 11:00", channel: "WhatsApp", title: "«Tus lentes ya están listos para recoger».", text: "El aviso le llega cuando tu equipo marca el pedido listo: por WhatsApp si Meta ya aprobó ese mensaje en la cuenta de tu óptica o si escribió en las últimas 24 horas; si no, por correo." },
           { when: "Un año después", channel: "WhatsApp", title: "Argos la invita a su control anual de la vista.", text: "Si responde que sí, Sofi le agenda la hora.", agent: ARGOS },
         ],
         note: "Un caso de ejemplo.",
@@ -140,7 +140,7 @@ export const VISTIA_PAGES = {
         tag: "Tú decides",
         title: "Lo que hace cada agente, lo prendes o lo apagas.",
         paragraphs: [
-          "Cada agente hace solo lo que le permites. Si apagas «Agendar citas», Sofi envía el enlace para que la persona elija la hora; si apagas «Avisar los controles», Argos te deja la lista y tu equipo decide a quién escribir.",
+          "Cada agente hace solo lo que le permites: en su página dentro de vistIA, cada cosa que hace tiene su interruptor y dice qué pasa en los dos casos. Si apagas «Agendar, mover y cancelar citas», Sofi envía el enlace para que la persona elija la hora; si apagas «Avisar un control», Argos no escribe por su cuenta.",
           "Tu equipo siempre puede tomar una conversación: Sofi espera y le deja un resumen de lo que se habló.",
         ],
         points: [
@@ -217,6 +217,19 @@ export const VISTIA_PAGES = {
       },
       {
         kind: "split",
+        tag: "Tú decides",
+        title: "Lo que hace Sofi, lo prendes o lo apagas.",
+        paragraphs: [
+          "En la página de Sofi, dentro de vistIA, cada cosa que hace tiene su interruptor, dice qué pasa en los dos casos y se guarda al momento. Estas son las que cambian lo que responde:",
+        ],
+        points: [
+          { title: "«Informar»", text: "Apagado: responde el saludo y lo de sus citas; los precios, los servicios y los horarios se los pasa a tu equipo.", agent: SOFI },
+          { title: "«Agendar, mover y cancelar citas»", text: "Apagado: si piden una cita, envía el enlace para que la persona elija la hora; moverla o cancelarla se lo pasa a tu equipo.", agent: SOFI },
+          { title: "«Pasar a una persona»", text: "Siempre prendido: lo que no puede responder queda como un tema para tu equipo, con el resumen de lo que se habló.", agent: SOFI },
+        ],
+      },
+      {
+        kind: "split",
         tag: "Lo que no ve",
         title: "Sofi agenda sin ver la historia clínica.",
         paragraphs: [
@@ -281,7 +294,7 @@ export const VISTIA_PAGES = {
           { title: "«¿Qué se vendió más este mes?»", text: "Los servicios y productos que más se cobraron." },
           { title: "«¿Quién me debe?»", text: "Cuánto te deben y desde cuándo, persona por persona." },
         ],
-        note: "Puedes fijar una respuesta en tu Resumen o descargarla. Y cada lunes te llega por correo el resumen de la semana, con lo que recomienda Argos.",
+        note: "Puedes fijar una respuesta en tu Resumen o descargarla. Y cada lunes, el resumen de la semana por correo y, si hay, lo que recomienda Argos.",
       },
       {
         kind: "split",
@@ -294,7 +307,7 @@ export const VISTIA_PAGES = {
         points: [
           { title: "Recordar las citas", text: "Un día antes, por el canal de la persona. No se cobra.", agent: ARGOS },
           { title: "Ofrecer otro horario a quien faltó", text: "Si reserva y viene, es una cita recuperada.", agent: ARGOS },
-          { title: "Avisar los controles", text: "El control anual de la vista o el de los lentes de contacto, a tiempo.", agent: ARGOS },
+          { title: "Avisar un control", text: "El control anual de la vista o el de los lentes de contacto, a tiempo.", agent: ARGOS },
           { title: "Invitar a volver", text: "A quien lleva tiempo sin venir. Si no puede escribirle, te deja una tarea de llamada.", agent: ARGOS },
         ],
       },
@@ -350,7 +363,7 @@ export const VISTIA_PAGES = {
     faq: [
       { q: "¿Puedo tener varias salas de examen?", a: "Sí, y varias sedes. Cada cita va con su optómetra, su sala de examen y su sede." },
       { q: "¿Los recordatorios se cobran?", a: "No. Los recordatorios y los avisos de cita no se cobran." },
-      { q: "¿Qué pasa si Sofi no puede agendar?", a: "Si apagas «Agendar citas», Sofi envía el enlace para que la persona elija la hora. Y tu equipo siempre puede tomar la conversación." },
+      { q: "¿Qué pasa si Sofi no puede agendar?", a: "Si apagas «Agendar, mover y cancelar citas», Sofi envía el enlace para que la persona elija la hora. Y tu equipo siempre puede tomar la conversación." },
       {
         q: "¿Puedo ver mis citas en mi calendario?",
         a: "Sí, si atiendes: «Mi calendario» lleva tus citas a Google Calendar, Apple u Outlook, junto a lo demás de tu día. De cada cita muestra solo las iniciales, nunca el nombre, el servicio ni el motivo.",
@@ -551,7 +564,7 @@ export const VISTIA_PAGES = {
       },
       {
         q: "¿El aviso de lentes listos sale siempre por WhatsApp?",
-        a: "Por WhatsApp sale con un mensaje aprobado por Meta, que tu óptica pide al conectar su número. Si la persona te escribió en las últimas 24 horas, le llega escrito; si no hay WhatsApp, por correo. Si no pudo salir, el pedido te lo dice para que la llames.",
+        a: "Por WhatsApp sale con un mensaje aprobado por Meta, que tu óptica pide al conectar su número. Si la persona te escribió en las últimas 24 horas, le llega escrito aunque Meta aún no lo apruebe. Si no, mientras Meta no lo aprueba o si no tiene WhatsApp, le llega por correo. Si no pudo salir, el pedido te lo dice para que la llames.",
       },
       {
         q: "¿Puedo hacerle un pedido a alguien que no está registrado?",
@@ -735,7 +748,7 @@ export const VISTIA_PAGES = {
         title: "Cada papel le llega en PDF. Y en su portal están todos.",
         lead: "Su enlace no guarda papeles: lleva lo pendiente. Lo que tu óptica le entrega le llega a su chat o a su correo, y queda en su portal.",
         items: [
-          { title: "En PDF, por WhatsApp o por correo", text: "La orden o el consentimiento firmado salen con «Enviar», y el cajón dice antes por dónde le llega. El comprobante sale por correo al cobrar." },
+          { title: "En PDF, por WhatsApp o por correo", text: "La orden o el consentimiento firmado salen con «Enviar», y el cajón dice antes por dónde le llega: por WhatsApp, si te escribió en las últimas 24 horas o si Meta ya aprobó ese mensaje en la cuenta de tu óptica; si no, por correo. El comprobante sale por correo al cobrar." },
           { title: "Su portal, con todo lo suyo", text: "Sus citas, sus recetas de lentes, sus documentos y su cuenta. Lo anulado se ve marcado y una receta vencida dice «Vencida»." },
           { title: "«Tus pedidos»", text: "Si sus lentes ya están listos para recoger, para cuándo y lo que le falta pagar.", href: "/pedidos-de-lentes", label: "Ver los pedidos" },
           { title: "Un QR en cada papel", text: "Cualquiera comprueba con el código, sin cuenta, si ese papel sigue vigente." },
@@ -877,10 +890,11 @@ export const VISTIA_PAGES = {
         tag: "La persona y sus datos",
         title: "Si un cliente pide sus datos, sabes qué hacer.",
         paragraphs: [
-          "Registras el pedido en su ficha y el sistema te recuerda responder dentro de 10 días. Puede pedir una copia (en PDF y en HL7 FHIR), corregir un dato, no recibir mensajes o borrar lo que no es clínico.",
+          "Registras el pedido en su ficha: tienes 10 días corridos para responder, y desde tres días antes del plazo sale en «Te espera». Puede pedir una copia (en PDF y en HL7 FHIR), corregir un dato, no recibir mensajes o borrar lo que no es clínico.",
           "Comprobar que es la persona o su representante es un paso del pedido, nunca por el número de teléfono.",
         ],
         points: [
+          { title: "Si un día te vas", text: "Cada historia sale en PDF y en HL7 FHIR." },
           { title: "Lo que todavía no podemos decir", text: "No mostramos sellos ni certificaciones de seguridad: todavía no tenemos ninguna que mostrar, y no vamos a insinuarla." },
         ],
       },

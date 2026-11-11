@@ -1,8 +1,8 @@
 // La portada de latidIA (lienzo «Inicio», sección 1): la Dra. Vela dicta la consulta de Rosa sobre
 // la línea de pulso «72 lpm» y Clío propone cada cosa en su bloque; la temperatura se corrige por
 // voz y al final la doctora confirma las cinco listas. El descanso no se confirma: se emite aparte.
-// Se repite en bucle con «Pausar» y «Repetir», arriba junto al estado para que se vean con lo que
-// controlan; sin movimiento se ve el final.
+// Se repite dos veces y queda terminada; «Pausar» y «Volver a dictar» van arriba, junto al estado,
+// para que se vean con lo que controlan. Sin movimiento se ve el final.
 import { useState } from "react"
 import { useLoop } from "./loop"
 import "./dictation-demo.css"
@@ -91,7 +91,7 @@ function Box({ row, state, fixed, ghost = false }: { row: Row; state: "empty" | 
 
 export default function DictationDemo() {
   const [paused, setPaused] = useState(false)
-  const { step, restart } = useLoop({ len: 9, hold: 3, ms: 1900, paused })
+  const { step, restart, done: ended } = useLoop({ len: 9, hold: 3, ms: 1900, paused })
   const fixed = step >= 6
   const done = step >= 8
   const listening = step < 7
@@ -116,7 +116,7 @@ export default function DictationDemo() {
           <span className="ld-wide">Rosa Paredes · Dra. Vela</span>
           <span className="ld-narrow">Rosa · Dra. Vela</span>
         </span>
-        {/* El estado más largo reserva su ancho: «Pausar» y «Repetir» no cambian de fila cuando cambia. */}
+        {/* El estado más largo reserva su ancho: «Pausar» y «Volver a dictar» no cambian de fila cuando cambia. */}
         <span className="fit fit-inline">
           {STATUSES.map((text) => (
             <span key={text} className="ld-status fit-ghost" aria-hidden="true">
@@ -130,8 +130,9 @@ export default function DictationDemo() {
           </span>
         </span>
         <span className="ld-btns">
-          <button type="button" className="ld-btn" aria-pressed={paused} onClick={() => setPaused(!paused)}>
-            {paused ? "Seguir" : "Pausar"}
+          {/* Terminada, no hay nada que pausar: el botón queda en su sitio, apagado. */}
+          <button type="button" className="ld-btn" aria-pressed={paused} disabled={ended} onClick={() => setPaused(!paused)}>
+            {paused && !ended ? "Seguir" : "Pausar"}
           </button>
           <button
             type="button"
@@ -144,7 +145,7 @@ export default function DictationDemo() {
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
               <path d="M2 7a5 5 0 1 0 1.6-3.7M2 1.5v3h3"></path>
             </svg>
-            Repetir
+            Volver a dictar
           </button>
         </span>
       </div>

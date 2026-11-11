@@ -384,7 +384,7 @@ export default function AgentTabs() {
               </p>
               <AgentFoot
                 note="Hablas como siempre. Clío escucha y propone."
-                replay="Volver a escuchar"
+                replay="Volver a dictar"
                 onReplay={() => replay("cli")}
               />
             </div>

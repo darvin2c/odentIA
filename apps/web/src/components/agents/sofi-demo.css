@@ -16,14 +16,16 @@
 .sd-emoji[aria-pressed="true"] .sd-switch > span { transform: translateX(16px); }
 .sd-tone:focus-visible, .sd-emoji:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
-.sd-chat { display: flex; flex-direction: column; gap: 12px; }
-.sd-chat > * { margin: 0; transition: opacity .45s ease, transform .45s ease, box-shadow .45s ease; }
-.sd-chat > .sd-off { opacity: 0; transform: translateY(8px); }
-.sd-chat > .sd-on { opacity: 1; transform: none; }
+/* Los mensajes van pegados al fondo, como en WhatsApp: la tarjeta tiene el alto de la conversación
+   completa y el espacio que queda mientras se escribe está arriba. Cada mensaje entra con un fundido. */
+.sd-chat { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; }
+.sd-chat > * { margin: 0; animation: sofi-in .4s ease both; }
+@keyframes sofi-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sd-chat > * { animation: none; } }
 .sd-chat [data-side="in"], .sd-chat [data-side="out"] { border-radius: 16px; padding: 12px 14px; font-size: 15px; line-height: 1.45; }
 .sd-chat [data-side="in"] { align-self: flex-start; max-width: 78%; background: #fff; }
 .sd-chat [data-side="out"] { align-self: flex-end; max-width: 82%; background: #d6f1f6; }
-.sd-chat [data-typing] { font-style: italic; color: var(--muted); }
+.sd-typing { font-style: italic; color: var(--muted); }
 .sd-chat [data-side="agenda"] { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 12px; background: #fff; border-radius: 14px; padding: 10px 14px; font-size: 14px; box-shadow: 0 0 0 2px transparent; }
 .sd-chat [data-marked] { box-shadow: 0 0 0 2px var(--sky); }
 .sd-booked { font-family: var(--agent-font); font-size: 12px; color: var(--teal); }

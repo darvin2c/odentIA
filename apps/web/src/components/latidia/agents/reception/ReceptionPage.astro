@@ -187,16 +187,16 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
         </div>
         <ul class="rp-decide" aria-label="Así se ve en tu consultorio">
           <li>
-            <span><b>Agendar citas</b><span>Apagado: le envía su enlace para que la persona elija la hora.</span></span>
+            <span><b>Agendar, mover y cancelar citas</b><span>Prendido: reserva con el sí de la persona. Apagado: le envía su enlace para que elija la hora.</span></span>
             <span class="rp-switch" aria-hidden="true"><span></span></span>
           </li>
           <li>
             <span><b>Horario de recontacto</b><span>Lunes a viernes de 8:00 a 20:00 y sábado de 8:00 a 14:00, como viene.</span></span>
-            <span class="rp-change" aria-hidden="true">Cambiar</span>
+            <span class="rp-change">Lo eliges tú</span>
           </li>
           <li>
             <span><b>Nombre y tono</b><span>Cercano, neutro o formal; de tú o de usted; con pocos emojis o ninguno.</span></span>
-            <span class="rp-change" aria-hidden="true">Cambiar</span>
+            <span class="rp-change">Lo eliges tú</span>
           </li>
         </ul>
       </div>
@@ -233,7 +233,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
   .rp-decide li > span:first-child > span { font-size: 15px; line-height: 1.45; color: var(--muted); }
   .rp-switch { flex: none; width: 48px; height: 28px; border-radius: 999px; background: #0e7490; display: flex; justify-content: flex-end; padding: 3px; }
   .rp-switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; }
-  .rp-change { flex: none; font-weight: 700; color: #0e7490; }
+  /* Un rótulo, no un enlace: en la web no se cambia nada, se cuenta que lo elige la clínica. */
+  .rp-change { flex: none; font-size: 13px; color: var(--soft); }
   /* Cómo aprende: debajo de «Tú decides», tres tarjetas. */
   .rp-teach { margin-top: 56px; gap: 20px; }
   .rp-teach-h { font-size: clamp(24px, 2.6vw, 30px); line-height: 1.15; letter-spacing: -.02em; text-wrap: balance; }

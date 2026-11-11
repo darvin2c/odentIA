@@ -1,7 +1,7 @@
 // Las preguntas a Argos en la portada de /agentes/administrador de latidIA (tablero «Argos»): la pregunta
 // se escribe sola, Argos piensa en dos pasos («Leyendo la pregunta», «Consultando las cifras de
 // Reportes») y responde con las cifras, un dibujo (columnas o barras) y «Así lo calculé». Solo pasa a
-// la siguiente pregunta; tocar una la detiene ahí. Las cifras son del Consultorio San Martín de la demo.
+// la siguiente pregunta, dos vueltas, y se queda en la última (WCAG 2.2.2); tocar una la detiene ahí. Las cifras son del Consultorio San Martín de la demo.
 // Con movimiento reducido, la respuesta aparece entera y no pasa sola.
 import { useEffect, useRef, useState } from "react"
 import { AgentFoot, AgentHead } from "../../../agents/frame/AgentFrame"
@@ -82,6 +82,8 @@ const QUESTIONS: Question[] = [
 
 const TYPE_MS = 40
 const NEXT_MS = 6500
+/** Vueltas por las preguntas antes de quedarse en la última respuesta. */
+const ROUNDS = 2
 
 export default function ArgosQuestions() {
   const steady = useSteadyHeight<HTMLDivElement>()
@@ -93,8 +95,10 @@ export default function ArgosQuestions() {
   const [auto, setAuto] = useState(true)
   const timers = useRef<number[]>([])
   const reduce = useRef(false)
-  // Con movimiento reducido no pasa sola: la nota no promete que avanza.
+  // Con movimiento reducido, o terminadas sus vueltas, no pasa sola: la nota no promete que avanza.
   const [still, setStill] = useState(false)
+  // Preguntas que respondió sola; al llegar a sus vueltas se queda en la última.
+  const answered = useRef(0)
 
   const stop = () => {
     for (const id of timers.current) {
@@ -108,6 +112,7 @@ export default function ArgosQuestions() {
     stop()
     setPick(i)
     setAuto(keepGoing)
+    if (!keepGoing) setStill(reduce.current)
     const length = QUESTIONS[i].q.length
     if (reduce.current) {
       setChars(length)
@@ -127,7 +132,14 @@ export default function ArgosQuestions() {
       timers.current.push(
         window.setTimeout(() => {
           setPhase(3)
-          if (keepGoing) timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
+          if (!keepGoing) return
+          answered.current += 1
+          if (answered.current < ROUNDS * QUESTIONS.length)
+            timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
+          else {
+            setAuto(false)
+            setStill(true)
+          }
         }, 1500),
       )
     }, TYPE_MS)

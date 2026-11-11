@@ -1,7 +1,9 @@
 ---
 // Cierre de cada página: una sola llamada a la acción y otra para hablar con una persona.
-import { shownPlan } from "../lib/pricing"
-import { ofProduct } from "../lib/product"
+// Sin otro texto, dice la oferta como el resto de la web (`lib/offer.ts`): con Fundadores, el
+// regalo; con el alta abierta, el crédito y los días de prueba.
+import { offerOf } from "../lib/offer"
+import { ofProduct, WORDS } from "../lib/product"
 import { contactHref, ctaOf } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
@@ -9,19 +11,15 @@ interface Props {
   title?: string
   text?: string
 }
-const plan = shownPlan(Astro.locals.pricing)
-// Lo que dice el cierre sin otro texto: odentIA y latidIA, «tu clínica» desde siempre; vistIA, su óptica.
-const [people, place] = ofProduct({
-  dental: ["pacientes", "tu clínica"],
-  medical: ["pacientes", "tu clínica"],
-  optical: ["clientes", "tu óptica"],
+const offer = offerOf(Astro.locals.pricing)
+// odentIA y vistIA cuentan sedes; latidIA, salas.
+const [people, rooms] = ofProduct({
+  dental: ["pacientes", "sedes"],
+  medical: ["pacientes", "salas"],
+  optical: ["clientes", "sedes"],
 })
-const {
-  title = `Tu equipo, de vuelta con sus ${people}.`,
-  text = plan
-    ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en ${place} desde el primer día, sin tarjeta.`
-    : `Tus agentes trabajan en ${place} desde el primer día, sin tarjeta.`,
-} = Astro.props
+const limits = `sin límite de ${WORDS.clinicians}, ${rooms} ni usuarios`
+const { title = `Tu equipo, de vuelta con sus ${people}.`, text } = Astro.props
 ---
 <section class="hero band" id="empezar">
   <div class="grain" aria-hidden="true"></div>
@@ -29,7 +27,21 @@ const {
     <span class="tag tag-d">[ Empieza hoy ]</span>
     <h2 class="t">{title}</h2>
     {/* El texto puede llegar armado (slot «text»), por ejemplo con el regalo en ámbar. */}
-    {Astro.slots.has("text") ? <p class="lead lead-d"><slot name="text" /></p> : <p class="lead lead-d">{text}</p>}
+    {Astro.slots.has("text") ? (
+      <p class="lead lead-d"><slot name="text" /></p>
+    ) : text ? (
+      <p class="lead lead-d">{text}</p>
+    ) : (
+      <p class="lead lead-d">
+        {offer.gift && offer.founder ? (
+          <>Los primeros <b class="gift">{offer.gift}</b> de tus agentes los pagamos nosotros. {offer.noFee ? "Sin cuota, sin tarjeta" : "Sin tarjeta"} y {limits}.</>
+        ) : offer.gift ? (
+          <>Obtén <b class="gift">{offer.gift}</b> de crédito y pruébalo {offer.trial} sin tarjeta, {limits}.</>
+        ) : (
+          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y {limits}.</>
+        )}
+      </p>
+    )}
     <div class="ctas">
       <a class="btn btn-p" href={cta.href}>{cta.label}</a>
       <a class="btn btn-g" href={contactHref}>Habla con nosotros</a>

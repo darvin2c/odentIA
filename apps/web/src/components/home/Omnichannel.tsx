@@ -1,5 +1,6 @@
 // 01 · Omnicanal: una conversación que cambia de canal y sigue en la misma ficha.
-// El HTML generado trae la conversación completa; al verla, se reproduce paso a paso.
+// El HTML generado trae la conversación completa; al verla, se reproduce paso a paso, dos veces, y se
+// queda completa (WCAG 2.2.2). «Volver a ver» la reproduce una vez más.
 import { useEffect, useRef, useState } from "react"
 import { useSteadyHeight } from "../../lib/steady"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
@@ -39,11 +40,15 @@ const OC = [
   },
 ]
 const CH = ["WhatsApp", "Instagram", "Messenger", "Telegram", "Chat de tu web", "Correo"]
+/** Vueltas que da sola antes de quedarse completa. */
+const ROUNDS = 2
 
 export default function Omnichannel() {
   const moving = useMoving()
   const [oc, setOc] = useState(OC.length)
   const hold = useRef(0)
+  const laps = useRef(0)
+  const [ended, setEnded] = useState(false)
   // La tarjeta de la conversación mide siempre lo que la conversación completa (también al girar).
   const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
     hold.current = 0
@@ -56,11 +61,13 @@ export default function Omnichannel() {
   }, [])
 
   useInterval(() => {
-    if (!moving) return
-    if (oc < 7) setOc(oc + 1)
+    if (!moving || ended) return
+    if (oc < OC.length) setOc(oc + 1)
     else if (++hold.current > 5) {
       hold.current = 0
-      setOc(0)
+      // Dio sus vueltas: se queda con la conversación completa.
+      if (++laps.current >= ROUNDS) setEnded(true)
+      else setOc(0)
     }
   }, 1150)
 
@@ -116,6 +123,8 @@ export default function Omnichannel() {
             className="mono replay"
             onClick={() => {
               hold.current = 0
+              laps.current = ROUNDS - 1
+              setEnded(false)
               // En pausa o con menos movimiento no hay reproducción: se queda la conversación completa.
               setOc(moving ? 0 : OC.length)
             }}

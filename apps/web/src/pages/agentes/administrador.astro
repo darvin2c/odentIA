@@ -28,7 +28,7 @@ const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
 const color = AGENT_COLORS.administrador
 // El ámbar de Argos sobre claro (#c98a1c) no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
-const tagColor = "#9a6a12"
+const tagColor = "#8f6210"
 const trail: [string, string][] = [["Inicio", "/"], ...(page.parent ? [page.parent] : []), [page.crumb, page.path]]
 
 const faq: FaqItem[] = [
@@ -83,7 +83,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     title="Lo pendiente, sin listas ni llamadas de más."
     lead="Argos ve quién necesita un mensaje y Sofi se lo escribe por su canal. Si no puede escribirle, te deja la tarea con el motivo."
     items={[
-      { title: "Recuerda cada cita", text: "Un día antes y tres horas antes. No se cobra." },
+      { title: "Recuerda cada cita", text: "Un día antes y tres horas antes, como viene; tú cambias cuándo. No se cobra." },
       { title: "Avisa los controles", text: "Dos días antes de que le toque, le escribe para buscarle un horario." },
       { title: "Ofrece otra fecha a quien faltó", text: "Al día siguiente de la inasistencia, con un toque para elegir otro horario." },
       { title: "Retoma los presupuestos", text: "A los dos días sin respuesta, a quien aceptó recibir novedades." },
@@ -131,10 +131,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       { title: "«Dile qué quieres que haga»", text: "Por ejemplo, que le ofrezca otra fecha a quien cancela. Te lo deja como borrador y, cuando se puede, con una prueba sobre tus últimos 30 días." },
       { title: "Cada línea, con su interruptor", text: "Recordar, avisar o retomar se prende o se apaga. Y dice quién lo hace: «Lo hace Argos» o «Le toca a una persona»." },
       { title: "Tareas que se cierran solas", text: "Las que deja a tu equipo se cierran cuando ya no hacen falta: la persona confirmó o el presupuesto se decidió. Y dicen por qué." },
-      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00 con cuatro cifras de la semana y, si hay, lo que cambió y lo que Argos recomienda." },
     ]}
   >
     <p class="more-line">También retoma las oportunidades de tu tablero de ventas. <a href="/presupuestos-dentales#oportunidades">Ver Oportunidades →</a></p>
+    <p class="more-line">Y cada lunes, un correo con las cifras de tu semana y lo que recomienda Argos. <a href="/reportes">Ver el resumen del lunes →</a></p>
   </FeatureGrid>
 
   <AgentCharges

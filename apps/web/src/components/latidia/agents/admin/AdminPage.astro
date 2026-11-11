@@ -21,7 +21,7 @@ const cta = ctaOf(pricing)
 const plan = shownPlan(pricing)
 const color = AGENT_COLORS.administrador
 // El ámbar de Argos sobre claro (#c98a1c) no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
-const amberText = "#9a6a12"
+const amberText = "#8f6210"
 
 const title = "Argos, agente administrador con IA para tu consultorio médico"
 const description =
@@ -51,11 +51,6 @@ const more = [
     kicker: "Metas",
     title: "Le pones una meta al mes",
     text: "En Reportes le pones una meta al mes, en Cobrado o en Pacientes nuevos, y ves si vas por delante.",
-  },
-  {
-    kicker: "Cada lunes",
-    title: "El resumen del lunes",
-    text: "Un correo a las 8:00 con cuatro cifras de la semana anterior y, si hay, lo que cambió y lo que recomienda Argos.",
   },
 ]
 
@@ -135,7 +130,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
               {[160, 140, 120, 100, 80].map((v) => (
                 <>
                   <line x1="40" y1={y(v)} x2="510" y2={y(v)} stroke={v === 80 ? "#e9e2f7" : "#f1ecf9"} />
-                  <text x="32" y={y(v) + 4} text-anchor="end" font-size="11" fill="#64748b" class="ad-mono">{v}</text>
+                  <text x="32" y={y(v) + 4} text-anchor="end" font-size="11" fill="#5d6b82" class="ad-mono">{v}</text>
                 </>
               ))}
               <polyline points={line(systolic)} fill="none" stroke="#6d3fc0" stroke-width="3" stroke-linejoin="round" />
@@ -145,7 +140,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
               <text x="80" y={y(152) - 13} text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">152/96</text>
               <text x="480" y={y(132) - 13} text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">132/84</text>
               {["1.er control", "2.º", "3.º", "4.º · hoy"].map((label, i) => (
-                <text x={xs[i]} y="182" text-anchor="middle" font-size="11" fill="#64748b">{label}</text>
+                <text x={xs[i]} y="182" text-anchor="middle" font-size="11" fill="#5d6b82">{label}</text>
               ))}
             </svg>
             <div class="ad-legend">
@@ -219,6 +214,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
             </div>
           ))}
         </div>
+        <p class="ad-more-line">Y cada lunes, un correo con las cifras de tu semana y lo que recomienda Argos. <a href="/reportes">Ver el resumen del lunes →</a></p>
       </div>
     </section>
 
@@ -263,6 +259,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
   /* Lo que hace sin que le preguntes: debajo de «Pregúntale», tres tarjetas. */
   .ad-more { margin-top: 56px; gap: 20px; }
   .ad-more-h { font-size: clamp(24px, 2.6vw, 30px); line-height: 1.15; letter-spacing: -.02em; text-wrap: balance; }
+  .ad-more-line { margin: 0; font-size: 15px; color: var(--muted); }
+  .ad-more-line a { font-weight: 700; display: inline-block; padding: 10px 0; }
   .ad-more-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
   @media (max-width: 1080px) {
     .ad-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

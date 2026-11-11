@@ -282,7 +282,8 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
 
   const v = d3vals(d.step, hover, d.cycle, still)
   const togglePause = () => pauseStore.set(!paused)
-  const pauseLabel = paused ? "Reanudar movimiento" : "Pausar movimiento"
+  // El mismo par en las tres webs: «Pausar» y «Seguir»; este vale para todas las escenas de la página.
+  const pauseLabel = paused ? "Seguir el movimiento" : "Pausar el movimiento"
 
   const key = (
     <div className="zkey">
@@ -431,7 +432,8 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
                 note.text
               )
             ) : (
-              "Sin tarjeta para probar. Tú decides qué puede hacer cada agente, y lo que no da resultado no se cobra."
+              // Sin plan publicado (sin cifras): no se pide tarjeta nunca, el pago va con su comprobante (lib/offer.ts).
+              "No te pedimos tarjeta: ni para probar ni después. Tú decides qué puede hacer cada agente, y lo que no da resultado no se cobra."
             )}
           </p>
           <div className="hh-key hh-desk rise d4">

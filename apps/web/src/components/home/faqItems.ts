@@ -1,13 +1,15 @@
 // Preguntas del inicio (sección 09). Los textos vienen del lienzo aprobado.
 import type { FaqItem } from "../../lib/faq"
-import { hours, type PlanPrices, type Terms } from "../../lib/pricing"
+import { offerOf, trialFaq } from "../../lib/offer"
+import { hours, type Pricing } from "../../lib/pricing"
 
 /**
- * Las preguntas con los días de prueba del plan que se muestra y las condiciones comerciales (no van fijos en el código).
- * `founder`: el plan que se muestra es el de Fundadores, sin cuota y por invitación, como en Precios.
+ * Las preguntas con la oferta del plan que se muestra y las condiciones comerciales (no van fijos en el código).
+ * Con Fundadores, el plan es sin cuota y por invitación, como en Precios; la prueba la cuenta `trialFaq`, igual en las tres webs.
  */
-export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false): (FaqItem & { pending?: boolean })[] => {
-  const days = plan ? `${plan.trialDays} días` : "la prueba"
+export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] => {
+  const { founder } = offerOf(pricing)
+  const terms = pricing.terms
   return [
   {
     q: "¿Qué significa omnicanal y agéntica?",
@@ -33,7 +35,7 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false):
   // Pendiente de confirmar: se muestra con su marcador y queda fuera de los datos estructurados.
   {
     q: "¿Usan los datos de mi clínica para entrenar la IA?",
-    a: "No. Los datos de tu clínica se usan solo para atender a tus pacientes. odentIA no los usa para entrenar modelos, y los proveedores de inteligencia artificial que usa por API (OpenAI y TypeSafe) tampoco.",
+    a: "No. Los datos de tu clínica se usan solo para atender a tus pacientes. odentIA no los usa para entrenar modelos, y los proveedores de inteligencia artificial que usa por API tampoco: OpenAI, el de ChatGPT, y TypeSafe AI, cuyo modelo entiende qué pide cada mensaje.",
     pending: true,
   },
   {
@@ -54,7 +56,7 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false):
   },
   {
     q: "¿Mi equipo necesita capacitación?",
-    a: "Inicio le dice a cada persona qué le toca hoy, en una sola lista: «Te espera». Y en todas las pantallas está «Ayuda»: escribes con tus palabras qué quieres hacer, responde con la guía del sistema y «Llévame» te deja en la pantalla.",
+    a: "Inicio le dice a cada persona qué le toca hoy, en una sola lista: «Te espera». A quien atiende le muestra también su sala de espera: quién llegó y cuánto lleva esperando. Y en todas las pantallas está «Ayuda»: escribes con tus palabras qué quieres hacer, responde con la guía del sistema y «Llévame» te deja en la pantalla.",
   },
   {
     q: "¿Tengo que pagarle algo más a WhatsApp?",
@@ -64,15 +66,6 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false):
     q: "¿Funciona en mi país?",
     a: "odentIA está hecho para clínicas de habla hispana. La moneda, la zona horaria y los documentos se configuran por clínica.",
   },
-  {
-    q: "¿Qué pasa cuando termina la prueba?",
-    a: "Activas el plan y sigues donde estabas. Si el crédito de la prueba se termina antes de terminar la prueba, te avisamos con tiempo y los agentes se pausan hasta que actives el plan.",
-  },
-  {
-    q: "¿La prueba pide tarjeta?",
-    a: founder
-      ? "No. Pides tu invitación, abres tu clínica y tus agentes empiezan con el crédito de regalo. La tarjeta no se pide."
-      : `No. Te registras, conectas tus canales y tus agentes trabajan ${days} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
-  },
+  ...trialFaq(pricing, "clínica"),
 ]
 }

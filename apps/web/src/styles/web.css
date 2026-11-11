@@ -9,7 +9,9 @@
   --ink: #0f172a;
   --ink-2: #334155;
   --muted: #475569;
-  --soft: #64748b;
+  /* El gris de horas y notas: #64748b no llegaba a 4,5:1 sobre los grises de las tarjetas (4,17 a 4,47);
+     este es el más cercano que pasa sobre todos ellos (4,7:1 sobre #eef0f4, 5,1:1 sobre --bg). */
+  --soft: #5d6b82;
   --line: #e2e8f0;
   --bg: #f6f8fb;
   --paper: #ffffff;

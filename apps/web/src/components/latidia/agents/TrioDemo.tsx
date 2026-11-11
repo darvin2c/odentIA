@@ -1,7 +1,7 @@
 // La portada de /agentes en latidIA: los tres agentes en la misma consulta de Rosa. Sofi la agenda
 // de noche, Clío ordena lo que dicta la Dra. Vela y Argos le avisa su control una semana después.
-// Cada tramo se abre mientras pasa y queda resumido en una línea al terminar; se repite en bucle
-// con «Pausar» y «Repetir». Sin movimiento se ve el final.
+// Cada tramo se abre mientras pasa y queda resumido en una línea al terminar; se repite dos veces y
+// queda terminada, con «Pausar» y «Volver a ver». Sin movimiento se ve el final.
 import { useState } from "react"
 import { useLoop } from "../home/loop"
 import "./trio-demo.css"
@@ -56,7 +56,7 @@ const LEN = 11
 
 export default function TrioDemo() {
   const [paused, setPaused] = useState(false)
-  const { step, restart } = useLoop({ len: LEN, hold: 4, ms: 1600, paused })
+  const { step, restart, done } = useLoop({ len: LEN, hold: 4, ms: 1600, paused })
   const current = step >= 8 ? 2 : step >= 4 ? 1 : 0
   const finished = step >= LEN - 1
 
@@ -122,7 +122,7 @@ export default function TrioDemo() {
       </div>
 
       {/* El tramo abierto cambia de alto según el agente: los tres van en la misma celda (dos solo
-          reservan su alto), así la tarjeta no crece ni se encoge y «Pausar» y «Repetir» quedan quietos. */}
+          reservan su alto), así la tarjeta no crece ni se encoge y «Pausar» y «Volver a ver» quedan quietos. */}
       <div className="fit">
         {STAGES.map((s, i) => (
           <div key={s.key} className="tr-stages fit-ghost" aria-hidden="true">
@@ -135,8 +135,9 @@ export default function TrioDemo() {
       <div className="tr-foot">
         <span className="tr-note">Demostración con datos de prueba.</span>
         <span className="tr-btns">
-          <button type="button" className="tr-b" aria-pressed={paused} onClick={() => setPaused(!paused)}>
-            {paused ? "Seguir" : "Pausar"}
+          {/* Terminada, no hay nada que pausar: el botón queda en su sitio, apagado. */}
+          <button type="button" className="tr-b" aria-pressed={paused} disabled={done} onClick={() => setPaused(!paused)}>
+            {paused && !done ? "Seguir" : "Pausar"}
           </button>
           <button
             type="button"
@@ -146,7 +147,7 @@ export default function TrioDemo() {
               restart()
             }}
           >
-            ↻ Repetir
+            ↻ Volver a ver
           </button>
         </span>
       </div>

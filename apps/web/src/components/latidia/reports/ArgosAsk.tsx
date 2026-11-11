@@ -1,7 +1,7 @@
 // Argos responde en la portada de /reportes (latidIA y, con `variant="dental"`, odentIA): la pregunta se escribe letra a letra, Argos dice
 // sus pasos («Leyendo la pregunta», «Consultando…»), responde con las cifras destacadas, el dibujo crece y
-// debajo dice «Así lo calculé», con sus botones. Tres preguntas que pasan solas hasta que la persona
-// elige una; «Preguntar otra vez» va arriba, en la propia ventana de Reportes. Con movimiento reducido se ve la
+// debajo dice «Así lo calculé», con sus botones. Tres preguntas que pasan solas (dos vueltas, y se queda
+// en la última respuesta: WCAG 2.2.2) hasta que la persona elige una; «Preguntar otra vez» va arriba, en la propia ventana de Reportes. Con movimiento reducido se ve la
 // respuesta sin animar. Las cifras son de ejemplo (las mismas de las pestañas de Reportes): en latidIA,
 // las del Consultorio San Martín; en odentIA, las de Clínica Sonrisa Norte. En soles: no son precios.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
@@ -116,6 +116,8 @@ const QUESTION_SETS: Record<Variant, Question[]> = { medical: MEDICAL_QUESTIONS,
 const TYPE_MS = 45
 const THINK_MS = 1400
 const NEXT_MS = 6500
+/** Vueltas por las preguntas antes de quedarse en la última respuesta. */
+const ROUNDS = 2
 
 /** «Te deben **S/ 1.230**…» con lo destacado en negrita. */
 function Rich({ text }: { text: string }) {
@@ -137,6 +139,8 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
   const [phase, setPhase] = useState<0 | 1 | 2>(2)
   const timers = useRef<number[]>([])
+  // Preguntas que respondió sola; al llegar a sus vueltas no pasa a la siguiente.
+  const answered = useRef(0)
 
   const stop = useCallback(() => {
     for (const t of timers.current) {
@@ -168,7 +172,9 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
         timers.current.push(
           window.setTimeout(() => {
             setPhase(2)
-            if (keepGoing) timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
+            if (keepGoing) answered.current += 1
+            if (keepGoing && answered.current < ROUNDS * QUESTIONS.length)
+              timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
           }, THINK_MS),
         )
       }, TYPE_MS)

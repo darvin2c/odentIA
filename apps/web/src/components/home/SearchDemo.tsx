@@ -1,5 +1,6 @@
 // El buscador rápido en la portada (las dos webs): la ventana del producto (Ctrl K) con datos de
-// ejemplo. Al verse, escribe sola cada ejemplo y muestra lo que encuentra; quien mira puede escribir
+// ejemplo. Al verse, escribe sola cada ejemplo una vez, muestra lo que encuentra y se queda en el
+// último (WCAG 2.2.2: no se mueve sin fin); quien mira puede escribir
 // en el campo, tocar una ficha o recorrer los resultados con las flechas. Con menos movimiento (o en
 // pausa) se queda con el primer ejemplo ya buscado. Ctrl K solo se atiende con el foco dentro de la
 // demo: fuera de ella sigue siendo el atajo del navegador.
@@ -172,6 +173,8 @@ export default function SearchDemo({
   // En el servidor y sin movimiento, el primer ejemplo ya buscado: la página se lee entera.
   const [query, setQuery] = useState(first)
   const [auto, setAuto] = useState(true)
+  // Ya escribió todos los ejemplos: se queda con el último buscado.
+  const [ended, setEnded] = useState(false)
   const [visible, setVisible] = useState(false)
   const [hidden, setHidden] = useState<DemoType[]>([])
   const [active, setActive] = useState(0)
@@ -207,10 +210,10 @@ export default function SearchDemo({
     return () => io.disconnect()
   }, [])
 
-  // Se escribe sola mientras se ve, hasta que quien mira toma el control. Cada vez que vuelve a verse,
-  // empieza a escribir el ejemplo en que iba.
+  // Se escribe sola mientras se ve, hasta que quien mira toma el control o termina la vuelta por los
+  // ejemplos. Cada vez que vuelve a verse, empieza a escribir el ejemplo en que iba.
   useEffect(() => {
-    if (!auto || !visible || !moving || prefersReducedMotion()) return
+    if (!auto || ended || !visible || !moving || prefersReducedMotion()) return
     const examples = data.examples
     let timer: number | undefined
     const tick = () => {
@@ -226,6 +229,11 @@ export default function SearchDemo({
       // pasa al siguiente.
       timer = window.setTimeout(() => {
         latest.current.activate(latest.current.rows[0], true)
+        // El último ejemplo queda buscado, con su resultado: la vuelta terminó.
+        if (s.example >= examples.length - 1) {
+          setEnded(true)
+          return
+        }
         timer = window.setTimeout(
           () => {
             s.example = (s.example + 1) % examples.length
@@ -241,12 +249,12 @@ export default function SearchDemo({
     setQuery("")
     timer = window.setTimeout(tick, 450)
     return () => window.clearTimeout(timer)
-  }, [auto, visible, moving, data.examples])
+  }, [auto, ended, visible, moving, data.examples])
 
   // En pausa (el botón de la portada) se queda con el ejemplo completo, no a medio escribir.
   useEffect(() => {
-    if (auto && !moving) setQuery(data.examples[step.current.example] ?? first)
-  }, [auto, moving, data.examples, first])
+    if (auto && !ended && !moving) setQuery(data.examples[step.current.example] ?? first)
+  }, [auto, ended, moving, data.examples, first])
 
   useEffect(() => () => window.clearTimeout(chipTimer.current), [])
 
@@ -380,7 +388,7 @@ export default function SearchDemo({
       case "argos":
         return setOpened(go(`${data.agent} responde a un lado, con los datos que tú puedes ver.`))
       case "help":
-        return setOpened(go(`responde Ariadna, que te enseña a usar ${p}.`))
+        return setOpened(go(`responde Ariadna, la Ayuda, que te enseña a usar ${p}.`))
       case "screen":
         return setOpened(go(`Ir a ${row.label}.`))
       case "recent":
@@ -556,7 +564,7 @@ export default function SearchDemo({
             </span>
             <span className="sd-grow sd-two">
               <span className="sd-title">Preguntarle a Ariadna: «{text}»</span>
-              <span className="sd-sub">Te enseña a usar {data.product}; no conoce cifras</span>
+              <span className="sd-sub">Ariadna es la Ayuda: te enseña a usar {data.product}; no conoce cifras</span>
             </span>
           </div>
         )

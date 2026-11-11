@@ -19,7 +19,7 @@ const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders
-const faq = homeFaq(gift)
+const faq = homeFaq(gift, pricing)
 // Un caso completo en la óptica: el mismo de la página de los agentes.
 const day = VISTIA_PAGES.agentes.blocks[1]
 
@@ -176,7 +176,7 @@ const trust = [
       <div class="vs-head wide">
         <span class="tag">[ Tú decides ]</span>
         <h2>Lo que hace cada agente, lo prendes o lo apagas.</h2>
-        <p>Cada interruptor dice qué pasa en los dos casos. Si apagas «Agendar citas», Sofi envía el enlace para que la persona elija la hora. Tu equipo siempre puede tomar una conversación: Sofi espera.</p>
+        <p>En la página de cada agente, dentro de vistIA, cada cosa que hace tiene su interruptor y dice qué pasa en los dos casos. Si apagas «Agendar, mover y cancelar citas», Sofi envía el enlace para que la persona elija la hora. Tu equipo siempre puede tomar una conversación: Sofi espera.</p>
       </div>
       <div class="vt">
         <div class="vt-head">
@@ -266,7 +266,7 @@ const trust = [
   .va-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 18px; }
   .va-card { background: var(--paper); border: 1px solid var(--line); border-top: 4px solid var(--ac-line); border-radius: 26px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
   .va-card.sofi { --ac: #0e7490; --ac-line: #0e7490; }
-  .va-card.argos { --ac: #9a6a12; --ac-line: #c98a1c; }
+  .va-card.argos { --ac: #8f6210; --ac-line: #c98a1c; }
   .va-role { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ac); }
   .va-name { font-size: 60px; line-height: .9; letter-spacing: -.055em; font-weight: 800; color: var(--ac); }
   .va-text { font-size: 17px; line-height: 1.5; color: var(--ink-2); }
@@ -325,5 +325,12 @@ const trust = [
     .vt-title b { font-size: 22px; }
     .vc-in { gap: 22px; }
     .vc-card { flex-basis: 100%; padding: 16px 18px; border-radius: 20px; }
+  }
+  /* En el teléfono, las tarjetas de «Confianza» (solo texto) van en mosaico de dos columnas. */
+  @media (max-width: 720px) {
+    .vt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .vt-card { padding: 14px; border-radius: 14px; gap: 6px; }
+    .vt-card h3 { font-size: 15.5px; overflow-wrap: break-word; }
+    .vt-card p { font-size: 14px; line-height: 1.45; overflow-wrap: break-word; }
   }
 </style>

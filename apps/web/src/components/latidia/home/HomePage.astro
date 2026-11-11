@@ -24,7 +24,7 @@ const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders
-const faq = homeFaq(gift)
+const faq = homeFaq(gift, pricing)
 
 // Un jueves de cobros: lo que hizo cada agente con los precios del plan que se muestra. Rosa vino a
 // su consulta, así que la conversación en que Sofi la agendó cuenta como «Agenda» (ADR 0085).
@@ -392,7 +392,7 @@ const trust = [
 
 <style>
   .lh-page { overflow-x: clip; background: var(--paper); }
-  .lk { color: var(--teal); font-weight: 700; text-decoration: none; font-size: 16px; }
+  .lk { color: var(--teal); font-weight: 700; text-decoration: none; font-size: 16px; min-height: 44px; display: inline-flex; align-items: center; }
   .lk:hover { color: var(--teal-hover); text-decoration: underline; }
   .c-sofi { color: #4fc3d7; }
   .c-clio { color: #a6f0d8; }
@@ -436,7 +436,7 @@ const trust = [
   .la-card { background: var(--paper); border: 1px solid #e9e2f7; border-top: 4px solid var(--ac-line); border-radius: 26px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
   .la-card.sofi { --ac: #0e7490; --ac-line: #0e7490; }
   .la-card.clio { --ac: #1f7f63; --ac-line: #1f9d7a; }
-  .la-card.argos { --ac: #9a6a12; --ac-line: #c98a1c; }
+  .la-card.argos { --ac: #8f6210; --ac-line: #c98a1c; }
   .la-role { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ac); }
   .la-name { font-size: 60px; line-height: .9; letter-spacing: -.055em; font-weight: 800; color: var(--ac); }
   .la-text { font-size: 17px; line-height: 1.5; color: var(--ink-2); }

@@ -582,7 +582,7 @@ export default function AgentScene({ focus = "todos" }: { focus?: AgentFocus }) 
             onClick={() => setPaused((p) => !p)}
             aria-pressed={paused}
           >
-            {paused ? "Activar movimiento" : "Pausar movimiento"}
+            {paused ? "Seguir el movimiento" : "Pausar el movimiento"}
           </button>
         </div>
       </div>

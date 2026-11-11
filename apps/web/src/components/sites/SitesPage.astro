@@ -1,9 +1,7 @@
 ---
 // /varias-sedes de odentIA: portada con la demostración de sedes (agenda, caja, historia y reportes
 // cambian con la sede), qué es de cada sede y qué es de todas, los roles, las preguntas y el cierre.
-// Título, descripción, migas, enlaces relacionados y preguntas son los de PAGES.sedes; la pregunta que
-// traía un marcador «[Por confirmar…]» se publica solo con lo que ya es cierto (cada rol ve lo que su
-// permiso le da).
+// Título, descripción, migas, enlaces relacionados y preguntas son los de PAGES.sedes.
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
@@ -21,9 +19,7 @@ const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders
 const gift = giftOf(pricing)
 const cta = ctaOf(pricing)
-const faq: FaqItem[] = page.faq.map((item) =>
-  item.a.includes("[Por confirmar") ? { ...item, a: "Cada persona ve lo que su rol le permite: recepción coordina, los odontólogos atienden con la historia y caja cobra." } : item,
-)
+const faq: FaqItem[] = page.faq
 const jsonLd = [
   breadcrumbJsonLd(Astro.site, [
     ["Inicio", "/"],

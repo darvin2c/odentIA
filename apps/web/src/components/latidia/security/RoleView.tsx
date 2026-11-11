@@ -1,7 +1,8 @@
 // «Entra como…» (lienzo de latidIA, tablero «Seguridad», portada): la misma persona vista por cada rol.
 // Cada fila dice qué ve ese rol y qué no, como lo decide la matriz de permisos del sistema
-// (packages/auth/src/permissions.ts). Los roles pasan solos cada 3,6 s hasta que la persona toca uno; con
-// movimiento reducido se queda en el primero. Datos de ejemplo.
+// (packages/auth/src/permissions.ts). Los roles pasan solos cada 3,6 s hasta que la persona toca uno, dos
+// vueltas, y se queda en el primero (WCAG 2.2.2); con movimiento reducido se queda en el primero. Datos
+// de ejemplo.
 // Un solo componente para las dos webs (`variant`): latidIA, con Rosa Paredes vista por la Dra. Vela,
 // Recepción, Caja y Sofi; odentIA, con Carlos Medina vista por la Dra. Paredes (odontólogo), Recepción,
 // Caja, Administración y Sofi. En odentIA, Recepción ve solo las alergias de la historia (`clinical.alerts`)
@@ -168,6 +169,8 @@ const DENTAL: RoleSet = {
 const SETS: Record<Variant, RoleSet> = { medical: MEDICAL, dental: DENTAL }
 
 const NEXT_MS = 3600
+/** Vueltas por todos los roles antes de quedarse en el primero. */
+const ROUNDS = 2
 
 export default function RoleView({ variant = "medical" }: { variant?: Variant }) {
   const steady = useSteadyHeight<HTMLDivElement>()
@@ -179,8 +182,14 @@ export default function RoleView({ variant = "medical" }: { variant?: Variant })
   useEffect(() => {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return
     const order = set.roles.map(([key]) => key)
+    // Pasos que da solo: todos los roles, dos veces, y termina en el primero, como llegó del servidor.
+    let moves = 1
     setRole(order[1])
-    timer.current = window.setInterval(() => setRole((r) => order[(order.indexOf(r) + 1) % order.length]), NEXT_MS)
+    timer.current = window.setInterval(() => {
+      moves += 1
+      setRole(order[moves % order.length])
+      if (moves >= ROUNDS * order.length) window.clearInterval(timer.current)
+    }, NEXT_MS)
     return () => window.clearInterval(timer.current)
   }, [set])
 

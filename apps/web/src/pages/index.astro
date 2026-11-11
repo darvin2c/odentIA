@@ -21,7 +21,7 @@ import VistiaHome from "../components/vistia/HomePage.astro"
 import Base from "../layouts/Base.astro"
 import { faqJsonLd } from "../lib/faq"
 import { ofProduct, WORDS } from "../lib/product"
-import { businessDays, giftOf, shownPlan } from "../lib/pricing"
+import { businessDays, giftOf } from "../lib/pricing"
 import { ctaOf } from "../lib/site"
 
 const { title, description } = ofProduct({
@@ -42,10 +42,9 @@ const { title, description } = ofProduct({
   },
 })
 const pricing = Astro.locals.pricing
-const plan = shownPlan(pricing)
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
-const HOME_FAQ = homeFaq(plan, pricing.terms, plan !== null && plan === pricing.founders)
+const HOME_FAQ = homeFaq(pricing)
 const answer = businessDays(pricing.terms.waitlistAnswerDays)
 // Mientras se entra por invitación, la nota de la portada dice el regalo y cómo se entra.
 const note =
@@ -65,8 +64,8 @@ const softwareLd = {
 // latidIA y vistIA tienen su propia portada; la de odentIA se arma aquí mismo.
 const { Own, jsonLd } = ofProduct({
   dental: { Own: null, jsonLd: [softwareLd, faqLd] },
-  medical: { Own: LatidiaHome, jsonLd: [softwareLd, faqJsonLd(latidiaFaq(gift))] },
-  optical: { Own: VistiaHome, jsonLd: [softwareLd, faqJsonLd(vistiaFaq(gift))] },
+  medical: { Own: LatidiaHome, jsonLd: [softwareLd, faqJsonLd(latidiaFaq(gift, pricing))] },
+  optical: { Own: VistiaHome, jsonLd: [softwareLd, faqJsonLd(vistiaFaq(gift, pricing))] },
 })
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>
@@ -82,11 +81,7 @@ const { Own, jsonLd } = ofProduct({
     <SearchSection />
     <TrustSection />
     <Faq items={HOME_FAQ} tag="09 · Preguntas" />
-    <CtaBand
-      text={plan
-        ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en tu clínica desde el primer día, con el crédito de prueba. Sin límite de odontólogos, sedes ni usuarios.`
-        : "Tus agentes trabajan en tu clínica desde el primer día. Sin límite de odontólogos, sedes ni usuarios."}
-    />
+    <CtaBand />
     <StickyCta />
   </div>
   )}

@@ -1,8 +1,10 @@
 // Las preguntas del inicio de latidIA (lienzo «Inicio», sección 9). Las usa la página y sus datos
 // estructurados (FAQPage en index.astro). El regalo sale del plan que se muestra, nunca del código.
 import type { FaqItem } from "../../../lib/faq"
+import { trialFaq } from "../../../lib/offer"
+import type { Pricing } from "../../../lib/pricing"
 
-export function homeFaq(gift: string | null): FaqItem[] {
+export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
   return [
     {
       q: "¿Para qué especialidades sirve?",
@@ -48,5 +50,7 @@ export function homeFaq(gift: string | null): FaqItem[] {
       q: "¿Sirve en mi país?",
       a: "Está hecho para consultorios de habla hispana. La moneda, la zona horaria y el número de emergencias se ajustan a tu país (106 en Perú, 911 en México, 123 en Colombia), y los diagnósticos usan CIE-10 o CIE-11.",
     },
+    // La prueba, igual que en odentIA y en Precios.
+    ...trialFaq(pricing, "consultorio"),
   ]
 }

@@ -64,6 +64,8 @@
 .ld-btns { display: flex; gap: 8px; }
 .ld-btn { min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: var(--on-night); font-family: var(--font); font-weight: 700; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .ld-btn:hover { border-color: rgba(255, 255, 255, .7); }
+/* Terminada la escena, «Pausar» queda en su sitio pero apagado. */
+.ld-btn:disabled { opacity: .45; cursor: default; border-color: rgba(255, 255, 255, .3); }
 .ld-replay { border: 0; background: rgba(183, 156, 240, .2); }
 .ld-replay:hover { background: rgba(183, 156, 240, .32); }
 .ld-btn:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }

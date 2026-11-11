@@ -1,6 +1,6 @@
 // Las piezas comunes de las demos de los agentes, en las dos webs: la cabecera (quién es el agente,
 // dónde trabaja y en qué está), el globo de voz de quien le dicta y el pie (datos de ejemplo y
-// «Repetir»). Con ellas Sofi, Clío y Argos se leen igual: alguien le habla o le escribe al agente y
+// «Volver a ver», o el verbo propio: «Volver a dictar», «Preguntar otra vez»). Con ellas Sofi, Clío y Argos se leen igual: alguien le habla o le escribe al agente y
 // se ve lo que hace. Los colores salen de las variables de la marca (`data-brand`).
 import { type ReactNode, useEffect, useState } from "react"
 import "./agent-frame.css"

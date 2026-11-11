@@ -1,8 +1,10 @@
 // «Emitir receta» en la portada de Receta y descanso médico (lienzo de latidIA, tablero «Receta»):
-// tres casos de la demo que pasan solos hasta que alguien toca uno. Se escribe el medicamento y
-// aparece lo que diría la receta real; los textos de los avisos son los de
+// tres casos de la demo que pasan solos, dos vueltas (WCAG 2.2.2), hasta que alguien toca uno. Se
+// escribe el medicamento y aparece lo que diría la receta real; los textos de los avisos son los de
 // `packages/medical/src/prescribing.ts` (checkPrescription), con los datos de cada caso.
-import { useEffect, useState } from "react"
+// «Emitir receta» responde cuando la receta se puede emitir: dice «Receta emitida.» y su número, como
+// el aviso de la app; si no se puede, el botón está apagado y la línea de al lado dice por qué.
+import { useEffect, useRef, useState } from "react"
 import "./prescription-demo.css"
 
 type CaseId = "embarazo" | "nino" | "controlado"
@@ -66,6 +68,10 @@ const CASES: Record<CaseId, Case> = {
   },
 }
 const ORDER: CaseId[] = ["embarazo", "nino", "controlado"]
+/** El número que tendría cada receta al emitirla (de ejemplo). */
+const NUMBER: Record<CaseId, number> = { embarazo: 7, nino: 8, controlado: 9 }
+/** Vueltas por los tres casos antes de quedarse en el último. */
+const ROUNDS = 2
 /** Pasos de 110 ms: escribir, aparecer el aviso y, mientras nadie toque, pasar al siguiente caso. */
 const TICK = 110
 const LAST_TICK = 60
@@ -84,11 +90,16 @@ function CaseForm({
   t,
   live,
   ghost = false,
+  emitted = false,
+  onEmit,
 }: {
   kase: CaseId
   t: number
   live: "off" | "polite"
   ghost?: boolean
+  /** Ya se tocó «Emitir receta». */
+  emitted?: boolean
+  onEmit?: () => void
 }) {
   const c = CASES[kase]
   const done = t >= c.dci.length + 4
@@ -130,6 +141,7 @@ function CaseForm({
       emitLabel = "No se emite aquí"
     }
   }
+  if (emitted && emitOk) status = `Receta emitida. Receta N.º ${NUMBER[kase]}${kase === "embarazo" ? ": guarda el aviso que viste" : ""}.`
 
   return (
     <div className={`rx-body${ghost ? " fit-ghost" : ""}`} aria-hidden={ghost || undefined}>
@@ -194,7 +206,16 @@ function CaseForm({
       </div>
       <div className="rx-foot">
         <span className="rx-status">{status}</span>
-        <span className={`rx-emit${emitOk ? " ok" : ""}`}>{emitLabel}</span>
+        {/* Las variantes que solo reservan alto no llevan botón. */}
+        {ghost ? (
+          <span className={`rx-emit${emitOk ? " ok" : ""}`}>{emitted && emitOk ? "✓ Emitida" : emitLabel}</span>
+        ) : emitted && emitOk ? (
+          <span className="rx-emitted">✓ Emitida</span>
+        ) : (
+          <button type="button" className={`rx-emit${emitOk ? " ok" : ""}`} disabled={!emitOk} onClick={onEmit}>
+            {emitLabel}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -206,6 +227,10 @@ export default function PrescriptionDemo() {
   const [t, setT] = useState(DONE)
   const [auto, setAuto] = useState(true)
   const [reduced, setReduced] = useState(false)
+  // La receta del caso que se ve ya se emitió.
+  const [emitted, setEmitted] = useState(false)
+  const laps = useRef(0)
+  const timer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
@@ -213,21 +238,47 @@ export default function PrescriptionDemo() {
       return
     }
     setT(0)
-    const id = setInterval(() => setT((n) => n + 1), TICK)
-    return () => clearInterval(id)
+    timer.current = window.setInterval(() => setT((n) => Math.min(n + 1, DONE)), TICK)
+    return () => window.clearInterval(timer.current)
   }, [])
 
-  // Al terminar un caso, si nadie tocó, se pasa al siguiente.
+  // Al terminar un caso, si nadie tocó, se pasa al siguiente; tras dos vueltas se queda en el último.
   useEffect(() => {
     if (t < LAST_TICK || t >= DONE || !auto) return
-    setKase((k) => ORDER[(ORDER.indexOf(k) + 1) % ORDER.length])
+    const at = ORDER.indexOf(kase)
+    if (at === ORDER.length - 1 && ++laps.current >= ROUNDS) {
+      setAuto(false)
+      window.clearInterval(timer.current)
+      setT(DONE)
+      return
+    }
+    setKase(ORDER[(at + 1) % ORDER.length])
     setT(0)
-  }, [t, auto])
+  }, [t, auto, kase])
+
+  // Lo que escribe el caso elegido sigue hasta terminar; después el reloj se detiene.
+  useEffect(() => {
+    if (t >= DONE) window.clearInterval(timer.current)
+  }, [t])
 
   const pick = (id: CaseId) => {
     setKase(id)
-    setT(reduced ? DONE : 0)
     setAuto(false)
+    setEmitted(false)
+    if (reduced) {
+      setT(DONE)
+      return
+    }
+    setT(0)
+    window.clearInterval(timer.current)
+    timer.current = window.setInterval(() => setT((n) => Math.min(n + 1, DONE)), TICK)
+  }
+
+  const emit = () => {
+    setAuto(false)
+    window.clearInterval(timer.current)
+    setT(DONE)
+    setEmitted(true)
   }
 
   return (
@@ -250,8 +301,11 @@ export default function PrescriptionDemo() {
         {ORDER.map((id) => (
           <CaseForm key={id} kase={id} t={DONE} live="off" ghost />
         ))}
+        {ORDER.map((id) => (
+          <CaseForm key={`${id}-emitida`} kase={id} t={DONE} live="off" ghost emitted />
+        ))}
         <CaseForm kase="nino" t={NINO_SIN_PESO} live="off" ghost />
-        <CaseForm kase={kase} t={t} live={auto ? "off" : "polite"} />
+        <CaseForm kase={kase} t={t} live={auto ? "off" : "polite"} emitted={emitted} onEmit={emit} />
       </div>
       <div className="rx-note">Demostración con datos de ejemplo. Elige un caso: las mismas reglas se revisan otra vez al emitir.</div>
     </div>

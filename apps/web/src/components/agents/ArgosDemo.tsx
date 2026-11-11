@@ -1,7 +1,7 @@
 // Demostración de Argos (lienzo del paso 3, tableros Argos y Reportes): la pregunta se escribe letra a
 // letra, Argos muestra sus pasos («Leyendo la pregunta», «Consultando…») y responde con la frase, el
 // dibujo que crece (barras o columnas), «Así lo calculé» y sus botones. La usan /agentes/administrador
-// (tres preguntas para elegir, que pasan solas) y /reportes (una pregunta, en columnas, y «Preguntar
+// (tres preguntas para elegir, que pasan solas dos vueltas y se quedan en la última: WCAG 2.2.2) y /reportes (una pregunta, en columnas, y «Preguntar
 // otra vez» en la esquina de la propia demo: al tocarlo se ve empezar). Con movimiento reducido se ve
 // la respuesta sin animar.
 //
@@ -53,6 +53,8 @@ interface Props {
 const TYPE_MS = 45
 const THINK_MS = 1300
 const NEXT_MS = 6000
+/** Vueltas por las preguntas antes de quedarse en la última respuesta. */
+const ROUNDS = 2
 
 /** «Te deben **S/ 4.820**…» con lo destacado en negrita. */
 function Rich({ text }: { text: string }) {
@@ -85,6 +87,8 @@ export default function ArgosDemo({
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
   const [phase, setPhase] = useState<0 | 1 | 2>(2)
   const timers = useRef<number[]>([])
+  // Preguntas que respondió sola; al llegar a sus vueltas no pasa a la siguiente.
+  const answered = useRef(0)
   // El alto de la demo queda fijo: una respuesta más corta que otra no empuja la página.
   const box = useRef<HTMLDivElement | null>(null)
   useSteadyHeight(box)
@@ -119,7 +123,9 @@ export default function ArgosDemo({
         timers.current.push(
           window.setTimeout(() => {
             setPhase(2)
-            if (keepGoing && questions.length > 1) timers.current.push(window.setTimeout(() => play((i + 1) % questions.length, true), NEXT_MS))
+            if (keepGoing) answered.current += 1
+            if (keepGoing && questions.length > 1 && answered.current < ROUNDS * questions.length)
+              timers.current.push(window.setTimeout(() => play((i + 1) % questions.length, true), NEXT_MS))
           }, THINK_MS),
         )
       }, TYPE_MS)

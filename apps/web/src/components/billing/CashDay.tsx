@@ -114,12 +114,10 @@ export default function CashDay() {
             </button>
           </span>
         </div>
-        <div className="fc-tabs" aria-hidden="true">
-          <span className="on">Caja</span>
-          <span>Deudas</span>
-          <span>Gastos</span>
-          <span>Comisiones</span>
-        </div>
+        {/* Dónde está, dicho como texto: las pestañas de Finanzas no se dibujan, porque aquí no se tocan. */}
+        <p className="fc-where">
+          Pestaña <b>Caja</b>. Las otras: Cobros, Deudas, Gastos y Comisiones.
+        </p>
 
         <div className="fc-cards">
           <div className="fc-stat fc-stat-main">

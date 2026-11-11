@@ -155,29 +155,29 @@ export default function SofiChat() {
       </div>
       <div className="lsc-chat" aria-live="polite">
         <span className="lsc-day">HOY</span>
-        {messages.map((m) => (
-          // El mensaje ocupa su lugar desde el principio; mientras Sofi escribe, los tres puntos van
-          // encima, en la misma celda: el chat no cambia de alto y «Volver a ver» no se mueve.
-          <div key={`${scene}-${m.start}`} className="lsc-slot" data-kind={m.kind}>
-            <div
-              className={`lsc-msg ${m.visible && !m.typing ? "on" : "off"}`}
-              data-kind={m.kind}
-              aria-hidden={m.visible && !m.typing ? undefined : true}
-            >
-              <span className="lsc-text">{m.text}</span>
-              <span className="lsc-time">{m.meta}</span>
+        {messages.map((m) =>
+          // Los mensajes van pegados al fondo, como en WhatsApp: cada uno entra abajo y el espacio que
+          // queda está arriba. La tarjeta mide lo que la conversación completa (useSteadyHeight), así
+          // el chat no cambia de alto y «Volver a ver» no se mueve. Mientras Sofi escribe, los tres puntos.
+          !m.visible ? null : (
+            <div key={`${scene}-${m.start}`} className="lsc-slot" data-kind={m.kind}>
+              {m.typing ? (
+                <div className="lsc-msg on" data-kind="out">
+                  <span className="lsc-dots" role="img" aria-label="Sofi está escribiendo">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </div>
+              ) : (
+                <div className="lsc-msg on" data-kind={m.kind}>
+                  <span className="lsc-text">{m.text}</span>
+                  <span className="lsc-time">{m.meta}</span>
+                </div>
+              )}
             </div>
-            {m.typing && (
-              <div className="lsc-msg on" data-kind="out">
-                <span className="lsc-dots" role="img" aria-label="Sofi está escribiendo">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              </div>
-            )}
-          </div>
-        ))}
+          ),
+        )}
       </div>
       <div className="lsc-note">
         <AgentFoot

@@ -249,8 +249,10 @@ export const legalLinks: NavLink[] = [
 ]
 
 /** Colores de cada agente: sobre fondo oscuro y sobre fondo claro. */
+// `light` es el color del agente como texto sobre claro: pasa 4,5:1 sobre el blanco y el gris de la web
+// (el verde #1f9d7a y el ámbar #c98a1c de los dibujos daban 3,2 y 2,8:1).
 export const AGENT_COLORS = {
   recepcion: { dark: "#4fc3d7", light: "#0e7490" },
-  clinico: { dark: "#a6f0d8", light: "#1f9d7a" },
-  administrador: { dark: "#f5c46b", light: "#c98a1c" },
+  clinico: { dark: "#a6f0d8", light: "#1f7f63" },
+  administrador: { dark: "#f5c46b", light: "#8f6210" },
 } as const
