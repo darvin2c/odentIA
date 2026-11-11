@@ -238,9 +238,17 @@ export function personHeaderRules(can: Can, hasPatient: boolean) {
 
 export function agendaHeader(
   can: Can,
-  run?: { book: () => void; calendar: () => void },
-): { primary?: PageHeaderPrimary; secondary?: { label: string; icon: ReactNode; onClick?: () => void; disabled?: boolean } } {
+  run?: { book: () => void; calendar: () => void; absence: () => void },
+): {
+  primary?: PageHeaderPrimary
+  secondary?: { label: string; icon: ReactNode; onClick?: () => void; disabled?: boolean }
+  menu?: PageHeaderMenuItem[]
+} {
+  // La ausencia va en ⋯, que está en todos los anchos: quien lleva la agenda anota la de
+  // cualquiera; quien atiende, la suya.
+  const absence = can("appointments.absences") ? "Anotar una ausencia" : can("clinical.write") ? "Anotar mi ausencia" : null
   return {
+    menu: absence ? [{ label: absence, ...(run ? { onSelect: run.absence } : { disabled: true }) }] : undefined,
     secondary: can("clinical.write")
       ? { label: "Mi calendario", icon: <CalendarCheck aria-hidden />, ...(run ? { onClick: run.calendar } : { disabled: true }) }
       : undefined,

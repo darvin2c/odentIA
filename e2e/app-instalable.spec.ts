@@ -114,8 +114,11 @@ test("la clínica se instala con su nombre y avisa en el equipo: activar, sin co
   await expect(again).toBeChecked()
   expect(await page.evaluate(() => localStorage.getItem("e2e-push"))).not.toBeNull()
 
-  // Cerrar sesión: este equipo deja de recibir los avisos de quien sale.
+  // Cerrar sesión: este equipo deja de recibir los avisos de quien sale. El panel de avisos
+  // devuelve el foco a la campana al terminar de cerrarse: abrir el menú antes lo cerraría.
   await page.keyboard.press("Escape")
+  await expect(avisosSwitch(page)).toBeHidden()
+  await expect(page.getByRole("button", { name: /^Avisos/ })).toBeFocused()
   await page.getByRole("button", { name: /^Menú de / }).click()
   const deleted = page.waitForResponse((response) => response.url().endsWith("/api/push/subscriptions") && response.request().method() === "DELETE")
   await page.getByRole("menuitem", { name: "Cerrar sesión" }).click()

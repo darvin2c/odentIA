@@ -507,6 +507,13 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     <TooltipProvider>
       {notice}
       <SidebarProvider className="min-h-[calc(100svh-var(--notice-strip-h,0px))]">
+        {/* Con teclado, lo primero: saltar el menú y llegar al contenido (WCAG 2.4.1). */}
+        <a
+          href="#contenido"
+          className="sr-only z-50 rounded-md bg-background px-3 py-2 font-semibold focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:ring-2 focus:ring-ring"
+        >
+          Saltar al contenido
+        </a>
         <CloseFloatingSidebarOnNavigate pathname={pathname} />
         <Sidebar
           collapsible="icon"
@@ -565,7 +572,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {/* `SidebarInset` ya renderiza el landmark `<main>`: un `<main>`
             anidado sería HTML inválido y duplicaría el landmark para lectores
             de pantalla. El alto mínimo vive ahora en el propio inset. */}
-        <SidebarInset className="min-h-[calc(100svh-var(--notice-strip-h,0px))]">{children}</SidebarInset>
+        <SidebarInset id="contenido" tabIndex={-1} className="min-h-[calc(100svh-var(--notice-strip-h,0px))] outline-none">
+          {children}
+        </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
   )

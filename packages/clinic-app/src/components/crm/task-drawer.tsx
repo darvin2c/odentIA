@@ -249,7 +249,7 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
 
         <form.AppField name="owner">
           {(field) => (
-            <field.Control label="Quién la lleva" description="Sin responsable, la ve quien trabaja en esa parte del equipo.">
+            <field.Control label="Quién la lleva" description="Si no la lleva nadie, la ve quien trabaja en esa parte del equipo.">
               {(control) => (
                 <ChoiceSelect
                   {...control.props}

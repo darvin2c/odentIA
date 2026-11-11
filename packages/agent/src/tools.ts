@@ -2117,6 +2117,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (result.outcome === "ninguna") {
         return "La persona no tiene citas por venir que confirmar. Si habla de otra cita, pregúntale cuál o pasa el caso a una persona."
       }
+      if (result.outcome === "cambio") {
+        return `No se confirmó: la cita cambió de fecha después del recordatorio que recibió, y su «sí» puede ser a la fecha anterior. Dile con send_reply la fecha nueva y pregúntale si le queda bien; si dice que sí, vuelve a llamar con su id.\n${result.options.map((item) => `- ${said(item)} (id ${item.appointmentId})`).join("\n")}`
+      }
       if (result.outcome !== "varias") {
         // Un padre confirma las citas de quienes lleva: se le dice de quiénes son.
         const list = result.appointments

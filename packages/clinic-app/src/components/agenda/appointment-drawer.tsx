@@ -1,6 +1,7 @@
 import {
   Button,
   buttonVariants,
+  Checkbox,
   cn,
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +47,7 @@ import {
   appointmentSessionsText,
   appointmentShortWords,
   doneForWords,
+  movedNote,
   professionalSaid,
   visitLabel,
   visitState,
@@ -327,6 +329,23 @@ function RealAppointmentDrawer({
     Date.parse(target.start) === Date.parse(appointment.startsAt) &&
     Date.parse(target.end) === Date.parse(appointment.endsAt)
   const targetSaid = target ? whenSaid(target.start, timeZone, today) : ""
+  // Confirmó otro día: al cambiarla de día vuelve a «por confirmar», salvo que ya lo haya dicho.
+  const [stillConfirmed, setStillConfirmed] = React.useState(false)
+  const asksConfirmed =
+    appointment.status === "confirmada" &&
+    target != null &&
+    zonedDateOf(target.start, timeZone) !== zonedDateOf(appointment.startsAt, timeZone)
+  // La marca vale para el día que se eligió: con otro día se pregunta de nuevo. Y aparece a la
+  // vista, junto al botón: queda debajo de las horas.
+  const targetDay = target ? zonedDateOf(target.start, timeZone) : ""
+  const confirmedRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => setStillConfirmed(false), [targetDay, asksConfirmed])
+  // Con cada hora elegida (y su aviso, si lo trae) la casilla vuelve a quedar a la vista.
+  const targetStart = target?.start ?? ""
+  const targetState = when.state
+  React.useEffect(() => {
+    if (asksConfirmed) confirmedRef.current?.scrollIntoView({ block: "nearest" })
+  }, [targetStart, targetState, asksConfirmed])
   const move = useMutation({
     // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
     mutationFn: (range: { start: string; end: string; columnId: string }) =>
@@ -338,6 +357,7 @@ function RealAppointmentDrawer({
           endsAt: range.end,
           professionalUserId: range.columnId,
           ...exceptionFlags(when.exception),
+          ...(asksConfirmed && stillConfirmed ? { stillConfirmed: true } : {}),
         }),
       }),
   })
@@ -351,8 +371,10 @@ function RealAppointmentDrawer({
         const result = await move.mutateAsync(when.shown)
         toast.success(
           `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
-          { description: result.data.notice?.queued ? "El agente le avisa la nueva fecha." : undefined },
+          // Confirmó otro día: el nuevo queda por confirmar, y se dice.
+          { description: movedNote(appointment, result.data) },
         )
+        setStillConfirmed(false)
         setMode("view")
         await onChanged()
       } catch (cause) {
@@ -412,6 +434,7 @@ function RealAppointmentDrawer({
   const back = () => {
     setActionError("")
     moveForm.reset()
+    setStillConfirmed(false)
     setMode("view")
   }
   const error = mode === "move" ? moveError : mode === "edit" ? editError : actionError || null
@@ -494,6 +517,25 @@ function RealAppointmentDrawer({
         {mode === "move" ? (
           <div ref={moveRoot} className="grid gap-4">
             <WhenFields form={moveForm} fields="when" when={when} />
+            {asksConfirmed ? (
+              <div ref={confirmedRef} data-draft-ignore className="grid gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="cita-mover-ya-confirmo"
+                    checked={stillConfirmed}
+                    onCheckedChange={(checked) => setStillConfirmed(checked === true)}
+                    aria-describedby="cita-mover-ya-confirmo-ayuda"
+                  />
+                  <FieldLabel htmlFor="cita-mover-ya-confirmo" className="font-normal">
+                    Ya confirmó conmigo el día nuevo
+                  </FieldLabel>
+                </div>
+                <p id="cita-mover-ya-confirmo-ayuda" className="text-sm text-muted-foreground">
+                  {appointment.patientName} había confirmado otro día. Sin marcar, la cita vuelve a «por confirmar» y se le
+                  pide confirmar la fecha nueva.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : mode === "edit" ? (
           <div ref={editRoot} className="grid gap-4">
