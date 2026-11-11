@@ -60,5 +60,37 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
       <slot />
     </main>
     <Footer legalOnly={footer === "legal"} />
+    <script is:inline>
+      // Cada bloque de una sección entra con suavidad la primera vez que se ve. Solo se prepara lo que
+      // al cargar está más abajo de la pantalla: nada de lo que ya se ve se esconde ni salta, y sin
+      // JavaScript o con menos movimiento todo está a la vista desde el principio. Es opacidad y un
+      // desplazamiento corto dentro del propio bloque: no cambia el alto de nada ni empuja la página.
+      ;(() => {
+        if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) return
+        const blocks = []
+        for (const wrap of document.querySelectorAll("main section:not(.hero) > .wrap")) {
+          let n = 0
+          for (const el of wrap.children) {
+            // Las escenas (islas) traen su propio movimiento y las arma React: no se tocan.
+            if (el.tagName === "ASTRO-ISLAND" || el.getBoundingClientRect().top < innerHeight) continue
+            el.style.setProperty("--rv-d", Math.min(n++, 3) * 70 + "ms")
+            el.setAttribute("data-rv", "")
+            blocks.push(el)
+          }
+        }
+        if (!blocks.length) return
+        const seen = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue
+              entry.target.setAttribute("data-rv", "in")
+              seen.unobserve(entry.target)
+            }
+          },
+          { rootMargin: "0px 0px -6% 0px" },
+        )
+        for (const el of blocks) seen.observe(el)
+      })()
+    </script>
   </body>
 </html>

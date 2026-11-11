@@ -51,7 +51,7 @@
    mueve mientras el contenido de arriba aparece. */
 .af-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .af-note { font-size: 12px; color: var(--muted); }
-.af-replay { min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); background: var(--paper); color: var(--ink); font: 700 13px var(--font); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
+.af-replay { min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); background: var(--paper); color: var(--ink); font: 700 13px var(--font); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
 .af-replay:hover { border-color: var(--teal); color: var(--teal); }
 .af-replay:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .af-replay svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }

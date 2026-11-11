@@ -72,9 +72,18 @@ export default function ActsLog() {
           >
             <span className="mono at">{x.t}</span>
             <i aria-hidden="true"></i>
-            <span className="atxt">
-              <strong>{x.verb}</strong> {x.obj}
-              <span className="where where-m">{x.where}</span>
+            {/* Cada fila mide lo que la acción más larga: al entrar una nueva, la lista no cambia de alto. */}
+            <span className="fit">
+              {ACTS.map((ghost) => (
+                <span key={ghost.t + ghost.verb} className="atxt fit-ghost" aria-hidden="true">
+                  <strong>{ghost.verb}</strong> {ghost.obj}
+                  <span className="where where-m">{ghost.where}</span>
+                </span>
+              ))}
+              <span className="atxt">
+                <strong>{x.verb}</strong> {x.obj}
+                <span className="where where-m">{x.where}</span>
+              </span>
             </span>
             <span className="where where-d">{x.where}</span>
           </li>

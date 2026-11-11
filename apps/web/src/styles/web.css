@@ -60,6 +60,18 @@ canvas {
 a {
   color: var(--teal);
 }
+/* Lo que se toca responde al primer toque: sin la espera del doble toque para acercar y con un
+   destello discreto en vez del gris del navegador. */
+a,
+button,
+summary,
+label,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--sky) 22%, transparent);
+}
 a:hover {
   color: var(--teal-hover);
 }
@@ -187,7 +199,6 @@ fieldset {
 .btn-p:hover {
   background: #86dbe8;
   color: #03252e;
-  transform: translateY(-1px);
 }
 .btn-g {
   background: transparent;
@@ -205,7 +216,17 @@ fieldset {
 .btn-d:hover {
   background: var(--teal-hover);
   color: #fff;
-  transform: translateY(-1px);
+}
+/* El botón se levanta solo con puntero: en el teléfono el «hover» se queda pegado tras tocar. Al
+   apretar, cualquier botón se hunde un poco: se nota que el toque llegó. */
+@media (hover: hover) {
+  .btn-p:hover,
+  .btn-d:hover {
+    transform: translateY(-1px);
+  }
+}
+.btn:active {
+  transform: scale(0.98);
 }
 .btn-l {
   background: var(--paper);
@@ -368,6 +389,26 @@ details.q p {
     transform: translateY(22px);
   }
   to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Cada bloque de una sección entra al verse por primera vez (lo marca Base.astro): opacidad y un
+   desplazamiento corto, una sola vez. No se usa en la portada ni en lo que ya está en pantalla al cargar. */
+[data-rv] {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.55s ease var(--rv-d, 0s),
+    transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) var(--rv-d, 0s);
+}
+[data-rv="in"] {
+  opacity: 1;
+  transform: none;
+}
+@media print {
+  [data-rv] {
     opacity: 1;
     transform: none;
   }

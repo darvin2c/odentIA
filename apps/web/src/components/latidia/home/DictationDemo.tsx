@@ -6,7 +6,6 @@
 import { useState } from "react"
 import { useLoop } from "./loop"
 import "./dictation-demo.css"
-import { useSteadyHeight } from "../../../lib/steady"
 
 /** Lo que dice la doctora en cada paso (el 0 es antes de dictar; el 7 y el 8, el final). */
 const PHRASES = [
@@ -19,8 +18,10 @@ const PHRASES = [
   "«No, la temperatura es 38,4.»",
 ]
 
+type Row = { title: string; at: number; n: number; text: string; vitals?: boolean; doc?: boolean }
+
 /** Cada bloque de la atención, desde qué paso tiene su sugerencia y cuántas. */
-const BLOCKS = [
+const BLOCKS: Row[] = [
   { title: "Consulta", at: 1, n: 2, text: "Motivo: fiebre y dolor de garganta · 3 días de enfermedad" },
   { title: "Examen físico", at: 2, n: 1, text: "PA 118/76 mmHg · FC 96 lpm · T ", vitals: true },
   { title: "Boca y garganta", at: 3, n: 1, text: "Con hallazgos: amígdalas aumentadas con placas blanquecinas" },
@@ -32,8 +33,63 @@ const BLOCKS = [
 export const ECG =
   "M0 50 L40 50 Q48 42 56 50 L76 50 L84 58 L92 8 L100 72 L108 50 L128 50 Q142 36 156 50 L200 50 L240 50 Q248 42 256 50 L276 50 L284 58 L292 8 L300 72 L308 50 L328 50 Q342 36 356 50 L400 50 L440 50 Q448 42 456 50 L476 50 L484 58 L492 8 L500 72 L508 50 L528 50 Q542 36 556 50 L600 50"
 
+/** Lo que dice el estado de arriba, de la escucha al final. */
+const STATUSES = ["Clío está escuchando", "Dictando…", "Dictado terminado", "Confirmado"]
+const IDLE = "Toca «Dictar» y atiende como siempre."
+const ENDED = "Dictado terminado: 6 sugerencias."
+/** Todo lo que puede decir la línea de lo que se oye. */
+const HEARD = [IDLE, ENDED, ...PHRASES.filter(Boolean)]
+/** Las tres cabeceras de la atención: mientras propone, al terminar de dictar y con todo confirmado. */
+const HEADS = [
+  { title: "Clío propone · 6 sugerencias", sub: "Cada cosa cae en su bloque." },
+  { title: "Dictado terminado: 6 sugerencias", sub: "5 listas. Todavía no hay nada en la historia." },
+  { title: "5 confirmadas · ya están en la historia", sub: "El descanso se emite aparte, con tu firma." },
+]
+
+/**
+ * El recuadro de un bloque: vacío, con su sugerencia (y sus botones) o ya confirmado. Los estados que
+ * no se ven van en la misma celda (`ghost`) para que la fila mida siempre lo que el más alto.
+ */
+function Box({ row, state, fixed, ghost = false }: { row: Row; state: "empty" | "open" | "ok"; fixed: boolean; ghost?: boolean }) {
+  return (
+    <div className={`ld-box${state === "empty" ? " empty" : state === "ok" ? " ok" : ""}${ghost ? " fit-ghost" : ""}`} aria-hidden={ghost || undefined}>
+      <span className="ld-text">
+        {state === "empty" ? (
+          "Sin sugerencias todavía"
+        ) : row.vitals ? (
+          <>
+            {row.text}
+            {fixed && <s>38,5</s>} <span className={fixed ? "ld-fixed" : undefined}>{fixed ? "38,4" : "38,5"}</span> °C
+            {fixed && <span className="ld-voice">corregido por voz</span>}
+          </>
+        ) : (
+          row.text
+        )}
+      </span>
+      {state === "open" && !row.doc && (
+        <span className="ld-acts">
+          <span className="ld-ok">Confirmar</span>
+          <span className="ld-edit">Editar</span>
+          <span className="ld-tick" aria-hidden="true">✓</span>
+        </span>
+      )}
+      {state !== "empty" && row.doc && (
+        <span className="ld-emit">
+          <span className="ld-wide">Emitir descanso</span>
+          <span className="ld-narrow">Emitir</span>
+        </span>
+      )}
+      {state === "ok" && !row.doc && (
+        <span className="ld-done">
+          <span className="ld-wide">✓ Confirmado</span>
+          <span className="ld-narrow">✓</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 export default function DictationDemo() {
-  const steady = useSteadyHeight<HTMLElement>()
   const [paused, setPaused] = useState(false)
   const { step, restart } = useLoop({ len: 9, hold: 3, ms: 1900, paused })
   const fixed = step >= 6
@@ -44,33 +100,34 @@ export default function DictationDemo() {
   const rows = BLOCKS.map((block) => {
     const has = step >= block.at
     if (has) count += block.n
-    return { ...block, has, confirmed: done && !block.doc }
+    return { block, has, confirmed: done && !block.doc }
   })
 
-  const status = step === 0 ? "Clío está escuchando" : listening ? "Dictando…" : done ? "Confirmado" : "Dictado terminado"
-  const heard = step === 0 ? "Toca «Dictar» y atiende como siempre." : step >= 7 ? "Dictado terminado: 6 sugerencias." : PHRASES[step]
+  const status = step === 0 ? STATUSES[0] : listening ? STATUSES[1] : done ? STATUSES[3] : STATUSES[2]
+  const heard = step === 0 ? IDLE : step >= 7 ? ENDED : PHRASES[step]
   const before = step >= 2 && step <= 7 ? PHRASES[Math.min(step, 6) - 1] : ""
-  const headTitle = done
-    ? "5 confirmadas · ya están en la historia"
-    : step >= 7
-      ? "Dictado terminado: 6 sugerencias"
-      : `Clío propone · ${count} ${count === 1 ? "sugerencia" : "sugerencias"}`
-  const headSub = done ? "El descanso se emite aparte, con tu firma." : step >= 7 ? "5 listas. Todavía no hay nada en la historia." : "Cada cosa cae en su bloque."
+  const headTitle = done ? HEADS[2].title : step >= 7 ? HEADS[1].title : `Clío propone · ${count} ${count === 1 ? "sugerencia" : "sugerencias"}`
+  const headSub = done ? HEADS[2].sub : step >= 7 ? HEADS[1].sub : HEADS[0].sub
 
   return (
-    <figure
-      className="ld"
-      ref={steady}
-      aria-label="Demostración: Clío ordena la consulta que dicta la Dra. Vela"
-    >
+    <figure className="ld" aria-label="Demostración: Clío ordena la consulta que dicta la Dra. Vela">
       <div className="ld-top">
         <span className="ld-who">
           <span className="ld-wide">Rosa Paredes · Dra. Vela</span>
           <span className="ld-narrow">Rosa · Dra. Vela</span>
         </span>
-        <span className={`ld-status${listening ? " live" : ""}`}>
-          <i className="ld-blink" aria-hidden="true"></i>
-          <span>{status}</span>
+        {/* El estado más largo reserva su ancho: «Pausar» y «Repetir» no cambian de fila cuando cambia. */}
+        <span className="fit fit-inline">
+          {STATUSES.map((text) => (
+            <span key={text} className="ld-status fit-ghost" aria-hidden="true">
+              <i className="ld-blink"></i>
+              <span>{text}</span>
+            </span>
+          ))}
+          <span className={`ld-status${listening ? " live" : ""}`}>
+            <i className="ld-blink" aria-hidden="true"></i>
+            <span>{status}</span>
+          </span>
         </span>
         <span className="ld-btns">
           <button type="button" className="ld-btn" aria-pressed={paused} onClick={() => setPaused(!paused)}>
@@ -105,14 +162,29 @@ export default function DictationDemo() {
           <path d={ECG} className="ld-ecg-base" vectorEffect="non-scaling-stroke"></path>
           <path d={ECG} className="ld-ecg-line" pathLength={1000} vectorEffect="non-scaling-stroke"></path>
         </svg>
+        {/* Cada frase que se oye reserva las líneas de la más larga: la tarjeta no salta al cambiar. */}
         <div className="ld-words">
-          <span className="ld-before">{before}</span>
+          <span className="fit">
+            {PHRASES.filter(Boolean).map((phrase) => (
+              <span key={phrase} className="ld-before fit-ghost" aria-hidden="true">
+                {phrase}
+              </span>
+            ))}
+            <span className="ld-before">{before}</span>
+          </span>
           <span className="ld-now">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
               <rect x="5.5" y="1.5" width="5" height="8" rx="2.5"></rect>
               <path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2"></path>
             </svg>
-            <span className={`ld-heard${step === 0 ? " idle" : step >= 7 ? " end" : ""}`}>{heard}</span>
+            <span className="fit">
+              {HEARD.map((phrase) => (
+                <span key={phrase} className="ld-heard fit-ghost" aria-hidden="true">
+                  {phrase}
+                </span>
+              ))}
+              <span className={`ld-heard${step === 0 ? " idle" : step >= 7 ? " end" : ""}`}>{heard}</span>
+            </span>
           </span>
         </div>
       </div>
@@ -125,51 +197,33 @@ export default function DictationDemo() {
               <path d="M9 2v3M6.5 9h.01M11.5 9h.01"></path>
             </svg>
           </span>
-          <span className="ld-head-copy">
-            <b>{headTitle}</b>
-            <span>{headSub}</span>
-          </span>
-          {step >= 7 && <span className={`ld-all${done ? " done" : ""}`}>{done ? "✓ Listo" : "Confirmar las 5 listas"}</span>}
-        </div>
-        {rows.map((row) => (
-          <div className="ld-row" key={row.title}>
-            <span className="ld-row-name">
-              <b>{row.title}</b>
-              <span>{row.has ? (row.confirmed ? "en la historia" : row.n === 2 ? "2 sugerencias" : "1 sugerencia") : "esperando"}</span>
-            </span>
-            <div className={`ld-box${!row.has ? " empty" : row.confirmed ? " ok" : ""}`}>
-              <span className="ld-text">
-                {!row.has ? (
-                  "Sin sugerencias todavía"
-                ) : row.vitals ? (
-                  <>
-                    {row.text}
-                    {fixed && <s>38,5</s>} <span className={fixed ? "ld-fixed" : undefined}>{fixed ? "38,4" : "38,5"}</span> °C
-                    {fixed && <span className="ld-voice">corregido por voz</span>}
-                  </>
-                ) : (
-                  row.text
-                )}
+          <span className="fit ld-head-fit">
+            {HEADS.map((each) => (
+              <span key={each.title} className="ld-head-copy fit-ghost" aria-hidden="true">
+                <b>{each.title}</b>
+                <span>{each.sub}</span>
               </span>
-              {row.has && !row.doc && !row.confirmed && (
-                <span className="ld-acts">
-                  <span className="ld-ok">Confirmar</span>
-                  <span className="ld-edit">Editar</span>
-                  <span className="ld-tick" aria-hidden="true">✓</span>
-                </span>
-              )}
-              {row.has && row.doc && (
-                <span className="ld-emit">
-                  <span className="ld-wide">Emitir descanso</span>
-                  <span className="ld-narrow">Emitir</span>
-                </span>
-              )}
-              {row.confirmed && (
-                <span className="ld-done">
-                  <span className="ld-wide">✓ Confirmado</span>
-                  <span className="ld-narrow">✓</span>
-                </span>
-              )}
+            ))}
+            <span className="ld-head-copy">
+              <b>{headTitle}</b>
+              <span>{headSub}</span>
+            </span>
+          </span>
+          {/* «Confirmar las 5» tiene su lugar desde el principio y aparece al terminar de dictar. */}
+          <span className={`ld-all${done ? " done" : ""}`} data-off={step < 7 || undefined} aria-hidden={step < 7 || undefined}>
+            {done ? "✓ Listo" : "Confirmar las 5 listas"}
+          </span>
+        </div>
+        {rows.map(({ block, has, confirmed }) => (
+          <div className="ld-row" key={block.title}>
+            <span className="ld-row-name">
+              <b>{block.title}</b>
+              <span>{has ? (confirmed ? "en la historia" : block.n === 2 ? "2 sugerencias" : "1 sugerencia") : "esperando"}</span>
+            </span>
+            <div className="fit ld-box-fit">
+              <Box row={block} state="open" fixed ghost />
+              {!block.doc && <Box row={block} state="ok" fixed ghost />}
+              <Box row={block} state={!has ? "empty" : confirmed ? "ok" : "open"} fixed={fixed} />
             </div>
           </div>
         ))}
