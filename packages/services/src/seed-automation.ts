@@ -69,6 +69,7 @@ export async function seedChannelTemplates(
     // «¿Vienes en camino?», recién pedido: mientras tanto queda la llamada para recepción.
     cita_sin_llegar: { status: "en_revision" },
     aviso_cita_movida: { status: "aprobada", since: lastWeek },
+    aviso_cita_movida_confirmar: { status: "aprobada", since: lastWeek },
     aviso_cita_cancelada: { status: "en_revision" },
     retomar_conversacion: { status: "aprobada", since: lastWeek },
     // Aprobado: el presupuesto de la semilla puede salir pasadas las 24 horas.

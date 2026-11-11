@@ -196,6 +196,14 @@ export const REMINDER_PENDING_KEY = "recordatorio_cita_pendientes"
 export const REMINDER_CONFIRMED_KEY = "recordatorio_cita_confirmada"
 
 /**
+ * El aviso de cambio de una cita que quedó por confirmar (ADR 0180): la fecha nueva la eligió el
+ * equipo y la persona no la confirmó. Lleva «Confirmar», que confirma la fecha que dice ese
+ * mensaje. Sale en lugar del aviso de cambio; por WhatsApp, a quien no escribió en las últimas 24
+ * horas, solo cuando lo aprobó: mientras tanto sale el de siempre.
+ */
+export const MOVED_TO_CONFIRM_KEY = "aviso_cita_movida_confirmar"
+
+/**
  * «¿Vienes en camino?» (ADR 0113): de «Recordar la cita», a los minutos de la
  * hora si la persona no llegó y en su sede ya marcaron llegadas ese día. Es su
  * propio trabajo, uno por cita, y cuenta como recordatorio: lo apaga «No más
@@ -214,6 +222,7 @@ export const AUTOMATION_MESSAGE_KEYS = [
   "aviso_cita_reservada",
   APPOINTMENT_DATA_NOTICE_KEY,
   "aviso_cita_movida",
+  MOVED_TO_CONFIRM_KEY,
   "aviso_cita_cancelada",
   "recordatorio_control",
   "seguimiento_presupuesto",
@@ -367,7 +376,8 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     buttons: [{ action: "responder", title: "Sí, otra fecha", asks: "reservar" }, OPT_OUT],
     subject: "¿Te buscamos otra fecha?",
   },
-  // Los tres avisos de «Recordar la cita». No piden confirmar: eso lo pide el
+  // Los tres avisos de «Recordar la cita». Solo el de cambio pide confirmar, y solo cuando la
+  // cita quedó por confirmar (`aviso_cita_movida_confirmar`, ADR 0180); lo demás lo pide el
   // recordatorio, cerca de la fecha. Son avisos: sin botón de baja (ADR 0040).
   aviso_cita_reservada: {
     key: "aviso_cita_reservada",
@@ -398,6 +408,20 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     body: "Hola, {{1}}. Tu cita en {{2}} cambió de fecha: ahora es {{3}}. Si no te queda bien, responde a este mensaje.",
     variables: ["persona", "lugar", "citas"],
     buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }],
+    subject: "Tu cita cambió de fecha",
+  },
+  // Dice qué hace cada botón: «No podré ir» no cancela, busca otra fecha (mesa del 11 nov).
+  aviso_cita_movida_confirmar: {
+    key: "aviso_cita_movida_confirmar",
+    purpose: "avisos",
+    category: "utility",
+    template: "odentia_aviso_cita_movida_confirmar_v1",
+    body: "Hola, {{1}}. Tu cita en {{2}} cambió de fecha: ahora es {{3}}. Si te queda bien, confírmala. Si no puedes, avísanos y te buscamos otra fecha.",
+    variables: ["persona", "lugar", "citas"],
+    buttons: [
+      { action: "confirmar", title: "Confirmar" },
+      { action: "responder", title: "No podré ir", asks: "cambiar" },
+    ],
     subject: "Tu cita cambió de fecha",
   },
   aviso_cita_cancelada: {
@@ -698,6 +722,7 @@ export const NOTICE_TEXTS: Partial<Record<string, string>> = {
   aviso_cita_reservada: "Hola, {{persona}}. Tu cita en {{lugar}} quedó reservada: {{citas}}. Para cambiarla, responde a este mensaje.",
   aviso_cita_reservada_datos: "Hola, {{persona}}. Tu cita en {{lugar}} es {{citas}}. Faltan tus datos: complétalos antes de venir.",
   aviso_cita_movida: "Hola, {{persona}}. Tu cita en {{lugar}} cambió: ahora es {{citas}}. Si no te queda bien, responde a este mensaje.",
+  aviso_cita_movida_confirmar: "Hola, {{persona}}. Tu cita en {{lugar}} cambió: ahora es {{citas}}. Para confirmarla o cambiarla, responde a este mensaje.",
   aviso_cita_cancelada: "Hola, {{persona}}. Tu cita del {{cita_pasada}} en {{clinica}} quedó cancelada. Responde a este mensaje para agendar otra.",
   presupuesto_listo: "Hola, {{persona}}. Tu presupuesto ya está listo: {{resumen_presupuesto}}. Puedes verlo aquí.",
 }

@@ -774,11 +774,12 @@ interface JobView extends Record<string, unknown> {
 }
 
 /**
- * El recordatorio de la cita logró que la confirmara: se confirmó después de enviarlo. La que ya
+ * El recordatorio de la cita, o el aviso de su cambio con «Confirmar» (ADR 0180), logró que la
+ * confirmara: se confirmó después de enviarlo. La que ya
  * estaba confirmada (desde el ADR 0109, la que elige la propia persona nace así) no cuenta. Toda
  * confirmación pasa por `setAppointmentStatus`, que la deja en la auditoría.
  */
-const CONFIRMED_AFTER_REMINDER = sql`(j.kind = 'recordatorio_cita' and a.status = 'confirmada' and exists (
+const CONFIRMED_AFTER_REMINDER = sql`(j.kind in ('recordatorio_cita', 'aviso_cita_movida') and a.status = 'confirmada' and exists (
   select 1 from audit_event e
   where e.organization_id = j.organization_id and e.entity = 'appointment' and e.entity_id = a.id::text
     and e.action = 'appointment.status_confirmada' and e.created_at >= coalesce(m.created_at, j.scheduled_for)))`

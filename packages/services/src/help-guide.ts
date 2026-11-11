@@ -416,7 +416,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "mover-cita-confirmada",
         q: "Moví una cita que ya estaba confirmada, ¿sigue confirmada?",
-        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha, y se le recuerda de nuevo para la fecha nueva. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
+        forms: [
+          "¿Cómo confirma la persona la nueva fecha?",
+          "el paciente confirma la fecha nueva",
+          "el aviso de cambio trae confirmar",
+          "toca confirmar en un mensaje viejo",
+        ],
+        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha: el aviso del cambio le pide confirmar la fecha nueva con un botón «Confirmar», y los recordatorios vuelven a pedírselo si no lo hace. Si toca «Confirmar» en un mensaje de una fecha que después cambió, no se confirma: Sofi le dice la fecha nueva y le pregunta. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
       },
       {
         id: "aparece-profesional-agenda",
@@ -441,7 +447,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quien-avisa-persona-cita",
         q: "¿Quién le avisa a la persona su cita?",
-        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si al moverla queda por confirmar, el aviso del cambio ya trae «Confirmar»; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
       },
       {
         id: "marco-llego",
