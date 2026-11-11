@@ -466,16 +466,23 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     const second = await run((tx) =>
       createProposal(tx, ORG, { conversationId: other.conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:retira-2" }),
     )
-    await inbound("retira-2", other.connectionId, "evt-ret-2b", "Sí")
-    // La clínica pregunta otra cosa y la persona contesta: el «sí» de antes ya no es lo último que dijo.
-    await run((tx) => sendOutbound(tx, ORG, { conversationId: other.conversationId, senderKind: "agent", content: { type: "text", text: "¿Prefieres en la mañana o en la tarde?" } }))
-    await inbound("retira-2", other.connectionId, "evt-ret-2c", "En la tarde")
+    // Primero pregunta otra cosa; el «sí» llega a la pregunta siguiente de la clínica, no a la cita.
+    await inbound("retira-2", other.connectionId, "evt-ret-2b", "¿Dónde quedan?")
+    await run((tx) => sendOutbound(tx, ORG, { conversationId: other.conversationId, senderKind: "agent", content: { type: "text", text: "En Miraflores. ¿Te mando la ubicación?" } }))
+    await inbound("retira-2", other.connectionId, "evt-ret-2c", "Sí")
     await expect(
       run((tx) => confirmProposalByContact(tx, ORG, other.contactId, second.id)),
     ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
-    // Un «sí, gracias» a lo último que se le dijo sí confirma.
-    await inbound("retira-2", other.connectionId, "evt-ret-2d", "Sí, gracias")
-    const done = await run((tx) => confirmProposalByContact(tx, ORG, other.contactId, second.id))
+
+    // Lo que la clínica escribe después del sí (pedirle su correo) no lo borra.
+    const third = await openConversation("retira-3", "evt-ret-3")
+    const asked = await run((tx) =>
+      createProposal(tx, ORG, { conversationId: third.conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:retira-3" }),
+    )
+    await inbound("retira-3", third.connectionId, "evt-ret-3b", "Sí, gracias")
+    await run((tx) => sendOutbound(tx, ORG, { conversationId: third.conversationId, senderKind: "agent", content: { type: "text", text: "Para dejarla lista, ¿me dejas tu correo?" } }))
+    await inbound("retira-3", third.connectionId, "evt-ret-3c", "ana@example.com")
+    const done = await run((tx) => confirmProposalByContact(tx, ORG, third.contactId, asked.id))
     expect(done.status).not.toBe("propuesta")
   })
 

@@ -2603,6 +2603,20 @@ export function isAffirmative(text: string | null): boolean {
   return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
 }
 
+/** Lo que retira un sí ya dado: «no», «mejor otro día», «espera», «cancela», «cambia la hora». */
+const RETRACT_WORDS = new Set(["no", "mejor", "espera", "esperame", "cancela", "cancelala", "cancelar", "cambia", "cambiar", "cambiala", "otro", "otra", "olvidalo", "olvida"])
+
+export function retractsYes(text: string | null): boolean {
+  if (!text) return false
+  const words = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+  return words.some((word) => RETRACT_WORDS.has(word))
+}
+
 /** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */
 export function onlyCourtesy(text: string | null): boolean {
   const words = plainWords(text)
@@ -2730,16 +2744,18 @@ export async function confirmProposalByContact(
   }
   const since = new Date(noticeShown?.createdAt ?? current.createdAt).getTime()
   const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= since
-  // El sí por palabras contesta lo último que se le dijo: solo cuenta lo que
-  // escribió después del último mensaje de la clínica, y nada de lo que escribió
-  // después lo retira («sí» y luego «mejor el jueves» no confirma). Un «sí» a
-  // otra pregunta que vino después de la propuesta, o uno ya retirado, no sirve.
-  const lastOut = items.filter((m) => m.direction === "out").at(-1)
-  const answerSince = Math.max(since, lastOut ? new Date(lastOut.createdAt).getTime() : 0)
-  const answer = items.filter((m) => m.direction === "in" && new Date(m.createdAt).getTime() >= answerSince)
-  const yesAt = answer.findIndex((m) => isAffirmative(m.body))
-  const byWords =
-    yesAt >= 0 && answer.slice(yesAt + 1).every((m) => isAffirmative(m.body) || onlyCourtesy(m.body)) ? answer[yesAt] : undefined
+  // El sí por palabras contesta la propuesta: cuenta lo que escribió en su
+  // primera respuesta después de ella (hasta que la clínica le volvió a
+  // escribir), y nada de lo que escribió después lo retira («sí» y luego
+  // «mejor no»). Un «sí» a otra pregunta que vino después no la confirma; lo
+  // que la clínica escribió después del sí (pedirle su correo, «¡listo!») no lo borra.
+  const at = (m: (typeof items)[number]) => new Date(m.createdAt).getTime()
+  const firstIn = items.find((m) => m.direction === "in" && at(m) >= since)
+  const nextOut = firstIn ? items.find((m) => m.direction === "out" && at(m) > at(firstIn)) : undefined
+  const firstAnswer = items.filter((m) => m.direction === "in" && at(m) >= since && (!nextOut || at(m) < at(nextOut)))
+  const yes = firstAnswer.find((m) => isAffirmative(m.body))
+  const retracted = yes ? items.some((m) => m.direction === "in" && at(m) > at(yes) && retractsYes(m.body)) : false
+  const byWords = yes && !retracted ? yes : undefined
   // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
   const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
   const latestIn = items.filter((m) => m.direction === "in").at(-1)

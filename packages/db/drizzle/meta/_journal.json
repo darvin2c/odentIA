@@ -687,6 +687,13 @@
       "when": 1794403128668,
       "tag": "0097_mensaje_intento_de_envio",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1794403138668,
+      "tag": "0098_mensaje_intento_de_envio_reglas",
+      "breakpoints": true
     }
   ]
 }

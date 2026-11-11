@@ -16,7 +16,7 @@ import {
   SIGNUP_TOKEN_DEAD,
   type Storage,
 } from "@odentia/services"
-import { and, eq, lt, sql } from "drizzle-orm"
+import { and, eq, isNull, lt, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 export interface SendDeps {
   storage: Storage
@@ -300,10 +300,17 @@ export async function processOutbound(
       if (row.connection.ownApp && !row.connection.signup && typeof token === "string") {
         ownAppToken = { connectionId: row.connection.id, token }
       }
-      await tx
+      // Solo quien encuentra la marca vacía envía: otro worker que leyó el mismo
+      // trabajo a la vez no anota nada y no llama al canal.
+      const [marked] = await tx
         .update(message)
         .set({ sendAttemptedAt: sql`clock_timestamp()` })
-        .where(and(eq(message.id, messageId), eq(message.status, "queued")))
+        .where(and(eq(message.id, messageId), eq(message.status, "queued"), isNull(message.sendAttemptedAt)))
+        .returning({ id: message.id })
+      if (!marked) return null
+      // El trabajo queda reservado mientras se llama al canal: si la llamada
+      // tarda, la cola no lo entrega a otro worker, que lo dejaría «no se sabe si salió».
+      await tx.execute(sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, ${SENDING_VT_SECONDS}::integer)`)
       return {
         conversationId: row.conversation.id,
         outbound,
@@ -464,6 +471,9 @@ export async function consumeOutbound(
     })
   }
 }
+
+/** Cuánto queda reservado un trabajo mientras se llama al canal (más que cualquier llamada). */
+export const SENDING_VT_SECONDS = 300
 
 /** Cada cuánto vuelve a mirar un mensaje que espera a otro de su conversación. */
 export const WAITING_DELAY_SECONDS = 30
