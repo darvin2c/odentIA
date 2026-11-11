@@ -504,8 +504,9 @@ async function workspaceToday(
   // llegar tarde o marcarse «No vino») y, al final, quien no vino (para reagendar).
   const waitingRank = (item: (typeof sorted)[number]) =>
     item.visit === "llego" || item.visit === "en_atencion" ? 0
-      : item.visit === "por_confirmar" || item.visit === "confirmada" ? 1
-        : item.visit === "sin_cerrar" ? 2
+      // Quien llegó tarde (sin cerrar) antes que lo que viene: es lo que hay que resolver ya.
+      : item.visit === "sin_cerrar" ? 1
+        : item.visit === "por_confirmar" || item.visit === "confirmada" ? 2
         : item.visit === "no_vino" ? 3 : 4
   const shown = own
     ? sorted
@@ -895,9 +896,12 @@ async function waitingCameUnrecorded(tx: Db, orgId: string, userId: string): Pro
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
       and not exists (select 1 from audit_event s where s.organization_id = a.organization_id and s.entity = 'appointment'
         and s.entity_id = a.id::text and s.action = 'appointment.record_skipped' and s.created_at >= came.created_at)
-    order by a.starts_at desc, a.id limit ${WAITING_LIMITS.unclosed}`)
+    order by a.starts_at desc, a.id limit ${CAME_UNRECORDED_ROWS}`)
   return [...rows]
 }
+
+/** Las propias «atendidas sin registrar» que se ven a la vez: son de quien mira y no se van solas. */
+const CAME_UNRECORDED_ROWS = 10
 
 /**
  * Lo aceptado sin cita: cuántos son en Pacientes › «Por agendar» (la misma

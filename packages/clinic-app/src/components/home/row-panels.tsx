@@ -13,7 +13,7 @@ import { useOrgProfile } from "../../lib/org"
 import { whatsappMessagesKey } from "../../lib/whatsapp"
 import type { WaitingPromotion, WaitingRow } from "../../lib/workspace"
 import { productUi } from "../../product/product-ui"
-import { useAppointmentVisitStatus } from "../agenda/arrival"
+import { undoCame, useAppointmentVisitStatus } from "../agenda/arrival"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { useDiscardEncounter } from "../patient/stale-encounter"
@@ -70,6 +70,16 @@ export function VisitPanel({
   const attend = useAttendAppointment()
   const status = useAppointmentVisitStatus()
   const [noShow, setNoShow] = useState(false)
+  // «Vino»: el panel dice cómo quedó y ofrece deshacerlo ahí mismo, sin depender de un aviso que se va.
+  const [came, setCame] = useState(false)
+  const undo = useMutation({
+    mutationFn: () => undoCame(row.id),
+    onSuccess: () => {
+      setCame(false)
+      onChanged()
+    },
+    onError: (cause) => toast.error(submitErrorMessage(cause)),
+  })
   return (
     <DetailDrawer
       open
@@ -77,7 +87,11 @@ export function VisitPanel({
       description={[text.ask].filter(Boolean).join(" · ") || undefined}
       onClose={onClose}
       actions={
-        noShow ? (
+        came ? (
+          <Button type="button" variant="secondary" className={ACTION} disabled={undo.isPending} onClick={() => undo.mutate()}>
+            {undo.isPending ? "Deshaciendo…" : "Deshacer «Vino»"}
+          </Button>
+        ) : noShow ? (
           canWrite ? (
             <Button type="button" className={ACTION} onClick={() => openBookingAnywhere({ patient: { id: row.patientId, name: row.patientName }, lockedPatient: true })}>
               Reagendar
@@ -121,11 +135,10 @@ export function VisitPanel({
                   onClick={() =>
                     status.mutate(
                       { id: row.id, status: "atendida", expectedVersion: row.version },
-                      // El aviso lo dice y el panel se cierra: ya no queda nada que preguntar.
                       {
                         onSuccess: () => {
+                          setCame(true)
                           onChanged()
-                          onClose()
                         },
                       },
                     )
@@ -163,7 +176,14 @@ export function VisitPanel({
       }
     >
       <div className="flex flex-col gap-4">
-        {noShow ? (
+        {came ? (
+          <p role="status" className="text-sm">
+            Quedó atendida.{" "}
+            {row.professionalName
+              ? `Lo que se hizo lo registra ${row.professionalName}, a quien le aparece en «Te espera».`
+              : "Lo que se hizo lo registra quien la atendió."}
+          </p>
+        ) : noShow ? (
           <p role="status" className="text-sm">Quedó marcada como que no vino. Si quiere otra fecha, puedes reagendarla.</p>
         ) : (
           <p className="text-sm">
@@ -347,7 +367,11 @@ export function OldUnclosedPanel({
     <DetailDrawer
       open
       title="Citas de hace más de un mes sin cerrar"
-      description={`${row.count} ${row.count === 1 ? "cita" : "citas"}: nadie dijo si vinieron`}
+      description={(() => {
+        // La cuenta de lo que queda, no la de cuando se abrió.
+        const left = list.data ? items.length : row.count
+        return left === 0 ? "No queda ninguna" : `${left} ${left === 1 ? "cita" : "citas"}: nadie dijo si vinieron`
+      })()}
       onClose={onClose}
       actions={
         canWrite && missing.length > 0 ? (
@@ -364,7 +388,8 @@ export function OldUnclosedPanel({
         {list.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
         {list.isError ? <p className="text-sm text-destructive">{submitErrorMessage(list.error)}</p> : null}
         {!list.isPending && !list.isError && items.length === 0 ? <p className="text-sm">No queda ninguna sin cerrar.</p> : null}
-        {items.length > 0 && row.count > items.length ? (
+        {/* El servidor trae hasta 200 a la vez. */}
+        {items.length >= 200 ? (
           <p className="text-[13px] text-muted-foreground">
             Aquí están las {items.length} más antiguas; al cerrarlas aparecen las siguientes.
           </p>
