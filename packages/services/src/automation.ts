@@ -245,6 +245,8 @@ export interface JobPayload {
    * la cita pasó a otro día después, no confirma la nueva (ADR 0180).
    */
   announcedStartsAt?: string
+  /** Su mensaje pidió confirmar (traía «Confirmar»): un «sí» escrito le responde a él (ADR 0180). */
+  asksToConfirm?: boolean
 }
 
 /** Lee el payload JSONB de un caso campo por campo (sin casts ciegos). */
@@ -260,6 +262,7 @@ export function jobPayloadOf(value: unknown): JobPayload {
   if ("taskId" in value && typeof value.taskId === "string") payload.taskId = value.taskId
   if ("announcedStartsAt" in value && typeof value.announcedStartsAt === "string" && Number.isFinite(Date.parse(value.announcedStartsAt)))
     payload.announcedStartsAt = value.announcedStartsAt
+  if ("asksToConfirm" in value && value.asksToConfirm === true) payload.asksToConfirm = true
   return payload
 }
 
@@ -1169,21 +1172,39 @@ export async function restartAppointmentReminders(tx: Db, orgId: string, appoint
 
 /**
  * A la persona se le escribió por esta cita (el recordatorio, o el aviso de que se reservó o
- * cambió), después la cita pasó a otro día y por esta conversación todavía no se le escribió nada:
- * su «sí» responde a la fecha anterior. No se confirma: se le dice la fecha nueva y se le pregunta.
- * El botón de un mensaje que guardó su fecha (`announcedStartsAt`) se mide con esa fecha.
+ * cambió) con una fecha que ya no es la de la cita, y por esta conversación no se le escribió
+ * nada después del último movimiento: su «sí» responde a la fecha anterior. No se confirma: se le
+ * dice la fecha nueva y se le pregunta. Cada mensaje dice su fecha (`announcedStartsAt`, por día en
+ * la zona de la sede, ADR 0180); los que salieron antes de guardarla se miden por el movimiento:
+ * el recordatorio marcado como de la fecha anterior, o el aviso que salió antes del último cambio
+ * de día.
  */
 export async function answersEarlierDate(tx: Db, orgId: string, appointmentId: string, conversationId: string): Promise<boolean> {
+  const [appt] = await tx
+    .select({ startsAt: appointment.startsAt, branchId: appointment.branchId })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  if (!appt) return false
+  const zone = await timezoneOf(tx, orgId, appt.branchId)
   const rows = await tx.execute<{ stale: boolean }>(sql`
     with last_move as (
-      select max(a.created_at) as at from audit_event a
+      select max(a.created_at) as at,
+        max(a.created_at) filter (where a.metadata->>'remindersMark' is not null) as day_at
+      from audit_event a
       where a.organization_id = ${orgId} and a.entity = 'appointment' and a.entity_id = ${appointmentId}
-        and a.action = 'appointment.moved' and a.metadata->>'remindersMark' is not null)
+        and a.action = 'appointment.moved')
     select exists (
       select 1 from automation_job j, last_move
       where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.status = 'enviado'
-        and ((j.kind = 'recordatorio_cita' and j.dedupe_key like ${`%${EARLIER_DATE_MARK}%`})
-          or (j.kind in ('aviso_cita_reservada', 'aviso_cita_movida') and j.created_at < last_move.at))
+        and j.kind in ('recordatorio_cita', 'aviso_cita_reservada', 'aviso_cita_movida')
+        and case
+          when j.payload->>'announcedStartsAt' is not null then
+            ((j.payload->>'announcedStartsAt')::timestamptz at time zone ${zone})::date
+              <> (${appt.startsAt.toISOString()}::timestamptz at time zone ${zone})::date
+          when j.kind = 'recordatorio_cita' then j.dedupe_key like ${`%${EARLIER_DATE_MARK}%`}
+          else j.created_at < last_move.day_at
+        end
         and not exists (
           select 1 from message m
           where m.organization_id = ${orgId} and m.conversation_id = ${conversationId} and m.direction = 'out'
@@ -3058,14 +3079,16 @@ export async function deliverJob(
         updatedAt: now,
       })
       .where(inArray(automationJob.id, ids()))
-    // La fecha que dijo el mensaje, por cita: su «Confirmar» vale para esa y no para otra (ADR 0180).
+    // La fecha que dijo el mensaje, por cita, y si pidió confirmar: su «Confirmar» y el «sí» escrito
+    // valen para esa fecha y no para otra (ADR 0180).
+    const asksToConfirm = spec.buttons.some((button) => button.action === "confirmar")
     for (const item of group) {
       const announced = item.appointmentId ? composed.announced[item.appointmentId] : undefined
       if (!announced) continue
       const kept = item.payload && typeof item.payload === "object" ? item.payload : {}
       await tx
         .update(automationJob)
-        .set({ payload: { ...kept, announcedStartsAt: announced } })
+        .set({ payload: { ...kept, announcedStartsAt: announced, ...(asksToConfirm ? { asksToConfirm: true } : {}) } })
         .where(eq(automationJob.id, item.id))
     }
     await audit(tx, orgId, null, "automation_job.sent", job.id, {
@@ -3401,8 +3424,25 @@ export async function appointmentConfirmationPlan(
       ),
     )
     .orderBy(asc(automationJob.scheduledFor))
+  // El aviso del cambio con «Confirmar» de la fecha que tiene ahora también se lo pidió (ADR 0180).
+  const [notice] = await tx
+    .select({ updatedAt: automationJob.updatedAt })
+    .from(automationJob)
+    .where(
+      and(
+        eq(automationJob.organizationId, orgId),
+        eq(automationJob.appointmentId, appt.id),
+        eq(automationJob.kind, "aviso_cita_movida"),
+        eq(automationJob.status, "enviado"),
+        sql`${automationJob.payload}->>'asksToConfirm' = 'true'`,
+        sql`${automationJob.payload}->>'announcedStartsAt' = ${appt.startsAt.toISOString()}`,
+      ),
+    )
+    .orderBy(desc(automationJob.updatedAt))
+    .limit(1)
   const sent = jobs.find((job) => job.status === "enviado")
-  if (sent) return { askAt: null, askedAt: sent.updatedAt.toISOString() }
+  const asked = [sent?.updatedAt, notice?.updatedAt].filter((at): at is Date => !!at).sort((a, b) => b.getTime() - a.getTime())[0]
+  if (asked) return { askAt: null, askedAt: asked.toISOString() }
   const pending = jobs.find((job) => job.status === "pendiente")
   if (pending) return { askAt: pending.scheduledFor.toISOString(), askedAt: null }
   // Aún sin programar (falta para la cita): el primero que llegue a tiempo.
