@@ -5,6 +5,7 @@
 // de la OMS, las preguntas y el cierre. Las capturas son de la app, con datos de prueba.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { signatureFaq } from "../../../lib/signature-faq"
 import { days, giftOf, shownPlan } from "../../../lib/pricing"
 import { WORDS } from "../../../lib/product"
 import { ctaOf } from "../../../lib/site"
@@ -56,6 +57,7 @@ const faq: FaqItem[] = [
     q: "¿Se puede corregir una atención firmada?",
     a: "No se cambia. Lo que falte o haya que aclarar va en una adenda, con su fecha y quién la escribió. Lo firmado queda como estaba.",
   },
+  signatureFaq("el médico"),
   {
     q: "¿Quién puede ver la historia clínica?",
     a: "Quien atiende, con los permisos que le das. Recepción y caja ven lo que necesitan para su trabajo, no la historia. Sofi tampoco la ve.",
