@@ -196,6 +196,19 @@ const { kind } = Astro.props
   .vv { position: relative; display: flex; justify-content: center; contain: inline-size; animation: float 7s ease-in-out infinite; }
   @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
   @media (prefers-reduced-motion: reduce) { .vv, .bub.ok, .chip i { animation: none; } }
+  /* Las piezas de cada ilustración entran una tras otra al cargar: los mensajes del chat, los pasos del
+     pedido, las filas. Ya ocupan su lugar desde el principio y solo cambian opacidad y un desplazamiento
+     corto, así la portada no cambia de alto ni empuja nada. Con menos movimiento se ven todas de una vez. */
+  @media (prefers-reduced-motion: no-preference) {
+    .vv :is(.bub:not(.ok), li, .chip) { animation: vv-in .55s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(.45s + var(--vi, 0) * .3s); }
+    .vv :is(.bub, li, .chip):nth-child(2) { --vi: 1; }
+    .vv :is(.bub, li, .chip):nth-child(3) { --vi: 2; }
+    .vv :is(.bub, li, .chip):nth-child(4) { --vi: 3; }
+    .vv :is(.bub, li, .chip):nth-child(5) { --vi: 4; }
+    .vv :is(.bub, li, .chip):nth-child(6) { --vi: 5; }
+    .vv :is(.bub, li, .chip):nth-child(n + 7) { --vi: 6; }
+  }
+  @keyframes vv-in { from { opacity: 0; transform: translateY(10px); } }
   .panel { width: min(520px, 100%); padding: 22px; border-radius: 24px; background: rgba(6, 23, 13, .78); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 40px 80px -40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 14px; color: #e3f1e7; }
   .ph { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--on-night-3); text-transform: uppercase; }
   .ex { font-family: var(--mono); font-size: 11px; text-transform: lowercase; color: var(--on-night-3); padding: 2px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
