@@ -1284,11 +1284,14 @@ it("a quien aún no es paciente le da su enlace con la hora que eligió para dej
   // Con ese enlace ya dado en la atención, otra llamada con la misma hora no lo vuelve a armar (ronda del ADR 0109).
   ctx.pickLinks = [new Date(first!.slot.startsAt).toISOString()]
   expect(await book()).toContain("Ya le diste su enlace con esa hora en esta atención")
-  // Pero si lo pide otra vez («mándame el link otra vez, no lo veo»), le devuelve el mismo para escribírselo (auditoría del 8 nov).
-  ctx.pickLinkUrls = [url.toString()]
-  expect(await book()).toContain(`escríbeselo de nuevo tal cual, en una frase: ${url.toString()}`)
+  // Pero si lo pide otra vez («mándame el link otra vez, no lo veo»), le devuelve el mismo para escribírselo
+  // (auditoría del 8 nov), con la referencia de su token: el historial lo muestra tapado y copiado de ahí no abre.
+  const resent = await book()
+  expect(resent).toContain(`escríbeselo de nuevo tal cual, en una frase: ${PICK_LINK.exec(sent)![0]}`)
+  expect(pickOf(resent).toString()).toBe(url.toString())
+  expect(await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, contactId)))).toHaveLength(1)
   ctx.pickLinks = []
-  ctx.pickLinkUrls = []
   // Un servicio inventado (vacío) no sigue sin él: se le pide el de «Servicios».
   expect(String(await makeAgentTools(ctx).find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...first!.slot, serviceId: "00000000-0000-0000-0000-000000000000" })))
     .toContain("Ese servicio no es de la clínica")

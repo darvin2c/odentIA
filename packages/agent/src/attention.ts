@@ -105,14 +105,10 @@ export interface AttentionProgress {
   formulas: { opener: number; noted: number }
   /** Las horas (ISO 8601) de los enlaces con la hora elegida que ya le dio en esta atención (ADR 0109). */
   pickLinks: string[]
-  /** Esos enlaces tal como se los escribió, para volver a dárselos si los pide. */
-  pickLinkUrls: string[]
 }
 
 /** La hora del enlace con la hora elegida (`bookingPickAddress`), tal como queda en el mensaje; también si lleva otro destino. */
 const PICK_LINK_HOUR = /\/(?:reserva|pendientes)\?\S*?[?&]hora=([^&\s]+)/g
-/** El mismo enlace entero, con su dirección: se le puede volver a escribir tal cual. */
-const PICK_LINK_URL = /https?:\/\/\S+?\/(?:reserva|pendientes)\?\S*?[?&]hora=[^\s]+/g
 
 /**
  * Cómo va la atención: cuántas veces le respondió, si ya ofreció horarios, qué
@@ -158,7 +154,6 @@ export function attentionProgress(input: {
       noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
     },
     pickLinks: [...new Set(said.flatMap((item) => [...(item.body ?? "").matchAll(PICK_LINK_HOUR)].map((match) => decodeURIComponent(match[1] ?? ""))))],
-    pickLinkUrls: [...new Set(said.flatMap((item) => [...(item.body ?? "").matchAll(PICK_LINK_URL)].map((match) => match[0].replace(/[.,;:!?)»]+$/, ""))))],
   }
 }
 

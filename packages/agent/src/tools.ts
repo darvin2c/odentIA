@@ -360,8 +360,6 @@ export interface AgentToolCtx {
   formulas?: { opener: number; noted: number }
   /** Las horas de los enlaces con la hora elegida que ya le dio en esta atención (`attentionProgress`). */
   pickLinks?: string[]
-  /** Esos enlaces tal como se le escribieron (`attentionProgress().pickLinkUrls`). */
-  pickLinkUrls?: string[]
   /** Ya se le pidió una vez en esta corrida que no repita esas fórmulas. */
   formulaNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
@@ -1783,18 +1781,28 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return link ? { link, url: bookingPickAddress(origin, personalLinkRef(link.linkId), { branchId, professionalUserId, startsAt }) } : null
     })
 
-  /** Ya le dio en esta atención el enlace con esa misma hora: no se le manda otra vez. */
-  /**
-   * Ya le dio su enlace con esa hora. No se arma otro, pero si lo pide de nuevo («mándame el link
-   * otra vez, no lo veo») se le devuelve el mismo para que se lo escriba tal cual: no repetirlo a
-   * cada «ya» no es negárselo (auditoría del 8 nov: 0 de 4 lo reenviaba).
-   */
-  const pickLinkGiven = (startsAt: string): string | null => {
+  /** Ya le dio en esta atención el enlace con esa misma hora. */
+  const pickLinkGiven = (startsAt: string): boolean => {
     const at = Date.parse(startsAt)
-    if (Number.isNaN(at) || !(ctx.pickLinks ?? []).some((given) => Date.parse(given) === at)) return null
-    const url = (ctx.pickLinkUrls ?? []).find((link) => {
-      const hour = /[?&]hora=([^&\s]+)/.exec(link)?.[1]
-      return hour !== undefined && Date.parse(decodeURIComponent(hour)) === at
+    return !Number.isNaN(at) && (ctx.pickLinks ?? []).some((given) => Date.parse(given) === at)
+  }
+  /**
+   * Ya le dio su enlace con esa hora. No se le repite a cada «ya», pero si lo pide de nuevo («mándame
+   * el link otra vez, no lo veo») se le devuelve el mismo para que se lo escriba tal cual: no
+   * repetirlo no es negárselo (auditoría del 8 nov: 0 de 4 lo reenviaba). Se vuelve a pedir al
+   * servicio, que devuelve el mismo enlace vivo con su referencia: el historial que lee el modelo
+   * lo muestra sin token (`hidePersonalLinkRefs`) y copiado de ahí no abriría.
+   */
+  const pickLinkAgain = async (
+    origin: string | Promise<string | null>,
+    slot: Parameters<typeof pickLink>[1],
+  ): Promise<string> => {
+    const url = await (async () => {
+      const at = await origin
+      return at ? ((await pickLink(at, slot))?.url ?? null) : null
+    })().catch((error: unknown) => {
+      if (error instanceof ServiceError) return null
+      throw error
     })
     const resend = url
       ? `Si te lo pidió otra vez o dice que no le llegó o no lo ve, escríbeselo de nuevo tal cual, en una frase: ${url}`
@@ -1863,8 +1871,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const publicUrl = ctx.publicUrl
         const branchId = input.branchId ?? offeredBranch(input)
         if (!publicUrl || !branchId) return null
-        const given = pickLinkGiven(input.startsAt)
-        if (given) return given
+        if (pickLinkGiven(input.startsAt)) {
+          return pickLinkAgain(inOrg((tx) => clinicLinkOrigin(tx, publicUrl)), {
+            patientId: input.patientId,
+            branchId,
+            ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+            professionalUserId,
+            startsAt: input.startsAt,
+          })
+        }
         try {
           const found = await inOrg(async (tx) => {
             const origin = await clinicLinkOrigin(tx, publicUrl)
@@ -1962,8 +1977,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (await unknownService(input.serviceId)) return UNKNOWN_SERVICE
       const branchId = input.branchId ?? offeredBranch(input)
       if (!branchId) return "Falta la sede del hueco que eligió: vuelve a llamar con su branchId exacto (el dato «sede» del hueco de buscar_huecos)."
-      const given = pickLinkGiven(input.startsAt)
-      if (given) return given
+      if (pickLinkGiven(input.startsAt)) {
+        return pickLinkAgain(origin, {
+          branchId,
+          ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+          professionalUserId,
+          startsAt: input.startsAt,
+          ...(linked.length > 0 ? { newPerson: true } : {}),
+        })
+      }
       const toTeam = "pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que lo registre y le confirme; no le digas que quedó reservada."
       let issued: Awaited<ReturnType<typeof pickLink>>
       try {

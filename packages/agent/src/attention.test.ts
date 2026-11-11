@@ -110,8 +110,7 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     })
     expect(given.pickLinks).toEqual(["2026-11-03T14:00:00.000Z"])
     expect(attentionLines(given, "Sofi").join("\n")).toContain("Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar")
-    // Si lo pide otra vez, se le vuelve a escribir el mismo (auditoría del 8 nov): queda entero para eso.
-    expect(given.pickLinkUrls).toEqual([link])
+    // Si lo pide otra vez, la herramienta se lo devuelve (auditoría del 8 nov).
     expect(attentionLines(given, "Sofi").join("\n")).toContain("Si te pide el enlace otra vez o dice que no le llegó")
     // La agenda que acompaña a los horarios no trae hora; lo de otra atención tampoco cuenta.
     const agenda = attentionProgress({

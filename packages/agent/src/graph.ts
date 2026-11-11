@@ -985,7 +985,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // `send_reply` pide de nuevo la respuesta que vuelve a «Entiendo…» o «anoté que…».
     toolCtx.formulas = progress.formulas
     toolCtx.pickLinks = progress.pickLinks
-    toolCtx.pickLinkUrls = progress.pickLinkUrls
     // Con una cita que espera su sí, decir que quedó reservada es falso (`send_reply`).
     toolCtx.awaitingYes = progress.pendingBooking
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
