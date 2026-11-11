@@ -2,6 +2,7 @@ import {
   asAdminDecider,
   createDecisionModel,
   createFakeDecisionModel,
+  createHelpWriter,
   meterAiUse,
   type PlatformDecisions,
   type PlatformLlm,
@@ -29,6 +30,7 @@ import {
   markSupportCaseSeen,
   orgProduct,
   productHelpTopics,
+  markHelpNoneFits,
   rateHelp,
   reopenMySupportCase,
   replyToMySupportCase,
@@ -46,6 +48,8 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
 const askInput = z.object({
   question: z.string().trim().min(3, "Escribe tu pregunta: al menos 3 caracteres.").max(500, "Escribe como mucho 500 caracteres."),
   screen: z.string().max(200),
+  /** La pregunta anterior de esa conversación y la pantalla de su respuesta: la filtra el servicio. */
+  previous: z.object({ question: z.string().max(500), where: z.string().max(200).nullable() }).optional(),
 })
 const feedbackInput = z.object({ helpful: z.boolean() })
 const requestInput = z.object({
@@ -131,10 +135,15 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = askInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    // Al proveedor viajan solo la pregunta y el nombre de la pantalla; lo que cuesta lo paga odentIA (origen «ayuda»).
+    // A Jev viajan la pregunta, la anterior y el nombre de la pantalla; a quien redacta, la pregunta y textos de
+    // la guía. Nada de la clínica. Lo que cuesta lo paga odentIA (origen «ayuda»).
     return runService(c, 200, async () => {
       const asker = askerOf(userId, memberRole, await withOrgContext(deps.db, orgId, (tx) => orgProduct(tx, orgId)))
-      return meterAiUse(deps.db, orgId, "ayuda", async () => askHelp(deps.db, orgId, asker, parsed.data, await helpDecider(deps, orgId)))
+      // Quien redacta es el modelo de la plataforma, y solo entra si Jev decide: sin Jev no se redacta.
+      return meterAiUse(deps.db, orgId, "ayuda", async () => {
+        const decider = await helpDecider(deps, orgId)
+        return askHelp(deps.db, orgId, asker, parsed.data, decider, decider ? createHelpWriter(deps.llm) : null)
+      })
     })
   })
 
@@ -146,6 +155,17 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       await withOrgContext(deps.db, orgId, (tx) => rateHelp(tx, orgId, userId, id.data, parsed.data.helpful))
+      return { ok: true }
+    })
+  })
+
+  /** «Ninguna es lo que busco»: queda contado como una pregunta que nadie respondió, sin su texto. */
+  app.post("/ask/:id/none", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const id = z.uuid().safeParse(c.req.param("id"))
+    if (!id.success) return validationError(c, id.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => markHelpNoneFits(tx, orgId, userId, id.data))
       return { ok: true }
     })
   })

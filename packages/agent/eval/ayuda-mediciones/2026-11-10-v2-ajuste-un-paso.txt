@@ -1,0 +1,40 @@
+Ayuda · help.v1 · proveedor jev (jev-1.13.0)
+  guía odentia: 30 pantallas y 457 preguntas frecuentes → 489 opciones con «datos» y «ninguna», 72920 caracteres (≈ 18230 tokens a 4 car./token, sin tokenizador)
+  guía latidia: 30 pantallas y 455 preguntas frecuentes → 487 opciones con «datos» y «ninguna», 73009 caracteres (≈ 18252 tokens a 4 car./token, sin tokenizador)
+  guía vistia: 31 pantallas y 471 preguntas frecuentes → 504 opciones con «datos» y «ninguna», 75808 caracteres (≈ 18952 tokens a 4 car./token, sin tokenizador)
+  bancos: desarrollo 244 · control 180 · final 150
+
+Por banco, con el umbral 0.9:
+  banco          n  seguro bien  seguro mal  (2.ª mal)  (pantalla bien)  duda c/correcta  duda sin  ninguna bien  ninguna mal  datos bien  datos mal  fallos
+  desarrollo   244          122           1          0                1               73        15            18            3           1          0       0
+  control      180           45           3          0                2               68        20            27            1           0          0       0
+  final        150           29           4          0                4               41        34            26            6           0          0       0
+  «seguro bien»: todo lo que mostró corresponde. «seguro mal» incluye (2.ª mal), la primera bien y la segunda no, y (pantalla bien), la pantalla correcta con otra respuesta.
+
+Para elegir el umbral, en desarrollo + control + final (n = 574; ya se usaron para ajustar el buscador):
+  umbral     mostrado  cota inf.  sin respuesta  con respuesta  seguro y    «datos»  fallos  cumple
+             correcto       95 %    no responde       resuelve       mal bien dicho
+  mínimo       ≥ 95 %                    ≥ 95 %         ≥ 70 %                                p95 ≤ 2 s
+  0.30         78.9 %     74.7 %         84.3 %         70.8 %        86     59.3 %       0      no
+  0.40         82.9 %     78.8 %         86.1 %         74.7 %        65     55.6 %       0      no
+  0.50         86.2 %     82.3 %         90.4 %         76.3 %        49     48.1 %       0      no
+  0.60         89.0 %     85.1 %         92.2 %         77.8 %        36     37.0 %       0      no
+  0.70         93.1 %     89.6 %         93.9 %         80.6 %        20     22.2 %       0      no
+  0.80         94.9 %     91.4 %         94.8 %         81.7 %        13     14.8 %       0      no
+  0.90         96.1 %     92.5 %         96.5 %         82.4 %         8      3.7 %       0      sí
+  Cumplen los cuatro mínimos: 0.90. Confirma el más bajo, una sola vez, con --umbral=0.90.
+
+Demora (574 llamadas, también las que fallaron): p50 272 ms · p95 326 ms (mínimo para salir ≤ 2000 ms; plazo de esta medición 5000 ms)
+  Tokens de entrada por pregunta: mínimo 12385 · habitual 12559 · máximo 13413; de salida, habitual 2416
+  Costo por pregunta: habitual USD 0.000527 · máximo USD 0.000563 · esta corrida USD 0.303681 (574 llamadas con precio, de 574)
+  1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.685100
+
+Seguro y se equivoca con el umbral 0.9 (8):
+  - [desarrollo · odentia] «¿Qué sabe Sofi?» → mostró FAQ «¿Qué recuerda Sofi de una persona?» (0.97); esperado: FAQ «¿Cómo le enseño algo al agente?»
+  - [control · odentia] «quien me debe plata» → mostró FAQ «¿Dónde veo quiénes deben?» (0.93); esperado: datos
+  - [control · odentia] «quiero saber que materiales estan por acabarse» → mostró FAQ «¿Por qué me aparece el inventario en Inicio?» (0.94); esperado: FAQ «¿Cómo veo qué está por vencer y doy de baja lo vencido?» o párrafo de inventario
+  - [control · odentia] «cuanto le toca al doctor por lo que hizo este mes» → mostró párrafo de comisiones (0.96); esperado: datos
+  - [final · odentia] «no me deja poner una cita a las 8 de la noche» → mostró FAQ «¿Cómo doy una cita más temprano o más tarde de lo que muestra la agenda?» (0.97); esperado: FAQ «¿Puedo dar una cita fuera de horario o a una hora ocupada?»
+  - [final · odentia] «cuales citas de mañana faltan confirmar» → mostró FAQ «¿Cómo veo las citas que faltan confirmar?» (0.97); esperado: datos
+  - [final · odentia] «no quiero que le digan por chat el precio de la ortodoncia» → mostró FAQ «¿Puedo hacer que Sofi no agende citas?» (0.92); esperado: FAQ «¿Cómo elijo qué precio dice Sofi?»
+  - [final · odentia] «por que me rechazaron la plantilla del recordatorio» → mostró FAQ «¿Cómo cambio el texto del recordatorio de WhatsApp?» (0.93); esperado: ninguna
