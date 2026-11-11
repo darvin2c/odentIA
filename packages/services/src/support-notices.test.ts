@@ -122,7 +122,40 @@ describe("cuando soporte pide el acceso de diagnóstico", () => {
     expect(await personNoticesOf(kase.id)).toHaveLength(3)
     // La propietaria lo recibe aunque no haya abierto el caso.
     const forOwner = rows.find((row) => row.recipientUserId === OWNER)
-    expect(await claimSupportNotice(ownerDb, forOwner!.id)).toMatchObject({ kind: "necesita_algo", to: "duena@notice.test", who: "Luis Caja" })
+    // Su correo pide la autorización y nombra a quien abrió el caso; el de quien abrió no.
+    expect(await claimSupportNotice(ownerDb, forOwner!.id)).toMatchObject({
+      kind: "necesita_algo",
+      to: "duena@notice.test",
+      who: "Luis Caja",
+      toGranter: true,
+    })
+    const forLuis = rows.find((row) => row.recipientUserId === LUIS)
+    expect(await claimSupportNotice(ownerDb, forLuis!.id)).toMatchObject({ kind: "necesita_algo", to: "luis@notice.test", toGranter: false })
+  })
+
+  it("«La clínica respondió» dice quién actuó y qué hizo: la propietaria que autoriza no es quien abrió", async () => {
+    const kase = await ask("La agenda no me deja mover citas", LUIS)
+    const sendInbox = async () => {
+      for (const row of (await noticesOf(kase.id)).filter((notice) => notice.recipientUserId === null && notice.emailState === "pendiente")) {
+        const claimed = await claimSupportNotice(ownerDb, row.id)
+        await completeSupportNotice(ownerDb, row.id, true)
+        if (row.kind === "clinica_respondio") return claimed
+      }
+      return null
+    }
+    // El de «Caso nuevo» es de quien abrió y no dice ningún hecho.
+    expect(await sendInbox()).toBeNull()
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const grant = await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
+    const granted = await sendInbox()
+    expect(granted).toMatchObject({
+      kind: "clinica_respondio",
+      who: "Luis Caja",
+      acted: { who: "Dueña", role: "Propietario", act: { kind: "autorizo", until: new Date(grant.expiresAt) } },
+    })
+    // Luis escribe después: el aviso lo nombra a él.
+    await run((tx) => replyToMySupportCase(tx, ORG, LUIS, kase.id, "Ya pueden entrar"))
+    expect(await sendInbox()).toMatchObject({ acted: { who: "Luis Caja", act: { kind: "escribio" } } })
   })
 
   it("autorizado el acceso, lo que soporte pida después es solo de quien preguntó", async () => {

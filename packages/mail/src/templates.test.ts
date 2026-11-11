@@ -195,6 +195,53 @@ describe("pie", () => {
   })
 })
 
+describe("avisos de soporte", () => {
+  it("«La clínica respondió» nombra a quien actuó y lo que hizo, no a quien abrió el caso", () => {
+    const granted = supportInboxNoticeTemplate({
+      kind: "clinica_respondio",
+      clinic: "Dental Smile",
+      caseKind: "pregunta",
+      screen: "Inicio",
+      who: "Lucía Paredes",
+      role: "Recepción",
+      acted: { who: "Dra. Ana Torres", role: "Propietario", act: { kind: "autorizo", until: new Date("2026-11-11T20:30:00Z") } },
+      url: URL,
+    })
+    expect(granted.text).toContain("Dra. Ana Torres (propietario) autorizó el acceso de diagnóstico hasta las 15:30 en el caso.")
+    expect(granted.text).toContain("Abrió el caso: Lucía Paredes (recepción)")
+    expect(granted.text).not.toContain("Lucía Paredes (recepción) respondió")
+    const wrote = supportInboxNoticeTemplate({
+      kind: "clinica_respondio",
+      clinic: "Dental Smile",
+      caseKind: "pregunta",
+      screen: "Inicio",
+      who: "Lucía Paredes",
+      role: "Recepción",
+      acted: { who: "Lucía Paredes", role: "Recepción", act: { kind: "escribio" } },
+      url: URL,
+    })
+    expect(wrote.text).toContain("Lucía Paredes (recepción) escribió en el caso.")
+    expect(wrote.text).not.toContain("Abrió el caso")
+  })
+
+  it("«necesita algo» a quien autoriza pide la autorización y dice quién abrió el caso", () => {
+    const mail = supportReplyNoticeTemplate({
+      kind: "necesita_algo",
+      caseKind: "pregunta",
+      topic: "Inicio",
+      url: URL,
+      granter: { clinic: "Dental Smile", openerName: "Lucía Paredes", openerRole: "Recepción" },
+    })
+    expect(mail.subject).toBe("Soporte de odentIA pide tu autorización")
+    expect(mail.text).toContain("que abrió Lucía Paredes (Recepción)")
+    expect(mail.text).toContain("Te escribimos porque eres propietario o administrador de Dental Smile")
+    expect(mail.text).not.toContain("abriste un caso")
+    // A quien abrió el caso, lo de siempre.
+    const opener = supportReplyNoticeTemplate({ kind: "necesita_algo", caseKind: "pregunta", topic: "Inicio", url: URL })
+    expect(opener.text).toContain("Te escribimos porque abriste un caso")
+  })
+})
+
 describe("variantes", () => {
   it("la banda de plazo y la de vencido, la ficha con total y las secciones", () => {
     const plazo = renderEmail({

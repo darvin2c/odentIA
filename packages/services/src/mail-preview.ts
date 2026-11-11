@@ -141,6 +141,7 @@ const MAILS: Record<string, MailTemplate> = {
     screen: "Automatizaciones",
     who: "Ana Torres",
     role: "Recepción",
+    acted: { who: "Dra. Lucía Paredes", role: "Propietario", act: { kind: "autorizo", until: new Date("2026-11-11T20:30:00Z") } },
     url: `${adminUrl}/support`,
   }),
   "19-soporte-respondio-tu-caso": supportReplyNoticeTemplate({ kind: "respuesta", caseKind: "pregunta", topic: "Agenda", url }),

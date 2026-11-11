@@ -1,6 +1,7 @@
+import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
+import { supportAccessGrant, supportAttachment, supportCase, supportMessage, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
@@ -204,8 +205,90 @@ export interface ClaimedSupportNotice {
   screen: string
   /** El nombre corto de la pantalla: «Pregunta · Automatizaciones». */
   topic: string
+  /** Quien abrió el caso, con el rol con que lo abrió. */
   who: string
   role: string
+  /**
+   * «La clínica respondió»: quién actuó, con su rol, y qué hizo; la
+   * propietaria que autoriza no es quien preguntó. Nulo en los demás avisos
+   * o si el hecho ya no está.
+   */
+  acted: SupportClinicActed | null
+  /**
+   * «Necesita algo» a quien autoriza el acceso (la propietaria o un
+   * administrador), no a quien abrió el caso: su correo pide la autorización
+   * y nombra a quien lo abrió (`who`, `role`).
+   */
+  toGranter: boolean
+}
+
+/** Lo que hizo la clínica en su caso y avisa a soporte (`until`: hasta cuándo vale el acceso que autorizó). */
+export type SupportClinicAct = { kind: "escribio" } | { kind: "adjunto" } | { kind: "autorizo"; until: Date }
+export interface SupportClinicActed {
+  who: string
+  role: string
+  act: SupportClinicAct
+}
+
+/**
+ * Quién hizo lo que avisa «La clínica respondió» y qué hizo: el aviso guarda
+ * el hecho en su clave (`clinica_respondio:<id>`, `enqueueSupportInboxNotice`),
+ * que es un mensaje, un adjunto o un acceso autorizado del caso.
+ */
+async function clinicActOf(
+  ownerDb: Db,
+  kase: typeof supportCase.$inferSelect,
+  dedupeKey: string,
+  product: ClinicalProduct,
+): Promise<SupportClinicActed | null> {
+  const sourceId = dedupeKey.startsWith("clinica_respondio:") ? dedupeKey.slice("clinica_respondio:".length) : null
+  if (!sourceId || !/^[0-9a-f-]{36}$/i.test(sourceId)) return null
+  const [message] = await ownerDb
+    .select({ userId: supportMessage.authorUserId })
+    .from(supportMessage)
+    .where(and(eq(supportMessage.id, sourceId), eq(supportMessage.caseId, kase.id)))
+    .limit(1)
+  const [attachment] = message
+    ? []
+    : await ownerDb
+        .select({ userId: supportAttachment.createdBy })
+        .from(supportAttachment)
+        .where(and(eq(supportAttachment.id, sourceId), eq(supportAttachment.caseId, kase.id)))
+        .limit(1)
+  const [grant] =
+    message || attachment
+      ? []
+      : await ownerDb
+          .select({ userId: supportAccessGrant.grantedBy, until: supportAccessGrant.expiresAt })
+          .from(supportAccessGrant)
+          .where(and(eq(supportAccessGrant.id, sourceId), eq(supportAccessGrant.caseId, kase.id)))
+          .limit(1)
+  const act: SupportClinicAct | null = message
+    ? { kind: "escribio" }
+    : attachment
+      ? { kind: "adjunto" }
+      : grant
+        ? { kind: "autorizo", until: grant.until }
+        : null
+  const userId = message?.userId ?? attachment?.userId ?? grant?.userId ?? null
+  if (!act || !userId) return null
+  const [person] = await ownerDb.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
+  const [membership] = kase.organizationId
+    ? await ownerDb
+        .select({ role: member.role })
+        .from(member)
+        .where(and(eq(member.userId, userId), eq(member.organizationId, kase.organizationId)))
+        .limit(1)
+    : []
+  // El rol de hoy en la clínica, como lo dice la administración; quien ya no
+  // está, o quien abrió y no tiene otro, con el rol con que abrió el caso.
+  const role =
+    membership && (ORG_ROLES as readonly string[]).includes(membership.role)
+      ? roleLabel(membership.role as OrgRole, product)
+      : userId === kase.openedBy
+        ? kase.role
+        : ""
+  return { act, who: person?.name ?? "Alguien de la clínica", role }
 }
 
 /**
@@ -247,9 +330,10 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
   if (!row) return omit("el caso ya no existe")
   const { kase } = row
   let to: string | null = null
+  const toGranter = notice.recipientUserId !== null && notice.recipientUserId !== kase.openedBy
   if (notice.recipientUserId) {
     if (kase.status === "resuelto") return omit("el caso se resolvió")
-    if (notice.recipientUserId !== kase.openedBy) {
+    if (toGranter) {
       // A quien autoriza el acceso: solo mientras se le sigue esperando.
       if (row.awaitingGranters !== true) return omit("ya no espera el acceso")
     } else {
@@ -275,6 +359,8 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
   }
   const topic = helpTopicForScreen(kase.screen)
   const caseKind = kase.kind === "problema" || kase.kind === "acceso" || kase.kind === "cobro" ? kase.kind : "pregunta"
+  const clinicProduct = isClinicalProduct(row.clinicProduct) ? row.clinicProduct : null
+  const acted = notice.kind === "clinica_respondio" ? await clinicActOf(ownerDb, kase, notice.dedupeKey, clinicProduct ?? "dental") : null
   return {
     id: notice.id,
     kind: notice.kind as SupportNoticeKind,
@@ -284,12 +370,14 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     // El automático no es de una clínica: su título la nombra («Modelo sin responder · Clínica Smile»).
     clinicName: row.clinicName ?? (kase.openedBy === null ? kase.question.split(" · ").slice(1).join(" · ") || null : null),
     clinicSlug: row.clinicSlug,
-    clinicProduct: isClinicalProduct(row.clinicProduct) ? row.clinicProduct : null,
+    clinicProduct,
     caseKind,
     screen: topic ? helpTopicLabel(topic) : kase.screen,
     topic: topic?.title ?? kase.screen,
     who: row.openerName ?? "odentIA",
     role: kase.role,
+    acted,
+    toGranter,
   }
 }
 
