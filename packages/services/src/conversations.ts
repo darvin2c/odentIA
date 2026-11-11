@@ -715,12 +715,14 @@ async function markNotOnWhatsApp(tx: Db, orgId: string, conversationId: string):
 
 /**
  * Los estados desde los que un aviso del proveedor ya no mueve el mensaje: el
- * mismo o uno posterior. «No salió» es final y no lo cambia ningún aviso.
+ * mismo o uno posterior. «No salió» no lo deshace un «entregado» o «leído»
+ * tardío; otro «no salió» sí lo pone al día, porque puede traer el motivo
+ * (el número no tiene WhatsApp), y dejar pendiente el tema otra vez no repite nada.
  */
 const STATUS_AFTER: Record<NormalizedStatus["status"], string[]> = {
   delivered: ["delivered", "read", "failed"],
   read: ["read", "failed"],
-  failed: ["failed", "delivered", "read"],
+  failed: ["delivered", "read"],
 }
 
 /**
@@ -739,9 +741,9 @@ export async function applyStatus(
   for (const s of statuses) {
     const status = s.status
     // Los avisos del proveedor llegan sin orden y repetidos: un estado solo
-    // avanza (enviado → entregado → leído) y «no salió» no se pisa. Un
-    // «entregado» tardío no baja un «leído», ni deshace un «no salió»; un
-    // «no salió» tampoco borra que llegó. Repetir el mismo estado no cambia nada.
+    // avanza (enviado → entregado → leído). Un «entregado» tardío no baja un
+    // «leído», ni deshace un «no salió»; un «no salió» tampoco borra que llegó.
+    // Repetir «entregado» o «leído» no cambia nada (`STATUS_AFTER`).
     const reached = STATUS_AFTER[status]
     const [updated] =
       status === "failed"
