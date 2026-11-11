@@ -239,9 +239,9 @@ export const CLINICA: readonly HelpMore[] = [
       // ---------- Plan, presupuesto y controles ----------
       {
         id: "pacientes-control-indicar-completar-cancelar",
-        q: "¿Cómo indico un control que se repite, lo completo o lo cancelo?",
-        a: "En su Plan, en «Controles», «Indicar control»: eliges el tipo, le pones título y fecha y, en «Se repite», cada cuánto; al completarlo queda indicado el siguiente hasta que toques «Dejar de repetir». Cada control tiene «Completar control» (eliges la atención finalizada y escribes el resultado), «Cambiar fecha» y «Cancelar control», con su motivo; cancelarlo no cancela su cita. Lo hace quien escribe en la historia clínica.",
-        forms: ["como indico un control cada 6 meses", "como cancelo un control", "como marco que el control ya se hizo", "control que se repite"],
+        q: "¿Cómo indico un control, lo completo o lo cancelo?",
+        a: "En su Plan, en «Controles», «Indicar control»: eliges el tipo y le pones título y fecha. Cada control tiene «Completar control» (eliges la atención finalizada y escribes el resultado), «Cambiar fecha» y «Cancelar control», con su motivo; cancelarlo no cancela su cita. Lo hace quien escribe en la historia clínica.",
+        forms: ["como indico un control", "como cancelo un control", "como marco que el control ya se hizo"],
         area: "plan",
         needs: "clinical.write",
       },

@@ -45,6 +45,8 @@ function codeText(): string {
  * `help-guide.test.ts` compara con las pantallas.
  */
 const OWN_QUOTED = [
+  "Una sola vez",
+  "Dejar de repetir",
   "Control anual de la vista",
   "En 1 año",
   "Preparar presupuesto",
@@ -78,6 +80,46 @@ const OWN_QUOTED = [
   "Tus pedidos",
   "Tu cuenta",
   "Emitir otra desde su examen",
+  // Lo indicado queda aceptado y un control puede repetirse (`budgetRequired`, `repeatingControls`).
+  "Reservar lo indicado",
+  "Una sola vez",
+  // El examen: la salud del ojo y cuándo conviene el oftalmólogo.
+  "Salud del ojo",
+  "Conviene que lo vea un oftalmólogo",
+  "Lo que importa para la vista",
+  // El pedido: sus pestañas, sus pasos, lo que lleva, la receta y el adelanto.
+  "Pedidos",
+  "Abiertos",
+  "Listos",
+  "Entregados",
+  "Anulados",
+  "En laboratorio",
+  "Entregado",
+  "se rehízo",
+  "Lo que lleva",
+  "Montura",
+  "Lunas",
+  "Lentes de contacto",
+  "Medidas para montar",
+  "Altura OD",
+  "Altura OI",
+  "Sin receta",
+  "la agrega quien la ve",
+  "Va con el pedido; la ve quien lo hace",
+  "Agregar otro medio",
+  "Se vende en",
+  "Ver el ticket",
+  "Pedido listo",
+  // La montura en el inventario («Más datos» del producto).
+  "Código de barras",
+  "Marca",
+  "Modelo",
+  "Color",
+  "Medidas",
+  // Lo que trae una óptica: sus consentimientos y el título que propone el perfil profesional.
+  "Dilatación de las pupilas",
+  "Adaptación de lentes de contacto",
+  "Tecnólogo médico en optometría",
 ]
 
 /** La Ayuda de vistIA: las mismas pantallas, con lo que tiene una óptica. */
@@ -140,6 +182,88 @@ describe("la guía de vistIA", () => {
   it("la de odentIA no cambia", () => {
     expect(JSON.stringify(HELP_TOPICS)).toMatch(/odontograma/)
     expect(helpTopicForScreen("/patients/123")?.id).toBe("pacientes")
+  })
+
+  const faqOf = (id: string) => OPTICAL_HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((faq) => faq.id === id)
+  const answerOf = (id: string) => faqOf(id)?.a ?? ""
+
+  // Auditoría del 10 nov: lo que la guía decía y en una óptica no es así.
+  it("vender con una receta: el camino de Ventas y Caja es «Vender lentes»", () => {
+    // «Vender con esta receta» pide leer la historia, los pedidos y la caja: no lo ven Ventas ni Caja.
+    expect(answerOf("vendo-unos-lentes")).toMatch(/^En Pedidos, «Vender lentes» \(también en su página › Cobros › «Pedidos»\)/)
+    expect(answerOf("vendo-unos-lentes")).toContain("solo le aparece a quien además lee la historia clínica")
+    expect(text).not.toMatch(/o en «Recetas de lentes» de su ficha, «Vender con esta receta»/)
+    expect(answerOf("pedidos-sin-receta")).toContain("«Sin receta»")
+  })
+
+  it("Clínica tiene cuatro secciones, con «Recetas de lentes»", () => {
+    const answer = answerOf("quedaron-atenciones-recetas-u-ordenes")
+    expect(answer).toContain("Clínica tiene cuatro secciones: Antecedentes, Recetas de lentes, Historia y Documentos.")
+    expect(answer).toContain("(presupuestos, recetas, órdenes, consentimientos, formularios, imágenes y otros archivos)")
+    expect(text).not.toMatch(/tres secciones/)
+  })
+
+  it("la montura se vende con su pedido, no solo por «Cobrar»", () => {
+    const answer = answerOf("vendo-cepillo-enjuague")
+    expect(answer).toContain("«Vender lentes»")
+    expect(answer).toContain("«Venta de mostrador»")
+  })
+
+  it("donde la guía dice quién puede, Ventas va con recepción y con caja", () => {
+    expect(answerOf("escribo-alguien-nunca-escribio")).toContain("(la tienen recepción, Ventas, el propietario y el administrador)")
+    expect(answerOf("pacientes-nuevo-contacto")).toContain("Lo hacen recepción, Ventas y Administración.")
+    expect(answerOf("finanzas-otro-concepto")).toContain("Lo hacen caja, Ventas y Administración.")
+    expect(answerOf("quien-puede-recibir-llega")).toContain("Ventas con precios")
+    // Cerrar la caja no es de Ventas (`finance.close`).
+    expect(answerOf("finanzas-cerrar-caja")).toContain("La cierran caja, propietario y administrador")
+    expect(answerOf("equipo-ventas-no-puede")).toMatch(/^No: /)
+    expect(answerOf("equipo-roles")).toContain("Ventas")
+  })
+
+  it("lo indicado queda aceptado: ni fases ni caminos, y sin dictado", () => {
+    expect(text).not.toMatch(/Reservar lo aceptado|algo aceptado sin una cita|por fases|otra fase|falta elegir el camino/)
+    expect(answerOf("alergias-toca-ultima-atencion")).toContain("«Reservar lo indicado»")
+    expect(faqOf("pacientes-dictado-corregir-pausar")).toBeUndefined()
+    expect(faqOf("agente-clio-probar-dictado")).toBeUndefined()
+    expect(text).not.toMatch(/dictas otro|control radiográfico/)
+  })
+
+  it("el portal del cliente muestra sus recetas de lentes y sus pedidos", () => {
+    expect(answerOf("ve-paciente-portal")).toContain("sus recetas de lentes")
+    expect(answerOf("ve-paciente-portal")).toContain("«Tus pedidos»")
+    expect(answerOf("pasa-receta-vencio")).toContain("12 meses")
+  })
+
+  it("tiene las preguntas que solo se hacen en una óptica", () => {
+    for (const id of [
+      "pacientes-recetas-lentes-quien",
+      "pacientes-receta-gotas",
+      "pacientes-receta-lentes-enviar",
+      "pacientes-salud-ojo-oftalmologo",
+      "inventario-montura-marca-modelo",
+      "roles-hay-optica",
+      "equipo-ventas-no-puede",
+      "tareas-ventas-taller",
+      "whatsapp-mensaje-pedido-listo",
+      "formularios-consentimientos-optica",
+      "especialidades-trae-optica",
+      "pedidos-entregados-buscar",
+      "pedidos-de-un-cliente",
+      "pedidos-quien-vende-quien-marca",
+      "pedidos-sin-receta",
+      "pedidos-montura-lunas-medidas",
+      "pedidos-adelanto-varios-medios",
+      "pedidos-sin-ficha",
+      "pedidos-no-veo-receta",
+      "pedidos-que-significa-cada-paso",
+    ]) {
+      expect(faqOf(id), id).toBeDefined()
+    }
+    // Cada nombre fijo, una sola vez en la guía.
+    const ids = OPTICAL_HELP_TOPICS.flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id))
+    expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([])
+    // Lo clínico de la ficha va en su categoría, no en la de la lista de pacientes.
+    for (const id of ["anoto-examen-vista", "emito-receta-lentes", "oct", "pacientes-receta-gotas"]) expect(faqOf(id)?.area, id).toBe("clinica")
   })
 })
 
