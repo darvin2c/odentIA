@@ -42,6 +42,7 @@ import {
   moveAppointment,
   setAppointmentStatus,
 } from "./appointments.js"
+import { answersEarlierDate } from "./automation.js"
 import {
   listMessages,
   sendOutbound,
@@ -560,6 +561,8 @@ export type ContactConfirmOutcome =
     }
   | { outcome: "ninguna" }
   | { outcome: "varias"; options: ContactAppointmentOption[] }
+  /** La cita cambió de día después del recordatorio al que responde: se le dice la fecha nueva y se le pregunta. */
+  | { outcome: "cambio"; options: ContactAppointmentOption[] }
 
 /** Cuánto tiempo un «sí» sin decir cuál responde al último recordatorio. */
 const REMINDER_REPLY_HOURS = 72
@@ -655,6 +658,12 @@ export async function confirmAppointmentByContact(
     const reminded = await lastReminderAppointments(tx, orgId, input.contactId, input.conversationId)
     const together = options.filter((option) => reminded.includes(option.appointmentId))
     const waiting = options.filter((option) => option.status === "programada")
+    // Ese recordatorio decía la fecha anterior y aún no se le dijo la nueva: su «sí» no la confirma.
+    const moved: typeof options = []
+    for (const option of together) {
+      if (option.status === "programada" && (await answersEarlierDate(tx, orgId, option.appointmentId, input.conversationId))) moved.push(option)
+    }
+    if (moved.length > 0) return { outcome: "cambio", options: moved.map(strip) }
     if (together.length > 0) chosen = together
     // El último recordatorio fue de citas que ya no puede confirmar (la de un hijo que cumplió
     // 18): su «sí» respondía a esas, así que no se confirma otra sin preguntar.

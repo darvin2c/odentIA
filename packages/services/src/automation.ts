@@ -1158,6 +1158,47 @@ export async function restartAppointmentReminders(tx: Db, orgId: string, appoint
       and status <> 'pendiente' and dedupe_key not like ${`%${EARLIER_DATE_MARK}%`}`)
 }
 
+/**
+ * A la persona se le recordó esta cita, después la cita pasó a otro día y por esta conversación
+ * todavía no se le escribió nada: su «sí» (el botón del recordatorio o un mensaje) responde a la
+ * fecha anterior. No se confirma: se le dice la fecha nueva y se le pregunta.
+ */
+export async function answersEarlierDate(tx: Db, orgId: string, appointmentId: string, conversationId: string): Promise<boolean> {
+  const rows = await tx.execute<{ stale: boolean }>(sql`
+    select exists (
+      select 1 from automation_job j
+      where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.kind = 'recordatorio_cita'
+        and j.status = 'enviado' and j.dedupe_key like ${`%${EARLIER_DATE_MARK}%`}
+        and not exists (
+          select 1 from message m
+          where m.organization_id = ${orgId} and m.conversation_id = ${conversationId} and m.direction = 'out'
+            and m.created_at > (
+              select max(a.created_at) from audit_event a
+              where a.organization_id = ${orgId} and a.entity = 'appointment' and a.entity_id = ${appointmentId}
+                and a.action = 'appointment.moved' and a.metadata->>'remindersMark' is not null))
+    ) as stale`)
+  return rows[0]?.stale === true
+}
+
+/** Lo que se le contesta a quien dice sí a la fecha anterior de una cita que cambió de día. */
+export async function newDateQuestion(tx: Db, orgId: string, appointmentId: string): Promise<string | null> {
+  const [appt] = await tx
+    .select({ startsAt: appointment.startsAt, branchId: appointment.branchId })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  if (!appt) return null
+  const when = new Intl.DateTimeFormat((await findOrgLocale(tx, orgId)).locale, {
+    timeZone: await timezoneOf(tx, orgId, appt.branchId),
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(appt.startsAt)
+  return `Tu cita cambió de fecha después de ese recordatorio: ahora es el ${when}. ¿Te queda bien? Responde «sí» y la confirmo.`
+}
+
 /** «Deshacer» ese movimiento: los recordatorios de la fecha a la que vuelve cuentan otra vez. */
 export async function restoreAppointmentReminders(tx: Db, orgId: string, appointmentId: string, version: number): Promise<void> {
   const mark = `${EARLIER_DATE_MARK}${version}`
@@ -2583,6 +2624,7 @@ export async function deliverJob(
     return { jobId: job.id, outcome: "cancelado", detail: "Sofi no escribe en esta línea" }
   }
   // Si el recordatorio de la misma cita sale ahora (o acaba de salir), ese mensaje ya dice la fecha.
+  // El que salió antes de este aviso no: lo que decía es la fecha de antes del cambio.
   if (isAppointmentNotice(job.kind) && job.kind !== "aviso_cita_cancelada" && job.appointmentId) {
     const [reminder] = await tx
       .select({ id: automationJob.id })
@@ -2599,7 +2641,7 @@ export async function deliverJob(
             ),
             and(
               eq(automationJob.status, "enviado"),
-              gte(automationJob.updatedAt, new Date(now.getTime() - GROUP_WINDOW_MS)),
+              gte(automationJob.updatedAt, new Date(Math.max(now.getTime() - GROUP_WINDOW_MS, job.createdAt.getTime()))),
             ),
           ),
         ),
@@ -3849,6 +3891,7 @@ export async function handleAutomationReply(
   const appointmentIds = [...new Set(together.map((row) => row.appointmentId).filter((id): id is string => !!id))]
   if (appointmentIds.length === 0) return false
   const items: ConfirmedItem[] = []
+  const changed: string[] = []
   for (const appointmentId of appointmentIds) {
     const [appt] = await tx
       .select({
@@ -3866,8 +3909,22 @@ export async function handleAutomationReply(
     if (!appt || appt.startsAt.getTime() < Date.now()) continue
     if (appt.status === "confirmada") items.push({ patientName: appt.patientName, self: appt.self, was: "ya_confirmada", startsAt: appt.startsAt })
     if (appt.status !== "programada") continue
+    // El botón es del recordatorio de la fecha anterior: no confirma la nueva sin habérsela dicho.
+    if (await answersEarlierDate(tx, orgId, appointmentId, input.conversationId)) {
+      changed.push(appointmentId)
+      continue
+    }
     await setAppointmentStatus(tx, orgId, null, appointmentId, "confirmada", { via: "respuesta" })
     items.push({ patientName: appt.patientName, self: appt.self, was: "confirmada", startsAt: appt.startsAt })
+  }
+  // La cita cambió de día después de ese recordatorio: se le dice la fecha nueva y se le pregunta.
+  // Con varias citas en el mismo mensaje lo sigue el agente, que ve la conversación.
+  if (items.length === 0 && changed.length === 1) {
+    const text = await newDateQuestion(tx, orgId, changed[0]!)
+    if (text) {
+      await sendOutbound(tx, orgId, { conversationId: input.conversationId, senderKind: "agent", content: { type: "text", text } })
+      return true
+    }
   }
   // Cita cancelada, atendida o ya pasada: no hay nada que confirmar y lo
   // correcto es que alguien lea la conversación.
