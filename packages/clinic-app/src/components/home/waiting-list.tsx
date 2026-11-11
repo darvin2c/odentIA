@@ -111,6 +111,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/inventory" search={{ branch: row.branchId, ver: row.needed > 0 ? "hacen_falta" : "por_vencer" }} {...props} />
     case "promotions":
       return <Link to="/settings/integrations/whatsapp" search={{ mensaje: row.items[0]?.messageId }} {...props} />
+    case "person":
+      // Lo que no se sabe si salió se resuelve en la Bandeja, con «Salió» o «No salió».
+      return <Link to="/inbox" search={{ conversation: row.conversationId }} {...props} />
     case "stillOpen":
       return row.conversationId
         ? <Link to="/inbox" search={{ conversation: row.conversationId }} {...props} />

@@ -264,6 +264,9 @@ export function createConversationsRoute(deps: CrmDeps) {
   // «Salió» / «No salió»: el canal no confirmó si aceptó el mensaje y una persona lo resuelve.
   app.post("/:id/messages/:messageId/delivery", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    // Un id que no tiene forma de id no existe: 404, no un error interno.
+    const ids = z.object({ id: z.uuid(), messageId: z.uuid() }).safeParse({ id: c.req.param("id"), messageId: c.req.param("messageId") })
+    if (!ids.success) return c.json(errorBody(c, "NOT_FOUND", "Mensaje no encontrado"), 404)
     const parsed = z.object({ outcome: z.enum(["sent", "failed"]) }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

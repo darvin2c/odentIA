@@ -24,7 +24,7 @@ export type OrderNoticeStatus = "sin_enviar" | "no_salio" | "en_cola" | "enviado
 
 export interface OrderNotice {
   status: OrderNoticeStatus
-  /** «Enviado por WhatsApp», «No se entregó: …», «No sabemos si llegó…». */
+  /** «Enviado por WhatsApp», «No se entregó: …», «No se sabe si salió…». */
   words: string
   channel: "whatsapp" | "email" | null
   at: string | null
@@ -67,7 +67,7 @@ export async function orderNoticeOf(tx: Db, orgId: string, order: { readyMessage
           ? `Entregado ${by}.`
           : status === "leido"
             ? `Leído ${by}.`
-            : (deliveryNoteOf(row.status, row.error) ?? "No sabemos si llegó.")
+            : (deliveryNoteOf(row.status, row.error) ?? "No se sabe si salió.")
   return {
     status,
     words,

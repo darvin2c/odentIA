@@ -462,6 +462,8 @@ export function ThreadView({
       apiFetch(`/api/conversations/${id}/messages/${messageId}/delivery`, { method: "POST", body: JSON.stringify({ outcome }) }),
     onSuccess: (_result, variables) => {
       toast.success(variables.outcome === "sent" ? "Anotado: el mensaje salió." : "Anotado: el mensaje no salió.")
+      // Los botones desaparecen: el foco no se pierde, queda donde se escribe.
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')?.focus()
       invalidate()
       invalidateAgentWork(queryClient)
       for (const key of ["person-panel", "crm-context", "workspace-home"]) {

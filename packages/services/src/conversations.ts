@@ -173,12 +173,12 @@ export interface MessageItem {
 export function deliveryNoteOf(status: string, error: string | null): string | null {
   if (status === "failed") {
     if (error === "connection-disabled") return "No se entregó: la conexión del canal estaba desactivada."
-    if (error?.startsWith("confirmado por el equipo")) return "No salió: lo confirmó el equipo. Si hace falta, escríbele de nuevo o avísale por otra vía."
+    if (error?.startsWith("confirmado por el equipo")) return "No salió: lo anotó el equipo. Si hace falta, escríbele de nuevo o avísale por otra vía."
     if (error?.startsWith("interno:")) return "No se entregó: el sistema no pudo enviarlo. Si es importante, avísale por otra vía."
     return whatsappFailureWords(error) ?? "No se entregó: el canal no lo aceptó. Si es importante, avísale por otra vía."
   }
   if (status === "unknown") {
-    return "No sabemos si llegó: el canal no confirmó el envío. No se reenvía solo, para no mandarlo dos veces."
+    return "No se sabe si salió: el canal no confirmó el envío. No se reenvía solo, para no mandarlo dos veces."
   }
   return null
 }

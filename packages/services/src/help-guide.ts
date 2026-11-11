@@ -292,13 +292,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "correos de pacientes",
       "sin responder",
       "no sabemos si llegó",
+      "no se sabe si llegó",
       "no se sabe si salió",
     ],
     writePermission: "conversations.write",
     faqs: [
       {
         id: "no-se-sabe-si-salio",
-        q: "Un mensaje dice «No sabemos si llegó», ¿qué hago?",
+        q: "Un mensaje dice «No se sabe si salió», ¿qué hago?",
         a: "El canal no confirmó si aceptó el mensaje, y no se reenvía solo para que la persona no lo reciba dos veces. La conversación queda en «Por atender». Compruébalo por otra vía (en el celular de la clínica o preguntándole a la persona) y, debajo del mensaje, pulsa «Salió» o «No salió». Si no salió, escríbele de nuevo si hace falta; si era la respuesta de un tema, el tema vuelve a quedar pendiente.",
       },
       {

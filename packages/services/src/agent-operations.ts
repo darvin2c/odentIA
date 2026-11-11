@@ -2603,18 +2603,29 @@ export function isAffirmative(text: string | null): boolean {
   return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
 }
 
-/** Lo que retira un sí ya dado: «no», «mejor otro día», «espera», «cancela», «cambia la hora». */
-const RETRACT_WORDS = new Set(["no", "mejor", "espera", "esperame", "cancela", "cancelala", "cancelar", "cambia", "cambiar", "cambiala", "otro", "otra", "olvidalo", "olvida"])
+/**
+ * Lo que retira un sí ya dado: «no», «mejor no», «ya no», «espera», «cancela»,
+ * «cambia la hora», «mejor otro día». Una pregunta no retira nada («¿tengo que
+ * llevar otra cosa?», «¿no hay problema si llego antes?»): eso lo contesta Sofi.
+ */
+const RETRACT_ALONE = new Set(["espera", "esperame", "cancela", "cancelala", "cancelar", "cambia", "cambiar", "cambiala", "olvidalo", "olvida"])
+const RETRACT_OTHER = new Set(["dia", "hora", "horario", "fecha", "turno", "semana"])
 
 export function retractsYes(text: string | null): boolean {
-  if (!text) return false
+  if (!text || text.includes("?")) return false
   const words = text
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-  return words.some((word) => RETRACT_WORDS.has(word))
+    .filter(Boolean)
+  return words.some(
+    (word, index) =>
+      RETRACT_ALONE.has(word) ||
+      (word === "no" && (index === 0 || ["mejor", "ya", "pero"].includes(words[index - 1] ?? ""))) ||
+      ((word === "otro" || word === "otra") && RETRACT_OTHER.has(words[index + 1] ?? "")),
+  )
 }
 
 /** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */

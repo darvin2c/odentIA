@@ -14,6 +14,7 @@ import {
   getProposal,
   proposalReplyOf,
   chosenBeforeProposalOf,
+  retractsYes,
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, listMessages, sendOutbound } from "./conversations.js"
@@ -108,6 +109,17 @@ function run<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
   return withOrgContext(appDb, ORG, fn)
 }
 
+
+describe("lo que retira un sí", () => {
+  it("retira «no», «mejor no», «espera» u «otro día»; una pregunta o un «otra cosa» no", () => {
+    for (const text of ["No", "Mejor no, gracias", "Ya no puedo", "Espera, reviso mi agenda", "Mejor otro día", "Cancela por favor", "Cámbiala a la tarde"]) {
+      expect(retractsYes(text), text).toBe(true)
+    }
+    for (const text of ["¿Tengo que llevar otra cosa?", "¿No hay problema si llego 5 min antes?", "ana@example.com", "Gracias, nos vemos", "Llevo otra radiografía", "Sí, no hay problema"]) {
+      expect(retractsYes(text), text).toBe(false)
+    }
+  })
+})
 
 describe("clave de idempotencia", () => {
   it("es estable ante el mismo trigger y cambia con otro trigger", () => {

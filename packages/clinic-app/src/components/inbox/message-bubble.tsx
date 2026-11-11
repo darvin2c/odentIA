@@ -232,7 +232,7 @@ export function MessageBubble({
         ) : null}
         {/* No se reenvía solo: quien lo comprobó por otra vía lo dice. Escribir de nuevo lo decide la persona. */}
         {out && msg.status === "unknown" && onResolveDelivery ? (
-          <div className="flex flex-wrap items-center justify-end gap-2" role="group" aria-label="¿Salió este mensaje?">
+          <div className="flex flex-wrap items-center justify-end gap-2" role="group" aria-label={`¿Salió este mensaje? «${(msg.body ?? "").slice(0, 60)}»`}>
             <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={resolvingDelivery} onClick={() => onResolveDelivery("sent")}>
               Salió
             </Button>
