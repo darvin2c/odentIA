@@ -45,7 +45,7 @@ import {
   updateBranch,
   updateOrgRegion,
 } from "@odentia/services"
-import { and, eq, gt, inArray, sql } from "drizzle-orm"
+import { and, eq, getTableColumns, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
@@ -973,7 +973,18 @@ export function createApp(deps: AppDeps) {
   guarded.get("/branches", async (c) => {
     const { orgId } = orgContextOf(c)
     const rows = await withOrgContext(db, orgId, (tx) =>
-      tx.select().from(branch).where(eq(branch.organizationId, orgId)).orderBy(branch.name),
+      tx
+        .select({
+          ...getTableColumns(branch),
+          // Las citas de hoy de cada sede: sin una sede elegida, la pantalla abre la que tiene más.
+          todayAppointments: sql<number>`(select count(*)::int from appointment a
+            where a.organization_id = ${branch.organizationId} and a.branch_id = ${branch.id} and not a.is_test
+              and a.status in ('programada','confirmada','atendida')
+              and (a.starts_at at time zone coalesce(${branch.timezone}, 'UTC'))::date = (now() at time zone coalesce(${branch.timezone}, 'UTC'))::date)`,
+        })
+        .from(branch)
+        .where(eq(branch.organizationId, orgId))
+        .orderBy(branch.name),
     )
     return c.json({ data: rows })
   })

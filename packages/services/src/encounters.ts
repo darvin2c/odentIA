@@ -1304,7 +1304,7 @@ async function encounterBudgetsOf(
 async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | null): Promise<string | null> {
   if (!appointmentId) return null
   const [booked] = await tx
-    .select({ reason: appointment.reason })
+    .select({ reason: appointment.reason, serviceName: appointment.serviceName })
     .from(appointment)
     .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
     .limit(1)
@@ -1349,7 +1349,9 @@ async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | nul
       ),
     )
     .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
-  if (items.length === 0) return null
+  // Sin tratamientos ni controles, lo que dice la cita: su servicio («Limpieza»). Antes
+  // decía «Sin cita» aunque la persona viniera con una (QA del 10 nov, C16).
+  if (items.length === 0) return booked.serviceName?.trim() || null
   const { site } = await productHooks(tx, orgId)
   // «de la 46», como se dice la pieza en el resto de textos; sin pieza (o en latidIA), solo el título.
   const words = items.map((item) => {
@@ -3612,6 +3614,25 @@ async function closeAppointment(
       ),
     )
     .returning()
+  // Si recepción la cerró antes con «Vino», sus controles volvieron a pendientes y quedaron
+  // sin cita: la atención que se registra después los cumple igual, como si la cita los llevara.
+  const releasedByCame = await tx
+    .update(clinicalFollowUp)
+    .set({ status: "realizado", completedEncounterId: row.id, completedAt: at, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, patientId),
+        eq(clinicalFollowUp.status, "pendiente"),
+        isNull(clinicalFollowUp.appointmentId),
+        sql`${clinicalFollowUp.id}::text in (
+          select e.entity_id from audit_event e
+          where e.organization_id = ${orgId} and e.entity = 'clinical_follow_up' and e.action = 'follow_up.unscheduled'
+            and e.metadata->>'appointmentId' = ${row.appointmentId} and e.metadata->>'by' = 'vino')`,
+      ),
+    )
+    .returning()
+  completed.push(...releasedByCame)
   for (const followUp of completed) {
     await audit(tx, orgId, actorUserId, "follow_up.completed", "clinical_follow_up", followUp.id, {
       patientId,

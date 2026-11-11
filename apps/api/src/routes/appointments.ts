@@ -350,14 +350,23 @@ export function createAgendaRoute(deps: CrmDeps) {
     )
   })
 
-  // Configuración de bloqueos.
+  // Bloqueos y ausencias. Quien configura, todo; quien lleva la agenda anota la ausencia de
+  // cualquier profesional; quien atiende, solo la suya (mesa del 10 nov, decisiones 1 y 4).
   app.post("/blocks", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
-    }
     const parsed = blockInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const absence = parsed.data.kind === "ausencia" && Boolean(parsed.data.professionalUserId)
+    const allowed =
+      canAccess(memberRole, "settings.write") ||
+      (absence && canAccess(memberRole, "appointments.absences")) ||
+      (absence && parsed.data.professionalUserId === userId && canAccess(memberRole, "clinical.write"))
+    if (!allowed) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", absence ? "Solo puedes anotar tu propia ausencia" : "No tienes permiso para configurar bloqueos"),
+        403,
+      )
+    }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         createScheduleBlock(tx, orgId, userId, parsed.data),
@@ -367,12 +376,20 @@ export function createAgendaRoute(deps: CrmDeps) {
 
   app.delete("/blocks/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
+    const configures = canAccess(memberRole, "settings.write")
+    const scope = configures
+      ? undefined
+      : canAccess(memberRole, "appointments.absences")
+        ? { absenceOf: null }
+        : canAccess(memberRole, "clinical.write")
+          ? { absenceOf: userId }
+          : null
+    if (scope === null) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        await deleteScheduleBlock(tx, orgId, c.req.param("id"), userId)
+        await deleteScheduleBlock(tx, orgId, c.req.param("id"), userId, scope)
         return { ok: true }
       }),
     )
@@ -443,7 +460,11 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const created = await createAppointment(tx, orgId, userId, parsed.data, { requested: true })
+        // El origen lo fija el servidor: por esta ruta reserva una persona del equipo (en una
+        // conversación o en recepción). «Agente» y «enlace» los ponen Sofi y el enlace en su propio
+        // servicio: el origen decide el cobro y lo que Reportes atribuye a Sofi.
+        const source = parsed.data.conversationId ? "conversacion" : "recepcion"
+        const created = await createAppointment(tx, orgId, userId, { ...parsed.data, source }, { requested: true })
         // Si el recordatorio le llegará: «Carmen no recibirá el recordatorio: aún no tiene WhatsApp».
         return { ...created, reminderReach: await appointmentReminderReach(tx, orgId, created.patientId) }
       }),

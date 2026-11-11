@@ -290,7 +290,8 @@ async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
     .from(branch)
     .leftJoin(orgProfile, eq(orgProfile.organizationId, branch.organizationId))
     .where(and(...conditions))
-    .orderBy(asc(branch.createdAt))
+    // La primera sede es la misma en todo el servidor: la más antigua y, con el mismo instante, la de menor id.
+    .orderBy(asc(branch.createdAt), asc(branch.id))
     .limit(1)
   if (!row) {
     if (branchId) throw branchNotFound()
@@ -1649,8 +1650,12 @@ export async function moveAppointment(
     })
   }
   // Llegó hoy: si la cita pasa a otro día, esa llegada ya no es de ella.
-  const zone = current.arrivedAt ? await branchZone(tx, orgId, current.branchId) : null
-  const arrivalCleared = zone !== null && localDay(startsAt, zone) !== localDay(current.startsAt, zone)
+  const zone = await branchZone(tx, orgId, current.branchId)
+  const otherDay = localDay(startsAt, zone) !== localDay(current.startsAt, zone)
+  const arrivalCleared = current.arrivedAt !== null && otherDay
+  // Confirmó otro día: el nuevo no lo confirmó. Vuelve a «por confirmar» y el recordatorio
+  // se lo pide (QA del 10 nov, C31).
+  const unconfirmed = current.status === "confirmada" && !current.arrivedAt && otherDay
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {
@@ -1664,6 +1669,7 @@ export async function moveAppointment(
         roomId,
         overlapAllowed: input.overrideBusy === true,
         ...(arrivalCleared ? { arrivedAt: null, arrivedBy: null } : {}),
+        ...(unconfirmed ? { status: "programada" } : {}),
         version: current.version + 1,
         updatedAt: new Date(),
       })
@@ -1686,6 +1692,7 @@ export async function moveAppointment(
       professionalUserId,
       roomId,
       ...(arrivalCleared ? { arrivalCleared: true } : {}),
+      ...(unconfirmed ? { unconfirmed: true } : {}),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
       ...(input.overrideBusy ? { overrideBusy: true } : {}),
     })

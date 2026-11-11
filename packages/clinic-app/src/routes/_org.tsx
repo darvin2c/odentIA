@@ -76,6 +76,7 @@ import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
 import { forgetDevicePushOnSignOut, registerAppWorker, syncThemeColor } from "../lib/pwa"
+import { setActiveBranchOwner } from "../lib/active-branch"
 import { CANVAS_DARK, CANVAS_LIGHT } from "../lib/web-manifest"
 import { NavigationProgress } from "../components/navigation-progress"
 import { PageDraftGuard } from "../lib/page-draft-guard"
@@ -158,6 +159,8 @@ export const Route = createFileRoute("/_org")({
     const regionLoad = loadOrgRegion()
     const { session, org: data } = await checkOrgAccess(location)
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
+    // La sede recordada es de esta persona: en un mostrador compartido no se hereda.
+    if (typeof window !== "undefined") setActiveBranchOwner(session.userId)
     const permissions = platformPathPermission(location.pathname)
     // A Inicio, diciendo por qué: sin el aviso parecía un error de la app.
     if (permissions && !canAccessAny(role, permissions))
@@ -378,7 +381,8 @@ function OrgLayout() {
     refetchInterval: 60_000,
   })
   const waitingPeople = waiting.data?.data.people ?? 0
-  const waitingLabel = waitingPeople === 1 ? "persona espera" : "personas esperan"
+  // Lo que cuenta: personas con algo por responder (casos y conversaciones), no la sala de espera.
+  const waitingLabel = waitingPeople === 1 ? "persona por responder" : "personas por responder"
   const toResolve = useAgentSummary(canAccess(role, "agent.read")).data?.data.toResolve ?? 0
   const withNavState = <T extends AppShellNavItem>(item: T): T => {
     if (item.to === "/home") return waitingPeople > 0 ? { ...item, badge: waitingPeople, badgeLabel: waitingLabel } : item

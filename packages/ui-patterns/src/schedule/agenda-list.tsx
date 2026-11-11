@@ -231,6 +231,8 @@ function AgendaRow({
               variant="outline"
               className="h-10 bg-card font-bold text-primary-soft-foreground shadow-xs hover:bg-card/80"
               pending={action.pending}
+              // Con el nombre: diez «Llegó» iguales no le dicen al lector de pantalla de quién es cada uno.
+              aria-label={`${action.label}: ${entry.title}`}
               onClick={action.onSelect}
             >
               {action.label}

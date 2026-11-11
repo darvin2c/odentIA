@@ -97,6 +97,7 @@ import { dayShort, shortName } from "../../components/agenda/shared"
 import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
+import { AbsenceForm, type AbsenceScope } from "../../components/agenda/absence-form"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { AgendaPageSkeleton, AgendaSkeleton } from "../../components/skeletons/agenda"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -271,6 +272,9 @@ function AgendaPage() {
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
   const canAttend = usePermission("clinical.write")
+  // Anotar la ausencia de cualquier profesional; quien atiende anota la suya.
+  const canAbsences = usePermission("appointments.absences")
+  const [absence, setAbsence] = React.useState<AbsenceScope | null>(null)
   const myUserId = useMyUserId()
   const requested = Route.useSearch()
   const navigate = useNavigate()
@@ -1174,6 +1178,39 @@ function AgendaPage() {
             ))}
           </>
         ) : null}
+        {/* Anotar una ausencia sin ir a Configuración: quien lleva la agenda, la de cualquiera;
+            quien atiende, la suya (mesa del 10 nov, decisiones 1 y 4). */}
+        {canAbsences || (canAttend && myUserId) ? (
+          <>
+            <DropdownMenuSeparator />
+            {canAbsences ? (
+              <>
+                <p className="px-2 py-1 text-xs font-bold text-muted-foreground">Anotar una ausencia</p>
+                {team.map((item) => (
+                  <DropdownMenuItem
+                    key={`ausencia-${item.id}`}
+                    onClick={() => setAbsence({ kind: "person", professionalUserId: item.id, name: item.label })}
+                  >
+                    <ResourceAvatar label={item.label} tone={toneOf(item.id)} size="sm" />
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </>
+            ) : (
+              <DropdownMenuItem
+                onClick={() =>
+                  setAbsence({
+                    kind: "person",
+                    professionalUserId: myUserId!,
+                    name: team.find((item) => item.id === myUserId)?.label ?? "tu agenda",
+                  })
+                }
+              >
+                Anotar mi ausencia
+              </DropdownMenuItem>
+            )}
+          </>
+        ) : null}
         {view === "dia" && rooms.length > 0 ? (
           <>
             <DropdownMenuSeparator />
@@ -1440,6 +1477,20 @@ function AgendaPage() {
       />
       {canAttend ? (
         <MyCalendarDrawer open={get("calendario") === "1"} onClose={() => setParam("calendario", undefined)} />
+      ) : null}
+      {absence && resources ? (
+        <AbsenceForm
+          branchId={resources.branchId}
+          timeZone={resources.timeZone}
+          today={today}
+          scope={absence}
+          rooms={resources.rooms}
+          onClose={() => setAbsence(null)}
+          onSaved={async () => {
+            setAbsence(null)
+            await queryClient.invalidateQueries({ queryKey: ["agenda"] })
+          }}
+        />
       ) : null}
 
       {((requested.patientId &&

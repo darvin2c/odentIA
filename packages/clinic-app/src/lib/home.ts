@@ -181,6 +181,16 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         action: "Ver en Pacientes",
       }
     case "overdueControls":
+      // Los que indicó quien atiende: los suyos, con su lista.
+      if (row.mine)
+        return {
+          title:
+            row.controls === row.patients
+              ? plural(row.controls, "control que indicaste venció sin cita", "controles que indicaste vencieron sin cita")
+              : `${row.controls} controles que indicaste vencieron sin cita (${plural(row.patients, "persona", "personas")})`,
+          detail: "Ya pasó su día y no tienen ninguna cita por venir",
+          action: "Ver",
+        }
       // La misma lista de la línea de Argos «Avisar un control».
       return {
         title:
@@ -206,6 +216,8 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
     case "task":
       return {
         title: row.title,
+        // Una derivación dice quién te la pasó: es un pendiente clínico entre colegas.
+        ...(row.referredBy ? { ask: `Te la pasó ${row.referredBy}` } : {}),
         detail: joined([
           dueText(row, context).replace(/^./, (first) => first.toUpperCase()),
           row.opportunityTitle ? `Oportunidad «${row.opportunityTitle}»` : null,
@@ -465,9 +477,10 @@ export function agendaSummary(summary: WorkspaceTodaySummary): string {
 }
 
 /** «8 pacientes · 1 en sala · 2 atendidos · 5 por venir». */
-export function patientsSummary(summary: WorkspaceTodaySummary): string {
+export function patientsSummary(summary: WorkspaceTodaySummary, people = summary.total): string {
   return joined([
-    plural(summary.total, "paciente", "pacientes"),
+    // Personas; si alguna viene más de una vez, también cuántas citas.
+    people === summary.total ? plural(people, "paciente", "pacientes") : `${plural(people, "paciente", "pacientes")} (${plural(summary.total, "cita", "citas")})`,
     summary.waiting > 0 ? `${summary.waiting} en sala` : null,
     summary.attending > 0 ? `${summary.attending} en atención` : null,
     plural(summary.attended, "atendido", "atendidos"),

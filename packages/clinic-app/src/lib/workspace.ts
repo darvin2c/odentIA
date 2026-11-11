@@ -43,6 +43,8 @@ export interface WorkspaceHome {
   cash: WorkspaceCash | null
 }
 export interface WaitingTask {
+  /** Te la pasó un colega por un paciente: quién. */
+  referredBy?: string | null
   id: string
   title: string
   dueAt: string | null
@@ -163,7 +165,7 @@ export type WaitingRow =
   /** Quienes tienen algo aceptado sin una cita que lo lleve: lleva a Pacientes › «Por agendar». */
   | { kind: "acceptedUnbooked"; patients: number; cents: number; currency: string }
   /** Los controles vencidos sin cita: abre la lista de la línea de Argos «Avisar un control». */
-  | { kind: "overdueControls"; controls: number; patients: number }
+  | { kind: "overdueControls"; controls: number; patients: number; mine?: boolean }
   /** Una conversación que espera respuesta: con quién y qué pidió. */
   | {
       kind: "person"
