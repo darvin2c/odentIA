@@ -338,10 +338,13 @@ function RealAppointmentDrawer({
   // vista, junto al botón: queda debajo de las horas.
   const targetDay = target ? zonedDateOf(target.start, timeZone) : ""
   const confirmedRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => setStillConfirmed(false), [targetDay, asksConfirmed])
+  // Con cada hora elegida (y su aviso, si lo trae) la casilla vuelve a quedar a la vista.
+  const targetStart = target?.start ?? ""
+  const targetState = when.state
   React.useEffect(() => {
-    setStillConfirmed(false)
     if (asksConfirmed) confirmedRef.current?.scrollIntoView({ block: "nearest" })
-  }, [targetDay, asksConfirmed])
+  }, [targetStart, targetState, asksConfirmed])
   const move = useMutation({
     // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
     mutationFn: (range: { start: string; end: string; columnId: string }) =>
@@ -521,7 +524,7 @@ function RealAppointmentDrawer({
           <div ref={moveRoot} className="grid gap-4">
             <WhenFields form={moveForm} fields="when" when={when} />
             {asksConfirmed ? (
-              <div ref={confirmedRef} className="grid gap-1.5">
+              <div ref={confirmedRef} data-draft-ignore className="grid gap-1.5">
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="cita-mover-ya-confirmo"
