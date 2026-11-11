@@ -873,9 +873,9 @@ export const PAGES = {
 
   historia: {
     path: "/historia-clinica-y-odontograma",
-    title: "Historia clínica dental y odontograma digital",
+    title: "Historia clínica electrónica dental y odontograma digital",
     description:
-      "Historia clínica dental con odontograma digital en notación FDI, diagnósticos codificados y cada atención en orden. Clío, tu agente clínico, prepara la nota de tu dictado y tú la confirmas.",
+      "Historia clínica electrónica dental con odontograma digital en notación FDI, diagnósticos codificados, consentimientos con firma electrónica y cada atención en orden. Clío, tu agente clínico, prepara la nota de tu dictado y tú la confirmas.",
     crumb: "Historia y odontograma",
     faq: [
       {

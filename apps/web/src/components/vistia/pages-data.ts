@@ -7,6 +7,7 @@
 // Los ejemplos son de la Óptica Lucero, una óptica inventada (como la Clínica Sonrisa Norte de odentIA).
 import type { FaqItem } from "../../lib/faq"
 import type { Block } from "../../lib/pages-data"
+import { signatureFaq } from "../../lib/signature-faq"
 
 /** Los agentes de vistIA en los bloques: Sofi (0) y Argos (2), con los índices de `AGENT_NAMES`. */
 const SOFI = 0
@@ -334,7 +335,7 @@ export const VISTIA_PAGES = {
 
   historia: {
     path: "/historia-clinica-electronica",
-    title: "Historia clínica para ópticas: la ficha de cada cliente, con sus pruebas del ojo",
+    title: "Historia clínica electrónica para ópticas: la ficha de cada cliente, con sus pruebas del ojo",
     description:
       "Historia clínica electrónica para ópticas con vistIA: la ficha de cada cliente con sus conversaciones y citas, antecedentes y alergias, diagnósticos con CIE-10 o CIE-11, consentimientos y las pruebas del ojo con su informe.",
     crumb: "Ficha e historia clínica",
@@ -380,6 +381,7 @@ export const VISTIA_PAGES = {
       { q: "¿Recepción puede ver la historia clínica?", a: "No. Recepción lleva la agenda, las conversaciones y los datos de contacto. La historia la ve quien atiende." },
       { q: "¿Puedo subir las pruebas que trae el cliente?", a: "Sí. Las pruebas del ojo que se hacen en tu óptica o que llegan de un centro van en su ficha, con su informe." },
       { q: "¿Y si me equivoqué en una atención ya firmada?", a: "Agregas una adenda que lo aclara, con tu nombre y la hora. Lo firmado no se borra ni se reescribe." },
+      signatureFaq("el optómetra"),
       { q: "¿Puedo dar una copia de su historia?", a: "Sí: en PDF para leer y en HL7 FHIR, un estándar que otro sistema puede cargar." },
     ],
     cta: { title: "Cada cliente, con toda su historia.", text: "Una sola ficha por persona, con lo que le toca ver a cada rol." },
