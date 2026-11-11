@@ -645,13 +645,21 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
 
   // El caso que no cabe y es de alguien que ya tiene fila va a su «También», no a «N más»:
   // se agrupa por persona antes de cortar, para que nada suyo se pierda de vista.
-  const withRow = new Set(rows.map(personOf).filter((person): person is string => person !== null))
+  // Solo si esa fila es al menos tan urgente como el caso: plegado en «Sin apuro», o un
+  // «Ahora» bajo una fila de «Hoy», se vería menos que en «N más».
+  const rowBand = new Map<string, number>()
+  for (const row of rows) {
+    const person = personOf(row)
+    if (person) rowBand.set(person, Math.min(rowBand.get(person) ?? Infinity, BAND_RANK[bandOf(row, parts.today)]))
+  }
   const shownCases = new Set([...urgentShown, ...othersShown])
   // Solo acompañan: la fila de la persona sigue siendo la que ya tenía, en su sitio.
   const folded = new Set<WaitingRow>()
   for (const item of parts.cases) {
-    if (shownCases.has(item) || !item.contactId || !withRow.has(item.contactId)) continue
+    if (shownCases.has(item) || !item.contactId) continue
     const row: WaitingRow = { kind: "case", ...item }
+    const band = rowBand.get(item.contactId)
+    if (band === undefined || band > BAND_RANK[bandOf(row, parts.today)]) continue
     rows.push(row)
     folded.add(row)
     if (casesMore) casesMore.count -= 1

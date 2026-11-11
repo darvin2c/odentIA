@@ -240,3 +240,19 @@ it("el caso que se pliega no le quita la fila a lo que la persona ya tenía, ni 
   expect(rows.map((row) => ("id" in row ? row.id : row.kind))).toEqual(["rosa", "c0", "c1", "c2"])
   expect(rows[0]?.also).toMatchObject([{ id: "extra" }])
 })
+
+it("el caso que no cabe no se pliega en una fila menos urgente que él: sigue en «N más»", () => {
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases }, (_, index) => caseOf(`c${index}`, "media"))
+  // La única fila de la persona está en «Sin apuro»: su caso de «Hoy» se vería menos ahí que en «N más».
+  const later = { ...taskOf("luego", "later"), personId: "persona-lenta" }
+  const today = { ...caseOf("de-hoy", "media"), contactId: "persona-lenta" }
+  const rows = composeWaiting({ ...nothing, cases: [...calm, today], nextTask: later, openTasks: 1 })
+  expect(rows.flatMap((row) => row.also ?? [])).toEqual([])
+  expect(rows.find((row) => row.kind === "more")).toMatchObject({ of: "cases", count: 1 })
+  // Tampoco un «Ahora» que no cabe bajo una fila de «Hoy».
+  const urgent = Array.from({ length: WAITING_LIMITS.urgentCases }, (_, index) => caseOf(`u${index}`, "alta"))
+  const sixth = { ...caseOf("sexto", "alta"), contactId: "persona-rosa" }
+  const mixed = composeWaiting({ ...nothing, cases: [...urgent, sixth], unconfirmed: { items: [{ ...unconfirmedOf("rosa"), personId: "persona-rosa" }], total: 1 } })
+  expect(mixed.flatMap((row) => row.also ?? [])).toEqual([])
+  expect(mixed.find((row) => row.kind === "more")).toMatchObject({ of: "cases", count: 1 })
+})
