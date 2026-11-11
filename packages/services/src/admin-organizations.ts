@@ -14,7 +14,7 @@ import { channelConnection, contact, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
@@ -129,6 +129,8 @@ export interface OrgMemberItem {
   email: string
   emailVerified: boolean
   role: string
+  /** El rol en español, con la palabra del producto de la clínica («Odontólogo», «Médico»). */
+  roleLabel: string
   memberSince: Date
   blocked: boolean
 }
@@ -178,7 +180,8 @@ export interface OrganizationDetail {
   /** El producto de la clínica: su dominio y sus palabras (ADR 0087). */
   product: ClinicalProduct
   members: OrgMemberItem[]
-  invitations: OrgInvitationItem[]
+  /** Con el rol en español, como los miembros. */
+  invitations: Array<OrgInvitationItem & { roleLabel: string }>
   branches: OrgBranchItem[]
   usage: {
     members: number
@@ -412,6 +415,17 @@ function auditInput(
 // Organizaciones: lista y ficha
 // ---------------------------------------------------------------------------
 
+/**
+ * Una demo para presentar es la clínica con su fila en `admin.saas_demo` (ADR
+ * 0096). La lista la marca «Demo» en vez de «Alta incompleta», así que tampoco
+ * cuenta en «Altas por completar» ni sale con la propietaria sin aceptar.
+ */
+const presentationDemoSql = sql`${organization.id} in (select ${saasDemo.organizationId} from ${saasDemo} where ${saasDemo.organizationId} is not null)`
+
+/** Sin perfil o sin sede: la misma regla para el contador, la etiqueta «Alta incompleta» y la ficha. */
+const incompleteProvisioningSql = sql`(not exists (select 1 from ${orgProfile} where ${orgProfile.organizationId} = ${organization.id})
+  or not exists (select 1 from ${branch} where ${branch.organizationId} = ${organization.id}))`
+
 export async function listOrganizations(
   tx: Db,
   actor: AdminActor | null,
@@ -429,8 +443,7 @@ export async function listOrganizations(
   // Sin perfil, la clínica todavía no eligió nada: nace dental (`org_profile.product` por defecto).
   const productSql = sql<ClinicalProduct>`coalesce((select ${orgProfile.product} from ${orgProfile}
     where ${orgProfile.organizationId} = ${organization.id}), 'dental')`
-  // Una demo para presentar es la clínica con su fila en `admin.saas_demo` (ADR 0096).
-  const demoSql = sql`${organization.id} in (select ${saasDemo.organizationId} from ${saasDemo} where ${saasDemo.organizationId} is not null)`
+  const demoSql = presentationDemoSql
   const searched = [
     ...(q ? [or(ilike(organization.name, `%${q}%`), ilike(organization.slug, `%${q}%`))] : []),
     ...(opts.negotiated && seesPrice ? [negotiatedSql] : []),
@@ -638,6 +651,8 @@ export async function getOrganizationDetail(
       email: m.email,
       emailVerified: m.emailVerified,
       role: m.role,
+      // La misma etiqueta que la ficha de usuario y la plataforma: la pantalla no traduce roles.
+      roleLabel: withProduct(m.role, profile?.product).roleLabel,
       memberSince: m.memberSince,
       blocked: blocks.has(m.userId),
     })),
@@ -646,6 +661,7 @@ export async function getOrganizationDetail(
       organizationId,
       email: i.email,
       role: i.role,
+      roleLabel: withProduct(i.role, profile?.product).roleLabel,
       status: i.status,
       expiresAt: i.expiresAt,
       createdAt: i.createdAt,
@@ -2119,7 +2135,8 @@ export interface OrganizationPendingCounts {
 /**
  * Pendientes del slice para el Inicio admin (lo agrega admin-overview):
  * casos de recuperación por decidir, invitaciones pendientes, clínicas sin
- * perfil/sede y usuarios bloqueados. Sin cálculo monetario.
+ * perfil o sin sede (sin las demos para presentar, como la lista) y usuarios
+ * bloqueados. Sin cálculo monetario.
  */
 export async function getOrganizationPendingCounts(
   tx: Db,
@@ -2141,26 +2158,81 @@ export async function getOrganizationPendingCounts(
     .from(userGlobalBlock)
     .where(eq(userGlobalBlock.active, true))
     .then((r) => (r.length > 0 ? r : [{ n: 0 }]))
-  const orgIds = await tx.select({ id: organization.id }).from(organization).limit(500)
-  let incompleteProvisioning = 0
-  for (const org of orgIds) {
-    const [profile] = await tx
-      .select({ id: orgProfile.organizationId })
-      .from(orgProfile)
-      .where(eq(orgProfile.organizationId, org.id))
-      .limit(1)
-    if (profile) continue
-    const [sede] = await tx
-      .select({ id: branch.id })
-      .from(branch)
-      .where(eq(branch.organizationId, org.id))
-      .limit(1)
-    if (!sede) incompleteProvisioning += 1
-  }
+  const [incomplete] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(organization)
+    .where(and(incompleteProvisioningSql, sql`not (${presentationDemoSql})`))
   return {
     pendingRecoveryCases: cases?.n ?? 0,
     pendingInvitations: invites?.n ?? 0,
-    incompleteProvisioning,
+    incompleteProvisioning: incomplete?.n ?? 0,
     blockedUsers: blocked?.n ?? 0,
   }
+}
+
+/** Una clínica de «Clínicas con la propietaria sin aceptar» en Inicio. */
+export interface OwnerPendingRow {
+  organizationId: string
+  organizationName: string
+  product: ClinicalProduct
+  invitationId: string
+  /** Cuándo la invitó el personal. */
+  invitedAt: Date
+  /** Cuándo vence (o venció) su enlace. */
+  expiresAt: Date
+  /** Desde cuándo corre su prueba; nulo si no tiene una. */
+  trialStartedAt: Date | null
+}
+
+/** Cuántos días antes de vencer sale la invitación de una propietaria en Inicio (la misma regla que la de un prospecto). */
+const OWNER_INVITE_SOON_DAYS = 3
+
+/**
+ * Las clínicas que el personal abrió y cuya propietaria no aceptó: ninguna
+ * persona es propietaria todavía, su última invitación de propietaria sigue
+ * pendiente, la hizo alguien del personal y vence en 3 días o ya venció. Se
+ * mira el vencimiento, no el estado: una vencida sigue «pending» hasta que
+ * alguien la reenvíe. Sin las demos para presentar. Lo vencido arriba. Solo
+ * metadatos: ni el correo de la invitada ni importes.
+ */
+export async function ownersPendingRows(tx: Db, now = new Date()): Promise<OwnerPendingRow[]> {
+  const horizon = new Date(now.getTime() + OWNER_INVITE_SOON_DAYS * 24 * 60 * 60 * 1000)
+  const rows = await tx
+    .select({
+      organizationId: organization.id,
+      organizationName: organization.name,
+      product: orgProfile.product,
+      invitationId: invitation.id,
+      invitedAt: invitation.createdAt,
+      expiresAt: invitation.expiresAt,
+      trialStartedAt: saasSubscription.trialStartedAt,
+    })
+    .from(invitation)
+    .innerJoin(organization, eq(organization.id, invitation.organizationId))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id))
+    .leftJoin(saasSubscription, eq(saasSubscription.organizationId, organization.id))
+    .where(
+      and(
+        eq(invitation.role, "owner"),
+        eq(invitation.status, "pending"),
+        lte(invitation.expiresAt, horizon),
+        // La última invitación de propietaria de esa clínica: una anterior ya no cuenta.
+        sql`${invitation.id} = (select i2.id from ${invitation} i2 where i2.organization_id = ${invitation.organizationId}
+          and i2.role = 'owner' order by i2.created_at desc, i2.id desc limit 1)`,
+        // La hizo el personal (alta asistida), no la clínica invitando a una socia.
+        sql`exists (select 1 from ${adminStaff} where ${adminStaff.userId} = ${invitation.inviterId})`,
+        sql`not exists (select 1 from ${member} where ${member.organizationId} = ${invitation.organizationId} and ${member.role} = 'owner')`,
+        sql`not (${presentationDemoSql})`,
+      ),
+    )
+    .orderBy(asc(invitation.expiresAt), asc(organization.name))
+  return rows.map((row) => ({
+    organizationId: row.organizationId,
+    organizationName: row.organizationName,
+    product: isClinicalProduct(row.product) ? row.product : "dental",
+    invitationId: row.invitationId,
+    invitedAt: row.invitedAt,
+    expiresAt: row.expiresAt,
+    trialStartedAt: row.trialStartedAt,
+  }))
 }

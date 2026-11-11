@@ -19,6 +19,7 @@ import {
   ensureClinicSpecialties,
   getAgentConfig,
   getBackofficeOverview,
+  getBackofficeToday,
   getClinicLogo,
   getOrganizationBillingSummary,
   initialOrgRegion,
@@ -475,6 +476,11 @@ export function createApp(deps: AppDeps) {
       ),
     ),
   )
+  // Inicio fila por fila (administración y soporte): prospectos, casos que nos esperan,
+  // seguimientos de hoy y propietarias sin aceptar. Solo lee; lo que no ve soporte lo quita el servicio.
+  app.get("/api/admin/overview/today", (c) =>
+    runService(c, 200, () => deps.ownerDb.transaction((tx) => getBackofficeToday(tx, adminContextOf(c)))),
+  )
   app.all("/api/admin/*", (c) =>
     c.json(errorBody(c, "NOT_FOUND", "Recurso administrativo no encontrado"), 404),
   )
@@ -520,6 +526,9 @@ export function createApp(deps: AppDeps) {
       remoteAddress: deps.registrationRemoteAddress,
       replyTo: deps.foundersEmail,
       productOf: productOfRequest,
+      // El aviso «Solicitud nueva en la lista de espera»: al buzón de Fundadores, con el enlace a la solicitud.
+      adminURL: deps.adminURL,
+      teamEmail: deps.foundersEmail,
     }),
   )
   // Libro de Reclamaciones de odentIA.

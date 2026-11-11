@@ -1,7 +1,10 @@
+import { adminStaff } from "@odentia/db/schema/admin-core"
+import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { invitation, member, organization, session, user } from "@odentia/db/schema/auth"
+import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
-import { beforeEach, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import {
   accountProduct,
@@ -15,12 +18,14 @@ import {
   findActiveUserBlock,
   findLifecycleCandidates,
   getOrganizationDetail,
+  getOrganizationPendingCounts,
   getUserDetail,
   leaveOrganization,
   listMyInvitations,
   listOrganizationProducts,
   listOrganizations,
   openRecoveryCase,
+  ownersPendingRows,
   resendOrganizationInvitation,
   searchUsers,
   setGlobalBlock,
@@ -375,4 +380,127 @@ it("la administración distingue el producto de cada clínica: lo marca, lo cuen
   expect(products).toMatchObject({ [medical.organizationId]: "medical", [dental.organizationId]: "dental", "t-filtro-sin-perfil": "dental" })
   expect((await getOrganizationDetail(ownerDb, support, medical.organizationId)).product).toBe("medical")
   await expect(listOrganizationProducts(ownerDb, null)).rejects.toThrow()
+})
+
+it("la ficha › Equipo dice el rol en español y con la palabra del producto", async () => {
+  const medical = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, { orgName: "Consultorio Roles", slug: "t-roles-latidia", email: "t-roles-l@example.test", countryCode: "PE", product: "medical" }),
+  )
+  await seedUser("t-roles-medico", "t-roles-medico@example.test", true, new Date())
+  await seedMember(medical.organizationId, "t-roles-medico", "clinician")
+  const detail = await getOrganizationDetail(ownerDb, support, medical.organizationId)
+  expect(detail.members.map((item) => item.roleLabel)).toEqual(["Médico"])
+  expect(detail.invitations.map((item) => item.roleLabel)).toEqual(["Propietario"])
+})
+
+describe("Inicio: altas por completar y propietarias sin aceptar", () => {
+  const DAY = 24 * 60 * 60 * 1000
+  let n = 0
+  const assisted = async (actor: AdminActor = admin) => {
+    n += 1
+    return ownerDb.transaction((tx) =>
+      createAssistedOrganization(tx, actor, {
+        orgName: `Clínica Inicio ${n}`,
+        slug: `t-inicio-${n}`,
+        email: `t-inicio-${n}@example.test`,
+        countryCode: "PE",
+      }),
+    )
+  }
+  const incomplete = async () => (await getOrganizationPendingCounts(ownerDb, admin)).incompleteProvisioning
+  const expiresIn = (invitationId: string, ms: number) =>
+    ownerDb.update(invitation).set({ expiresAt: new Date(Date.now() + ms) }).where(eq(invitation.id, invitationId))
+  const pendingIds = async () => (await ownersPendingRows(ownerDb)).map((row) => row.organizationId)
+
+  beforeEach(async () => {
+    // Las invitaciones del alta asistida las hace el personal: quien está en `admin_staff`.
+    await ownerDb.insert(adminStaff).values([{ userId: "t-admin", role: "admin" }, { userId: "t-support", role: "support" }]).onConflictDoNothing()
+  })
+
+  it("un alta asistida con perfil y sin sede cuenta en «Altas por completar», igual que su etiqueta", async () => {
+    const before = await incomplete()
+    const created = await assisted()
+    const [item] = (await listOrganizations(ownerDb, admin, { q: created.slug })).items
+    expect(item).toMatchObject({ hasProfile: true, hasBranch: false })
+    expect(await incomplete()).toBe(before + 1)
+    // Con su primera sede ya está completa.
+    await ownerDb.insert(branch).values({ organizationId: created.organizationId, name: "Sede principal" })
+    expect(await incomplete()).toBe(before)
+  })
+
+  it("una demo para presentar no cuenta en «Altas por completar»", async () => {
+    const before = await incomplete()
+    const created = await assisted()
+    await ownerDb.insert(saasDemo).values({
+      organizationId: created.organizationId,
+      product: "dental",
+      kind: "dental",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Demo Inicio",
+      slug: created.slug,
+      presenterUserId: "t-admin",
+      createdBy: "t-admin",
+      seed: 1,
+    })
+    expect(await incomplete()).toBe(before)
+    expect(await pendingIds()).not.toContain(created.organizationId)
+  })
+
+  it("sale la clínica con la propietaria sin aceptar cuando su invitación vence en 3 días o ya venció", async () => {
+    const soon = await assisted()
+    const late = await assisted(support)
+    const later = await assisted()
+    await expiresIn(soon.invitationId, 3 * DAY - 60_000)
+    await expiresIn(late.invitationId, -DAY)
+    await expiresIn(later.invitationId, 5 * DAY)
+    const rows = (await ownersPendingRows(ownerDb)).filter((row) =>
+      [soon.organizationId, late.organizationId, later.organizationId].includes(row.organizationId),
+    )
+    // Lo vencido arriba; la que vence en 5 días todavía no sale.
+    expect(rows.map((row) => row.organizationId)).toEqual([late.organizationId, soon.organizationId])
+    expect(rows[1]).toMatchObject({ invitationId: soon.invitationId, product: "dental", organizationName: expect.stringMatching(/^Clínica Inicio/) })
+    // Ni el correo de la invitada ni importes.
+    expect(JSON.stringify(rows)).not.toContain("@example.test")
+  })
+
+  it("no sale si ya tiene propietaria, ni la invitación que la clínica le hizo a su socia", async () => {
+    const owned = await assisted()
+    await expiresIn(owned.invitationId, DAY)
+    await seedUser("t-inicio-duena", "t-inicio-duena@example.test", true, new Date())
+    await seedMember(owned.organizationId, "t-inicio-duena", "owner")
+    expect(await pendingIds()).not.toContain(owned.organizationId)
+
+    // Una clínica sin propietaria (salió) que invitó ella misma a una socia como propietaria: no es un alta nuestra.
+    const own = await assisted()
+    await expiresIn(own.invitationId, DAY)
+    await seedUser("t-inicio-socia", "t-inicio-socia@example.test", true, new Date())
+    await ownerDb.insert(invitation).values({
+      id: randomUUID(),
+      organizationId: own.organizationId,
+      email: "t-inicio-otra@example.test",
+      role: "owner",
+      status: "pending",
+      expiresAt: new Date(Date.now() + DAY),
+      createdAt: new Date(Date.now() + 60_000),
+      inviterId: "t-inicio-socia",
+    })
+    expect(await pendingIds()).not.toContain(own.organizationId)
+
+    // Aceptada o cancelada, tampoco.
+    const accepted = await assisted()
+    await expiresIn(accepted.invitationId, DAY)
+    await ownerDb.update(invitation).set({ status: "accepted" }).where(eq(invitation.id, accepted.invitationId))
+    expect(await pendingIds()).not.toContain(accepted.organizationId)
+  })
+
+  it("reenviar una vencida la renueva por 7 días y la fila se va", async () => {
+    const created = await assisted()
+    await expiresIn(created.invitationId, -DAY)
+    expect(await pendingIds()).toContain(created.organizationId)
+    const resent = await ownerDb.transaction((tx) => resendOrganizationInvitation(tx, admin, created.invitationId))
+    expect(Math.round((resent.expiresAt.getTime() - Date.now()) / DAY)).toBe(7)
+    expect(await pendingIds()).not.toContain(created.organizationId)
+  })
 })
