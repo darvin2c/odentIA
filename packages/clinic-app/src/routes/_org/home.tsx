@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { openAppointmentAnywhere } from "../../components/agenda/schedule-host"
-import { AlsoList, CallPanel, DuplicatePanel, EncounterPanel, InventoryPanel, PromotionPanel, VisitPanel } from "../../components/home/row-panels"
+import { AlsoList, CallPanel, CameUnrecordedPanel, DuplicatePanel, EncounterPanel, InventoryPanel, OldUnclosedPanel, PromotionPanel, VisitPanel } from "../../components/home/row-panels"
 import { BudgetReviewDrawer } from "../../components/patient/plan/budget-review"
 import { PersonPanel, type PersonPanelTarget } from "../../components/person/person-panel"
 import { invalidateAgentWork } from "../../lib/agent-work"
@@ -248,6 +248,8 @@ function HomePage() {
       case "overdueControls":
       case "unconfirmed":
       case "unclosed":
+      case "unclosedOld":
+      case "cameUnrecorded":
       case "staleEncounter":
       case "registrationDone":
       case "promotions":
@@ -440,7 +442,13 @@ function HomePage() {
     <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
     <PersonPanel target={person} also={openedAlso} next={next} onClose={closePanel} onChanged={refresh} />
     {context && opened?.kind === "unclosed" ? (
-      <VisitPanel row={opened} also={openedAlso} context={context} canAttend={canAttend} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
+      <VisitPanel key={opened.id} row={opened} also={openedAlso} context={context} canAttend={canAttend} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
+    ) : null}
+    {context && opened?.kind === "cameUnrecorded" ? (
+      <CameUnrecordedPanel key={opened.id} row={opened} also={openedAlso} context={context} myUserId={myUserId} onClose={closePanel} onChanged={refresh} />
+    ) : null}
+    {context && opened?.kind === "unclosedOld" ? (
+      <OldUnclosedPanel row={opened} context={context} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
     ) : null}
     {context && opened?.kind === "unconfirmed" ? (
       <CallPanel row={opened} also={openedAlso} context={context} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />

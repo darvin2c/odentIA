@@ -12,6 +12,7 @@ import { getAdminSettings } from "./agent-admin.js"
 import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import {
+  HELP_DATA_CONFIDENT,
   HELP_JOIN_CONFIDENT,
   HELP_OFFERED,
   type HelpDecider,
@@ -19,6 +20,7 @@ import {
   helpAreaQuestion,
   helpAreas,
   helpCandidates,
+  helpDataQuestion,
   helpJoinQuestion,
   type HelpOption,
   helpOptionBatches,
@@ -36,6 +38,7 @@ import {
   type HelpWriter,
   helpWrittenProblem,
   readHelpAreas,
+  readHelpData,
   readHelpJoin,
   readHelpSelection,
 } from "./help-decision.js"
@@ -63,7 +66,7 @@ import { getArgosPanelAllowance } from "./saas-included.js"
 /**
  * Ariadna responde con la guía del sistema (ADR 0146 y 0178): lo escrito igual
  * que en la guía responde sin modelo; lo demás lo elige Jev en dos pasos
- * (`help.v2`: la categoría y la respuesta) y se muestra tal cual. Solo si la
+ * (`help.v3`: la categoría y la respuesta) y se muestra tal cual. Solo si la
  * respuesta está repartida entre dos o tres de la guía que se completan, el
  * modelo que escribe las une, y lo redactado se comprueba sin modelo. Si Jev
  * duda, ofrece las más parecidas; si no está en la guía, lo dice; si es de las
@@ -380,8 +383,9 @@ const errorCodeOf = (error: unknown): string => {
 }
 
 /**
- * Jev decide en dos pasos (`help.v2`, ADR 0178): la categoría y, dentro de las
- * elegidas, la respuesta. Si la categoría no fue segura se busca en toda la
+ * Jev decide en dos pasos (`help.v3`, ADR 0178): la categoría y, dentro de las
+ * elegidas, la respuesta. Con la categoría se pregunta aparte si pide un dato
+ * de su clínica (ADR 0179): si la guía no lo responde segura, va a Argos. Si la categoría no fue segura se busca en toda la
  * guía, por tandas; y antes de decir que algo no está, también: una categoría
  * mal elegida no puede acabar en «Esto no está en la guía». Si la certeza se
  * reparte entre dos o tres respuestas que se completan (lo decide Jev con un
@@ -397,25 +401,36 @@ export async function decideHelp(
   writer: HelpWriter | null = null,
   previous: HelpPrevious | null = null,
 ): Promise<HelpDecided> {
+  // Pide un dato de su clínica: lo dice Jev aparte, y vale aunque después no se pueda buscar en la guía.
+  let figures: HelpDecided | null = null
   if (decider) {
     try {
       const state = helpState(question, screenName, previous)
       const options = helpOptions(topics)
       const areas = helpAreas(topics)
-      const where = readHelpAreas(await decider.decide(state, [helpAreaQuestion(areas, texts)]), areas)
+      // A la vez que la categoría, si pide un dato de su clínica. Si esta pregunta falla, decide la guía sola.
+      const [located, data] = await Promise.all([
+        decider.decide(state, [helpAreaQuestion(areas, texts)]),
+        decider.decide(state, [helpDataQuestion(texts)]).then(readHelpData, () => 0),
+      ])
+      // Una respuesta segura de la guía gana («¿quién me espera?» también es un dato, y la guía dice dónde verlo). Sin ella, va a Argos.
+      if (data >= HELP_DATA_CONFIDENT) figures = { via: "jev", selection: { verdict: "datos", shown: [], offered: [], top: data }, why: "ninguna", area: null }
+      const where = readHelpAreas(located, areas)
       if (where.verdict !== "areas") {
-        return { via: "jev", selection: { verdict: where.verdict, shown: [], offered: [], top: where.top }, why: "ninguna", area: null }
+        return figures ?? { via: "jev", selection: { verdict: where.verdict, shown: [], offered: [], top: where.top }, why: "ninguna", area: null }
       }
       const chosen = new Set(where.areas.map((area) => area.id))
       const area = where.sure ? (where.areas[0]?.id ?? null) : null
       let picked = await pickAnswer(state, where.sure ? [helpOptionsIn(options, chosen)] : helpOptionBatches(options), question, texts, decider)
-      // No está en las categorías elegidas: se mira el resto de la guía antes de decir que no está.
-      if (picked && where.sure && picked.selection.verdict !== "seguro" && picked.selection.offered.length === 0) {
+      // No está en las categorías elegidas: se mira el resto de la guía antes de decir que no está (si es un dato, no hace falta).
+      if (picked && !figures && where.sure && picked.selection.verdict !== "seguro" && picked.selection.offered.length === 0) {
         const rest = await pickAnswer(state, helpOptionBatches(options, chosen), question, texts, decider)
         if (rest && (rest.selection.verdict === "seguro" || rest.selection.offered.length > 0)) picked = rest
       }
       if (picked) {
         const { selection, parts } = picked
+        // También antes de redactar: unir dos textos de la guía no responde una cifra.
+        if (figures && selection.verdict !== "seguro") return figures
         if (selection.verdict === "duda" && parts.length >= 2 && writer) {
           const written = await writeFromParts(question, parts, texts, decider, writer)
           if (written) return { via: "jev", selection: { verdict: "seguro", shown: parts, offered: [], top: selection.top }, why: "ninguna", area, written }
@@ -427,6 +442,7 @@ export async function decideHelp(
       console.warn(`La Ayuda respondió sin Jev: ${errorCodeOf(error)}`)
     }
   }
+  if (figures) return figures
   return { via: "respaldo", selection: byWords(question, topics), why: "sin_jev" }
 }
 

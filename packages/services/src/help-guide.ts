@@ -354,7 +354,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Agenda",
     parent: null,
     purpose:
-      "Las citas por día, la semana de todo el equipo con sus horas libres y la vista Agenda, que las lista día por día; un odontólogo la abre en su columna. Desde ahí reservas, mueves y cancelas citas, marcas «Llegó» cuando la persona está en la clínica y, quien atiende, pulsa «Atender». Al abrir una cita ves en palabras cómo va (Por confirmar, Confirmada, Llegó, En atención, Atendida, No vino o Cancelada), el teléfono de la persona, de qué conversación salió y cuándo le pedirá Sofi que confirme, y puedes escribirle.",
+      "Las citas por día, la semana de todo el equipo con sus horas libres y la vista Agenda, que las lista día por día; un odontólogo la abre en su columna. Desde ahí reservas, mueves y cancelas citas, marcas «Llegó» cuando la persona está en la clínica y, quien atiende, pulsa «Atender». Al abrir una cita ves en palabras cómo va (Por confirmar, Confirmada, Llegó, En atención, Atendida, No vino, Cancelada o Sin cerrar, si su hora pasó y nadie dijo si vino), el teléfono de la persona, de qué conversación salió y cuándo le pedirá Sofi que confirme, y puedes escribirle.",
     terms: [
       "citas",
       "calendario",
@@ -388,6 +388,10 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "ver la semana",
       "marcar que llegó",
       "corregir hora",
+      "llegó tarde",
+      "vino tarde",
+      "atendida sin registrar",
+      "citas viejas",
     ],
     writePermission: "appointments.write",
     faqs: [
@@ -424,12 +428,25 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "marco-llego",
         q: "¿Cómo marco que llegó?",
-        a: "Con «Llegó» en la cita, en la Agenda o en Inicio. Queda la hora y quien atiende lo ve en su sala de espera. Si estaba por confirmar, queda confirmada y ya no se le envían recordatorios. Si fue un error, «Deshacer» en la cita (en la vista «Agenda», «…» › «Deshacer la llegada») la devuelve como estaba mientras no haya empezado su atención.",
+        a: "Con «Llegó» en la cita, en la Agenda o en Inicio. Queda la hora y quien atiende lo ve en su sala de espera. Si estaba por confirmar, queda confirmada y ya no se le envían recordatorios. Si fue un error, «Deshacer» en la cita (en la vista «Agenda», «…» › «Deshacer la llegada») la devuelve como estaba mientras no haya empezado su atención. Si llega tarde, ya pasada su hora, la cita dice «Sin cerrar» y «Llegó» sigue ahí, primero: no hace falta marcar antes «No vino».",
+        forms: ["llegó tarde", "el paciente llegó tarde", "cómo lo paso a sala si llegó tarde", "vino tarde a su cita"],
+      },
+      {
+        id: "cita-sin-cerrar",
+        q: "¿Qué hago con una cita que quedó sin cerrar?",
+        a: "«Sin cerrar» es una cita cuya hora pasó y nadie dijo si vino: no cuenta como atendida ni como falta. Se ve con ese nombre en Inicio, la Agenda, la ficha y Reportes. Hoy, si llegó tarde, «Llegó»; si ya la atendieron, «Registrar la atención»; si no vino, «No vino». De otro día, «¿Vino?»: «Vino» si vino (a pagar, a recoger algo o ya lo atendieron), «Registrar la atención» para quien la atendió, que queda con el día y la hora de la cita, o «No vino». En Inicio salen las del último mes, de la más reciente a la más antigua; las de antes van juntas en una fila «citas de hace más de un mes sin cerrar», con «Revisar» para cerrarlas una por una o con «Ninguna vino». Nada se cierra solo. Si marcaste «Vino» por error, el aviso trae «Deshacer»; después, en la cita, «Deshacer «Vino»», mientras nadie registre su atención. Si marcaste «No vino» por error: hoy, «Llegó»; otro día, «Sí vino» en la cita.",
+        forms: ["cita sin cerrar", "citas sin cerrar", "qué significa sin cerrar", "se me acumulan las citas", "citas viejas sin marcar", "cerrar citas pasadas", "deshacer vino", "marqué vino por error", "marqué no vino por error"],
+      },
+      {
+        id: "atendida-sin-registrar",
+        q: "¿Qué es «quedó atendida sin registrar»?",
+        a: "Recepción cerró tu cita con «Vino» y su historia de ese día está vacía. Te sale en «Te espera» hasta que la resuelvas: «Registrar la atención» la abre con el día y la hora de la cita, y «No hace falta», si no se hizo nada que anotar (vino solo a pagar o a recoger algo). No se va sola.",
+        forms: ["atendida sin registrar", "su cita quedó atendida sin registrar", "registrar una cita de otro día", "registrar la atención de ayer"],
       },
       {
         id: "quedo-atendida",
         q: "¿Dónde quedó «Atendida»?",
-        a: "La cita se cierra con su atención: al firmarla pasa a «Atendida» y quedan hechos el control reservado en ella y el que ya le tocaba, si quien firma lo deja marcado. Cancelar una cita o marcar «No vino» devuelve su control a estar por reservar. Si una cita ya pasó y nadie la cerró, aparece en «Ya pasaron · sin cerrar» con «Registrar la atención», «Vino» o «No vino». «Vino» la deja atendida sin abrir otra atención (vino a pagar, a recoger algo, o ya lo atendieron): no registra nada de su historia, así que lo que se le hizo lo registra quien atendió, y el control que llevaba vuelve a estar por reservar.",
+        a: "La cita se cierra con su atención: al firmarla pasa a «Atendida» y quedan hechos el control reservado en ella y el que ya le tocaba, si quien firma lo deja marcado. Cancelar una cita o marcar «No vino» devuelve su control a estar por reservar. Si una cita ya pasó y nadie la cerró, dice «Sin cerrar» (en la Agenda, en «Ya pasaron · sin cerrar») con «Registrar la atención», «Vino» o «No vino»; si es de hoy, también «Llegó». «Vino» la deja atendida sin abrir otra atención (vino a pagar, a recoger algo, o ya lo atendieron): no registra nada de su historia, así que a quien la atendió le sale en «Te espera» para registrarla, y el control que llevaba vuelve a estar por reservar.",
       },
       {
         id: "llega-tarde-despues-marcar-vino",
@@ -1084,7 +1101,6 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "te lo pasó el agente",
       "conocimiento",
       "aprender",
-      "tope diario",
       "autonomía",
       "cerrar conversaciones",
       "horario de recontacto",

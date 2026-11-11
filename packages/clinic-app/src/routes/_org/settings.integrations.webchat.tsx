@@ -18,6 +18,7 @@ import { z } from "zod"
 import { ChoiceButtons } from "../../components/choice-buttons"
 import { IntegrationsCrumbWithText } from "../../components/integrations/integrations-crumb"
 import { SettingsNoAccess } from "../../components/settings/no-access"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { RouterLink } from "../../lib/router-link"
@@ -437,6 +438,7 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
  * Pacientes y se borra a los 7 días o con «Borrar esta prueba».
  */
 function Preview({ chatId }: { chatId: string }) {
+  const receptionName = useReceptionName()
   const [size, setSize] = useState<"computadora" | "celular">("computadora")
   const [session, setSession] = useState<{ sessionId: string; token: string } | null>(null)
   const open = useMutation({
@@ -487,7 +489,7 @@ function Preview({ chatId }: { chatId: string }) {
         )}
       </div>
       <p className="text-sm text-muted-foreground">
-        Prueba · no se publica ni se cobra. Sofi responde de verdad; la conversación lleva «Prueba» en la Bandeja y se borra sola a los 7 días.
+        Prueba · no se publica ni se cobra. {receptionName} responde de verdad; la conversación lleva «Prueba» en la Bandeja y se borra sola a los 7 días.
       </p>
       {session ? (
         <Button variant="outline" className="w-fit" disabled={remove.isPending} onClick={() => remove.mutate(session.sessionId)}>

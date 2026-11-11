@@ -10,9 +10,10 @@ export type ScheduleStatus = "programada" | "confirmada" | "atendida" | "no_asis
 
 /**
  * Lo que pasa con la persona en una cita en pie, que no es un estado guardado:
- * llegó y espera, o ya la están atendiendo (ADR 0032). El servicio lo calcula.
+ * llegó y espera, ya la están atendiendo, o su hora terminó y nadie dijo si vino
+ * («sin cerrar») (ADR 0032). El servicio lo calcula.
  */
-export type ScheduleStage = "llego" | "en_atencion"
+export type ScheduleStage = "llego" | "en_atencion" | "sin_cerrar"
 
 /** El estado que se dice en pantalla: el guardado o, si lo hay, el momento de la persona. */
 export type ScheduleState = ScheduleStatus | ScheduleStage

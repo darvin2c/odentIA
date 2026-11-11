@@ -19,6 +19,8 @@ import {
   listScheduleResources,
   listTeamAttendance,
   markAppointmentCame,
+  undoAppointmentCame,
+  skipAppointmentRecord,
   moveAppointment,
   operationBodySchema,
   requirePatient,
@@ -89,12 +91,12 @@ const patchInput = z
   })
   .strict()
 
-// La versión de la cita que miraba quien pulsa: si otra persona la cambió antes, el botón no se aplica.
-const seenVersion = z.number().int().min(0).optional()
+// `expectedVersion`: la versión que vio la pantalla; un cajón abierto antes no pisa lo que cambió otro.
+const expectedVersion = z.number().int().positive().optional()
 
-const arrivalInput = z.object({ arrived: z.boolean(), expectedVersion: seenVersion }).strict()
+const arrivalInput = z.object({ arrived: z.boolean(), expectedVersion }).strict()
 
-const cameInput = z.object({ expectedVersion: seenVersion }).strict()
+const cameInput = z.object({ undo: z.boolean().optional(), expectedVersion }).strict()
 
 /**
  * El origen de una cita que reserva el equipo lo pone esta ruta: «recepcion» o, si salió de una
@@ -112,7 +114,7 @@ const statusInput = z.object({
   notice: z.literal(false).optional(),
   // Cómo confirmó la persona, cuando lo anota el equipo: queda en la actividad de la cita.
   via: z.enum(["telefono", "en_persona", "mensaje"]).optional(),
-  expectedVersion: seenVersion,
+  expectedVersion,
 })
 
 const roomInput = z.object({
@@ -531,10 +533,25 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     }
     const parsed = cameInput.safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const options = { expectedVersion: parsed.data.expectedVersion }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        markAppointmentCame(tx, orgId, userId, c.req.param("id"), parsed.data.expectedVersion),
+        parsed.data.undo
+          ? undoAppointmentCame(tx, orgId, userId, c.req.param("id"), options)
+          : markAppointmentCame(tx, orgId, userId, c.req.param("id"), options),
       ),
+    )
+  })
+
+  // «No hace falta»: la cita cerrada con «Vino» no tendrá su atención registrada. Lo decide quien
+  // atiende (escribe en la historia), no recepción: la fila es del profesional.
+  app.post("/:id/record-skipped", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Lo decide quien atiende: solo quien escribe en la historia clínica"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => skipAppointmentRecord(tx, orgId, userId, c.req.param("id"))),
     )
   })
 
@@ -583,7 +600,9 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        setAppointmentArrival(tx, orgId, userId, c.req.param("id"), parsed.data.arrived, new Date(), parsed.data.expectedVersion),
+        setAppointmentArrival(tx, orgId, userId, c.req.param("id"), parsed.data.arrived, new Date(), {
+          expectedVersion: parsed.data.expectedVersion,
+        }),
       ),
     )
   })
@@ -602,7 +621,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
           cancelNote: parsed.data.cancelNote,
           ...(parsed.data.via ? { via: parsed.data.via } : {}),
           ...(parsed.data.notice === false ? { notice: false } : {}),
-          ...(parsed.data.expectedVersion !== undefined ? { expectedVersion: parsed.data.expectedVersion } : {}),
+          expectedVersion: parsed.data.expectedVersion,
         }),
       ),
     )

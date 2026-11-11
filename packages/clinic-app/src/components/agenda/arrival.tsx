@@ -22,17 +22,27 @@ export interface ArrivalInput {
 
 export interface VisitStatusInput {
   id: string
-  /** La versión de la cita que la pantalla mostraba. */
-  version?: number
   /** «atendida» es «Vino»: la cita pasada queda atendida sin abrir otra atención (decisión B1). */
   status: "confirmada" | "no_asistio" | "atendida"
+  /** La versión que vio la pantalla: si otra persona la cambió, el servidor no la pisa. */
+  expectedVersion?: number
 }
 
-const seen = (version: number | undefined) => (version === undefined ? {} : { expectedVersion: version })
+/** «Deshacer» de «Vino»: la cita vuelve a «Sin cerrar» mientras nadie registró su atención. */
+export function undoCame(id: string): Promise<{ data: AgendaAppointment }> {
+  return apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${id}/came`, {
+    method: "POST",
+    body: JSON.stringify({ undo: true }),
+  })
+}
 
-/** Lo que se dice al confirmar una cita o marcar que no vino, en la fila y en el cajón: de quién, y si el agente le avisa. */
+/**
+ * Lo que se dice al confirmar una cita, marcar que no vino o que vino, en la
+ * fila y en el cajón: de quién, si el agente le avisa y, en «Vino», «Deshacer».
+ */
 export function announceVisitStatus(
-  appointment: Pick<AgendaAppointment, "patientName" | "status" | "notice">,
+  appointment: Pick<AgendaAppointment, "id" | "patientName" | "status" | "notice">,
+  options: { onUndone?: () => void } = {},
 ): string {
   const text =
     appointment.status === "confirmada"
@@ -40,16 +50,30 @@ export function announceVisitStatus(
       : appointment.status === "atendida"
         ? `Cita de ${appointment.patientName}: vino, queda atendida`
         : `Cita de ${appointment.patientName}: no vino`
-  toast.success(
-    text,
-    appointment.notice?.queued
-      ? { description: "El agente le avisa y le ofrece otra fecha." }
-      : undefined,
-  )
+  toast.success(text, {
+    ...(appointment.notice?.queued ? { description: "El agente le avisa y le ofrece otra fecha." } : {}),
+    ...(appointment.status === "atendida"
+      ? {
+          // Tiempo para leerlo y deshacerlo, como los demás «Deshacer» de la app.
+          duration: 10_000,
+          description: "Lo que se hizo lo registra su profesional: le aparece en «Te espera».",
+          action: {
+            label: "Deshacer",
+            onClick: () =>
+              void undoCame(appointment.id)
+                .then(() => {
+                  toast.success(`Se deshizo «Vino» de ${appointment.patientName}`)
+                  options.onUndone?.()
+                })
+                .catch((cause) => toast.error(errorMessage(cause))),
+          },
+        }
+      : {}),
+  })
   return text
 }
 
-/** «Confirmar cita» y «No vino» desde una fila, sin abrir la cita: en la Agenda y en Inicio, la misma. */
+/** «Confirmar cita», «No vino» y «Vino» desde una fila, sin abrir la cita: en la Agenda y en Inicio, la misma. */
 export function useAppointmentVisitStatus(options: { onDone?: (text: string) => void } = {}) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -57,14 +81,16 @@ export function useAppointmentVisitStatus(options: { onDone?: (text: string) => 
       input.status === "atendida"
         ? apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/came`, {
             method: "POST",
-            body: JSON.stringify(seen(input.version)),
+            body: JSON.stringify(input.expectedVersion ? { expectedVersion: input.expectedVersion } : {}),
           })
         : apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, {
             method: "POST",
-            body: JSON.stringify({ status: input.status, ...seen(input.version) }),
+            body: JSON.stringify({ status: input.status, expectedVersion: input.expectedVersion }),
           }),
     onSuccess: async (result) => {
-      options.onDone?.(announceVisitStatus(result.data))
+      options.onDone?.(
+        announceVisitStatus(result.data, { onUndone: () => void invalidateAppointmentQueries(queryClient) }),
+      )
       await invalidateAppointmentQueries(queryClient)
     },
     onError: async (cause) => {
@@ -89,7 +115,7 @@ export function useAppointmentArrival(options: {
     mutationFn: (input: ArrivalInput) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/arrival`, {
         method: "POST",
-        body: JSON.stringify({ arrived: input.arrived, ...seen(input.version) }),
+        body: JSON.stringify({ arrived: input.arrived, ...(input.version ? { expectedVersion: input.version } : {}) }),
       }),
     onSuccess: async (result, input) => {
       await invalidateAppointmentQueries(queryClient)

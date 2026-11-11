@@ -1,0 +1,33 @@
+Nota: es la configuración que se unió (ADR 0179): la guía de 457 respuestas, y una respuesta segura de la guía gana a «datos».
+La Ayuda no mostró lo redactado: sin_nombres
+Ayuda · help.v3 · proveedor jev (jev-1.13.0) · redactando
+  guía odentia: 30 pantallas, 457 preguntas frecuentes, 33 categorías; la mayor tiene 53 opciones
+  guía latidia: 30 pantallas, 455 preguntas frecuentes, 33 categorías; la mayor tiene 51 opciones
+  guía vistia: 31 pantallas, 471 preguntas frecuentes, 34 categorías; la mayor tiene 48 opciones
+  bancos: ciego 245 (10 repetidas, fuera) · ronda 14 · cifras 38
+
+Por banco:
+  banco          n  seguro bien  seguro mal  redactadas  duda c/correcta  duda sin  duda calla  ninguna bien  ninguna mal  datos bien  datos mal  sin Jev
+  ciego        245          119           4           2               65        12          16            15            2          11          1        3
+  ronda         14            1           1           1                4         2           5             0            0           1          0        0
+  cifras        38            5           1           2                6         1          11             0            0          14          0        0
+  «redactadas»: Jev dijo que dos o tres respuestas se completan. Sin --redactar cuentan como duda; con él, como seguro si todas sus partes corresponden.
+
+Confirmación (ronda + ciego + cifras), n = 297:
+  De lo que muestra como respuesta, corresponde: 95.4 % (cota inferior 95 %: 90.4 %; mínimo 95.0 %)
+  Lo que la guía no responde y no recibe una respuesta: 98.6 % (mínimo 95.0 %)
+  Lo que la guía responde y se resuelve solo o con un toque: 89.7 % (mínimo 70.0 %)
+  Seguro y mal: 6 · «datos» bien dicho: 74.3 %
+  Primer paso: de 184 con categoría segura, acertó 170 (92.4 %); en 69 buscó en toda la guía o dijo «ninguna» en el primer paso
+  Cumple los mínimos: sí
+
+Llamadas a Jev por pregunta: habitual 3 · máximo 5 (1042 en total)
+Demora por pregunta, con todos sus pasos: p50 483 ms · p95 671 ms (mínimo para salir ≤ 2000 ms)
+Costo de Jev por pregunta: habitual USD 0.000395 · máximo USD 0.001437 · esta corrida USD 0.188135 (294 preguntas con precio, de 294)
+1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.513500, sin contar lo redactado
+
+Seguro y se equivoca (0):
+
+… y 24 fallos en los bancos de confirmación: --ver-ciegos los muestra, y mirarlos para ajustar los gasta.
+
+Lo redactado, para leerlo (0; aquí no hay juez). «Se mostró» es que pasó la comprobación de nombres y cifras:

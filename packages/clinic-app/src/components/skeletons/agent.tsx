@@ -302,7 +302,7 @@ export function ReceptionSkeleton() {
           </p>
         </ReceptionCard>
 
-        <ReceptionCard title="Límites" hint="Siempre responde al momento. Aquí decides cuándo pasa el caso a una persona y cuánto puede hacer al día.">
+        <ReceptionCard title="Límites" hint="Siempre responde al momento. Aquí decides cuándo pasa el caso a una persona y cuándo cierra una conversación.">
           <div className="overflow-hidden rounded-xl border sm:hidden">
             <div className={ENTRY_ROW}>
               <span className="min-w-0 flex-[1_1_9rem] font-semibold">Límites y cuándo pasa a una persona</span>
@@ -344,7 +344,7 @@ export function ReceptionSkeleton() {
           <div className="flex flex-col gap-1 rounded-xl bg-muted/60 p-4 text-sm">
             <h3 className="font-semibold">Lo que recuerda de cada persona</h3>
             <p className="text-muted-foreground">
-              Pocos datos prácticos, cada uno con su origen, a la vista en la ficha de cada contacto. Los puedes corregir o quitar. Nunca guarda
+              Pocos datos prácticos, cada uno con su origen, a la vista en la ficha de cada contacto. Se corrigen o se quitan desde «Contexto», en la Bandeja. Nunca guarda
               información clínica.
             </p>
           </div>

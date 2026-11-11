@@ -469,7 +469,8 @@ export function EncounterDetailView({
           <span className="text-muted-foreground">
             {encounter.signerTitle ? ` · ${encounter.signerTitle}` : ""}
             {encounter.signerRegistration ? ` · colegiatura ${encounter.signerRegistration}` : ""}
-            {encounter.endedAt ? ` · ${formatDateTime(encounter.endedAt)}` : ""}
+            {/* Cuándo firmó, no cuándo terminó la visita: la de una cita pasada se firma después. */}
+            {(encounter.finalizedAt ?? encounter.endedAt) ? ` · ${formatDateTime((encounter.finalizedAt ?? encounter.endedAt)!)}` : ""}
           </span>
         </p>
       ) : null}

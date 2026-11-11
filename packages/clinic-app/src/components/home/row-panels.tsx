@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { fetchMyProfessionalProfile, saveProfessionalProfileApi } from "../../lib/encounters"
 import { type HomeTextContext, sentence, waitingKey, waitingText } from "../../lib/home"
 import { createReorderDrafts } from "../../lib/inventory"
@@ -13,7 +13,7 @@ import { useOrgProfile } from "../../lib/org"
 import { whatsappMessagesKey } from "../../lib/whatsapp"
 import type { WaitingPromotion, WaitingRow } from "../../lib/workspace"
 import { productUi } from "../../product/product-ui"
-import { useAppointmentVisitStatus } from "../agenda/arrival"
+import { undoCame, useAppointmentVisitStatus } from "../agenda/arrival"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { useDiscardEncounter } from "../patient/stale-encounter"
@@ -70,6 +70,16 @@ export function VisitPanel({
   const attend = useAttendAppointment()
   const status = useAppointmentVisitStatus()
   const [noShow, setNoShow] = useState(false)
+  // «Vino»: el panel dice cómo quedó y ofrece deshacerlo ahí mismo, sin depender de un aviso que se va.
+  const [came, setCame] = useState(false)
+  const undo = useMutation({
+    mutationFn: () => undoCame(row.id),
+    onSuccess: () => {
+      setCame(false)
+      onChanged()
+    },
+    onError: (cause) => toast.error(submitErrorMessage(cause)),
+  })
   return (
     <DetailDrawer
       open
@@ -77,7 +87,11 @@ export function VisitPanel({
       description={[text.ask].filter(Boolean).join(" · ") || undefined}
       onClose={onClose}
       actions={
-        noShow ? (
+        came ? (
+          <Button type="button" variant="secondary" className={ACTION} disabled={undo.isPending} onClick={() => undo.mutate()}>
+            {undo.isPending ? "Deshaciendo…" : "Deshacer «Vino»"}
+          </Button>
+        ) : noShow ? (
           canWrite ? (
             <Button type="button" className={ACTION} onClick={() => openBookingAnywhere({ patient: { id: row.patientId, name: row.patientName }, lockedPatient: true })}>
               Reagendar
@@ -87,7 +101,8 @@ export function VisitPanel({
           <div className="flex w-full flex-col gap-2">
             <p className="text-sm font-bold">¿Vino a su cita?</p>
             <div className="flex flex-wrap justify-end gap-2">
-              {canWrite ? (
+              {/* Si ese día se marcó «Llegó», vino: no se marca «No vino». */}
+              {canWrite && !row.arrived ? (
                 <Button
                   type="button"
                   variant="secondary"
@@ -95,7 +110,7 @@ export function VisitPanel({
                   disabled={status.isPending}
                   onClick={() =>
                     status.mutate(
-                      { id: row.id, status: "no_asistio" },
+                      { id: row.id, status: "no_asistio", expectedVersion: row.version },
                       {
                         onSuccess: () => {
                           setNoShow(true)
@@ -119,12 +134,11 @@ export function VisitPanel({
                   disabled={status.isPending}
                   onClick={() =>
                     status.mutate(
-                      { id: row.id, status: "atendida" },
-                      // El aviso lo dice y el panel se cierra: ya no queda nada que preguntar.
+                      { id: row.id, status: "atendida", expectedVersion: row.version },
                       {
                         onSuccess: () => {
+                          setCame(true)
                           onChanged()
-                          onClose()
                         },
                       },
                     )
@@ -162,7 +176,21 @@ export function VisitPanel({
       }
     >
       <div className="flex flex-col gap-4">
-        {noShow ? <p role="status" className="text-sm">Quedó marcada como que no vino. Si quiere otra fecha, puedes reagendarla.</p> : <p className="text-sm">Mientras no se cierre, no cuenta como atendida ni como falta.</p>}
+        {came ? (
+          <p role="status" className="text-sm">
+            Quedó atendida.{" "}
+            {row.professionalName
+              ? `Lo que se hizo lo registra ${row.professionalName}, a quien le aparece en «Te espera».`
+              : "Lo que se hizo lo registra quien la atendió."}
+          </p>
+        ) : noShow ? (
+          <p role="status" className="text-sm">Quedó marcada como que no vino. Si quiere otra fecha, puedes reagendarla.</p>
+        ) : (
+          <p className="text-sm">
+            {row.arrived ? "Ese día se marcó que llegó, pero nadie registró su atención. " : ""}
+            Mientras no se cierre, no cuenta como atendida ni como falta.
+          </p>
+        )}
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
           {row.serviceName ? (
             <>
@@ -181,6 +209,246 @@ export function VisitPanel({
         </dl>
         {also}
       </div>
+    </DetailDrawer>
+  )
+}
+
+/**
+ * «Su cita del 9 nov quedó atendida sin registrar»: recepción la cerró con «Vino»
+ * y su profesional registra lo que se hizo (la atención nace con la fecha de la
+ * cita) o dice que no hace falta. Las dos cosas quitan la fila.
+ */
+export function CameUnrecordedPanel({
+  row,
+  also,
+  context,
+  myUserId,
+  onClose,
+  onChanged,
+}: {
+  row: RowOf<"cameUnrecorded">
+  also: ReactNode
+  context: HomeTextContext
+  myUserId: string | null
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const text = waitingText(row, context)
+  const attend = useAttendAppointment()
+  const queryClient = useQueryClient()
+  const skip = useMutation({
+    mutationFn: () => apiFetch(`/api/appointments/${row.id}/record-skipped`, { method: "POST", body: "{}" }),
+    onSuccess: async () => {
+      toast.success(`La cita de ${row.patientName} queda atendida sin su atención registrada`)
+      await invalidateAppointmentQueries(queryClient)
+      onChanged()
+      onClose()
+    },
+    onError: (cause) => toast.error(submitErrorMessage(cause)),
+  })
+  const busy = skip.isPending || attend.isPending
+  return (
+    <DetailDrawer
+      open
+      title={row.patientName}
+      description={text.ask ?? undefined}
+      onClose={onClose}
+      actions={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="secondary" className={ACTION} disabled={busy} onClick={() => skip.mutate()}>
+            {skip.isPending ? "Guardando…" : "No hace falta"}
+          </Button>
+          <Button
+            type="button"
+            className={ACTION}
+            disabled={busy}
+            onClick={() =>
+              attend.mutate({
+                patientId: row.patientId,
+                // Es la cita de quien mira: la atención nace con el día y la hora de la cita.
+                appointment: { id: row.id, professionalUserId: myUserId ?? "", professionalName: "", pastVisit: true },
+              })
+            }
+          >
+            Registrar la atención
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm">{sentence(text.detail ?? "")} La atención que registres queda con el día y la hora de la cita.</p>
+        <p className="text-[13px] text-muted-foreground">
+          «No hace falta» si no se hizo nada que anotar en su historia: vino solo a pagar o a recoger algo.
+        </p>
+        {also}
+      </div>
+    </DetailDrawer>
+  )
+}
+
+/**
+ * Las citas sin cerrar de hace más de un mes, juntas (mesa del 10 nov, decisión
+ * 3): cada una con «Vino» o «No vino», y «Ninguna vino» para cerrarlas de una
+ * vez. Lo que se cierra sale de la lista.
+ */
+export function OldUnclosedPanel({
+  row,
+  context,
+  canWrite,
+  onClose,
+  onChanged,
+}: {
+  row: RowOf<"unclosedOld">
+  context: HomeTextContext
+  canWrite: boolean
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const queryClient = useQueryClient()
+  const list = useQuery({
+    queryKey: ["workspace", "unclosed-old"],
+    queryFn: () => apiFetch<{ data: { items: Array<RowOf<"unclosed">> } }>("/api/workspace/unclosed-old"),
+  })
+  const items = list.data?.data.items ?? []
+  // Las que se marcaron «Llegó» ese día vinieron: «Ninguna vino» no las toca.
+  const missing = items.filter((item) => !item.arrived)
+  const [confirmAll, setConfirmAll] = useState(false)
+  const close = useMutation({
+    mutationFn: async (input: { rows: Array<RowOf<"unclosed">>; status: "no_asistio" | "atendida" }) => {
+      // Una por una, con la versión que se ve: si otra persona cerró alguna, esa no se pisa.
+      let done = 0
+      let changed = 0
+      for (const item of input.rows) {
+        try {
+          await apiFetch(
+            input.status === "atendida" ? `/api/appointments/${item.id}/came` : `/api/appointments/${item.id}/status`,
+            {
+              method: "POST",
+              body: JSON.stringify(
+                input.status === "atendida"
+                  ? { expectedVersion: item.version }
+                  : { status: "no_asistio", expectedVersion: item.version },
+              ),
+            },
+          )
+          done += 1
+        } catch (cause) {
+          // La que no se pudo sigue en la lista: se ve al volver a leerla.
+          if (cause instanceof ApiError && cause.shape.code === "STALE_VERSION") changed += 1
+        }
+      }
+      return { done, changed, total: input.rows.length }
+    },
+    onSuccess: async ({ done, changed, total }) => {
+      if (done === total) toast.success(done === 1 ? "Cita cerrada" : `${done} citas cerradas`)
+      else
+        toast.warning(
+          `Se cerraron ${done} de ${total}. ${
+            changed === total - done
+              ? "Las demás cambiaron mientras tanto"
+              : "Las demás no se pudieron cerrar (revisa la conexión)"
+          } y siguen en la lista.`,
+        )
+      setConfirmAll(false)
+      await Promise.all([list.refetch(), invalidateAppointmentQueries(queryClient)])
+      onChanged()
+    },
+  })
+  const when = (iso: string) =>
+    new Intl.DateTimeFormat(context.locale, {
+      timeZone: context.timezone,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso))
+  return (
+    <DetailDrawer
+      open
+      title="Citas de hace más de un mes sin cerrar"
+      description={(() => {
+        // La cuenta de lo que queda, no la de cuando se abrió.
+        const left = list.data ? items.length : row.count
+        return left === 0 ? "No queda ninguna" : `${left} ${left === 1 ? "cita" : "citas"}: nadie dijo si vinieron`
+      })()}
+      onClose={onClose}
+      actions={
+        canWrite && missing.length > 0 ? (
+          <Button type="button" variant="secondary" className={ACTION} disabled={close.isPending} onClick={() => setConfirmAll(true)}>
+            Ninguna vino
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-sm">
+          Si no sabes si vino, mira su ficha: lo que se le hizo ese día está en su historia. Lo que cierres aquí ya no sale en «Te espera».
+        </p>
+        {list.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
+        {list.isError ? <p className="text-sm text-destructive">{submitErrorMessage(list.error)}</p> : null}
+        {!list.isPending && !list.isError && items.length === 0 ? <p className="text-sm">No queda ninguna sin cerrar.</p> : null}
+        {/* El servidor trae hasta 200 a la vez. */}
+        {items.length >= 200 ? (
+          <p className="text-[13px] text-muted-foreground">
+            Aquí están las {items.length} más antiguas; al cerrarlas aparecen las siguientes.
+          </p>
+        ) : null}
+        <ul aria-label="Citas sin cerrar" className="flex flex-col divide-y">
+          {items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center gap-2 py-2">
+              <span className="flex min-w-0 flex-1 flex-col text-sm">
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId: item.patientId }}
+                  className="truncate font-semibold underline-offset-4 hover:underline"
+                >
+                  {item.patientName}
+                </Link>
+                <span className="truncate text-[13px] text-muted-foreground">
+                  {[when(item.startsAt), item.professionalName, item.serviceName, item.branchName].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+              {canWrite ? (
+                <span className="flex shrink-0 gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="min-h-11 sm:min-h-8"
+                    disabled={close.isPending || item.arrived}
+                    aria-label={`No vino: ${item.patientName}`}
+                    onClick={() => close.mutate({ rows: [item], status: "no_asistio" })}
+                  >
+                    No vino
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="min-h-11 sm:min-h-8"
+                    disabled={close.isPending}
+                    aria-label={`Vino: ${item.patientName}`}
+                    onClick={() => close.mutate({ rows: [item], status: "atendida" })}
+                  >
+                    Vino
+                  </Button>
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <ConfirmDialog
+        open={confirmAll}
+        title={`¿Marcar ${missing.length === 1 ? "la cita" : `las ${missing.length} citas`} como «No vino»?`}
+        description={`Cada una queda como falta y su hueco se libera. Si alguna sí vino, ciérrala antes con «Vino».${items.length > missing.length ? " Las que tienen «Llegó» no se tocan." : ""}`}
+        confirmLabel="Ninguna vino"
+        variant="default"
+        pending={close.isPending}
+        onConfirm={() => close.mutate({ rows: missing, status: "no_asistio" })}
+        onClose={() => setConfirmAll(false)}
+      />
     </DetailDrawer>
   )
 }

@@ -210,7 +210,7 @@ export function generatedSolvers8(h: GoldenHelpers): GoldenSolvers {
       const from = `${year}-10-06`
       const to = `${year}-10-12`
       const span = { start: await startOf(from), end: await startOf(w.addDays(to, 1)) }
-      const [clinic] = await appointmentTotalsMany(h.tx, h.org, { branch: null, now: h.now }, [
+      const [clinic] = await appointmentTotalsMany(h.tx, h.org, { branch: null, now: h.now, timezone: h.tz }, [
         span,
       ])
       if (!branch) {
@@ -220,7 +220,7 @@ export function generatedSolvers8(h: GoldenHelpers): GoldenSolvers {
           datos: { clinica: clinic },
         }
       }
-      const [totals] = await appointmentTotalsMany(h.tx, h.org, { branch, now: h.now }, [span])
+      const [totals] = await appointmentTotalsMany(h.tx, h.org, { branch, now: h.now, timezone: h.tz }, [span])
       const attended = await h.fig("atendidas", "sede", `${from}..${to}`)
       const kept = (totals?.total ?? 0) - (totals?.cancelled ?? 0)
       const unmarked = totals?.unmarked ?? 0

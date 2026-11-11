@@ -6,6 +6,7 @@ import {
   countWorkspaceWaiting,
   getPersonPanel,
   getWorkspaceHome,
+  listOldUnclosed,
   proposeLessonFromReply,
   reopenTopic,
   replyToTopic,
@@ -41,6 +42,12 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     const can = (permission: string) => canAccess(memberRole, permission as Permission)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
       getWorkspaceHome(tx, orgId, userId, accessFor(memberRole), { branchId: parsed.data.branch, can })))
+  })
+  // Las citas sin cerrar de hace más de un mes, para cerrarlas de una vez desde Inicio.
+  app.get("/unclosed-old", c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx =>
+      ({ items: await listOldUnclosed(tx, orgId, userId, accessFor(memberRole)) })))
   })
   // El número de «Inicio» en el menú: cuántas personas esperan a quien mira.
   app.get("/waiting", c => {

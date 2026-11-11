@@ -4521,6 +4521,38 @@ await db
   .set({ createdAt: daysAgo(14), presentedAt: daysAgo(13), decidedAt: daysAgo(12) })
   .where(eq(treatmentBudget.id, marcoBudget.id))
 await db.update(appointmentPlanItem).set({ createdAt: daysAgo(12) }).where(eq(appointmentPlanItem.planItemId, marcoCtrl.id))
+// Su cita la cerró recepción con «Vino» al día siguiente: a la Dra. Ana le sale en «Te espera»
+// «quedó atendida sin registrar», hasta que la registra o dice que no hace falta.
+const marcoVisit = reservedAt.get("Marco Torres|-9|16:00")
+if (marcoVisit)
+  await db.insert(auditEvent).values({
+    organizationId: ORG_A,
+    actorUserId: RECEPCION_ID,
+    entity: "appointment",
+    entityId: marcoVisit,
+    action: "appointment.status_atendida",
+    metadata: { from: "confirmada", by: "vino", withoutEncounter: true },
+    createdAt: daysAgo(8),
+  })
+// Dos citas de hace más de un mes que nadie cerró: Inicio las junta en una fila para revisarlas
+// de una vez, y no tapan las de ayer.
+for (const [name, day] of [
+  ["Carmen Rojas", -40],
+  ["Elena Huamán", -52],
+] as const) {
+  await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: patientIdByName.get(name)!,
+    professionalUserId: ANA_ID,
+    roomId: roomA(0),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: lima(day, "07:15"),
+    endsAt: lima(day, "07:45"),
+    status: "confirmada",
+    outsideSchedule: true,
+    notice: false,
+  })
+}
 
 // La sala de espera de la Dra. Ana hoy (tablero 7): Lucía llegó y espera, y
 // Rosa ya está en atención (su evaluación en borrador de hoy se une a su cita
