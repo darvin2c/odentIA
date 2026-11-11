@@ -7,6 +7,7 @@ import type { AdminActor } from "./admin-core.js"
 import {
   createAccessSupportCase,
   getMySupportCase,
+  grantSupportAccess,
   listMySupportCases,
   markSupportCaseSeen,
   replyToAccountSupportCase,
@@ -122,6 +123,40 @@ describe("cuando soporte pide el acceso de diagnóstico", () => {
     // La propietaria lo recibe aunque no haya abierto el caso.
     const forOwner = rows.find((row) => row.recipientUserId === OWNER)
     expect(await claimSupportNotice(ownerDb, forOwner!.id)).toMatchObject({ kind: "necesita_algo", to: "duena@notice.test", who: "Luis Caja" })
+  })
+
+  it("autorizado el acceso, lo que soporte pida después es solo de quien preguntó", async () => {
+    const kase = await ask("El ticket sale sin el logo", LUIS)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const t0 = await lastAnswerOf(kase.id)
+    await tickSupportNotices(ownerDb, new Date(t0 + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    expect(await personNoticesOf(kase.id)).toHaveLength(3)
+    // La propietaria autoriza: el aviso que aún no salió a la administradora ya no sale.
+    await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
+    const forAna = (await personNoticesOf(kase.id)).find((row) => row.recipientUserId === ANA)
+    expect(await claimSupportNotice(ownerDb, forAna!.id)).toBeNull()
+    expect((await run((tx) => getMySupportCase(tx, ORG, LUIS, kase.id))).accessRequestPending).toBe(false)
+
+    // Días después soporte le pide una captura a Luis: no es un pedido para quienes autorizan.
+    await setSupportCaseStatus(ownerDb, staff, kase.id, "esperando_clinica")
+    const t2 = await lastAnswerOf(kase.id)
+    // Pasada la hora del aviso anterior, así el tope por persona no frena a nadie.
+    await tickSupportNotices(ownerDb, new Date(t2 + SUPPORT_REPLY_NOTICE_GAP_MS + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    const after = (await personNoticesOf(kase.id)).filter((row) => row.dedupeKey.includes(`:${t2}`))
+    expect(after.map((row) => `${row.kind}:${row.recipientUserId}`)).toEqual([`necesita_algo:${LUIS}`])
+  })
+
+  it("si la propietaria abre el caso, quien preguntó no pierde su no leído ni su correo", async () => {
+    const kase = await ask("No me deja guardar el horario", LUIS)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const t0 = await lastAnswerOf(kase.id)
+    await run((tx) => getMySupportCase(tx, ORG, OWNER, kase.id))
+    await run((tx) => markSupportCaseSeen(tx, ORG, OWNER, kase.id))
+    expect((await run((tx) => listMySupportCases(tx, ORG, LUIS))).find((item) => item.id === kase.id)?.unread).toBe(true)
+
+    await tickSupportNotices(ownerDb, new Date(t0 + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    const forLuis = (await personNoticesOf(kase.id)).find((row) => row.recipientUserId === LUIS)
+    expect(await claimSupportNotice(ownerDb, forLuis!.id)).toMatchObject({ kind: "necesita_algo", to: "luis@notice.test" })
   })
 })
 

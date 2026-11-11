@@ -5,6 +5,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
 import { helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
+import { awaitingGrantersSql } from "./support-case-rules.js"
 
 /* ---------- Avisos por correo de los casos de soporte ---------- */
 
@@ -17,8 +18,9 @@ import { helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
  * Ninguno lleva el texto de la clínica ni el de soporte: tipo, clínica,
  * pantalla, quién y un enlace. «Resuelto» no avisa. Si quien preguntó ya no
  * está en la clínica, no se le escribe. Cuando soporte pidió el acceso de
- * diagnóstico y espera a la clínica, «necesita algo» también va a la
- * propietaria y a cada administrador: son quienes lo autorizan (ADR 0180).
+ * diagnóstico y lo que espera es eso (`awaitingGrantersSql`), «necesita algo»
+ * también va a la propietaria y a cada administrador: son quienes lo
+ * autorizan (ADR 0180). Lo que soporte pida después es de quien preguntó.
  *
  * Igual que los correos del cobro, el aviso se guarda y se reclama antes de
  * SMTP; si la entrega queda incierta no se reintenta.
@@ -103,7 +105,7 @@ export async function tickSupportNotices(ownerDb: Db, now = new Date()): Promise
       status: supportCase.status,
       lastPublicMessageAt: supportCase.lastPublicMessageAt,
       clientSeenAt: supportCase.clientSeenAt,
-      accessRequestedAt: supportCase.accessRequestedAt,
+      awaitingGranters: awaitingGrantersSql,
     })
     .from(supportCase)
     .where(
@@ -114,9 +116,10 @@ export async function tickSupportNotices(ownerDb: Db, now = new Date()): Promise
         isNotNull(supportCase.openedBy),
         lte(supportCase.lastPublicMessageAt, dueBefore),
         gt(supportCase.lastPublicMessageAt, since),
-        // Quien preguntó no lo vio, o se pidió el acceso: eso también lo ven quienes lo autorizan.
+        // Quien preguntó no lo vio, o lo que esperamos es el acceso que pedimos:
+        // eso lo ven también quienes lo autorizan.
         sql`(${supportCase.clientSeenAt} is null or ${supportCase.clientSeenAt} < ${supportCase.lastPublicMessageAt}
-          or (${supportCase.status} = 'esperando_clinica' and ${supportCase.accessRequestedAt} is not null))`,
+          or ${awaitingGrantersSql})`,
       ),
     )
     .orderBy(asc(supportCase.lastPublicMessageAt))
@@ -126,7 +129,7 @@ export async function tickSupportNotices(ownerDb: Db, now = new Date()): Promise
     const answer = kase.lastPublicMessageAt.getTime()
     const unseen = kase.clientSeenAt === null || kase.clientSeenAt.getTime() < answer
     const recipients = unseen ? [kase.openedBy] : []
-    if (kase.status === "esperando_clinica" && kase.accessRequestedAt && kase.organizationId) {
+    if (kase.awaitingGranters && kase.organizationId) {
       const granters = await ownerDb
         .select({ userId: member.userId })
         .from(member)
@@ -225,6 +228,7 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
       clinicSlug: organization.slug,
       clinicProduct: orgProfile.product,
       openerName: user.name,
+      awaitingGranters: awaitingGrantersSql,
     })
     .from(supportCase)
     .leftJoin(organization, eq(organization.id, supportCase.organizationId))
@@ -247,7 +251,7 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     if (kase.status === "resuelto") return omit("el caso se resolvió")
     if (notice.recipientUserId !== kase.openedBy) {
       // A quien autoriza el acceso: solo mientras se le sigue esperando.
-      if (kase.status !== "esperando_clinica" || kase.accessRequestedAt === null) return omit("ya no espera el acceso")
+      if (row.awaitingGranters !== true) return omit("ya no espera el acceso")
     } else {
       const last = kase.lastPublicMessageAt?.getTime() ?? null
       const seen = kase.clientSeenAt?.getTime() ?? null

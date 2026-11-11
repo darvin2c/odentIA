@@ -68,8 +68,11 @@ LEFT JOIN LATERAL (
 ) a ON true
 WHERE length(trim(coalesce(r.note, ''))) > 0;--> statement-breakpoint
 
--- Casos atascados: la clínica respondió después de nuestra última respuesta pública y el caso
--- seguía «Esperando a la clínica». Vuelven a «En atención», que es lo que nos espera.
+-- Casos atascados: la clínica hizo algo después de nuestra última respuesta pública y el caso
+-- seguía «Esperando a la clínica». Vuelven a «En atención», que es lo que nos espera. Cuenta
+-- lo mismo que la regla de «nos espera» (`clinicActsSinceSql` de services): escribió, adjuntó
+-- (quien abrió el caso o alguien de la clínica) o autorizó el acceso. Antes, ni adjuntar ni
+-- autorizar movían el caso.
 UPDATE support_case c
 SET status = 'en_atencion', updated_at = now()
 WHERE c.status = 'esperando_clinica'
@@ -79,4 +82,14 @@ WHERE c.status = 'esperando_clinica'
       AND m.author_kind = 'cliente'
       AND NOT m.is_internal
       AND m.created_at > coalesce(c.last_public_message_at, '-infinity'::timestamptz)
+    UNION ALL
+    SELECT 1 FROM support_attachment a
+    WHERE a.case_id = c.id
+      AND a.created_at > coalesce(c.last_public_message_at, '-infinity'::timestamptz)
+      AND (a.created_by = c.opened_by OR EXISTS (
+        SELECT 1 FROM member mm WHERE mm.user_id = a.created_by AND mm.organization_id = c.organization_id))
+    UNION ALL
+    SELECT 1 FROM support_access_grant g
+    WHERE g.case_id = c.id
+      AND g.created_at > coalesce(c.last_public_message_at, '-infinity'::timestamptz)
   );

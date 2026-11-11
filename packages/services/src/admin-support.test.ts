@@ -561,3 +561,20 @@ describe("casos de acceso de la cuenta", () => {
     await expect(accountSupportAttachmentUrl(ownerDb, CLIENT, kase.id, shown.id, storage)).rejects.toThrow(/no encontrado/i)
   })
 })
+
+describe("Inicio y el número del menú", () => {
+  it("con más de 50 casos que nos esperan, Inicio los trae todos: el mismo número del menú", async () => {
+    await ownerDb.insert(supportCase).values(
+      Array.from({ length: 55 }, (_, index) => ({
+        organizationId: QUEUE,
+        kind: "pregunta",
+        question: `Muchos casos: pregunta ${index + 1}`,
+        dedupeKey: `muchos-casos-${index + 1}`,
+        openedBy: QUEUE_CLIENT,
+      })),
+    )
+    const rows = await supportHomeRows(ownerDb, staff)
+    expect(rows.length).toBeGreaterThan(55)
+    expect(rows.length).toBe((await getAdminSupportAttention(ownerDb, staff)).openCount)
+  })
+})

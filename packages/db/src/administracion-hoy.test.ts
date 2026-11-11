@@ -40,6 +40,10 @@ const WAITING = "c0000000-0000-4000-8000-000000000002"
 const INTERNAL_ONLY = "c0000000-0000-4000-8000-000000000003"
 const NEVER_ANSWERED = "c0000000-0000-4000-8000-000000000004"
 const RESOLVED = "c0000000-0000-4000-8000-000000000005"
+const GRANTED = "c0000000-0000-4000-8000-000000000006"
+const LOOSE_FILE = "c0000000-0000-4000-8000-000000000007"
+const STAFF_FILE = "c0000000-0000-4000-8000-000000000008"
+const OLD_GRANT = "c0000000-0000-4000-8000-000000000009"
 
 /** Copia de las migraciones hasta antes de la de reglas: la base como estaba en producción. */
 function migrationsBeforeRules(): string {
@@ -86,6 +90,19 @@ async function insertMessage(caseId: string, authorKind: string, internal: boole
     insert into "support_message" ("case_id", "organization_id", "author_kind", "author_user_id", "body", "is_internal", "created_at")
     values (${caseId}::uuid, ${ORG}, ${authorKind}, ${authorKind === "cliente" ? OWNER : ADA}, 'Mensaje',
       ${internal}, ${at}::timestamptz)`)
+}
+
+async function insertGrant(caseId: string, at: string) {
+  await ownerDb.execute(sql`
+    insert into "support_access_grant" ("case_id", "organization_id", "granted_by", "expires_at", "created_at")
+    values (${caseId}::uuid, ${ORG}, ${OWNER}, ${at}::timestamptz + interval '30 minutes', ${at}::timestamptz)`)
+}
+
+/** Un adjunto suelto (sin mensaje). */
+async function insertLooseAttachment(caseId: string, by: string, at: string) {
+  await ownerDb.execute(sql`
+    insert into "support_attachment" ("case_id", "organization_id", "object_key", "mime_type", "filename", "size", "created_by", "created_at")
+    values (${caseId}::uuid, ${ORG}, ${`soporte/${caseId}/${by}.png`}, 'image/png', 'captura.png', 1200, ${by}, ${at}::timestamptz)`)
 }
 
 async function insertEntry(requestId: string, body = "Le escribí por WhatsApp") {
@@ -158,6 +175,20 @@ beforeAll(async () => {
   await insertMessage(NEVER_ANSWERED, "cliente", false, "2026-11-04T10:00:00Z")
   await insertCase(RESOLVED, "resuelto", "2026-11-05T15:00:00Z")
   await insertMessage(RESOLVED, "cliente", false, "2026-11-06T10:00:00Z")
+  // Lo que la clínica hizo sin escribir: antes de esta entrega no movía el caso. Autorizó el
+  // acceso después de nuestro pedido, o subió un archivo suelto; un archivo del equipo o un
+  // acceso anterior a nuestra respuesta no cuentan.
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+    values ('member-owner-andes', ${ORG}, ${OWNER}, 'owner', now())`)
+  await insertCase(GRANTED, "esperando_clinica", "2026-11-10T14:00:00Z")
+  await insertGrant(GRANTED, "2026-11-10T14:30:00Z")
+  await insertCase(LOOSE_FILE, "esperando_clinica", "2026-11-10T14:00:00Z")
+  await insertLooseAttachment(LOOSE_FILE, OWNER, "2026-11-10T15:00:00Z")
+  await insertCase(STAFF_FILE, "esperando_clinica", "2026-11-10T14:00:00Z")
+  await insertLooseAttachment(STAFF_FILE, ADA, "2026-11-10T15:00:00Z")
+  await insertCase(OLD_GRANT, "esperando_clinica", "2026-11-10T14:00:00Z")
+  await insertGrant(OLD_GRANT, "2026-11-10T13:00:00Z")
 
   // El resto de las migraciones, como en el despliegue.
   await migrate(ownerDb, { migrationsFolder: FOLDER })
@@ -188,7 +219,7 @@ describe("al desplegar", () => {
     expect(noted!.note).toBe("Llamé: quiere ver la demo el jueves")
   })
 
-  it("el caso en que la clínica escribió después de nuestra respuesta vuelve a «En atención»; los demás quedan igual", async () => {
+  it("el caso en que la clínica escribió, adjuntó o autorizó el acceso después de nuestra respuesta vuelve a «En atención»; los demás quedan igual", async () => {
     const cases = rows<{ id: string; status: string; moved: boolean }>(
       await ownerDb.execute(sql`
         select "id", "status", "updated_at" > '2026-11-01T12:00:00Z'::timestamptz as "moved"
@@ -200,6 +231,10 @@ describe("al desplegar", () => {
       { id: INTERNAL_ONLY, status: "esperando_clinica", moved: false },
       { id: NEVER_ANSWERED, status: "en_atencion", moved: true },
       { id: RESOLVED, status: "resuelto", moved: false },
+      { id: GRANTED, status: "en_atencion", moved: true },
+      { id: LOOSE_FILE, status: "en_atencion", moved: true },
+      { id: STAFF_FILE, status: "esperando_clinica", moved: false },
+      { id: OLD_GRANT, status: "esperando_clinica", moved: false },
     ])
   })
 

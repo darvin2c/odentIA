@@ -157,6 +157,8 @@ const supportCaseDetail = supportCaseItem.extend({
   grants: z.array(supportGrantItem),
   /** Cuándo pidió soporte el acceso de diagnóstico (desde ahí lo ven también quienes lo autorizan). */
   accessRequestedAt: z.string().nullable().optional(),
+  /** El pedido sigue en pie: nadie de la clínica hizo nada después. */
+  accessRequestPending: z.boolean().optional(),
 })
 export const casesEnvelope = z.object({ data: z.array(supportCaseItem) })
 export type { SupportCaseItem }
@@ -481,7 +483,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
 
               {!canGrant ? (
                 <p className="text-sm text-muted-foreground">
-                  {kase.accessRequestedAt && kase.status === "esperando_clinica" && !activeGrant
+                  {kase.accessRequestPending && kase.status === "esperando_clinica" && !activeGrant
                     ? "Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda."
                     : "Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte."}
                 </p>
