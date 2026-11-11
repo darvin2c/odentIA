@@ -3617,7 +3617,6 @@ export interface SaasAdminAttention {
   overdueCount: number
   overdueCentsByCurrency: SaasMoneyByCurrency[]
   trialCount: number
-  trialEndingCount: number
   graceCount: number
   restrictedCount: number
   pausedCount: number
@@ -3687,17 +3686,6 @@ export async function getSaasAdminAttention(tx: Db, now = new Date()): Promise<S
     }
     return 0
   }
-  const trialEndingRows = await tx
-    .select({ total: sql<number>`count(*)` })
-    .from(saasSubscription)
-    .where(
-      and(
-        eq(saasSubscription.status, "prueba"),
-        eq(saasSubscription.isDemo, false),
-        lte(saasSubscription.trialEndsAt, addDays(now, 3)),
-        gte(saasSubscription.trialEndsAt, now),
-      ),
-    )
   const pendingCommissions = await tx
     .select({
       currency: saasSellerCommission.currency,
@@ -3713,14 +3701,12 @@ export async function getSaasAdminAttention(tx: Db, now = new Date()): Promise<S
     pendingCommissionCount += Number(row.count)
     pendingCommissionCentsByCurrency.push({ currency: row.currency, cents: Number(row.total) })
   }
-  const trialEndingCount = trialEndingRows.length > 0 ? Number(trialEndingRows[0]?.total ?? 0) : 0
   return {
     pendingPaymentCount,
     pendingPaymentCentsByCurrency,
     overdueCount,
     overdueCentsByCurrency,
     trialCount: statusOf("prueba"),
-    trialEndingCount,
     graceCount: statusOf("gracia"),
     restrictedCount: statusOf("restringida"),
     pausedCount: statusOf("pausada"),
