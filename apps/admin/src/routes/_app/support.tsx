@@ -486,12 +486,18 @@ function SupportPage() {
       invalidate()
     },
   })
+  // Un segundo clic antes de que se pinte «Pidiendo…» no manda otro pedido: la
+  // marca es inmediata; `isPending` llega a la pantalla después.
+  const requestingAccess = useRef(false)
   const requestAccess = useMutation({
     mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/request-access`, { method: "POST" }),
     onSuccess: () => {
       setAskingAccess(false)
       toast.success("Pediste el acceso: el caso espera a la clínica")
       invalidate()
+    },
+    onSettled: () => {
+      requestingAccess.current = false
     },
   })
   const guideGap = useMutation({
@@ -1366,7 +1372,11 @@ function SupportPage() {
                   variant="default"
                   pending={requestAccess.isPending}
                   error={requestAccess.isError ? (requestAccess.error instanceof Error ? requestAccess.error.message : "No se pudo pedir el acceso.") : null}
-                  onConfirm={() => requestAccess.mutate(kase.id)}
+                  onConfirm={() => {
+                    if (requestingAccess.current) return
+                    requestingAccess.current = true
+                    requestAccess.mutate(kase.id)
+                  }}
                   onClose={() => setAskingAccess(false)}
                 >
                   <div className="flex flex-col gap-1.5 text-sm">

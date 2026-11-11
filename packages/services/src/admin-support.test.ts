@@ -1,4 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
 import { helpAsk } from "@odentia/db/schema/workspace"
@@ -477,6 +478,24 @@ describe("pedir acceso de diagnóstico", () => {
     const row = (await supportHomeRows(ownerDb, staff)).find((item) => item.id === kase.id)
     expect(row?.accessUntil).not.toBeNull()
     await expect(requestSupportAccess(ownerDb, staff, kase.id)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/^Ya hay un acceso vigente hasta las \d\d:\d\d$/) })
+  })
+
+  it("dos pedidos a la vez (un doble clic, dos pestañas) dejan un solo mensaje y una sola auditoría", async () => {
+    const kase = await seedRequest(ORG, CLIENT, "Pedir acceso: dos pedidos en el mismo instante")
+    // Cada uno en su transacción, como la ruta: llegan juntos y ninguno ha escrito todavía.
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => ownerDb.transaction((tx) => requestSupportAccess(tx, staff, kase.id))),
+    )
+    expect(results.filter((result) => !result.repeated)).toHaveLength(1)
+    const [first] = results.filter((result) => !result.repeated)
+    for (const result of results) expect(result.requestedAt).toBe(first?.requestedAt)
+    const after = await getSupportCaseForStaff(ownerDb, staff, kase.id)
+    expect(after.messages).toHaveLength(1)
+    const audits = await ownerDb
+      .select({ id: adminAudit.id })
+      .from(adminAudit)
+      .where(and(eq(adminAudit.action, "support.case.access_requested"), eq(adminAudit.entityId, kase.id)))
+    expect(audits).toHaveLength(1)
   })
 
   it("no se pide en un caso de cobro, de entrar a su cuenta o resuelto", async () => {

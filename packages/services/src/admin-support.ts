@@ -1285,7 +1285,10 @@ async function accessRequestPendingOf(db: Db, kase: typeof supportCase.$inferSel
  * Soporte pide el acceso de diagnóstico: deja el mensaje fijo (según si quien
  * abrió puede autorizarlo), pasa el caso a «Esperando a la clínica» y, desde
  * ahí, la propietaria y los administradores lo leen y reciben el aviso. Pedirlo
- * otra vez sin que la clínica haya hecho nada no escribe otro mensaje.
+ * otra vez sin que la clínica haya hecho nada no escribe otro mensaje. El caso
+ * se lee bloqueado: dos pedidos a la vez (un doble clic, dos pestañas, dos
+ * personas) se ordenan y el segundo ve el pedido del primero. Corre dentro de
+ * la transacción que abre la ruta.
  */
 export async function requestSupportAccess(
   db: Db,
@@ -1293,7 +1296,7 @@ export async function requestSupportAccess(
   caseId: string,
   now: Date = new Date(),
 ): Promise<{ requestedAt: string; repeated: boolean }> {
-  const kase = await requireStaffCaseFor(db, actor, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId, { lock: true })
   const blocked = await accessRequestBlockedReason(db, kase)
   if (blocked) {
     const active = blocked.startsWith("Ya hay un acceso vigente")
@@ -1416,8 +1419,14 @@ const staffSees = (actor: AdminActor, kase: { kind: string }): boolean => kase.k
  * El caso para el equipo. Para el rol Soporte, un caso de cobro no existe: el
  * mismo 404 que un caso que no está, en la ficha y en cada acción.
  */
-async function requireStaffCaseFor(db: Db, actor: AdminActor, caseId: string): Promise<typeof supportCase.$inferSelect> {
-  const [row] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
+async function requireStaffCaseFor(
+  db: Db,
+  actor: AdminActor,
+  caseId: string,
+  options: { lock?: boolean } = {},
+): Promise<typeof supportCase.$inferSelect> {
+  const query = db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
+  const [row] = options.lock ? await query.for("update") : await query
   if (!row || !staffSees(actor, row)) throw notFound("Caso")
   return row
 }
