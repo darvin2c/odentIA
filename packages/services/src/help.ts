@@ -570,8 +570,22 @@ export async function askHelp(
     // contraseña) no depende de lo que falte en ella.
     const general = first?.kind === "faq" && first.faq.general
     if (WHY_NOT.test(normalizeForSearch(question)) && !general) {
-      const about = first?.topic ?? selection.offered[0]?.topic ?? matchHelpTopics(asked, topics)[0]?.topic ?? here
-      const blockers = await screenBlockers(tx, orgId, about, asker, topics)
+      // Con la guía completa Jev puede dudar entre varias pantallas: se mira lo que falta en cada una de las que
+      // nombró, en su orden, y responde la primera a la que de verdad le falta algo.
+      // Si no nombró ninguna, la pantalla donde está.
+      const named = [first?.topic, ...selection.offered.map((option) => option.topic), matchHelpTopics(asked, topics)[0]?.topic]
+      const known = [...new Set(named.filter((topic): topic is HelpTopic => !!topic))]
+      const asking = known.length > 0 ? known : here ? [here] : []
+      let about = asking[0]
+      let blockers: HelpReply["blockers"] = []
+      for (const topic of asking) {
+        // De las demás pantallas solo cuenta lo que falta en la clínica: que su rol no entre a una que quizá ni preguntó no es la respuesta.
+        if (topic !== asking[0] && (!asker.canOpen(topic.path) || !canChange(topic, asker))) continue
+        blockers = await screenBlockers(tx, orgId, topic, asker, topics)
+        if (blockers.length === 0) continue
+        about = topic
+        break
+      }
       if (blockers.length > 0) {
         // Se responde con lo que falta, no con lo redactado: no queda anotado como redactada.
         decided.written = null
