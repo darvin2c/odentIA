@@ -17,6 +17,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import {
   type SaasChargeStatus,
+  type SaasPaymentStatus,
   type SaasSubscriptionStatus,
   saasCharge,
   saasCommissionAdjustment,
@@ -82,9 +83,13 @@ function assertCents(value: number, field: string, positive: boolean): number {
   return value
 }
 
-function reason(value: string, field = "El motivo"): string {
+/** El motivo recortado, de 1 a `max` caracteres; con `key`, el error va junto a ese campo del cuerpo. */
+function reason(value: string, field = "El motivo", max = 2000, key?: string): string {
   const text = value?.trim() ?? ""
-  if (!text || text.length > 2000) throw validation(`${field} debe tener 1–2000 caracteres`)
+  if (!text || text.length > max) {
+    const message = `${field} debe tener 1–${max} caracteres`
+    throw validation(message, key ? { [key]: `Escribe el motivo en 1 a ${max} caracteres` } : undefined)
+  }
   return text
 }
 
@@ -1711,7 +1716,7 @@ export interface SaasPaymentRow {
   amountCents: number
   currency: string
   methodCode: string
-  status: "pendiente" | "confirmado" | "reversado" | "devuelto"
+  status: SaasPaymentStatus
   receiptFilename: string | null
   receiptMime: string | null
   receiptSize: number | null
@@ -1720,10 +1725,15 @@ export interface SaasPaymentRow {
   confirmedAt: Date | null
   reversedAt: Date | null
   reverseReason: string | null
+  /** Rechazado: cuándo y el motivo, que la clínica lee en Plan y pagos y en su franja. */
+  rejectedAt: Date | null
+  rejectReason: string | null
+  /** Quién lo rechazó: solo en las lecturas de la administración (`staffNames`); la clínica no lo recibe. */
+  rejectedByName: string | null
   createdAt: Date
 }
 
-function toPaymentRow(row: typeof saasPayment.$inferSelect): SaasPaymentRow {
+function toPaymentRow(row: typeof saasPayment.$inferSelect, rejectedByName: string | null = null): SaasPaymentRow {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -1740,6 +1750,9 @@ function toPaymentRow(row: typeof saasPayment.$inferSelect): SaasPaymentRow {
     confirmedAt: row.confirmedAt,
     reversedAt: row.reversedAt,
     reverseReason: row.reverseReason,
+    rejectedAt: row.rejectedAt,
+    rejectReason: row.rejectReason,
+    rejectedByName: row.status === "rechazado" ? rejectedByName : null,
     createdAt: row.createdAt,
   }
 }
@@ -2049,8 +2062,9 @@ export async function confirmSaasPayment(
       .limit(1)
     return { payment: toPaymentRow(payment), charge, commissionId: existing?.id ?? null }
   }
+  // Reversado, devuelto o rechazado: ya no se confirma (un rechazado es final; corregirlo es registrar el pago).
   if (payment.status !== "pendiente")
-    throw conflict("SAAS_PAYMENT_STATE", "Solo se confirma un comprobante pendiente")
+    throw conflict("SAAS_PAYMENT_STATE", "Ese comprobante ya no está pendiente")
   // Sobrepago: lo ya confirmado para el cargo más este pago no supera el cargo.
   if (lockedCharge) {
     const confirmed = await tx
@@ -2068,7 +2082,7 @@ export async function confirmSaasPayment(
     if (confirmedTotal + payment.amountCents > lockedCharge.amountCents) {
       throw conflict(
         "SAAS_OVERPAYMENT",
-        "Confirmarlo supera el cargo: reversa primero el comprobante duplicado",
+        "Confirmarlo supera el cargo: rechaza primero el comprobante duplicado",
       )
     }
   }
@@ -2252,6 +2266,51 @@ export async function reverseSaasPayment(
   return { payment: toPaymentRow(row), adjustmentId }
 }
 
+/** Nombre de quien rechazó, para las lecturas de la administración. */
+async function staffName(tx: Db, userId: string | null): Promise<string | null> {
+  if (!userId) return null
+  const [row] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
+  return row?.name ?? null
+}
+
+/**
+ * Admin rechaza un comprobante pendiente que no pudo confirmar (C11): queda
+ * `rechazado` con quién, cuándo y el motivo que lee la clínica en Plan y
+ * pagos y en su franja. No es dinero que entró: no toca el cargo (`paidCents`),
+ * ni comisiones, ni la prórroga que ese comprobante ya dio (decisión del
+ * tablero 5: no se retira). El cargo queda libre para otro comprobante o para
+ * registrar el pago a mano. Rechazar dos veces devuelve lo mismo; lo
+ * confirmado, reversado o devuelto ya no se rechaza, y un rechazado no cambia
+ * más (`saas_payment_immutable`).
+ */
+export async function rejectSaasReceipt(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  paymentId: string,
+  rejectReason: string,
+  now = new Date(),
+): Promise<{ payment: SaasPaymentRow }> {
+  // De 1 a 500, como el check de la base (`saas_payment_rejection_check`): la clínica lo lee en una línea.
+  const motive = reason(rejectReason, "El motivo del rechazo", 500, "reason")
+  const { payment } = await lockChargePayment(tx, orgId, paymentId)
+  if (payment.status === "rechazado") return { payment: toPaymentRow(payment, await staffName(tx, payment.rejectedBy)) }
+  if (payment.status !== "pendiente") throw conflict("SAAS_PAYMENT_STATE", "Ese comprobante ya no está pendiente")
+  const [row] = await tx
+    .update(saasPayment)
+    .set({ status: "rechazado", rejectedAt: now, rejectedBy: actorUserId, rejectReason: motive, updatedAt: now })
+    .where(and(eq(saasPayment.id, paymentId), eq(saasPayment.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Pago")
+  await audit(tx, orgId, actorUserId, "saas_payment", row.id, "saas.payment_rejected", {
+    chargeId: row.chargeId,
+    reason: motive,
+  })
+  // Como al confirmar: la franja y Plan y pagos de la clínica se refrescan.
+  await notifyOrg(tx, orgId, "saas.payment.updated")
+  return { payment: toPaymentRow(row, await staffName(tx, actorUserId)) }
+}
+
 /** Admin registra una devolución (dinero que vuelve a la clínica): contabiliza igual que el reverso. */
 export async function refundSaasPayment(
   tx: Db,
@@ -2297,18 +2356,35 @@ export async function registerManualSaasPayment(
   return confirmSaasPayment(tx, orgId, actorUserId, submitted.id, input.paidAt ?? now)
 }
 
+/**
+ * Pagos de una clínica, del más nuevo al más viejo. `staffNames` (solo la
+ * administración) suma quién rechazó cada comprobante; la clínica lee el
+ * motivo, no a la persona del equipo de odentIA.
+ */
 export async function listSaasPayments(
   tx: Db,
   orgId: string,
   limit = 50,
+  options: { staffNames?: boolean } = {},
 ): Promise<SaasPaymentRow[]> {
+  const max = Math.min(Math.max(limit, 1), 200)
+  if (!options.staffNames) {
+    const rows = await tx
+      .select()
+      .from(saasPayment)
+      .where(eq(saasPayment.organizationId, orgId))
+      .orderBy(desc(saasPayment.createdAt), desc(saasPayment.id))
+      .limit(max)
+    return rows.map((row) => toPaymentRow(row))
+  }
   const rows = await tx
-    .select()
+    .select({ payment: saasPayment, rejectedByName: user.name })
     .from(saasPayment)
+    .leftJoin(user, eq(user.id, saasPayment.rejectedBy))
     .where(eq(saasPayment.organizationId, orgId))
     .orderBy(desc(saasPayment.createdAt), desc(saasPayment.id))
-    .limit(Math.min(Math.max(limit, 1), 200))
-  return rows.map(toPaymentRow)
+    .limit(max)
+  return rows.map((row) => toPaymentRow(row.payment, row.rejectedByName))
 }
 
 export interface SaasPendingPaymentRow extends SaasPaymentRow {

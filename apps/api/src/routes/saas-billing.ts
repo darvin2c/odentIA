@@ -75,6 +75,7 @@ import {
   pauseSaasSubscription,
   refundSaasPayment,
   registerManualSaasPayment,
+  rejectSaasReceipt,
   resumeSaasSubscription,
   reverseSaasPayment,
   type SaasOperation,
@@ -222,7 +223,8 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     if (!requireAdmin(c)) return forbid(c)
     const parsed = z.object({ organizationId: z.string().min(1) }).safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => listSaasPayments(deps.ownerDb, parsed.data.organizationId))
+    // La administración lee quién rechazó cada comprobante; la clínica, solo el motivo.
+    return runService(c, 200, () => listSaasPayments(deps.ownerDb, parsed.data.organizationId, 50, { staffNames: true }))
   })
 
   // --- Tablero ------------------------------------------------------------------
@@ -688,6 +690,35 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
         )
         return result
       },
+    )
+  })
+
+  // «Rechazar» un comprobante pendiente: se cierra con su motivo y no suma al cargo. Lo
+  // confirmado se deshace con «Reversar»; esta ruta solo cierra lo pendiente.
+  app.post("/payments/:id/reject", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración rechaza comprobantes")
+    const parsed = z
+      .object({
+        organizationId: z.string().min(1),
+        reason: z.string().trim().min(1, "Escribe el motivo").max(500, "Escribe el motivo en 500 caracteres como mucho"),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const body = parsed.data
+    const paymentId = c.req.param("id")
+    return runStaffWrite(
+      c,
+      200,
+      actor,
+      {
+        action: "saas.payment_rejected",
+        organizationId: body.organizationId,
+        entityId: paymentId,
+        metadata: { reason: body.reason },
+      },
+      (tx) => rejectSaasReceipt(tx, body.organizationId, actor.userId, paymentId, body.reason),
     )
   })
 

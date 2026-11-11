@@ -15,7 +15,7 @@ import { currencyFractionDigits } from "@odentia/clinical"
 import { supportAccessGrant, supportCase } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
 import { saasCharge, saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm"
 import { getOrgLocale, orgProductName } from "./locale.js"
 import { type SaasAlert, getSaasAlerts } from "./saas-terms.js"
 
@@ -118,6 +118,20 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
     const inReview = Boolean(pendingPayment)
     const next = openCharges[0]
     const owed = next ? money(next.amountCents - next.paidCents, next.currency) : null
+    // Si el último comprobante de ese cargo se rechazó y el cargo sigue sin pagar, quien paga
+    // lee por qué en el mismo aviso (la misma frase que «Próximo cobro» en Plan y pagos).
+    const [lastProof] = next
+      ? await tx
+          .select({ id: saasPayment.id, status: saasPayment.status, filename: saasPayment.receiptFilename, reason: saasPayment.rejectReason })
+          .from(saasPayment)
+          .where(and(eq(saasPayment.organizationId, orgId), eq(saasPayment.chargeId, next.id)))
+          .orderBy(desc(saasPayment.createdAt), desc(saasPayment.id))
+          .limit(1)
+      : []
+    const rejected = lastProof?.status === "rechazado" ? lastProof : null
+    const rejectedLine = rejected ? ` ${rejectedProofLine(rejected.filename, rejected.reason)}` : ""
+    // Un aviso cerrado vuelve a verse cuando llega el rechazo.
+    const rejectedKey = rejected ? `:rechazo:${rejected.id}` : ""
 
     if (sub.status === "restringida") {
       const noPlan = sub.restrictReason === "sin_plan"
@@ -129,7 +143,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
               tone: "limite",
               message: noPlan
                 ? "La prueba terminó: la clínica está en solo lectura hasta que elijas un plan. No se pierde ningún dato."
-                : `La clínica está en solo lectura: falta pagar ${next ? `el cargo de ${monthOf(next.periodStart)} (${owed})` : "un cargo"}. Sofi no responde.`,
+                : `La clínica está en solo lectura: falta pagar ${next ? `el cargo de ${monthOf(next.periodStart)} (${owed})` : "un cargo"}.${rejectedLine} Sofi no responde.`,
               short: noPlan ? "Solo lectura: elige un plan" : "Solo lectura: falta un pago",
               action: noPlan ? CHOOSE : PAY,
               dismiss: null,
@@ -188,10 +202,10 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
           })
       } else if (billing) {
         notices.push({
-          id: `gracia:${next.id}`,
+          id: `gracia:${next.id}${rejectedKey}`,
           topic: "cobro",
           tone: "alarma",
-          message: `Venció tu cargo de ${monthOf(next.periodStart)} (${owed}).${graceEnds ? ` ${tomorrow ? "Mañana" : `El ${longDay(graceEnds)}`} la clínica pasa a solo lectura si no se registra el pago.` : ""}`,
+          message: `Venció tu cargo de ${monthOf(next.periodStart)} (${owed}).${rejectedLine}${graceEnds ? ` ${tomorrow ? "Mañana" : `El ${longDay(graceEnds)}`} la clínica pasa a solo lectura si no se registra el pago.` : ""}`,
           short: graceEnds ? `Pasa a solo lectura el ${shortDay(graceEnds)}` : "Tienes un cargo vencido",
           action: PAY,
           dismiss: "dia",
@@ -215,10 +229,10 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
         const left = next.dueAt.getTime() - now.getTime()
         const soon = left <= 2 * DAY
         notices.push({
-          id: `cargo:${next.id}:${soon ? "alarma" : "aviso"}`,
+          id: `cargo:${next.id}:${soon ? "alarma" : "aviso"}${rejectedKey}`,
           topic: "cobro",
           tone: soon ? "alarma" : "aviso",
-          message: `Tu cargo de ${monthOf(next.periodStart)} (${owed}) vence ${soon && left <= DAY ? "mañana" : "el"} ${longDay(next.dueAt)}.`,
+          message: `Tu cargo de ${monthOf(next.periodStart)} (${owed}) vence ${soon && left <= DAY ? "mañana" : "el"} ${longDay(next.dueAt)}.${rejectedLine}`,
           short: `Tu cargo vence el ${shortDay(next.dueAt)}`,
           action: PAY,
           dismiss: soon ? "dia" : "nivel",
@@ -301,6 +315,15 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
     .map((notice, index) => ({ notice, index }))
     .sort((a, b) => order[a.notice.tone] - order[b.notice.tone] || a.index - b.index)
     .map(({ notice }) => notice)
+}
+
+/**
+ * «No pudimos confirmar tu comprobante «demo.png»: motivo.»: lo que lee la clínica cuando la
+ * administración rechazó su último comprobante del cargo. No promete correo: no lo hay.
+ */
+function rejectedProofLine(filename: string | null, reason: string | null): string {
+  const why = (reason ?? "").trim().replace(/[.\s]+$/, "")
+  return `No pudimos confirmar tu comprobante${filename ? ` «${filename}»` : ""}${why ? `: ${why}` : ""}.`
 }
 
 function reviewNotice(brand: string): ClinicNotice {

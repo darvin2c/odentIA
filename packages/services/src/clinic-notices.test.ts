@@ -6,7 +6,7 @@ import { saasAction, saasCharge, saasNotice, saasPayment, saasPlan, saasSubscrip
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { callName, getClinicNotices } from "./clinic-notices.js"
-import { createSaasPlan, tickSaasBilling } from "./saas-billing.js"
+import { createSaasPlan, rejectSaasReceipt, tickSaasBilling } from "./saas-billing.js"
 import { setSaasSpendCap } from "./saas-terms.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -127,6 +127,43 @@ describe("franja de avisos: el pago del mes", () => {
     const owner = await read("owner")
     expect(owner).toHaveLength(1)
     expect(owner[0]).toMatchObject({ id: "cobro:en-revision", tone: "aviso" })
+  })
+
+  it("tras un rechazo, quien paga lee por qué en el aviso del cargo; con otro comprobante, vuelve «revisando tu pago»", async () => {
+    const { orgId, people, read } = await clinic()
+    const row = await charge(orgId, 6)
+    const proof = (values: Partial<typeof saasPayment.$inferInsert>) =>
+      ownerDb
+        .insert(saasPayment)
+        .values({
+          organizationId: orgId,
+          chargeId: row.id,
+          amountCents: row.amountCents,
+          currency: "USD",
+          methodCode: "transferencia",
+          status: "pendiente",
+          createdBy: people.owner,
+          idempotencyKey: randomUUID(),
+          ...values,
+        })
+        .returning()
+        .then((rows) => rows[0]!)
+    const first = await proof({ receiptFilename: "demo.png" })
+    expect((await read("owner"))[0]).toMatchObject({ id: "cobro:en-revision" })
+    await rejectSaasReceipt(ownerDb, orgId, "avisos-admin", first.id, "No se ve el número de operación.")
+    const owner = await read("owner")
+    expect(owner).toHaveLength(1)
+    expect(owner[0]).toMatchObject({ topic: "cobro", action: { kind: "pagar" } })
+    expect(owner[0]?.message).toContain("No pudimos confirmar tu comprobante «demo.png»: No se ve el número de operación.")
+    expect(owner[0]?.message).not.toContain("..")
+    expect(owner[0]?.message).not.toContain("correo")
+    // Otro id: si la persona había cerrado el aviso del cargo, el rechazo se vuelve a ver.
+    expect(owner[0]?.id).toContain(`rechazo:${first.id}`)
+    // Quien no paga no ve montos ni motivos.
+    expect(await read("reception")).toEqual([])
+    // Con otro comprobante en revisión, el rechazo anterior ya no es lo que pasa.
+    await proof({ receiptFilename: "otro.png" })
+    expect(await read("owner")).toMatchObject([{ id: "cobro:en-revision" }])
   })
 
   it("el día antes de pasar a solo lectura avisa a todo el equipo, sin montos y con a quién avisar", async () => {

@@ -7,13 +7,15 @@
  * - La demo está exenta de restricción y de comisiones.
  * - En pausa comercial no se opera ni se envía, pero billing/soporte/lectura pasan.
  * - La prueba dura 14 días y la gracia 7 antes de restringir.
+ * - Rechazar un comprobante pendiente lo cierra con su motivo y libera el cargo.
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext, type Db } from "@odentia/db"
 import { invitation, member, user } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
-import { saasCommissionSettlement, saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { eq } from "drizzle-orm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { saasCharge, saasCommissionSettlement, saasPayment, saasSellerCommission, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   assertSaasAllowed,
@@ -29,7 +31,10 @@ import {
   type SaasPaymentRow,
   listClinicPlans,
   listPendingSaasCommissions,
+  listSaasPayments,
   pauseSaasSubscription,
+  registerManualSaasPayment,
+  rejectSaasReceipt,
   reverseSaasPayment,
   settleSaasCommissions,
   startSaasTrial,
@@ -506,4 +511,136 @@ it("la clínica ve el plan de lista y el suyo, nada más (issue 104)", async () 
   expect(onList.map((plan) => plan.code)).toEqual([`lista-${f.orgId}`])
   // El plan por defecto es uno para toda la base: se deja como estaba.
   await updateSaasPlan(ownerDb, f.admin, list.id, { isDefault: false })
+})
+
+/** Lo que dice la base al rechazar una escritura: la causa de Postgres, no el envoltorio de drizzle. */
+async function dbRefusal(write: Promise<unknown>): Promise<string> {
+  const error = await write.then(
+    () => null,
+    (failure: unknown) => failure,
+  )
+  if (!error) return "la base aceptó la escritura"
+  const cause = (error as { cause?: { message?: string } }).cause
+  return cause?.message ?? String(error)
+}
+
+async function chargeOf(id: string) {
+  const [row] = await ownerDb.select().from(saasCharge).where(eq(saasCharge.id, id))
+  return row
+}
+
+async function subscriptionOf(orgId: string) {
+  const [row] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+  return row
+}
+
+it("rechazar un pendiente lo cierra con su motivo, sin tocar el cargo, la comisión ni la prórroga", async () => {
+  const f = await billingFixture("bil-18")
+  const seller = await upsertSaasSeller(ownerDb, f.admin, { displayName: "Rechazo", rateBps: 1000 })
+  await startSaasTrial(ownerDb, f.orgId, { planCode: `base-${f.orgId}`, sellerId: seller.id })
+  const { charge, now } = await trialWithCharge(f)
+  const payment = await f.run((tx) =>
+    submitSaasReceipt(tx, { storage: storageStub }, f.orgId, f.admin, { chargeId: charge.id, ...receipt(10000, randomUUID()) }, now),
+  )
+  const before = await subscriptionOf(f.orgId)
+  expect(before?.proofExtensionUntil).not.toBeNull()
+
+  const at = new Date("2026-01-06T15:00:00Z")
+  const { payment: rejected } = await rejectSaasReceipt(ownerDb, f.orgId, f.admin, payment.id, "  No se ve el número de operación  ", at)
+  expect(rejected).toMatchObject({
+    status: "rechazado",
+    rejectReason: "No se ve el número de operación",
+    rejectedByName: "Admin SaaS",
+  })
+  expect(rejected.rejectedAt?.toISOString()).toBe(at.toISOString())
+
+  // No es dinero que entró: el cargo sigue sin pagar, sin comisión, y la prórroga dada se queda.
+  expect(await chargeOf(charge.id)).toMatchObject({ paidCents: 0, status: "pendiente" })
+  expect(await ownerDb.select().from(saasSellerCommission).where(eq(saasSellerCommission.paymentId, payment.id))).toHaveLength(0)
+  const after = await subscriptionOf(f.orgId)
+  expect(after?.proofExtensionUntil?.toISOString()).toBe(before?.proofExtensionUntil?.toISOString())
+  expect(after?.proofExtensionCount).toBe(before?.proofExtensionCount)
+  const [audited] = await ownerDb
+    .select()
+    .from(auditEvent)
+    .where(and(eq(auditEvent.organizationId, f.orgId), eq(auditEvent.action, "saas.payment_rejected")))
+  expect(audited?.metadata).toMatchObject({ reason: "No se ve el número de operación", chargeId: charge.id })
+
+  // Un segundo rechazo devuelve lo mismo, con su motivo y su fecha.
+  const again = await rejectSaasReceipt(ownerDb, f.orgId, f.admin, payment.id, "Otro motivo", new Date("2026-01-07T10:00:00Z"))
+  expect(again.payment).toMatchObject({ status: "rechazado", rejectReason: "No se ve el número de operación" })
+  expect(again.payment.rejectedAt?.toISOString()).toBe(at.toISOString())
+
+  // Un rechazado no se confirma ni se reversa: 409 con la frase que lee la administración.
+  await expect(confirmSaasPayment(ownerDb, f.orgId, f.admin, payment.id)).rejects.toMatchObject({
+    code: "SAAS_PAYMENT_STATE",
+    status: 409,
+    message: "Ese comprobante ya no está pendiente",
+  })
+  await expect(reverseSaasPayment(ownerDb, f.orgId, f.admin, payment.id, "No")).rejects.toMatchObject({ code: "SAAS_PAYMENT_STATE" })
+
+  // Ni la base lo deja cambiar por fuera del servicio.
+  expect(
+    await dbRefusal(
+      ownerDb.update(saasPayment).set({ status: "confirmado", confirmedAt: at, confirmedBy: f.admin }).where(eq(saasPayment.id, payment.id)),
+    ),
+  ).toMatch(/rechazado no cambia/)
+  expect(await dbRefusal(ownerDb.update(saasPayment).set({ rejectReason: "Otro" }).where(eq(saasPayment.id, payment.id)))).toMatch(/rechazado no cambia/)
+
+  // La administración lee quién lo rechazó; la clínica, solo el motivo.
+  const [staffRow] = await listSaasPayments(ownerDb, f.orgId, 50, { staffNames: true })
+  expect(staffRow).toMatchObject({ status: "rechazado", rejectedByName: "Admin SaaS", rejectReason: "No se ve el número de operación" })
+  const [clinicRow] = await f.run((tx) => listSaasPayments(tx, f.orgId))
+  expect(clinicRow).toMatchObject({ status: "rechazado", rejectedByName: null, rejectReason: "No se ve el número de operación" })
+})
+
+it("rechazar libera el cargo: la clínica registra otro comprobante y la administración registra el pago a mano", async () => {
+  const f = await billingFixture("bil-19")
+  const { charge, now } = await trialWithCharge(f)
+  const first = await f.run((tx) =>
+    submitSaasReceipt(tx, { storage: storageStub }, f.orgId, f.admin, { chargeId: charge.id, ...receipt(10000, randomUUID()) }, now),
+  )
+  const extension = (await subscriptionOf(f.orgId))?.proofExtensionUntil
+  await rejectSaasReceipt(ownerDb, f.orgId, f.admin, first.id, "No corresponde a este cargo")
+
+  // Antes se quedaba pendiente para siempre y bloqueaba otro comprobante del mismo cargo.
+  const later = new Date("2026-01-07T12:00:00Z")
+  const second = await f.run((tx) =>
+    submitSaasReceipt(tx, { storage: storageStub }, f.orgId, f.admin, { chargeId: charge.id, ...receipt(10000, randomUUID()) }, later),
+  )
+  expect(second.status).toBe("pendiente")
+  // La prórroga no se renueva con un comprobante nuevo (una vez por defecto).
+  expect((await subscriptionOf(f.orgId))?.proofExtensionUntil?.toISOString()).toBe(extension?.toISOString())
+
+  await rejectSaasReceipt(ownerDb, f.orgId, f.admin, second.id, "El importe no coincide")
+  // Si el rechazo fue un error, se corrige registrando el pago en el cargo.
+  const manual = await registerManualSaasPayment(ownerDb, { storage: storageStub }, f.orgId, f.admin, {
+    chargeId: charge.id,
+    ...receipt(10000, randomUUID()),
+  })
+  expect(manual.payment.status).toBe("confirmado")
+  expect(manual.charge).toMatchObject({ status: "pagada", paidCents: 10000 })
+  const statuses = (await listSaasPayments(ownerDb, f.orgId)).map((row) => row.status).sort()
+  expect(statuses).toEqual(["confirmado", "rechazado", "rechazado"])
+})
+
+it("solo se rechaza un comprobante pendiente", async () => {
+  const f = await billingFixture("bil-20")
+  const { charge } = await trialWithCharge(f)
+  const payment = await f.run((tx) =>
+    submitSaasReceipt(tx, { storage: storageStub }, f.orgId, f.admin, { chargeId: charge.id, ...receipt(10000, randomUUID()) }),
+  )
+  await expect(rejectSaasReceipt(ownerDb, f.orgId, f.admin, payment.id, " ")).rejects.toMatchObject({ code: "VALIDATION", fields: { reason: expect.any(String) } })
+  await expect(rejectSaasReceipt(ownerDb, f.orgId, f.admin, payment.id, "x".repeat(501))).rejects.toMatchObject({ code: "VALIDATION" })
+  await confirmSaasPayment(ownerDb, f.orgId, f.admin, payment.id)
+  await expect(rejectSaasReceipt(ownerDb, f.orgId, f.admin, payment.id, "Tarde")).rejects.toMatchObject({
+    code: "SAAS_PAYMENT_STATE",
+    status: 409,
+    message: "Ese comprobante ya no está pendiente",
+  })
+  // Lo confirmado se deshace con «Reversar», que sigue igual.
+  const reversed = await reverseSaasPayment(ownerDb, f.orgId, f.admin, payment.id, "Cobro que no fue")
+  expect(reversed.payment.status).toBe("reversado")
+  await expect(rejectSaasReceipt(ownerDb, f.orgId, f.admin, payment.id, "Tarde")).rejects.toMatchObject({ code: "SAAS_PAYMENT_STATE" })
+  await expect(rejectSaasReceipt(ownerDb, f.orgId, f.admin, randomUUID(), "No existe")).rejects.toMatchObject({ code: "NOT_FOUND" })
 })
