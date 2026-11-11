@@ -739,6 +739,8 @@ export interface AppointmentContext {
   }
   /** Cuándo le pedirá (o le pidió) el agente confirmar; null si no se lo va a pedir. */
   confirmation: ConfirmationPlan | null
+  /** Atendida con «Vino» (sin atención): quién lo marcó y cuándo. Null si no. */
+  came: { byName: string | null; at: string } | null
 }
 
 export async function getAppointmentContext(tx: Db, orgId: string, id: string): Promise<AppointmentContext> {
@@ -785,7 +787,28 @@ export async function getAppointmentContext(tx: Db, orgId: string, id: string): 
       at: current.createdAt.toISOString(),
     },
     confirmation: await appointmentConfirmationPlan(tx, orgId, id),
+    came: current.status === "atendida" ? await cameMark(tx, orgId, id) : null,
   }
+}
+
+/** El último «Vino» de la cita, si su cierre fue ese: quién y cuándo. */
+async function cameMark(tx: Db, orgId: string, id: string): Promise<{ byName: string | null; at: string } | null> {
+  const [row] = await tx
+    .select({ metadata: auditEvent.metadata, at: auditEvent.createdAt, byName: user.name })
+    .from(auditEvent)
+    .leftJoin(user, eq(user.id, auditEvent.actorUserId))
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "appointment"),
+        eq(auditEvent.entityId, id),
+        eq(auditEvent.action, "appointment.status_atendida"),
+      ),
+    )
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(1)
+  if ((row?.metadata as { by?: string } | null)?.by !== "vino") return null
+  return { byName: row!.byName ?? null, at: row!.at.toISOString() }
 }
 
 /**

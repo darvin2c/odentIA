@@ -245,6 +245,8 @@ export interface AppointmentContext {
     whatsapp: PhoneWhatsApp
   } | null
   origin: { source: string; conversationId: string | null; channel: string | null; at: string }
+  /** Atendida con «Vino» (sin atención): quién lo marcó y cuándo. */
+  came?: { byName: string | null; at: string } | null
   confirmation: { askAt: string | null; askedAt: string | null } | null
   /** «Faltan datos para atenderla», del servidor; null para quien no edita los datos. */
   missingData: Array<{ key: string; label: string }> | null

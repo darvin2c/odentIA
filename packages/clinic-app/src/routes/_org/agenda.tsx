@@ -1064,7 +1064,11 @@ function AgendaPage() {
     agendaAppointments
       .filter((item) => zonedDateOf(item.startsAt, TZ) === date)
       // «Por confirmar» no trae lo que ya pasó: eso está sin cerrar.
-      .filter((item) => !statusFilter || (statusFilter === "programada" ? awaitingConfirmation(item) : item.status === statusFilter))
+      .filter(
+        (item) =>
+          !statusFilter ||
+          (item.status === statusFilter && !((statusFilter === "programada" || statusFilter === "confirmada") && isUnclosed(item, now))),
+      )
       .map((item) => ({
         entry: {
           id: item.id,
@@ -1093,8 +1097,10 @@ function AgendaPage() {
     }`
     return [{ date, items, summary }]
   })
+  // «Por confirmar» y «Confirmada» son lo que aún no pasa: lo que pasó sin cerrarse se cuenta en la cabecera.
   const counts: Partial<Record<ScheduleStatus, number>> = {}
   for (const item of agendaAppointments) {
+    if ((item.status === "programada" || item.status === "confirmada") && isUnclosed(item, now)) continue
     counts[item.status] = (counts[item.status] ?? 0) + 1
   }
 

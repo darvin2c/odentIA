@@ -167,7 +167,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         title: row.patientName,
         ask: `Su cita de ${daysAgo(row.startsAt, context)} a las ${formatClock(row.startsAt, context.locale, context.timezone)} quedó atendida sin registrar`,
         detail: joined([row.markedByName ? `«Vino» lo marcó ${row.markedByName}` : null, row.serviceName]),
-        action: "Registrar",
+        action: "Registrar la atención",
       }
     case "acceptedUnbooked":
       // El mismo número de Pacientes › «Por agendar», adonde lleva: ahí cada fila tiene «Reservar cita».
@@ -467,6 +467,7 @@ export function patientsSummary(summary: WorkspaceTodaySummary): string {
   return joined([
     plural(summary.total, "paciente", "pacientes"),
     summary.waiting > 0 ? `${summary.waiting} en sala` : null,
+    summary.attending > 0 ? `${summary.attending} en atención` : null,
     plural(summary.attended, "atendido", "atendidos"),
     summary.unclosed > 0 ? `${summary.unclosed} sin cerrar` : null,
     `${summary.upcoming} por venir`,

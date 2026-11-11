@@ -573,6 +573,13 @@ function RealAppointmentDrawer({
                   Lo ven quienes ven la agenda; no es parte de la historia.
                 </span>
               ) : null}
+              {/* «Vino» sin atención: quién lo marcó y cuándo (no hay hora de llegada que mostrar). */}
+              {cameUnrecorded && context?.came ? (
+                <span className="text-[13px] text-muted-foreground">
+                  «Vino» lo marcó {context.came.byName ?? "alguien del equipo"} {whenSaid(context.came.at, timeZone, today)}.
+                  Lo que se hizo lo registra {appointment.professionalName}.
+                </span>
+              ) : null}
 
               {/* Para lo que ya se terminó: se dice y se ofrece usarla o liberarla (QA del 10 nov, M1). */}
               {active && appointment.doneFor && !appointment.encounter ? (
@@ -707,6 +714,18 @@ function RealAppointmentDrawer({
               ) : null}
 
               {/* No vino o cancelada: se reagenda; si llega tarde hoy, «Llegó» recupera la cita. */}
+              {/* «No vino» por error en otro día: si sí vino, «Vino» la corrige (sin abrir otra atención). */}
+              {canWrite && appointment.visit === "no_vino" && !isToday ? (
+                <SubmitButton
+                  variant="outline"
+                  className="h-11 bg-card"
+                  disabled={busy}
+                  pending={setStatus.isPending && setStatus.variables?.status === "atendida"}
+                  onClick={() => changeStatus("atendida")}
+                >
+                  Sí vino
+                </SubmitButton>
+              ) : null}
               {canWrite && appointment.visit === "no_vino" && isToday ? (
                 <SubmitButton
                   className="h-11"
