@@ -45,7 +45,7 @@ function codeText(): string {
  * `help-guide.test.ts` compara con las pantallas.
  */
 const OWN_QUOTED = [
-  "Una sola vez",
+  "Se repite",
   "Dejar de repetir",
   "Control anual de la vista",
   "En 1 año",
@@ -82,7 +82,7 @@ const OWN_QUOTED = [
   "Emitir otra desde su examen",
   // Lo indicado queda aceptado y un control puede repetirse (`budgetRequired`, `repeatingControls`).
   "Reservar lo indicado",
-  "Una sola vez",
+  "Se repite",
   // El examen: la salud del ojo y cuándo conviene el oftalmólogo.
   "Salud del ojo",
   "Conviene que lo vea un oftalmólogo",
