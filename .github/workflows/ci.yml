@@ -209,8 +209,15 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      # Si la máquina no llega a los repositorios de Ubuntu, sigue solo con el navegador: la
+      # imagen ya trae las bibliotecas que Chromium necesita, apt solo agrega fuentes de otros
+      # alfabetos y ninguna prueba compara capturas.
       - name: Instalar Chromium
-        run: pnpm --filter @odentia/e2e exec playwright install --with-deps chromium
+        run: |
+          pnpm --filter @odentia/e2e exec playwright install --with-deps chromium || {
+            echo "::warning::Sin los repositorios de Ubuntu: se instala solo Chromium, sin fuentes de otros alfabetos"
+            pnpm --filter @odentia/e2e exec playwright install chromium
+          }
       - run: pnpm e2e --shard=${{ matrix.parte }}/3 --workers=2
       # Las trazas pueden llevar credenciales de prueba: solo como artefacto
       # privado del repo y por poco tiempo.
