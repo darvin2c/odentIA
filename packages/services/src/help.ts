@@ -12,6 +12,7 @@ import { getAdminSettings } from "./agent-admin.js"
 import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import {
+  HELP_DATA_CONFIDENT,
   HELP_JOIN_CONFIDENT,
   HELP_OFFERED,
   type HelpDecider,
@@ -19,6 +20,7 @@ import {
   helpAreaQuestion,
   helpAreas,
   helpCandidates,
+  helpDataQuestion,
   helpJoinQuestion,
   type HelpOption,
   helpOptionBatches,
@@ -36,6 +38,7 @@ import {
   type HelpWriter,
   helpWrittenProblem,
   readHelpAreas,
+  readHelpData,
   readHelpJoin,
   readHelpSelection,
 } from "./help-decision.js"
@@ -381,7 +384,8 @@ const errorCodeOf = (error: unknown): string => {
 
 /**
  * Jev decide en dos pasos (`help.v2`, ADR 0178): la categoría y, dentro de las
- * elegidas, la respuesta. Si la categoría no fue segura se busca en toda la
+ * elegidas, la respuesta. Con la categoría se pregunta aparte si pide un dato
+ * de su clínica (ADR 0179): si la guía no lo responde segura, va a Argos. Si la categoría no fue segura se busca en toda la
  * guía, por tandas; y antes de decir que algo no está, también: una categoría
  * mal elegida no puede acabar en «Esto no está en la guía». Si la certeza se
  * reparte entre dos o tres respuestas que se completan (lo decide Jev con un
@@ -402,20 +406,29 @@ export async function decideHelp(
       const state = helpState(question, screenName, previous)
       const options = helpOptions(topics)
       const areas = helpAreas(topics)
-      const where = readHelpAreas(await decider.decide(state, [helpAreaQuestion(areas, texts)]), areas)
+      // A la vez que la categoría, si pide un dato de su clínica. Si esta pregunta falla, decide la guía sola.
+      const [located, data] = await Promise.all([
+        decider.decide(state, [helpAreaQuestion(areas, texts)]),
+        decider.decide(state, [helpDataQuestion(texts)]).then(readHelpData, () => 0),
+      ])
+      // Una respuesta segura de la guía gana («¿quién me espera?» también es un dato, y la guía dice dónde verlo). Sin ella, va a Argos.
+      const figures: HelpDecided | null =
+        data >= HELP_DATA_CONFIDENT ? { via: "jev", selection: { verdict: "datos", shown: [], offered: [], top: data }, why: "ninguna", area: null } : null
+      const where = readHelpAreas(located, areas)
       if (where.verdict !== "areas") {
-        return { via: "jev", selection: { verdict: where.verdict, shown: [], offered: [], top: where.top }, why: "ninguna", area: null }
+        return figures ?? { via: "jev", selection: { verdict: where.verdict, shown: [], offered: [], top: where.top }, why: "ninguna", area: null }
       }
       const chosen = new Set(where.areas.map((area) => area.id))
       const area = where.sure ? (where.areas[0]?.id ?? null) : null
       let picked = await pickAnswer(state, where.sure ? [helpOptionsIn(options, chosen)] : helpOptionBatches(options), question, texts, decider)
-      // No está en las categorías elegidas: se mira el resto de la guía antes de decir que no está.
-      if (picked && where.sure && picked.selection.verdict !== "seguro" && picked.selection.offered.length === 0) {
+      // No está en las categorías elegidas: se mira el resto de la guía antes de decir que no está (si es un dato, no hace falta).
+      if (picked && !figures && where.sure && picked.selection.verdict !== "seguro" && picked.selection.offered.length === 0) {
         const rest = await pickAnswer(state, helpOptionBatches(options, chosen), question, texts, decider)
         if (rest && (rest.selection.verdict === "seguro" || rest.selection.offered.length > 0)) picked = rest
       }
       if (picked) {
         const { selection, parts } = picked
+        if (figures && selection.verdict !== "seguro") return figures
         if (selection.verdict === "duda" && parts.length >= 2 && writer) {
           const written = await writeFromParts(question, parts, texts, decider, writer)
           if (written) return { via: "jev", selection: { verdict: "seguro", shown: parts, offered: [], top: selection.top }, why: "ninguna", area, written }

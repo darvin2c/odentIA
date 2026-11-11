@@ -14,6 +14,7 @@ import type { AdminActor } from "./admin-core.js"
 import type { AdminAnswer, AdminQuestion } from "./admin-request.js"
 import {
   HELP_AREA_QUESTION,
+  HELP_DATA_QUESTION,
   HELP_JOIN_QUESTION,
   HELP_SELECT_QUESTION,
   type HelpDecider,
@@ -77,6 +78,8 @@ interface JevSetup {
   areas?: Record<string, number>
   /** Lo que responde a `help_join`: la probabilidad de que las partes, juntas, respondan. */
   join?: number
+  /** Lo que responde a `help_data`: la probabilidad de que pida un dato de su clínica. Con «falla», esa llamada falla. */
+  data?: number | "falla"
 }
 
 /**
@@ -87,6 +90,7 @@ interface JevSetup {
  * - `help`: lo nombrado se ubica entre las opciones de ESA llamada, por su
  *   descripción; lo que no está entre ellas no aparece.
  * - `help_join`: el sí o no de `join`.
+ * - `help_data`: el sí o no de `data`.
  * Anota lo que recibió, con el nombre de cada pregunta. Sin proveedor ni costo.
  */
 function jev(picks: Record<string, number>, setup: JevSetup = {}) {
@@ -125,6 +129,11 @@ function jev(picks: Record<string, number>, setup: JevSetup = {}) {
       if (!question || questions.length !== 1) throw new Error("La Ayuda pregunta una cosa por llamada")
       seen.push({ id: question.id, state, question })
       const done = (answer: AdminAnswer) => ({ answers: [answer], model: "jev-prueba", usage: null })
+      if (question.id === HELP_DATA_QUESTION) {
+        if (question.kind !== "yesno") throw new Error("help_data es un sí o no")
+        if (setup.data === "falla") throw new Error("Jev no respondió")
+        return done({ id: question.id, kind: "yesno", probability: setup.data ?? 0 })
+      }
       if (question.id === HELP_JOIN_QUESTION) {
         if (question.kind !== "yesno") throw new Error("help_join es un sí o no")
         return done({ id: question.id, kind: "yesno", probability: setup.join ?? 0 })
@@ -354,9 +363,10 @@ describe("con Jev (ADR 0146)", () => {
     const reply = await askHelp(appDb, org, owner, { question: "quiero cerrar la tarde del doctor Ruiz", screen: "/agenda/2026-11-06" }, decider)
     expect(reply).toMatchObject({ kind: "guia", choices: [], argos: false, basedOn: "El mapa del sistema: Agenda." })
     expect(reply.answers).toEqual([{ topicId: "agenda", where: "Agenda", text: expect.stringContaining("registra una ausencia del profesional"), path: "/agenda", restriction: null, videos: [] }])
-    // Dos pasos (ADR 0178): la categoría y, dentro de ella, la respuesta. A los dos les llega lo mismo, y nada más.
+    // Dos pasos (ADR 0178), y con la categoría, si pide un dato (ADR 0179). A todos les llega lo mismo, y nada más.
     expect(seen.map((item) => [item.id, item.state])).toEqual([
       ["help_area", "Pantalla: Agenda\nPregunta: quiero cerrar la tarde del doctor Ruiz"],
+      ["help_data", "Pantalla: Agenda\nPregunta: quiero cerrar la tarde del doctor Ruiz"],
       ["help", "Pantalla: Agenda\nPregunta: quiero cerrar la tarde del doctor Ruiz"],
     ])
     const [row] = await logOf(org)
@@ -387,7 +397,7 @@ describe("con Jev (ADR 0146)", () => {
     ])
     for (const choice of reply.choices) expect((await askHelp(appDb, org, owner, { question: choice.question, screen: "/inbox" }, decider)).kind).toBe("guia")
     // Jev solo vio la primera: la categoría (0,85: no es segura) y toda la guía por tandas. Lo tocado no le pregunta.
-    expect(seen.map((item) => item.id)).toEqual(["help_area", ...helpOptionBatches(helpOptions(helpTopicsFor("dental"))).map(() => "help")])
+    expect(seen.map((item) => item.id)).toEqual(["help_area", "help_data", ...helpOptionBatches(helpOptions(helpTopicsFor("dental"))).map(() => "help")])
     expect((await logOf(org)).map((row) => [row.via, row.verdict, row.topicId])).toEqual(
       expect.arrayContaining([["jev", "duda", null], ["exacta", null, "agente"], ["exacta", null, "agente"]]),
     )
@@ -417,6 +427,28 @@ describe("con Jev (ADR 0146)", () => {
     const noReports: HelpAsker = { ...reception, can: (permission) => permission !== "reports.read", whoCan: () => ["Propietario", "Administrador"] }
     const ask = await askHelp(appDb, on, noReports, question, figures)
     expect(ask).toMatchObject({ kind: "datos", argos: false, answers: [], say: "Eso es de las cifras de tu clínica, y no está en la guía. Pídeselo a quien ve Reportes: Propietario y Administrador." })
+  })
+
+  it("lo que pide un dato de la clínica va a Argos si la guía no lo responde segura", async () => {
+    const org = await clinic({ argos: true })
+    const question = { question: "quién me debe plata", screen: "/finance" }
+    // Sola, la guía habría dudado entre dos pantallas: la pregunta se parece a donde está esa cifra.
+    const doubt = { "tema:finanzas": 0.5, "tema:reportes": 0.4 }
+    const asked = jev(doubt, { data: 0.95 })
+    expect(await askHelp(appDb, org, owner, question, asked.decider)).toMatchObject({ kind: "datos", argos: true, answers: [], choices: [] })
+    expect(asked.seen[1]).toMatchObject({ id: "help_data", state: asked.seen[0]?.state })
+    // Si la categoría ya dice que no es de la guía, no se busca más.
+    const away = jev({ none: 0.95 }, { data: 0.95 })
+    expect((await askHelp(appDb, org, owner, question, away.decider)).kind).toBe("datos")
+    expect(away.seen.map((item) => item.id)).toEqual(["help_area", "help_data"])
+    // Por debajo de la certeza, o si esa pregunta falla, responde la guía como siempre.
+    for (const data of [0.85, "falla"] as const) {
+      expect((await askHelp(appDb, org, owner, question, jev(doubt, { data }).decider)).kind, String(data)).toBe("duda")
+    }
+    // Y una respuesta segura de la guía gana: también es un dato, pero la guía dice dónde verlo.
+    const sure = await askHelp(appDb, org, owner, question, jev({ "tema:finanzas": 0.95 }, { data: 0.95 }).decider)
+    expect(sure.kind).toBe("guia")
+    expect(sure.answers[0]?.topicId).toBe("finanzas")
   })
 
   it("si Jev falla o no decide, responden las palabras, y solo con una pregunta frecuente", async () => {
@@ -450,7 +482,7 @@ describe("con Jev (ADR 0146)", () => {
     // Una pregunta que trae un documento sí viaja (ADR 0178), sin la cifra: aquí Jev dice que no está en la guía.
     const withDocument = await askHelp(appDb, org, owner, { question: "¿Cómo registro al paciente con DNI 45678912?", screen: "/home" }, decider)
     expect(withDocument).toMatchObject({ kind: "nada", say: "Esto no está en la guía, y no quiero inventarlo." })
-    expect(seen.map((item) => item.id)).toEqual(["help_area"])
+    expect(seen.map((item) => item.id)).toEqual(["help_area", "help_data"])
     expect(seen[0]?.state).toMatch(/^Pantalla: Inicio\nPregunta: ¿Cómo registro al paciente con DNI\s*\?$/)
     const logged = await logOf(org)
     expect(logged.map((row) => row.via)).toEqual(["respaldo", "respaldo", "respaldo", "jev"])
@@ -502,7 +534,7 @@ describe("con Jev (ADR 0146)", () => {
     const { decider, seen } = jev({ "emito-descanso-medico": 0.95 }, { product: "medical" })
     const reply = await askHelp(appDb, org, owner, { question: "necesito darle 3 días de descanso", screen: "/people" }, decider)
     expect(reply.answers[0]?.text).toContain("Descanso médico")
-    expect(seen.map((item) => item.id)).toEqual(["help_area", "help"])
+    expect(seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help"])
     for (const item of seen) {
       expect(item.question.instructions).toContain("latidIA")
       expect(JSON.stringify(item.question)).not.toContain("odentIA")
@@ -560,7 +592,7 @@ describe("en dos pasos (ADR 0178)", () => {
     expect(reply).toMatchObject({ kind: "guia", written: null, choices: [] })
     expect(reply.answers).toEqual([{ topicId: "tareas", where: "Tareas", text: faq("tareas-de-un-paciente").faq.a, path: "/tasks", restriction: null, videos: [] }])
     // Una sola llamada `help`, con las respuestas de las dos categorías y de ninguna otra.
-    expect(seen.map((item) => item.id)).toEqual(["help_area", "help"])
+    expect(seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help"])
     const both = helpOptionsIn(OPTIONS, new Set(["ficha", "tareas"]))
     expect(new Set(both.map(helpAreaOf))).toEqual(new Set(["ficha", "tareas"]))
     expect(guideOptionsOf(calls("help")[0]?.question)).toEqual(both.map(describedAs))
@@ -588,7 +620,7 @@ describe("en dos pasos (ADR 0178)", () => {
     expect(reply.kind).toBe("guia")
     expect(reply.answers.map((answer) => answer.topicId)).toEqual(["tareas"])
     const rest = helpOptionBatches(OPTIONS, new Set(["agenda"]))
-    expect(wrong.seen.map((item) => item.id)).toEqual(["help_area", "help", ...rest.map(() => "help")])
+    expect(wrong.seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help", ...rest.map(() => "help")])
     // Primero solo Agenda; después el resto, sin volver a preguntar lo de Agenda.
     const [first, ...others] = wrong.calls("help")
     expect(guideOptionsOf(first?.question)).toEqual(helpOptionsIn(OPTIONS, new Set(["agenda"])).map(describedAs))
@@ -600,7 +632,7 @@ describe("en dos pasos (ADR 0178)", () => {
     const absent = jev({ none: 0.97 }, { areas: { agenda: 0.95, none: 0.05 } })
     const nothing = await askHelp(appDb, org, owner, { question: "¿cómo pido un taxi para el paciente?", screen: "/home" }, absent.decider)
     expect(nothing).toMatchObject({ kind: "nada", say: "Esto no está en la guía, y no quiero inventarlo.", answers: [], choices: [] })
-    expect(absent.seen.map((item) => item.id)).toEqual(["help_area", "help", ...rest.map(() => "help")])
+    expect(absent.seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help", ...rest.map(() => "help")])
     expect((await logOf(org))[1]).toMatchObject({ via: "jev", verdict: "ninguna", area: "agenda", topicId: null })
   })
 
@@ -614,7 +646,7 @@ describe("en dos pasos (ADR 0178)", () => {
       { topicId: "tareas", where: "Tareas", text: CREATE.faq.a, path: "/tasks", restriction: null, videos: [] },
       { topicId: "tareas", where: "Tareas", text: ASSIGN.faq.a, path: "/tasks", restriction: null, videos: [] },
     ])
-    expect(seen.map((item) => item.id)).toEqual(["help_area", "help", "help_join"])
+    expect(seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help", "help_join"])
     // A quien decide si se completan y a quien redacta les llega lo mismo: la pregunta y los textos. Nada de la clínica ni de la pantalla.
     const state = helpPartsState(TWO_PARTS_QUESTION, [CREATE, ASSIGN])
     expect(calls("help_join")[0]?.state).toBe(state)
@@ -645,7 +677,7 @@ describe("en dos pasos (ADR 0178)", () => {
       { question: CREATE.faq.q, where: "Tareas" },
       { question: ASSIGN.faq.q, where: "Tareas" },
     ])
-    expect(seen.map((item) => item.id)).toEqual(["help_area", "help", "help_join"])
+    expect(seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help", "help_join"])
     expect(got).toEqual([])
     expect((await logOf(org))[0]).toMatchObject({ via: "jev", verdict: "duda", written: false, topicId: null })
     // Justo por debajo del umbral tampoco se redacta.
@@ -676,7 +708,7 @@ describe("en dos pasos (ADR 0178)", () => {
     const alone = jev(TWO_PARTS, { join: 0.95 })
     const reply = await askHelp(appDb, org, owner, { question: TWO_PARTS_QUESTION, screen: "/home" }, alone.decider)
     expect(reply).toMatchObject({ kind: "duda", written: null })
-    expect(alone.seen.map((item) => item.id)).toEqual(["help_area", "help"])
+    expect(alone.seen.map((item) => item.id)).toEqual(["help_area", "help_data", "help"])
     const logged = await logOf(org)
     expect(logged).toHaveLength(cases.length + 1)
     expect(logged.every((row) => row.verdict === "duda" && row.written === false && row.topicId === null)).toBe(true)
@@ -744,6 +776,7 @@ describe("en dos pasos (ADR 0178)", () => {
     expect(reply.answers[0]).toMatchObject({ topicId: "finanzas", text: faq("finanzas-cobrar-varios-medios").faq.a })
     expect(seen.map((item) => [item.id, item.state])).toEqual([
       ["help_area", "Pantalla: Gestión › Finanzas\nPregunta: como cobro mitad yape y mitad efectivo"],
+      ["help_data", "Pantalla: Gestión › Finanzas\nPregunta: como cobro mitad yape y mitad efectivo"],
       ["help", "Pantalla: Gestión › Finanzas\nPregunta: como cobro mitad yape y mitad efectivo"],
     ])
     // Redactada: tampoco le llega el monto a quien decide si se completan ni a quien redacta.
@@ -756,7 +789,7 @@ describe("en dos pasos (ADR 0178)", () => {
     // El monto escrito con espacio o con su moneda tampoco viaja.
     const spaced = jev({ "finanzas-cobrar-varios-medios": 0.96 })
     await askHelp(appDb, org, owner, { question: "¿cómo cobro S/ 1 200,50 mitad Yape y mitad efectivo?", screen: "/finance" }, spaced.decider)
-    expect(spaced.seen.map((item) => item.state.split("\n")[1])).toEqual(["Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?", "Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?"])
+    expect(spaced.seen.map((item) => item.state.split("\n")[1])).toEqual(["Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?", "Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?", "Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?"])
     const logged = await logOf(org)
     expect(logged).toHaveLength(3)
     expect(JSON.stringify(logged, (key, value) => (/id$/i.test(key) ? undefined : value))).not.toMatch(/1200|1 200|yape/i)

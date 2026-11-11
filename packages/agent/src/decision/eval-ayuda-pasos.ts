@@ -1,5 +1,5 @@
 /**
- * La Ayuda en dos pasos (`help.v2`, ADR 0178), medida por respuesta con el
+ * La Ayuda en dos pasos (`help.v3`, ADR 0178 y 0179), medida por respuesta con el
  * recorrido real (`decideHelp` de los servicios): la categoría, la respuesta
  * dentro de ella, la búsqueda en toda la guía cuando la categoría no es segura
  * y, si la respuesta está repartida, si Jev dice que las partes se completan.
