@@ -372,6 +372,21 @@ it("quien pide mover una cita no la lleva a una hora que ya pasó; alargarla sin
   await expect(
     f.run((tx) => moveAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: visit.version, startsAt: visit.startsAt, endsAt: new Date(new Date(visit.startsAt).getTime() + 3 * 24 * 3_600_000).toISOString() }, { requested: true })),
   ).rejects.toMatchObject({ code: "VALIDATION", fields: { endsAt: expect.stringContaining("8 horas") } })
+  // «Deshacer»: la cita de hoy sin cerrar que se arrastró por error vuelve a su hora, aunque ya pasó.
+  const late = await f.book(1, 11)
+  await startedAgo(late.id, 60)
+  const before = await f.run((tx) => getAppointment(tx, "org_a", late.id))
+  const dragged = await f.run((tx) =>
+    moveAppointment(tx, "org_a", f.actor, late.id, { expectedVersion: before.version, startsAt: new Date(Date.now() + 2 * 24 * 3_600_000).toISOString() }, { requested: true, notice: false }),
+  )
+  const undone = await f.run((tx) =>
+    moveAppointment(tx, "org_a", f.actor, late.id, { expectedVersion: dragged.version, startsAt: before.startsAt }, { requested: true, notice: false }),
+  )
+  expect(undone.startsAt).toBe(before.startsAt)
+  // Solo a la hora de la que salió: otra hora pasada sigue sin valer.
+  await expect(
+    f.run((tx) => moveAppointment(tx, "org_a", f.actor, late.id, { expectedVersion: undone.version, startsAt: yesterday }, { requested: true })),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
   // Ya empezó y se alarga un cuarto de hora: su hora de inicio no cambia.
   await startedAgo(visit.id, 10)
   const started = await f.run((tx) => getAppointment(tx, "org_a", visit.id))

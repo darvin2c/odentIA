@@ -1283,9 +1283,17 @@ function assertDuration(startsAt: Date, endsAt: Date): void {
  * abiertos antes de que otra persona la cambiara, el botón no se aplica sobre lo que no vio.
  * Quien no la manda (el enlace, el agente, el cierre de la atención) actúa sobre la cita de ahora.
  */
-function assertSeenVersion(current: { version: number }, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && current.version !== expectedVersion)
-    throw conflict("STALE_VERSION", "La cita cambió mientras la mirabas; vuelve a abrirla e intenta de nuevo")
+function assertSeenVersion(current: { version: number; status: string; arrivedAt: Date | null }, expectedVersion: number | undefined): void {
+  if (expectedVersion === undefined || current.version === expectedVersion) return
+  // Dice cómo está ahora: «vuelve a abrirla» no le sirve a quien confirma una cita que otra persona canceló.
+  const now: Record<string, string> = {
+    programada: "sigue por confirmar, con otros datos",
+    confirmada: current.arrivedAt ? "la persona ya llegó" : "ya está confirmada",
+    cancelada: "está cancelada",
+    no_asistio: "quedó como «No vino»",
+    atendida: "ya se atendió",
+  }
+  throw conflict("STALE_VERSION", `Otra persona cambió esta cita mientras la mirabas: ${now[current.status] ?? "ya no está igual"}. Mira cómo quedó antes de repetirlo.`)
 }
 
 export async function createAppointment(
@@ -1508,6 +1516,32 @@ export async function createAppointment(
   }
 }
 
+/** Cuánto dura el «Deshacer» de un movimiento hacia una hora que ya pasó. */
+const UNDO_MOVE_MS = 10 * 60_000
+
+/**
+ * «Deshacer» un movimiento devuelve la cita a donde estaba, aunque esa hora ya haya pasado: una
+ * cita de hoy sin cerrar que se arrastró por error vuelve a su sitio. Solo vale la hora exacta de
+ * la que salió en su último movimiento, y por unos minutos.
+ */
+async function undoesLastMove(tx: Db, orgId: string, id: string, startsAt: Date): Promise<boolean> {
+  const [last] = await tx
+    .select({ metadata: auditEvent.metadata, createdAt: auditEvent.createdAt })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "appointment"),
+        eq(auditEvent.entityId, id),
+        eq(auditEvent.action, "appointment.moved"),
+      ),
+    )
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(1)
+  const from = (last?.metadata as { from?: string } | null)?.from
+  return !!last && !!from && new Date(from).getTime() === startsAt.getTime() && Date.now() - last.createdAt.getTime() <= UNDO_MOVE_MS
+}
+
 export interface MoveAppointmentInput {
   expectedVersion: number
   startsAt: string
@@ -1553,11 +1587,18 @@ export async function moveAppointment(
   const endsAt = input.endsAt
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + durationMs)
-  if (input.endsAt && options.requested) assertDuration(startsAt, endsAt)
+  // El tope de duración se mira cuando la duración cambia: la rejilla manda siempre el fin, y una
+  // cita larga de antes se sigue pudiendo mover.
+  if (input.endsAt && options.requested && endsAt.getTime() - startsAt.getTime() !== durationMs) assertDuration(startsAt, endsAt)
   else if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   // Como al reservar: una cita no se lleva a una hora que ya pasó (QA del 10 nov, C3). Alargarla
   // o cambiarle la unidad sin tocar su hora sí vale, aunque ya haya empezado.
-  if (options.requested && startsAt.getTime() !== current.startsAt.getTime() && startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS)
+  if (
+    options.requested &&
+    startsAt.getTime() !== current.startsAt.getTime() &&
+    startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS &&
+    !(await undoesLastMove(tx, orgId, id, startsAt))
+  )
     throw invalidField("startsAt", "Esa hora ya pasó. Elige una hora de ahora en adelante.")
   const professionalUserId = input.professionalUserId ?? current.professionalUserId
   const active = current.status === "programada" || current.status === "confirmada"
@@ -1624,6 +1665,7 @@ export async function moveAppointment(
       )
     }
     await audit(tx, orgId, actorUserId, "appointment.moved", id, {
+      from: current.startsAt.toISOString(),
       startsAt: startsAt.toISOString(),
       professionalUserId,
       roomId,

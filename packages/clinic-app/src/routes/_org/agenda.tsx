@@ -1009,7 +1009,11 @@ function AgendaPage() {
    * atención» o «No vino».
    */
   const primaryFor = (item: AgendaAppointment): { label: string; pending?: boolean; onSelect: () => void } | null => {
-    const busy = (id: string) => (arrival.isPending && arrival.variables?.id === id) || (attend.isPending && attend.variables?.appointment.id === id)
+    // Mientras un cambio de esa cita no termina (y la lista no la relee), su fila no lanza otro: llevaría la versión de antes.
+    const busy = (id: string) =>
+      (arrival.isPending && arrival.variables?.id === id) ||
+      (attend.isPending && attend.variables?.appointment.id === id) ||
+      (statusMutation.isPending && statusMutation.variables?.id === id)
     if (item.visit === "llego") return canAttend ? { label: "Atender", pending: busy(item.id), onSelect: () => attendItem(item) } : null
     if (item.visit === "no_vino" || item.visit === "cancelada") {
       return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item), item) } : null
@@ -1017,14 +1021,14 @@ function AgendaPage() {
     const step = stepBeforeArrival(item, now, isToday(item))
     if (step === "cerrar") {
       if (canAttend) return { label: "Registrar la atención", pending: busy(item.id), onSelect: () => attendItem(item) }
-      return canWrite ? { label: "No vino", pending: statusMutation.isPending && statusMutation.variables?.id === item.id, onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio", version: item.version }) } : null
+      return canWrite ? { label: "No vino", pending: busy(item.id), onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio", version: item.version }) } : null
     }
     if (!canWrite) return null
     // Hoy, cerca de la hora, lo que toca es marcar que llegó (eso también la confirma).
     if (step === "confirmar") {
       return {
         label: "Confirmar cita",
-        pending: statusMutation.isPending && statusMutation.variables?.id === item.id,
+        pending: busy(item.id),
         onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada", version: item.version }),
       }
     }

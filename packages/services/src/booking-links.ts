@@ -1823,7 +1823,7 @@ function changeableAppointment(link: ResolvedPersonalLink, seenStartsAt?: string
   const current = link.appointment
   if (!current) throw linkExpired()
   if (seenStartsAt && current.startsAt.getTime() !== new Date(seenStartsAt).getTime())
-    throw new ServiceError("BOOKING_APPOINTMENT_CHANGED", 409, "Esa cita ya cambió. Vuelve a abrir tu enlace para ver cómo quedó.")
+    throw new ServiceError("BOOKING_APPOINTMENT_CHANGED", 409, "La cita que tenías a la vista ya cambió: se canceló o se movió. Aquí ves cómo quedó; revísalo antes de volver a intentarlo.")
   assertOwnAppointmentChangeable(current)
   return current
 }
