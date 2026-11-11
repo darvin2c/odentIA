@@ -1421,7 +1421,7 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
     }
   })()
   expect(confirmed).toContain("Confirmado y ejecutado")
-  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/pendientes\?abre=datos&token=[0-9a-f]{64}»/)
+  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/pendientes\?abre=datos&token=\{\{su-enlace:[0-9a-f-]{36}\}\}»/)
   expect(confirmed).not.toContain("tu salud")
 })
 
@@ -3067,8 +3067,11 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   const link = makeAgentTools(ctxFor(withPatient.conversationId, fx.contactId)).find((item) => item.name === "enviar_enlace_cita")!
   const sent = String(await link.invoke({ branchId: fx.branchId }))
   // El enlace va a la dirección de la clínica, es personal y no lleva nada que la comprobación de respuestas lea como hora, fecha o precio.
-  const url = /https:\/\/norte\.odentia\.test\/reserva\?token=([0-9a-f]{64})/.exec(sent)
-  expect(url).not.toBeNull()
+  // En el mensaje va la referencia del enlace, nunca el token: lo pone el worker al enviarlo (ADR 0037).
+  const ref = /https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}/.exec(sent)
+  expect(ref, sent).not.toBeNull()
+  expect(sent).not.toMatch(/token=[0-9a-f]{64}/)
+  expect(resolvePersonalLinkRefs(ref![0], KEY)).toMatch(/token=[0-9a-f]{64}$/)
   expect(sent).toContain("Paciente enlace")
   // «Su enlace» vale una semana y es el mismo si ya tenía uno.
   expect(sent).toContain("vale 7 días")

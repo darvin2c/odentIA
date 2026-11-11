@@ -1243,7 +1243,8 @@ export async function bookedDataLink(
     },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token, missing.length > 0 ? "datos" : "pendientes")
+  // Va en el mensaje de Sofi: con la referencia del enlace, que el worker cambia por el token al enviarlo (ADR 0037).
+  const url = await personalLinkMessageUrl(tx, orgId, link.linkId, missing.length > 0 ? "datos" : "pendientes")
   return url ? { missing: missing.map((item) => item.label.toLowerCase()), url } : null
 }
 

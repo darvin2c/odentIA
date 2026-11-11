@@ -1680,7 +1680,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           const origin = await clinicLinkOrigin(tx, publicUrl)
           if (!origin) return null
           const link = await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey })
-          return { link, url: personalLinkAddress(origin, link.token) }
+          // En el mensaje va la referencia del enlace; el worker pone el token al enviarlo (ADR 0037).
+          return { link, url: personalLinkAddress(origin, personalLinkRef(link.linkId)) }
         })
         if (!found) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
         const { link, url } = found
