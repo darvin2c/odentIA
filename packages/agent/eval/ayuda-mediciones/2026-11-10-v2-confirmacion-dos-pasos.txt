@@ -1,0 +1,32 @@
+La Ayuda no mostró lo redactado: sin_nombres
+Ayuda · help.v2 · proveedor jev (jev-1.13.0) · redactando
+  guía odentia: 30 pantallas, 457 preguntas frecuentes, 33 categorías; la mayor tiene 53 opciones
+  guía latidia: 30 pantallas, 455 preguntas frecuentes, 33 categorías; la mayor tiene 51 opciones
+  guía vistia: 31 pantallas, 471 preguntas frecuentes, 34 categorías; la mayor tiene 48 opciones
+  bancos: ciego 245 (10 repetidas, fuera) · ronda 14 · cifras 38
+
+Por banco:
+  banco          n  seguro bien  seguro mal  redactadas  duda c/correcta  duda sin  duda calla  ninguna bien  ninguna mal  datos bien  datos mal  sin Jev
+  ciego        245          116           4           4               69        12          24            15            2           3          0        3
+  ronda         14            1           1           1                4         2           6             0            0           0          0        0
+  cifras        38            7           1           2                4         1          22             0            2           1          0        0
+  «redactadas»: Jev dijo que dos o tres respuestas se completan. Sin --redactar cuentan como duda; con él, como seguro si todas sus partes corresponden.
+
+Confirmación (ronda + ciego + cifras), n = 297:
+  De lo que muestra como respuesta, corresponde: 95.4 % (cota inferior 95 %: 90.3 %; mínimo 95.0 %)
+  Lo que la guía no responde y no recibe una respuesta: 98.6 % (mínimo 95.0 %)
+  Lo que la guía responde y se resuelve solo o con un toque: 90.1 % (mínimo 70.0 %)
+  Seguro y mal: 6 · «datos» bien dicho: 11.4 %
+  Primer paso: de 183 con categoría segura, acertó 167 (91.3 %); en 93 buscó en toda la guía o dijo «ninguna» en el primer paso
+  Cumple los mínimos: sí
+
+Llamadas a Jev por pregunta: habitual 2 · máximo 4 (760 en total)
+Demora por pregunta, con todos sus pasos: p50 473 ms · p95 730 ms (mínimo para salir ≤ 2000 ms)
+Costo de Jev por pregunta: habitual USD 0.000375 · máximo USD 0.001416 · esta corrida USD 0.186515 (294 preguntas con precio, de 294)
+1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.487500, sin contar lo redactado
+
+Seguro y se equivoca (0):
+
+… y 25 fallos en los bancos de confirmación: --ver-ciegos los muestra, y mirarlos para ajustar los gasta.
+
+Lo redactado, para leerlo (0; aquí no hay juez). «Se mostró» es que pasó la comprobación de nombres y cifras:

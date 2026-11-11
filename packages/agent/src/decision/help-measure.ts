@@ -10,7 +10,7 @@ import type { HelpOption, HelpSelection } from "@odentia/services"
 export interface HelpBankItem {
   q: string
   expected: string[]
-  producto?: "odentia" | "latidia"
+  producto?: "odentia" | "latidia" | "vistia"
   /** Ruta de la pantalla desde donde se preguntó, si se sabe. */
   pantalla?: string
   faqs?: string[]
@@ -18,6 +18,10 @@ export interface HelpBankItem {
   es?: "ninguna" | "datos"
   /** La misma pregunta ya está en este banco de ajuste: no cuenta para confirmar. */
   repite?: string
+  /** Pide dos cosas y su respuesta está repartida: `faqs` y `temas` son las partes. */
+  partes?: boolean
+  /** Pregunta de seguimiento: la anterior y la pantalla de su respuesta, como en el menú. */
+  antes?: { q: string; donde?: string }
 }
 
 export type HelpExpected = "respuesta" | "ninguna" | "datos"

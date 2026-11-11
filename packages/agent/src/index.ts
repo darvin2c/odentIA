@@ -36,6 +36,7 @@ export { embedderFromEnv, type EmbeddingsEnv, FAKE_EMBEDDINGS_MODEL, fakeEmbedde
 export { type AdminModelDeps, ALREADY_TOLD_MIN, asAdminDecider, createAdminDecisionModel, createAlreadyTold, createRuleConflictModel } from "./admin.js"
 export { runShadowTriage } from "./decision/shadow.js"
 export { type DecisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
+export { createHelpWriter, fakeHelpWriter } from "./help-writer.js"
 export {
   type AgentRuntime,
   consumeAgentRun,

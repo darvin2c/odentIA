@@ -22,10 +22,14 @@ export function createFakeDecisionModel(): DecisionModel {
                   ? !has("gracias", "ok", "listo")
                   : q.id === "interest"
                     ? has("cuánto", "cuanto", "precio", "cuesta", "quiero", "me interesa") && !has("lista de precios", "todos sus precios")
-                    : false
+                    : q.id === "help_join"
+                      ? // La Ayuda redacta (ADR 0178) cuando la pregunta trae dos partes: «…y…».
+                        /^pregunta: .* y /m.test(text)
+                      : false
           return { id: q.id, kind: "yesno", probability: yes ? 0.92 : 0.08 }
         }
-        if (q.kind === "choice" && q.id === "help") return fakeHelp(q, text)
+        // La Ayuda en sus dos pasos: la categoría y la respuesta se eligen igual, por palabras en común.
+        if (q.kind === "choice" && (q.id === "help" || q.id === "help_area")) return fakeHelp(q, text)
         if (q.kind === "choice" && q.id === "topic") {
           // Elección de conocimiento: gana la opción que comparte más palabras
           // con el estado; sin ninguna en común, «none».
@@ -100,7 +104,8 @@ function fakeHelp(q: Extract<DecisionQuestion, { kind: "choice" }>, text: string
     ? { data: 0.95 }
     : first && first.hits >= 3
       ? { [first.value]: 0.95 }
-      : first && second && first.hits === 2
+      : // La categoría (`help_area`) se describe con menos palabras que una respuesta: con una en común ya se busca ahí.
+        first && second && (first.hits === 2 || (q.id === "help_area" && first.hits === 1))
         ? { [first.value]: 0.6, [second.value]: 0.3 }
         : { none: 0.95 }
   const rest = (1 - Object.values(picks).reduce((sum, p) => sum + p, 0)) / Math.max(1, q.options.length - Object.keys(picks).length)

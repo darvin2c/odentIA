@@ -26,6 +26,7 @@ import { sql } from "drizzle-orm"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runAutomationTick } from "./automation.js"
 import { runBackupWatchTick } from "./backup-watch.js"
+import { runHelpVideosTick } from "./help-videos.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runDemosTick } from "./demos.js"
 import { env } from "./env.js"
@@ -254,6 +255,7 @@ let nextLegalPoll = 0
 let nextDigestPoll = 0
 let nextDemoPoll = 0
 let nextSuggestedConsentsPoll = 0
+let nextHelpVideosPoll = 0
 queues.push(
   {
     name: "saas_billing",
@@ -306,6 +308,31 @@ queues.push(
       nextSuggestedConsentsPoll = Date.now() + 6 * 3_600_000
       const result = await ensureSuggestedConsentsEverywhere(ownerDb, db)
       return result.created > 0
+    },
+  },
+  {
+    // Los videos de la Ayuda (ADR 0178): la lista de YouTube de cada producto, al arrancar y una vez al día.
+    name: "help_videos",
+    poll: async () => {
+      if (Date.now() < nextHelpVideosPoll) return false
+      nextHelpVideosPoll = Date.now() + 24 * 3_600_000
+      const playlists = {
+        dental: env.HELP_VIDEOS_PLAYLIST || undefined,
+        medical: env.MEDICAL_HELP_VIDEOS_PLAYLIST || undefined,
+        optical: env.OPTICAL_HELP_VIDEOS_PLAYLIST || undefined,
+      }
+      const apiKey = env.YOUTUBE_API_KEY || undefined
+      const wanted = apiKey ? Object.values(playlists).filter(Boolean).length : 0
+      // Sin esperarla: YouTube lento no detiene la ingesta ni el envío. Si un producto no se pudo leer, se reintenta en una hora.
+      void runHelpVideosTick(ownerDb, { apiKey, playlists })
+        .then((result) => {
+          if (Object.keys(result).length < wanted) nextHelpVideosPoll = Date.now() + 3_600_000
+        })
+        .catch((error: unknown) => {
+          nextHelpVideosPoll = Date.now() + 3_600_000
+          console.error(`[help_videos] ${error instanceof Error ? error.message : String(error)}`)
+        })
+      return false
     },
   },
   {

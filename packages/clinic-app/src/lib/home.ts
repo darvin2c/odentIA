@@ -120,7 +120,8 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         // Lo que preguntó dice más que el motivo; el motivo lo escribe el servidor y nombra a «Sofi».
         ask: row.quote ?? (row.contactName ? withReceptionName(row.reason, context.receptionName) : null),
         // «Te lo pasó Sofi hace 25 min · WhatsApp»; la urgencia ya la dice el grupo.
-        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, row.channel ? channelLabel(row.channel) : null, row.assigneeName ? `Con ${row.assigneeName}` : null]),
+        // La duda clínica se dice primero: es de quien atiende y no se confunde con una consulta de recepción.
+        detail: joined([row.topicKind === "clinico" ? "Duda clínica" : null, `${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, row.channel ? channelLabel(row.channel) : null, row.assigneeName ? `Con ${row.assigneeName}` : null]),
         action: !row.conversationId ? "Ver la tarea" : row.canReply ? "Responder" : row.windowClosed && !row.assigneeName ? "Escribirle" : row.assigneeName ? "" : "Ver el caso",
       }
     case "person":
@@ -402,6 +403,7 @@ export function alsoLine(also: readonly WaitingRow[]): string | null {
 export function alsoWords(row: WaitingRow): string {
   switch (row.kind) {
     case "case":
+      return row.topicKind === "clinico" ? "una duda clínica" : "una pregunta"
     case "person":
       return "una pregunta"
     case "unclosed":

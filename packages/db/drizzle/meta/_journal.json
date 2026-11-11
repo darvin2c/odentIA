@@ -666,6 +666,20 @@
       "when": 1794339915167,
       "tag": "0094_controles_que_faltan",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1794353783192,
+      "tag": "0095_ayuda_responde",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1794353794168,
+      "tag": "0096_ayuda_responde_reglas",
+      "breakpoints": true
     }
   ]
 }
