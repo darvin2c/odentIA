@@ -1206,8 +1206,8 @@ export async function chatBookingMissing(
  * Al confirmar en la conversación la cita que reservó el agente (fase 3 del
  * lienzo «Su enlace y el código QR»): si al paciente le faltan datos y quien
  * escribe decide por él, su enlace con esa cita, para completarlos («Antes de
- * venir, completa tus datos aquí»), con el token escrito (lo redacta el
- * agente). Nulo si no falta nada, si quien escribe no decide por el paciente o
+ * venir, completa tus datos aquí»), con la referencia de su token: lo escribe
+ * el agente y el worker pone el token al enviarlo. Nulo si no falta nada, si quien escribe no decide por el paciente o
  * si la clínica no tiene dirección pública. Desde el ADR 0109, a quien le
  * falta algo el agente ya le da su enlace con la hora en vez de reservar por
  * el chat: esto queda para quien ya tenía una cita por venir.
@@ -1243,7 +1243,8 @@ export async function bookedDataLink(
     },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token, missing.length > 0 ? "datos" : "pendientes")
+  // Va en el mensaje de Sofi: con la referencia del enlace, que el worker cambia por el token al enviarlo (ADR 0037).
+  const url = await personalLinkMessageUrl(tx, orgId, link.linkId, missing.length > 0 ? "datos" : "pendientes")
   return url ? { missing: missing.map((item) => item.label.toLowerCase()), url } : null
 }
 
