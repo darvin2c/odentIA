@@ -3074,8 +3074,8 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   expect(ref, sent).not.toBeNull()
   expect(sent).not.toMatch(/token=[0-9a-f]{64}/)
   expect(resolvePersonalLinkRefs(ref![0], KEY)).toMatch(/token=[0-9a-f]{64}$/)
-  // «Mándamelo otra vez»: copiado del historial, donde se ve sin su token, no abre y no sale;
-  // se le pide volver a la herramienta, que da el mismo enlace con su referencia.
+  // «Mándamelo otra vez»: tapado, como lo muestra la Bandeja, no abre y no sale; se le pide
+  // volver a la herramienta, que da el mismo enlace con su referencia.
   const resendCtx = ctxFor(withPatient.conversationId, fx.contactId)
   const copied = hidePersonalLinkRefs(ref![0])
   resendCtx.evidence = [{ kind: "conversacion", source: "Respuestas anteriores del agente", text: `Aquí tienes tu enlace: ${copied}` }]
@@ -3088,14 +3088,19 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   expect(againRef).toBe(ref![0])
   resendCtx.evidence.push({ kind: "sistema", source: "Enlace que entregó el sistema", text: webAddressesIn(again).join("\n") })
   expect(await send(`Claro, aquí está de nuevo: ${againRef}`)).not.toContain("No enviado")
-  // Ya salió en este hilo: copiado del historial, se le da tal cual se envió, con su referencia,
-  // sin contarlo como dato sin sustento (así sirve también para «completa tus datos», que no tiene herramienta).
-  const nextCtx = ctxFor(withPatient.conversationId, fx.contactId)
-  nextCtx.evidence = [{ kind: "conversacion", source: "Respuestas anteriores del agente", text: `Claro, aquí está de nuevo: ${copied}` }]
-  const sendNext = (text: string) => makeAgentTools(nextCtx).find((item) => item.name === "send_reply")!.invoke({ text }).then(String)
-  expect(await sendNext(`Aquí lo tienes otra vez: ${copied}`)).toContain(`Escríbelo así, tal cual: ${againRef}`)
-  expect(nextCtx.checkFailures ?? 0).toBe(0)
-  expect(await sendNext(`Aquí lo tienes otra vez: ${againRef}`)).not.toContain("No enviado")
+  // Ya salió en este hilo: en lo que lee el agente, lo enviado conserva su referencia y lo que escribió
+  // el contacto no. Copiado de ahí sale tal cual y el worker le pone el token; así sirve también para
+  // «completa tus datos», que no tiene herramienta que lo vuelva a dar.
+  expect((await agentMessages(withPatient.conversationId)).some((body) => body.includes(againRef))).toBe(true)
+  const typed = `https://norte.odentia.test/reserva?token={{su-enlace:${randomUUID()}}}`
+  const asked = await ingestText("tg:enlace-paciente", "evt-enlace-3", `¿Me lo mandas otra vez? Tengo este: ${typed}`)
+  const resend = new ScriptedModel(() => toolCall("send_reply", { text: `Aquí lo tienes otra vez: ${againRef}` }, "e-reenvio"))
+  expect(await runScripted(resend, asked.conversationId, asked.messageId)).toBe("done")
+  const read = (resend.seen[0] ?? []).map((item) => String(item.content)).join("\n")
+  expect(read).toContain(againRef)
+  expect(read).not.toContain(typed)
+  expect(read).toContain(hidePersonalLinkRefs(typed))
+  expect(await agentMessages(withPatient.conversationId)).toContain(`Aquí lo tienes otra vez: ${againRef}`)
   expect(sent).toContain("Paciente enlace")
   // «Su enlace» vale una semana y es el mismo si ya tenía uno.
   expect(sent).toContain("vale 7 días")

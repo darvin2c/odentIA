@@ -182,6 +182,18 @@ export function deliveryNoteOf(status: string, error: string | null): string | n
   return null
 }
 
+/**
+ * Lo que lee el agente de su conversación: en lo enviado, «Su enlace» conserva la
+ * referencia de su token, que el worker cambia por el token al enviarlo (ADR 0037).
+ * Así, si se lo vuelven a pedir, lo escribe tal cual y abre; tapado no abriría. Lo
+ * que escribió el contacto se tapa como en la Bandeja: una referencia que escribe
+ * él no es un enlace que se le dio.
+ */
+function toAgentMessageItem(row: typeof message.$inferSelect): MessageItem {
+  const item = toMessageItem(row)
+  return row.direction === "out" ? { ...item, body: row.body } : item
+}
+
 function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem["automatic"] = null): MessageItem {
   return {
     automatic,
@@ -1466,9 +1478,9 @@ async function listMessagesIn(
 }
 
 /**
- * Mensajes de una conversación por su id: los que citan otros mensajes y
- * quedaron fuera de la página leída (ADR 0050). Los de otra conversación no
- * salen.
+ * Mensajes de una conversación por su id, como los lee el agente: los que citan
+ * otros mensajes y quedaron fuera de la página leída (ADR 0050). Los de otra
+ * conversación no salen.
  */
 export async function listMessagesById(
   tx: Db,
@@ -1483,7 +1495,7 @@ export async function listMessagesById(
     .where(
       and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), inArray(message.id, ids)),
     )
-  return rows.map((row) => toMessageItem(row))
+  return rows.map((row) => toAgentMessageItem(row))
 }
 
 /**
@@ -1538,38 +1550,7 @@ export async function listAttentionMessages(
     .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
     .orderBy(desc(message.createdAt), desc(message.id))
     .limit(Math.min(Math.max(inAttention, input.minTail, 1), input.max))
-  return { items: rows.reverse().map((row) => toMessageItem(row)), startedAt: thread.startedAt.toISOString(), inAttention }
-}
-
-/** Un enlace con la referencia de su token al final (`{{su-enlace:<id>}}`, ADR 0037). */
-const LINK_WITH_REF = /https?:\/\/[^\s"<>«»]*?\{\{su-enlace:[0-9a-f-]{36}\}\}/g
-
-/**
- * El enlace que el historial muestra tapado (`toMessageItem` cambia la referencia de
- * su token por «…»), tal como salió en un mensaje de esta conversación: con su
- * referencia, que el worker cambia por el token al enviarlo. Así el agente puede
- * volver a escribir el mismo enlace a quien ya lo recibió por aquí. Nulo si ningún
- * mensaje enviado del hilo lo trae.
- */
-export async function sentLinkBehind(tx: Db, orgId: string, conversationId: string, shown: string): Promise<string | null> {
-  const rows = await tx
-    .select({ body: message.body })
-    .from(message)
-    .where(
-      and(
-        eq(message.organizationId, orgId),
-        eq(message.conversationId, conversationId),
-        eq(message.direction, "out"),
-        sql`${message.body} like '%{{su-enlace:%'`,
-      ),
-    )
-    .orderBy(desc(message.createdAt), desc(message.id))
-    .limit(50)
-  for (const row of rows) {
-    const sent = (row.body ?? "").match(LINK_WITH_REF)?.find((link) => hidePersonalLinkRefs(link) === shown)
-    if (sent) return sent
-  }
-  return null
+  return { items: rows.reverse().map((row) => toAgentMessageItem(row)), startedAt: thread.startedAt.toISOString(), inAttention }
 }
 
 export interface CrossThreadMessage {

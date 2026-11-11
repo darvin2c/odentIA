@@ -736,8 +736,8 @@ export function verifyReply(
   // Un enlace sale solo si lo trajo una fuente del turno (una herramienta, los
   // datos de la clínica): uno armado por el modelo lleva a una página que no
   // existe (auditoría del 27-oct: «…/cita» en vez de «…/reserva?token=…»).
-  // Tampoco sale «Su enlace» copiado del historial: ahí se ve sin su token
-  // (`hidePersonalLinkRefs`) y así no abre, aunque figure en las respuestas anteriores.
+  // Tampoco sale «Su enlace» tapado (`token=…`, como lo muestra la Bandeja): así no
+  // abre, aunque figure en lo consultado.
   for (const match of normalize(reply).matchAll(WEB_ADDRESS)) {
     const url = match[0].replace(/[.,;:!?)]+$/, "")
     const found = isHiddenPersonalLink(url) ? undefined : evidence.find((item) => normalize(item.text).includes(url))
