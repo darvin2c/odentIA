@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
 import { adminStaff } from "@odentia/db/schema/admin-core"
@@ -16,12 +17,14 @@ import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasActionReview } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { helpTopic, helpTopicForScreen } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
-import { enqueueSupportInboxNotice } from "./support-notices.js"
+import { addBusinessDays, saasTermsAt } from "./saas-commercial-terms.js"
+import { enqueueSupportInboxNotice, SUPPORT_ANSWER_BUSINESS_DAYS } from "./support-notices.js"
 
 /* ---------- Tipos ---------- */
 
@@ -302,6 +305,9 @@ export async function openSupportCaseFromHelp(
   return { ...toListItem(row, 0), reused: false }
 }
 
+const kindOf = (kind: string): SupportKind =>
+  (["pregunta", "problema", "acceso", "cobro"] as string[]).includes(kind) ? (kind as SupportKind) : "pregunta"
+
 function toListItem(
   row: typeof supportCase.$inferSelect,
   messageCount: number,
@@ -312,9 +318,7 @@ function toListItem(
     id: row.id,
     organizationId: row.organizationId,
     organizationName: null,
-    kind: (["pregunta", "problema", "acceso", "cobro"] as string[]).includes(row.kind)
-      ? (row.kind as SupportKind)
-      : "pregunta",
+    kind: kindOf(row.kind),
     question: row.question,
     status: caseStatusOf(row),
     assigneeStaffId: row.assigneeStaffId,
@@ -791,6 +795,174 @@ export async function isOrgOwnerOrAdmin(db: Db, userId: string, orgId: string): 
 }
 
 /* ---------- Lado staff (ownerDb; cada acción audita al actor real) ---------- */
+
+/*
+ * «Nos espera»: una sola regla para la cola, Inicio y el número del menú.
+ * Un caso nos espera si no está resuelto ni esperando a la clínica y, además,
+ * nunca le respondimos en público o la clínica hizo algo después de nuestra
+ * última respuesta: escribió, adjuntó o autorizó el acceso. Son fragmentos
+ * sobre `support_case` sin alias: se usan dentro de un `from support_case`.
+ */
+
+/** El primer hecho de la clínica posterior a nuestra última respuesta pública. */
+const clinicActAfterReplySql = sql`(select min(act.at) from (
+    select m.created_at as at from ${supportMessage} m
+      where m.case_id = ${supportCase.id} and m.author_kind = 'cliente' and m.is_internal = false
+        and m.created_at > ${supportCase.lastPublicMessageAt}
+    union all
+    select a.created_at from ${supportAttachment} a
+      where a.case_id = ${supportCase.id} and a.created_at > ${supportCase.lastPublicMessageAt}
+        and (a.created_by = ${supportCase.openedBy} or exists (select 1 from ${member} mm
+          where mm.user_id = a.created_by and mm.organization_id = ${supportCase.organizationId}))
+    union all
+    select g.created_at from ${supportAccessGrant} g
+      where g.case_id = ${supportCase.id} and g.created_at > ${supportCase.lastPublicMessageAt}
+  ) act)`
+
+const waitingOnUsSql = sql<boolean>`(${supportCase.status} not in ('resuelto', 'esperando_clinica')
+  and (${supportCase.lastPublicMessageAt} is null or ${clinicActAfterReplySql} is not null))`
+
+/** Desde cuándo nos espera: desde que se abrió si nunca respondimos; si no, desde lo primero que hizo la clínica. */
+const waitingSinceSql = sql`(case when not ${waitingOnUsSql} then null
+  when ${supportCase.lastPublicMessageAt} is null then ${supportCase.createdAt}
+  else ${clinicActAfterReplySql} end)`
+
+/** El acceso de diagnóstico vigente del caso, si lo hay. */
+const accessUntilSql = (now: Date) => sql`(select max(g.expires_at) from ${supportAccessGrant} g
+  where g.case_id = ${supportCase.id} and g.revoked_at is null and g.expires_at > ${now.toISOString()}::timestamptz)`
+
+/**
+ * El orden de la cola, el mismo de Inicio: primero lo que nos espera, de la
+ * espera más larga a la más corta; después lo que espera a la clínica y lo ya
+ * respondido, por nuestra última respuesta; al final lo resuelto.
+ */
+const queueOrderSql = [
+  sql`(case when ${waitingOnUsSql} then 0 when ${supportCase.status} <> 'resuelto' then 1 else 2 end)`,
+  sql`${waitingSinceSql} asc nulls last`,
+  sql`(case when ${supportCase.status} <> 'resuelto' then ${supportCase.lastPublicMessageAt} end) asc nulls last`,
+  sql`${supportCase.resolvedAt} desc nulls last`,
+  sql`${supportCase.createdAt} asc`,
+  sql`${supportCase.id} asc`,
+]
+
+/** Soporte no ve los casos «Revisión de cobro»: son de la administración (ADR 0094 y 0180). */
+const visibleKindsFor = (actor: AdminActor | undefined) =>
+  actor?.role === "admin" ? undefined : ne(supportCase.kind, "cobro")
+
+function dateOrNull(value: unknown): Date | null {
+  if (value === null || value === undefined) return null
+  const date = value instanceof Date ? value : new Date(String(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/**
+ * «Responder hasta el…»: un caso que nadie respondió, a los días hábiles del
+ * objetivo del equipo; un caso de cobro, el plazo de su revisión pendiente, y
+ * solo para la administración. Un caso automático de odentIA no tiene plazo.
+ */
+async function answerByOf(
+  db: Db,
+  actor: AdminActor | undefined,
+  rows: Array<Pick<typeof supportCase.$inferSelect, "id" | "kind" | "status" | "openedBy" | "lastPublicMessageAt" | "createdAt">>,
+): Promise<Map<string, Date | null>> {
+  const out = new Map<string, Date | null>()
+  const billing = rows.filter((row) => row.kind === "cobro" && row.status !== "resuelto")
+  const reviews =
+    actor?.role === "admin" && billing.length > 0
+      ? await db
+          .select({ caseId: saasActionReview.supportCaseId, requestedAt: saasActionReview.requestedAt })
+          .from(saasActionReview)
+          .where(
+            and(
+              inArray(
+                saasActionReview.supportCaseId,
+                billing.map((row) => row.id),
+              ),
+              eq(saasActionReview.status, "pendiente"),
+            ),
+          )
+      : []
+  for (const row of rows) {
+    if (row.status === "resuelto") {
+      out.set(row.id, null)
+      continue
+    }
+    if (row.kind === "cobro") {
+      const review = reviews.find((item) => item.caseId === row.id)
+      out.set(
+        row.id,
+        review ? addBusinessDays(review.requestedAt, (await saasTermsAt(db, review.requestedAt)).reviewAnswerDays) : null,
+      )
+      continue
+    }
+    out.set(
+      row.id,
+      row.lastPublicMessageAt === null && row.openedBy !== null
+        ? addBusinessDays(row.createdAt, SUPPORT_ANSWER_BUSINESS_DAYS)
+        : null,
+    )
+  }
+  return out
+}
+
+/** Una fila de «Casos de soporte por atender» en Inicio: solo metadatos, nunca la pregunta. */
+export interface SupportHomeRow {
+  id: string
+  organizationId: string | null
+  /** La clínica, «Cuenta sin clínica» o «odentIA · automático». */
+  organizationName: string
+  /** El producto de la clínica; nulo si el caso no es de una clínica. */
+  product: ClinicalProduct | null
+  kind: SupportKind
+  assigneeName: string | null
+  waitingSince: string
+  answerBy: string | null
+  accessUntil: string | null
+}
+
+const SUPPORT_HOME_ROWS_MAX = 50
+
+/**
+ * Lo que nos espera, en el orden de la cola. Sin auditoría: son metadatos,
+ * como los conteos (ni la pregunta ni la conversación).
+ */
+export async function supportHomeRows(db: Db, actor: AdminActor, now: Date = new Date()): Promise<SupportHomeRow[]> {
+  const assignee = alias(user, "assignee")
+  const rows = await db
+    .select({
+      id: supportCase.id,
+      organizationId: supportCase.organizationId,
+      orgName: organization.name,
+      product: orgProfile.product,
+      kind: supportCase.kind,
+      status: supportCase.status,
+      openedBy: supportCase.openedBy,
+      lastPublicMessageAt: supportCase.lastPublicMessageAt,
+      createdAt: supportCase.createdAt,
+      assigneeName: assignee.name,
+      waitingSince: waitingSinceSql,
+      accessUntil: accessUntilSql(now),
+    })
+    .from(supportCase)
+    .leftJoin(organization, eq(organization.id, supportCase.organizationId))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, supportCase.organizationId))
+    .leftJoin(assignee, eq(assignee.id, supportCase.assigneeStaffId))
+    .where(and(waitingOnUsSql, visibleKindsFor(actor)))
+    .orderBy(...queueOrderSql)
+    .limit(SUPPORT_HOME_ROWS_MAX)
+  const answerBy = await answerByOf(db, actor, rows)
+  return rows.map((row) => ({
+    id: row.id,
+    organizationId: row.organizationId,
+    organizationName: row.orgName ?? (row.openedBy === null ? "odentIA · automático" : "Cuenta sin clínica"),
+    product: isClinicalProduct(row.product) ? row.product : null,
+    kind: kindOf(row.kind),
+    assigneeName: row.assigneeName,
+    waitingSince: (dateOrNull(row.waitingSince) ?? row.createdAt).toISOString(),
+    answerBy: answerBy.get(row.id)?.toISOString() ?? null,
+    accessUntil: dateOrNull(row.accessUntil)?.toISOString() ?? null,
+  }))
+}
 
 export interface StaffCaseFilters {
   status?: SupportStatus
@@ -1579,27 +1751,33 @@ export async function staffAttachToSupportCase(
   return toAttachment(attachment)
 }
 
+export interface AdminSupportAttention {
+  /** Los casos que nos esperan: el número de «Soporte» en el menú y las filas de Inicio. */
+  openCount: number
+  waitingClinicCount: number
+  /** Desde cuándo espera el que más espera. */
+  oldestWaitingSince: string | null
+}
+
 /**
- * Atención pendiente de soporte para el Inicio admin: solo agregados
- * (conteos y fecha del más antiguo sin resolver), sin textos de clientes.
- * Sin auditoría: es un conteo, no una lectura de datos de clínicas.
+ * Atención pendiente de soporte para el Inicio admin: solo agregados, sin
+ * textos de clientes. Cuenta con la misma regla de la cola («nos espera»).
+ * Sin `actor`, o con el rol Soporte, no cuenta los casos de cobro. Sin
+ * auditoría: es un conteo, no una lectura de datos de clínicas.
  */
-export async function getAdminSupportAttention(
-  ownerTx: Db,
-): Promise<{ openCount: number; waitingClinicCount: number; oldestOpenAt: string | null }> {
-  const [row] = await ownerTx.execute<{
-    open_count: number
-    waiting_clinic_count: number
-    oldest_open_at: Date | string | null
-  }>(sql`
-    select count(*) filter (where status in ('abierto', 'en_atencion'))::int as open_count,
-           count(*) filter (where status = 'esperando_clinica')::int as waiting_clinic_count,
-           min(created_at) filter (where status <> 'resuelto') as oldest_open_at
-    from support_case`)
+export async function getAdminSupportAttention(ownerTx: Db, actor?: AdminActor): Promise<AdminSupportAttention> {
+  const [row] = await ownerTx
+    .select({
+      openCount: sql<number>`count(*) filter (where ${waitingOnUsSql})::int`,
+      waitingClinicCount: sql<number>`count(*) filter (where ${supportCase.status} = 'esperando_clinica')::int`,
+      oldestWaitingSince: sql`min(${waitingSinceSql})`,
+    })
+    .from(supportCase)
+    .where(visibleKindsFor(actor))
   return {
-    openCount: Number(row?.open_count ?? 0),
-    waitingClinicCount: Number(row?.waiting_clinic_count ?? 0),
-    oldestOpenAt: row?.oldest_open_at ? new Date(row.oldest_open_at).toISOString() : null,
+    openCount: Number(row?.openCount ?? 0),
+    waitingClinicCount: Number(row?.waitingClinicCount ?? 0),
+    oldestWaitingSince: dateOrNull(row?.oldestWaitingSince)?.toISOString() ?? null,
   }
 }
 

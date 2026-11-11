@@ -30,6 +30,12 @@ export const SUPPORT_REPLY_NOTICE_DELAY_MS = 15 * 60_000
 export const SUPPORT_REPLY_NOTICE_GAP_MS = 60 * 60_000
 /** Respuestas más viejas no se avisan (p. ej. al desplegar por primera vez). */
 const SUPPORT_REPLY_NOTICE_LOOKBACK_MS = 7 * 86_400_000
+/**
+ * Hasta cuándo respondemos un caso que nadie respondió todavía: días hábiles
+ * desde que se abrió. Es un objetivo interno del equipo, no se promete a la
+ * clínica («Responder hasta el…» en la cola y en Inicio).
+ */
+export const SUPPORT_ANSWER_BUSINESS_DAYS = 2
 
 /**
  * Deja el aviso a soporte de algo que hizo la clínica. Corre en la misma
