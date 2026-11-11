@@ -2725,6 +2725,11 @@ export async function dueControlsOf(
   }))
 }
 
+/** El más tardío de dos días «YYYY-MM-DD». */
+function notBefore(day: string, earliest: string): string {
+  return day < earliest ? earliest : day
+}
+
 /**
  * «¿Cuándo vuelve?» al firmar (ADR 0152): los atajos en días de la clínica,
  * los controles que esta visita cumple y el próximo que ya tiene la persona
@@ -2740,6 +2745,7 @@ async function closingControlsOf(
   const { timezone } = await findOrgLocale(tx, orgId)
   const { recallMonths } = await productHooks(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
+  const visitDay = dayKeyIn(row.startedAt, timezone) < today ? dayKeyIn(row.startedAt, timezone) : today
   const due = await dueControlsOf(tx, orgId, actorUserId, row, timezone)
   const dueIds = new Set(due.map((control) => control.id))
   const open = await tx
@@ -2793,7 +2799,12 @@ async function closingControlsOf(
       repeatEveryMonths,
       byName: originProfessionalName ?? null,
     })),
-    shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
+    // Desde el día de la visita (la de una cita pasada que se registra después), nunca antes de mañana.
+    shortcuts: {
+      week: notBefore(addDaysToDay(visitDay, 7), addDaysToDay(today, 1)),
+      month: notBefore(addMonthsToDay(visitDay, 1), addDaysToDay(today, 1)),
+      recall: notBefore(addMonthsToDay(visitDay, recallMonths), addDaysToDay(today, 1)),
+    },
     due,
     open: open
       .filter((control) => !byAppointment.includes(control))
@@ -3008,6 +3019,7 @@ async function applySessionAnswers(
   encounterId: string,
   input: FinalizeEncounterInput,
   sessions: ClosingCheckBase["sessions"],
+  at?: Date,
 ): Promise<{ addSessions: () => Promise<void>; keptOpen: SessionKeptOpen[] }> {
   const chosen = [...new Set(input.completePlanItemIds ?? [])]
   const addSession = [...new Set(input.addSessionPlanItemIds ?? [])]
@@ -3021,7 +3033,7 @@ async function applySessionAnswers(
   field(chosen, "completePlanItemIds")
   field(addSession, "addSessionPlanItemIds")
   for (const itemId of chosen)
-    await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId })
+    await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId, at })
   // Lo que llega a sus previstas se termina salvo «Falta otra sesión». Lo que viene
   // elegido no frena la firma: si algo impide completarlo (un presupuesto anulado
   // a medias), queda en curso como antes y el resultado lo dice. La traza distingue
@@ -3031,7 +3043,7 @@ async function applySessionAnswers(
     if (chosen.includes(session.planItemId) || addSession.includes(session.planItemId)) continue
     try {
       await tx.transaction(async (inner) => {
-        await setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId })
+        await setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId, at })
         await audit(inner as Db, orgId, actorUserId, "plan.item_completed_on_sign", "treatment_plan_item", session.planItemId, {
           patientId,
           encounterId,
@@ -3137,11 +3149,14 @@ export async function finalizeEncounter(
   // «¿Terminaste?» (lo respondido, o «Sí, terminar» si nadie lo cambió), en la misma
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
-  const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  // La visita es cuando fue: lo que se cierra con ella (tratamientos, controles, diagnósticos)
+  // queda con su hora de fin; la firma (`finalizedAt`) queda con la de ahora.
+  const visitAt = endedAt
+  const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions, visitAt)
   // Los controles que dejó lo terminado, como quedaron en el cierre (otro día, o quitados).
   await applyFinishingControlChanges(tx, { orgId, actorUserId, patientId, encounterId }, input.finishControlChanges ?? [])
   // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
-  await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], now)
+  await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], visitAt)
   const procedures = await tx
     .select()
     .from(encounterProcedure)
@@ -3195,8 +3210,8 @@ export async function finalizeEncounter(
     at: now,
     signer: signature,
   })
-  if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
-  const fulfilled = await fulfillDueControls(tx, orgId, actorUserId, row, fulfilling.map((control) => control.id), now)
+  if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, visitAt)
+  const fulfilled = await fulfillDueControls(tx, orgId, actorUserId, row, fulfilling.map((control) => control.id), visitAt)
   // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0031).
   await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
   // Los cargos caen solos al finalizar, con el precio final acordado:

@@ -442,10 +442,10 @@ function HomePage() {
     <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
     <PersonPanel target={person} also={openedAlso} next={next} onClose={closePanel} onChanged={refresh} />
     {context && opened?.kind === "unclosed" ? (
-      <VisitPanel row={opened} also={openedAlso} context={context} canAttend={canAttend} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
+      <VisitPanel key={opened.id} row={opened} also={openedAlso} context={context} canAttend={canAttend} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
     ) : null}
     {context && opened?.kind === "cameUnrecorded" ? (
-      <CameUnrecordedPanel row={opened} also={openedAlso} context={context} myUserId={myUserId} onClose={closePanel} onChanged={refresh} />
+      <CameUnrecordedPanel key={opened.id} row={opened} also={openedAlso} context={context} myUserId={myUserId} onClose={closePanel} onChanged={refresh} />
     ) : null}
     {context && opened?.kind === "unclosedOld" ? (
       <OldUnclosedPanel row={opened} context={context} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />

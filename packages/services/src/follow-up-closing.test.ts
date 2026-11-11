@@ -297,6 +297,12 @@ it("cancelar la cita del control o marcar «No vino» lo devuelve a pendiente y 
   ] as const) {
     const id = await book(status === "cancelada" ? 20 : 21)
     await f.run((tx) => scheduleFollowUp(tx, ...f.args, reserved.id, { appointmentId: id }))
+    // «No vino» se marca cuando su hora ya pasó.
+    if (status === "no_asistio")
+      await ownerDb
+        .update(appointment)
+        .set({ startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(Date.now() - 1_800_000) })
+        .where(eq(appointment.id, id))
     await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
     const [row] = await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id))
     expect(row).toMatchObject({ id: reserved.id, status: "pendiente", appointmentId: null, scheduledAt: null })

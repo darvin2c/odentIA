@@ -872,8 +872,8 @@ export async function listOldUnclosed(
 
 /**
  * Las citas propias que recepción cerró con «Vino» y nadie registró: la visita
- * ocurrió y su historia está vacía. Solo el último mes; «No hace falta» la quita
- * (`appointment.record_skipped`) y registrar su atención también.
+ * ocurrió y su historia está vacía. No se va sola: un hueco en la historia no se
+ * olvida. «No hace falta» la quita (`appointment.record_skipped`) y registrar su atención también.
  */
 async function waitingCameUnrecorded(tx: Db, orgId: string, userId: string): Promise<WaitingCameUnrecorded[]> {
   const rows = await tx.execute<{ [K in keyof WaitingCameUnrecorded]: WaitingCameUnrecorded[K] }>(sql`
@@ -890,7 +890,7 @@ async function waitingCameUnrecorded(tx: Db, orgId: string, userId: string): Pro
       order by e.created_at desc limit 1) came
     left join "user" mu on mu.id = came.actor_user_id
     where a.organization_id = ${orgId} and not a.is_test and a.status = 'atendida' and a.professional_user_id = ${userId}
-      and came.metadata->>'by' = 'vino' and came.created_at > now() - make_interval(days => ${UNCLOSED_RECENT_DAYS})
+      and came.metadata->>'by' = 'vino'
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
       and not exists (select 1 from audit_event s where s.organization_id = a.organization_id and s.entity = 'appointment'
         and s.entity_id = a.id::text and s.action = 'appointment.record_skipped' and s.created_at >= came.created_at)

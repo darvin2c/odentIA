@@ -300,7 +300,7 @@ export interface WaitingUnclosedOld {
 /**
  * Una cita que recepción cerró con «Vino» y su profesional todavía no registró:
  * «Su cita del 9 nov quedó atendida sin registrar». Se va al registrar la
- * atención o con «No hace falta», y sola a los 30 días.
+ * atención o con «No hace falta»; no se va sola.
  */
 export interface WaitingCameUnrecorded {
   id: string
