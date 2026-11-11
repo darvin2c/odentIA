@@ -1,7 +1,7 @@
 /**
  * Una devolución total no deja el tratamiento otra vez por cobrar (ADR 0068;
  * auditoría de estados del 11 nov, decisión del usuario): la siguiente atención
- * no lo cobra sola, el cierre dice «se devolvió todo» y la caja lo cobra a mano
+ * no lo cobra sola, el cierre dice que lo devuelto cuenta y la caja lo cobra a mano
  * si corresponde. Un adelanto devuelto sí se cobra al atender.
  */
 import { randomUUID } from "node:crypto"
@@ -9,7 +9,7 @@ import { encounter, patientCharge, serviceCatalog } from "@odentia/db/schema/cli
 import { branch } from "@odentia/db/schema/org"
 import { and, eq, isNull } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import { createBudget, decideBudget, deliverBudget, usedPlanItems } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter } from "./encounters.js"
 import { createPaymentMethod } from "./payment-methods.js"
@@ -22,6 +22,7 @@ import {
   wholeReturnedCharges,
 } from "./payments.js"
 import { addPlanItem } from "./plan.js"
+import { myAttendedUnpaid } from "./report-finance.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
@@ -108,7 +109,7 @@ it("por tratamiento: devuelto todo, la siguiente atención no lo cobra otra vez 
   // En Caja, la línea del presupuesto tampoco vuelve a cargarse sola: se cobra como otro concepto.
   await expect(f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: line.id }))).rejects.toMatchObject({
     code: "CHARGE_EXCEEDS_BUDGET",
-    message: expect.stringContaining("se devolvió todo"),
+    message: expect.stringContaining("cuenta aunque se haya devuelto"),
   })
   const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
   expect(account.pendiente).toEqual([])
@@ -116,6 +117,11 @@ it("por tratamiento: devuelto todo, la siguiente atención no lo cobra otra vez 
   const [totals] = await f.run((tx) => acceptedTreatmentTotals(tx, "org_a", f.patient.id))
   expect(totals).toMatchObject({ agreedCents: 120_000, paidCents: 0, remainingCents: 0, returnedCents: 120_000, discountCents: 0 })
   expect(totals?.lines[0]?.toChargeCents).toBe(0)
+  // «Mis honorarios» no espera un cobro que no va a llegar, y una revisión no le cambia el precio.
+  const now = new Date()
+  const unpaid = await f.run((tx) => myAttendedUnpaid(tx, "org_a", f.actor, { year: now.getFullYear(), month: now.getMonth() + 1 }))
+  expect(unpaid.items).toEqual([])
+  expect(await f.run((tx) => usedPlanItems(tx, "org_a", f.patient.id, [item.id]))).toEqual(new Set([item.id]))
 })
 
 it("devuelto en dos veces cuenta una sola vez lo cobrado", async () => {
@@ -170,4 +176,8 @@ it("por sesión: la visita devuelta entera cuenta para el tope y no deja otra po
   const three = await signVisit(f, item.id)
   expect(three.charges).toEqual([])
   expect(three.billing.lines.map((row) => row.reason)).toEqual(["returned"])
+  // En la cuenta, lo de la segunda visita dice «visita 2 de 2»: la devuelta ocupa la primera.
+  const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.pendiente.map((row) => [row.visitNumber, row.visitsPlanned])).toEqual([[2, 2]])
+  expect(account.visitasPorTratamiento[item.id]).toBe(2)
 })

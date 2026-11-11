@@ -445,7 +445,7 @@ function skippedReasonLabel(reason: string | null): string {
       return "ya se cobraron todas las visitas previstas"
     case "returned":
       // Una devolución total no deja el tratamiento por cobrar otra vez (ADR 0068).
-      return "se devolvió todo lo que se cobró de este tratamiento y no se vuelve a cobrar solo. Si corresponde, cóbralo en «Cobrar» con «Agregar otro concepto»"
+      return "lo cobrado de este tratamiento cuenta aunque se haya devuelto, y ya cubre lo acordado: no se vuelve a cobrar solo. Si corresponde, cóbralo en «Cobrar» con «Agregar otro concepto»"
     default:
       return "no genera cobro"
   }

@@ -34,20 +34,20 @@ import {
   asc,
   desc,
   eq,
-  exists,
   inArray,
   isNotNull,
   isNull,
   like,
-  notExists,
   or,
   type Column,
   type SQL,
   type SQLWrapper,
   sql,
 } from "drizzle-orm"
-import { alias } from "drizzle-orm/pg-core"
 import { budgetLineUnits, budgetValueOptionSql } from "./budgets.js"
+import { ADVANCE_KEY, wholeReturnedCharges } from "./charge-returns.js"
+
+export { ADVANCE_KEY, wholeReturnedCharges, type WholeReturnedCharge } from "./charge-returns.js"
 import {
   chargeTaxOf,
   orgTaxes,
@@ -406,7 +406,7 @@ export async function createCharge(
       throw conflict(
         "CHARGE_EXCEEDS_BUDGET",
         returnedWhole.length > 0 && sum(generated) < agreed
-          ? "Lo cobrado de este tratamiento se devolvió todo: si corresponde cobrarlo otra vez, usa «Agregar otro concepto»"
+          ? "Lo cobrado de este tratamiento cuenta aunque se haya devuelto, y ya cubre lo acordado: si corresponde cobrarlo otra vez, usa «Agregar otro concepto»"
           : "El tratamiento ya tiene cargado el importe acordado",
       )
     amountCents ??= remaining
@@ -1012,8 +1012,6 @@ export async function updateCharge(
 
 // --- Cobro atómico -----------------------------------------------------------------------
 
-/** La clave del cargo de un adelanto para un tratamiento (`advanceForBudgetItemId`), con la del cobro. */
-export const ADVANCE_KEY = "adelanto:"
 
 /** Medio efectivo que acepta la clínica (catálogo de Configuración, congelado al cobrar). */
 const CASH_TYPE_CODE = "10"
@@ -3675,14 +3673,20 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       .orderBy(asc(treatmentBudgetItem.createdAt))
     for (const row of rows) plannedByPlanItem[row.planItemId] = row.sessionsPlanned ?? 1
   }
+  // Lo devuelto entero cuenta como cobrado (ADR 0068): ocupa su visita y su tratamiento no se vuelve a cargar.
+  const returnedWhole = await wholeReturnedCharges(tx, orgId, patientId)
   const visitNumberByCharge: Record<string, number> = {}
   const visitasPorTratamiento: Record<string, number> = {}
-  for (const charge of liveCharges) {
-    // Una visita es un acto atendido de ese tratamiento (los cargos van del más antiguo al más nuevo).
+  const visitCharges = [
+    ...liveCharges.map((charge) => ({ ...charge, live: true })),
+    ...returnedWhole.map((charge) => ({ id: charge.chargeId, ...charge, live: false })),
+  ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  for (const charge of visitCharges) {
+    // Una visita es un acto atendido de ese tratamiento, del más antiguo al más nuevo.
     if (!charge.planItemId || !charge.encounterProcedureId) continue
     const next = (visitasPorTratamiento[charge.planItemId] ?? 0) + 1
     visitasPorTratamiento[charge.planItemId] = next
-    visitNumberByCharge[charge.id] = next
+    if (charge.live) visitNumberByCharge[charge.id] = next
   }
   const serviceByLine: Record<string, string | null> = {}
   if (lineIds.length) {
@@ -3922,13 +3926,13 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     aFavorOrigen,
     /** La moneda de lo aceptado de su plan; nula si no hay nada o hay en dos. */
     planCurrency: planCurrencies.length === 1 ? (planCurrencies[0]?.currency ?? null) : null,
-    /** Visitas atendidas por tratamiento (actos con cargo vivo): base de «ya realizado» en cobro por sesión. */
+    /** Visitas atendidas por tratamiento (actos con cargo vivo o devuelto entero): base de «ya realizado» en cobro por sesión. */
     visitasPorTratamiento,
     // Un adelanto para un tratamiento no lo da por cargado: al firmar se carga lo que falta.
     // Lo devuelto entero también se cobró: al firmar no se vuelve a cargar (ADR 0068).
     conCargo: coveredPlanItems([
       ...liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY)),
-      ...(await wholeReturnedCharges(tx, orgId, patientId)),
+      ...returnedWhole,
     ]),
   }
 }
@@ -4102,82 +4106,6 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
 /** Tratamientos con cargo vivo (cobrado o no): una sola tarifa por tratamiento. */
 function coveredPlanItems(charges: Array<{ planItemId: string | null }>): string[] {
   return [...new Set(charges.filter((c) => c.planItemId).map((c) => c.planItemId as string))].sort()
-}
-
-/** Lo cobrado de un tratamiento que una devolución se llevó entero. */
-export interface WholeReturnedCharge {
-  chargeId: string
-  planItemId: string
-  encounterProcedureId: string | null
-  currency: string
-  /** Lo que se cobró de él: importe más lo devuelto antes y lo descontado (el total de la cadena). */
-  chargedCents: number
-  /** Lo devuelto de la cadena, que es todo lo que se pagó: lo cobrado sin lo descontado. */
-  returnedCents: number
-}
-
-/**
- * Lo cobrado de un tratamiento que se devolvió entero (ADR 0068): una devolución
- * parcial deja un concepto con lo devuelto (`returned_cents`), pero la total lo
- * anula sin reemplazo, y sin esto el tratamiento parecería nunca cobrado y la
- * siguiente atención lo cobraría otra vez. Es el último concepto de su cadena
- * (`original_charge_id`), anulado por una devolución (su pago guarda `return_id`)
- * y sin otro que lo reemplace. Un adelanto devuelto no cuenta: se devuelve entero
- * justamente para que el tratamiento se cobre al atenderlo.
- */
-export async function wholeReturnedCharges(
-  tx: Db,
-  orgId: string,
-  patientId: string,
-  /** Sin lista: todos los tratamientos de la persona. */
-  planItemIds?: string[],
-): Promise<WholeReturnedCharge[]> {
-  if (planItemIds?.length === 0) return []
-  const successor = alias(patientCharge, "successor")
-  const rows = await tx
-    .select({
-      chargeId: patientCharge.id,
-      planItemId: patientCharge.planItemId,
-      encounterProcedureId: patientCharge.encounterProcedureId,
-      currency: patientCharge.currency,
-      chargedCents: sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents} + ${patientCharge.discountCents}`.mapWith(Number),
-      returnedCents: sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents}`.mapWith(Number),
-    })
-    .from(patientCharge)
-    .where(
-      and(
-        eq(patientCharge.organizationId, orgId),
-        eq(patientCharge.patientId, patientId),
-        planItemIds ? inArray(patientCharge.planItemId, planItemIds) : isNotNull(patientCharge.planItemId),
-        isNotNull(patientCharge.voidedAt),
-        sql`coalesce(${patientCharge.requestKey}, '') not like ${`${ADVANCE_KEY}%`}`,
-        exists(
-          tx
-            .select({ id: patientPaymentApplication.id })
-            .from(patientPaymentApplication)
-            .where(
-              and(
-                eq(patientPaymentApplication.organizationId, orgId),
-                eq(patientPaymentApplication.chargeId, patientCharge.id),
-                isNotNull(patientPaymentApplication.returnId),
-              ),
-            ),
-        ),
-        notExists(
-          tx
-            .select({ id: successor.id })
-            .from(successor)
-            .where(
-              and(
-                eq(successor.organizationId, orgId),
-                sql`${successor.originalChargeId} = coalesce(${patientCharge.originalChargeId}, ${patientCharge.id})`,
-                sql`${successor.createdAt} > ${patientCharge.createdAt}`,
-              ),
-            ),
-        ),
-      ),
-    )
-  return rows.flatMap((row) => (row.planItemId ? [{ ...row, planItemId: row.planItemId }] : []))
 }
 
 /**
