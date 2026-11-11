@@ -45,7 +45,7 @@ function codeText(): string {
  * `help-guide.test.ts` compara con las pantallas.
  */
 const OWN_QUOTED = [
-  "Se repite",
+  "Una sola vez",
   "Dejar de repetir",
   "Control anual de la vista",
   "En 1 año",
