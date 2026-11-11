@@ -196,3 +196,63 @@ it("«¿Es la misma persona?» del registro en línea no se pliega en otra fila 
   expect(rows.map((row) => [row.kind, row.band])).toEqual([["case", "ahora"], ["possibleDuplicate", "hoy"]])
   expect(rows[0]?.also?.map((row) => row.kind)).toEqual(["unclosed"])
 })
+
+it("una duda clínica nunca se corta: va antes que los demás casos y no cuenta para el tope", () => {
+  // Llegan de la más antigua a la más reciente: la duda clínica es la última y antes quedaba fuera.
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases + 1 }, (_, index) => caseOf(`c${index}`, "media"))
+  const doubt = { ...caseOf("ibuprofeno", "baja"), topicKind: "clinico" }
+  expect(shape({ cases: [...calm, doubt] })).toEqual(["case:ibuprofeno", "case:c0", "case:c1", "case:c2", "more:cases:1"])
+  // Tampoco entre los «Ahora»: va primera, y los demás conservan su tope.
+  const urgent = Array.from({ length: WAITING_LIMITS.urgentCases + 1 }, (_, index) => caseOf(`u${index}`, "alta"))
+  const urgentDoubt = { ...caseOf("alergia", "alta"), topicKind: "clinico" }
+  expect(shape({ cases: [...urgent, urgentDoubt] })).toEqual(["case:alergia", "case:u0", "case:u1", "case:u2", "case:u3", "case:u4", "more:cases:1"])
+})
+
+it("una duda clínica no se pliega: ni en «Sin apuro» ni en otra cosa de la misma persona, y abre «Hoy»", () => {
+  const doubt = { ...caseOf("ibuprofeno", "baja"), topicKind: "clinico", contactId: "elena" }
+  const angry = { ...caseOf("molesta", "alta"), contactId: "elena" }
+  const rows = composeWaiting({ ...nothing, cases: [angry, doubt], unconfirmed: { items: [unconfirmedOf("rosa")], total: 1 } })
+  // Su fila es aparte de lo urgente de la misma persona, y va antes que lo demás de «Hoy».
+  expect(rows.map((row) => [row.kind, "id" in row ? row.id : null, row.band, row.also?.length ?? 0])).toEqual([
+    ["case", "molesta", "ahora", 0], ["case", "ibuprofeno", "hoy", 0], ["unconfirmed", "rosa", "hoy", 0],
+  ])
+})
+
+it("la duda clínica que ya lleva otra persona sigue el tope de cualquier caso", () => {
+  const taken = Array.from({ length: WAITING_LIMITS.otherCases + 2 }, (_, index) => ({ ...caseOf(`d${index}`, "media"), topicKind: "clinico", assigneeName: "Dr. Luis Prado" }))
+  expect(shape({ cases: taken })).toEqual(["case:d0", "case:d1", "case:d2", "more:cases:2"])
+})
+
+it("el caso que no cabe va al «También» de su persona, si ya tiene una fila", () => {
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases }, (_, index) => ({ ...caseOf(`c${index}`, "media"), contactId: `persona-${index}` }))
+  const again = { ...caseOf("otra-vez", "media"), contactId: "persona-0" }
+  const stranger = { ...caseOf("ajeno", "media"), contactId: "persona-9" }
+  const rows = composeWaiting({ ...nothing, cases: [...calm, again, stranger] })
+  expect(rows.find((row) => row.kind === "case" && row.id === "c0")?.also).toMatchObject([{ id: "otra-vez" }])
+  // El de otra persona sigue contado en «N más»; el que se plegó ya no.
+  expect(rows.at(-1)).toMatchObject({ kind: "more", of: "cases", count: 1 })
+})
+
+it("el caso que se pliega no le quita la fila a lo que la persona ya tenía, ni la mueve", () => {
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases }, (_, index) => caseOf(`c${index}`, "media"))
+  const extra = { ...caseOf("extra", "media"), contactId: "persona-rosa" }
+  const rows = composeWaiting({ ...nothing, cases: [...calm, extra], unconfirmed: { items: [{ ...unconfirmedOf("rosa"), personId: "persona-rosa" }], total: 1 } })
+  expect(rows.map((row) => ("id" in row ? row.id : row.kind))).toEqual(["rosa", "c0", "c1", "c2"])
+  expect(rows[0]?.also).toMatchObject([{ id: "extra" }])
+})
+
+it("el caso que no cabe no se pliega en una fila menos urgente que él: sigue en «N más»", () => {
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases }, (_, index) => caseOf(`c${index}`, "media"))
+  // La única fila de la persona está en «Sin apuro»: su caso de «Hoy» se vería menos ahí que en «N más».
+  const later = { ...taskOf("luego", "later"), personId: "persona-lenta" }
+  const today = { ...caseOf("de-hoy", "media"), contactId: "persona-lenta" }
+  const rows = composeWaiting({ ...nothing, cases: [...calm, today], nextTask: later, openTasks: 1 })
+  expect(rows.flatMap((row) => row.also ?? [])).toEqual([])
+  expect(rows.find((row) => row.kind === "more")).toMatchObject({ of: "cases", count: 1 })
+  // Tampoco un «Ahora» que no cabe bajo una fila de «Hoy».
+  const urgent = Array.from({ length: WAITING_LIMITS.urgentCases }, (_, index) => caseOf(`u${index}`, "alta"))
+  const sixth = { ...caseOf("sexto", "alta"), contactId: "persona-rosa" }
+  const mixed = composeWaiting({ ...nothing, cases: [...urgent, sixth], unconfirmed: { items: [{ ...unconfirmedOf("rosa"), personId: "persona-rosa" }], total: 1 } })
+  expect(mixed.flatMap((row) => row.also ?? [])).toEqual([])
+  expect(mixed.find((row) => row.kind === "more")).toMatchObject({ of: "cases", count: 1 })
+})
