@@ -152,11 +152,12 @@ it("C1: hoy, pasada su hora, «Llegó» vale sin pasar por «No vino»", async (
   const f = await clinicalFixture()
   const book = await booker(f)
   const booked = await book(1)
-  // Ya terminó su hora, hoy: llegó tarde. Minutos atrás, para que siga siendo hoy cerca de medianoche.
+  // Empezó hace unos minutos y ya terminó: llegó tarde. Minutos y no una hora: pasada la
+  // medianoche, «hace una hora» era ayer y la cita dejaba de ser de hoy.
   const startsAt = new Date(Date.now() - 3 * 60_000)
   await ownerDb
     .update(appointment)
-    .set({ startsAt, endsAt: new Date(startsAt.getTime() + 60_000) })
+    .set({ startsAt, endsAt: new Date(startsAt.getTime() + 2 * 60_000) })
     .where(eq(appointment.id, booked.id))
   const arrived = await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, booked.id, true))
   expect(arrived.visit).toBe("llego")

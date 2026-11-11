@@ -280,9 +280,10 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   const created = await owner.request("/appointments", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, startsAt: "2027-10-11T15:00:00Z", durationMin: 15, outsideSchedule: true }),
+    body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, startsAt: "2027-10-11T15:00:00Z", durationMin: 15, outsideSchedule: true, source: "agent" }),
   })
   expect(created.status).toBe(201)
+  // El origen lo pone la ruta del equipo: lo que diga el cuerpo no cuenta (abajo sale «recepcion»).
   const cita = ((await created.json()) as { data: { id: string; notice?: unknown } }).data
   // Sin «Recordar la cita» prendida nadie le avisa: lo dice la respuesta.
   expect(cita.notice).toEqual({ queued: false })

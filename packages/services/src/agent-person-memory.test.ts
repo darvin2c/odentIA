@@ -385,6 +385,9 @@ describe("reservar desde un enlace", () => {
     await expect(run((tx) => getBookingLinkView(tx, ORG, "no-es-un-enlace"))).rejects.toMatchObject({ status: 404 })
 
     const chosen = slots[0]!
+    // Como al cambiarla: la persona reserva de ahora en adelante.
+    await expect(run((tx) =>
+      reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: new Date(Date.now() - 86_400_000).toISOString(), professionalUserId: chosen.professionalUserId }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "VALIDATION" })
     const booked = await run((tx) =>
       reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }, { secretsKey: KEY }))
     expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "Miraflores", professionalName: "Dra. Lucía Salas" })
@@ -419,8 +422,12 @@ describe("reservar desde un enlace", () => {
     // Otra organización no llega a la cita con ese enlace.
     await expect(run((tx) => cancelBookingLinkAppointment(tx, OTHER, link.token), OTHER)).rejects.toMatchObject({ status: 404 })
 
+    // La página dice qué cita miraba: si «su cita» ya es otra (otra pestaña, dos toques), no la toca.
+    await expect(run((tx) => cancelBookingLinkAppointment(tx, ORG, link.token, { secretsKey: KEY, seenStartsAt: chosen.startsAt }))).rejects.toMatchObject({ code: "BOOKING_APPOINTMENT_CHANGED", status: 409 })
+    expect((await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))).map((row) => row.status)).toEqual(["confirmada"])
+
     // Y la cancela: queda cancelada con su motivo, el enlace ya no cambia nada y el caso lo recuerda.
-    const cancelled = await run((tx) => cancelBookingLinkAppointment(tx, ORG, link.token, { secretsKey: KEY }))
+    const cancelled = await run((tx) => cancelBookingLinkAppointment(tx, ORG, link.token, { secretsKey: KEY, seenStartsAt: other.startsAt }))
     expect(cancelled).toMatchObject({ cancelled: true, canChange: false })
     expect((await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))).map((row) => row.status)).toEqual(["cancelada"])
     await expect(run((tx) => cancelBookingLinkAppointment(tx, ORG, link.token))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
