@@ -74,13 +74,42 @@ const { kind } = Astro.props
       <div class="ph"><span>Ficha · Rosa Paredes Luna</span><span class="ex">ejemplo</span></div>
       <div class="who"><span class="av">RP</span><span><strong>Rosa Paredes Luna</strong><span class="mono">HC-000001 · 42 años</span></span></div>
       <ul class="rows">
-        <li><span class="mono">Antecedentes</span><span>Usa lentes desde los 15 años</span></li>
-        <li><span class="mono">Alergias</span><span>Ninguna conocida</span></li>
+        <li><span class="mono">Antecedentes</span><span>Usa anteojos desde los 15 años</span></li>
         <li><span class="mono">Diagnóstico</span><span>H52.1 · Miopía</span></li>
+        <li><span class="mono">Agudeza visual</span><span>OD 20/20 · OI 20/25, con corrección</span></li>
+        <li><span class="mono">Receta de lentes</span><span>Anteojos · OD −1,25 · OI −1,00</span></li>
         <li><span class="mono">Pruebas del ojo</span><span>Retinografía · con su informe</span></li>
         <li><span class="mono">Próximo control</span><span>Control anual de la vista · octubre</span></li>
       </ul>
       <div class="chip"><i></i>Atención firmada · solo admite adendas</div>
+    </div>
+  )}
+
+  {kind === "pedido" && (
+    <div class="panel">
+      <div class="ph"><span>Pedidos · Lucero Centro</span><span class="ex">ejemplo</span></div>
+      <div class="ord">
+        <div class="ord-h">
+          <span><strong>Pedido N.º 214 · Rosa Paredes</strong><span class="mono">Montura y lunas · para el jueves</span></span>
+          <span class="pill-s ok">Listo</span>
+        </div>
+        <ol class="track">
+          {[
+            ["Por enviar", "sáb 10:45", "done"],
+            ["En laboratorio", "lun 09:10", "done"],
+            ["Por revisar", "jue 10:30", "done"],
+            ["Listo", "jue 11:00", "now"],
+            ["Entregado", "", "todo"],
+          ].map(([step, when, state]) => (
+            <li class={state}><i></i><span>{step}</span><span class="mono">{when}</span></li>
+          ))}
+        </ol>
+      </div>
+      <ul class="ords">
+        <li><span class="mono">N.º 215</span><span>Julia · Lentes de contacto</span><span class="pill-s">En laboratorio</span></li>
+        <li><span class="mono">N.º 209</span><span>Pedro · Lunas progresivas</span><span class="pill-s late">Atrasado</span></li>
+      </ul>
+      <div class="chip still"><i></i>Aviso enviado: «Tus lentes ya están listos»</div>
     </div>
   )}
 
@@ -111,9 +140,9 @@ const { kind } = Astro.props
       <div class="next"><span class="mono">Tu próxima cita</span><strong>Sábado · 10:00</strong><span>Examen de la vista · Andrea Quispe</span></div>
       <div class="acts">
         <span class="act main">Cambiar mi cita</span>
-        <span class="act">Mis datos</span>
-        <span class="act">Mis documentos</span>
-        <span class="act">Mis mensajes</span>
+        <span class="act">Tus datos</span>
+        <span class="act">Firma tu consentimiento</span>
+        <span class="act">Tus mensajes</span>
       </div>
       <span class="ex mono">ejemplo</span>
     </div>
@@ -144,6 +173,8 @@ const { kind } = Astro.props
           ["Recepción", "Agenda, conversaciones y datos de contacto", "var(--sky)"],
           ["Optómetras", "La historia clínica de quienes atienden", "var(--mint)"],
           ["Caja", "Cobros, gastos y cierre", "var(--amber)"],
+          ["Ventas", "Vende y cobra, con la receta de lentes vigente", "#4fc3d7"],
+          ["Taller", "Solo los pedidos, con sus medidas", "#c4b5fd"],
         ].map(([r, s, c]) => (
           <div class="role" style={`--rc:${c}`}>
             <svg viewBox="0 0 24 24" class="lock"><rect x="5" y="11" width="14" height="10" rx="2.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
@@ -210,6 +241,26 @@ const { kind } = Astro.props
   .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
   .rows li { display: grid; grid-template-columns: 128px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13.5px; }
   .rows .mono { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--on-night-3); padding-top: 2px; }
+
+  /* Pedido: sus pasos, quietos (sin animación); lo que aún no pasó va hueco */
+  .ord { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; background: rgba(255,255,255,.06); }
+  .ord-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .ord-h > span:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
+  .ord-h strong { color: #fff; }
+  .ord-h .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .track { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .track li { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; font-size: 13.5px; color: var(--on-night-2); }
+  .track li i { width: 8px; height: 8px; border-radius: 50%; background: var(--sky); }
+  .track li .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .track li.now { color: #fff; font-weight: 700; }
+  .track li.now i { box-shadow: 0 0 0 3px rgba(74,222,128,.25); }
+  .track li.todo { color: var(--on-night-3); }
+  .track li.todo i { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.3); }
+  .ords { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .ords li { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13.5px; }
+  .ords .mono { font-size: 11.5px; color: var(--on-night-3); }
+  .pill-s.late { background: rgba(245,196,107,.16); color: var(--amber); }
+  .chip.still i { animation: none; }
 
   /* Caja */
   .moves { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

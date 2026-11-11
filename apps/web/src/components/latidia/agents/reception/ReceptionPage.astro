@@ -2,7 +2,8 @@
 // /agentes/recepcion de latidIA (tablero «Sofi» del lienzo): «Sofi.» en grande con su frase y el h1 para
 // los buscadores; el WhatsApp del Consultorio San Martín con las escenas «Agenda» y «Urgencia»; lo que
 // hace hoy, con la señal de alarma al frente; cuánto cobra (cifras de Astro.locals.pricing); lo que
-// decides tú; las preguntas de los médicos y el cierre. Sofi no da consejos médicos: el principio
+// decides tú y cómo le enseñas (Conocimiento, las lecciones de Agente › Aprender y «Probar»); las
+// preguntas de los médicos y el cierre. Sofi no da consejos médicos: el principio
 // «No diagnostica, no receta y no decide por el profesional» está en el agente (packages/agent).
 import Base from "../../../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../../../lib/faq"
@@ -74,6 +75,22 @@ const night =
       }
     : null
 
+// Cómo aprende: Agente › Conocimiento, la corrección desde «En qué se basó» y «Probar».
+const teach = [
+  {
+    title: "Lee tus datos al momento",
+    text: "Horarios, sedes, servicios, precios y medios de pago: los toma de donde ya los tienes. En Conocimiento agregas lo que solo tú sabes, como el estacionamiento o los seguros.",
+  },
+  {
+    title: "La corriges y aprende",
+    text: "Debajo de su respuesta, «En qué se basó» › «Corregir». Queda como una lección, y Sofi la usa recién cuando alguien la aprueba.",
+  },
+  {
+    title: "La pruebas antes",
+    text: "«Probar» abre una conversación real con una persona de prueba, también con Sofi apagada. Lo que hace ahí se borra con la prueba.",
+  },
+]
+
 const faq: AgentQuestion[] = [
   {
     q: "¿Sofi da consejos médicos?",
@@ -87,6 +104,10 @@ const faq: AgentQuestion[] = [
   {
     q: "¿Agenda sin preguntarme?",
     a: "Agenda en los horarios libres que tú dejas en la agenda y solo con el sí del paciente. Si prefieres, lo apagas y Sofi envía su enlace para que elija.",
+  },
+  {
+    q: "¿Cómo le enseño lo que mi consultorio hace distinto?",
+    a: "Tus horarios, servicios y precios los lee al momento. Lo demás lo escribes en Conocimiento o como una regla en «Lo que Sofi debe saber». Y si respondió mal, la corriges: tu corrección queda como una lección y Sofi la usa cuando alguien la aprueba.",
   },
   { q: "¿Se hace pasar por una persona?", a: "No. Se presenta como asistente virtual del consultorio, con el nombre que le pongas." },
   {
@@ -179,6 +200,17 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
           </li>
         </ul>
       </div>
+      <div class="wrap la-in rp-teach">
+        <h3 class="rp-teach-h">Y le enseñas, como a alguien nuevo en tu recepción.</h3>
+        <div class="rp-teach-grid">
+          {teach.map((item) => (
+            <div class="la-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </section>
 
     <AgentFaq items={faq} white />
@@ -202,6 +234,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
   .rp-switch { flex: none; width: 48px; height: 28px; border-radius: 999px; background: #0e7490; display: flex; justify-content: flex-end; padding: 3px; }
   .rp-switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; }
   .rp-change { flex: none; font-weight: 700; color: #0e7490; }
+  /* Cómo aprende: debajo de «Tú decides», tres tarjetas. */
+  .rp-teach { margin-top: 56px; gap: 20px; }
+  .rp-teach-h { font-size: clamp(24px, 2.6vw, 30px); line-height: 1.15; letter-spacing: -.02em; text-wrap: balance; }
+  .rp-teach-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
   @media (max-width: 1020px) {
     .rp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .rp-alarm { grid-row: auto; }
@@ -211,6 +247,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
     .rp-alarm { grid-column: auto; padding: 20px; }
     .rp-alarm h3 { font-size: 22px; }
     .rp-decide li { padding: 16px; }
+    .rp-teach { margin-top: 40px; }
     .rp-decide li > span:first-child > span { font-size: 14px; }
   }
 </style>

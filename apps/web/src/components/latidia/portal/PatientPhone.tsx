@@ -1,8 +1,9 @@
 // Lo que ve Rosa en su teléfono al abrir Su enlace (lienzo de latidIA, tablero «Enlace»): su próxima
-// cita con «Cambiar», «Cancelar» y «Cómo llegar», sus datos y su salud, sus papeles y sus mensajes.
+// cita con «Cambiar», «Cancelar» y «Cómo llegar», sus datos y su salud, sus mensajes y, de su portal,
+// sus papeles.
 // Las tarjetas aparecen una a una y después «Cambiar» invita a tocarlo; todo se puede tocar.
-// Lo que dice es lo que hace la página real (`/reserva`): «Tus papeles» son la receta y el
-// comprobante de los últimos 30 días, y «Tus mensajes» elige qué mensajes recibe.
+// Lo que dice es lo que hace la app: la cita, los datos y «Tus mensajes» son de Su enlace (`/reserva`);
+// los papeles ya no viven ahí: llegan en PDF por su chat o su correo y quedan en su portal, sin vencer.
 import { useEffect, useState } from "react"
 import "./patient-phone.css"
 
@@ -15,10 +16,10 @@ const SLOTS = [
 ]
 const BASE = { when: "Lunes 26 de octubre · 09:00", short: "lunes 26 a las 09:00", room: "Sala 1" }
 
-/** Los papeles de la consulta del 24 de octubre: se descargan 30 días, hasta el 23 de noviembre. */
+/** Los papeles de la consulta del 24 de octubre: le llegaron en PDF y siguen en su portal. */
 const PAPERS = [
-  { id: "receta", name: "Receta N.º 1", sub: "24 oct. · hasta el 23 de noviembre" },
-  { id: "comprobante", name: "Comprobante N.º 000001", sub: "24 oct. · hasta el 23 de noviembre" },
+  { id: "receta", name: "Receta N.º 1", sub: "24 oct. · te llegó por WhatsApp" },
+  { id: "comprobante", name: "Comprobante N.º 000001", sub: "24 oct. · te llegó por WhatsApp" },
 ]
 
 /** Los tres interruptores de «Tus mensajes»; las novedades solo con su sí. */
@@ -191,7 +192,7 @@ export default function PatientPhone() {
           </section>
 
           <section className={card(3)} aria-label="Tus papeles">
-            <span className="pp-h">TUS PAPELES · QUEDAN AQUÍ 30 DÍAS</span>
+            <span className="pp-h">TUS PAPELES · EN TU PORTAL, SIN VENCER</span>
             {PAPERS.map((p) => (
               <span key={p.id} className="pp-paper">
                 <span className="pp-paper-name">

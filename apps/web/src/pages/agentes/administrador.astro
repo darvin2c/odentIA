@@ -1,7 +1,9 @@
 ---
 // Argos, el agente administrador (lienzo del paso 3, tablero Argos; decisión 3): el nombre enorme con su
 // frase, el h1 para los buscadores en chico y la pregunta que se escribe sola y se responde; lo que trae
-// de vuelta, «Pregúntale» con la captura real, cuánto cobra con los precios del plan, preguntas y cierre.
+// de vuelta, «Pregúntale» con la captura real, lo que se le pide con palabras propias (el borrador, las
+// líneas con su interruptor, las tareas y el resumen del lunes), cuánto cobra con los precios del plan,
+// preguntas y cierre.
 // Título, descripción, migas y las preguntas de siempre salen de PAGES.administrador (lib/pages-data.ts).
 import AgentCharges from "../../components/agents/AgentCharges.astro"
 import ArgosDemo from "../../components/agents/ArgosDemo"
@@ -31,6 +33,10 @@ const trail: [string, string][] = [["Inicio", "/"], ...(page.parent ? [page.pare
 
 const faq: FaqItem[] = [
   ...page.faq,
+  {
+    q: "¿Puedo pedirle algo con mis palabras?",
+    a: "Sí. En «Dile qué quieres que haga» escribes lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador, con una prueba con tus últimos 30 días, y nada cambia hasta que lo prendas o lo guardes.",
+  },
   {
     q: "¿Argos ve los nombres de mis pacientes?",
     a: "Para responder tus preguntas, no: el modelo nunca ve los nombres de tus pacientes. La lista con nombres la arma tu sistema.",
@@ -115,8 +121,25 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     </div>
   </section>
 
+  <FeatureGrid
+    tag="A tu manera"
+    tagColor={tagColor}
+    title="Le dices qué hacer con tus palabras. Nada cambia sin tu sí."
+    min={250}
+    small
+    items={[
+      { title: "«Dile qué quieres que haga»", text: "Por ejemplo, que le ofrezca otra fecha a quien cancela. Te lo deja como borrador, con una prueba sobre tus últimos 30 días." },
+      { title: "Cada línea, con su interruptor", text: "Recordar, avisar o retomar se prende o se apaga. Y dice quién lo hace: «Lo hace Argos» o «Le toca a una persona»." },
+      { title: "Tareas que se cierran solas", text: "Las que deja a tu equipo se cierran cuando ya no hacen falta: la persona confirmó o el presupuesto se decidió. Y dicen por qué." },
+      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00 con cuatro cifras de la semana, lo que cambió y lo que Argos recomienda." },
+    ]}
+  >
+    <p class="more-line">También retoma las oportunidades de tu tablero de ventas. <a href="/presupuestos-dentales#oportunidades">Ver Oportunidades →</a></p>
+  </FeatureGrid>
+
   <AgentCharges
     agent="argos"
+    white
     tag="Cuánto cobra Argos"
     tagColor={tagColor}
     title="Recordar no se cobra. Recuperar, sí."
@@ -145,6 +168,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .ask-shot figcaption { font-size: 13px; color: var(--soft); }
   .more { font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; align-self: flex-start; }
   .more:hover { text-decoration: underline; }
+  .more-line { margin: 0; font-size: 15px; color: var(--muted); }
+  .more-line a { font-weight: 700; display: inline-block; padding: 10px 0; }
   .faqwrap { background: var(--paper); }
   @media (max-width: 720px) {
     .ask { padding: 64px 0; }

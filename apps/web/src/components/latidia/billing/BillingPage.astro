@@ -1,7 +1,8 @@
 ---
 // /caja-y-cobros de latidIA (lienzo de latidIA, tablero «Caja»): la caja del día que se llena cobro a
-// cobro con el ticket de Luis, lo que controla la caja, «sin presupuesto» con la captura real y varias
-// sedes. Los Reportes del tablero tienen su propia página (/reportes). Los montos en soles son del
+// cobro con el ticket de Luis, lo que controla la caja (también en dos monedas), «sin presupuesto» con
+// la captura real, varias sedes y lo que sale: gastos, inventario de insumos y honorarios de cada médico
+// (dibujos quietos, sin isla). Los Reportes tienen su propia página (/reportes). Los montos en soles son del
 // tarifario de ejemplo del Consultorio San Martín; el regalo y el botón salen de Astro.locals.pricing.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
@@ -19,7 +20,7 @@ const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const title = "Caja y cobros para consultorio médico"
 const description =
-  "Caja para tu consultorio médico: cobra cada consulta con tu tarifario, ticket con el impuesto aparte, quién debe y desde cuándo, cierre de caja y varias sedes. Sin presupuesto obligatorio."
+  "Caja para tu consultorio médico: cobra cada consulta con tu tarifario, en soles o en dólares, con ticket, quién debe y cierre de caja. Y lo que sale: gastos, inventario de insumos y honorarios de cada médico."
 const trail: [string, string][] = [
   ["Inicio", "/"],
   ["Caja y cobros", "/caja-y-cobros"],
@@ -39,6 +40,18 @@ const faq: FaqItem[] = [
     a: "El resto queda a su nombre como «Le falta pagar», con la fecha, hasta que lo pague. En Reportes ves quién te debe y desde cuándo.",
   },
   {
+    q: "¿Puedo cobrar en soles y en dólares?",
+    a: "Sí. Lo que está en dólares se debe en dólares hasta que se paga. En el cobro eliges con qué paga y llega el tipo de cambio de hoy; el ticket dice lo que canceló y con qué pagó. Cada moneda tiene su caja y su cierre: nunca se suman.",
+  },
+  {
+    q: "¿Lleva el inventario de mis insumos?",
+    a: "Sí. Cada servicio dice qué materiales usa y se descuentan solos al firmar la atención. Registras las compras y lo que llega, cuentas lo que hay a fin de mes y ves lo que hace falta y lo que vence, en cada sede.",
+  },
+  {
+    q: "¿Cómo calculo lo que le toca a cada médico?",
+    a: "Fijas su porcentaje sobre lo cobrado de lo que atendió, o una comisión distinta para un servicio. La liquidación del mes muestra cada cobro por fecha, y cada médico ve solo lo suyo en «Mis honorarios».",
+  },
+  {
     q: "¿Cada sede tiene su caja?",
     a: "Sí. La agenda y la caja son de cada sede, con su propio cierre. La historia del paciente es una sola en todas, y en Reportes ves una sede o todas juntas.",
   },
@@ -49,6 +62,41 @@ const faq: FaqItem[] = [
   {
     q: "¿Cuesta más tener otra sede?",
     a: "No. Pagas por el trabajo de tus agentes, no por cuántas sedes, médicos o usuarios tienes.",
+  },
+]
+
+// Lo que sale: Finanzas › Gastos, Inventario y Comisiones, con las palabras de cada pantalla.
+const outs = [
+  {
+    kicker: "Gastos",
+    title: "Lo que gastas, también lo que aún no pagas.",
+    row: ["Alquiler · cada mes", "Por pagar"],
+    points: [
+      "«Por pagar»: anotas la factura que pagarás después y la pagas entera o por partes.",
+      "«Lo que se repite»: el alquiler o los sueldos quedan por pagar cada vez que toca. Nunca se pagan solos.",
+      "«Descargar el mes»: la lista para tu contador, con el comprobante, el proveedor y su RUC.",
+    ],
+  },
+  {
+    kicker: "Inventario",
+    title: "Tus insumos se descuentan solos.",
+    row: ["Jeringa 5 ml · Hay 12 · Mínimo 20", "Pedir"],
+    points: [
+      "Cada servicio dice qué materiales usa, y salen de la sede al firmar la atención.",
+      "Las compras al proveedor, lo que llega con sus lotes y lo que está por vencer.",
+      "«Contar» a fin de mes. Y para empezar, «Pegar mi lista» desde tu Excel.",
+      "Lo que marcas «Se vende» entra al cobro con «Agregar producto».",
+    ],
+  },
+  {
+    kicker: "Honorarios",
+    title: "Lo que le toca a cada médico, sin planillas.",
+    row: ["Liquidación de octubre", "Falta pagar S/ 800"],
+    points: [
+      "Un porcentaje por profesional, o una comisión distinta para un servicio.",
+      "La liquidación del mes dice cómo se calcula, con cada cobro por fecha, y se imprime.",
+      "Cada médico ve solo lo suyo en «Mis honorarios». Caja no ve cuánto gana cada uno.",
+    ],
   },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -84,6 +132,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         { title: "El ticket", text: "Separa subtotal e impuesto y siempre dice «Recibo interno. No es un documento fiscal.»" },
         { title: "Gastos y efectivo", text: "Ingresos y retiros de efectivo con su motivo. Anular pide motivo y queda quién lo hizo." },
         { title: "Cierre de caja", text: "Al cerrar, imprimes la hoja para firmar la entrega del día." },
+        { title: "Soles y dólares", text: "Si también cobras en dólares, cada moneda tiene su caja y su cierre. El cobro trae el tipo de cambio de hoy." },
+        { title: "Devolver o anular", text: "«Anular ticket» corrige un error al cobrar. «Devolver» es para otro día: le pagas en el momento o le queda a favor." },
       ]}
     >
       <p class="more">Caja ve lo que necesita para cobrar, sin la historia clínica. <a href="/seguridad">Qué ve cada rol →</a></p>
@@ -124,6 +174,29 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         </div>
         <Sites client:visible />
         <p class="more">Sin cobrar por sede: todo el sistema incluido, sin límite de médicos, salas ni usuarios. <a href="/precios">Ver los precios →</a></p>
+      </div>
+    </section>
+
+    <section class="bp-outs">
+      <div class="wrap bp-sites">
+        <div class="bp-head">
+          <span class="tag bp-tag">[ Gastos, inventario y honorarios ]</span>
+          <h2 class="bp-h2">Lo que sale también se cuenta solo.</h2>
+          <p class="bp-lead">La caja no termina en el cobro. Lo que gastas, lo que usas en cada atención y lo que le toca a cada médico llegan a Reportes, hasta «Lo que deja» el mes.</p>
+        </div>
+        <div class="bp-outs-grid">
+          {outs.map((item) => (
+            <div class="bp-out">
+              <span class="bp-out-k">{item.kicker}</span>
+              <h3>{item.title}</h3>
+              <span class="bp-out-row" aria-hidden="true"><span>{item.row[0]}</span><b>{item.row[1]}</b></span>
+              <ul>
+                {item.points.map((point) => <li>{point}</li>)}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <p class="more">Todo llega a Reportes › Finanzas, sin copiar nada. <a href="/reportes">Ver Reportes →</a></p>
       </div>
     </section>
 
@@ -175,10 +248,23 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .bp-sites { display: flex; flex-direction: column; gap: 32px; }
   .bp-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
 
-  .faqwrap { background: var(--bg); }
+  /* Lo que sale: tres tarjetas con una fila de la pantalla dibujada y sus puntos. Nada se mueve. */
+  .bp-outs { padding: 104px 0; background: var(--bg); }
+  .bp-outs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  .bp-out { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .bp-out-k { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+  .bp-out h3 { font-size: 21px; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
+  .bp-out-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; background: var(--bg); border-radius: 14px; padding: 12px 14px; font-size: 14px; }
+  .bp-out-row b { font-size: 12px; background: var(--teal-soft); color: var(--teal-hover); border-radius: 999px; padding: 4px 10px; }
+  .bp-out ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .bp-out li { position: relative; padding-left: 18px; font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .bp-out li::before { content: ""; position: absolute; left: 0; top: .6em; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+
+  .faqwrap { background: var(--paper); }
 
   @media (max-width: 720px) {
-    .bp-split { padding: 64px 0; }
+    .bp-split, .bp-outs { padding: 64px 0; }
+    .bp-out { padding: 20px; }
     .bp-split-in { gap: 32px; }
     .bp-copy, .bp-shot { flex-basis: 100%; }
     .bp-lead { font-size: 16px; }

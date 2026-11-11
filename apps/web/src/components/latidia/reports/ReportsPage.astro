@@ -1,7 +1,8 @@
 ---
 // /reportes de latidIA (lienzo de latidIA, tablero «Caja», secciones Reportes y «Pregúntale a Argos»):
 // Argos de protagonista en la portada, respondiendo con las cifras del Consultorio San Martín; las cinco
-// pestañas de Reportes con su réplica y la captura real de Pacientes; por qué confiar en su respuesta,
+// pestañas de Reportes con su réplica, lo que el Resumen hace además (meta, resumen del lunes, fijar y
+// descargar) y la captura real de Pacientes; por qué confiar en su respuesta,
 // las preguntas y el cierre. Ningún precio en el código: lo que se pagó por los agentes y las preguntas
 // de Argos salen del plan que se muestra (Astro.locals.pricing).
 import Base from "../../../layouts/Base.astro"
@@ -72,6 +73,10 @@ const faq: FaqItem[] = [
     a: "Sí. En Reportes eliges la sede y el periodo, o ves todas juntas.",
   },
   {
+    q: "¿Tengo que entrar a Reportes para saber cómo voy?",
+    a: "No hace falta. Cada lunes a las 8:00 te llega un correo con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. Si la semana no tuvo movimientos, no se envía.",
+  },
+  {
     q: "¿Argos inventa las cifras?",
     a: "No. Usa las mismas cuentas de Reportes y debajo de cada respuesta dice cómo lo calculó: qué contó, de qué periodo y de qué sedes. Si latidIA no registra ese dato, te lo dice y te ofrece lo más cercano.",
   },
@@ -80,6 +85,14 @@ const faq: FaqItem[] = [
     q: "¿Quién ve los reportes?",
     a: "Quien tiene ese permiso en tu consultorio, normalmente quien dirige. Caja y recepción ven lo suyo, no los reportes.",
   },
+]
+
+// Lo que Reportes hace además de mostrar: la meta, el correo del lunes, lo fijado y las descargas.
+const extras = [
+  { title: "Pon una meta", text: "«Poner meta» en Cobrado o en Pacientes nuevos. Una raya marca cuánto del mes ya pasó: si la barra va por delante, vas bien." },
+  { title: "El resumen del lunes", text: "Cada lunes a las 8:00, un correo con cuatro cifras de la semana, lo que cambió y lo que recomienda Argos." },
+  { title: "Fija lo que más miras", text: "«Fijar en Resumen» deja una respuesta de Argos al final del Resumen, para todos los que ven Reportes." },
+  { title: "Descarga cada lista", text: "Cada lista y cada tabla tiene «Descargar»: un archivo que abre en Excel o en Google Sheets." },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
@@ -106,6 +119,14 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           <p class="rp-lead">Salen de lo que ya pasa en el consultorio: la agenda, las conversaciones, la historia y la caja. Cada cifra se compara con palabras, no solo con un color.</p>
         </div>
         <ReportsTabs client:visible agentCost={agentCost} contactHref={contactHref} />
+        <div class="rp-extras">
+          {extras.map((item) => (
+            <div class="rp-extra">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
         <figure class="rp-shot">
           <img
             src="/img/latidia/reportes-pacientes.jpg"
@@ -162,6 +183,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .rp-tag { font-size: 13px; letter-spacing: .12em; }
   .rp-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
   .rp-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .rp-extras { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+  .rp-extra { background: var(--bg); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .rp-extra h3 { font-size: 19px; line-height: 1.25; letter-spacing: -.01em; }
+  .rp-extra p { font-size: 15px; line-height: 1.5; color: var(--muted); }
   .rp-shot { margin: 0; display: flex; flex-direction: column; gap: 8px; max-width: 720px; width: 100%; align-self: center; }
   .rp-shot img { width: 100%; height: auto; border-radius: 20px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(30, 11, 61, .35); }
   .rp-shot figcaption { font-size: 13px; color: var(--soft); }

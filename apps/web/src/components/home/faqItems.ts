@@ -45,6 +45,14 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false):
     a: "Con Ctrl K (⌘K en Mac) desde cualquier pantalla, o con la lupa en el teléfono. Escribe parte del nombre sin preocuparte por las tildes, el teléfono, el DNI o el número de historia, y aparece la persona con su próxima cita, su última conversación, lo que debe y el presupuesto por aceptar. Las citas, los mensajes, la historia clínica, los presupuestos y los pagos también se encuentran por lo que dicen, cada uno debajo de su persona y según lo que tu rol puede ver. Los documentos e imágenes se encuentran por su nombre.",
   },
   {
+    q: "¿Puedo usar odentIA desde el celular?",
+    a: "Sí. Se abre en el navegador del teléfono, con las mismas pantallas adaptadas. Si quieres, instalas tu clínica como una app con su ícono, sin tienda, y te avisa cuando un paciente te escribe o Sofi te pasa a alguien, aunque la tengas cerrada. El aviso no dice el nombre de la persona ni lo que escribió: eso se ve al abrirlo.",
+  },
+  {
+    q: "¿Mi equipo necesita capacitación?",
+    a: "Inicio le dice a cada persona qué le toca hoy, en una sola lista: «Te espera». Y en todas las pantallas está «Ayuda»: escribes con tus palabras qué quieres hacer, responde con la guía del sistema y «Llévame» te deja en la pantalla.",
+  },
+  {
     q: "¿Tengo que pagarle algo más a WhatsApp?",
     a: "WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima.",
   },

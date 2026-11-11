@@ -2,9 +2,10 @@
 // /portal-del-paciente de latidIA (lienzo de la web de latidIA, tablero «Enlace»): la portada con
 // el teléfono de Rosa, cómo entra, lo que decide el consultorio, las preguntas y el cierre.
 // Lo que se promete es lo que hacen hoy Su enlace (`/reserva`) y el portal (`/portal`) de la app:
-// en Su enlace, la receta y el comprobante 30 días y «Tus mensajes» para elegir qué recibe; el
-// descanso médico le llega por WhatsApp o por correo; el portal lo da recepción y se vuelve con la
-// huella o la cara. odentIA sigue con su propia página.
+// Su enlace lleva lo pendiente (la cita, sus datos, firmar) y «Tus mensajes»; cada papel sale en PDF
+// por WhatsApp o por correo al tocar «Enviar»; el portal lo da el consultorio, muestra todo lo suyo
+// sin vencer y se vuelve con la huella o la cara. Antes de eso, el registro por QR o enlace, con las
+// preguntas que elige el consultorio y su color. odentIA sigue con su propia página.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { giftOf } from "../../../lib/pricing"
@@ -16,7 +17,7 @@ import PatientPhone from "./PatientPhone"
 
 const title = "Portal del paciente para tu consultorio, sin descargar nada"
 const description =
-  "Portal del paciente para consultorios médicos: cada paciente tiene su enlace para ver su próxima cita, cambiarla o cancelarla, completar sus datos y descargar su receta. Sin aplicación y sin contraseña."
+  "Portal del paciente para consultorios médicos: se registra con un código QR, ve su próxima cita, la cambia o la cancela, firma su consentimiento y encuentra su receta y sus papeles, sin vencer. Sin aplicación y sin contraseña."
 const cta = ctaOf(Astro.locals.pricing)
 const gift = giftOf(Astro.locals.pricing)
 const trail: [string, string][] = [["Inicio", "/"], ["Portal del paciente", "/portal-del-paciente"]]
@@ -26,8 +27,20 @@ const steps = [
   { title: "Lo abre en el navegador", text: "No descarga nada ni crea una contraseña." },
   {
     title: "Vuelve con su huella o su cara",
-    text: "Si tu consultorio le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, responde el mensaje y recibe uno nuevo.",
+    text: "Si tu consultorio le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, pide uno nuevo ahí mismo, con «Enviarme uno nuevo».",
   },
+]
+
+// El registro por QR o enlace (Configuración › Registro de pacientes) y el color de la marca.
+const regPoints = [
+  { title: "Tú eliges qué preguntar", text: "Dato por dato: «No preguntar», «Opcional» u «Obligatorio». Y el aviso de privacidad que acepta." },
+  { title: "Sin fichas repetidas", text: "Si coincide con alguien que ya tienes, recepción revisa dato por dato antes de guardar." },
+  { title: "Con tu color y tu logo", text: "El color de tu marca va en la página de sus citas, la reserva, el chat de tu web y tus documentos." },
+]
+const regAsks: [string, string, "must" | "opt" | "no"][] = [
+  ["Alergias", "Obligatorio", "must"],
+  ["Seguro", "Opcional", "opt"],
+  ["Ocupación", "No preguntar", "no"],
 ]
 
 const decides: { title: string; text: string; link?: { href: string; label: string } }[] = [
@@ -38,7 +51,7 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
   },
   {
     title: "Sus papeles",
-    text: "La receta y el comprobante, para descargar durante 30 días. El descanso médico le llega por WhatsApp o por correo.",
+    text: "Receta, orden, descanso médico y comprobante le llegan en PDF por WhatsApp o por correo cuando tocas «Enviar». En su portal quedan todos, sin vencer.",
     link: { href: "/receta-y-descanso-medico", label: "Ver cómo se emiten" },
   },
   {
@@ -54,11 +67,19 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Qué pasa si el enlace venció?",
-    a: "Responde el mensaje del consultorio y recibe uno nuevo. No hay contraseñas que recordar.",
+    a: "La misma página le ofrece «Enviarme uno nuevo» y le llega por su canal. No hay contraseñas que recordar.",
   },
   {
-    q: "¿Cuánto tiempo puede descargar su receta?",
-    a: "La receta y el comprobante quedan en Su enlace durante 30 días desde que se emitieron. Después, se los pide al consultorio. El descanso médico le llega por WhatsApp o por correo al emitirse.",
+    q: "¿Dónde quedan su receta y sus papeles?",
+    a: "Le llegan en PDF por WhatsApp o por correo cuando tocas «Enviar» en el documento: receta, orden, descanso médico, consentimiento firmado y comprobante. Con acceso al portal los ve todos cuando quiera: el acceso no vence, dura hasta que el consultorio lo quita.",
+  },
+  {
+    q: "¿Cómo se registra un paciente nuevo?",
+    a: "Solo, desde su celular: escanea el código QR de tu recepción o abre el enlace de registro. Responde lo que tu consultorio decidió pedir y acepta el aviso de privacidad. Si coincide con alguien que ya tienes, recepción lo revisa antes de guardarlo, para no duplicar fichas.",
+  },
+  {
+    q: "¿Puedo ponerle el color y el logo de mi consultorio?",
+    a: "Sí. Eliges el color de tu marca debajo del logo, en los datos del consultorio. Tus pacientes lo ven en la página de sus citas, en la reserva y en el chat de tu web, y tus documentos lo llevan bajo el logo.",
   },
   {
     q: "¿Lo que llena el paciente entra directo a la historia clínica?",
@@ -79,7 +100,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         <div class="pt-copy">
           <span class="tag tag-d pt-tag rise">[ Su enlace ]</span>
           <h1 class="pt-h1 rise d1">El portal del paciente de tu consultorio, <span class="acc">sin descargar nada.</span></h1>
-          <p class="pt-lead rise d2">Cada paciente tiene su propio enlace: ve su próxima cita, la cambia o la cancela, completa sus datos y descarga su receta. Sin llamar y sin contraseña.</p>
+          <p class="pt-lead rise d2">Cada paciente tiene su propio enlace: ve su próxima cita, la cambia o la cancela, completa sus datos y firma su consentimiento. Y en su portal, todos sus papeles, sin vencer. Sin llamar y sin contraseña.</p>
           <div class="pt-ctas rise d3">
             <a class="btn btn-p" href={cta.href}>{cta.label}</a>
             <a class="btn btn-g" href="#entrar">Cómo entra</a>
@@ -88,6 +109,38 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         </div>
         <div class="pt-phone rise d2">
           <PatientPhone client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="pt-sec" id="registro">
+      <div class="wrap pt-reg">
+        <div class="pt-reg-copy">
+          <div class="pt-head">
+            <span class="tag pt-tag">[ Antes de la primera cita ]</span>
+            <h2 class="pt-h2">Se registra solo, con el color de tu consultorio.</h2>
+            <p class="pt-p">Pones el código QR en tu recepción o envías el enlace de registro. La persona llena sus datos en su celular, una pantalla por tema, y llega con la ficha lista.</p>
+          </div>
+          <ul class="pt-reg-list">
+            {regPoints.map((point) => (
+              <li><b>{point.title}</b><span>{point.text}</span></li>
+            ))}
+          </ul>
+        </div>
+        <div class="pt-reg-demo" role="img" aria-label="Ejemplo: la hoja con el código QR del registro del Consultorio San Martín y, al lado, tres datos con lo que el consultorio eligió pedir: alergias obligatorio, seguro opcional y ocupación sin preguntar.">
+          <div class="pt-qr" aria-hidden="true">
+            <span class="pt-qr-brand"><i></i>Consultorio San Martín</span>
+            <span class="pt-qr-code"><i></i><i></i><i></i></span>
+            <b>Regístrate desde tu celular</b>
+            <span>Escanea el código y llena tus datos antes de tu cita.</span>
+          </div>
+          <div class="pt-ask" aria-hidden="true">
+            <span class="pt-ask-k">Registro de pacientes · tú eliges</span>
+            {regAsks.map(([name, choice, tone]) => (
+              <span class="pt-ask-row"><span>{name}</span><span class:list={["pt-ask-pill", tone]}>{choice}</span></span>
+            ))}
+            <span class="pt-ask-note">Al lado ves lo que verá el paciente.</span>
+          </div>
         </div>
       </div>
     </section>
@@ -119,7 +172,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         <div class="pt-head">
           <span class="tag pt-tag">[ Tú decides ]</span>
           <h2 class="pt-h2">Lo que antes era una llamada, ahora lo resuelve solo.</h2>
-          <p class="pt-p">En el portal, tu consultorio decide qué ve cada paciente desde Configuración › Portal del paciente: sus citas, sus documentos y su cuenta.</p>
+          <p class="pt-p">En el portal, tu consultorio decide qué ven sus pacientes desde Configuración › Portal del paciente: sus citas, sus documentos y su cuenta. El acceso se lo das en el consultorio, con su documento.</p>
         </div>
         <div class="pt-grid">
           {decides.map((item) => (
@@ -166,6 +219,34 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .pt-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
   .pt-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
 
+  /* El registro: el texto y, al lado, la hoja del QR y lo que se pide. Dibujo quieto, sin isla. */
+  .pt-reg { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .pt-reg-copy { flex: 1.2 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+  .pt-reg-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .pt-reg-list li { background: var(--paper); border-radius: 18px; padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; }
+  .pt-reg-list b { font-size: 17px; }
+  .pt-reg-list span { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .pt-reg-demo { flex: 1 1 400px; min-width: 0; display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; }
+  .pt-qr, .pt-ask { flex: 1 1 190px; min-width: 0; background: var(--paper); border: 1px solid var(--lat-line); border-radius: 22px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  .pt-qr { align-items: center; text-align: center; border-top: 6px solid var(--teal); }
+  .pt-qr-brand { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+  .pt-qr-brand i { width: 18px; height: 18px; border-radius: 6px; background: var(--teal); }
+  /* Un código de dibujo: tres esquinas sobre una trama. No se escanea. */
+  .pt-qr-code { position: relative; width: 132px; height: 132px; border-radius: 12px; background-color: #fff; background-image: radial-gradient(#1e0b3d 34%, transparent 36%); background-size: 11px 11px; }
+  .pt-qr-code i { position: absolute; width: 34px; height: 34px; border: 7px solid #1e0b3d; border-radius: 8px; background: #fff; box-shadow: 0 0 0 4px #fff; }
+  .pt-qr-code i:nth-child(1) { top: 0; left: 0; }
+  .pt-qr-code i:nth-child(2) { top: 0; right: 0; }
+  .pt-qr-code i:nth-child(3) { bottom: 0; left: 0; }
+  .pt-qr > b { font-size: 16px; }
+  .pt-qr > span:last-child { font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .pt-ask-k { font-family: var(--agent-font); font-size: 11px; text-transform: uppercase; color: var(--teal); }
+  .pt-ask-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; padding: 9px 0; border-bottom: 1px solid var(--lat-line); }
+  .pt-ask-pill { flex: none; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; }
+  .pt-ask-pill.must { background: var(--teal-soft); color: var(--teal-hover); }
+  .pt-ask-pill.opt { background: #e3f5ee; color: #16614b; }
+  .pt-ask-pill.no { background: #eef0f4; color: var(--soft); }
+  .pt-ask-note { font-size: 13px; line-height: 1.45; color: var(--muted); margin-top: auto; }
+
   .pt-enter { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
   .pt-enter-copy { flex: 1.3 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
   .pt-login { flex: 0 1 340px; min-width: 0; max-width: 100%; margin: 0 auto; }
@@ -190,7 +271,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     .pt-hero-in { gap: 32px; }
     .pt-lead { font-size: 17px; }
     .pt-ctas :global(.btn) { flex: 1 1 100%; }
-    .pt-copy, .pt-phone, .pt-enter-copy, .pt-login { flex-basis: 100%; }
+    .pt-copy, .pt-phone, .pt-enter-copy, .pt-login, .pt-reg-copy, .pt-reg-demo { flex-basis: 100%; }
+    .pt-reg { gap: 32px; }
     .pt-sec { padding: 64px 0; }
     .pt-in { gap: 28px; }
     .pt-enter { gap: 32px; }

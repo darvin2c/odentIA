@@ -1,7 +1,7 @@
 ---
 // Inicio de vistIA: la portada con Sofi agendando un examen de la vista por WhatsApp, Omnicanal, los dos
-// agentes, un día en la Óptica Lucero, el sistema, lo que decides tú y la confianza, cómo se cobra,
-// preguntas y cierre. El documento (<Base>, título, descripción y datos estructurados) lo arma
+// agentes, un caso completo en la Óptica Lucero (del examen a los lentes entregados), el sistema, lo que
+// decides tú y la confianza, cómo se cobra, preguntas y cierre. El documento (<Base>, título, descripción y datos estructurados) lo arma
 // src/pages/index.astro. Solo lo que vistIA hace hoy (components/vistia/pages-data.ts). Ninguna cifra de
 // precio vive aquí: salen de Astro.locals.pricing.
 import { giftOf, shownPlan } from "../../lib/pricing"
@@ -20,7 +20,7 @@ const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders
 const faq = homeFaq(gift)
-// Un día en la óptica: el mismo de la página de los agentes.
+// Un caso completo en la óptica: el mismo de la página de los agentes.
 const day = VISTIA_PAGES.agentes.blocks[1]
 
 // Un sábado de cobros: lo que hizo cada agente con los precios del plan que se muestra. Rosa vino a su
@@ -49,7 +49,7 @@ const agents = [
     key: "sofi" as const,
     role: "Recepción",
     name: "Sofi.",
-    text: "Responde siempre, en cualquier canal. Informa tus servicios y precios y agenda el examen de la vista con el sí de la persona.",
+    text: "Responde siempre, en cualquier canal. Informa tus servicios y precios, agenda el examen de la vista con el sí de la persona y le dice a tu cliente cómo van sus lentes.",
     href: "/agentes/recepcion",
     more: "Conoce a Sofi →",
   },
@@ -65,18 +65,18 @@ const agents = [
 
 const system = [
   { title: "Agenda y controles", text: "Por optómetra, sala de examen y sede. El control anual de la vista se repite solo.", href: "/agenda-para-opticas" },
-  { title: "Ficha e historia clínica", text: "Antecedentes, diagnósticos con CIE-10 o CIE-11, consentimientos y las pruebas del ojo con su informe.", href: "/historia-clinica-electronica" },
-  { title: "Caja e inventario", text: "Cobra el examen y lo que vendes en el mismo paso. Monturas, lunas y lentes, con su stock por sede.", href: "/caja-y-cobros" },
-  { title: "Varias sedes", text: "Cada sede con su agenda, su caja y su stock; tú lo ves todo junto.", href: "/caja-y-cobros" },
+  { title: "Examen, receta e historia", text: "El examen de la vista en pantalla, ojo por ojo. La receta de lentes sale firmada y con su código QR, en la ficha de cada cliente.", href: "/historia-clinica-electronica" },
+  { title: "Pedidos de lentes", text: "Vendes con adelanto y sigues cada pedido, del laboratorio a la entrega. Tu cliente recibe «Tus lentes ya están listos».", href: "/pedidos-de-lentes" },
+  { title: "Caja, inventario y sedes", text: "Cobra el examen y lo que vendes, con ficha o sin ella. Monturas, lunas y lentes, con su stock en cada sede.", href: "/caja-y-cobros" },
   { title: "Reportes con Argos", text: "Lo cobrado, los clientes nuevos y quién faltó, y lo que quieras preguntarle a Argos.", href: "/reportes" },
-  { title: "Su enlace", text: "Tu cliente ve su próxima cita, la cambia y ve sus documentos, sin aplicación.", href: "/portal-del-cliente" },
+  { title: "Su enlace y portal", text: "Tu cliente ve su cita y la cambia sin llamar, sin aplicación. Sus recetas, sus pedidos y sus documentos, en su portal.", href: "/portal-del-cliente" },
   { title: "Buscador", text: "Ctrl K desde cualquier pantalla: clientes, citas, mensajes y cobros en un paso.", href: "/buscador" },
-  { title: "Seguridad", text: "Cada rol ve solo lo suyo y tu óptica está separada de las demás.", href: "/seguridad" },
+  { title: "Seguridad", text: "Recepción, optómetra, caja, ventas y taller: cada rol ve solo lo suyo, y tu óptica está separada de las demás.", href: "/seguridad" },
 ]
 
 const trust = [
   { title: "Cada óptica, aparte", text: "La conexión va cifrada, tus datos no se mezclan con los de otra óptica y cada permiso se revisa en el servidor." },
-  { title: "Cada rol ve lo suyo", text: "Recepción agenda, el optómetra ve la historia, caja cobra. Sofi no ve la historia clínica." },
+  { title: "Cada rol ve lo suyo", text: "Recepción agenda, el optómetra ve la historia, caja cobra y el taller ve solo los pedidos. Sofi no ve la historia clínica." },
   { title: "Firmada no se cambia", text: "Al firmar, la atención queda fija y solo admite adendas, con el nombre y la hora." },
   { title: "Tu equipo toma la palabra", text: "Cualquiera del equipo puede escribir en una conversación; Sofi espera y le deja un resumen." },
 ]
@@ -152,7 +152,7 @@ const trust = [
     </div>
   </section>
 
-  <!-- 4 · Un día en la Óptica Lucero -->
+  <!-- 4 · Un caso completo en la Óptica Lucero: del examen a los lentes entregados -->
   <div id="dia"><ContentBlock block={day} white /></div>
 
   <!-- 5 · El sistema -->

@@ -1,8 +1,9 @@
 ---
 // /historia-clinica-electronica, solo de latidIA (lienzo de la web de latidIA, tablero «Historia»):
 // la ficha de Luis con su presión en el tiempo, los signos vitales, el examen por 10 sistemas, los
-// antecedentes y la lista de problemas, la atención con su firma, las especialidades con su código
-// de la OMS, las preguntas y el cierre. Las capturas son de la app, con datos de prueba.
+// antecedentes y la lista de problemas, la atención con su firma, el consentimiento que se firma en
+// la tablet, por enlace o en papel, las especialidades con su código de la OMS, las preguntas y el
+// cierre. Las capturas son de la app, con datos de prueba.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { signatureFaq } from "../../../lib/signature-faq"
@@ -46,6 +47,14 @@ const blocks = [
   ["Evolución", "pronóstico e indicaciones"],
 ]
 
+// Las cuatro formas de firmar un consentimiento, con el nombre de su botón en la atención.
+const consents = [
+  { kicker: "En la tablet", title: "«Firmar ahora»", text: "Le pasas la tablet: lee la hoja en letra grande, marca que entendió y firma con el dedo." },
+  { kicker: "Antes de llegar", title: "«Enviar para firmar»", text: "Le llega «Firma tu consentimiento»: lo lee y lo firma desde su teléfono, escribiendo su documento." },
+  { kicker: "En el consultorio", title: "«Firmar en su teléfono»", text: "Muestras un código y lo escanea ahí mismo, sin que le llegue ningún mensaje." },
+  { kicker: "En papel", title: "«Firmado en papel»", text: "Subes la foto de la hoja firmada. Si no sabe firmar, la hoja trae el recuadro para su huella." },
+]
+
 const specialties = ["Medicina general", "Medicina familiar", "Medicina interna", "Pediatría", "Ginecología y obstetricia"]
 
 const faq: FaqItem[] = [
@@ -58,6 +67,10 @@ const faq: FaqItem[] = [
     a: "No se cambia. Lo que falte o haya que aclarar va en una adenda, con su fecha y quién la escribió. Lo firmado queda como estaba.",
   },
   signatureFaq("el médico"),
+  {
+    q: "¿Cómo firma el paciente un consentimiento?",
+    a: "Como le quede mejor: en la tablet del consultorio, desde su teléfono antes de llegar, con un código que escanea ahí mismo o en papel, con la foto de la hoja. Lo que firma por enlace lo confirmas tú dentro de su atención.",
+  },
   {
     q: "¿Quién puede ver la historia clínica?",
     a: "Quien atiende, con los permisos que le das. Recepción y caja ven lo que necesitan para su trabajo, no la historia. Sofi tampoco la ve.",
@@ -220,7 +233,27 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     </div>
   </section>
 
-  <section class="rs white" id="imagenes">
+  <section class="rs white" id="consentimientos">
+    <div class="wrap rs-in">
+      <div class="head narrow">
+        <span class="tag">[ Consentimientos ]</span>
+        <h2 class="rs-h2">El consentimiento se firma donde esté la persona.</h2>
+        <p class="rs-lead">Si lo que haces hoy pide un consentimiento, la atención lo prepara lleno. La persona lee la misma hoja que queda en el papel, y tú lo confirmas con tu perfil profesional.</p>
+      </div>
+      <div class="cards four">
+        {consents.map((item) => (
+          <div class="card-l">
+            <span class="k">{item.kicker}</span>
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+      <p class="rs-p">El consentimiento firmado lleva un código QR: quien lo recibe comprueba que sigue vigente y quién lo firmó, sin nada de salud. <a href="/receta-y-descanso-medico">Los demás papeles de la consulta →</a></p>
+    </div>
+  </section>
+
+  <section class="rs alt" id="imagenes">
     <div class="wrap imgs">
       <div class="imgs-copy">
         <span class="tag">[ Radiografías y ecografías ]</span>
@@ -231,7 +264,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     </div>
   </section>
 
-  <section class="rs alt">
+  <section class="rs white">
     <div class="wrap spec">
       <div class="spec-copy">
         <span class="tag">[ Especialidades y códigos ]</span>
@@ -327,6 +360,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .card-l { background: #f7f5fc; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
   .card-l h3 { font-size: 20px; line-height: 1.25; }
   .card-l p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .cards.four { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+  .card-l .k { font-family: var(--agent-font); font-size: 12px; text-transform: uppercase; color: var(--teal); }
+  .rs-in > .rs-p a { font-weight: 700; }
 
   .visit { display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
   .visit-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }

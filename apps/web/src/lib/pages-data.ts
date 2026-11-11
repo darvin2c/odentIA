@@ -154,7 +154,7 @@ export const LINKS: Record<string, { label: string; text: string }> = {
   },
   "/portal-del-paciente": {
     label: "Su enlace",
-    text: "Cada paciente reserva, cambia su cita y ve sus documentos.",
+    text: "Cada paciente reserva y cambia su cita. En su portal ve sus documentos.",
   },
   "/reportes": { label: "Reportes", text: "Lo que pasa en tu clínica, sin armar planillas." },
   "/varias-sedes": {
@@ -367,7 +367,7 @@ export const PAGES = {
             agent: 0,
             title: "Tu agente de recepción",
             label: "Responde, informa y agenda a cualquier hora.",
-            text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente.",
+            text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente. Y aprende de tus correcciones: cada lección la apruebas tú.",
             href: "/agentes/recepcion",
           },
           {
@@ -381,7 +381,7 @@ export const PAGES = {
             agent: 2,
             title: "Tu agente administrador",
             label: "Recuerda citas y trae de vuelta a los pacientes.",
-            text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo. Y te responde lo que le preguntes con las cifras de tu clínica.",
+            text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo. Le pides con tus palabras lo que quieres que haga, y te responde lo que le preguntes con las cifras de tu clínica.",
             href: "/agentes/administrador",
           },
         ],
@@ -715,7 +715,7 @@ export const PAGES = {
           {
             agent: 0,
             title: "Envía Su enlace",
-            text: "Para que el paciente elija la hora, cambie su cita o vea sus documentos.",
+            text: "Para que el paciente elija la hora, cambie su cita o firme su consentimiento.",
             href: "/portal-del-paciente",
           },
           {
@@ -868,6 +868,14 @@ export const PAGES = {
         q: "¿Se envían recordatorios de las citas?",
         a: "Sí. Argos recuerda cada cita un día antes y tres horas antes. Es una tarea que se puede apagar.",
       },
+      {
+        q: "¿Puedo ver mis citas en el calendario de mi celular?",
+        a: "Sí, si atiendes pacientes. En la Agenda, «Mi calendario» te da un enlace solo tuyo para añadir tus citas a Google Calendar, Apple u Outlook. De cada cita se ve «Paciente» con sus iniciales, nunca el nombre, el servicio ni el motivo, y desde tu calendario no se mueve ni se reserva nada.",
+      },
+      {
+        q: "¿Cómo sé quién ya llegó?",
+        a: "Recepción marca «Llegó» y el odontólogo lo ve en su sala de espera, en Inicio: quién llegó, desde qué hora y cuánto lleva esperando. «Atender» abre la atención en un clic.",
+      },
     ],
   },
 
@@ -951,6 +959,10 @@ export const PAGES = {
         q: "¿De dónde salen los precios?",
         a: "Del tarifario de tu clínica. Ningún agente escribe ni cambia un precio.",
       },
+      {
+        q: "¿Puedo dejarle una tarea a alguien de mi equipo?",
+        a: "Sí. Con «Nueva tarea», desde Tareas, la página de la persona o su oportunidad, y eliges quién la lleva. Las que deja Argos se cierran solas cuando ya no hacen falta, por ejemplo cuando el presupuesto se decidió, y dicen por qué.",
+      },
     ],
   },
 
@@ -958,7 +970,7 @@ export const PAGES = {
     path: "/caja-y-cobros",
     title: "Control de caja para clínica dental",
     description:
-      "Control de caja para tu clínica dental: cobros, adelantos, gastos y movimientos de efectivo por sede, quién debe y desde cuándo, y el cierre de caja con su hoja para firmar.",
+      "Control de caja para tu clínica dental: cobros, gastos y cierre de caja por sede, quién debe y desde cuándo, las comisiones de cada odontólogo y el inventario que se descuenta solo.",
     crumb: "Caja y cobros",
     hero: {
       type: "visual",
@@ -1049,6 +1061,18 @@ export const PAGES = {
         q: "¿Quién puede ver la caja?",
         a: "Quien tiene ese permiso en tu clínica, como caja y la dirección. Caja no ve la historia clínica.",
       },
+      {
+        q: "¿Puedo cobrar en soles y en dólares?",
+        a: "Sí. Activas la otra moneda en los datos de tu clínica y escribes el tipo de cambio de hoy. Lo que está en dólares se debe en dólares hasta que se paga, el paciente puede pagarlo en soles y cada moneda tiene su caja y su cierre: nunca se suman.",
+      },
+      {
+        q: "¿Calcula las comisiones de los odontólogos?",
+        a: "Sí. Le pones a cada profesional su porcentaje de lo cobrado, o un monto fijo por un servicio, y cada mes ves su liquidación: cuánto falta pagar, cómo se calcula y cada cobro por fecha. Cada odontólogo ve solo lo suyo en «Mis honorarios».",
+      },
+      {
+        q: "¿Lleva el inventario de materiales?",
+        a: "Sí. Cada servicio dice qué materiales usa y se descuentan solos al firmar la atención, en la sede donde se atendió. También registras las compras, cuentas lo que hay a fin de mes y vendes productos desde el cobro.",
+      },
     ],
   },
 
@@ -1056,7 +1080,7 @@ export const PAGES = {
     path: "/portal-del-paciente",
     title: "Reserva de citas online para dentistas: Su enlace",
     description:
-      "Reserva de citas online para dentistas: con Su enlace cada paciente reserva, cambia su cita, ve sus documentos y responde sus presupuestos desde el teléfono, sin llamar ni descargar nada.",
+      "Reserva de citas online para dentistas: con Su enlace cada paciente reserva, cambia su cita y responde su presupuesto desde el teléfono, sin llamar ni descargar nada. En su portal ve sus documentos.",
     crumb: "Su enlace",
     hero: {
       type: "visual",
@@ -1064,7 +1088,7 @@ export const PAGES = {
       tag: "Su enlace",
       title: "Reserva de citas online para dentistas,",
       accent: "con Su enlace.",
-      lead: "Cada paciente reserva, cambia su cita y ve sus documentos desde su propio enlace, sin tener que llamar.",
+      lead: "Cada paciente reserva y cambia su cita desde su propio enlace, sin tener que llamar. En su portal ve sus documentos.",
       secondary: { href: "/agenda-odontologica", label: "Ver la agenda" },
     },
     blocks: [
@@ -1080,7 +1104,7 @@ export const PAGES = {
           { title: "Cambiar o cancelar", text: "Desde el mismo enlace, sin escribirle a nadie." },
           {
             title: "Ver sus documentos",
-            text: "Lo que la clínica le autoriza a ver, en un solo lugar.",
+            text: "En su portal, con el acceso que le das en la clínica. Cada papel le llega también en PDF.",
           },
           {
             title: "Responder sus presupuestos",
@@ -1116,9 +1140,9 @@ export const PAGES = {
       {
         kind: "split",
         tag: "Tú decides",
-        title: "Cada clínica decide qué ve cada paciente.",
+        title: "Cada clínica decide qué muestra su portal.",
         paragraphs: [
-          "Desde recepción se le da acceso a sus citas, sus presupuestos o sus documentos. Si un enlace venció, el paciente responde el mensaje y recibe uno nuevo.",
+          "El acceso al portal se da en la clínica, comprobando su documento, y no vence: ve sus citas, sus presupuestos, su cuenta y sus documentos, lo que tu clínica deja ver. Si su enlace venció, el paciente responde el mensaje y recibe uno nuevo.",
         ],
         link: { href: "/seguridad", label: "Cómo cuidamos los datos" },
       },
@@ -1146,6 +1170,18 @@ export const PAGES = {
       {
         q: "¿Qué pasa si el horario se ocupa mientras elige?",
         a: "Se le avisa que ese horario acaba de ocuparse y elige otro de la lista.",
+      },
+      {
+        q: "¿Su enlace y el portal son lo mismo?",
+        a: "No. Su enlace lleva lo que tiene pendiente: su cita, sus datos, su presupuesto y lo que tiene por firmar, sin crear una cuenta. El portal es para ver todo lo suyo cuando quiera: el acceso se le da en la clínica, comprobando su documento, y no vence.",
+      },
+      {
+        q: "¿Cómo le llegan la receta y el comprobante?",
+        a: "En PDF, por WhatsApp o por correo, cuando tocas «Enviar». Y quedan en su portal, junto con sus órdenes, sus consentimientos firmados y sus radiografías con informe.",
+      },
+      {
+        q: "¿Un paciente nuevo puede registrarse solo?",
+        a: "Sí, con el enlace de tu clínica o el código QR de recepción. Tú eliges qué se le pregunta, dato por dato, y lo ve con tu logo y el color de tu marca.",
       },
     ],
   },

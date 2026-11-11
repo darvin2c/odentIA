@@ -1,8 +1,9 @@
 ---
 // /receta-y-descanso-medico, solo de latidIA (lienzo de la web de latidIA, tablero «Receta»): la
 // receta que avisa (embarazo, niños, controlados y alergias), el descanso médico numerado y
-// firmado, las órdenes y los consentimientos, las preguntas y el cierre. La receta no revisa
-// interacciones ni es la receta oficial de ningún país: eso no se dice.
+// firmado, las órdenes, los consentimientos y la hoja de atención para el seguro, las preguntas y el
+// cierre. Cada papel sale en PDF al tocar «Enviar» y queda en el portal; Su enlace ya no lleva papeles.
+// La receta no revisa interacciones ni es la receta oficial de ningún país: eso no se dice.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { days, giftOf, shownPlan } from "../../../lib/pricing"
@@ -36,7 +37,11 @@ const papers = [
   { title: "Orden de imagen", text: "Radiografía, ecografía, tomografía, resonancia o mamografía, con lo que buscas." },
   { title: "Orden de laboratorio", text: "Los análisis que pides, firmados, para que la persona los lleve." },
   { title: "Derivación", text: "A otra especialidad o a otro médico, con el motivo." },
-  { title: "Consentimientos", text: "Procedimiento menor, inyectables y toma de muestras, firmados por la persona." },
+  { title: "Consentimientos", text: "Procedimiento menor, inyectables y toma de muestras. La persona firma en la tablet, en su teléfono o en papel." },
+  {
+    title: "Hoja de atención para el seguro",
+    text: "De la atención firmada: el diagnóstico, la fecha, lo que se hizo, los exámenes y el tratamiento sugerido, con tu firma y tu sello. Sin la nota de evolución.",
+  },
   { title: "Lo que trae la persona", text: "Subes su radiografía, ecografía, tomografía, resonancia, mamografía o una foto clínica." },
 ]
 
@@ -52,6 +57,14 @@ const faq: FaqItem[] = [
   {
     q: "¿Cómo le llega a la persona?",
     a: "Lo envías tú desde el documento, en PDF, por WhatsApp o por correo, a la persona o a su representante. Si no hay por dónde enviarlo, lo imprimes.",
+  },
+  {
+    q: "¿Qué le doy a la persona para su seguro?",
+    a: "La «Hoja de atención» de la atención firmada, junto con la receta y la orden. Lleva el diagnóstico, la fecha, lo que se hizo, los exámenes y el tratamiento sugerido, con tu firma y tu sello. La boleta o factura la emites aparte, y cada aseguradora decide qué acepta.",
+  },
+  {
+    q: "¿Cómo sabe una farmacia o un empleador que el papel es verdadero?",
+    a: "Receta, orden, descanso y consentimiento firmado llevan un código QR. Al escanearlo dice si el papel sigue vigente, quién lo firmó y las iniciales de la persona, sin nada de su salud.",
   },
   {
     q: "¿Y los medicamentos controlados?",
@@ -164,8 +177,12 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           </div>
         ))}
         <div class="card-l">
-          <h3>La receta, en Su enlace 30 días</h3>
-          <p>La receta, para que la persona la descargue. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+          <h3>Un QR para comprobarlo</h3>
+          <p>Quien recibe el papel lo escanea y ve si sigue vigente y quién lo firmó, sin nada de salud.</p>
+        </div>
+        <div class="card-l">
+          <h3>En PDF y en su portal</h3>
+          <p>Con «Enviar», cada papel sale en PDF por WhatsApp o por correo. Y queda en su portal, sin vencer. <a href="/portal-del-paciente">Ver el portal</a></p>
         </div>
       </div>
     </div>

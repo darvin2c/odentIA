@@ -278,6 +278,29 @@ const trust = [
           </div>
           <span class="links"><a class="lk" href="/caja-y-cobros">Caja y cobros →</a><a class="lk" href="/reportes">Reportes →</a></span>
         </div>
+
+        <div class="lsys-card wide3">
+          <span class="lsys-title"><h3>Y el día entero, sin perseguir a nadie</h3><span>Inicio te dice qué te toca. Lo demás se cuenta solo, también desde tu celular.</span></span>
+          <div class="lsys-three even">
+            <div class="mini">
+              <span class="mini-k">Inicio · «Te espera»</span>
+              <span class="slot lila"><b>Rosa</b> · te la pasó Sofi · Responder</span>
+              <span class="slot amber"><b>Luis</b> · no confirmó su cita · Llamar</span>
+              <span class="small">Sala de espera: Julia llegó a las 09:52 · Atender</span>
+            </div>
+            <div class="mini">
+              <span class="mini-k">Inventario y gastos</span>
+              <span>Los insumos se descuentan solos al firmar la atención.</span>
+              <span class="small">Facturas por pagar, lo que se repite cada mes y la lista para tu contador.</span>
+            </div>
+            <div class="mini">
+              <span class="mini-k">En tu celular</span>
+              <span>La instalas como una app, sin pasar por una tienda.</span>
+              <span class="small">Te avisa cuando alguien escribe, sin decir su nombre.</span>
+            </div>
+          </div>
+          <span class="links"><a class="lk" href="/caja-y-cobros">Gastos, inventario y honorarios →</a><a class="lk" href="/portal-del-paciente">Portal del paciente →</a></span>
+        </div>
       </div>
     </div>
   </section>
@@ -430,6 +453,8 @@ const trust = [
   .vitals { grid-column: span 2; gap: 14px; }
   .exam { grid-row: span 2; }
   .wide2 { grid-column: span 2; gap: 14px; }
+  .wide3 { grid-column: 1 / -1; gap: 14px; }
+  .lsys-three.even { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lsys-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
   .lsys-title { display: flex; flex-direction: column; gap: 4px; }
   .lsys-title > span { font-size: 15px; color: var(--muted); }
@@ -533,7 +558,7 @@ const trust = [
     .lsys-legend { display: none; }
     .lsys-exam li { padding: 8px 0; }
     .lsys-sum { font-size: 11px; padding: 9px 10px; }
-    .lsys-three { grid-template-columns: 1fr; }
+    .lsys-three, .lsys-three.even { grid-template-columns: 1fr; }
     .ld-in, .lc-in { gap: 22px; }
     .ld-switches { flex-basis: 100%; }
     .lt { margin-top: 4px; gap: 12px; padding-top: 22px; }

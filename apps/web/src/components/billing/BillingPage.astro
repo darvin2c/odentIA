@@ -1,7 +1,8 @@
 ---
 // /caja-y-cobros de odentIA (misma estructura que la de latidIA): la caja del día que se llena cobro a
 // cobro con el ticket de Carlos, lo que controla la caja, el cierre con su hoja para firmar, quién debe
-// y desde cuándo, enlaces relacionados, preguntas y cierre. Título, descripción, preguntas y enlaces son
+// y desde cuándo, los gastos y las comisiones del equipo, el inventario que se descuenta al firmar la
+// atención, enlaces relacionados, preguntas y cierre. Título, descripción, preguntas y enlaces son
 // los de PAGES.caja. Los montos en soles son del ejemplo de una clínica de Perú.
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
@@ -64,6 +65,8 @@ const jsonLd = [
         { title: "El ticket", text: "Separa subtotal e impuesto y dice «Recibo interno. No es un documento fiscal.»" },
         { title: "Gastos y efectivo", text: "Ingresos y retiros de efectivo con su motivo. Anular pide motivo y queda quién lo hizo." },
         { title: "Saldos y devoluciones", text: "Cada movimiento queda en la cuenta del paciente, en su pestaña Cobros." },
+        { title: "Soles y dólares", text: "Si también cobras en otra moneda, el cobro trae el tipo de cambio de hoy y cada moneda tiene su caja y su cierre." },
+        { title: "Venta de mostrador", text: "Vendes un producto a quien no es paciente, sin abrirle una ficha. Sale su ticket y entra a la caja." },
       ]}
     >
       <p class="more">Caja ve lo que necesita para cobrar, sin la historia clínica. <a href="/seguridad">Qué ve cada rol →</a></p>
@@ -92,6 +95,38 @@ const jsonLd = [
         <p class="more">Con varias sedes, cada una tiene su caja y su cierre; la historia del paciente es una sola. <a href="/varias-sedes">Cómo funcionan las sedes →</a></p>
       </div>
     </section>
+
+    <FeatureGrid
+      tag="Gastos y comisiones"
+      title="Lo que sale también queda claro."
+      lead="El alquiler, la factura del laboratorio y lo que le toca a cada odontólogo se anotan donde cobras. A fin de mes no hay que armar nada."
+      items={[
+        { title: "Facturas por pagar", text: "«Anotar una factura» guarda a quién le debes, cuánto y cuándo vence, como la del laboratorio. Pagas una parte y lo que falta sigue por pagar." },
+        { title: "Lo que se repite", text: "El alquiler, la luz o un sueldo quedan por pagar cada vez que toca. Nunca se pagan solos: tú tocas «Pagar»." },
+        { title: "«Descargar el mes»", text: "Cada gasto con su comprobante, su número y el RUC del proveedor, en una hoja de cálculo para tu contador." },
+        { title: "La comisión de cada profesional", text: "Su porcentaje de lo que atendió y ya se cobró, o un monto fijo por un servicio. Cambiarlo no toca lo ya atendido." },
+        { title: "La liquidación del mes", text: "Dice cuánto falta pagar, cómo se calcula y cada cobro por fecha. «Registrar el pago» lo deja en Gastos, y la liquidación se imprime." },
+        { title: "«Mis honorarios»", text: "Cada odontólogo ve solo lo suyo, con sus pagos. Caja no ve cuánto gana cada uno." },
+      ]}
+    />
+
+    <FeatureGrid
+      id="inventario"
+      tag="Inventario"
+      title="Los materiales se descuentan solos al firmar la atención."
+      lead="Cada servicio dice qué usa cada vez. Al firmar, sale de la sede donde se atendió: nadie lleva la cuenta en un cuaderno."
+      white
+      items={[
+        { title: "«Pegar mi lista»", text: "Copias de tu Excel el nombre, la unidad, lo que hay y el mínimo, y tu inventario queda cargado." },
+        { title: "Lo que hace falta y lo que vence", text: "Arriba, en cada sede, con «Pedir» o «Dar de baja» al lado." },
+        { title: "Compras y proveedores", text: "La compra, lo que llega con sus lotes y lo que le debes a cada proveedor." },
+        { title: "«Contar» a fin de mes", text: "Escribes lo que hay de cada producto y la diferencia se guarda sola, con su motivo." },
+        { title: "Vendes un producto en el cobro", text: "Un cepillo o un enjuague: «Agregar producto» lo suma a la cuenta y lo descuenta de la sede." },
+        { title: "Nunca frena la atención", text: "Si se usó más de lo registrado, queda como faltante y la próxima compra lo cubre primero." },
+      ]}
+    >
+      <p class="more">Con varias sedes, cada una tiene su inventario. <a href="/varias-sedes">Cómo funcionan las sedes →</a></p>
+    </FeatureGrid>
 
     <Related hrefs={page.related} />
     <div class="faqwrap">

@@ -67,7 +67,7 @@ const STEPS: Step[] = [
         text: "3 días de descanso. Sin diagnóstico: Rosa no autorizó que figure. Elena Vela · CMP 045678",
         chip: "Emitido",
       },
-      { kind: "out", label: "WhatsApp · 09:19", text: "Rosa, aquí está tu descanso médico. También lo descargas desde tu enlace durante 30 días." },
+      { kind: "out", label: "WhatsApp · 09:19", text: "Rosa, te enviamos tu descanso médico. Lo tienes adjunto en este mensaje, en PDF." },
     ],
   },
   {

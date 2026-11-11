@@ -1,7 +1,8 @@
-// Lo que ve Andrea en su teléfono al abrir Su enlace (portada de /portal-del-paciente): su cita con
-// «Confirmar», «Cambiar» y «Cancelar», su presupuesto con «Ver y responder», sus papeles y sus mensajes. Las tarjetas aparecen una a una; todo se puede tocar.
-// Las palabras son las de la página real (`/reserva`): «Tu cita», «Por confirmar», «Ver y responder»,
-// «Tus papeles» (la receta y el comprobante de los últimos 30 días) y «Tus mensajes».
+// Lo que ve Andrea en su teléfono (portada de /portal-del-paciente): su cita con «Confirmar», «Cambiar»
+// y «Cancelar», su presupuesto con «Ver y responder», sus documentos y sus mensajes. Las tarjetas aparecen una a una; todo se puede tocar.
+// Las palabras son las de las páginas reales: «Tu cita», «Por confirmar», «Ver y responder» y «Tus
+// mensajes» de Su enlace (`/reserva`), y «Tus documentos» con «Ver» de su portal (`/portal`), donde no
+// vencen. Su enlace ya no lleva papeles: cada uno le llega en PDF por su chat o su correo.
 import { useEffect, useState } from "react"
 import "./patient-phone.css"
 
@@ -14,10 +15,10 @@ const SLOTS = [
 ]
 const BASE = { when: "Jueves 29 de octubre · 10:30", who: "Dra. Paredes", short: "jueves 29 de octubre · 10:30" }
 
-/** Los papeles de la atención del 24 de octubre: se descargan 30 días, hasta el 23 de noviembre. */
+/** Los documentos de la atención del 24 de octubre, como salen en su portal: el tipo y el día. No vencen. */
 const PAPERS = [
-  { id: "comprobante", name: "Comprobante N.º 000001", sub: "24 de octubre · disponible hasta el 23 de noviembre" },
-  { id: "receta", name: "Receta N.º 1", sub: "24 de octubre · disponible hasta el 23 de noviembre" },
+  { id: "comprobante", name: "Comprobante N.º 000001", sub: "Comprobante · 24 de octubre" },
+  { id: "receta", name: "Receta N.º 1", sub: "Receta · 24 de octubre" },
 ]
 
 /** Los tres interruptores de «Tus mensajes»; las novedades solo con su sí. */
@@ -203,8 +204,8 @@ export default function PatientPhone() {
             )}
           </section>
 
-          <section className={card(3)} aria-label="Tus papeles">
-            <span className="dpp-h">Tus papeles</span>
+          <section className={card(3)} aria-label="Tus documentos">
+            <span className="dpp-h">Tus documentos</span>
             {PAPERS.map((p) => (
               <span key={p.id} className="dpp-paper">
                 <span className="dpp-paper-name">
@@ -212,11 +213,11 @@ export default function PatientPhone() {
                   <span>{p.sub}</span>
                 </span>
                 <button type="button" className={`dpp-chip-btn${got[p.id] ? " ok" : ""}`} onClick={() => setGot((g) => ({ ...g, [p.id]: true }))}>
-                  {got[p.id] ? "Descargado ✓" : "Descargar"}
+                  {got[p.id] ? "Abierto ✓" : "Ver"}
                 </button>
               </span>
             ))}
-            <span className="dpp-sub small">Cada papel queda aquí 30 días. Después, pídeselo a la clínica.</span>
+            <span className="dpp-sub small">En tu portal, sin vencer. Cada uno te llega también en PDF por tu chat o tu correo.</span>
           </section>
 
           <section className={card(4)} aria-label="Tus mensajes">

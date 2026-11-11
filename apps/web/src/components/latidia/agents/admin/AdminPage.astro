@@ -3,7 +3,8 @@
 // para los buscadores; las preguntas a Argos que se responden con cifras, dibujo y «Así lo calculé»;
 // cómo trae de vuelta a tus pacientes (12 meses, controles que se repiten, otro horario, tarea de
 // llamada) con los controles de Luis y la captura del control que se repite; «Pregúntale» con la captura
-// de Reportes; cuánto cobra (cifras de Astro.locals.pricing); las preguntas y el cierre.
+// de Reportes y, debajo, lo que hace sin que le preguntes (pedirle algo con tus palabras, las metas
+// y el resumen del lunes); cuánto cobra (cifras de Astro.locals.pricing); las preguntas y el cierre.
 import Base from "../../../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../../../lib/faq"
 import { shownPlan } from "../../../../lib/pricing"
@@ -39,6 +40,25 @@ const asks = [
   "«¿Qué especialidad tiene más inasistencias?»",
 ]
 
+// Lo que hace sin que le preguntes: Agente › Argos («Dile qué quieres que haga») y Reportes › Resumen.
+const more = [
+  {
+    kicker: "A pedido",
+    title: "Se lo pides con tus palabras",
+    text: "En «Dile qué quieres que haga» escribes lo que quieres, como ofrecerle otra fecha a quien cancela. Te lo deja como borrador, con una prueba con tus últimos 30 días. Nada cambia hasta que lo prendes.",
+  },
+  {
+    kicker: "Metas",
+    title: "Le pones una meta al mes",
+    text: "«Poner meta» en Cobrado o en Pacientes nuevos. Una raya marca cuánto del mes ya pasó: si la barra va por delante, vas bien.",
+  },
+  {
+    kicker: "Cada lunes",
+    title: "El resumen del lunes",
+    text: "Un correo a las 8:00 con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos.",
+  },
+]
+
 // Los controles de Luis (datos de la demo): la sistólica de 152 a 132 y la diastólica de 96 a 84.
 // Escala del dibujo: 160 mmHg arriba (y = 20) y 80 abajo (y = 160).
 const xs = [80, 220, 360, 480]
@@ -53,6 +73,10 @@ const faq: AgentQuestion[] = [
   { q: "¿A quién invita a volver?", a: "A quien lleva 12 meses sin venir y no tiene una cita ni un control pendiente." },
   { q: "¿Los controles se repiten solos?", a: "Cada 1, 3, 6 o 12 meses, hasta que tocas «Dejar de repetir». Al completar uno queda indicado el siguiente." },
   { q: "¿Qué pasa si no puede escribirle?", a: "Te deja una tarea de llamada con el motivo. Nadie se queda sin aviso por no tener WhatsApp." },
+  {
+    q: "¿Puedo pedirle algo que no está en su lista?",
+    a: "Sí. Se lo escribes en «Dile qué quieres que haga» y te lo deja como borrador, con su flujo y una prueba con tus últimos 30 días. Nada cambia hasta que lo prendes.",
+  },
   { q: "¿De dónde salen sus cifras?", a: "De Reportes, con las mismas cuentas. Cuenta la consulta cobrada y siempre dice «Así lo calculé»." },
   {
     q: "¿Y si no sabe la respuesta?",
@@ -184,6 +208,18 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
           <figcaption>Captura real del producto, con datos de prueba.</figcaption>
         </figure>
       </div>
+      <div class="wrap la-in ad-more">
+        <h3 class="ad-more-h">Y no espera a que le preguntes.</h3>
+        <div class="ad-more-grid">
+          {more.map((item) => (
+            <div class="la-card">
+              <span class="ad-kicker">{item.kicker}</span>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </section>
 
     <AgentPrices
@@ -224,6 +260,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
   .ad-asks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 16px; }
   .ad-shot { flex: 1 1 560px; }
   .ad-shot .la-frame { border-radius: 22px; }
+  /* Lo que hace sin que le preguntes: debajo de «Pregúntale», tres tarjetas. */
+  .ad-more { margin-top: 56px; gap: 20px; }
+  .ad-more-h { font-size: clamp(24px, 2.6vw, 30px); line-height: 1.15; letter-spacing: -.02em; text-wrap: balance; }
+  .ad-more-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
   @media (max-width: 1080px) {
     .ad-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
@@ -231,6 +271,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
     .ad-chart { padding: 18px; }
     .ad-wa { padding: 16px; }
     .ad-ask-in { gap: 24px; }
+    .ad-more { margin-top: 40px; }
     .ad-out, .ad-in { font-size: 14.5px; }
   }
   @media (max-width: 600px) {

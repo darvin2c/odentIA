@@ -3,7 +3,7 @@
 // app dental. Portada con la agenda del día por unidad dental, los controles que se repiten (la
 // limpieza de cada 6 meses), Argos invitando a volver, los recordatorios, las preguntas y el cierre.
 // Título, descripción, migas, enlaces relacionados y preguntas son los de PAGES.agenda; lo que se
-// promete es lo que hace la app (Agenda, pestaña Plan, «Invitar a volver», Su enlace).
+// promete es lo que hace la app (Agenda, pestaña Plan, «Invitar a volver», Su enlace, «Mi calendario»).
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
@@ -124,6 +124,18 @@ const reminders: { title: string; text: string; link?: { href: string; label: st
               <p>{item.text}{item.link && <> <a href={item.link.href}>{item.link.label}</a></>}</p>
             </div>
           ))}
+          <div class="ag-card ag-cal">
+            <div class="ag-cal-copy">
+              <h3>«Mi calendario»: tus citas, en el calendario de tu celular</h3>
+              <p>Cada odontólogo añade sus citas de la clínica a Google Calendar, Apple u Outlook, junto a lo demás de su día. De cada cita se ven solo las iniciales del paciente: nunca el nombre, el servicio ni el motivo.</p>
+            </div>
+            {/* Ilustración de cómo se ve una cita en el calendario del odontólogo: no es un control. */}
+            <div class="ag-cal-ev" role="img" aria-label="Ejemplo: en el calendario del odontólogo la cita del jueves a las 10:30 dice «Paciente · R. P.»">
+              <span class="ag-cal-day">Jueves 29</span>
+              <span class="ag-cal-row"><b>10:30</b><span>Paciente · R. P.</span></span>
+              <span class="ag-cal-row"><b>11:30</b><span>Paciente · C. M.</span></span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -187,6 +199,12 @@ const reminders: { title: string; text: string; link?: { href: string; label: st
   .ag-card h3 { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
   .ag-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
   .ag-card a { font-weight: 700; }
+  .ag-cal { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 24px; }
+  .ag-cal-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .ag-cal-ev { flex: 0 1 300px; min-width: 0; box-sizing: border-box; background: var(--bg); border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .ag-cal-day { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); }
+  .ag-cal-row { display: flex; gap: 12px; align-items: baseline; background: var(--paper); border-left: 3px solid var(--teal); border-radius: 8px; padding: 9px 12px; font-size: 15px; }
+  .ag-cal-row b { font-size: 14px; color: var(--muted); }
 
   .ag-faq { background: var(--paper); padding-bottom: 8px; }
 
@@ -201,5 +219,7 @@ const reminders: { title: string; text: string; link?: { href: string; label: st
     .ag-split, .ag-argos { gap: 24px; }
     .ag-ctl, .ag-how, .ag-argos-copy, .ag-argos-demo, .ag-demo, .ag-copy { flex-basis: 100%; }
     .ag-how li { padding: 16px; gap: 12px; }
+    .ag-cal { gap: 16px; }
+    .ag-cal-copy, .ag-cal-ev { flex-basis: 100%; }
   }
 </style>
