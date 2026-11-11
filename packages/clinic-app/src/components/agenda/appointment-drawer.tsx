@@ -198,7 +198,7 @@ function RealAppointmentDrawer({
   const step = stepBeforeArrival(appointment, now, isToday)
   const unclosed = step === "cerrar" || step === "tarde"
   /** «Vino» la dejó atendida y nadie registró qué se hizo: se puede deshacer o registrar. */
-  const cameUnrecorded = appointment.visit === "atendida" && !appointment.encounter && !appointment.arrivedAt
+  const cameUnrecorded = appointment.visit === "atendida" && !appointment.encounter && Boolean(context?.came)
   const patient = { id: appointment.patientId, name: appointment.patientName }
   const startAttention = () =>
     attend.mutate({

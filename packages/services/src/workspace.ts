@@ -820,11 +820,11 @@ async function waitingUnclosed(
   tx: Db, orgId: string, timezone: string, professionalUserId: string | null,
 ): Promise<{ items: WaitingUnclosed[]; total: number; nextAt: string | null; older: { count: number; oldestAt: string } | null }> {
   const recent = sql`a.starts_at >= now() - make_interval(days => ${UNCLOSED_RECENT_DAYS})`
-  const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] } & { total: number }>(sql`
+  const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] } & { total: number; oldestAt: string }>(sql`
     select a.id, a.patient_id as "patientId", p.person_id as "personId", pp.display_name as "patientName", ${iso(sql`a.starts_at`)} as "startsAt",
       a.professional_user_id as "professionalUserId", u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
       a.arrived_at is not null as arrived, a.version,
-      count(*) over ()::int as total
+      count(*) over ()::int as total, ${iso(sql`min(a.starts_at) over ()`)} as "oldestAt"
     from appointment a
     join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
     join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
@@ -832,7 +832,7 @@ async function waitingUnclosed(
     left join "user" u on u.id = a.professional_user_id
     where ${unclosedSql(orgId, timezone, professionalUserId)} and ${recent}
     order by a.starts_at desc, a.id limit ${WAITING_LIMITS.unclosed + 1}`)
-  const items = rows.map(({ total: _total, ...row }) => row)
+  const items = rows.map(({ total: _total, oldestAt: _oldest, ...row }) => row)
   const [older] = await tx.execute<{ count: number; oldestAt: string | null }>(sql`
     select count(*)::int as count, min(${iso(sql`a.starts_at`)}) as "oldestAt"
     from appointment a join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
@@ -841,7 +841,8 @@ async function waitingUnclosed(
   return {
     items: items.slice(0, WAITING_LIMITS.unclosed),
     total: rows[0]?.total ?? 0,
-    nextAt: items[WAITING_LIMITS.unclosed]?.startsAt ?? null,
+    // «N más» abre la Agenda en el día de la más antigua del mes: desde ahí se ven hacia hoy.
+    nextAt: rows.length > WAITING_LIMITS.unclosed ? (rows[0]?.oldestAt ?? null) : null,
     older: older && older.count > 0 && older.oldestAt ? { count: older.count, oldestAt: older.oldestAt } : null,
   }
 }

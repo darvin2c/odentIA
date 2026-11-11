@@ -52,6 +52,8 @@ export function announceVisitStatus(
     ...(appointment.notice?.queued ? { description: "El agente le avisa y le ofrece otra fecha." } : {}),
     ...(appointment.status === "atendida"
       ? {
+          // Tiempo para leerlo y deshacerlo, como los demás «Deshacer» de la app.
+          duration: 10_000,
           description: "Lo que se hizo lo registra su profesional: le aparece en «Te espera».",
           action: {
             label: "Deshacer",

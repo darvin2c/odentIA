@@ -279,9 +279,11 @@ export function ScheduleAgendaList({
     const end = Date.parse(item.entry.end)
     // Lo que está en curso sale del estado real: hoy llegó o está en atención.
     // Una llegada de otro día ya no es «en la clínica»: es algo sin cerrar.
-    const inClinic = item.entry.stage !== undefined && (today === null || zonedDateOf(item.entry.start, timeZone) === today)
+    // «Sin cerrar» no es estar aquí: nadie la vio llegar.
+    const present = item.entry.stage === "llego" || item.entry.stage === "en_atencion"
+    const inClinic = present && (today === null || zonedDateOf(item.entry.start, timeZone) === today)
     if (inClinic) current.push(item)
-    else if (standing(item) && item.entry.stage === undefined && (nowMs === null || end > nowMs)) upcoming.push(item)
+    else if (standing(item) && !present && item.entry.stage !== "sin_cerrar" && (nowMs === null || end > nowMs)) upcoming.push(item)
     // Su hora pasó y nadie la cerró: queda a la vista, con su salida.
     else if (standing(item)) unclosed.push(item)
     else past.push(item)

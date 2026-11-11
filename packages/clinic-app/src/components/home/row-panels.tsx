@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { fetchMyProfessionalProfile, saveProfessionalProfileApi } from "../../lib/encounters"
 import { type HomeTextContext, sentence, waitingKey, waitingText } from "../../lib/home"
 import { createReorderDrafts } from "../../lib/inventory"
@@ -297,6 +297,7 @@ export function OldUnclosedPanel({
     mutationFn: async (input: { rows: Array<RowOf<"unclosed">>; status: "no_asistio" | "atendida" }) => {
       // Una por una, con la versión que se ve: si otra persona cerró alguna, esa no se pisa.
       let done = 0
+      let changed = 0
       for (const item of input.rows) {
         try {
           await apiFetch(
@@ -311,15 +312,23 @@ export function OldUnclosedPanel({
             },
           )
           done += 1
-        } catch {
+        } catch (cause) {
           // La que no se pudo sigue en la lista: se ve al volver a leerla.
+          if (cause instanceof ApiError && cause.shape.code === "STALE_VERSION") changed += 1
         }
       }
-      return { done, total: input.rows.length }
+      return { done, changed, total: input.rows.length }
     },
-    onSuccess: async ({ done, total }) => {
+    onSuccess: async ({ done, changed, total }) => {
       if (done === total) toast.success(done === 1 ? "Cita cerrada" : `${done} citas cerradas`)
-      else toast.warning(`Se cerraron ${done} de ${total}: las demás cambiaron mientras tanto y siguen en la lista`)
+      else
+        toast.warning(
+          `Se cerraron ${done} de ${total}. ${
+            changed === total - done
+              ? "Las demás cambiaron mientras tanto"
+              : "Las demás no se pudieron cerrar (revisa la conexión)"
+          } y siguen en la lista.`,
+        )
       setConfirmAll(false)
       await Promise.all([list.refetch(), invalidateAppointmentQueries(queryClient)])
       onChanged()
@@ -355,6 +364,11 @@ export function OldUnclosedPanel({
         {list.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
         {list.isError ? <p className="text-sm text-destructive">{submitErrorMessage(list.error)}</p> : null}
         {!list.isPending && !list.isError && items.length === 0 ? <p className="text-sm">No queda ninguna sin cerrar.</p> : null}
+        {items.length > 0 && row.count > items.length ? (
+          <p className="text-[13px] text-muted-foreground">
+            Aquí están las {items.length} más antiguas; al cerrarlas aparecen las siguientes.
+          </p>
+        ) : null}
         <ul aria-label="Citas sin cerrar" className="flex flex-col divide-y">
           {items.map((item) => (
             <li key={item.id} className="flex flex-wrap items-center gap-2 py-2">

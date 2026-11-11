@@ -376,7 +376,8 @@ async function planFactsOf(
     left join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
     left join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and a.patient_id = ${patientId}::uuid and not a.is_test
-      and a.status in ('programada', 'confirmada') and a.arrived_at is null
+      -- Sin cerrar, la misma regla de Inicio: también la que llegó ese día y nadie registró.
+      and a.status in ('programada', 'confirmada')
       and (a.starts_at at time zone coalesce(b.timezone, ${context.timezone}))::date < (now() at time zone coalesce(b.timezone, ${context.timezone}))::date
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
     order by a.starts_at desc, a.id limit 3`)

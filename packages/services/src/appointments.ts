@@ -2196,7 +2196,25 @@ export async function skipAppointmentRecord(tx: Db, orgId: string, actorUserId: 
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (current.status !== "atendida")
     throw conflict("APPOINTMENT_STATUS", "Solo una cita atendida puede quedar sin su atención registrada")
+  // Lo decide quien la atendió: es su historia la que queda sin ese registro.
+  if (current.professionalUserId !== actorUserId)
+    throw new ServiceError("FORBIDDEN", 403, "Lo decide quien atendió la cita: es su registro")
   if (await linkedEncounter(tx, orgId, id)) return getAppointment(tx, orgId, id)
+  // Dicho una vez basta.
+  const [already] = await tx
+    .select({ id: auditEvent.id })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "appointment"),
+        eq(auditEvent.entityId, id),
+        eq(auditEvent.action, "appointment.record_skipped"),
+        gt(auditEvent.createdAt, current.updatedAt),
+      ),
+    )
+    .limit(1)
+  if (already) return getAppointment(tx, orgId, id)
   await audit(tx, orgId, actorUserId, "appointment.record_skipped", id, {})
   await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
   return getAppointment(tx, orgId, id)
