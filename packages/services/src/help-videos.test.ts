@@ -14,6 +14,12 @@ describe("las etiquetas de un video", () => {
     ])
   })
 
+  it("el segundo de inicio se escribe de varias formas, y lo que no se entiende es desde el principio", () => {
+    const at = (suffix: string) => parseHelpVideoTags(`#ayuda:tareas-crear${suffix}`)[0]?.startSeconds
+    expect([at("@90"), at("@90s"), at("@2m"), at("@1m30"), at("@1m30s"), at("@1:30"), at("@0:05")]).toEqual([90, 90, 120, 90, 90, 90, 5])
+    expect([at(""), at("@m"), at("@1:2:3")]).toEqual([null, null, null])
+  })
+
   it("la primera de cada respuesta manda, y sin etiquetas no hay nada", () => {
     expect(parseHelpVideoTags("#ayuda:tareas-crear@10 y otra vez #ayuda:tareas-crear@99")).toEqual([{ target: "tareas-crear", startSeconds: 10 }])
     expect(parseHelpVideoTags("Un video cualquiera #tareas ayuda:tareas-crear")).toEqual([])

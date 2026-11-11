@@ -1378,9 +1378,9 @@ export async function supportHelpStats(db: Db, actor: AdminActor, now: Date = ne
   for (const row of rows) {
     const total = Number(row.total)
     // La duda (ADR 0146) no es «sin respuesta» ni se cuenta: si la persona toca una de las que ofrece, esa cuenta
-    // como su pregunta, y no dos veces. Si tocó «Ninguna es lo que busco», sí: nadie le respondió (ADR 0178).
+    // como su pregunta, y no dos veces. Si tocó «Ninguna es lo que busco», sí, también tras una redactada: nadie le respondió (ADR 0178).
     // Lo de las cifras sí se cuenta, pero va a Argos: tampoco es «sin respuesta».
-    if (row.verdict === "duda" && row.noneFits) {
+    if (row.noneFits) {
       asked += total
       const name = helpTopicForScreen(row.screen)?.title ?? row.screen
       unanswered.set(name, (unanswered.get(name) ?? 0) + total)

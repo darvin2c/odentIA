@@ -18,7 +18,17 @@ import { helpTopicsFor } from "./products.js"
  * empieza lo suyo (`#ayuda:tareas-crear@90`, `@1m30s`). Unirlos a mano no
  * existe: una sola forma de hacerlo.
  */
-const TAG = /#ayuda:((?:tema:)?[a-z0-9]+(?:[-_][a-z0-9]+)*)(?:@(?:(\d+)m)?(\d+)s?)?/gi
+const TAG = /#ayuda:((?:tema:)?[a-z0-9]+(?:[-_][a-z0-9]+)*)(?:@([0-9ms:]+))?/gi
+
+/** El segundo de inicio como se escribe: «90», «90s», «2m», «1m30», «1m30s» o «1:30». Nulo si no se entiende. */
+function startSecondsOf(text: string | undefined): number | null {
+  if (!text) return null
+  const clock = /^(\d+):(\d{1,2})$/.exec(text)
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2])
+  const spoken = /^(?:(\d+)m)?(?:(\d+)s?)?$/i.exec(text)
+  if (!spoken || (spoken[1] === undefined && spoken[2] === undefined)) return null
+  return Number(spoken[1] ?? 0) * 60 + Number(spoken[2] ?? 0)
+}
 /** Cuántos videos se muestran bajo una respuesta. */
 export const HELP_VIDEOS_SHOWN = 2
 
@@ -33,8 +43,7 @@ export function parseHelpVideoTags(description: string): HelpVideoTag[] {
   for (const match of description.matchAll(TAG)) {
     const target = (match[1] ?? "").toLowerCase()
     if (!target || tags.has(target)) continue
-    const seconds = match[3] === undefined ? null : Number(match[2] ?? 0) * 60 + Number(match[3])
-    tags.set(target, { target, startSeconds: seconds !== null && Number.isFinite(seconds) ? seconds : null })
+    tags.set(target, { target, startSeconds: startSecondsOf(match[2]) })
   }
   return [...tags.values()]
 }

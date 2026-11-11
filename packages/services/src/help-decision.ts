@@ -333,6 +333,19 @@ export function readHelpAreas(
   return { verdict: "areas", areas: picked, sure: cover >= HELP_AREA_COVER, top }
 }
 
+/** Las respuestas de la guía con la probabilidad que les dio Jev, de la más probable a la menos; vacío sin probabilidades. */
+export function helpRanked(result: { answers: readonly AdminAnswer[] }, candidates: readonly HelpOption[]): Array<{ option: HelpOption; probability: number }> {
+  const answer = result.answers.filter(isChoice).find((item) => item.id === HELP_SELECT_QUESTION)
+  if (!answer?.probabilities) return []
+  const byValue = new Map(candidates.map((option, index) => [optionValue(option, index), option]))
+  return Object.entries(answer.probabilities)
+    .flatMap(([value, probability]) => {
+      const option = byValue.get(value)
+      return option ? [{ option, probability }] : []
+    })
+    .sort((a, b) => b.probability - a.probability)
+}
+
 /** Las respuestas de unas categorías, en el orden de la guía. */
 export function helpOptionsIn(options: readonly HelpOption[], areas: ReadonlySet<string>): HelpOption[] {
   return options.filter((option) => areas.has(helpAreaOf(option)))

@@ -28,6 +28,7 @@ import {
   helpPartsState,
   type HelpPrevious,
   helpQuestion,
+  helpRanked,
   helpScreenName,
   type HelpSelection,
   helpState,
@@ -342,7 +343,7 @@ async function pickAnswer(
     batches.map(async (batch) => {
       const candidates = helpCandidates(batch, question)
       const result = await decider.decide(state, [helpQuestion(candidates, texts)])
-      return { selection: readHelpSelection(result, candidates), parts: helpParts(result, candidates) }
+      return { selection: readHelpSelection(result, candidates), parts: helpParts(result, candidates), ranked: helpRanked(result, candidates) }
     }),
   )
   if (read.length === 0 || read.some((item) => item.selection.top === null)) return null
@@ -351,7 +352,12 @@ async function pickAnswer(
   if (sure) return { selection: sure.selection, parts: [] }
   const offering = read.filter((item) => item.selection.verdict === "duda" && item.selection.offered.length > 0)
   if (offering.length > 0) {
-    const offered = offering.flatMap((item) => item.selection.offered).slice(0, HELP_OFFERED)
+    // De todas las tandas, las más probables primero: la de una tanda no tapa a una mejor de otra.
+    const offered = offering
+      .flatMap((item) => item.ranked.filter((entry) => item.selection.offered.includes(entry.option)))
+      .sort((a, b) => b.probability - a.probability)
+      .slice(0, HELP_OFFERED)
+      .map((entry) => entry.option)
     return { selection: { verdict: "duda", shown: [], offered, top }, parts: offering.length === 1 ? (offering[0]?.parts ?? []) : [] }
   }
   if (read.some((item) => item.selection.verdict === "datos")) return { selection: { verdict: "datos", shown: [], offered: [], top }, parts: [] }
@@ -428,8 +434,9 @@ async function writeFromParts(
   writer: HelpWriter,
 ): Promise<string | null> {
   const state = helpPartsState(question, parts)
-  if (readHelpJoin(await decider.decide(state, [helpJoinQuestion(texts)])) < HELP_JOIN_CONFIDENT) return null
   try {
+    // Dentro del intento: si Jev falla aquí, queda la duda que ya decidió, no el respaldo por palabras.
+    if (readHelpJoin(await decider.decide(state, [helpJoinQuestion(texts)])) < HELP_JOIN_CONFIDENT) return null
     const written = (await withTimeout(writer({ system: helpWriteInstructions(texts), user: state }), WRITER_TIMEOUT_MS))?.trim()
     if (!written) return null
     const problem = helpWrittenProblem(written, parts)
@@ -566,6 +573,8 @@ export async function askHelp(
       const about = first?.topic ?? selection.offered[0]?.topic ?? matchHelpTopics(asked, topics)[0]?.topic ?? here
       const blockers = await screenBlockers(tx, orgId, about, asker, topics)
       if (blockers.length > 0) {
+        // Se responde con lo que falta, no con lo redactado: no queda anotado como redactada.
+        decided.written = null
         return reply("estado", {
           askId: await log(about?.id ?? null),
           blockers,
