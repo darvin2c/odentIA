@@ -44,6 +44,8 @@ const SHEET_TIMEOUT_MS = 4000
 const SHEET_CACHE_BYTES = 48 * 1024 * 1024
 const sheetCache = new Map<string, Uint8Array>()
 let sheetCacheBytes = 0
+const sheetReading = new Map<string, Promise<Uint8Array | null>>()
+const sheetFailedUntil = new Map<string, number>()
 
 /** La API y el worker lo fijan al arrancar, como `configurePublicLinks`. */
 export function configureDocumentLogos(reader: Partial<LogoReader> | null): void {
@@ -51,6 +53,7 @@ export function configureDocumentLogos(reader: Partial<LogoReader> | null): void
   logoCache.clear()
   sheetCache.clear()
   sheetCacheBytes = 0
+  sheetFailedUntil.clear()
 }
 
 /** El PDF de una versión de la hoja, del bucket privado; null si no se pudo leer a tiempo. */
@@ -62,38 +65,50 @@ async function readLetterheadPdf(letterhead: Letterhead): Promise<Uint8Array | n
     sheetCache.set(letterhead.id, cached)
     return cached
   }
+  // Varios papeles a la vez esperan la misma lectura; lo que no se pudo leer no se
+  // vuelve a intentar enseguida, como el logo.
+  const failed = sheetFailedUntil.get(letterhead.id)
+  if (failed && failed > Date.now()) return null
+  const pending = sheetReading.get(letterhead.id)
+  if (pending) return pending
+  const reading = fetchLetterheadPdf(letterhead).finally(() => sheetReading.delete(letterhead.id))
+  sheetReading.set(letterhead.id, reading)
+  return reading
+}
+
+async function fetchLetterheadPdf(letterhead: Letterhead): Promise<Uint8Array | null> {
   const get = logoReader?.getAttachment
   if (!get) return null
   let timer: ReturnType<typeof setTimeout> | undefined
+  let bytes: Uint8Array | null = null
   try {
-    const bytes = await Promise.race([
+    bytes = await Promise.race([
       get(letterhead.pdfKey),
       new Promise<null>((resolve) => {
         timer = setTimeout(() => resolve(null), SHEET_TIMEOUT_MS)
       }),
     ])
-    if (!bytes) return null
     // Se dibuja con pdf-lib: si no la lee, es como si no se hubiera podido leer.
-    try {
-      ;(await PDFDocument.load(bytes)).getPage(0)
-    } catch {
-      return null
-    }
-    if (bytes.byteLength <= SHEET_CACHE_BYTES && !sheetCache.has(letterhead.id)) {
-      sheetCache.set(letterhead.id, bytes)
-      sheetCacheBytes += bytes.byteLength
-      for (const [id, old] of sheetCache) {
-        if (sheetCacheBytes <= SHEET_CACHE_BYTES) break
-        sheetCache.delete(id)
-        sheetCacheBytes -= old.byteLength
-      }
-    }
-    return bytes
+    if (bytes) (await PDFDocument.load(bytes)).getPage(0)
   } catch {
-    return null
+    bytes = null
   } finally {
     if (timer) clearTimeout(timer)
   }
+  if (!bytes) {
+    sheetFailedUntil.set(letterhead.id, Date.now() + LOGO_RETRY_MS)
+    return null
+  }
+  if (bytes.byteLength <= SHEET_CACHE_BYTES && !sheetCache.has(letterhead.id)) {
+    sheetCache.set(letterhead.id, bytes)
+    sheetCacheBytes += bytes.byteLength
+    for (const [id, old] of sheetCache) {
+      if (sheetCacheBytes <= SHEET_CACHE_BYTES) break
+      sheetCache.delete(id)
+      sheetCacheBytes -= old.byteLength
+    }
+  }
+  return bytes
 }
 
 /** La hoja de un papel, ya leída, o que no se pudo leer. */
@@ -350,36 +365,28 @@ export async function loadDocumentLetterhead(
     ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
     : null
   const letterhead = at ? await getLetterheadAt(tx, orgId, new Date(at)) : await getCurrentLetterhead(tx, orgId)
-  if (letterhead) {
-    // Como el papel: su diseño dice quién es; abajo, la razón social y su documento.
-    return {
-      name,
-      fiscalLine: [profile?.legalName || name, fiscal].filter(Boolean).join(" · ") || null,
-      logo: null,
-      branchName: letterhead.hasContact ? null : (only?.name ?? null),
-      address: letterhead.hasContact
-        ? null
-        : ((only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null),
-      phone: letterhead.hasContact ? null : (only?.phone ?? null),
-      brandInk: null,
-      sheet: {
-        topBand: letterhead.topBandUrl,
-        bottomBand: letterhead.bottomBandUrl,
-        hasContact: letterhead.hasContact,
-      },
-    }
-  }
+  // Con hoja, como el papel: su diseño dice quién es; abajo, la razón social y su
+  // documento, y la sede y su contacto si la hoja no los trae.
+  const contact = !letterhead?.hasContact
   return {
     name,
     fiscalLine:
-      [profile?.legalName && profile.legalName !== name ? profile.legalName : null, fiscal].filter(Boolean).join(" · ") ||
-      null,
-    logo: org?.logo ?? null,
-    branchName: only?.name ?? null,
-    address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null,
-    phone: only?.phone ?? null,
-    brandInk: brandPaperInk(profile?.brandColor ?? null),
-    sheet: null,
+      [
+        letterhead ? profile?.legalName || name : profile?.legalName && profile.legalName !== name ? profile.legalName : null,
+        fiscal,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null,
+    logo: letterhead ? null : (org?.logo ?? null),
+    branchName: contact ? (only?.name ?? null) : null,
+    address: contact
+      ? ((only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null)
+      : null,
+    phone: contact ? (only?.phone ?? null) : null,
+    brandInk: letterhead ? null : brandPaperInk(profile?.brandColor ?? null),
+    sheet: letterhead
+      ? { topBand: letterhead.topBandUrl, bottomBand: letterhead.bottomBandUrl, hasContact: letterhead.hasContact }
+      : null,
   }
 }
 

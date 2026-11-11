@@ -1,9 +1,11 @@
+import { halfMm } from "@odentia/clinical"
 import { Button, Checkbox, Input, Label, toast } from "@odentia/ui"
 import { FormDrawer, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import {
+  base64ToBytes,
   clampMargins,
   detectMargins,
   getLetterhead,
@@ -172,7 +174,6 @@ function LetterheadDrawer({
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [rendered, setRendered] = useState<RenderedLetterhead | null>(null)
-  const [detected, setDetected] = useState<LetterheadMargins | null>(null)
   const [margins, setMargins] = useState<LetterheadMargins | null>(null)
   const [hasContact, setHasContact] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -183,13 +184,14 @@ function LetterheadDrawer({
   const [adjusting, setAdjusting] = useState(false)
   const [dirty, setDirty] = useState(false)
   const previewTurn = useRef(0)
+  // Lo que se midió en su dibujo, para «Volver a lo que encontramos».
+  const detected = useMemo(() => (rendered ? detectMargins(rendered) : null), [rendered])
 
   // Al abrir: vacío, o la hoja de hoy dibujada para corregirla sin volver a subirla.
   useEffect(() => {
     if (!open) return
     setFile(null)
     setRendered(null)
-    setDetected(null)
     setMargins(null)
     setPreview(null)
     setFileError(null)
@@ -211,7 +213,6 @@ function LetterheadDrawer({
           rightMm: current.rightMm,
         }
         setRendered(drawn)
-        setDetected(detectMargins(drawn))
         setMargins(own)
       })
       .catch(
@@ -232,15 +233,12 @@ function LetterheadDrawer({
       setBusy(true)
       previewLetterhead(file, margins, hasContact)
         .then(async (result) => {
-          const image = await pdfPageImage(result.pdf, 800)
-          const probe = new Image()
-          probe.src = image
-          await probe.decode().catch(() => undefined)
+          const { image, aspect } = await pdfPageImage(result.pdf, 800)
           if (turn !== previewTurn.current) return
           setPreview({
             image,
             pdf: result.pdf,
-            aspect: probe.naturalWidth ? probe.naturalHeight / probe.naturalWidth : 297 / 210,
+            aspect,
             pages: result.pages,
             lowResolution: result.lowResolution,
             paper: result.paper,
@@ -273,11 +271,9 @@ function LetterheadDrawer({
     setFileError(null)
     try {
       const drawn = await renderLetterhead(next)
-      const found = detectMargins(drawn)
       setFile(next)
       setRendered(drawn)
-      setDetected(found)
-      setMargins(found)
+      setMargins(detectMargins(drawn))
       setDirty(true)
     } catch {
       setFileError("No pudimos leer esa hoja. Si es un PDF con clave, guárdalo sin clave.")
@@ -287,7 +283,7 @@ function LetterheadDrawer({
 
   function setSide(key: keyof LetterheadMargins, value: number) {
     if (!Number.isFinite(value)) return
-    setMargins((now) => (now ? { ...now, [key]: Math.max(0, Math.round(value * 2) / 2) } : now))
+    setMargins((now) => (now ? { ...now, [key]: Math.max(0, halfMm(value)) } : now))
     setDirty(true)
   }
 
@@ -596,28 +592,27 @@ function TextBox({
             <span className="absolute -top-6 left-0 rounded bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">
               Aquí va el texto
             </span>
-            <span
-              className={`${handle} pointer-events-auto -top-2 left-1/2 -ml-1.5 cursor-ns-resize`}
-              onPointerDown={drag("topMm")}
-            />
-            <span
-              className={`${handle} pointer-events-auto -bottom-2 left-1/2 -ml-1.5 cursor-ns-resize`}
-              onPointerDown={drag("bottomMm")}
-            />
-            <span
-              className={`${handle} pointer-events-auto top-1/2 -left-2 -mt-1.5 cursor-ew-resize`}
-              onPointerDown={drag("leftMm")}
-            />
-            <span
-              className={`${handle} pointer-events-auto top-1/2 -right-2 -mt-1.5 cursor-ew-resize`}
-              onPointerDown={drag("rightMm")}
-            />
+            {HANDLES.map((side) => (
+              <span
+                key={side.key}
+                className={`${handle} pointer-events-auto ${side.place}`}
+                onPointerDown={drag(side.key)}
+              />
+            ))}
           </>
         ) : null}
       </div>
     </div>
   )
 }
+
+/** Los bordes del recuadro que se arrastran, y dónde va cada uno. */
+const HANDLES: { key: keyof LetterheadMargins; place: string }[] = [
+  { key: "topMm", place: "-top-2 left-1/2 -ml-1.5 cursor-ns-resize" },
+  { key: "bottomMm", place: "-bottom-2 left-1/2 -ml-1.5 cursor-ns-resize" },
+  { key: "leftMm", place: "top-1/2 -left-2 -mt-1.5 cursor-ew-resize" },
+  { key: "rightMm", place: "top-1/2 -right-2 -mt-1.5 cursor-ew-resize" },
+]
 
 /** El error que el servidor dijo junto al archivo, si lo dijo. */
 function fieldError(cause: unknown): string | null {
@@ -627,8 +622,9 @@ function fieldError(cause: unknown): string | null {
 
 /** «Ver en grande»: la vista previa como PDF, en otra pestaña. */
 function openPdf(base64: string) {
-  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+  const url = URL.createObjectURL(
+    new Blob([base64ToBytes(base64) as BlobPart], { type: "application/pdf" }),
+  )
   window.open(url, "_blank", "noopener")
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }

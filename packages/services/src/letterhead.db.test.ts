@@ -48,6 +48,12 @@ async function clinicWithOwner() {
   return { orgId, userId, run }
 }
 
+const bands = {
+  topBandUrl: "https://example.com/nueva-arriba.png",
+  bottomBandUrl: "https://example.com/nueva-abajo.png",
+  thumbnailUrl: "https://example.com/nueva-mini.png",
+}
+
 const pause = () => new Promise((resolve) => setTimeout(resolve, 25))
 
 it("cada cambio es una versión y cada momento tiene la suya", async () => {
@@ -61,6 +67,7 @@ it("cada cambio es una versión y cada momento tiene la suya", async () => {
   await pause()
   const adjusted = await run((tx) =>
     adjustLetterhead(tx, orgId, userId, {
+      ...bands,
       topMm: 55,
       bottomMm: 41,
       leftMm: 19,
@@ -163,14 +170,22 @@ it("no se pisa lo que otra persona cambió entretanto, y «Deshacer» no quita u
   const { orgId, userId, run } = await clinicWithOwner()
   const first = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("una"), null))
   // Quien abrió sin hoja no pisa la que otra persona puso entretanto.
-  await expect(run((tx) => saveLetterhead(tx, orgId, userId, sheet("otra"), null))).rejects.toMatchObject({
+  await expect(
+    run((tx) => saveLetterhead(tx, orgId, userId, sheet("otra"), null)),
+  ).rejects.toMatchObject({
     code: "LETTERHEAD_CHANGED",
   })
   const second = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("dos"), first.id))
   // Ajustar la que ya no está a la vista, tampoco.
   await expect(
     run((tx) =>
-      adjustLetterhead(tx, orgId, userId, { topMm: 60, bottomMm: 41, leftMm: 19, rightMm: 19, hasContact: false }, first.id),
+      adjustLetterhead(
+        tx,
+        orgId,
+        userId,
+        { ...bands, topMm: 60, bottomMm: 41, leftMm: 19, rightMm: 19, hasContact: false },
+        first.id,
+      ),
     ),
   ).rejects.toMatchObject({ code: "LETTERHEAD_CHANGED" })
   // Quitada y vuelta a poner por otra persona: «Deshacer» de la primera no la pisa.

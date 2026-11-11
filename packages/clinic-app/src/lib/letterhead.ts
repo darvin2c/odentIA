@@ -4,14 +4,19 @@
  * con pdf.js, que se carga solo al abrir el cajón (y no entra al servidor:
  * `clinicAppWorkerStubs`); el servidor vuelve a leer y normaliza todo lo que recibe.
  */
+import {
+  clampLetterheadMargins,
+  halfMm,
+  type LetterheadMargins,
+  letterheadImagePage,
+  PT_PER_MM,
+} from "@odentia/clinical"
 import type { ApiErrorShape } from "@odentia/ui-patterns"
-import { ApiError, apiFetch } from "./api"
+import { ApiError, apiFetch, apiFetchBytes } from "./api"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname } from "./host"
 
-const MM_PER_PT = 25.4 / 72
-const A4 = { width: 595.28, height: 841.89 }
-const LETTER = { width: 612, height: 792 }
+const MM_PER_PT = 1 / PT_PER_MM
 /** El ancho al que se dibuja para medir y recortar: unas 150 ppp en una A4. */
 const RENDER_WIDTH_PX = 1240
 /** Sin diseño a un lado, lo de siempre de los papeles (54 pt a los costados, 15 mm arriba, 8,5 abajo). */
@@ -23,12 +28,7 @@ const BLANK_RUN_MM = 10
 /** Más claro que esto es marca de agua: el texto puede ir encima. */
 const INK_LUMINANCE = 0.8
 
-export interface LetterheadMargins {
-  topMm: number
-  bottomMm: number
-  leftMm: number
-  rightMm: number
-}
+export type { LetterheadMargins }
 
 export interface LetterheadSummary extends LetterheadMargins {
   id: string
@@ -102,12 +102,7 @@ async function drawPdf(bytes: ArrayBuffer, widthPx: number): Promise<RenderedLet
 async function drawImage(file: Blob): Promise<RenderedLetterhead> {
   const bitmap = await createImageBitmap(file)
   const ratio = bitmap.height / bitmap.width
-  const size =
-    Math.abs(ratio - A4.height / A4.width) < 0.02
-      ? A4
-      : Math.abs(ratio - LETTER.height / LETTER.width) < 0.02
-        ? LETTER
-        : { width: A4.width, height: A4.width * ratio }
+  const size = letterheadImagePage(bitmap.width, bitmap.height)
   const canvas = document.createElement("canvas")
   canvas.width = RENDER_WIDTH_PX
   canvas.height = Math.round(RENDER_WIDTH_PX * ratio)
@@ -127,11 +122,18 @@ export async function renderLetterhead(file: Blob): Promise<RenderedLetterhead> 
   return isPdf ? drawPdf(await file.arrayBuffer(), RENDER_WIDTH_PX) : drawImage(file)
 }
 
-/** Un PDF (la vista previa que arma el servidor) como imagen, para mostrarlo en el cajón. */
-export async function pdfPageImage(base64: string, widthPx: number): Promise<string> {
-  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
-  const { canvas } = await drawPdf(bytes.buffer, widthPx)
-  return canvas.toDataURL("image/png")
+/** Lo que llega en base64 (la vista previa del servidor), como bytes. */
+export function base64ToBytes(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
+}
+
+/** Un PDF (la vista previa que arma el servidor) como imagen, con su alto entre su ancho. */
+export async function pdfPageImage(
+  base64: string,
+  widthPx: number,
+): Promise<{ image: string; aspect: number }> {
+  const { canvas } = await drawPdf(base64ToBytes(base64).buffer as ArrayBuffer, widthPx)
+  return { image: canvas.toDataURL("image/png"), aspect: canvas.height / canvas.width }
 }
 
 /**
@@ -226,15 +228,7 @@ export function clampMargins(
   page: { widthPt: number; heightPt: number },
   margins: LetterheadMargins,
 ): LetterheadMargins {
-  const widthMm = page.widthPt * MM_PER_PT
-  const heightMm = page.heightPt * MM_PER_PT
-  const floor = (value: number) => (Number.isFinite(value) ? Math.max(5, value) : 5)
-  const fit = (a: number, b: number, room: number): [number, number] =>
-    a + b <= room ? [a, b] : [(a * room) / (a + b), (b * room) / (a + b)]
-  const [leftMm, rightMm] = fit(floor(margins.leftMm), floor(margins.rightMm), widthMm * 0.5)
-  const [topMm, bottomMm] = fit(floor(margins.topMm), floor(margins.bottomMm), heightMm * 0.6)
-  const half = (value: number) => Math.round(value * 2) / 2
-  return { topMm: half(topMm), bottomMm: half(bottomMm), leftMm: half(leftMm), rightMm: half(rightMm) }
+  return clampLetterheadMargins(page, margins)
 }
 
 function toPng(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -294,10 +288,7 @@ async function send<T>(path: string, init: RequestInit): Promise<T> {
 
 function marginsForm(margins: LetterheadMargins, hasContact: boolean): FormData {
   const form = new FormData()
-  form.append("topMm", String(margins.topMm))
-  form.append("bottomMm", String(margins.bottomMm))
-  form.append("leftMm", String(margins.leftMm))
-  form.append("rightMm", String(margins.rightMm))
+  for (const [key, value] of Object.entries(margins)) form.append(key, String(value))
   form.append("hasContact", String(hasContact))
   return form
 }
@@ -312,13 +303,9 @@ export function getLetterhead(): Promise<LetterheadState> {
 
 /** El PDF de la hoja de hoy, para volver a abrirla sin subirla. */
 export async function getLetterheadPdf(): Promise<Blob> {
-  const slug = orgSlugFromHostname(window.location.hostname)
-  const response = await fetch(`${API_URL}/api/org-profile/letterhead/pdf`, {
-    credentials: "include",
-    headers: slug ? { "x-odentia-org": slug } : {},
+  return new Blob([await apiFetchBytes("/api/org-profile/letterhead/pdf")], {
+    type: "application/pdf",
   })
-  if (!response.ok) throw new ApiError(response.status, {})
-  return response.blob()
 }
 
 /** La receta de ejemplo sobre la hoja (la elegida, o la de hoy sin `file`). */

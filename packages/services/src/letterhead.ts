@@ -9,6 +9,11 @@
  * mide al dibujarla) y sus franjas en PNG para la hoja que se firma en pantalla.
  */
 import { ATTENDING_ROLES } from "@odentia/auth/permissions"
+import {
+  clampLetterheadMargins,
+  type LetterheadMargins,
+  letterheadImagePage,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, clinicLetterhead } from "@odentia/db/schema/org"
@@ -20,27 +25,12 @@ import { requireProfessionalSignature } from "./professional-profiles.js"
 
 /** Lo más que pesa la hoja que se sube. */
 export const LETTERHEAD_MAX_BYTES = 5 * 1024 * 1024
-/** Lo mínimo que se deja desde cada borde: las impresoras no imprimen en el borde. */
-export const LETTERHEAD_MIN_MARGIN_MM = 5
-/** El texto siempre tiene lugar: al menos la mitad del ancho y el 40 % del alto de la hoja. */
-const MIN_TEXT_WIDTH = 0.5
-const MIN_TEXT_HEIGHT = 0.4
 /** Por debajo de esto, una imagen se imprime borrosa a toda la hoja. */
 const LOW_DPI = 110
 
-const MM = 72 / 25.4
-const A4 = { width: 595.28, height: 841.89 }
-const LETTER = { width: 612, height: 792 }
+export { clampLetterheadMargins, type LetterheadMargins } from "@odentia/clinical"
 
 export type LetterheadKind = "pdf" | "png" | "jpg"
-
-/** Dónde va el texto: lo que se deja desde cada borde de la hoja, en milímetros. */
-export interface LetterheadMargins {
-  topMm: number
-  bottomMm: number
-  leftMm: number
-  rightMm: number
-}
 
 export interface Letterhead extends LetterheadMargins {
   id: string
@@ -80,7 +70,10 @@ export interface NormalizedLetterhead {
   lowResolution: boolean
 }
 
-const FILE_FIELD = "file"
+/** Lo que está mal en un archivo se dice junto a él. */
+function fileProblem(message: string, field = "file"): ServiceError {
+  return validation(message, { [field]: message })
+}
 
 /**
  * La hoja como la dibujan los papeles: un PDF de una página, del tamaño que se ve (su
@@ -88,34 +81,30 @@ const FILE_FIELD = "file"
  * si tiene su forma, si no del ancho de una A4.
  */
 export async function normalizeLetterhead(bytes: Uint8Array): Promise<NormalizedLetterhead> {
+  if (bytes.byteLength > LETTERHEAD_MAX_BYTES) throw fileProblem("La hoja no puede superar 5 MB")
   const kind = letterheadKindOf(bytes)
-  if (!kind)
-    throw validation("La hoja debe ser PDF, PNG o JPG", {
-      [FILE_FIELD]: "La hoja debe ser PDF, PNG o JPG",
-    })
+  if (!kind) throw fileProblem("La hoja debe ser PDF, PNG o JPG")
   const out = await PDFDocument.create()
   if (kind === "pdf") {
     let source: PDFDocument
     try {
       source = await PDFDocument.load(bytes, { updateMetadata: false })
     } catch (error) {
-      const message =
+      throw fileProblem(
         error instanceof EncryptedPDFError
           ? "Tu PDF tiene clave: guárdalo sin clave y súbelo de nuevo"
-          : "No pudimos leer ese PDF. Prueba guardándolo de nuevo como PDF"
-      throw validation(message, { [FILE_FIELD]: message })
+          : "No pudimos leer ese PDF. Prueba guardándolo de nuevo como PDF",
+      )
     }
     const pages = source.getPageCount()
-    if (pages === 0)
-      throw validation("Ese PDF no tiene páginas", { [FILE_FIELD]: "Ese PDF no tiene páginas" })
+    if (pages === 0) throw fileProblem("Ese PDF no tiene páginas")
     const page = source.getPage(0)
     const crop = page.getCropBox()
     const rotation = (((page.getRotation().angle % 360) + 360) % 360) as 0 | 90 | 180 | 270
     const turned = rotation === 90 || rotation === 270
     const width = turned ? crop.height : crop.width
     const height = turned ? crop.width : crop.height
-    if (!(width > 0 && height > 0))
-      throw validation("No pudimos leer ese PDF", { [FILE_FIELD]: "No pudimos leer ese PDF" })
+    if (!(width > 0 && height > 0)) throw fileProblem("No pudimos leer ese PDF")
     const embedded = await out.embedPage(page, {
       left: crop.x,
       bottom: crop.y,
@@ -144,59 +133,18 @@ export async function normalizeLetterhead(bytes: Uint8Array): Promise<Normalized
         ? await out.embedPng(await upright.png().toBuffer())
         : await out.embedJpg(await upright.jpeg({ quality: 92 }).toBuffer())
   } catch {
-    throw validation("No pudimos leer esa imagen", { [FILE_FIELD]: "No pudimos leer esa imagen" })
+    throw fileProblem("No pudimos leer esa imagen")
   }
-  const ratio = image.height / image.width
-  const size =
-    Math.abs(ratio - A4.height / A4.width) < 0.02
-      ? A4
-      : Math.abs(ratio - LETTER.height / LETTER.width) < 0.02
-        ? LETTER
-        : { width: A4.width, height: A4.width * ratio }
-  const target = out.addPage([size.width, size.height])
-  target.drawImage(image, { x: 0, y: 0, width: size.width, height: size.height })
-  const dpi = image.width / (size.width / 72)
+  const size = letterheadImagePage(image.width, image.height)
+  out
+    .addPage([size.width, size.height])
+    .drawImage(image, { x: 0, y: 0, width: size.width, height: size.height })
   return {
     pdf: await out.save(),
     widthPt: size.width,
     heightPt: size.height,
     pages: 1,
-    lowResolution: dpi < LOW_DPI,
-  }
-}
-
-/**
- * Dónde va el texto, dentro de lo posible: al menos 5 mm desde cada borde y, si los
- * márgenes no dejan lugar, se achican en proporción hasta dejar la mitad del ancho y el
- * 40 % del alto. Medio milímetro basta.
- */
-export function clampLetterheadMargins(
-  page: { widthPt: number; heightPt: number },
-  margins: LetterheadMargins,
-): LetterheadMargins {
-  const widthMm = page.widthPt / MM
-  const heightMm = page.heightPt / MM
-  const floor = (value: number) =>
-    Number.isFinite(value) ? Math.max(LETTERHEAD_MIN_MARGIN_MM, value) : LETTERHEAD_MIN_MARGIN_MM
-  let { topMm, bottomMm, leftMm, rightMm } = {
-    topMm: floor(margins.topMm),
-    bottomMm: floor(margins.bottomMm),
-    leftMm: floor(margins.leftMm),
-    rightMm: floor(margins.rightMm),
-  }
-  const fit = (a: number, b: number, room: number): [number, number] => {
-    if (a + b <= room) return [a, b]
-    const k = room / (a + b)
-    return [a * k, b * k]
-  }
-  ;[leftMm, rightMm] = fit(leftMm, rightMm, widthMm * (1 - MIN_TEXT_WIDTH))
-  ;[topMm, bottomMm] = fit(topMm, bottomMm, heightMm * (1 - MIN_TEXT_HEIGHT))
-  const half = (value: number) => Math.round(value * 2) / 2
-  return {
-    topMm: half(topMm),
-    bottomMm: half(bottomMm),
-    leftMm: half(leftMm),
-    rightMm: half(rightMm),
+    lowResolution: image.width / (size.width / 72) < LOW_DPI,
   }
 }
 
@@ -318,11 +266,14 @@ function changedMeanwhile(): ServiceError {
  * La hoja que quien guarda tenía a la vista (`expected`: su id, o null si no había):
  * si otra persona la cambió entretanto, no se pisa. Sin `expected`, no se comprueba.
  */
-async function assertCurrent(tx: Db, orgId: string, expected: string | null | undefined) {
-  if (expected === undefined) return null
+async function assertCurrent(
+  tx: Db,
+  orgId: string,
+  expected: string | null | undefined,
+): Promise<void> {
+  if (expected === undefined) return
   const current = await getCurrentLetterhead(tx, orgId)
   if ((current?.id ?? null) !== expected) throw changedMeanwhile()
-  return current
 }
 
 /** Sube una hoja nueva. */
@@ -346,12 +297,12 @@ export async function adjustLetterhead(
   orgId: string,
   userId: string,
   changes: LetterheadMargins &
-    Pick<Letterhead, "hasContact"> &
-    Partial<Pick<Letterhead, "topBandUrl" | "bottomBandUrl" | "thumbnailUrl">>,
+    Pick<Letterhead, "hasContact" | "topBandUrl" | "bottomBandUrl" | "thumbnailUrl">,
   expected?: string,
 ): Promise<Letterhead> {
-  const current = (await assertCurrent(tx, orgId, expected)) ?? (await getCurrentLetterhead(tx, orgId))
+  const current = await getCurrentLetterhead(tx, orgId)
   if (!current) throw notFound("Hoja membretada")
+  if (expected !== undefined && current.id !== expected) throw changedMeanwhile()
   const { id: _id, createdAt: _at, ...rest } = current
   return putVersion(tx, orgId, userId, { ...rest, ...changes }, "org_profile.letterhead_adjusted")
 }
@@ -432,7 +383,7 @@ export async function letterheadSampleSigner(
 }
 
 /** Lo más que pesa cada franja o la miniatura que manda el navegador. */
-export const LETTERHEAD_IMAGE_MAX_BYTES = 3 * 1024 * 1024
+const LETTERHEAD_IMAGE_MAX_BYTES = 3 * 1024 * 1024
 
 /**
  * Una franja o la miniatura, como se guarda en el bucket público: PNG rehecho aquí (sin
@@ -440,19 +391,18 @@ export const LETTERHEAD_IMAGE_MAX_BYTES = 3 * 1024 * 1024
  * imagen se rechaza.
  */
 export async function cleanLetterheadImage(bytes: Uint8Array, field: string): Promise<Uint8Array> {
-  if (bytes.byteLength === 0 || bytes.byteLength > LETTERHEAD_IMAGE_MAX_BYTES)
-    throw validation("No pudimos preparar la vista de tu hoja. Vuelve a elegirla", {
+  const unusable = () =>
+    validation("No pudimos preparar la vista de tu hoja. Vuelve a elegirla", {
       [field]: "Imagen no válida",
     })
+  if (bytes.byteLength === 0 || bytes.byteLength > LETTERHEAD_IMAGE_MAX_BYTES) throw unusable()
   try {
     const png = await sharp(bytes, { failOn: "error", limitInputPixels: 30_000_000 })
       .resize({ width: 2400, withoutEnlargement: true })
-      .png({ compressionLevel: 9 })
+      .png()
       .toBuffer()
     return new Uint8Array(png)
   } catch {
-    throw validation("No pudimos preparar la vista de tu hoja. Vuelve a elegirla", {
-      [field]: "Imagen no válida",
-    })
+    throw unusable()
   }
 }

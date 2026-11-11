@@ -1,11 +1,10 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  adjustLetterhead,
   clampLetterheadMargins,
   cleanLetterheadImage,
-  adjustLetterhead,
   clinicLogoFolder,
   getCurrentLetterhead,
-  LETTERHEAD_MAX_BYTES,
   type Letterhead,
   letterheadContact,
   letterheadPdfKey,
@@ -46,6 +45,11 @@ const restoreInput = z.object({ id: z.uuid() }).strict()
 
 /** La hoja que tenía a la vista quien guarda: su id, o «none» si no había. */
 const currentInput = z.union([z.literal("none"), z.uuid()]).optional()
+
+/** Sin hoja que leer: se dice junto al archivo. */
+function chooseSheet(): ServiceError {
+  return new ServiceError("VALIDATION", 400, "Elige la hoja", { file: "Elige la hoja" })
+}
 
 function fileOf(form: FormData, name: string): File | null {
   const value = form.get(name)
@@ -112,12 +116,7 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
     if (!margins.success) return validationError(c, margins.error.issues)
     const file = fileOf(form, "file")
     return runService(c, 200, async () => {
-      const source = file ? await bytesOf(file) : await currentPdf(orgId)
-      if (source.byteLength > LETTERHEAD_MAX_BYTES)
-        throw new ServiceError("VALIDATION", 400, "La hoja no puede superar 5 MB", {
-          file: "La hoja no puede superar 5 MB",
-        })
-      const sheet = await normalizeLetterhead(source)
+      const sheet = await normalizeLetterhead(file ? await bytesOf(file) : await currentPdf(orgId))
       const page = { widthPt: sheet.widthPt, heightPt: sheet.heightPt }
       const clamped = clampLetterheadMargins(page, margins.data)
       const { clinic, signer } = await withOrgContext(deps.db, orgId, async (tx) => ({
@@ -128,7 +127,6 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
         {
           ...clinic,
           logo: null,
-          sheetUnavailable: false,
           sheet: { pdf: sheet.pdf, ...clamped, hasContact: margins.data.hasContact },
         },
         signer,
@@ -191,20 +189,14 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
       const { hasContact, ...rest } = margins.data
       if (!file) {
         // Ajustar la de hoy: el mismo PDF, con sus franjas recortadas de nuevo.
-        if (!expected)
-          throw new ServiceError("VALIDATION", 400, "Elige la hoja", { file: "Elige la hoja" })
+        if (!expected) throw chooseSheet()
         const bands = await putBands()
         const adjusted = await withOrgContext(deps.db, orgId, (tx) =>
           adjustLetterhead(tx, orgId, userId, { ...rest, hasContact, ...bands }, expected),
         )
         return { letterhead: summaryOf(adjusted) }
       }
-      const source = await bytesOf(file)
-      if (source.byteLength > LETTERHEAD_MAX_BYTES)
-        throw new ServiceError("VALIDATION", 400, "La hoja no puede superar 5 MB", {
-          file: "La hoja no puede superar 5 MB",
-        })
-      const sheet = await normalizeLetterhead(source)
+      const sheet = await normalizeLetterhead(await bytesOf(file))
       if (!deps.storage.putAttachmentAt)
         throw new ServiceError(
           "STORAGE_UNAVAILABLE",
