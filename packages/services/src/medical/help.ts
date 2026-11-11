@@ -113,7 +113,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       if (faq.q.startsWith("¿Puedo ofrecer dos opciones"))
         return [
           {
-            id: "ofrecer-dos-opciones-presupuesto",
+            id: faq.id,
             ...(faq.area ? { area: faq.area } : {}),
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
             a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
