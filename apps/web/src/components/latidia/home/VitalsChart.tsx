@@ -41,7 +41,7 @@ export default function VitalsChart() {
             <text x="8" y="147">100</text>
             <text x="14" y="185">80</text>
           </g>
-          <g fontSize="14" fill="#64748b" textAnchor="middle">
+          <g fontSize="14" style={{ fill: "var(--soft)" }} textAnchor="middle">
             <text x="90" y="222">ene.</text>
             <text x="260" y="222">abr.</text>
             <text x="430" y="222">jul.</text>
@@ -97,7 +97,7 @@ export default function VitalsChart() {
             <text x="0" y="129">100</text>
             <text x="6" y="164">80</text>
           </g>
-          <g fontSize="12" fill="#64748b" textAnchor="middle">
+          <g fontSize="12" style={{ fill: "var(--soft)" }} textAnchor="middle">
             <text x="60" y="190">ene.</text>
             <text x="145" y="190">abr.</text>
             <text x="230" y="190">jul.</text>

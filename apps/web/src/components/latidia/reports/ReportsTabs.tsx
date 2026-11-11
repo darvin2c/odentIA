@@ -83,17 +83,21 @@ const MEDICAL: Data = {
     // Que falten menos es bueno: baja, pero va en verde.
     { label: "Faltaron a su cita", value: "16", cmp: "↓ 3 menos que en septiembre", trend: "up", spark: [0.7, 0.66, 0.68, 0.6, 0.62, 0.55, 0.5, 0.52, 0.48, 0.45, 0.42, 0.3] },
   ],
+  // La cascada de Reportes › Finanzas: lo cobrado, su impuesto, las comisiones de los médicos y cada tipo de
+  // gasto, hasta «Lo que deja». La app no descuenta comisiones de tarjeta: no las registra.
   cascade: [
     ["Cobrado", "18.640", 0, 100, false],
-    ["Impuesto (IGV)", "− 2.843", 84.7, 15.3, true],
-    ["Comisiones de tarjeta", "− 210", 83.6, 1.1, true],
-    ["Lo que te deja", "15.587", 0, 83.6, false],
+    ["IGV", "− 2.843", 84.7, 15.3, true],
+    ["Comisiones", "− 2.200", 72.9, 11.8, true],
+    ["Alquiler", "− 1.800", 63.3, 9.6, true],
+    ["Materiales", "− 1.050", 57.7, 5.6, true],
+    ["Lo que deja", "10.747", 0, 57.7, false],
   ],
-  cascadeEnd: "Lo que te deja",
-  cascadeNote: "El impuesto se separa de lo cobrado antes de decir lo que te deja.",
+  cascadeEnd: "Lo que deja",
+  cascadeNote: "El impuesto no es del consultorio: se separa de lo cobrado antes de decir lo que deja.",
   finance: [
-    { label: "Te deben", value: "S/ 1.230", cmp: "14 personas · S/ 240 llevan más de 60 días", trend: "warn" },
-    { label: "Comisiones de tarjeta", value: "S/ 210", cmp: "Igual que en los mismos días de septiembre", trend: "flat" },
+    { label: "Te deben", value: "S/ 1.230", cmp: "14 personas · Vencido hace más de 30 días: S/ 90 menos que en septiembre", trend: "warn" },
+    { label: "Comisiones", value: "S/ 2.200", cmp: "14 % de lo cobrado sin IGV · Por pagar: S/ 800", trend: "flat" },
   ],
   funnel: [
     ["Nos buscaron", "Primera conversación o registro", 120, ""],
@@ -128,7 +132,7 @@ const MEDICAL: Data = {
 
 // Clínica Sonrisa Norte (la de las demás demostraciones de odentIA), en soles. Las cifras que ya publican
 // la portada de Argos y las preguntas de esta misma página son las mismas: te deben S/ 4.820 de 23 personas,
-// S/ 1.150 llevan más de 60 días, la inasistencia de la clínica es 11 % y la limpieza dental suma S/ 3.200
+// S/ 2.220 llevan más de 30 días (S/ 1.150 de ellos, más de 60), la inasistencia de la clínica es 11 % y la limpieza dental suma S/ 3.200
 // en 40 atenciones. Los rótulos y el orden de las cifras, los de Reportes de la app
 // (packages/clinic-app/src/components/reports).
 const DENTAL: Data = {
@@ -143,11 +147,11 @@ const DENTAL: Data = {
     { label: "No vinieron", value: "11 %", cmp: "↓ 2 puntos menos que en septiembre", trend: "up", detail: "27 de 245 citas que ya pasaron", spark: [0.66, 0.62, 0.64, 0.58, 0.6, 0.55, 0.52, 0.5, 0.48, 0.46, 0.44, 0.38] },
     { label: "Citas que agendó el agente", value: "71", cmp: "↑ 6 más que en septiembre", trend: "up", detail: "y recuperó 9 citas", spark: [0.3, 0.34, 0.4, 0.42, 0.48, 0.5, 0.55, 0.58, 0.6, 0.66, 0.7, 0.55] },
     // Que baje lo que se debe es bueno: va en verde.
-    { label: "Te deben hace más de 60 días", value: "S/ 1.150", cmp: "↓ S/ 200 menos que en septiembre", trend: "up", detail: "5 personas, al cierre del periodo", spark: [0.6, 0.62, 0.66, 0.64, 0.6, 0.58, 0.62, 0.56, 0.54, 0.5, 0.48, 0.42] },
+    { label: "Te deben hace más de 30 días", value: "S/ 2.220", cmp: "↓ S/ 200 menos que en septiembre", trend: "up", detail: "11 personas, al cierre del periodo", spark: [0.6, 0.62, 0.66, 0.64, 0.6, 0.58, 0.62, 0.56, 0.54, 0.5, 0.48, 0.42] },
   ],
   cascade: [
     ["Cobrado", "21.600", 0, 100, false],
-    ["Impuesto (IGV)", "− 3.295", 84.7, 15.3, true],
+    ["IGV", "− 3.295", 84.7, 15.3, true],
     ["Comisiones", "− 2.500", 73.2, 11.6, true],
     ["Materiales", "− 2.100", 63.4, 9.7, true],
     ["Lo que deja", "13.705", 0, 63.4, false],
@@ -155,7 +159,7 @@ const DENTAL: Data = {
   cascadeEnd: "Lo que deja",
   cascadeNote: "El impuesto no es de la clínica: se separa de lo cobrado antes de decir lo que deja.",
   finance: [
-    { label: "Te deben", value: "S/ 4.820", cmp: "23 personas · S/ 1.150 llevan más de 60 días", trend: "warn" },
+    { label: "Te deben", value: "S/ 4.820", cmp: "23 personas · Vencido hace más de 30 días: S/ 200 menos que en septiembre", trend: "warn" },
     { label: "Comisiones", value: "S/ 2.500", cmp: "14 % de lo cobrado sin IGV · Por pagar: S/ 900", trend: "flat" },
   ],
   byService: {
@@ -298,7 +302,7 @@ export default function ReportsTabs({ agentCost, contactHref, variant = "medical
           <div className="lt-rtabs-stack">
             <div className="lt-rtabs-row">
               <div className="lt-rtabs-card lt-rtabs-wide">
-                <b className="lt-rtabs-h">{variant === "dental" ? "De lo cobrado a lo que deja el periodo" : "De lo cobrado a lo que te deja"}</b>
+                <b className="lt-rtabs-h">De lo cobrado a lo que deja el periodo</b>
                 {d.cascade.map(([label, value, from, width, minus]) => (
                   <div key={label} className="lt-rtabs-line">
                     <span>{label}</span>

@@ -1,7 +1,8 @@
 ---
 // /omnicanal de odentIA (misma estructura que la de latidIA): la portada con los seis canales que llegan
 // a la ficha de Lucía, una sola persona aunque cambie de canal (y la mamá que escribe por su hija),
-// WhatsApp para clínicas con la ventana de 24 horas y el recordatorio aprobado, enlaces relacionados,
+// WhatsApp para clínicas con la ventana de 24 horas y el recordatorio aprobado, el chat web que se
+// instala con una línea (ilustración quieta), enlaces relacionados,
 // preguntas y cierre. Título, descripción, migas y relacionados son los de PAGES.omnicanal; las preguntas
 // se escriben aquí para quitar los marcadores «Por confirmar» que la plantilla genérica deja a la vista.
 import Base from "../../layouts/Base.astro"
@@ -36,6 +37,13 @@ const onePerson: { title: string; text: string; link?: { href: string; label: st
   { title: "Tu equipo, cuando hace falta", text: "Lo que necesita a una persona pasa a tu equipo, con un resumen de lo hablado." },
 ]
 
+// El chat web: una línea que se pega una vez (Configuración › Integraciones › Chat web).
+const webchat = [
+  { title: "La pegas una vez", text: "Antes de </body>, tú o quien hace tu web. Cambiar el saludo o el color de tu marca no obliga a volver a pegarla." },
+  { title: "Lo pruebas sin publicar", text: "Al lado de la línea conversas con Sofi en modo prueba. La prueba no se cobra ni cuenta en Reportes." },
+  { title: "Si cierra la pestaña, no se pierde", text: "Su conversación sigue en ese navegador 30 días. Si Sofi le pasa el tema a tu equipo, el chat le pide su WhatsApp o su correo para avisarle." },
+]
+
 const faq: FaqItem[] = [
   {
     q: "¿Qué significa omnicanal?",
@@ -60,6 +68,10 @@ const faq: FaqItem[] = [
   {
     q: "¿Puedo usar el WhatsApp que ya tiene mi clínica?",
     a: "Sí. Conectas el número de tu clínica desde tu cuenta de Meta, con pasos guiados dentro de odentIA, y tus pacientes siguen escribiendo al de siempre.",
+  },
+  {
+    q: "¿Cómo pongo el chat en mi web?",
+    a: "En Configuración › Integraciones › Chat web, «Copiar código» y pegas esa línea en tu sitio, antes de </body>. Si no lo manejas tú, «Enviar a quien hace mi web» copia un mensaje listo para mandárselo. El chat responde en el primer sitio donde la pegas y en los que tú permites.",
   },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -134,7 +146,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           </div>
           <div class="om-card soft">
             <h3>Su enlace en el mensaje</h3>
-            <p>Para elegir la hora, cambiar su cita o ver sus documentos. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+            <p>Para elegir la hora, cambiar su cita o firmar su consentimiento. <a href="/portal-del-paciente">Ver Su enlace</a></p>
           </div>
           <div class="om-card soft">
             <h3>Lo que cobra Meta</h3>
@@ -144,7 +156,30 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       </div>
     </section>
 
-    <Related hrefs={page.related} />
+    <section class="om-sec" id="chat-web">
+      <div class="wrap om-in">
+        <div class="om-head">
+          <span class="tag om-tag">[ El chat de tu web ]</span>
+          <h2 class="om-h2">Se instala pegando una sola línea.</h2>
+          <p class="om-p">Lo que escriben en tu sitio llega a la misma Bandeja y Sofi responde al momento.</p>
+        </div>
+        {/* La línea que se pega, como ilustración: la de cada clínica sale de su Configuración. */}
+        <div class="om-line" role="img" aria-label="Ejemplo de la línea del chat que se pega en el sitio web, con los botones «Copiar código» y «Enviar a quien hace mi web»">
+          <code>&lt;script src="https://tu-clinica…/chat.js" async&gt;&lt;/script&gt;</code>
+          <span class="om-line-btns"><span class="om-line-btn main">Copiar código</span><span class="om-line-btn">Enviar a quien hace mi web</span><span class="om-line-ex">así se ve en tu Configuración</span></span>
+        </div>
+        <div class="om-grid">
+          {webchat.map((item) => (
+            <div class="om-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} white />
     <div class="om-faq">
       <Faq items={faq} />
     </div>

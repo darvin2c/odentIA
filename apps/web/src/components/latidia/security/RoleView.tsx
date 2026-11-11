@@ -1,13 +1,15 @@
 // «Entra como…» (lienzo de latidIA, tablero «Seguridad», portada): la misma persona vista por cada rol.
 // Cada fila dice qué ve ese rol y qué no, como lo decide la matriz de permisos del sistema
-// (packages/auth/src/permissions.ts). Los roles pasan solos cada 3,6 s hasta que la persona toca uno; con
-// movimiento reducido se queda en el primero. Datos de ejemplo.
+// (packages/auth/src/permissions.ts). Los roles pasan solos cada 3,6 s hasta que la persona toca uno, dos
+// vueltas, y se queda en el primero (WCAG 2.2.2); con movimiento reducido se queda en el primero. Datos
+// de ejemplo.
 // Un solo componente para las dos webs (`variant`): latidIA, con Rosa Paredes vista por la Dra. Vela,
 // Recepción, Caja y Sofi; odentIA, con Carlos Medina vista por la Dra. Paredes (odontólogo), Recepción,
 // Caja, Administración y Sofi. En odentIA, Recepción ve solo las alergias de la historia (`clinical.alerts`)
 // y sube la tomografía que trae el paciente sin abrirla (`clinical.receive`): se marca «en parte».
 import { useEffect, useRef, useState } from "react"
 import "./role-view.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 type Variant = "medical" | "dental"
 
@@ -167,8 +169,11 @@ const DENTAL: RoleSet = {
 const SETS: Record<Variant, RoleSet> = { medical: MEDICAL, dental: DENTAL }
 
 const NEXT_MS = 3600
+/** Vueltas por todos los roles antes de quedarse en el primero. */
+const ROUNDS = 2
 
 export default function RoleView({ variant = "medical" }: { variant?: Variant }) {
+  const steady = useSteadyHeight<HTMLDivElement>()
   const set = SETS[variant]
   // Se arma en el servidor con la vista del primer rol: sin JavaScript se lee igual.
   const [role, setRole] = useState<string>(set.roles[0][0])
@@ -177,8 +182,14 @@ export default function RoleView({ variant = "medical" }: { variant?: Variant })
   useEffect(() => {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return
     const order = set.roles.map(([key]) => key)
+    // Pasos que da solo: todos los roles, dos veces, y termina en el primero, como llegó del servidor.
+    let moves = 1
     setRole(order[1])
-    timer.current = window.setInterval(() => setRole((r) => order[(order.indexOf(r) + 1) % order.length]), NEXT_MS)
+    timer.current = window.setInterval(() => {
+      moves += 1
+      setRole(order[moves % order.length])
+      if (moves >= ROUNDS * order.length) window.clearInterval(timer.current)
+    }, NEXT_MS)
     return () => window.clearInterval(timer.current)
   }, [set])
 
@@ -188,7 +199,7 @@ export default function RoleView({ variant = "medical" }: { variant?: Variant })
   }
 
   return (
-    <div className="lt-roles">
+    <div className="lt-roles" ref={steady}>
       <fieldset className="lt-roles-roles">
         <legend>Entra como…</legend>
         <div>
@@ -206,26 +217,34 @@ export default function RoleView({ variant = "medical" }: { variant?: Variant })
           <span className="lt-roles-age">{set.who.sub}</span>
         </span>
       </div>
-      <ul className="lt-roles-rows">
-        {set.sections.map((s) => {
-          const [ok, text] = s.see[role]
-          return (
-            <li key={s.title} data-ok={ok === "some" ? "some" : ok || undefined}>
-              <span className="lt-roles-icon" aria-hidden="true">
-                {ok === "some" ? "◐" : ok ? "✓" : "—"}
-              </span>
-              <span className="lt-roles-text">
-                <b>{s.title}</b>
-                <span className="lt-roles-see">
-                  <span className="sr-only">{ok === "some" ? "Lo ve en parte: " : ok ? "Lo ve: " : "No lo ve: "}</span>
-                  {text}
-                </span>
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-      <p className="lt-roles-note">{set.notes[role]}</p>
+      {/* Lo que ve cada rol ocupa la misma celda (las demás vistas, sin verse): la tarjeta mide lo que
+          la vista más larga y pasar de un rol a otro no corre lo que está debajo. */}
+      <div className="fit">
+        {set.roles.map(([key]) => (
+          <div key={key} className={`lt-roles-view${key === role ? "" : " fit-ghost"}`} aria-hidden={key === role ? undefined : true}>
+            <ul className="lt-roles-rows">
+              {set.sections.map((s) => {
+                const [ok, text] = s.see[key]
+                return (
+                  <li key={s.title} data-ok={ok === "some" ? "some" : ok || undefined}>
+                    <span className="lt-roles-icon" aria-hidden="true">
+                      {ok === "some" ? "◐" : ok ? "✓" : "—"}
+                    </span>
+                    <span className="lt-roles-text">
+                      <b>{s.title}</b>
+                      <span className="lt-roles-see">
+                        <span className="sr-only">{ok === "some" ? "Lo ve en parte: " : ok ? "Lo ve: " : "No lo ve: "}</span>
+                        {text}
+                      </span>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="lt-roles-note">{set.notes[key]}</p>
+          </div>
+        ))}
+      </div>
       <span className="lt-roles-demo">Demostración con datos de ejemplo. Toca un rol.</span>
     </div>
   )

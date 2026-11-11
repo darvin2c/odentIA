@@ -76,11 +76,25 @@ export default function WhatsappConnect() {
               <span className="wc-num" aria-hidden="true">
                 {state === "done" ? "✓" : i + 1}
               </span>
+              {/* Lo hecho y lo que falta ocupan la misma celda, y la línea de espera tiene su lugar desde
+                  el principio: cada paso mide siempre lo mismo y «Volver a ver» no se corre. */}
               <span className="wc-text">
                 <b>{s.title}</b>
-                <span>{state === "done" ? s.done : s.todo}</span>
-                {state === "current" && i === 1 && <span className="wc-wait">Esperando a Meta. Esta pantalla lo detecta sola cuando verifique la dirección.</span>}
-                {state === "current" && i === 2 && <span className="wc-wait">Esperando el primer mensaje. Esta pantalla lo detecta sola en cuanto llegue.</span>}
+                <span className="fit">
+                  <span className={state === "done" ? undefined : "fit-ghost"} aria-hidden={state === "done" ? undefined : true}>
+                    {s.done}
+                  </span>
+                  <span className={state === "done" ? "fit-ghost" : undefined} aria-hidden={state === "done" || undefined}>
+                    {s.todo}
+                  </span>
+                </span>
+                {i > 0 && (
+                  <span className="wc-wait" data-off={state !== "current" || undefined} aria-hidden={state !== "current" || undefined}>
+                    {i === 1
+                      ? "Esperando a Meta. Esta pantalla lo detecta sola cuando verifique la dirección."
+                      : "Esperando el primer mensaje. Esta pantalla lo detecta sola en cuanto llegue."}
+                  </span>
+                )}
               </span>
             </li>
           )

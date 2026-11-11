@@ -2,9 +2,12 @@
 // /portal-del-paciente de odentIA: la misma estructura que la de latidIA, con la pantalla de Su enlace de
 // la app dental. Portada con el teléfono de Andrea, cómo entra, lo que resuelve cada paciente, las
 // preguntas y el cierre. Título, descripción, migas, enlaces relacionados y preguntas son los de
-// PAGES.enlace. Lo que se promete es lo que hacen hoy Su enlace (`/reserva`) y el portal (`/portal`):
-// reservar, cambiar o cancelar, responder el presupuesto, leer y firmar el consentimiento, la receta y
-// el comprobante 30 días y «Tus mensajes»; el portal lo da recepción y se vuelve con la huella o la cara.
+// PAGES.enlace. Lo que se promete es lo que hacen hoy Su enlace (`/reserva`), el portal (`/portal`) y el
+// registro (`/registro`): Su enlace lleva lo pendiente (reservar, cambiar o cancelar, responder el
+// presupuesto, sus datos, leer y firmar el consentimiento y «Tus mensajes»); cada papel le llega en PDF
+// por WhatsApp o por correo al tocar «Enviar»; el portal, con el acceso que se da en la clínica, muestra
+// todo lo suyo sin vencer y se vuelve con la huella o la cara. Debajo, el registro por QR o enlace con
+// las preguntas que elige la clínica, y su logo y su color.
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
@@ -39,25 +42,32 @@ const steps = [
   { title: "Lo abre en el navegador", text: "No descarga nada ni crea una contraseña." },
   {
     title: "Vuelve con su huella o su cara",
-    text: "Si tu clínica le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, responde el mensaje y recibe uno nuevo.",
+    text: "Si tu clínica le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, pide uno nuevo ahí mismo, con «Enviarme uno nuevo».",
   },
 ]
 
 const decides: { title: string; text: string; link?: { href: string; label: string } }[] = [
-  { title: "Su cita", text: "Reserva, cambia o cancela en los horarios libres. Si es su primera cita, después de elegir se le piden unos datos. El horario que deja se libera para otro." },
+  {
+    title: "Su cita",
+    text: "Reserva, cambia o cancela en los horarios libres, y aparece en la agenda de la sede. Si es su primera cita, después de elegir se le piden unos datos.",
+    link: { href: "/agenda-odontologica", label: "Ver la agenda" },
+  },
   {
     title: "Su presupuesto",
     text: "Ve las opciones, acepta la que prefiere o solo una parte, y elige el horario ahí mismo.",
     link: { href: "/presupuestos-dentales", label: "Ver los presupuestos" },
   },
   { title: "Sus consentimientos y datos", text: "Lee y firma el consentimiento con calma y completa sus datos y su salud antes de llegar. Lo que declara queda como declarado por él." },
-  { title: "Sus papeles", text: "La receta y el comprobante, para descargar durante 30 días." },
+  { title: "Sus papeles, en PDF", text: "La receta, la orden y el consentimiento firmado salen en PDF cuando tocas «Enviar». Por WhatsApp, si te escribió en las últimas 24 horas o si Meta ya aprobó ese mensaje en la cuenta de tu clínica; si no, por correo. El comprobante sale por correo al cobrar." },
+  { title: "Su portal, sin vencer", text: "Con el acceso que le das en la clínica ve todo lo suyo cuando quiera: sus citas, sus presupuestos, su cuenta y sus documentos, también las radiografías con su informe." },
   { title: "Sus mensajes", text: "Elige qué mensajes recibe: recordatorios, controles y novedades. Los avisos de su cita y sus papeles le llegan siempre." },
-  {
-    title: "Su cita, en tu agenda",
-    text: "Lo que reserva o cambia aparece en la agenda de la sede, con su unidad dental y su odontólogo.",
-    link: { href: "/agenda-odontologica", label: "Ver la agenda" },
-  },
+]
+
+// Antes de la primera cita: el registro por QR o enlace y la marca de la clínica en lo que ve el paciente.
+const yours = [
+  { title: "Se registra con un QR o un enlace", text: "Con el código QR de recepción o el enlace de tu clínica, llena sus datos y su salud en su celular. A quien aún no es paciente, Sofi le envía el enlace de su cita y ahí completa sus datos." },
+  { title: "Tú eliges qué preguntar", text: "Dato por dato: «No preguntar», «Opcional» u «Obligatorio». Al lado ves lo que verá el paciente." },
+  { title: "Tu logo y tu color", text: "Subes tu logo y eliges el color de tu marca: tus pacientes lo ven en su registro, su enlace y la reserva." },
 ]
 ---
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
@@ -68,7 +78,7 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
         <div class="pt-copy">
           <span class="tag tag-d pt-tag rise">[ Su enlace ]</span>
           <h1 class="pt-h1 rise d1">Reserva de citas online para dentistas, <span class="acc">con Su enlace.</span></h1>
-          <p class="pt-lead rise d2">Cada paciente tiene su propio enlace: reserva y cambia su cita, responde su presupuesto, completa sus datos y descarga sus papeles. Sin llamar y sin contraseña.</p>
+          <p class="pt-lead rise d2">Cada paciente tiene su propio enlace: reserva y cambia su cita, responde su presupuesto, completa sus datos y firma su consentimiento. Sin llamar y sin contraseña.</p>
           <div class="pt-ctas rise d3">
             <a class="btn btn-p" href={cta.href}>{cta.label}</a>
             <a class="btn btn-g" href="#entrar">Cómo entra</a>
@@ -108,7 +118,7 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
         <div class="pt-head">
           <span class="tag pt-tag">[ Qué resuelve ]</span>
           <h2 class="pt-h2">Lo que antes era una llamada, ahora es un toque.</h2>
-          <p class="pt-p">Desde recepción se le da acceso al portal; tu clínica decide qué ve cada paciente: sus citas, sus presupuestos o sus documentos.</p>
+          <p class="pt-p">Lo que tiene pendiente lo resuelve desde su teléfono, sin llamar.</p>
         </div>
         <div class="pt-grid">
           {decides.map((item) => (
@@ -121,7 +131,35 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
       </div>
     </section>
 
-    <Related hrefs={page.related} white />
+    <section class="pt-sec white">
+      <div class="wrap pt-yours">
+        <div class="pt-yours-copy">
+          <div class="pt-head">
+            <span class="tag pt-tag">[ Con tu marca ]</span>
+            <h2 class="pt-h2">Se registra solo, con tu logo y tu color.</h2>
+          </div>
+          <ul class="pt-list">
+            {yours.map((item) => (
+              <li><b>{item.title}</b><span>{item.text}</span></li>
+            ))}
+          </ul>
+        </div>
+        {/* Ilustración de la hoja del registro y del color de la marca: no son controles de esta página. */}
+        <div class="pt-sheet" role="img" aria-label="Ejemplo: la hoja de registro de Clínica Sonrisa Norte con su código QR y, debajo, los colores de la marca con el botón «Usar este color»">
+          <span class="pt-sheet-org"><i aria-hidden="true">SN</i>Clínica Sonrisa Norte</span>
+          <b class="pt-sheet-t">Registro de paciente</b>
+          <span class="pt-qr" aria-hidden="true"></span>
+          <span class="pt-sheet-sub">Escanéalo con la cámara de tu celular.</span>
+          <span class="pt-sw">
+            <span class="pt-sw-h">Color de la marca</span>
+            <span class="pt-sw-row" aria-hidden="true"><i class="on" style="background:#0e7490"></i><i style="background:#b45309"></i><i style="background:#7c3aed"></i><i style="background:#be185d"></i><i style="background:#15803d"></i></span>
+            <span class="pt-sw-btn">Usar este color</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} />
     <div class="pt-faq"><Faq items={page.faq} /></div>
     <CtaBand title="Que tus pacientes resuelvan sin llamar.">
       <Fragment slot="text">
@@ -176,6 +214,26 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
   .pt-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
   .pt-card a { font-weight: 700; }
 
+  .pt-yours { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .pt-yours-copy { flex: 1.3 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+  .pt-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .pt-list li { display: flex; flex-direction: column; gap: 4px; background: var(--bg); border-radius: 18px; padding: 18px 20px; }
+  .pt-list b { font-size: 17px; }
+  .pt-list span { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .pt-sheet { flex: 0 1 340px; min-width: 0; max-width: 100%; margin: 0 auto; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 26px; padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+  .pt-sheet-org { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--ink-2); }
+  .pt-sheet-org i { width: 28px; height: 28px; border-radius: 8px; background: var(--teal); color: #fff; font-style: normal; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+  .pt-sheet-t { font-size: 19px; line-height: 1.25; }
+  /* Un dibujo de QR, no un código que se pueda leer. */
+  .pt-qr { width: 132px; height: 132px; box-sizing: border-box; border-radius: 12px; border: 10px solid var(--paper); background-color: var(--paper); background-image: repeating-conic-gradient(var(--ink) 0 25%, transparent 0 50%), repeating-conic-gradient(var(--ink) 0 25%, transparent 0 50%); background-size: 22px 22px, 38px 38px; background-position: 0 0, 7px 5px; }
+  .pt-sheet-sub { font-size: 13px; color: var(--muted); }
+  .pt-sw { align-self: stretch; margin-top: 4px; background: var(--paper); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .pt-sw-h { font-size: 13px; font-weight: 700; color: var(--ink-2); }
+  .pt-sw-row { display: flex; gap: 10px; }
+  .pt-sw-row i { width: 26px; height: 26px; border-radius: 50%; }
+  .pt-sw-row i.on { box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px var(--teal); }
+  .pt-sw-btn { font-size: 14px; font-weight: 700; color: #fff; background: var(--teal); border-radius: 999px; padding: 9px 18px; }
+
   .pt-faq { background: var(--paper); padding-bottom: 8px; }
 
   @media (max-width: 720px) {
@@ -183,11 +241,20 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
     .pt-hero-in { gap: 32px; }
     .pt-lead { font-size: 17px; }
     .pt-ctas :global(.btn) { flex: 1 1 100%; }
-    .pt-copy, .pt-phone, .pt-enter-copy, .pt-login { flex-basis: 100%; }
+    .pt-copy, .pt-phone, .pt-enter-copy, .pt-login, .pt-yours-copy { flex-basis: 100%; }
+    .pt-yours { gap: 28px; }
+    .pt-list li { padding: 16px; }
     .pt-sec { padding: 64px 0; }
     .pt-in { gap: 28px; }
     .pt-enter { gap: 32px; }
     .pt-p { font-size: 16px; }
     .pt-steps li { padding: 16px; gap: 12px; }
+  }
+  /* En el teléfono, las tarjetas de «Qué resuelve» (solo texto) van en mosaico de dos columnas. */
+  @media (max-width: 720px) {
+    .pt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .pt-card { padding: 14px; border-radius: 14px; gap: 6px; }
+    .pt-card h3 { font-size: 15.5px; overflow-wrap: break-word; }
+    .pt-card p { font-size: 14px; line-height: 1.45; overflow-wrap: break-word; }
   }
 </style>

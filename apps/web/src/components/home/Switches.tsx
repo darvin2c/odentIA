@@ -1,4 +1,6 @@
-// 04 · El control: cada tarea de los agentes se prende o se apaga, y dice qué pasa en cada caso.
+// 04 · El control: cada tarea de los agentes se prende o se apaga, y dice qué pasa en el estado en que
+// está. Los nombres son los de la app: «Agendar, mover y cancelar citas» (packages/services/src/
+// agent-roles.ts) y las líneas del Administrador (admin-lines.ts).
 import { useState } from "react"
 
 const SW = [
@@ -13,9 +15,9 @@ const SW = [
   {
     id: "agendar",
     agent: "Sofi",
-    label: "Agendar citas",
+    label: "Agendar, mover y cancelar citas",
     on: "Agenda en los horarios libres de quien atiende ese servicio, con el sí del paciente.",
-    off: "Envía su enlace para que la persona elija la hora.",
+    off: "No toca la agenda: envía el enlace para que la persona elija la hora.",
     phone: false,
   },
   {
@@ -29,7 +31,7 @@ const SW = [
   {
     id: "recuperar",
     agent: "Argos",
-    label: "Avisar los controles",
+    label: "Avisar un control",
     on: "Escribe dos días antes de que le toque su control.",
     off: "Te deja la lista y tu equipo decide a quién llamar.",
     phone: false,
@@ -37,7 +39,7 @@ const SW = [
   {
     id: "presupuestos",
     agent: "Argos",
-    label: "Retomar los presupuestos",
+    label: "Retomar un presupuesto",
     on: "Pregunta por los presupuestos que quedaron sin respuesta.",
     off: "Los presupuestos esperan a tu equipo.",
     phone: true,

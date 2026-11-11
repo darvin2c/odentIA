@@ -1,16 +1,22 @@
 // «Un día en el Consultorio San Martín» (lienzo «Inicio», sección 4): siete pasos, del mensaje de
-// Rosa a medianoche al control de Luis cada 3 meses. Avanza solo; elegir un paso lo detiene ahí.
-// En el escritorio, la lista a la izquierda y el paso a la derecha; en el teléfono, los números
-// arriba y «Anterior», pausa y «Siguiente» abajo. Sin movimiento se queda en el paso 3.
-import { useEffect, useState } from "react"
+// Rosa a medianoche al control de Luis cada 3 meses. Avanza solo, da dos vueltas y se queda en el
+// último paso (WCAG 2.2.2); elegir un paso lo detiene ahí. El control dice lo que hace: «Pausar»,
+// «Seguir» o «Volver a ver». En el escritorio, la lista a la izquierda y el paso a la derecha; en el
+// teléfono, los números arriba y «Anterior», el control y «Siguiente» abajo. Sin movimiento se queda
+// en el paso 3.
+// Los siete pasos ocupan la misma celda y solo se ve el actual: la tarjeta mide lo que el paso más
+// largo y «Anterior», el control y «Siguiente» no se mueven mientras el caso avanza solo.
+// Quién hace cada cosa es lo del producto: el descanso lo emite y lo firma la médica (Clío solo lo
+// propone) y los mensajes que decide Argos los escribe Sofi.
+import { useEffect, useRef, useState } from "react"
 import { prefersReducedMotion } from "./loop"
 import "./day-case.css"
 
-type Agent = "Sofi" | "Clío" | "Argos" | "Equipo"
+type Agent = "Sofi" | "Clío" | "Argos" | "Equipo" | "Dra. Vela"
 type Item = { kind: "in" | "out" | "card"; label: string; text: string; chip?: string }
 type Step = { when: string; ch: string; agent: Agent; title: string; text: string; items: Item[] }
 
-const AGENT_CLASS: Record<Agent, string> = { Sofi: "sofi", Clío: "clio", Argos: "argos", Equipo: "team" }
+const AGENT_CLASS: Record<Agent, string> = { Sofi: "sofi", Clío: "clio", Argos: "argos", Equipo: "team", "Dra. Vela": "team" }
 
 const STEPS: Step[] = [
   {
@@ -55,9 +61,9 @@ const STEPS: Step[] = [
   {
     when: "Jueves 09:18",
     ch: "Documentos",
-    agent: "Clío",
-    title: "Descanso emitido y enviado",
-    text: "Firmado con su colegiatura y enviado por WhatsApp.",
+    agent: "Dra. Vela",
+    title: "La Dra. Vela emite el descanso",
+    text: "Clío lo propuso; ella lo firma con su colegiatura y le llega por WhatsApp.",
     items: [
       {
         kind: "card",
@@ -65,7 +71,7 @@ const STEPS: Step[] = [
         text: "3 días de descanso. Sin diagnóstico: Rosa no autorizó que figure. Elena Vela · CMP 045678",
         chip: "Emitido",
       },
-      { kind: "out", label: "WhatsApp · 09:19", text: "Rosa, aquí está tu descanso médico. También lo descargas desde tu enlace durante 30 días." },
+      { kind: "out", label: "WhatsApp · 09:19", text: "Rosa, te enviamos tu descanso médico. Lo tienes adjunto en este mensaje, en PDF." },
     ],
   },
   {
@@ -84,9 +90,9 @@ const STEPS: Step[] = [
     ch: "WhatsApp",
     agent: "Argos",
     title: "Argos la invita a su control",
-    text: "El control que dictó la doctora, a tiempo.",
+    text: "Argos ve que le toca el control que dictó la doctora; Sofi le escribe.",
     items: [
-      { kind: "out", label: "Argos · 10:00", text: "Hola, Rosa. ¿Cómo sigues? Te toca tu control con la Dra. Vela. ¿Te reservo el jueves a las 09:00?" },
+      { kind: "out", label: "Sofi · 10:00", text: "Hola, Rosa. ¿Cómo sigues? Te toca tu control con la Dra. Vela. ¿Te reservo el jueves a las 09:00?" },
       { kind: "in", label: "Rosa · 10:12", text: "Sí, gracias. Ya estoy mejor." },
       { kind: "card", label: "Agenda", text: "Control · jueves 09:00 · Sala 1", chip: "Reservado" },
     ],
@@ -96,11 +102,11 @@ const STEPS: Step[] = [
     ch: "WhatsApp",
     agent: "Argos",
     title: "Y Luis vuelve a su control",
-    text: "Su control de presión se repite hasta «Dejar de repetir».",
+    text: "Luis, otro paciente del consultorio, se controla la presión cada 3 meses, hasta «Dejar de repetir».",
     items: [
       {
         kind: "out",
-        label: "Argos · a Luis Gómez",
+        label: "Sofi · a Luis Gómez",
         text: "Hola, Luis. Le toca su control de presión. ¿Le reservo el martes a las 10:00? Traiga el registro de presión de su casa.",
       },
       { kind: "in", label: "Luis · 11:05", text: "Sí, el martes." },
@@ -110,10 +116,19 @@ const STEPS: Step[] = [
 ]
 const N = STEPS.length
 const STEP_MS = 3400
+/** Vueltas que da solo antes de quedarse en el último paso. */
+const ROUNDS = 2
+/** Lo que puede decir el control. */
+const AUTO_LABELS = ["Pausar", "Seguir", "Volver a ver"]
 
 export default function DayCase() {
   const [cur, setCur] = useState(2)
   const [auto, setAuto] = useState(false)
+  // Terminó sus vueltas solo: el control ofrece «Volver a ver».
+  const [ended, setEnded] = useState(false)
+  const at = useRef(cur)
+  at.current = cur
+  const laps = useRef(0)
 
   useEffect(() => {
     if (prefersReducedMotion()) return
@@ -123,23 +138,52 @@ export default function DayCase() {
 
   useEffect(() => {
     if (!auto) return
-    const id = setInterval(() => setCur((c) => (c + 1) % N), STEP_MS)
+    const id = setInterval(() => {
+      const next = at.current + 1
+      if (next < N) {
+        setCur(next)
+        return
+      }
+      laps.current += 1
+      if (laps.current >= ROUNDS) {
+        setAuto(false)
+        setEnded(true)
+      } else setCur(0)
+    }, STEP_MS)
     return () => clearInterval(id)
   }, [auto])
 
   const pick = (i: number) => {
     setCur((i + N) % N)
     setAuto(false)
+    setEnded(false)
   }
-  const step = STEPS[cur]
-  const tone = AGENT_CLASS[step.agent]
-  const autoLabel = auto ? "Pausar el recorrido" : "Reproducir el recorrido"
+  // Pausar, seguir desde donde quedó o, terminado, una vuelta más.
+  const toggle = () => {
+    if (auto) setAuto(false)
+    else if (ended || cur === N - 1) {
+      laps.current = ROUNDS - 1
+      setEnded(false)
+      setCur(0)
+      setAuto(true)
+    } else setAuto(true)
+  }
+  const autoLabel = auto ? "Pausar" : ended || cur === N - 1 ? "Volver a ver" : "Seguir"
+  const autoGlyph = auto ? "❚❚" : ended || cur === N - 1 ? "↻" : "▶"
 
   return (
     <div className="dc">
       <div className="dc-bar">
-        <button type="button" className="dc-auto" onClick={() => setAuto(!auto)}>
-          {autoLabel}
+        <button type="button" className="dc-auto" onClick={toggle}>
+          {/* El texto más largo reserva su ancho: el botón no cambia de tamaño al cambiar. */}
+          <span className="fit fit-inline">
+            {AUTO_LABELS.map((text) => (
+              <span key={text} className="fit-ghost" aria-hidden="true">
+                {text}
+              </span>
+            ))}
+            <span>{autoLabel}</span>
+          </span>
         </button>
       </div>
       <div className="dc-grid">
@@ -178,27 +222,37 @@ export default function DayCase() {
           ))}
         </fieldset>
 
-        <div className={`dc-panel ${tone}`}>
-          <div className="dc-panel-head">
-            <span className="dc-panel-title">
-              <b>{step.title}</b>
-              <span>{step.text}</span>
-            </span>
-            <span className="dc-pos">
-              Paso {cur + 1} de {N}
-            </span>
+        <div className="dc-panel">
+          <div className="fit">
+            {STEPS.map((step, i) => (
+              <div
+                key={step.title}
+                className={`dc-view ${AGENT_CLASS[step.agent]}${i === cur ? "" : " fit-ghost"}`}
+                aria-hidden={i === cur ? undefined : true}
+              >
+                <div className="dc-panel-head">
+                  <span className="dc-panel-title">
+                    <b>{step.title}</b>
+                    <span>{step.text}</span>
+                  </span>
+                  <span className="dc-pos">
+                    Paso {i + 1} de {N}
+                  </span>
+                </div>
+                <div className="dc-chline">
+                  <span className="dc-ch">{step.ch}</span>
+                  <span className="dc-when">{step.when}</span>
+                </div>
+                {step.items.map((item) => (
+                  <div key={item.label + item.text} className={`dc-item ${item.kind}`}>
+                    <span className="dc-label">{item.label}</span>
+                    <span className="dc-text">{item.text}</span>
+                    {item.chip && <span className="dc-chip">{item.chip}</span>}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
-          <div className="dc-chline">
-            <span className="dc-ch">{step.ch}</span>
-            <span className="dc-when">{step.when}</span>
-          </div>
-          {step.items.map((item) => (
-            <div key={item.label + item.text} className={`dc-item ${item.kind}`}>
-              <span className="dc-label">{item.label}</span>
-              <span className="dc-text">{item.text}</span>
-              {item.chip && <span className="dc-chip">{item.chip}</span>}
-            </div>
-          ))}
           <div className="dc-dots" aria-hidden="true">
             {STEPS.map((s, i) => (
               <i key={s.title} className={i <= cur ? "on" : undefined}></i>
@@ -208,8 +262,8 @@ export default function DayCase() {
             <button type="button" className="dc-prev" onClick={() => pick(cur - 1)}>
               ← Anterior
             </button>
-            <button type="button" className="dc-play" aria-label={autoLabel} onClick={() => setAuto(!auto)}>
-              {auto ? "❚❚" : "▶"}
+            <button type="button" className="dc-play" aria-label={autoLabel} onClick={toggle}>
+              {autoGlyph}
             </button>
             <button type="button" className="dc-next" onClick={() => pick(cur + 1)}>
               Siguiente →

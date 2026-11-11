@@ -39,6 +39,7 @@
       "/agentes/administrador",
       "/agenda-para-opticas",
       "/historia-clinica-electronica",
+      "/pedidos-de-lentes",
       "/buscador",
       "/omnicanal",
       "/caja-y-cobros",
@@ -56,6 +57,6 @@
       "/aviso-legal",
       "/pe/libro-de-reclamaciones"
     ],
-    "own": ["/agenda-para-opticas", "/portal-del-cliente"]
+    "own": ["/agenda-para-opticas", "/pedidos-de-lentes", "/portal-del-cliente"]
   }
 }

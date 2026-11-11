@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { AgentFoot, AgentHead } from "../../../agents/frame/AgentFrame"
 import "./sofi-chat.css"
+import { useSteadyHeight } from "../../../../lib/steady"
 
 type Scene = "agenda" | "urgencia"
 type Tone = "cercano" | "neutro" | "formal"
@@ -57,6 +58,7 @@ const LAST = 8
 const STEP_MS = 1500
 
 export default function SofiChat() {
+  const steady = useSteadyHeight<HTMLDivElement>()
   const [scene, setScene] = useState<Scene>("agenda")
   const [tone, setTone] = useState<Tone>("cercano")
   const [emoji, setEmoji] = useState(false)
@@ -116,7 +118,7 @@ export default function SofiChat() {
   })
 
   return (
-    <div className="lsc">
+    <div className="lsc" ref={steady}>
       <div className="lsc-top">
         <AgentHead
           agent="sofi"
@@ -153,27 +155,29 @@ export default function SofiChat() {
       </div>
       <div className="lsc-chat" aria-live="polite">
         <span className="lsc-day">HOY</span>
-        {messages.map((m) => (
-          <div
-            key={`${scene}-${m.start}`}
-            className={`lsc-msg ${m.visible ? "on" : "off"}`}
-            data-kind={m.kind}
-            aria-hidden={m.visible ? undefined : true}
-          >
-            {m.typing ? (
-              <span className="lsc-dots" role="img" aria-label="Sofi está escribiendo">
-                <i />
-                <i />
-                <i />
-              </span>
-            ) : (
-              <>
-                <span className="lsc-text">{m.text}</span>
-                <span className="lsc-time">{m.meta}</span>
-              </>
-            )}
-          </div>
-        ))}
+        {messages.map((m) =>
+          // Los mensajes van pegados al fondo, como en WhatsApp: cada uno entra abajo y el espacio que
+          // queda está arriba. La tarjeta mide lo que la conversación completa (useSteadyHeight), así
+          // el chat no cambia de alto y «Volver a ver» no se mueve. Mientras Sofi escribe, los tres puntos.
+          !m.visible ? null : (
+            <div key={`${scene}-${m.start}`} className="lsc-slot" data-kind={m.kind}>
+              {m.typing ? (
+                <div className="lsc-msg on" data-kind="out">
+                  <span className="lsc-dots" role="img" aria-label="Sofi está escribiendo">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </div>
+              ) : (
+                <div className="lsc-msg on" data-kind={m.kind}>
+                  <span className="lsc-text">{m.text}</span>
+                  <span className="lsc-time">{m.meta}</span>
+                </div>
+              )}
+            </div>
+          ),
+        )}
       </div>
       <div className="lsc-note">
         <AgentFoot
