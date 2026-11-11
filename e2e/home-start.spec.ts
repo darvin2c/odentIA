@@ -153,7 +153,7 @@ for (const width of [1440, 390]) {
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
       expect(home.setup).toMatchObject({ availability: true, rooms: true, patients: true, agent: true })
       expect(home.waiting).toEqual([])
-      expect(home.today?.summary).toEqual({ total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0 })
+      expect(home.today?.summary).toEqual({ total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0, unclosed: 0 })
       await observe(page, info, "configurada-sin-pendientes")
       await agenda.getByRole("button", { name: "Abrir la Agenda", exact: true }).click()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/agenda"))
@@ -187,7 +187,7 @@ for (const width of [1440, 390]) {
       // (o, si ya pasó su hora sin que llegara, aparte).
       const upcoming = upcomingOfActiveDay()
       const mine = page.getByRole("region", { name: "Mis pacientes de hoy" })
-      await expect(mine.getByRole("list", { name: upcoming.mine ? "Más tarde" : "Pasó su hora sin llegar" })).toContainText("Paciente con cita")
+      await expect(mine.getByRole("list", { name: upcoming.mine ? "Más tarde" : "Sin cerrar" })).toContainText("Paciente con cita")
       await expect(mine).not.toContainText("Paciente de otra profesional")
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
       // La agenda de la sede, en una línea con su resumen, igual al de la Agenda de ese día.
@@ -208,8 +208,8 @@ for (const width of [1440, 390]) {
 
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
       expect(home.waiting.map(row => row.kind)).toEqual(["case", "task"])
-      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: upcoming.mine, unconfirmed: 1 } })
-      expect(home.agendaLine).toMatchObject({ branch: { id: owner.branchId }, summary: { total: 2, waiting: 0, attended: 0, upcoming: upcoming.all, unconfirmed: 1 } })
+      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: upcoming.mine, unconfirmed: upcoming.mine, unclosed: 1 - upcoming.mine } })
+      expect(home.agendaLine).toMatchObject({ branch: { id: owner.branchId }, summary: { total: 2, waiting: 0, attended: 0, upcoming: upcoming.all, unconfirmed: upcoming.mine, unclosed: 2 - upcoming.all } })
       expect(home.cash?.toCollect.map(row => row.displayName)).toEqual(["Paciente con cita"])
       // Una sede que no existe no rompe Inicio ni mezcla sedes: vale la primera activa.
       const fallback = await call<WorkspaceHome>(page, "GET", `/api/workspace/home?branch=${randomUUID()}`, owner.org.slug)
@@ -234,7 +234,7 @@ for (const width of [1440, 390]) {
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
       const upcoming = upcomingOfActiveDay()
       // El servidor no entrega citas de otro profesional, caja ni lo que decide recepción.
-      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: upcoming.mine, unconfirmed: 1 } })
+      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: upcoming.mine, unconfirmed: upcoming.mine, unclosed: 1 - upcoming.mine } })
       expect(home.today?.appointments.map(row => row.patientName)).toEqual(["Paciente con cita"])
       expect(home.cash).toBeNull()
       expect(home.waiting.some(row => row.kind === "case")).toBe(false)
