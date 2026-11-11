@@ -41,6 +41,8 @@ import {
   invalidateAppointmentTokens,
   preferredContact,
   rescheduleAppointmentReminders,
+  restartAppointmentReminders,
+  restoreAppointmentReminders,
 } from "./automation.js"
 import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
 import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
@@ -215,6 +217,8 @@ export interface AppointmentItem {
    * («Recordar la cita»). Ausente en las lecturas.
    */
   notice?: { queued: boolean }
+  /** Solo al mover: estaba confirmada, pasó a otro día y volvió a «por confirmar». */
+  unconfirmed?: boolean
   /**
    * Cita de prueba (ADR 0094): de qué prueba salió, quién la hizo en «Probar»
    * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.
@@ -1572,6 +1576,8 @@ export async function createAppointment(
 }
 
 export interface MoveAppointmentInput {
+  /** La persona ya confirmó con el equipo el día nuevo: la confirmada sigue confirmada. */
+  stillConfirmed?: boolean
   expectedVersion: number
   startsAt: string
   endsAt?: string
@@ -1597,7 +1603,7 @@ const UNDO_MOVE_MS = 10 * 60_000
  * cita de hoy sin cerrar que se arrastró por error vuelve a su sitio. Solo vale la hora exacta de
  * la que salió en su último movimiento, y por unos minutos.
  */
-async function undoesLastMove(tx: Db, orgId: string, id: string, startsAt: Date): Promise<boolean> {
+async function lastMoveBack(tx: Db, orgId: string, id: string, startsAt: Date): Promise<{ unconfirmed: boolean } | null> {
   const [last] = await tx
     .select({ metadata: auditEvent.metadata, createdAt: auditEvent.createdAt })
     .from(auditEvent)
@@ -1611,8 +1617,9 @@ async function undoesLastMove(tx: Db, orgId: string, id: string, startsAt: Date)
     )
     .orderBy(desc(auditEvent.createdAt))
     .limit(1)
-  const from = (last?.metadata as { from?: string } | null)?.from
-  return !!last && !!from && new Date(from).getTime() === startsAt.getTime() && Date.now() - last.createdAt.getTime() <= UNDO_MOVE_MS
+  const metadata = last?.metadata as { from?: string; unconfirmed?: boolean } | null
+  const back = !!last && !!metadata?.from && new Date(metadata.from).getTime() === startsAt.getTime() && Date.now() - last.createdAt.getTime() <= UNDO_MOVE_MS
+  return back ? { unconfirmed: metadata?.unconfirmed === true } : null
 }
 
 export async function moveAppointment(
@@ -1621,8 +1628,12 @@ export async function moveAppointment(
   actorUserId: string,
   id: string,
   input: MoveAppointmentInput,
-  /** `requested`: lo pide una persona (el equipo, Sofi o la persona en su enlace), como al crearla. */
-  options: { notice?: boolean; requested?: boolean } = {},
+  /**
+   * `requested`: lo pide una persona (el equipo, Sofi o la persona en su enlace), como al crearla.
+   * `byPerson`: la hora nueva la eligió la propia persona (su enlace, o Sofi en su conversación):
+   * elegirla ya es confirmarla, y la cita confirmada lo sigue estando.
+   */
+  options: { notice?: boolean; requested?: boolean; byPerson?: boolean } = {},
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id)
   // Solo se mueve lo que sigue en pie: lo atendido, cancelado o que no vino ya pasó.
@@ -1640,12 +1651,10 @@ export async function moveAppointment(
   const startsAt = parseInstant(input.startsAt, "startsAt")
   // A una hora que ya pasó no se lleva una cita: lo que pasó se cierra («Vino», «No vino»
   // o su atención), no se vuelve a reservar. La misma regla que al crearla, aquí y no solo en la pantalla.
-  if (
-    options.requested &&
-    startsAt.getTime() !== current.startsAt.getTime() &&
-    startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS &&
-    !(await undoesLastMove(tx, orgId, id, startsAt))
-  )
+  const moved = startsAt.getTime() !== current.startsAt.getTime()
+  // «Deshacer»: vuelve a la hora de la que salió en su último movimiento.
+  const back = moved ? await lastMoveBack(tx, orgId, id, startsAt) : null
+  if (options.requested && moved && startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS && !back)
     throw invalidField("startsAt", "Esa hora ya pasó. Elige una hora de ahora en adelante.")
   const durationMs = current.endsAt.getTime() - current.startsAt.getTime()
   const endsAt = input.endsAt
@@ -1687,8 +1696,17 @@ export async function moveAppointment(
     })
   }
   // Llegó hoy: si la cita pasa a otro día, esa llegada ya no es de ella.
-  const zone = current.arrivedAt ? await branchZone(tx, orgId, current.branchId) : null
-  const arrivalCleared = zone !== null && localDay(startsAt, zone) !== localDay(current.startsAt, zone)
+  const zone = moved ? await branchZone(tx, orgId, current.branchId) : null
+  const dayChanged = zone !== null && localDay(startsAt, zone) !== localDay(current.startsAt, zone)
+  const arrivalCleared = dayChanged && current.arrivedAt !== null
+  // La persona dijo sí a otro día: si el equipo la lleva a un día distinto, la cita vuelve a «por
+  // confirmar» y sus recordatorios empiezan de nuevo. Dentro del mismo día sigue confirmada (le
+  // llega el aviso del cambio), y también si la hora nueva la eligió ella. «Deshacer» ese
+  // movimiento la devuelve confirmada.
+  const keptConfirmed = current.status === "confirmada" && dayChanged && !options.byPerson && !back && input.stillConfirmed === true
+  const unconfirmed = current.status === "confirmada" && dayChanged && !options.byPerson && !back && !keptConfirmed
+  const reconfirmed = current.status === "programada" && back?.unconfirmed === true
+  const status = unconfirmed ? "programada" : reconfirmed ? "confirmada" : current.status
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {
@@ -1701,6 +1719,7 @@ export async function moveAppointment(
         professionalUserId,
         roomId,
         overlapAllowed: input.overrideBusy === true,
+        status,
         ...(arrivalCleared ? { arrivedAt: null, arrivedBy: null } : {}),
         version: current.version + 1,
         updatedAt: new Date(),
@@ -1725,6 +1744,10 @@ export async function moveAppointment(
       professionalUserId,
       roomId,
       ...(arrivalCleared ? { arrivalCleared: true } : {}),
+      ...(unconfirmed ? { unconfirmed: true } : {}),
+      // Recepción dijo que la persona ya confirmó con ella el día nuevo.
+      ...(keptConfirmed ? { confirmedWithTeam: true } : {}),
+      ...(reconfirmed ? { reconfirmed: true } : {}),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
       ...(input.overrideBusy ? { overrideBusy: true } : {}),
     })
@@ -1739,13 +1762,17 @@ export async function moveAppointment(
         moved: true,
       })
     }
-    const moved = startsAt.getTime() !== current.startsAt.getTime()
     if (moved) await rescheduleAppointmentReminders(tx, orgId, id, startsAt)
+    // Otro día, otros recordatorios: los que ya salieron eran de la fecha anterior.
+    if (dayChanged) {
+      if (back) await restoreAppointmentReminders(tx, orgId, id, current.version)
+      else await restartAppointmentReminders(tx, orgId, id, current.version + 1)
+    }
     const notice =
       moved && active && options.notice !== false ? await enqueueAppointmentNotice(tx, orgId, id, "movida") : null
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, id)
-    return notice ? { ...item, notice } : item
+    return { ...item, ...(notice ? { notice } : {}), ...(unconfirmed ? { unconfirmed: true } : {}) }
   } catch (error) {
     if (isExclusionViolation(error)) {
       throw appointmentConflict(exclusionTarget(error), roomName)

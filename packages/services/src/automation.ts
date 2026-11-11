@@ -1136,7 +1136,37 @@ export async function newPersonRemindersVia(tx: Db, orgId: string): Promise<"wha
 export function remindedUnconfirmedSql(appt: SQL): SQL {
   return sql`(${appt}.status = 'programada' and ${appt}.starts_at > now() and exists (select 1 from automation_job j_rem
     where j_rem.organization_id = ${appt}.organization_id and j_rem.appointment_id = ${appt}.id
-      and j_rem.kind = 'recordatorio_cita' and j_rem.status = 'enviado'))`
+      and j_rem.kind = 'recordatorio_cita' and j_rem.status = 'enviado'
+      and j_rem.dedupe_key not like ${`%${EARLIER_DATE_MARK}%`}))`
+}
+
+/**
+ * Marca en la clave de un recordatorio que fue de una fecha anterior de la cita: la cita pasó a
+ * otro día y esos avisos ya no cuentan para la fecha nueva. Siguen en la historia como salieron.
+ */
+const EARLIER_DATE_MARK = ":antes:"
+
+/**
+ * La cita pasó a otro día: sus recordatorios empiezan de nuevo. Los que ya salieron (o ya no
+ * iban a salir) quedan como de la fecha anterior, y `syncAppointmentReminders` programa los de la
+ * fecha nueva. Los pendientes solo cambian de hora (`rescheduleAppointmentReminders`).
+ */
+export async function restartAppointmentReminders(tx: Db, orgId: string, appointmentId: string, version: number): Promise<void> {
+  await tx.execute(sql`
+    update automation_job set dedupe_key = dedupe_key || ${`${EARLIER_DATE_MARK}${version}`}, updated_at = updated_at
+    where organization_id = ${orgId} and appointment_id = ${appointmentId} and kind = 'recordatorio_cita'
+      and status <> 'pendiente' and dedupe_key not like ${`%${EARLIER_DATE_MARK}%`}`)
+}
+
+/** «Deshacer» ese movimiento: los recordatorios de la fecha a la que vuelve cuentan otra vez. */
+export async function restoreAppointmentReminders(tx: Db, orgId: string, appointmentId: string, version: number): Promise<void> {
+  const mark = `${EARLIER_DATE_MARK}${version}`
+  await tx.execute(sql`
+    update automation_job j set dedupe_key = left(j.dedupe_key, length(j.dedupe_key) - ${mark.length}::int)
+    where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.kind = 'recordatorio_cita'
+      and right(j.dedupe_key, ${mark.length}::int) = ${mark}
+      and not exists (select 1 from automation_job o where o.organization_id = j.organization_id
+        and o.dedupe_key = left(j.dedupe_key, length(j.dedupe_key) - ${mark.length}::int))`)
 }
 
 /**
@@ -1171,7 +1201,7 @@ export async function syncAppointmentReminders(
         lte(appointment.startsAt, horizon),
         sql`(select count(*) from automation_job j
           where j.organization_id = ${orgId} and j.rule_id = ${rule.id} and j.kind = 'recordatorio_cita'
-            and j.appointment_id = ${appointment.id})
+            and j.appointment_id = ${appointment.id} and j.dedupe_key not like ${`%${EARLIER_DATE_MARK}%`})
           < (select count(*) from (values ${fitting}) as hh(h)
               where ${appointment.startsAt} - hh.h * interval '1 hour' >= ${now.toISOString()}::timestamptz - interval '30 minutes')`,
       ),
@@ -3266,6 +3296,8 @@ export async function appointmentConfirmationPlan(
         eq(automationJob.organizationId, orgId),
         eq(automationJob.appointmentId, appt.id),
         eq(automationJob.kind, "recordatorio_cita"),
+        // Lo que se le pidió para una fecha anterior de la cita no es un pedido de esta.
+        sql`${automationJob.dedupeKey} not like ${`%${EARLIER_DATE_MARK}%`}`,
       ),
     )
     .orderBy(asc(automationJob.scheduledFor))

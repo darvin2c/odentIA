@@ -1,6 +1,7 @@
 import {
   Button,
   buttonVariants,
+  Checkbox,
   cn,
   DropdownMenu,
   DropdownMenuContent,
@@ -327,6 +328,12 @@ function RealAppointmentDrawer({
     Date.parse(target.start) === Date.parse(appointment.startsAt) &&
     Date.parse(target.end) === Date.parse(appointment.endsAt)
   const targetSaid = target ? whenSaid(target.start, timeZone, today) : ""
+  // Confirmó otro día: al cambiarla de día vuelve a «por confirmar», salvo que ya lo haya dicho.
+  const [stillConfirmed, setStillConfirmed] = React.useState(false)
+  const asksConfirmed =
+    appointment.status === "confirmada" &&
+    target != null &&
+    zonedDateOf(target.start, timeZone) !== zonedDateOf(appointment.startsAt, timeZone)
   const move = useMutation({
     // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
     mutationFn: (range: { start: string; end: string; columnId: string }) =>
@@ -338,6 +345,7 @@ function RealAppointmentDrawer({
           endsAt: range.end,
           professionalUserId: range.columnId,
           ...exceptionFlags(when.exception),
+          ...(asksConfirmed && stillConfirmed ? { stillConfirmed: true } : {}),
         }),
       }),
   })
@@ -351,7 +359,15 @@ function RealAppointmentDrawer({
         const result = await move.mutateAsync(when.shown)
         toast.success(
           `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
-          { description: result.data.notice?.queued ? "El agente le avisa la nueva fecha." : undefined },
+          {
+            description:
+              [
+                result.data.unconfirmed ? "Cambió de día: vuelve a «por confirmar»." : "",
+                result.data.notice?.queued ? "El agente le avisa la nueva fecha." : "",
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined,
+          },
         )
         setMode("view")
         await onChanged()
@@ -412,6 +428,7 @@ function RealAppointmentDrawer({
   const back = () => {
     setActionError("")
     moveForm.reset()
+    setStillConfirmed(false)
     setMode("view")
   }
   const error = mode === "move" ? moveError : mode === "edit" ? editError : actionError || null
@@ -494,6 +511,24 @@ function RealAppointmentDrawer({
         {mode === "move" ? (
           <div ref={moveRoot} className="grid gap-4">
             <WhenFields form={moveForm} fields="when" when={when} />
+            {asksConfirmed ? (
+              <div className="grid gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="cita-mover-ya-confirmo"
+                    checked={stillConfirmed}
+                    onCheckedChange={(checked) => setStillConfirmed(checked === true)}
+                    aria-describedby="cita-mover-ya-confirmo-ayuda"
+                  />
+                  <FieldLabel htmlFor="cita-mover-ya-confirmo" className="font-normal">
+                    Ya confirmó conmigo el día nuevo
+                  </FieldLabel>
+                </div>
+                <p id="cita-mover-ya-confirmo-ayuda" className="text-sm text-muted-foreground">
+                  Había confirmado otro día. Sin marcar, la cita vuelve a «por confirmar» y se le recuerda de nuevo.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : mode === "edit" ? (
           <div ref={editRoot} className="grid gap-4">

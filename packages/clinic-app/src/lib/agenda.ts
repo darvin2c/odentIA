@@ -87,6 +87,8 @@ export interface AgendaAppointment {
   conversationId?: string | null
   /** Solo al reservar, mover o cancelar: si el agente le avisará a la persona. */
   notice?: { queued: boolean }
+  /** Solo al mover: estaba confirmada, pasó a otro día y volvió a «por confirmar». */
+  unconfirmed?: boolean
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   visit: AppointmentVisit

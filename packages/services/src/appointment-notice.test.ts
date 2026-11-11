@@ -7,7 +7,7 @@ import { patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/sche
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { portalSession } from "@odentia/db/schema/portal"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, desc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } from "./agent-operations.js"
 import { createAppointment, getAppointmentContext, moveAppointment, setAppointmentStatus } from "./appointments.js"
@@ -380,6 +380,62 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const jobs = await jobsOf(c)
     expect(jobs.map((job) => job.kind).sort()).toEqual(["aviso_cita_reservada", "recordatorio_cita"])
     expect(jobs.find((job) => job.kind === "recordatorio_cita")!.scheduledFor.getTime()).toBe(to.getTime() - 3 * HOUR)
+  })
+
+  it("la cita confirmada que el equipo lleva a otro día vuelve a «por confirmar» y sus recordatorios empiezan de nuevo", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
+    // A media mañana en la sede (Lima): mover media hora no cambia de día a ninguna hora del reloj.
+    const at = new Date(Date.now() + 2 * DAY)
+    at.setUTCHours(15, 0, 0, 0)
+    const booked = await book(c, rosa.patientId, at, { notice: false })
+    // Ya se le recordó y confirmó ese día.
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, new Date(at.getTime() - 20 * HOUR)))
+    const key = `recordatorio_cita:${booked.id}:3`
+    await ownerDb.update(automationJob).set({ status: "enviado" }).where(eq(automationJob.dedupeKey, key))
+    const confirmed = await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, booked.id, "confirmada"))
+    const move = (version: number, startsAt: Date, extra: { stillConfirmed?: boolean } = {}, options: { byPerson?: boolean } = {}) =>
+      run(c, (tx) =>
+        moveAppointment(tx, c.orgId, c.ownerId, booked.id, { expectedVersion: version, startsAt: startsAt.toISOString(), outsideSchedule: true, ...extra }, { notice: false, ...options }),
+      )
+
+    // Dentro del mismo día sigue confirmada.
+    const sameDay = await move(confirmed.version, new Date(at.getTime() + HOUR / 2))
+    expect(sameDay).toMatchObject({ status: "confirmada" })
+    expect(sameDay.unconfirmed).toBeUndefined()
+
+    // A otro día: dijo sí a otro día, así que vuelve a «por confirmar».
+    const to = new Date(at.getTime() + 3 * DAY)
+    const moved = await move(sameDay.version, to)
+    expect(moved).toMatchObject({ status: "programada", unconfirmed: true })
+    // El recordatorio que ya salió era de la fecha anterior: no cuenta como pedido de esta…
+    expect((await jobsOf(c)).filter((job) => job.kind === "recordatorio_cita").map((job) => job.dedupeKey)).toEqual([`${key}:antes:${moved.version}`])
+    expect((await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, booked.id)))?.askedAt ?? null).toBeNull()
+    // …y al acercarse la fecha nueva se programa otro.
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, new Date(to.getTime() - 20 * HOUR)))
+    const again = (await jobsOf(c)).find((job) => job.dedupeKey === key)
+    expect(again).toMatchObject({ status: "pendiente" })
+    await ownerDb.delete(automationJob).where(eq(automationJob.id, again!.id))
+
+    // «Deshacer» la devuelve a su hora, confirmada, y su recordatorio vuelve a contar.
+    const undone = await move(moved.version, new Date(at.getTime() + HOUR / 2))
+    expect(undone).toMatchObject({ status: "confirmada" })
+    expect((await jobsOf(c)).filter((job) => job.kind === "recordatorio_cita").map((job) => job.dedupeKey)).toEqual([key])
+
+    // Si recepción ya lo confirmó con la persona, o la hora nueva la eligió ella, sigue confirmada.
+    const withTeam = await move(undone.version, new Date(to.getTime() + DAY), { stillConfirmed: true })
+    expect(withTeam).toMatchObject({ status: "confirmada" })
+    const byPerson = await move(withTeam.version, new Date(to.getTime() + 2 * DAY), {}, { byPerson: true })
+    expect(byPerson).toMatchObject({ status: "confirmada" })
+    const [audit] = await ownerDb
+      .select({ metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(and(eq(auditEvent.entityId, booked.id), eq(auditEvent.action, "appointment.moved")))
+      .orderBy(desc(auditEvent.createdAt))
+      .offset(1)
+      .limit(1)
+    expect(audit?.metadata).toMatchObject({ confirmedWithTeam: true })
   })
 
   it("si el recordatorio de la misma cita sale ahora, el aviso de reserva se da por cubierto", async () => {

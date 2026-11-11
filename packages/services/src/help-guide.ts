@@ -392,6 +392,9 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "vino tarde",
       "atendida sin registrar",
       "citas viejas",
+      "mover cita confirmada",
+      "volvió a por confirmar",
+      "ya no está confirmada",
     ],
     writePermission: "appointments.write",
     faqs: [
@@ -399,6 +402,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "bloqueo-horario",
         q: "¿Cómo bloqueo un horario?",
         a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (días enteros o unas horas) o un feriado o cierre de la sede. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
+      },
+      {
+        id: "mover-cita-confirmada",
+        q: "Moví una cita que ya estaba confirmada, ¿sigue confirmada?",
+        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha, y se le recuerda de nuevo para la fecha nueva. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
       },
       {
         id: "aparece-profesional-agenda",
