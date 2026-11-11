@@ -89,7 +89,15 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
   for (const status of ["cancelada", "no_asistio", "atendida"]) {
     // «Atendida» solo la pone el cierre de su atención (ADR 0032): aquí basta el estado en la base.
     if (status === "atendida") await ownerDb.update(appointment).set({ status }).where(eq(appointment.id, id))
-    else await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
+    else {
+      // «No vino» va sobre una cita en pie cuya hora ya pasó: de cancelada no se sale por /status.
+      if (status === "no_asistio")
+        await ownerDb
+          .update(appointment)
+          .set({ status: "programada", startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(Date.now() - 1_800_000) })
+          .where(eq(appointment.id, id))
+      await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
+    }
     const [row] = await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id))
     // Cancelar la cita suelta el control (ADR 0152): vuelve a estar por reservar, sin cita.
     expect(row).toMatchObject({

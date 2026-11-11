@@ -7,6 +7,7 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { ApiError } from "../../lib/api"
+import { activeOrgLocale } from "../../lib/locale"
 
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.shape.message ?? error.message
@@ -34,6 +35,14 @@ export function whenSaid(startISO: string, timeZone: string, today: string): str
 }
 
 /** «Hoy, de 11:30 a 12:00» o «Mar 13, de 09:00 a 09:30». */
+/** «nov» de un día «YYYY-MM-DD», en el idioma de la clínica. */
+function monthShort(date: string): string {
+  const [year, month, day] = date.split("-").map(Number)
+  return new Intl.DateTimeFormat(activeOrgLocale(), { month: "short", timeZone: "UTC" })
+    .format(new Date(Date.UTC(year!, month! - 1, day!, 12)))
+    .replace(".", "")
+}
+
 export function rangeSaid(
   startISO: string,
   endISO: string,
@@ -41,6 +50,8 @@ export function rangeSaid(
   today: string,
 ): string {
   const date = zonedDateOf(startISO, timeZone)
-  const day = date === today ? "Hoy" : capitalize(dayShort(date))
+  // Lejos de esta semana, con su mes: «Mar 3» de una cita pasada se leía como 3 de marzo.
+  const far = date < addDays(today, -6) || date > addDays(today, 6)
+  const day = date === today ? "Hoy" : capitalize(far ? `${dayShort(date)} ${monthShort(date)}` : dayShort(date))
   return `${day}, de ${hourLabel(dayMinutesIn(startISO, timeZone))} a ${hourLabel(dayMinutesIn(endISO, timeZone))}`
 }

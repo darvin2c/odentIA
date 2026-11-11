@@ -282,6 +282,36 @@ export interface WaitingUnclosed {
   professionalName: string | null
   serviceName: string | null
   branchName: string
+  /** Marcó «Llegó» ese día y nadie registró su atención: sigue sin cerrar. */
+  arrived?: boolean
+  /** La versión que ve la fila: cerrarla desde aquí no pisa lo que cambió otro. */
+  version?: number
+}
+
+/**
+ * Las citas sin cerrar de hace más de un mes, juntas en una fila (decisión 3 de
+ * la mesa del 10 nov): se revisan de una vez y no tapan lo reciente.
+ */
+export interface WaitingUnclosedOld {
+  count: number
+  oldestAt: string
+}
+
+/**
+ * Una cita que recepción cerró con «Vino» y su profesional todavía no registró:
+ * «Su cita del 9 nov quedó atendida sin registrar». Se va al registrar la
+ * atención o con «No hace falta»; no se va sola.
+ */
+export interface WaitingCameUnrecorded {
+  id: string
+  patientId: string
+  personId?: string | null
+  patientName: string
+  startsAt: string
+  serviceName: string | null
+  markedAt: string
+  markedByName: string | null
+  version: number
 }
 
 /**
@@ -371,6 +401,8 @@ export type WaitingRow =
   | ({ kind: "registrationDone" } & WaitingRegistrationDone)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unclosed" } & WaitingUnclosed)
+  | ({ kind: "unclosedOld" } & WaitingUnclosedOld)
+  | ({ kind: "cameUnrecorded" } & WaitingCameUnrecorded)
   | ({ kind: "acceptedUnbooked" } & WaitingAcceptedUnbooked)
   | ({ kind: "overdueControls" } & WaitingOverdueControls)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
@@ -402,8 +434,13 @@ export interface WaitingParts {
   registrationsDone?: WaitingRegistrationDone[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
-  /** Citas de días anteriores sin cerrar, de la más antigua a la más reciente, y cuántas son. */
-  unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null } | null
+  /**
+   * Citas de días anteriores sin cerrar del último mes, de la más reciente a la más
+   * antigua, y cuántas son; `older`, las de antes, que van juntas en una fila.
+   */
+  unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null; older?: WaitingUnclosedOld | null } | null
+  /** Las citas propias cerradas con «Vino» que falta registrar, de la más reciente a la más antigua. */
+  cameUnrecorded?: WaitingCameUnrecorded[]
   /** Quienes tienen algo aceptado sin cita, con lo que suma (null o 0: nadie). */
   acceptedUnbooked?: WaitingAcceptedUnbooked | null
   /** Los controles vencidos sin cita, si Argos no los recomienda ya (null o 0: ninguno). */
@@ -467,6 +504,7 @@ function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
     case "registrationDone":
     case "unconfirmed":
     case "unclosed":
+    case "cameUnrecorded":
     case "acceptedUnbooked":
     case "overdueControls":
     case "unsentBudget":
@@ -494,6 +532,7 @@ function personOf(row: WaitingRow): string | null {
     case "staleEncounter":
     case "unconfirmed":
     case "unclosed":
+    case "cameUnrecorded":
     case "registrationDone":
     case "unsentBudget":
     case "portalReentry":
@@ -570,6 +609,9 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   // La ficha de esa persona sigue trabada por un borrador de otro día: va antes que lo del día.
   for (const item of parts.staleEncounters ?? []) rows.push({ kind: "staleEncounter", ...item })
 
+  // Vino y nadie registró lo que se hizo: la historia de esa visita está vacía.
+  for (const item of parts.cameUnrecorded ?? []) rows.push({ kind: "cameUnrecorded", ...item })
+
   // Terminó su registro y su cita es hoy: ya se le puede atender al llegar.
   for (const item of (parts.registrationsDone ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "registrationDone", ...item })
 
@@ -580,6 +622,8 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
     const left = parts.unclosed.total - shown.length
     if (left > 0) rows.push({ kind: "more", of: "unclosed", count: left, startsAt: parts.unclosed.nextAt ?? null })
   }
+  // Lo de hace más de un mes no tapa lo reciente: una fila para revisarlo de una vez.
+  if (parts.unclosed?.older && parts.unclosed.older.count > 0) rows.push({ kind: "unclosedOld", ...parts.unclosed.older })
 
   if (parts.unconfirmed && parts.unconfirmed.total > 0) {
     const shown = parts.unconfirmed.items.slice(0, WAITING_LIMITS.unconfirmed)

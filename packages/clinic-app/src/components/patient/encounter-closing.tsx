@@ -58,22 +58,25 @@ import { productUi } from "../../product/product-ui"
 import { whenSaid } from "../agenda/shared"
 
 /**
- * Entre qué horas puede haber terminado la atención, en la zona de la clínica:
- * desde su inicio (una de otro día, desde las 00:00) hasta ahora. La lista
- * («Hora», cada 15 minutos) va dentro de esos límites.
+ * Entre qué horas puede haber terminado la atención, en la zona de la clínica, y
+ * de qué día: la de hoy, desde su inicio hasta ahora; la de otro día (la de una
+ * cita pasada que se registra después), ese mismo día desde su inicio, porque
+ * terminó cuando fue y no cuando se escribe. La lista («Hora», cada 15 minutos)
+ * va dentro de esos límites.
  */
 export function endTimeBounds(
   startedAt: string | null | undefined,
   now = new Date(),
-): { min: string; max: string } {
+): { min: string; max: string; day: string; past: boolean } {
   const nowValue = clinicDateTimeValue(now.toISOString())
-  const max = nowValue.slice(11, 16)
-  let min = "00:00"
+  const today = nowValue.slice(0, 10)
   if (startedAt) {
     const startValue = clinicDateTimeValue(startedAt)
-    if (startValue.slice(0, 10) === nowValue.slice(0, 10)) min = startValue.slice(11, 16)
+    const day = startValue.slice(0, 10)
+    if (day < today) return { min: startValue.slice(11, 16), max: "23:59", day, past: true }
+    if (day === today) return { min: startValue.slice(11, 16), max: nowValue.slice(11, 16), day, past: false }
   }
-  return { min, max }
+  return { min: "00:00", max: nowValue.slice(11, 16), day: today, past: false }
 }
 
 /** «¿Cuándo vuelve?»: nada elegido, uno de los atajos, «Otra fecha» o «No hace falta». */
@@ -1309,7 +1312,7 @@ export function EncounterClosingDialog({
                         className="w-44"
                         min={bounds.min}
                         max={bounds.max}
-                        emptyLabel={`Ahora (${bounds.max})`}
+                        emptyLabel={bounds.past ? "La de su cita" : `Ahora (${bounds.max})`}
                         value={field.state.value}
                         onChange={(value) => {
                           field.handleChange(value)

@@ -2,7 +2,6 @@ import { Button, cn, Dialog, DialogContent, DialogTitle, Input, ScrollArea, Spin
 import {
   dayMinutesIn,
   hourLabel,
-  SCHEDULE_AGENDA_LABELS,
   StatusIcon,
   statusTextClass,
   zonedDateOf,
@@ -10,7 +9,7 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, Plus, Search } from "lucide-react"
 import * as React from "react"
-import type { AgendaAppointment, AgendaSearchPerson } from "../../lib/agenda"
+import { type AgendaAppointment, type AgendaSearchPerson, visitName, visitState } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { dayShort } from "./shared"
 
@@ -143,11 +142,12 @@ export function AppointmentSearch({
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
                     {what} con {appointment.professionalName}
                   </span>
+                  {/* El momento de la cita, como en la Agenda: la de hoy que ya pasó dice «Sin cerrar». */}
                   <span
-                    className={`flex shrink-0 items-center gap-1 text-xs font-bold ${statusTextClass(appointment.status)}`}
+                    className={`flex shrink-0 items-center gap-1 text-xs font-bold ${statusTextClass(visitState(appointment.visit))}`}
                   >
-                    <StatusIcon status={appointment.status} className="size-3.5" />
-                    {SCHEDULE_AGENDA_LABELS[appointment.status]}
+                    <StatusIcon status={visitState(appointment.visit)} className="size-3.5" />
+                    {visitName(appointment.visit)}
                   </span>
                 </Button>
               )

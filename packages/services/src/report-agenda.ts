@@ -26,7 +26,7 @@ import {
   type Span,
 } from "./report-scope.js"
 import { intersectSpans, subtractSpans } from "./availability.js"
-import { appointmentTotalsMany, waitInRoom } from "./reports.js"
+import { appointmentTotalsMany, settledAppointment, waitInRoom } from "./reports.js"
 
 /** Minutos de horario libres de bloqueos (`availMin`) y los ocupados por citas, en una hora de un día. */
 export interface AgendaSlot {
@@ -304,7 +304,7 @@ async function firstScheduleDays(tx: Db, orgId: string, branchId: string | undef
 }
 
 /** Citas del periodo de cada profesional, por cómo terminaron (la misma regla de `appointmentTotalsMany`). */
-export async function appointmentsByProfessional(tx: Db, orgId: string, span: Span, now: Date, branchId: string | undefined) {
+export async function appointmentsByProfessional(tx: Db, orgId: string, span: Span, now: Date, branchId: string | undefined, timezone: string) {
   const rows = await tx.execute<{ userId: string; name: string; attended: number; noShow: number; cancelled: number; unmarked: number }>(sql`
     select a.professional_user_id as "userId", u.name,
       count(*) filter (where a.status = 'atendida')::int as attended,
@@ -313,7 +313,7 @@ export async function appointmentsByProfessional(tx: Db, orgId: string, span: Sp
       count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
     from appointment a join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and not a.is_test and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
-      and (a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))
+      and ${settledAppointment(now, timezone)}
       ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
     group by a.professional_user_id, u.name`)
   return [...rows]
@@ -335,7 +335,7 @@ export async function getAgendaReport(tx: Db, orgId: string, query: ReportQuery,
   // Los mapas miran los 12 meses que terminan en el periodo; la comparación, el anterior.
   const minutes = await agendaMinutes(tx, orgId, hullOf([...spans, ...buckets]), { branchId })
   const occupancy = occupancyBySpan(minutes.days, spans)
-  const byProfessional = await appointmentsByProfessional(tx, orgId, window, now, branchId)
+  const byProfessional = await appointmentsByProfessional(tx, orgId, window, now, branchId, scope.timezone)
   const wait = await waitInRoom(tx, orgId, scope, window)
   const names = new Map<string, string>()
   for (const row of byProfessional) names.set(row.userId, row.name)

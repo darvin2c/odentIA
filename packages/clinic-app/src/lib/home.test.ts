@@ -210,9 +210,11 @@ describe("textos de «Te espera»", () => {
 describe("resumen de hoy", () => {
   it("escribe el resumen de la agenda y calla lo que está en cero", () => {
     // La sala va siempre; «en atención», solo si hay alguien (tablero 7).
-    expect(agendaSummary({ total: 12, waiting: 2, attending: 0, attended: 4, upcoming: 6, unconfirmed: 2 })).toBe("12 citas · 2 en sala · 4 atendidas · 6 por venir")
-    expect(agendaSummary({ total: 3, waiting: 0, attending: 1, attended: 1, upcoming: 1, unconfirmed: 0 })).toBe("3 citas · 0 en sala · 1 en atención · 1 atendida · 1 por venir")
-    expect(patientsSummary({ total: 8, waiting: 1, attending: 0, attended: 2, upcoming: 5, unconfirmed: 1 })).toBe("8 pacientes · 1 en sala · 2 atendidos · 5 por venir")
+    expect(agendaSummary({ total: 12, waiting: 2, attending: 0, attended: 4, upcoming: 6, unconfirmed: 2, unclosed: 0 })).toBe("12 citas · 2 en sala · 4 atendidas · 6 por venir")
+    expect(agendaSummary({ total: 3, waiting: 0, attending: 1, attended: 1, upcoming: 1, unconfirmed: 0, unclosed: 0 })).toBe("3 citas · 0 en sala · 1 en atención · 1 atendida · 1 por venir")
+    expect(patientsSummary({ total: 8, waiting: 1, attending: 0, attended: 2, upcoming: 5, unconfirmed: 1, unclosed: 0 })).toBe("8 pacientes · 1 en sala · 2 atendidos · 5 por venir")
+    // Lo que pasó sin cerrarse se dice: así las cifras suman el total.
+    expect(agendaSummary({ total: 10, waiting: 1, attending: 1, attended: 3, upcoming: 2, unconfirmed: 0, unclosed: 3 })).toBe("10 citas · 1 en sala · 1 en atención · 3 atendidas · 3 sin cerrar · 2 por venir")
     expect(attendedPercent({ total: 24, attended: 6 })).toBe(25)
     expect(attendedPercent({ total: 0, attended: 0 })).toBe(0)
   })
