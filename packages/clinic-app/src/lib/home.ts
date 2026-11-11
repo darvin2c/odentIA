@@ -215,9 +215,9 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
           }
     case "task":
       return {
-        title: row.title,
-        // Una derivación dice quién te la pasó: es un pendiente clínico entre colegas.
-        ...(row.referredBy ? { ask: `Te la pasó ${row.referredBy}` } : {}),
+        // Una derivación es de un paciente: su nombre primero y quién te lo pasó, con qué.
+        title: row.referredBy && row.patientName ? row.patientName : row.title,
+        ...(row.referredBy ? { ask: row.patientName ? `Te lo pasó ${row.referredBy}: ${row.title}` : `Te la pasó ${row.referredBy}` } : {}),
         detail: joined([
           dueText(row, context).replace(/^./, (first) => first.toUpperCase()),
           row.opportunityTitle ? `Oportunidad «${row.opportunityTitle}»` : null,

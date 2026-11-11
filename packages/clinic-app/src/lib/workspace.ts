@@ -45,6 +45,8 @@ export interface WorkspaceHome {
 export interface WaitingTask {
   /** Te la pasó un colega por un paciente: quién. */
   referredBy?: string | null
+  /** En una derivación, de qué paciente es. */
+  patientName?: string | null
   id: string
   title: string
   dueAt: string | null

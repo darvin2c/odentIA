@@ -183,7 +183,7 @@ describe("la guía ayuda a encontrar el trabajo", () => {
     expect(first("¿dónde veo el stock de insumos?")).toBe("inventario")
     expect(first("¿cómo enciendo el agente?")).toBe("agente")
     // Una pregunta frecuente responde con su texto, no con el propósito de la pantalla.
-    expect(matchHelpTopics("¿Cómo bloqueo un horario?")[0]?.faq?.a).toContain("registra una ausencia del profesional")
+    expect(matchHelpTopics("¿Cómo bloqueo un horario?")[0]?.faq?.a).toContain("La ausencia de un profesional")
     // Quien responde dice quién es.
     expect(matchHelpTopics("¿Quién es Ariadna?")[0]?.faq?.a).toContain("guía virtual de odentIA")
     // Lo que no está en la guía no se inventa.
@@ -353,7 +353,7 @@ describe("con Jev (ADR 0146)", () => {
     const { decider, seen } = jev({ "¿Cómo bloqueo un horario?": 0.96, none: 0.04 })
     const reply = await askHelp(appDb, org, owner, { question: "quiero cerrar la tarde del doctor Ruiz", screen: "/agenda/2026-11-06" }, decider)
     expect(reply).toMatchObject({ kind: "guia", choices: [], argos: false, basedOn: "El mapa del sistema: Agenda." })
-    expect(reply.answers).toEqual([{ topicId: "agenda", where: "Agenda", text: expect.stringContaining("registra una ausencia del profesional"), path: "/agenda", restriction: null, videos: [] }])
+    expect(reply.answers).toEqual([{ topicId: "agenda", where: "Agenda", text: expect.stringContaining("La ausencia de un profesional"), path: "/agenda", restriction: null, videos: [] }])
     // Dos pasos (ADR 0178): la categoría y, dentro de ella, la respuesta. A los dos les llega lo mismo, y nada más.
     expect(seen.map((item) => [item.id, item.state])).toEqual([
       ["help_area", "Pantalla: Agenda\nPregunta: quiero cerrar la tarde del doctor Ruiz"],
@@ -428,7 +428,7 @@ describe("con Jev (ADR 0146)", () => {
     }
     const known = await askHelp(appDb, org, owner, { question: "como bloqueo un horario para el doctor", screen: "/agenda" }, down)
     expect(known).toMatchObject({ kind: "guia" })
-    expect(known.answers[0]?.text).toContain("registra una ausencia del profesional")
+    expect(known.answers[0]?.text).toContain("La ausencia de un profesional")
     // Lo que las palabras solo acercan a una pantalla no se responde con su párrafo.
     expect(await askHelp(appDb, org, owner, { question: "¿Dónde veo el stock de insumos?", screen: "/agenda" }, down)).toMatchObject({ kind: "nada", answers: [], say: "Ahora no puedo buscar bien en la guía." })
     // Un Jev que se niega a responder tampoco deja una duda sin nada que ofrecer.

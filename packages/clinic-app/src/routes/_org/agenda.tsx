@@ -1178,40 +1178,6 @@ function AgendaPage() {
             ))}
           </>
         ) : null}
-        {/* Anotar una ausencia sin ir a Configuración: quien lleva la agenda, la de cualquiera;
-            quien atiende, la suya (mesa del 10 nov, decisiones 1 y 4). */}
-        {canAbsences || (canAttend && myUserId) ? (
-          <>
-            <DropdownMenuSeparator />
-            {canAbsences ? (
-              <>
-                <p className="px-2 py-1 text-xs font-bold text-muted-foreground">Anotar una ausencia</p>
-                {/* Todos los que atienden, también quien no tiene horario en esta sede. */}
-                {(resources?.professionals ?? []).map((item) => (
-                  <DropdownMenuItem
-                    key={`ausencia-${item.id}`}
-                    onClick={() => setAbsence({ kind: "person", professionalUserId: item.id, name: item.label })}
-                  >
-                    <ResourceAvatar label={item.label} tone={toneOf(item.id)} size="sm" />
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  </DropdownMenuItem>
-                ))}
-              </>
-            ) : (
-              <DropdownMenuItem
-                onClick={() =>
-                  setAbsence({
-                    kind: "person",
-                    professionalUserId: myUserId!,
-                    name: team.find((item) => item.id === myUserId)?.label ?? "tu agenda",
-                  })
-                }
-              >
-                Anotar mi ausencia
-              </DropdownMenuItem>
-            )}
-          </>
-        ) : null}
         {view === "dia" && rooms.length > 0 ? (
           <>
             <DropdownMenuSeparator />
@@ -1474,7 +1440,25 @@ function AgendaPage() {
             </>
           ) : undefined
         }
-        {...agendaHeader(can, { book: () => openBooking(), calendar: () => setParam("calendario", "1") })}
+        {...agendaHeader(can, {
+          book: () => openBooking(),
+          calendar: () => setParam("calendario", "1"),
+          // Quien lleva la agenda elige de quién (el que se está mirando, si es uno); quien atiende, la suya.
+          absence: () =>
+            canAbsences
+              ? setAbsence({
+                  kind: "person",
+                  professionalUserId: group === "professionals" && onlyChosen ? onlyChosen.id : "",
+                  name: "",
+                })
+              : myUserId
+                ? setAbsence({
+                    kind: "person",
+                    professionalUserId: myUserId,
+                    name: team.find((item) => item.id === myUserId)?.label ?? "tu agenda",
+                  })
+                : undefined,
+        })}
       />
       {canAttend ? (
         <MyCalendarDrawer open={get("calendario") === "1"} onClose={() => setParam("calendario", undefined)} />
@@ -1486,6 +1470,8 @@ function AgendaPage() {
           today={today}
           scope={absence}
           rooms={resources.rooms}
+          people={canAbsences ? resources.professionals.map(({ id, label }) => ({ id, label })) : undefined}
+          branches={sede.branches}
           onClose={() => setAbsence(null)}
           onSaved={async () => {
             setAbsence(null)

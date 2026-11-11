@@ -81,6 +81,7 @@ const absenceSchema = z
     fromTime: z.string(),
     toTime: z.string(),
     roomId: z.string(),
+    who: z.string(),
   })
   .superRefine((value, ctx) => {
     // Con horas, el fin es del mismo día: tiene que ser después del inicio.
@@ -121,6 +122,8 @@ export function AbsenceForm({
   today,
   scope,
   rooms,
+  people,
+  branches = [],
   onClose,
   onSaved,
 }: {
@@ -130,11 +133,15 @@ export function AbsenceForm({
   scope: AbsenceScope
   /** Unidades dentales de la sede: un cierre puede ser de una sola (mantenimiento). */
   rooms: { id: string; label: string }[]
+  /** Quien lleva la agenda elige de quién es la ausencia; sin lista, es la del `scope`. */
+  people?: { id: string; label: string }[]
+  /** Para decir en qué sede está cada cita que queda dentro. */
+  branches?: { id: string; name: string }[]
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
   const person = scope.kind === "person"
-  const who = person ? scope.professionalUserId : null
+  const choosing = person && people != null
   const reasons = person ? PERSON_REASONS : BRANCH_REASONS
 
   const save = useMutation({
@@ -151,9 +158,15 @@ export function AbsenceForm({
       fromTime: "12:00",
       toTime: "14:00",
       roomId: "",
+      who: person ? scope.professionalUserId : "",
     } as AbsenceValues,
-    validators: { onSubmit: absenceSchema },
+    validators: {
+      onSubmit: absenceSchema.superRefine((value, ctx) => {
+        if (person && !value.who) ctx.addIssue({ code: "custom", path: ["who"], message: "Elige de quién es la ausencia." })
+      }),
+    },
     onSubmit: async ({ value }) => {
+      const who = person ? value.who : null
       const chosen = reasons.find((item) => item.id === value.reason) ?? reasons[0]
       const text = value.reason === "otro" ? value.other.trim() : chosen?.label
       const { startsAt, endsAt } = rangeOf(value, timeZone)
@@ -201,13 +214,15 @@ export function AbsenceForm({
     },
   })
   const values = useStore(form.store, (state) => state.values)
+  const who = person ? values.who || null : null
+  const whoName = choosing ? (people.find((item) => item.id === who)?.label ?? null) : person ? scope.name : null
   const { lastDay, startsAt, endsAt } = rangeOf(values, timeZone)
   const valid = Date.parse(endsAt) > Date.parse(startsAt)
 
   // Citas en pie que quedan dentro: se avisa antes de guardar.
   const affectedQuery = useQuery({
     queryKey: ["agenda", "ausencia", branchId, who, values.roomId, startsAt, endsAt],
-    enabled: valid,
+    enabled: valid && (!person || who != null),
     queryFn: () => {
       const params = new URLSearchParams({ from: startsAt, to: endsAt, status: "programada,confirmada" })
       // La ausencia de un profesional vale en todas las sedes: avisa de sus citas en cualquiera.
@@ -224,6 +239,14 @@ export function AbsenceForm({
       Date.parse(item.startsAt) < Date.parse(endsAt),
   )
   const firstAffected = affected[0]
+  // Las sedes, aparte de esta, donde hay citas dentro (la ausencia vale en todas).
+  const elsewhere = [
+    ...new Set(
+      affected
+        .filter((item) => item.branchId !== branchId)
+        .map((item) => branches.find((option) => option.id === item.branchId)?.name ?? "otra sede"),
+    ),
+  ]
 
   return (
     <FormDrawer
@@ -232,13 +255,41 @@ export function AbsenceForm({
       title={person ? "Nueva ausencia" : "Nuevo feriado o cierre"}
       description={
         person
-          ? `Días u horas en que ${scope.name} no atiende. Esos huecos dejan de ofrecerse.`
+          ? `Días u horas en que ${whoName ?? "esa persona"} no atiende. Esos huecos dejan de ofrecerse.`
           : `Días u horas en que ${scope.name} no atiende. Vale para todos los profesionales.`
       }
       onClose={onClose}
       submitLabel={person ? "Guardar ausencia" : "Guardar"}
     >
       <div className="grid gap-4">
+        {choosing ? (
+          <form.AppField name="who">
+            {(field) => (
+              <field.Control label="De quién" id="ausencia-quien">
+                {(control) => (
+                  <ChoiceSelect
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={(event) => {
+                      field.handleChange(event.target.value)
+                      field.handleBlur()
+                    }}
+                  >
+                    <option value="">Elige a quién</option>
+                    {people.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        ) : null}
         <div className="grid gap-2">
           <form.AppField name="reason">
             {(field) => (
@@ -438,8 +489,9 @@ export function AbsenceForm({
                 : `${affected.length} citas quedan dentro ${person ? "de la ausencia" : "del cierre"}`}
             </span>
             <span className="text-sm">
-              {namesSaid([...new Set(affected.map((item) => item.patientName))])}. No se cancelan
-              solas: hay que moverlas.
+              {namesSaid([...new Set(affected.map((item) => item.patientName))])}
+              {elsewhere.length > 0 ? ` (${elsewhere.length === affected.length ? "en" : "algunas en"} ${namesSaid(elsewhere)})` : ""}. No
+              se cancelan solas: hay que moverlas.
             </span>
             <Link
               to="/agenda"
@@ -448,7 +500,8 @@ export function AbsenceForm({
                 view: "lista",
                 date: zonedDateOf(firstAffected.startsAt, timeZone),
                 who: who ?? undefined,
-                branch: branchId,
+                // La sede de esa cita: la ausencia vale en todas y la cita puede estar en otra.
+                branch: firstAffected.branchId,
               }}
               className={cn(buttonVariants({ variant: "outline" }), "justify-self-start bg-card")}
             >

@@ -396,16 +396,16 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     writePermission: "appointments.write",
     faqs: [
       {
+        id: "bloqueo-horario",
+        q: "¿Cómo bloqueo un horario?",
+        a: "La ausencia de un profesional (días enteros o unas horas) se anota en la Agenda, en «Más opciones» (los tres puntos de arriba): recepción, la de cualquiera («Anotar una ausencia»), y quien atiende, la suya («Anotar mi ausencia»); si te equivocas, el aviso trae «Deshacer». Quien configura también la anota en Configuración › Horarios y ausencias, junto con los feriados y cierres de la sede. Una ausencia vale en todas las sedes. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
+        forms: ["¿Cómo anoto que voy a faltar?", "voy a faltar", "anotar mi ausencia", "cómo aviso que no vengo", "registrar vacaciones del doctor", "el doctor no viene mañana"],
+      },
+      {
         id: "sede-al-abrir",
         q: "¿Por qué Inicio y la Agenda abren en otra sede?",
         a: "Abren en la sede que eligió cada persona la última vez; si nunca eligió, en la que hoy tiene más citas. Cada persona tiene la suya: en una computadora compartida, quien entra no hereda la sede de quien estuvo antes. Se cambia en la Agenda (o, si la tienes, en la sede de «Agenda de hoy» en Inicio) y queda recordada para ti.",
         forms: ["¿Por qué Inicio abre en otra sede?", "abre en otra sede", "inicio abre en la sede vacía", "por qué veo otra sede", "no veo las citas de mi sede"],
-      },
-      {
-        id: "bloqueo-horario",
-        q: "¿Cómo bloqueo un horario?",
-        a: "La ausencia de un profesional (días enteros o unas horas) se anota en la Agenda, en el menú de profesionales: recepción, la de cualquiera («Anotar una ausencia»), y quien atiende, la suya («Anotar mi ausencia»); si te equivocas, el aviso trae «Deshacer». Quien configura también la anota en Configuración › Horarios y ausencias, junto con los feriados y cierres de la sede. Una ausencia vale en todas las sedes. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
-        forms: ["¿Cómo anoto que voy a faltar?", "voy a faltar", "anotar mi ausencia", "cómo aviso que no vengo", "registrar vacaciones del doctor", "el doctor no viene mañana"],
       },
       {
         id: "aparece-profesional-agenda",

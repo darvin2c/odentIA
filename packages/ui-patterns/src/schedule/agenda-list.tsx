@@ -148,8 +148,23 @@ function AgendaRow({
   const start = hourLabel(dayMinutesIn(entry.start, timeZone))
   const state = entryState(entry)
   const status = entryStateLabel(entry)
+  // Tras «Llegó» el botón cambia («Atender») o se va: el foco vuelve a la fila, no al cuerpo
+  // de la página, para seguir con el teclado desde la misma cita.
+  const rowRef = React.useRef<HTMLLIElement>(null)
+  const refocus = React.useRef(false)
+  React.useEffect(() => {
+    if (!refocus.current || action?.pending) return
+    refocus.current = false
+    const active = document.activeElement
+    if (active && active !== document.body && !rowRef.current?.contains(active)) return
+    const target =
+      rowRef.current?.querySelector<HTMLElement>("[data-row-actions] button:not(:disabled)") ??
+      rowRef.current?.querySelector<HTMLElement>("[data-row-open]")
+    target?.focus()
+  }, [action?.pending, action?.label])
   return (
     <li
+      ref={rowRef}
       data-entry={entry.id}
       data-status={entry.status}
       data-state={state}
@@ -175,6 +190,7 @@ function AgendaRow({
         {onOpen ? (
           <button
             type="button"
+            data-row-open
             onClick={() => onOpen(entry)}
             className="truncate text-left text-[15px] font-semibold outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
           >
@@ -225,7 +241,7 @@ function AgendaRow({
       </span>
 
       {action || menu.length > 0 ? (
-        <div className="relative z-10 flex shrink-0 items-center justify-end gap-1 sm:w-44">
+        <div data-row-actions className="relative z-10 flex shrink-0 items-center justify-end gap-1 sm:w-44">
           {action ? (
             <SubmitButton
               variant="outline"
@@ -233,7 +249,10 @@ function AgendaRow({
               pending={action.pending}
               // Con el nombre: diez «Llegó» iguales no le dicen al lector de pantalla de quién es cada uno.
               aria-label={`${action.label}: ${entry.title}`}
-              onClick={action.onSelect}
+              onClick={() => {
+                refocus.current = true
+                action.onSelect()
+              }}
             >
               {action.label}
             </SubmitButton>

@@ -118,7 +118,8 @@ it("la derivación de un colega va en su propia fila con quién la pasó; la tar
   ])
   const home = await c.tx((db) => getWorkspaceHome(db, c.orgId, c.ids.ana, { ...clinicianAccess, tasks: true }))
   const referred = rowsOf(home.waiting, "task").filter((row) => row.referredBy)
-  expect(referred).toMatchObject([{ title: "Evaluar la 36 para endodoncia", referredBy: "Dr. Luis Rojas" }])
+  // Nombra al paciente y no va plegada aunque no tenga fecha.
+  expect(referred).toMatchObject([{ title: "Evaluar la 36 para endodoncia", referredBy: "Dr. Luis Rojas", patientName: "Jorge Ramos", band: "hoy" }])
 })
 
 it("el odontólogo ve en su Inicio los controles vencidos que él indicó, no los de otro", async () => {

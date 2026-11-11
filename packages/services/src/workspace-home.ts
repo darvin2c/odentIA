@@ -119,6 +119,8 @@ export interface WaitingTask {
   opportunityTitle: string | null
   /** Te la pasó un colega por un paciente (una derivación): quién. Va en su propia fila. */
   referredBy?: string | null
+  /** En una derivación, de qué paciente es. */
+  patientName?: string | null
 }
 
 export interface WaitingAdvice {
@@ -506,7 +508,8 @@ function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
       // Tiene plazo: nunca va plegado.
       return today && row.dueOn < today ? "ahora" : "hoy"
     case "task":
-      return row.due === "overdue" || row.due === "today" ? "hoy" : "sin_apuro"
+      // Una derivación sin fecha la dejó un colega para que la mires: no va plegada.
+      return row.due === "overdue" || row.due === "today" || (row.referredBy && row.due === "none") ? "hoy" : "sin_apuro"
     case "advice":
       return row.key === ADVICE_OF_TODAY ? "hoy" : "sin_apuro"
     case "staleEncounter":

@@ -996,7 +996,11 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const [count] = await tx.execute<{ open: number }>(sql`select count(*)::int as open from task t where ${scope}`)
   // Lo que un colega te pasó por un paciente: suya, con paciente y creada por otra persona del equipo.
   // `created_by` dice el tipo de autor («user»); quién la creó lo dice su «task.created».
-  const referred = await tx.execute<Row & { referredBy: string | null }>(sql`select r.*, cu.name as "referredBy" from (
+  const referred = await tx.execute<Row & { referredBy: string | null; patientName: string | null }>(sql`select r.*, cu.name as "referredBy",
+      -- La fila nombra al paciente: «Evaluar la 36» solo no dice de quién es.
+      (select pc.display_name from task t2 join patient p on p.id = t2.patient_id and p.organization_id = t2.organization_id
+        join contact pc on pc.id = p.person_id and pc.organization_id = p.organization_id where t2.id = r.id) as "patientName"
+    from (
       ${select} and t.assignee_user_id=${userId} and t.patient_id is not null and t.created_by = 'user'
       order by t.created_at desc, t.id limit 50) r
     cross join lateral (select e.actor_user_id from audit_event e
@@ -1016,7 +1020,7 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
     overdue: overdue.map(place),
     next: next ? place(next) : null,
     open: count?.open ?? 0,
-    referred: referred.map(({ referredBy, ...row }) => ({ ...place(row), referredBy })),
+    referred: referred.map(({ referredBy, patientName, ...row }) => ({ ...place(row), referredBy, patientName })),
   }
 }
 
