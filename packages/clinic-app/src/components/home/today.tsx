@@ -273,6 +273,7 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
     </span>
   )
   const attended = today.summary.attended
+  const people = new Set(today.appointments.filter((item) => item.visit !== "no_vino").map((item) => item.patientId)).size
   const attendButton = (item: WorkspaceAppointment) =>
     canAttend ? (
       <SubmitButton
@@ -300,7 +301,8 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
     ) : null
   return (
     <section aria-labelledby={headingId} className={CARD}>
-      <CardHeader id={headingId} title="Mis pacientes de hoy" count={today.summary.total} />
+      {/* Personas, no citas: quien viene dos veces hoy es un paciente. */}
+      <CardHeader id={headingId} title="Mis pacientes de hoy" count={people} />
       {today.summary.total === 0 ? (
         <EmptyState
           icon={CalendarDays}
@@ -312,7 +314,7 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
         />
       ) : (
         <>
-          <p className="sr-only">{patientsSummary(today.summary)}</p>
+          <p className="sr-only">{patientsSummary(today.summary, people)}</p>
           {group("Sala de espera", waiting, (item) => attendButton(item))}
           {group("Ahora", attending, (item) =>
             item.encounter ? (
@@ -436,7 +438,7 @@ export function TodayCash({
         />
       ) : (
         <>
-          <h3 className="pt-1 text-[13px] font-bold">Por cobrar · {peopleText(cash.toCollect.length)}</h3>
+          <h3 className="pt-1 text-[13px] font-bold">Por cobrar · {peopleText(peopleToCollect(cash))}</h3>
           <ul className="flex flex-col">
             {cash.toCollect.map((row) => (
               <ToCollectRow key={`${row.patientId}-${row.currency}`} row={row} cash={cash} locale={locale} onCollect={onCollect} />
@@ -452,8 +454,13 @@ export function TodayCash({
 }
 
 /** La caja del día en una línea, para quien dirige: lleva a Finanzas › Caja de esa sede. */
+/** Cuántas personas deben hoy: quien debe en soles y en dólares es una persona, no dos filas. */
+function peopleToCollect(cash: WorkspaceCash): number {
+  return new Set(cash.toCollect.map((row) => row.patientId)).size
+}
+
 export function CashLine({ cash, locale }: { cash: WorkspaceCash; locale: string }) {
-  const pending = cash.toCollect.length
+  const pending = peopleToCollect(cash)
   return (
     <Link
       to="/finance"
@@ -464,7 +471,8 @@ export function CashLine({ cash, locale }: { cash: WorkspaceCash; locale: string
       )}
     >
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="text-[17px] font-bold tracking-tight">Caja de hoy</span>
+        {/* De qué sede es: junto a pacientes de otra sede, un «S/ 0.00» sin nombre engañaba. */}
+        <span className="text-[17px] font-bold tracking-tight">Caja de hoy · {cash.branchName}</span>
         <span>
           {collectedText(cash, locale)} · {pending === 0 ? "nadie por cobrar" : `${peopleText(pending)} por cobrar`}
         </span>

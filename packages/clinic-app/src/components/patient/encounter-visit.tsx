@@ -76,7 +76,10 @@ export function EncounterVisitStrip({
   beforeWrite,
   onChanged,
   onPendingChange,
+  past = false,
 }: {
+  /** La atención es de otro día (una cita pasada que se registra después): no se dice «hoy». */
+  past?: boolean
   patientId: string
   encounterId: string
   visit: EncounterVisit | null | undefined
@@ -126,7 +129,7 @@ export function EncounterVisitStrip({
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id={`${encounterId}-visit`} className="font-heading text-base font-medium">
-          Hoy viene a…
+          {past ? "Vino a…" : "Hoy viene a…"}
         </h2>
         {reasonEmpty ? (
           <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onUrgency}>

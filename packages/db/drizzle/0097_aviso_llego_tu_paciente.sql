@@ -1,0 +1,1 @@
+ALTER TABLE "push_subscription" ADD COLUMN "arrivals_since" timestamp with time zone DEFAULT now() NOT NULL;

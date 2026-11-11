@@ -680,6 +680,13 @@
       "when": 1794353794168,
       "tag": "0096_ayuda_responde_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1794371167952,
+      "tag": "0097_aviso_llego_tu_paciente",
+      "breakpoints": true
     }
   ]
 }

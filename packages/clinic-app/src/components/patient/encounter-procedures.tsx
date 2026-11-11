@@ -503,7 +503,7 @@ export function EncounterProcedures({
       <div className="flex flex-col gap-3">
         <section aria-label="Procedimientos registrados">
           {detail.procedures.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin procedimientos registrados hoy.</p>
+            <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {detail.procedures.map((proc) => {

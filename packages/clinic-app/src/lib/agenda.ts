@@ -87,10 +87,6 @@ export interface AgendaAppointment {
   conversationId?: string | null
   /** Solo al reservar, mover o cancelar: si el agente le avisará a la persona. */
   notice?: { queued: boolean }
-  /** Solo al mover: estaba confirmada, pasó a otro día y volvió a «por confirmar». */
-  unconfirmed?: boolean
-  /** Solo al mover: «Deshacer» la devolvió al día que tenía confirmado. */
-  reconfirmed?: boolean
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   visit: AppointmentVisit
@@ -371,4 +367,32 @@ export function stepBeforeArrival(
   const soon = isToday && Date.parse(item.startsAt) - Date.parse(now) <= ARRIVAL_WINDOW_MS
   if (item.visit === "por_confirmar" && !soon) return "confirmar"
   return isToday ? "llego" : null
+}
+
+/**
+ * Lo que dice el aviso tras mover una cita, además de adónde fue: si se quitó su llegada o quedó
+ * por confirmar (confirmó el otro día), si «Deshacer» le devolvió la llegada o la confirmación y
+ * si el agente le avisa a la persona.
+ */
+export function movedNote(
+  before: Pick<AgendaAppointment, "status" | "arrivedAt">,
+  after: Pick<AgendaAppointment, "status" | "arrivedAt" | "notice">,
+): string | undefined {
+  const unconfirmed = before.status === "confirmada" && after.status === "programada"
+  const notes = [
+    before.arrivedAt && !after.arrivedAt
+      ? unconfirmed
+        ? "Se quitó «Llegó» y queda por confirmar."
+        : "Se quitó «Llegó»."
+      : unconfirmed
+        ? "Queda por confirmar: confirmó el otro día."
+        : null,
+    !before.arrivedAt && after.arrivedAt
+      ? "Vuelve a figurar que llegó."
+      : before.status === "programada" && after.status === "confirmada"
+        ? "Vuelve a quedar confirmada."
+        : null,
+    after.notice?.queued ? "El agente le avisa la nueva fecha." : null,
+  ]
+  return notes.filter(Boolean).join(" ") || undefined
 }

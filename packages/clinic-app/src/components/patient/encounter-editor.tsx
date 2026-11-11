@@ -1151,6 +1151,8 @@ export function EncounterEditor({
    * otro día) a la hora indicada, en la zona de la clínica. El minuto de inicio
    * (con sus segundos en 0) queda antes del inicio: se toma el inicio mismo.
    */
+  /** De otro día (una cita pasada que se registra después): la pantalla no dice «hoy». */
+  const pastVisit = endTimeBounds(encounter.startedAt).past
   const endedAtIso = (endTime: string): string | null => {
     if (!endTime) return null
     const { day } = endTimeBounds(encounter.startedAt)
@@ -2364,6 +2366,7 @@ export function EncounterEditor({
           {canWrite && attending ? (
             <div id={`${uid}-visita`} className="scroll-mt-4">
               <EncounterVisitStrip
+                past={pastVisit}
                 patientId={patientId}
                 encounterId={encounterId}
                 visit={detail.visit}
@@ -2437,7 +2440,7 @@ export function EncounterEditor({
 
           {block(
             "realizado",
-            "Realizado hoy",
+            pastVisit ? "Realizado ese día" : "Realizado hoy",
             <>
               <EncounterTreatments
                 patientId={patientId}
@@ -2973,7 +2976,7 @@ export function EncounterEditor({
               {/* «No dejó nada que cobrar» se leía como que no debía nada (QA del 9 nov). */}
               {/* Lo que dice tiene que seguir siendo cierto después de cobrar aquí mismo (entrega 8). */}
               {chargedLines.length === 0
-                ? "Hoy no se carga nada."
+                ? "No se carga nada."
                 : finalizedPaidUp
                   ? "Pagado: no debe nada."
                   : "Caja ya lo ve en su lista de por cobrar."}

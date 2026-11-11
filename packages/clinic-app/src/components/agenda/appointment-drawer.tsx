@@ -47,6 +47,7 @@ import {
   appointmentSessionsText,
   appointmentShortWords,
   doneForWords,
+  movedNote,
   professionalSaid,
   visitLabel,
   visitState,
@@ -370,15 +371,8 @@ function RealAppointmentDrawer({
         const result = await move.mutateAsync(when.shown)
         toast.success(
           `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
-          {
-            description:
-              [
-                result.data.unconfirmed ? "Cambió de día: vuelve a «por confirmar»." : "",
-                result.data.notice?.queued ? "El agente le avisa la nueva fecha." : "",
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined,
-          },
+          // Confirmó otro día: el nuevo queda por confirmar, y se dice.
+          { description: movedNote(appointment, result.data) },
         )
         setStillConfirmed(false)
         setMode("view")
