@@ -87,6 +87,17 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
         forms: ["devolverle su adelanto", "devolver saldo a favor", "quiere que le devuelva lo que dejo", "tiene plata a favor y la quiere de vuelta"],
       },
       {
+        id: "finanzas-devuelto-todo-no-se-cobra",
+        q: "Le devolví todo lo de un tratamiento y volvió: ¿por qué al firmar no se le cobró?",
+        a: "Porque lo que se cobró de un tratamiento cuenta como cobrado aunque después se haya devuelto todo: así nadie recibe un cargo sorpresa por lo mismo. Al firmar, el cierre lo dice («se devolvió todo lo que se cobró de este tratamiento»), y su cuenta lo muestra como devuelto. Si de verdad corresponde cobrarlo otra vez, en «Cobrar» usa «Agregar otro concepto» con lo que se le cobra. Un adelanto que se devolvió no cuenta: ese tratamiento se cobra al atenderlo.",
+        forms: [
+          "devolvi todo y no se cobra",
+          "le devolvi la plata y volvio",
+          "por que no se cobro al firmar despues de una devolucion",
+          "cobrar de nuevo un tratamiento devuelto",
+        ],
+      },
+      {
         id: "finanzas-sede-del-cobro",
         q: "¿A qué caja entra lo que cobro desde la página de la persona?",
         a: "A la caja de la sede en que estás cobrando. Si no tienes una sede elegida, antes de cobrar pregunta «¿En qué sede estás cobrando?»: la que elijas queda como tu sede activa.",

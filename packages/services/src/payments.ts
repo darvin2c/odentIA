@@ -34,16 +34,19 @@ import {
   asc,
   desc,
   eq,
+  exists,
   inArray,
   isNotNull,
   isNull,
   like,
+  notExists,
   or,
   type Column,
   type SQL,
   type SQLWrapper,
   sql,
 } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import { budgetLineUnits, budgetValueOptionSql } from "./budgets.js"
 import {
   chargeTaxOf,
@@ -394,11 +397,17 @@ export async function createCharge(
         ),
       )
     const agreed = source.line.priceCents ?? itemPrice ?? 0
-    const remaining = agreed - sum(generated)
+    // Lo devuelto entero también se cobró: no vuelve a quedar por generar.
+    const returnedWhole = (await wholeReturnedCharges(tx, orgId, patientId, [source.line.planItemId])).filter(
+      (charge) => charge.currency === unit,
+    )
+    const remaining = agreed - sum(generated) - returnedWhole.reduce((total, charge) => total + charge.chargedCents, 0)
     if (remaining <= 0)
       throw conflict(
         "CHARGE_EXCEEDS_BUDGET",
-        "El tratamiento ya tiene cargado el importe acordado",
+        returnedWhole.length > 0 && sum(generated) < agreed
+          ? "Lo cobrado de este tratamiento se devolvió todo: si corresponde cobrarlo otra vez, usa «Agregar otro concepto»"
+          : "El tratamiento ya tiene cargado el importe acordado",
       )
     amountCents ??= remaining
     if (amountCents > remaining)
@@ -3916,7 +3925,11 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     /** Visitas atendidas por tratamiento (actos con cargo vivo): base de «ya realizado» en cobro por sesión. */
     visitasPorTratamiento,
     // Un adelanto para un tratamiento no lo da por cargado: al firmar se carga lo que falta.
-    conCargo: coveredPlanItems(liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY))),
+    // Lo devuelto entero también se cobró: al firmar no se vuelve a cargar (ADR 0068).
+    conCargo: coveredPlanItems([
+      ...liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY)),
+      ...(await wholeReturnedCharges(tx, orgId, patientId)),
+    ]),
   }
 }
 
@@ -4011,6 +4024,8 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     : []
   const appliedTo = new Map<string, number>()
   for (const app of applications) appliedTo.set(app.chargeId, (appliedTo.get(app.chargeId) ?? 0) + app.amountCents)
+  // Lo devuelto entero también se cobró: no vuelve a quedar por cargar y se dice como devuelto.
+  const returnedWhole = await wholeReturnedCharges(tx, orgId, patientId, planItemIds)
   type Group = {
     budgetId: string
     budgetNumber: number
@@ -4055,7 +4070,10 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     groups.set(key, group)
     const agreed = (line.priceCents ?? 0) * budgetLineUnits(line)
     const own = charges.filter((charge) => charge.planItemId === line.planItemId && charge.currency === line.currency)
-    const generated = own.reduce((total, c) => total + c.amountCents + c.returnedCents + c.discountCents, 0)
+    const ownReturned = returnedWhole.filter((charge) => charge.planItemId === line.planItemId && charge.currency === line.currency)
+    const generated =
+      own.reduce((total, c) => total + c.amountCents + c.returnedCents + c.discountCents, 0) +
+      ownReturned.reduce((total, c) => total + c.chargedCents, 0)
     const paid = own.reduce((total, c) => total + (appliedTo.get(c.id) ?? 0), 0)
     const owing = own.reduce((total, c) => total + Math.max(0, c.amountCents - (appliedTo.get(c.id) ?? 0)), 0)
     const toCharge = Math.max(0, agreed - generated)
@@ -4063,8 +4081,11 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     group.paidCents += paid
     group.remainingCents += toCharge + owing
     group.owingCents += owing
-    group.discountCents += own.reduce((total, c) => total + c.discountCents, 0)
-    group.returnedCents += own.reduce((total, c) => total + c.returnedCents, 0)
+    group.discountCents +=
+      own.reduce((total, c) => total + c.discountCents, 0) +
+      ownReturned.reduce((total, c) => total + c.chargedCents - c.returnedCents, 0)
+    group.returnedCents +=
+      own.reduce((total, c) => total + c.returnedCents, 0) + ownReturned.reduce((total, c) => total + c.returnedCents, 0)
     group.lines.push({
       budgetItemId: line.lineId,
       planItemId: line.planItemId,
@@ -4081,6 +4102,82 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
 /** Tratamientos con cargo vivo (cobrado o no): una sola tarifa por tratamiento. */
 function coveredPlanItems(charges: Array<{ planItemId: string | null }>): string[] {
   return [...new Set(charges.filter((c) => c.planItemId).map((c) => c.planItemId as string))].sort()
+}
+
+/** Lo cobrado de un tratamiento que una devolución se llevó entero. */
+export interface WholeReturnedCharge {
+  chargeId: string
+  planItemId: string
+  encounterProcedureId: string | null
+  currency: string
+  /** Lo que se cobró de él: importe más lo devuelto antes y lo descontado (el total de la cadena). */
+  chargedCents: number
+  /** Lo devuelto de la cadena, que es todo lo que se pagó: lo cobrado sin lo descontado. */
+  returnedCents: number
+}
+
+/**
+ * Lo cobrado de un tratamiento que se devolvió entero (ADR 0068): una devolución
+ * parcial deja un concepto con lo devuelto (`returned_cents`), pero la total lo
+ * anula sin reemplazo, y sin esto el tratamiento parecería nunca cobrado y la
+ * siguiente atención lo cobraría otra vez. Es el último concepto de su cadena
+ * (`original_charge_id`), anulado por una devolución (su pago guarda `return_id`)
+ * y sin otro que lo reemplace. Un adelanto devuelto no cuenta: se devuelve entero
+ * justamente para que el tratamiento se cobre al atenderlo.
+ */
+export async function wholeReturnedCharges(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  /** Sin lista: todos los tratamientos de la persona. */
+  planItemIds?: string[],
+): Promise<WholeReturnedCharge[]> {
+  if (planItemIds?.length === 0) return []
+  const successor = alias(patientCharge, "successor")
+  const rows = await tx
+    .select({
+      chargeId: patientCharge.id,
+      planItemId: patientCharge.planItemId,
+      encounterProcedureId: patientCharge.encounterProcedureId,
+      currency: patientCharge.currency,
+      chargedCents: sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents} + ${patientCharge.discountCents}`.mapWith(Number),
+      returnedCents: sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents}`.mapWith(Number),
+    })
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.patientId, patientId),
+        planItemIds ? inArray(patientCharge.planItemId, planItemIds) : isNotNull(patientCharge.planItemId),
+        isNotNull(patientCharge.voidedAt),
+        sql`coalesce(${patientCharge.requestKey}, '') not like ${`${ADVANCE_KEY}%`}`,
+        exists(
+          tx
+            .select({ id: patientPaymentApplication.id })
+            .from(patientPaymentApplication)
+            .where(
+              and(
+                eq(patientPaymentApplication.organizationId, orgId),
+                eq(patientPaymentApplication.chargeId, patientCharge.id),
+                isNotNull(patientPaymentApplication.returnId),
+              ),
+            ),
+        ),
+        notExists(
+          tx
+            .select({ id: successor.id })
+            .from(successor)
+            .where(
+              and(
+                eq(successor.organizationId, orgId),
+                sql`${successor.originalChargeId} = coalesce(${patientCharge.originalChargeId}, ${patientCharge.id})`,
+                sql`${successor.createdAt} > ${patientCharge.createdAt}`,
+              ),
+            ),
+        ),
+      ),
+    )
+  return rows.flatMap((row) => (row.planItemId ? [{ ...row, planItemId: row.planItemId }] : []))
 }
 
 /**
