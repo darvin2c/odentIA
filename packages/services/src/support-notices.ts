@@ -3,7 +3,7 @@ import type { Db } from "@odentia/db"
 import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
 import { helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
 
 /* ---------- Avisos por correo de los casos de soporte ---------- */
@@ -16,7 +16,9 @@ import { helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
  *   vio en 15 minutos, como mucho uno por caso cada hora.
  * Ninguno lleva el texto de la clínica ni el de soporte: tipo, clínica,
  * pantalla, quién y un enlace. «Resuelto» no avisa. Si quien preguntó ya no
- * está en la clínica, no se le escribe.
+ * está en la clínica, no se le escribe. Cuando soporte pidió el acceso de
+ * diagnóstico y espera a la clínica, «necesita algo» también va a la
+ * propietaria y a cada administrador: son quienes lo autorizan (ADR 0180).
  *
  * Igual que los correos del cobro, el aviso se guarda y se reclama antes de
  * SMTP; si la entrega queda incierta no se reintenta.
@@ -100,6 +102,8 @@ export async function tickSupportNotices(ownerDb: Db, now = new Date()): Promise
       openedBy: supportCase.openedBy,
       status: supportCase.status,
       lastPublicMessageAt: supportCase.lastPublicMessageAt,
+      clientSeenAt: supportCase.clientSeenAt,
+      accessRequestedAt: supportCase.accessRequestedAt,
     })
     .from(supportCase)
     .where(
@@ -110,32 +114,66 @@ export async function tickSupportNotices(ownerDb: Db, now = new Date()): Promise
         isNotNull(supportCase.openedBy),
         lte(supportCase.lastPublicMessageAt, dueBefore),
         gt(supportCase.lastPublicMessageAt, since),
-        sql`(${supportCase.clientSeenAt} is null or ${supportCase.clientSeenAt} < ${supportCase.lastPublicMessageAt})`,
-        // Uno por caso cada hora: cuenta todo aviso a la persona que salió o pudo salir.
-        sql`not exists (select 1 from ${supportNotice} n where n.case_id = ${supportCase.id}
-          and n.recipient_user_id is not null and n.email_state <> 'omitido' and n.created_at > ${recently.toISOString()}::timestamptz)`,
-        // Quien ya no está en la clínica no recibe nada.
-        sql`(${supportCase.organizationId} is null or exists (select 1 from ${member} m
-          where m.user_id = ${supportCase.openedBy} and m.organization_id = ${supportCase.organizationId}))`,
+        // Quien preguntó no lo vio, o se pidió el acceso: eso también lo ven quienes lo autorizan.
+        sql`(${supportCase.clientSeenAt} is null or ${supportCase.clientSeenAt} < ${supportCase.lastPublicMessageAt}
+          or (${supportCase.status} = 'esperando_clinica' and ${supportCase.accessRequestedAt} is not null))`,
       ),
     )
     .orderBy(asc(supportCase.lastPublicMessageAt))
     .limit(200)
   for (const kase of due) {
-    if (!kase.lastPublicMessageAt) continue
-    await ownerDb
-      .insert(supportNotice)
-      .values({
-        caseId: kase.id,
-        organizationId: kase.organizationId,
-        kind: kase.status === "esperando_clinica" ? "necesita_algo" : "respuesta",
-        recipientUserId: kase.openedBy,
-        dedupeKey: `persona:${kase.id}:${kase.lastPublicMessageAt.getTime()}`,
-        // La hora de la vuelta: el «uno por hora» se mide con el mismo reloj.
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing({ target: supportNotice.dedupeKey })
+    if (!kase.lastPublicMessageAt || !kase.openedBy) continue
+    const answer = kase.lastPublicMessageAt.getTime()
+    const unseen = kase.clientSeenAt === null || kase.clientSeenAt.getTime() < answer
+    const recipients = unseen ? [kase.openedBy] : []
+    if (kase.status === "esperando_clinica" && kase.accessRequestedAt && kase.organizationId) {
+      const granters = await ownerDb
+        .select({ userId: member.userId })
+        .from(member)
+        .where(and(eq(member.organizationId, kase.organizationId), inArray(member.role, ["owner", "admin"])))
+      for (const granter of granters) if (granter.userId !== kase.openedBy) recipients.push(granter.userId)
+    }
+    for (const recipient of recipients) {
+      // Quien ya no está en la clínica no recibe nada.
+      if (kase.organizationId) {
+        const [still] = await ownerDb
+          .select({ id: member.id })
+          .from(member)
+          .where(and(eq(member.userId, recipient), eq(member.organizationId, kase.organizationId)))
+          .limit(1)
+        if (!still) continue
+      }
+      // Uno por caso y persona cada hora: cuenta todo aviso que salió o pudo salir.
+      const [recent] = await ownerDb
+        .select({ id: supportNotice.id })
+        .from(supportNotice)
+        .where(
+          and(
+            eq(supportNotice.caseId, kase.id),
+            eq(supportNotice.recipientUserId, recipient),
+            ne(supportNotice.emailState, "omitido"),
+            gt(supportNotice.createdAt, recently),
+          ),
+        )
+        .limit(1)
+      if (recent) continue
+      await ownerDb
+        .insert(supportNotice)
+        .values({
+          caseId: kase.id,
+          organizationId: kase.organizationId,
+          kind: kase.status === "esperando_clinica" ? "necesita_algo" : "respuesta",
+          recipientUserId: recipient,
+          // Quien preguntó conserva la clave de siempre (la de los avisos que ya
+          // salieron); los demás la llevan con su id: una por persona.
+          dedupeKey:
+            recipient === kase.openedBy ? `persona:${kase.id}:${answer}` : `persona:${kase.id}:${answer}:${recipient}`,
+          // La hora de la vuelta: el «uno por hora» se mide con el mismo reloj.
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing({ target: supportNotice.dedupeKey })
+    }
   }
   const pending = await ownerDb
     .select({ id: supportNotice.id, recipient: supportNotice.recipientUserId })
@@ -207,9 +245,14 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
   let to: string | null = null
   if (notice.recipientUserId) {
     if (kase.status === "resuelto") return omit("el caso se resolvió")
-    const last = kase.lastPublicMessageAt?.getTime() ?? null
-    const seen = kase.clientSeenAt?.getTime() ?? null
-    if (last === null || (seen !== null && seen >= last)) return omit("ya vio la respuesta")
+    if (notice.recipientUserId !== kase.openedBy) {
+      // A quien autoriza el acceso: solo mientras se le sigue esperando.
+      if (kase.status !== "esperando_clinica" || kase.accessRequestedAt === null) return omit("ya no espera el acceso")
+    } else {
+      const last = kase.lastPublicMessageAt?.getTime() ?? null
+      const seen = kase.clientSeenAt?.getTime() ?? null
+      if (last === null || (seen !== null && seen >= last)) return omit("ya vio la respuesta")
+    }
     if (kase.organizationId) {
       const [still] = await ownerDb
         .select({ id: member.id })

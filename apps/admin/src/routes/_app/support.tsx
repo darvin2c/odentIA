@@ -7,9 +7,19 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  toast,
 } from "@odentia/ui"
+import { Switch } from "@odentia/ui/components/switch"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
-import { EmptyState, ErrorState, ExpandableText, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  ExpandableText,
+  PageHeader,
+  PageShell,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -28,10 +38,12 @@ import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import {
+  accessUntilWords,
   agoWords,
   daysSince,
   grantWords,
   SUPPORT_KIND_LABEL,
+  supportDay,
   supportDayTime,
   supportWaitWords,
 } from "../../lib/support-words"
@@ -147,7 +159,20 @@ const caseDetail = caseItem.extend({
   ),
   /** Solo en «Revisión de cobro»: la fila que la clínica pidió revisar (ADR 0054). */
   review: caseReview.nullable().optional(),
+  accessRequestedAt: z.string().nullable(),
+  /** Quien abrió y su rol de hoy (nulo en los automáticos de odentIA). */
+  opener: z.object({ name: z.string(), roleLabel: z.string() }).nullable(),
+  openerCanGrant: z.boolean(),
+  /** La propietaria y los administradores de hoy. */
+  granters: z.array(z.object({ name: z.string(), roleLabel: z.string() })),
+  accessRequestPending: z.boolean(),
+  /** El mensaje que deja el pedido, tal cual lo verá la clínica. */
+  accessRequestText: z.string().nullable(),
+  /** Por qué no se ofrece pedir el acceso. */
+  accessRequestBlocked: z.string().nullable(),
+  guideGapMarkedAt: z.string().nullable(),
 })
+type CaseDetail = z.infer<typeof caseDetail>
 
 const diagnosticPayload = z.object({
   caseId: z.string(),
@@ -220,12 +245,31 @@ const helpStatsPayload = z.object({
   notHelpfulByTopic: z.array(helpStatsRow),
 })
 
+const guideGapItem = z.object({
+  caseId: z.string(),
+  question: z.string(),
+  kind: z.string(),
+  topic: z.string().nullable(),
+  markedAt: z.string(),
+})
+
 const casesPayload = z.object({ items: z.array(queueItem), total: z.number(), resolvedCount: z.number() })
 const assigneePayload = z.object({
   userId: z.string(),
   name: z.string(),
   role: z.enum(["admin", "support"]),
 })
+
+/** A quién le llega el pedido y quién lo autoriza: «Le llega a Rosa (Recepción). Lo autoriza: Ana Torres (Propietario) o un administrador.». */
+function accessRecipientsWords(kase: CaseDetail): string {
+  const person = (who: { name: string; roleLabel: string }) => `${who.name} (${who.roleLabel})`
+  const opener = kase.opener ? person(kase.opener) : "quien abrió el caso"
+  if (kase.openerCanGrant) return `Le llega a ${opener}, que puede autorizarlo.`
+  const owner = kase.granters[0]
+  return owner
+    ? `Le llega a ${opener}. Lo autoriza: ${person(owner)} o un administrador.`
+    : `Le llega a ${opener}. Lo autoriza la propietaria o un administrador de la clínica.`
+}
 
 /** Dónde está la espera de una fila de la cola, en una línea. */
 function queueLine(item: QueueItem, now: Date): { text: string; urgent: boolean; closeHint: boolean } {
@@ -260,6 +304,7 @@ function SupportPage() {
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
   const [manyBody, setManyBody] = useState("")
+  const [askingAccess, setAskingAccess] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLHeadingElement>(null)
   const rowButtons = useRef(new Map<string, HTMLButtonElement>())
@@ -305,6 +350,12 @@ function SupportPage() {
     queryKey: ["admin-support-help-stats"],
     queryFn: () =>
       api("/api/admin/support/help-stats").then((body: unknown) => helpStatsPayload.parse(body)),
+    enabled: tab === "conocimiento",
+  })
+  const guideGaps = useQuery({
+    queryKey: ["admin-support-guide-gaps"],
+    queryFn: () =>
+      api("/api/admin/support/knowledge/guide-gaps").then((body: unknown) => z.array(guideGapItem).parse(body)),
     enabled: tab === "conocimiento",
   })
   const metrics = useQuery({
@@ -435,6 +486,34 @@ function SupportPage() {
       invalidate()
     },
   })
+  const requestAccess = useMutation({
+    mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/request-access`, { method: "POST" }),
+    onSuccess: () => {
+      setAskingAccess(false)
+      toast.success("Pediste el acceso: el caso espera a la clínica")
+      invalidate()
+    },
+  })
+  const guideGap = useMutation({
+    mutationFn: (input: { id: string; on: boolean }) =>
+      api(`/api/admin/support/cases/${input.id}/guide-gap`, { method: input.on ? "PUT" : "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-support-guide-gaps"] })
+      void queryClient.invalidateQueries({ queryKey: ["admin-support-case"] })
+    },
+  })
+  /** «Ya está en la guía» desde Conocimiento: se quita al momento y el aviso ofrece «Deshacer». */
+  function inGuide(id: string) {
+    guideGap.mutate(
+      { id, on: false },
+      {
+        onSuccess: () =>
+          toast.success("Quitado de «Para llevar a la guía»", {
+            action: { label: "Deshacer", onClick: () => guideGap.mutate({ id, on: true }) },
+          }),
+      },
+    )
+  }
   const revokeGrant = useMutation({
     mutationFn: (grantId: string) =>
       api(`/api/admin/support/grants/revoke`, {
@@ -571,6 +650,61 @@ function SupportPage() {
               ) : null}
             </>
           ) : null}
+        </section>
+      ) : null}
+
+      {tab === "conocimiento" ? (
+        <section aria-labelledby="soporte-para-la-guia" className="flex flex-col gap-2">
+          <h2 id="soporte-para-la-guia" className="font-heading text-base font-semibold">
+            Para llevar a la guía
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Casos que el equipo marcó con «Falta en la guía». Se quedan aquí hasta que alguien los quite.
+          </p>
+          {guideGaps.isPending ? (
+            <SkeletonRegion message="Cargando lo que falta en la guía…">
+              <SupportKnowledgeSkeleton />
+            </SkeletonRegion>
+          ) : guideGaps.isError ? (
+            <ErrorState message="No pude cargar lo que falta en la guía." onRetry={() => void guideGaps.refetch()} />
+          ) : (guideGaps.data ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nada marcado por ahora.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {(guideGaps.data ?? []).map((gap) => (
+                <li key={gap.caseId} className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
+                  <p className="font-semibold [overflow-wrap:anywhere]">«{gap.question}»</p>
+                  <p className="text-muted-foreground">
+                    Tema: {gap.topic ?? "sin tema en la guía"} · marcado el {supportDay(gap.markedAt)}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-9"
+                      onClick={() => {
+                        focusedCase.current = null
+                        setSearch({ pestana: undefined, caso: gap.caseId })
+                      }}
+                    >
+                      Abrir caso
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-9"
+                      disabled={guideGap.isPending}
+                      onClick={() => inGuide(gap.caseId)}
+                    >
+                      Ya está en la guía
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       ) : null}
 
@@ -1078,6 +1212,20 @@ function SupportPage() {
                 >
                   Asignarme
                 </Button>
+                <span className="flex min-h-11 items-center gap-2 sm:min-h-9">
+                  <Switch
+                    id="soporte-falta-guia"
+                    checked={kase.guideGapMarkedAt !== null}
+                    disabled={guideGap.isPending}
+                    onCheckedChange={(on) =>
+                      guideGap.mutate(
+                        { id: kase.id, on },
+                        { onSuccess: () => toast.success(on ? "Marcado: falta en la guía" : "Quitado de «Para llevar a la guía»") },
+                      )
+                    }
+                  />
+                  <FieldLabel htmlFor="soporte-falta-guia">Falta en la guía</FieldLabel>
+                </span>
                 {/* Una «Revisión de cobro» se resuelve al decidirla (ADR 0054). */}
                 {STATUSES.filter((value) => value !== kase.status && !(value === "resuelto" && kase.review?.status === "pendiente")).map((value) => (
                   <Button
@@ -1096,9 +1244,7 @@ function SupportPage() {
               <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
                 <p className="font-bold">Acceso diagnóstico</p>
                 {(kase.grants ?? []).length === 0 ? (
-                  <p className="text-muted-foreground">
-                    Sin permisos: lo autoriza la propietaria o un administrador de la clínica.
-                  </p>
+                  <p className="text-muted-foreground">Sin permisos todavía.</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {kase.grants.map((grant) => (
@@ -1120,7 +1266,22 @@ function SupportPage() {
                     ))}
                   </ul>
                 )}
+                <AccessRequestLine kase={kase} now={now} />
                 <div className="flex flex-wrap gap-2">
+                  {kase.accessRequestText ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-9"
+                      onClick={() => {
+                        requestAccess.reset()
+                        setAskingAccess(true)
+                      }}
+                    >
+                      Pedir acceso de diagnóstico…
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -1195,6 +1356,28 @@ function SupportPage() {
                   </div>
                 ) : null}
               </div>
+              {kase.accessRequestText ? (
+                <ConfirmDialog
+                  open={askingAccess}
+                  title="¿Pedir el acceso de diagnóstico?"
+                  description={accessRecipientsWords(kase)}
+                  confirmLabel="Pedir acceso"
+                  cancelLabel="Volver"
+                  variant="default"
+                  pending={requestAccess.isPending}
+                  error={requestAccess.isError ? (requestAccess.error instanceof Error ? requestAccess.error.message : "No se pudo pedir el acceso.") : null}
+                  onConfirm={() => requestAccess.mutate(kase.id)}
+                  onClose={() => setAskingAccess(false)}
+                >
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <p className="font-semibold">Este mensaje queda en el caso:</p>
+                    <blockquote className="rounded-xl bg-primary-soft px-3 py-2 whitespace-pre-wrap">{kase.accessRequestText}</blockquote>
+                    <p className="text-muted-foreground">
+                      El caso pasa a «Esperando a la clínica». Si no lo ven en 15 minutos, les llega el correo de que soporte necesita algo.
+                    </p>
+                  </div>
+                </ConfirmDialog>
+              ) : null}
             </section>
           ) : selectedId !== null ? (
             <section
@@ -1227,4 +1410,29 @@ function SupportPage() {
       ) : null}
     </PageShell>
   )
+}
+
+/**
+ * Cómo va el pedido de acceso: «Pediste acceso el mié 11 nov, 10:40 · esperando
+ * a la clínica», o «Acceso autorizado hasta las 15:30» con un permiso vigente.
+ */
+function AccessRequestLine({ kase, now }: { kase: CaseDetail; now: Date }) {
+  const active = kase.grants.find((grant) => grant.active)
+  if (active) return <p className="font-semibold">{accessUntilWords(active.expiresAt, now)}</p>
+  if (kase.accessRequestPending && kase.accessRequestedAt)
+    return (
+      <p>
+        Pediste acceso el {supportDayTime(kase.accessRequestedAt)}
+        {kase.status === "esperando_clinica" ? " · esperando a la clínica" : ""}
+      </p>
+    )
+  if (kase.accessRequestText)
+    return (
+      <p className="text-muted-foreground">
+        {kase.openerCanGrant
+          ? `Lo puede autorizar quien abrió el caso: es ${kase.opener?.roleLabel ?? "de la clínica"}.`
+          : "Lo autoriza la propietaria o un administrador de la clínica: al pedirlo, ellos también ven el caso."}
+      </p>
+    )
+  return null
 }

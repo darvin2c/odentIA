@@ -9,6 +9,7 @@ import {
   supportAccessGrant,
   supportAttachment,
   supportCase,
+  supportGuideGap,
   supportMessage,
 } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
@@ -24,6 +25,7 @@ import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { helpTopic, helpTopicForScreen } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
+import { helpTopicsFor } from "./products.js"
 import { addBusinessDays, saasTermsAt } from "./saas-commercial-terms.js"
 import { enqueueSupportInboxNotice, SUPPORT_ANSWER_BUSINESS_DAYS } from "./support-notices.js"
 
@@ -75,6 +77,8 @@ export interface SupportCaseListItem {
 }
 
 export interface SupportCaseDetail extends SupportCaseListItem {
+  /** Cuándo pidió soporte el acceso de diagnóstico (el último pedido). */
+  accessRequestedAt: string | null
   detail: string | null
   screen: string
   role: string
@@ -333,7 +337,9 @@ function toListItem(
 
 /**
  * Quién sigue un caso de la clínica: quien lo abrió. Si esa persona ya no está
- * en la clínica, lo siguen su propietario y su administrador; nadie más.
+ * en la clínica, lo siguen su propietario y su administrador. Desde que
+ * soporte pide el acceso de diagnóstico, también lo leen la propietaria y los
+ * administradores: son quienes pueden autorizarlo (ADR 0180). Nadie más.
  */
 async function requireCaseReader(
   tx: Db,
@@ -345,6 +351,7 @@ async function requireCaseReader(
   // Un caso sin autor es automático de odentIA: no es de ninguna clínica.
   if (kase.openedBy === null) throw notFound("Caso")
   if (!(await isOrgOwnerOrAdmin(tx, userId, orgId))) throw notFound("Caso")
+  if (kase.accessRequestedAt !== null) return
   const [opener] = await tx
     .select({ id: member.id })
     .from(member)
@@ -355,7 +362,8 @@ async function requireCaseReader(
 
 /**
  * Casos que sigue la persona en su clínica, del más reciente al más viejo: los
- * suyos y, si es propietaria o administradora, los de quien ya no está.
+ * suyos y, si es propietaria o administradora, los de quien ya no está y
+ * aquellos en que soporte pidió el acceso de diagnóstico.
  */
 export async function listMySupportCases(
   tx: Db,
@@ -370,8 +378,10 @@ export async function listMySupportCases(
       and(
         eq(supportCase.organizationId, orgId),
         manager
-          ? sql`(${supportCase.openedBy} = ${userId} or not exists (select 1 from ${member} m
-              where m.user_id = ${supportCase.openedBy} and m.organization_id = ${orgId}))`
+          ? sql`(${supportCase.openedBy} = ${userId}
+              or (${supportCase.openedBy} is not null and ${supportCase.accessRequestedAt} is not null)
+              or not exists (select 1 from ${member} m
+                where m.user_id = ${supportCase.openedBy} and m.organization_id = ${orgId}))`
           : eq(supportCase.openedBy, userId),
       ),
     )
@@ -430,6 +440,7 @@ function toDetail(
   return {
     ...toListItem(row, messages.length),
     organizationName,
+    accessRequestedAt: row.accessRequestedAt?.toISOString() ?? null,
     detail: row.detail,
     screen: row.screen,
     role: row.role,
@@ -1080,12 +1091,30 @@ export async function listSupportCasesForStaff(
   }
 }
 
+/** La ficha para el equipo: además, quién abrió, quién puede autorizar el acceso y la marca de la guía. */
+export interface StaffSupportCaseDetail extends SupportCaseDetail {
+  /** Quien abrió el caso y su rol de hoy; nulo en los automáticos de odentIA. */
+  opener: { name: string; roleLabel: string } | null
+  /** ¿Puede autorizar el acceso quien abrió? Con su membresía de hoy, no con el rol de cuando abrió. */
+  openerCanGrant: boolean
+  /** La propietaria y los administradores de hoy: quienes pueden autorizar el acceso. */
+  granters: { name: string; roleLabel: string }[]
+  /** Hay un pedido de acceso y la clínica todavía no hizo nada después. */
+  accessRequestPending: boolean
+  /** El mensaje que deja «Pedir acceso de diagnóstico…», tal cual; nulo si no se puede pedir. */
+  accessRequestText: string | null
+  /** Por qué no se puede pedir el acceso en este caso, si no se puede. */
+  accessRequestBlocked: string | null
+  /** «Falta en la guía»: cuándo se marcó, o nulo. */
+  guideGapMarkedAt: string | null
+}
+
 /** Ficha completa del caso: conversación privada, notas internas, adjuntos y permisos. */
 export async function getSupportCaseForStaff(
   db: Db,
   actor: AdminActor,
   caseId: string,
-): Promise<SupportCaseDetail> {
+): Promise<StaffSupportCaseDetail> {
   const [row] = await db
     .select({ kase: supportCase, orgName: organization.name })
     .from(supportCase)
@@ -1114,13 +1143,221 @@ export async function getSupportCaseForStaff(
     organizationId: row.kase.organizationId,
     entityId: row.kase.id,
   })
-  return toDetail(
-    row.kase,
-    messages.map(toMessage),
-    attachments.map(toAttachment),
-    grants.map(toGrant),
-    row.orgName,
+  const access = await accessPeopleOf(db, row.kase)
+  const [gap] = await db
+    .select({ markedAt: supportGuideGap.markedAt })
+    .from(supportGuideGap)
+    .where(eq(supportGuideGap.caseId, row.kase.id))
+    .limit(1)
+  const blocked = await accessRequestBlockedReason(db, row.kase)
+  const pending = await accessRequestPendingOf(db, row.kase)
+  return {
+    ...toDetail(row.kase, messages.map(toMessage), attachments.map(toAttachment), grants.map(toGrant), row.orgName),
+    ...access,
+    accessRequestPending: pending,
+    accessRequestText: blocked || pending ? null : accessRequestText(access.openerCanGrant),
+    accessRequestBlocked: blocked,
+    guideGapMarkedAt: gap?.markedAt.toISOString() ?? null,
+  }
+}
+
+/* ---------- «Pedir acceso de diagnóstico…» (ADR 0180) ---------- */
+
+/** El mensaje fijo del pedido: cambia si quien abrió el caso puede autorizarlo. */
+function accessRequestText(openerCanGrant: boolean): string {
+  return openerCanGrant
+    ? "Para revisarlo necesitamos ver la configuración de tu clínica. En este caso, abre «Acceso diagnóstico de soporte» y pulsa «Autorizar acceso». Tú eliges por cuánto tiempo, máximo 1 hora, y puedes revocarlo cuando quieras. Nunca vemos tus pacientes."
+    : "Para revisarlo necesitamos ver la configuración de tu clínica. Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda, en «Tus casos con soporte», con «Autorizar acceso». Eligen por cuánto tiempo, máximo 1 hora, y pueden revocarlo cuando quieran. Nunca vemos tus pacientes."
+}
+
+/** Quién abrió, si puede autorizar (con su membresía de hoy) y quiénes pueden. */
+async function accessPeopleOf(
+  db: Db,
+  kase: typeof supportCase.$inferSelect,
+): Promise<Pick<StaffSupportCaseDetail, "opener" | "openerCanGrant" | "granters">> {
+  const [profile] = kase.organizationId
+    ? await db
+        .select({ product: orgProfile.product })
+        .from(orgProfile)
+        .where(eq(orgProfile.organizationId, kase.organizationId))
+        .limit(1)
+    : []
+  const product: ClinicalProduct = isClinicalProduct(profile?.product) ? profile.product : "dental"
+  const labelOf = (role: string) =>
+    (ORG_ROLES as readonly string[]).includes(role) ? roleLabel(role as OrgRole, product) : role
+  const people = kase.organizationId
+    ? await db
+        .select({ userId: member.userId, role: member.role, name: user.name })
+        .from(member)
+        .innerJoin(user, eq(user.id, member.userId))
+        .where(eq(member.organizationId, kase.organizationId))
+    : []
+  const [openerUser] = kase.openedBy
+    ? await db.select({ name: user.name }).from(user).where(eq(user.id, kase.openedBy)).limit(1)
+    : []
+  const openerMembership = people.find((person) => person.userId === kase.openedBy)
+  const granters = people
+    .filter((person) => person.role === "owner" || person.role === "admin")
+    .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, "es") : a.role === "owner" ? -1 : 1))
+  return {
+    opener: openerUser
+      ? {
+          name: openerUser.name,
+          // Quien ya no está en la clínica conserva el rol con que abrió.
+          roleLabel: openerMembership ? labelOf(openerMembership.role) : kase.role || "Cuenta",
+        }
+      : null,
+    openerCanGrant: openerMembership?.role === "owner" || openerMembership?.role === "admin",
+    granters: granters.map((person) => ({ name: person.name, roleLabel: labelOf(person.role) })),
+  }
+}
+
+/** Por qué no se pide el acceso en este caso; nulo si se puede pedir. */
+async function accessRequestBlockedReason(db: Db, kase: typeof supportCase.$inferSelect): Promise<string | null> {
+  if (!kase.organizationId) return "Este caso no es de una clínica: no hay configuración que ver"
+  if (kase.status === "resuelto") return "El caso está resuelto: reábrelo para pedir el acceso"
+  if (kase.kind === "cobro") return "Un caso de cobro se revisa sin el acceso de diagnóstico"
+  if (kase.kind === "acceso") return "Es un caso para entrar a su cuenta: no hay configuración que ver"
+  const grant = await activeGrantFor(db, kase.id)
+  if (grant) return `Ya hay un acceso vigente hasta las ${limaTime(grant.expiresAt)}`
+  return null
+}
+
+const limaTimeFormat = new Intl.DateTimeFormat("es-PE", {
+  timeZone: "America/Lima",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+/** «15:30», en la hora de Lima, como la administración. */
+const limaTime = (at: Date): string => limaTimeFormat.format(at)
+
+/** ¿Hay un pedido de acceso sin nada de la clínica después? Entonces no se pide otro. */
+async function accessRequestPendingOf(db: Db, kase: typeof supportCase.$inferSelect): Promise<boolean> {
+  if (!kase.accessRequestedAt) return false
+  const since = kase.accessRequestedAt.toISOString()
+  const [row] = await db.execute<{ acted: boolean }>(sql`select exists (
+      select 1 from ${supportMessage} m
+        where m.case_id = ${kase.id} and m.author_kind = 'cliente' and m.is_internal = false
+          and m.created_at > ${since}::timestamptz
+      union all
+      select 1 from ${supportAttachment} a
+        where a.case_id = ${kase.id} and a.created_at > ${since}::timestamptz
+          and (a.created_by = ${kase.openedBy} or exists (select 1 from ${member} mm
+            where mm.user_id = a.created_by and mm.organization_id = ${kase.organizationId}))
+      union all
+      select 1 from ${supportAccessGrant} g
+        where g.case_id = ${kase.id} and g.created_at > ${since}::timestamptz
+    ) as acted`)
+  return row?.acted !== true
+}
+
+/**
+ * Soporte pide el acceso de diagnóstico: deja el mensaje fijo (según si quien
+ * abrió puede autorizarlo), pasa el caso a «Esperando a la clínica» y, desde
+ * ahí, la propietaria y los administradores lo leen y reciben el aviso. Pedirlo
+ * otra vez sin que la clínica haya hecho nada no escribe otro mensaje.
+ */
+export async function requestSupportAccess(
+  db: Db,
+  actor: AdminActor,
+  caseId: string,
+  now: Date = new Date(),
+): Promise<{ requestedAt: string; repeated: boolean }> {
+  const kase = await requireStaffCaseFor(db, actor, caseId)
+  const blocked = await accessRequestBlockedReason(db, kase)
+  if (blocked) {
+    const active = blocked.startsWith("Ya hay un acceso vigente")
+    throw new ServiceError(active ? "ACCESS_ACTIVE" : "VALIDATION", active ? 409 : 400, blocked)
+  }
+  if (kase.accessRequestedAt && (await accessRequestPendingOf(db, kase)))
+    return { requestedAt: kase.accessRequestedAt.toISOString(), repeated: true }
+  const { openerCanGrant } = await accessPeopleOf(db, kase)
+  await db.insert(supportMessage).values({
+    caseId: kase.id,
+    organizationId: kase.organizationId,
+    authorKind: "staff",
+    authorUserId: actor.userId,
+    body: accessRequestText(openerCanGrant),
+    createdAt: now,
+  })
+  await staffWrite(
+    db,
+    actor,
+    kase,
+    { status: "esperando_clinica", resolvedAt: null, lastPublicMessageAt: now, accessRequestedAt: now },
+    "support.case.access_requested",
+    { de: kase.status, quienAbrioAutoriza: openerCanGrant },
   )
+  return { requestedAt: now.toISOString(), repeated: false }
+}
+
+/* ---------- «Falta en la guía» (marca del equipo en admin, ADR 0180) ---------- */
+
+export interface SupportGuideGapItem {
+  caseId: string
+  question: string
+  kind: SupportKind
+  /** El tema de la guía según la pantalla desde donde se preguntó, en la guía del producto de la clínica. */
+  topic: string | null
+  markedAt: string
+}
+
+/** Marca que la respuesta de este caso falta en la guía. Marcar dos veces deja una marca. */
+export async function markGuideGap(db: Db, actor: AdminActor, caseId: string): Promise<void> {
+  const kase = await requireStaffCaseFor(db, actor, caseId)
+  await db.insert(supportGuideGap).values({ caseId: kase.id, markedBy: actor.userId }).onConflictDoNothing()
+  await writeAdminAudit(db, actor, {
+    action: "support.case.guide_gap",
+    organizationId: kase.organizationId,
+    entityId: kase.id,
+    metadata: { on: true },
+  })
+}
+
+/** «Ya está en la guía»: quita la marca. */
+export async function unmarkGuideGap(db: Db, actor: AdminActor, caseId: string): Promise<void> {
+  const kase = await requireStaffCaseFor(db, actor, caseId)
+  await db.delete(supportGuideGap).where(eq(supportGuideGap.caseId, kase.id))
+  await writeAdminAudit(db, actor, {
+    action: "support.case.guide_gap",
+    organizationId: kase.organizationId,
+    entityId: kase.id,
+    metadata: { on: false },
+  })
+}
+
+/**
+ * «Para llevar a la guía»: lo marcado, del más viejo al más nuevo. Como el
+ * resto de Conocimiento, sin clínica ni conversación: la pregunta, el tema y la
+ * fecha. Soporte no ve los casos de cobro.
+ */
+export async function listGuideGaps(db: Db, actor: AdminActor): Promise<SupportGuideGapItem[]> {
+  const rows = await db
+    .select({
+      caseId: supportCase.id,
+      question: supportCase.question,
+      kind: supportCase.kind,
+      screen: supportCase.screen,
+      product: orgProfile.product,
+      markedAt: supportGuideGap.markedAt,
+    })
+    .from(supportGuideGap)
+    .innerJoin(supportCase, eq(supportCase.id, supportGuideGap.caseId))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, supportCase.organizationId))
+    .where(visibleKindsFor(actor))
+    .orderBy(asc(supportGuideGap.markedAt))
+    .limit(200)
+  await writeAdminAudit(db, actor, { action: "support.knowledge.list", metadata: { lista: "para_la_guia" } })
+  return rows.map((row) => ({
+    caseId: row.caseId,
+    question: row.question,
+    kind: kindOf(row.kind),
+    topic:
+      helpTopicForScreen(row.screen, helpTopicsFor(isClinicalProduct(row.product) ? row.product : "dental"))?.title ??
+      null,
+    markedAt: row.markedAt.toISOString(),
+  }))
 }
 
 async function staffWrite(

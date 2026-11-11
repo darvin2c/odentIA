@@ -12,6 +12,7 @@ import {
   replyToAccountSupportCase,
   replyToMySupportCase,
   replyToSupportCase,
+  requestSupportAccess,
   setSupportCaseStatus,
 } from "./admin-support.js"
 import { sendHelpRequest } from "./help.js"
@@ -102,6 +103,25 @@ describe("a soporte", () => {
     expect(rows.map((row) => row.kind).sort()).toEqual(["caso_nuevo"])
     const claimed = await claimSupportNotice(ownerDb, rows[0]!.id)
     expect(claimed).toMatchObject({ kind: "caso_nuevo", to: null, clinicName: null, caseKind: "acceso" })
+  })
+})
+
+describe("cuando soporte pide el acceso de diagnóstico", () => {
+  it("«necesita algo» sale a quien abrió y a quienes lo autorizan, uno por persona", async () => {
+    const kase = await ask("No puedo imprimir el ticket desde Caja", LUIS)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const t0 = await lastAnswerOf(kase.id)
+    await tickSupportNotices(ownerDb, new Date(t0 + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    const rows = await personNoticesOf(kase.id)
+    expect(rows.map((row) => `${row.kind}:${row.recipientUserId}`).sort()).toEqual(
+      [`necesita_algo:${ANA}`, `necesita_algo:${LUIS}`, `necesita_algo:${OWNER}`].sort(),
+    )
+    // Otra vuelta, horas después, no le repite a nadie el mismo pedido.
+    await tickSupportNotices(ownerDb, new Date(t0 + 3 * SUPPORT_REPLY_NOTICE_GAP_MS))
+    expect(await personNoticesOf(kase.id)).toHaveLength(3)
+    // La propietaria lo recibe aunque no haya abierto el caso.
+    const forOwner = rows.find((row) => row.recipientUserId === OWNER)
+    expect(await claimSupportNotice(ownerDb, forOwner!.id)).toMatchObject({ kind: "necesita_algo", to: "duena@notice.test", who: "Luis Caja" })
   })
 })
 

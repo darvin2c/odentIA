@@ -19,11 +19,14 @@ import {
   getMySupportCase,
   getSupportCaseForStaff,
   grantSupportAccess,
+  listGuideGaps,
   listMySupportCases,
   listSupportCasesForStaff,
+  markGuideGap,
   openSupportCaseFromHelp,
   readSupportDiagnostic,
   reopenMySupportCase,
+  requestSupportAccess,
   replyToAccountSupportCase,
   replyToMySupportCase,
   replyToSupportCase,
@@ -36,6 +39,7 @@ import {
   supportHelpStats,
   supportHomeRows,
   supportKnowledgeGroups,
+  unmarkGuideGap,
 } from "./admin-support.js"
 import { sendHelpRequest } from "./help.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -441,6 +445,91 @@ describe("la cola de soporte", () => {
     expect((await itemOf(automatic.id))?.answerBy).toBeNull()
     const home = (await supportHomeRows(ownerDb, staff)).find((row) => row.id === automatic.id)
     expect(home).toMatchObject({ organizationName: "odentIA · automático", answerBy: null })
+  })
+})
+
+describe("pedir acceso de diagnóstico", () => {
+  it("dos pedidos dejan un solo mensaje y pasan el caso a esperar a la clínica", async () => {
+    const kase = await seedRequest(ORG, CLIENT, "Pedir acceso: no puedo imprimir el ticket desde Caja")
+    const before = await getSupportCaseForStaff(ownerDb, staff, kase.id)
+    // Lo abrió recepción: el texto dice quién lo autoriza y la ficha, a quién.
+    expect(before).toMatchObject({
+      opener: { name: "Clínica A", roleLabel: "Recepción" },
+      openerCanGrant: false,
+      granters: [{ name: "Dueña A", roleLabel: "Propietario" }],
+      accessRequestPending: false,
+      accessRequestBlocked: null,
+    })
+    expect(before.accessRequestText).toMatch(/Lo autoriza la propietaria o un administrador/)
+
+    const first = await requestSupportAccess(ownerDb, staff, kase.id)
+    const again = await requestSupportAccess(ownerDb, staff, kase.id)
+    expect(first.repeated).toBe(false)
+    expect(again).toEqual({ requestedAt: first.requestedAt, repeated: true })
+    const after = await getSupportCaseForStaff(ownerDb, staff, kase.id)
+    expect(after.messages.map((message) => message.body)).toEqual([before.accessRequestText])
+    expect(after).toMatchObject({ status: "esperando_clinica", accessRequestPending: true, accessRequestText: null })
+    expect(after.accessRequestedAt).toBe(first.requestedAt)
+
+    // La propietaria autoriza sin escribir: el caso vuelve a nosotros y ya hay acceso vigente.
+    await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
+    expect(await statusOf(kase.id)).toBe("en_atencion")
+    const row = (await supportHomeRows(ownerDb, staff)).find((item) => item.id === kase.id)
+    expect(row?.accessUntil).not.toBeNull()
+    await expect(requestSupportAccess(ownerDb, staff, kase.id)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/^Ya hay un acceso vigente hasta las \d\d:\d\d$/) })
+  })
+
+  it("no se pide en un caso de cobro, de entrar a su cuenta o resuelto", async () => {
+    const billing = await seedBillingCase("Revisión de cobro · Pedir acceso · 0,10 USD")
+    await expect(requestSupportAccess(ownerDb, admin, billing.id)).rejects.toThrow(/cobro/)
+    await expect(requestSupportAccess(ownerDb, staff, billing.id)).rejects.toThrow(/no encontrado/i)
+    const account = await createAccessSupportCase(ownerDb, OTHER_CLIENT, { question: "Pedir acceso: no entro a mi cuenta" })
+    await expect(requestSupportAccess(ownerDb, staff, account.id)).rejects.toThrow(/clínica/)
+    const solved = await seedRequest(ORG, CLIENT, "Pedir acceso: ya resuelto")
+    await setSupportCaseStatus(ownerDb, staff, solved.id, "resuelto")
+    await expect(requestSupportAccess(ownerDb, staff, solved.id)).rejects.toThrow(/resuelto/)
+    expect((await getSupportCaseForStaff(ownerDb, staff, solved.id)).messages).toHaveLength(0)
+  })
+
+  it("desde el pedido, la propietaria lee el caso que abrió recepción; antes no", async () => {
+    const kase = await seedRequest(ORG, CLIENT, "Pedir acceso: la propietaria lo ve después")
+    const ownerSees = async () => (await run((tx) => listMySupportCases(tx, ORG, OWNER))).map((item) => item.id)
+    expect(await ownerSees()).not.toContain(kase.id)
+    await expect(run((tx) => getMySupportCase(tx, ORG, OWNER, kase.id))).rejects.toThrow(/no encontrado/i)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    expect(await ownerSees()).toContain(kase.id)
+    const read = await run((tx) => getMySupportCase(tx, ORG, OWNER, kase.id))
+    expect(read.accessRequestedAt).not.toBeNull()
+    expect(read.messages).toHaveLength(1)
+    // Otra clínica sigue sin verlo.
+    await expect(run((tx) => getMySupportCase(tx, OTHER, OTHER_CLIENT, kase.id), OTHER)).rejects.toThrow(/no encontrado/i)
+  })
+})
+
+describe("falta en la guía", () => {
+  it("se marca, sale en «Para llevar a la guía» con su tema, se quita y se vuelve a poner", async () => {
+    const kase = await seedRequest(ORG, CLIENT, "Guía: ¿cómo cambio la duración de una cita?")
+    await markGuideGap(ownerDb, staff, kase.id)
+    await markGuideGap(ownerDb, staff, kase.id)
+    const listed = (await listGuideGaps(ownerDb, staff)).filter((item) => item.caseId === kase.id)
+    expect(listed).toEqual([{ caseId: kase.id, question: kase.question, kind: "problema", topic: "Agenda", markedAt: expect.any(String) }])
+    expect((await getSupportCaseForStaff(ownerDb, staff, kase.id)).guideGapMarkedAt).toBe(listed[0]?.markedAt)
+    await unmarkGuideGap(ownerDb, staff, kase.id)
+    expect((await listGuideGaps(ownerDb, staff)).map((item) => item.caseId)).not.toContain(kase.id)
+    expect((await getSupportCaseForStaff(ownerDb, staff, kase.id)).guideGapMarkedAt).toBeNull()
+    // «Deshacer» la vuelve a poner.
+    await markGuideGap(ownerDb, staff, kase.id)
+    expect((await listGuideGaps(ownerDb, staff)).map((item) => item.caseId)).toContain(kase.id)
+  })
+
+  it("soporte no ve ni marca los casos de cobro; la administración sí", async () => {
+    const billing = await seedBillingCase("Revisión de cobro · Guía · 0,20 USD")
+    await expect(markGuideGap(ownerDb, staff, billing.id)).rejects.toThrow(/no encontrado/i)
+    await markGuideGap(ownerDb, admin, billing.id)
+    const forStaff = await listGuideGaps(ownerDb, staff)
+    expect(forStaff.map((item) => item.caseId)).not.toContain(billing.id)
+    expect(JSON.stringify(forStaff)).not.toContain("USD")
+    expect((await listGuideGaps(ownerDb, admin)).map((item) => item.caseId)).toContain(billing.id)
   })
 })
 

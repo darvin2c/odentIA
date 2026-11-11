@@ -11,8 +11,11 @@ import {
   readReviewConversation,
   listSupportAccessAudit,
   listSupportAssignees,
+  listGuideGaps,
   listSupportCasesForStaff,
+  markGuideGap,
   readSupportDiagnostic,
+  requestSupportAccess,
   replyToSupportCase,
   replyToSupportCasesMany,
   revokeSupportGrantAsStaff,
@@ -29,6 +32,7 @@ import {
   listHelpVideos,
   supportHelpStats,
   supportMetrics,
+  unmarkGuideGap,
 } from "@odentia/services"
 import type { Context } from "hono"
 import { Hono } from "hono"
@@ -215,6 +219,35 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
     )
   })
 
+  /**
+   * «Pedir acceso de diagnóstico…»: deja el mensaje fijo, pasa el caso a
+   * «Esperando a la clínica» y desde ahí lo leen la propietaria y los
+   * administradores (ADR 0180). Pedirlo dos veces deja un solo pedido.
+   */
+  app.post("/cases/:id/request-access", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) => requestSupportAccess(tx as Db, staffOf(c), c.req.param("id"))),
+    ),
+  )
+
+  /** «Falta en la guía»: la marca del equipo en el caso (encender y apagar). */
+  app.put("/cases/:id/guide-gap", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        await markGuideGap(tx as Db, staffOf(c), c.req.param("id"))
+        return { ok: true }
+      }),
+    ),
+  )
+  app.delete("/cases/:id/guide-gap", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        await unmarkGuideGap(tx as Db, staffOf(c), c.req.param("id"))
+        return { ok: true }
+      }),
+    ),
+  )
+
   app.post("/cases/:id/attachments", async (c) => {
     const caseId = c.req.param("id")
     const declaredSize = Number(c.req.header("content-length") ?? 0)
@@ -331,6 +364,11 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
   /** Agrupación para conocimiento: agregado sin datos de organizaciones. */
   app.get("/knowledge", async (c) => {
     return runService(c, 200, () => supportKnowledgeGroups(deps.ownerDb, staffOf(c)))
+  })
+
+  /** «Para llevar a la guía»: los casos marcados, con su tema y la fecha, sin clínica ni conversación. */
+  app.get("/knowledge/guide-gaps", async (c) => {
+    return runService(c, 200, () => listGuideGaps(deps.ownerDb, staffOf(c)))
   })
 
   /** Métricas: conteos y tiempos; nunca texto de preguntas sin enviar. */

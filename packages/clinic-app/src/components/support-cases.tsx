@@ -155,6 +155,8 @@ const supportCaseDetail = supportCaseItem.extend({
   messages: z.array(supportMessageItem),
   attachments: z.array(supportAttachmentItem),
   grants: z.array(supportGrantItem),
+  /** Cuándo pidió soporte el acceso de diagnóstico (desde ahí lo ven también quienes lo autorizan). */
+  accessRequestedAt: z.string().nullable().optional(),
 })
 export const casesEnvelope = z.object({ data: z.array(supportCaseItem) })
 export type { SupportCaseItem }
@@ -478,7 +480,11 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
               ) : null}
 
               {!canGrant ? (
-                <p className="text-sm text-muted-foreground">Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte.</p>
+                <p className="text-sm text-muted-foreground">
+                  {kase.accessRequestedAt && kase.status === "esperando_clinica" && !activeGrant
+                    ? "Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda."
+                    : "Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte."}
+                </p>
               ) : resolved && !activeGrant ? (
                 <p className="text-sm text-muted-foreground">
                   El caso está resuelto: si soporte necesita ver el diagnóstico de tu clínica, reábrelo y autoriza el acceso.
