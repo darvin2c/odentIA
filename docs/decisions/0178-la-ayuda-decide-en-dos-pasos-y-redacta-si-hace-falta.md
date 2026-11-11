@@ -40,9 +40,15 @@ Alguien preguntó en la Ayuda «¿tenemos tareas por paciente?» y recibió «No
 
 ## Consecuencias
 
-- **Sin medir todavía con Jev ni con el modelo que escribe.** Los umbrales nuevos (0,90 de categorías, 0,15 por parte, 0,80 de «se completan») son puntos de partida. No se da por mejor que la 0146 hasta medirlo con `eval:ayuda`: el paso 1 con las categorías del banco, el conjunto, y la redacción con un juez.
-- **El banco se queda corto:** 627 preguntas son de odentIA, 14 de latidIA y ninguna de vistIA; no tiene pares de seguimiento ni preguntas de dos partes, y 147 dicen «ninguna» sobre la guía de antes. Hay que escribir lo que falta antes de confirmar.
-- **Cuesta más por pregunta:** dos llamadas a Jev en vez de una, más las tandas cuando la categoría no es segura, más el modelo que escribe cuando se redacta.
+- **Medido con Jev real el 2026-11-10** (`eval:ayuda-pasos`; registros en `packages/agent/eval/ayuda-mediciones/`), contra la pregunta de un solo paso sobre la misma guía completa y los mismos bancos:
+  - **Ajuste (desarrollo, control y final; n = 574).** De lo mostrado es correcto el 97,6 % (un paso: 96,1 %); calla lo que la guía no responde el 96,5 % (igual); resuelve solo o con un toque el 93,2 % (un paso: 82,4 %); seguro y mal, 6 (un paso: 8).
+  - **Confirmación, una vez, con la redacción encendida (ronda, ciego y cifras; n = 297).** De lo mostrado es correcto el 95,4 %, cota inferior 90,3 % (un paso: 96,8 % y 90,9 %); calla el 98,6 % (igual); resuelve el 90,1 % (un paso: 80,7 %); seguro y mal, 6 (un paso: 3). Cumple los cuatro mínimos del estudio X8, el de lo mostrado por cuatro décimas.
+  - **Costo y demora.** Habitual USD 0,00037 por pregunta y USD 0,0014 la más cara; con la guía completa, un paso cuesta USD 0,00053, porque manda 249 opciones cada vez. Dos llamadas lo habitual, cinco como máximo en lo medido. p95 de 730 ms (un paso: 315 ms).
+  - **La redacción.** En `desarrollo`, Jev dijo 11 veces de 244 que las partes se completan; las 11 pasaron la comprobación y, leídas una por una, dicen lo que dicen sus textos. No hay juez automático y son pocos casos.
+  - **Lo que no mejora.** «Datos» casi no se reconoce (11 % en la confirmación), como antes. Jev no responde siempre igual: entre dos corridas del mismo banco cambian una o dos preguntas.
+  - Los umbrales nuevos (0,90 de categorías, 0,15 por parte, 0,80 de «se completan») no se ajustaron: son los de partida.
+- **El banco se amplió en este cambio** a 881 preguntas (odentIA 707, latidIA 94, vistIA 80), con preguntas de dos partes y de seguimiento, y sus etiquetas se pusieron al día con la guía completa. Las 120 nuevas de `ciego` las escribió quien ya había leído la guía: son menos ciegas que las originales.
+- **El peor caso cuesta más:** las tandas cuando la categoría no es segura y el modelo que escribe cuando se redacta. El tope diario cuenta preguntas, no llamadas.
 - **El modelo que escribe pasa a recibir preguntas del equipo de toda clínica** (sin cifras ni correos), además de Jev. El registro de tratamiento lo tiene que decir. Pendiente legal.
 - **La lectura de YouTube no se probó contra YouTube:** en este cambio no había clave. Está probada con respuestas de muestra.
 - **Qué invalida lo medido:** cambiar la redacción u orden de cualquiera de las tres preguntas, las instrucciones de quien redacta o un umbral. `product-prompts.test.ts` del agente lo atrapa (`__golden__/ayuda.json`, `ayuda-pasos.json`).

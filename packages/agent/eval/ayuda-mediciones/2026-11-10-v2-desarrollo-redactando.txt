@@ -1,0 +1,66 @@
+La Ayuda respondió sin Jev: PROVIDER
+Ayuda · help.v2 · proveedor jev (jev-1.13.0) · redactando
+  guía odentia: 30 pantallas, 457 preguntas frecuentes, 33 categorías; la mayor tiene 53 opciones
+  guía latidia: 30 pantallas, 455 preguntas frecuentes, 33 categorías; la mayor tiene 51 opciones
+  guía vistia: 31 pantallas, 471 preguntas frecuentes, 34 categorías; la mayor tiene 48 opciones
+  bancos: desarrollo 244
+
+Por banco:
+  banco          n  seguro bien  seguro mal  redactadas  duda c/correcta  duda sin  duda calla  ninguna bien  ninguna mal  datos bien  datos mal  sin Jev
+  desarrollo   244          155           5          11               43         7          13            14            5           2          0        4
+  «redactadas»: Jev dijo que dos o tres respuestas se completan. Sin --redactar cuentan como duda; con él, como seguro si todas sus partes corresponden.
+
+Ajuste (desarrollo + control + final), n = 244:
+  De lo que muestra como respuesta, corresponde: 96.9 % (cota inferior 95 %: 92.9 %; mínimo 95.0 %)
+  Lo que la guía no responde y no recibe una respuesta: 96.8 % (mínimo 95.0 %)
+  Lo que la guía responde y se resuelve solo o con un toque: 93.0 % (mínimo 70.0 %)
+  Seguro y mal: 5 · «datos» bien dicho: 22.2 %
+  Primer paso: de 171 con categoría segura, acertó 163 (95.3 %); en 63 buscó en toda la guía o dijo «ninguna» en el primer paso
+  Cumple los mínimos: sí
+
+Llamadas a Jev por pregunta: habitual 2 · máximo 5 (610 en total)
+Demora por pregunta, con todos sus pasos: p50 476 ms · p95 1083 ms (mínimo para salir ≤ 2000 ms)
+Costo de Jev por pregunta: habitual USD 0.000373 · máximo USD 0.001413 · esta corrida USD 0.142111 (241 preguntas con precio, de 241)
+1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.484900, sin contar lo redactado
+
+Seguro y se equivoca (5):
+  - [desarrollo · odentia] «¿Cómo subo una foto del paciente?» → seguro en clinica: FAQ «¿Dónde subo una radiografía?»; esperado: FAQ «¿Cómo pongo la foto de un paciente?»
+  - [desarrollo · odentia] «¿Cómo cambio los colores de la app?» → seguro en organizacion: FAQ «¿Puedo poner el color de mi clínica?», párrafo de organizacion; esperado: FAQ «¿Puedo poner el color de mi clínica?»
+  - [desarrollo · vistia] «como mando el pedido al laboratorio por correo desde aca» → seguro en pedidos: FAQ «¿Cómo vendo unos lentes?»; esperado: ninguna
+  - [desarrollo · odentia] «busco a un paciente en la lupa de arriba y no me sale nada» → seguro en ficha: FAQ «¿Por qué el buscador no me trae lo que busco?», FAQ «¿Cómo busco a una persona en Pacientes?», FAQ «¿Hay un buscador general?»; esperado: FAQ «¿Por qué el buscador no me trae lo que busco?»
+  - [desarrollo · odentia] «como conecto el whatsapp y cambio el texto del recordatorio» → seguro en whatsapp: FAQ «¿Cómo cambio el texto del recordatorio de WhatsApp?», párrafo de whatsapp; esperado: FAQ «¿Cómo conecto el WhatsApp de la clínica?» o FAQ «¿Cómo cambio el texto del recordatorio de WhatsApp?»
+
+Lo redactado, para leerlo (11; aquí no hay juez). «Se mostró» es que pasó la comprobación de nombres y cifras:
+  - [desarrollo · odentia] «¿Dónde veo mis comisiones?»
+      partes: FAQ «¿Quién ve las comisiones?» + párrafo de comisiones
+      se mostró: Puedes ver tus comisiones en «Mis honorarios»: ahí ves solo lo tuyo, con tus pagos y descuentos.
+  - [desarrollo · odentia] «¿Dónde cambio los precios?»
+      partes: FAQ «¿Cómo cambio el precio de un servicio?» + párrafo de servicios
+      se mostró: En «Gestión» › «Servicios y precios», abre el menú de la fila del servicio y selecciona «Ver y editar». Cambia el precio y guarda; el precio nuevo vale para lo que se indique desde entonces.
+  - [desarrollo · odentia] «¿Cómo cambio el nombre de la clínica?»
+      partes: FAQ «¿Qué nombre de la clínica ven mis pacientes?» + párrafo de organizacion
+      se mostró: Cambia el nombre comercial en «Datos de la clínica», dentro de Configuración. Es el nombre que ven tus pacientes.
+  - [desarrollo · odentia] «¿Cómo cambio los colores de la app?»
+      partes: FAQ «¿Puedo poner el color de mi clínica?» + párrafo de organizacion
+      se mostró: Cambia el color de la marca en «Datos de la clínica» › «Color de la marca», debajo del logo. Elige un color y guárdalo con «Usar este color»; solo puede cambiarlo quien administra la clínica.
+  - [desarrollo · latidia] «donde pongo la presion y la temperatura del paciente»
+      partes: FAQ «¿Dónde registro los signos vitales y el examen físico?» + FAQ «¿Qué signos vitales puedo registrar?»
+      se mostró: Registra la presión arterial y la temperatura en el bloque «Examen físico» de la atención.
+  - [desarrollo · odentia] «busco a un paciente en la lupa de arriba y no me sale nada»
+      partes: FAQ «¿Por qué el buscador no me trae lo que busco?» + FAQ «¿Cómo busco a una persona en Pacientes?» + FAQ «¿Hay un buscador general?»
+      se mostró: Puede estar filtrado: en «Filtrar», revisa «Buscar en»; si debajo dice «Sin buscar en», elige «Buscar en todo». Escribe al menos dos letras. El buscador solo muestra lo que tu rol ve.
+  - [desarrollo · odentia] «como hago el periodontograma y despues pongo el estadio»
+      partes: FAQ «¿Cómo pongo el estadio y el grado de la periodontitis?» + FAQ «¿Dónde hago el periodontograma?»
+      se mostró: Dentro de la atención, abajo, en «También», toca «Periodontograma» y después «Empezar»; completa las piezas y el periodontograma queda fijo al firmar la atención. Para poner el estadio, en «Resumen y clasificación» agrega la pérdida de hueso en la radiografía, las piezas perdidas, los cigarrillos al día y la diabetes; el sistema propone el diagnóstico con estadio, grado y extensión, que puedes cambiar si no coincide. «Confirmar diagnóstico» lo deja también en el diagnóstico de la atención.
+  - [desarrollo · odentia] «como conecto el whatsapp y cambio el texto del recordatorio»
+      partes: FAQ «¿Cómo cambio el texto del recordatorio de WhatsApp?» + párrafo de whatsapp
+      se mostró: Conecta el número de WhatsApp de la clínica en «Configuración › Integraciones › WhatsApp»; solo puedes tener un número conectado por clínica. Para cambiar el texto, abre el mensaje y toca «Editar el texto»; luego guárdalo con «Enviar a revisión».
+  - [desarrollo · latidia] «que signos vitales puedo tomar y donde veo despues como van en el tiempo»
+      partes: FAQ «¿Qué signos vitales puedo registrar?» + FAQ «¿Dónde veo cómo va su presión o su peso?»
+      se mostró: Puedes registrar presión arterial, frecuencia cardiaca y respiratoria, temperatura, saturación, peso, talla, perímetro cefálico y glucosa capilar; el IMC sale del peso y la talla. Para ver cómo van en el tiempo, entra en su página › Clínica › «Signos vitales»: verás un gráfico por cada signo que se le tomó y «Última medición». «Ver como tabla» los muestra por fecha y con quién los tomó; ahí solo se miran, se registran en el «Examen físico» de cada atención.
+  - [desarrollo · latidia] «como le doy descanso medico y a quien se le manda»
+      partes: FAQ «¿A quién se le envía una receta, una orden o un descanso médico?» + FAQ «¿Cómo emito un descanso médico?»
+      se mostró: En la atención, en «Documentos», selecciona «Nuevo» › «Descanso médico» e indica «Desde» qué día y cuántos «Días». Se envía solo a la propia persona o, si es menor, a su representante legal; nunca a otro número. «Enviar» le manda el PDF por WhatsApp o, si no, por correo.
+  - [desarrollo · vistia] «como anoto el examen de la vista y saco la receta de lentes»
+      partes: FAQ «¿Cómo anoto el examen de la vista?» + FAQ «¿Cómo emito la receta de lentes?»
+      se mostró: Anota en «Examen de la vista» quién acompaña si es menor, si ya usa lentes, la agudeza visual, la refracción, la distancia pupilar y la salud del ojo; registra la presión si la mides. Con la refracción guardada, en «Receta de lentes» elige «Emitir receta de anteojos» o «Emitir receta de lentes de contacto» y revisa la graduación; para lentes de contacto, completa la curva base, el diámetro y la marca de cada ojo. La firmas tú con tu colegiatura del perfil profesional.
