@@ -75,7 +75,23 @@ const YES = /(?<!\p{L})[sS][íÍ](?!\p{L})/gu
 /** Lo que pregunta o depende de algo: «¿Ya tenemos tu WhatsApp?», «If you shared your number…». */
 const ASKS_OR_IF = /\?\s*$|^\W*(?:si|if|whether|in case)\b/
 
-export function claimsOf(text: string): { team: boolean; note: boolean; contact: boolean } {
+/**
+ * «Ya quedó reservada», «te reservé la cita», «your appointment is booked». Lo que depende de
+ * algo no la da por hecha: «al confirmar tus datos queda reservada», «cuando elijas, queda agendada».
+ */
+const BOOKED_PARTICIPLE = String.raw`(?:reservad|agendad|separad)[oa]s?`
+const BOOKED_ES = new RegExp(
+  [
+    String.raw`${NOT_AFTER}\b(?:quedo|queda|quedaron|esta|ha quedado|ya esta)(?: ya)? ${BOOKED_PARTICIPLE}\b`,
+    String.raw`${NOT_AFTER}\b(?:te|le|les) (?:reserve|agende|separe|he reservado|hemos reservado|reservamos|agendamos)\b`,
+    String.raw`${NOT_AFTER}\b(?:reserve|agende|separe|he reservado|hemos reservado) (?:tu|su|la) cita\b`,
+  ].join("|"),
+)
+const BOOKED_EN = /\b(?:is|are|has been|have been|you're|you are) (?:now |all )?booked\b|\bi(?:'ve| have)? booked\b/
+/** Lo que pasará cuando haga algo: no afirma que ya pasó. «Con tu sí» llega como «con tu claro» (`YES`). */
+const WHEN_IT_DOES = /\b(?:al (?:confirmar|completar|elegir|llenar|terminar)|cuando|una vez que|apenas|en cuanto|para que|con tu (?:si|claro|confirmacion|respuesta)|respondeme|confirmame|si me (?:dices|confirmas|respondes)|once|when|after you)\b/
+
+export function claimsOf(text: string): { team: boolean; note: boolean; contact: boolean; booked: boolean } {
   const said = plain(text)
   const yours = plain(text.replace(YES, "claro")).replace(LEFT_ONE, (_match, to: string | undefined, what: string) => `${to ? "a " : ""}tu ${what}`)
   // Frase por frase: la que pregunta o pone una condición no afirma que lo tiene.
@@ -84,5 +100,6 @@ export function claimsOf(text: string): { team: boolean; note: boolean; contact:
     team: TEAM_WILL.test(said) || PASSED_ON.test(said),
     note: NOTED.test(said),
     contact: sentences.some((sentence) => KEPT_ES.test(sentence) || KEPT_EN.test(sentence)),
+    booked: sentences.some((sentence) => !WHEN_IT_DOES.test(sentence) && (BOOKED_ES.test(sentence) || BOOKED_EN.test(sentence))),
   }
 }
