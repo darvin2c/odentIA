@@ -732,7 +732,8 @@ describe("en dos pasos (ADR 0178)", () => {
     for (const previous of [null, "¿hay tareas por paciente?", { where: "Tareas" }, { question: 12 }, { question: "   " }]) {
       expect(await stateWith(previous), JSON.stringify(previous)).toBe("Pantalla: Inicio\nPregunta: ¿y cómo la creo?")
     }
-    expect(JSON.stringify(await logOf(org))).not.toMatch(/Elena|987|correo|tareas por paciente/)
+    // Sin los ids: uno al azar puede traer «987».
+    expect(JSON.stringify(await logOf(org), (key, value) => (/id$/i.test(key) ? undefined : value))).not.toMatch(/Elena|987|correo|tareas por paciente/)
   })
 
   it("cifras: la pregunta viaja a Jev y a quien redacta sin el monto, y no queda guardado", async () => {
@@ -758,7 +759,7 @@ describe("en dos pasos (ADR 0178)", () => {
     expect(spaced.seen.map((item) => item.state.split("\n")[1])).toEqual(["Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?", "Pregunta: ¿cómo cobro S/ mitad Yape y mitad efectivo?"])
     const logged = await logOf(org)
     expect(logged).toHaveLength(3)
-    expect(JSON.stringify(logged)).not.toMatch(/1200|1 200|yape/i)
+    expect(JSON.stringify(logged, (key, value) => (/id$/i.test(key) ? undefined : value))).not.toMatch(/1200|1 200|yape/i)
   })
 
   it("lo que una respuesta explica puede pedir otro permiso que su pantalla: lo dice a quien no lo tiene", async () => {
