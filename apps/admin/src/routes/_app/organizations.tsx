@@ -99,6 +99,11 @@ const orgListSchema = z.object({
   ),
 })
 
+/** Lo que dice el filtro: cada producto con su cifra y «Todos», la suma de todos, sin nombrarlos uno por uno (ADR 0168). */
+function filterCounts(byProduct: Record<ClinicalProduct, number>): Record<ProductChoice, number> {
+  return { todos: CLINICAL_PRODUCTS.reduce((sum, each) => sum + byProduct[each], 0), ...byProduct }
+}
+
 /** El estado de la clínica como pastilla: verde si está activa, ámbar si algo falta, rojo si está restringida. */
 function statusVariant(status: string | null): "success" | "warning" | "destructive" | "secondary" {
   if (status === "activa") return "success"
@@ -397,15 +402,7 @@ function OrganizationsPage() {
         <ProductFilter
           value={product}
           onChange={(value) => setList({ producto: value })}
-          counts={
-            listQuery.data
-              ? {
-                  todos: listQuery.data.byProduct.dental + listQuery.data.byProduct.medical,
-                  dental: listQuery.data.byProduct.dental,
-                  medical: listQuery.data.byProduct.medical,
-                }
-              : undefined
-          }
+          counts={listQuery.data ? filterCounts(listQuery.data.byProduct) : undefined}
         />
         {/* El precio negociado es de la administración: soporte no filtra por él (ADR 0094). */}
         {isAdmin ? (
