@@ -687,6 +687,20 @@
       "when": 1794371167952,
       "tag": "0097_aviso_llego_tu_paciente",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1794423450929,
+      "tag": "0098_administracion_hoy",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1794423455230,
+      "tag": "0099_administracion_hoy_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { organization, user } from "./auth.js"
+import { adminSchema } from "./schemas.js"
 
 /**
  * Casos de soporte de odentIA: la única fuente de lo que una persona envía
@@ -45,6 +46,11 @@ export const supportCase = pgTable(
     lastPublicMessageAt: timestamp("last_public_message_at", { withTimezone: true }),
     /** Cuándo abrió la clínica la conversación por última vez («Ver»). */
     clientSeenAt: timestamp("client_seen_at", { withTimezone: true }),
+    /**
+     * Cuándo pidió soporte el acceso de diagnóstico. Puesto: la propietaria y
+     * los administradores leen el caso aunque no lo hayan abierto (ADR 0180).
+     */
+    accessRequestedAt: timestamp("access_requested_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -64,6 +70,26 @@ export const supportCase = pgTable(
       sql`${table.status} in ('abierto','en_atencion','esperando_clinica','resuelto')`,
     ),
   ],
+)
+
+/**
+ * «Falta en la guía»: soporte marca un caso cuya respuesta no está en la
+ * Ayuda. Es una marca del equipo de odentIA y vive en `admin`, no en
+ * `support_case`, porque la clínica escribe en esa tabla: sin `GRANT` al rol
+ * de la aplicación. Una fila por caso; «Ya está en la guía» la borra.
+ */
+export const supportGuideGap = adminSchema.table(
+  "support_guide_gap",
+  {
+    caseId: uuid("case_id")
+      .primaryKey()
+      .references(() => supportCase.id, { onDelete: "cascade" }),
+    markedAt: timestamp("marked_at", { withTimezone: true }).notNull().defaultNow(),
+    markedBy: text("marked_by")
+      .notNull()
+      .references(() => user.id),
+  },
+  (table) => [index("support_guide_gap_marked_idx").on(table.markedAt)],
 )
 
 /**
