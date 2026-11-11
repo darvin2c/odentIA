@@ -155,6 +155,17 @@ function replyButtonsOf(value: unknown): { id: string; title: string }[] | null 
   return buttons.length > 0 ? buttons : null
 }
 
+/** Lo que el envío necesita fuera de la transacción que anotó el intento. */
+interface PreparedSend {
+  conversationId: string
+  outbound: OutboundMessage
+  config: Record<string, unknown>
+  adapter: NonNullable<(typeof channelAdapters)[keyof typeof channelAdapters]>
+  webhookSecret: (typeof channelConnection.$inferSelect)["webhookSecret"]
+  /** La app propia tenía marcada su clave como rechazada: si Meta acepta, se quita. */
+  clearOwnAppConnectionId: string | null
+}
+
 /**
  * Envía un mensaje `queued` al proveedor. Solo reintenta errores anteriores a
  * la llamada externa; una excepción durante `sendMessage` es ambigua y exige
@@ -164,6 +175,11 @@ function replyButtonsOf(value: unknown): { id: string; title: string }[] | null 
  * (`ProviderThrottledError`) sigue en cola y se reintenta más tarde, hasta el
  * tope de entregas. Los mensajes de una conversación salen en orden: mientras
  * uno anterior sigue en cola, este lo espera (`waiting`).
+ *
+ * El intento se anota y se confirma antes de llamar al proveedor
+ * (`send_attempted_at`), y la llamada va fuera de toda transacción: si el
+ * worker se detiene después de que el proveedor lo aceptó, el mensaje no se
+ * reenvía al volver a la cola, queda `unknown` y lo resuelve una persona.
  */
 export async function processOutbound(
   db: Db,
@@ -187,12 +203,14 @@ export async function processOutbound(
     return "deferred"
   }
   let providerAttempted = false
+  let acceptedExternalId: string | null = null
   let conversationId: string | null = null
   let waiting = false
   let signupToken = null as SignupTokenInUse | null
   let ownAppToken = null as { connectionId: string; token: string } | null
   try {
-    await withOrgContext(db, orgId, async (tx) => {
+    // 1. Preparar y anotar el intento, en una transacción que se confirma antes de llamar al proveedor.
+    const prepared = await withOrgContext(db, orgId, async (tx): Promise<PreparedSend | null> => {
       const [row] = await tx
         .select({ message, conversation, connection: channelConnection })
         .from(message)
@@ -201,8 +219,25 @@ export async function processOutbound(
         .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
         .limit(1)
       // Mensaje inexistente o ya procesado: ack.
-      if (row?.message.status !== "queued") return
+      if (row?.message.status !== "queued") return null
       conversationId = row.conversation.id
+      // Ya se intentó y el worker se detuvo antes de saber cómo terminó: puede
+      // haber salido. No se reenvía; queda para que una persona lo resuelva.
+      if (row.message.sendAttemptedAt) {
+        await tx
+          .update(message)
+          .set({ status: "unknown", error: "ambiguous: el envío se interrumpió antes de saber si el canal lo aceptó" })
+          .where(and(eq(message.id, messageId), eq(message.status, "queued")))
+        await tx.insert(auditEvent).values({
+          organizationId: orgId,
+          action: "message.updated",
+          entity: "message",
+          entityId: messageId,
+          metadata: { op: "send-uncertain", error: "interrumpido" },
+        })
+        await notify(tx, { orgId, kind: "message.updated", conversationId: row.conversation.id, messageId, at: new Date().toISOString() })
+        return null
+      }
       // Una conversación cerrada sí entrega lo que ya estaba en cola: la
       // despedida sale y enseguida se cierra (ADR 0024). Solo una conexión
       // desactivada lo impide, salvo en la prueba del chat web (fase 6 del pulido).
@@ -212,12 +247,12 @@ export async function processOutbound(
           .set({ status: "failed", error: "connection-disabled" })
           .where(eq(message.id, messageId))
         await reopenTopicOfFailedReplySafely(tx, orgId, messageId)
-        return
+        return null
       }
       // En orden: uno anterior de la conversación que sigue en cola (frenado
-      // por un límite de ritmo, por reintentar o esperando a otro) sale
-      // primero. Solo si aún tiene su trabajo en la cola: uno que lo perdió no
-      // frena la conversación, y los que lo tienen terminan al tope de entregas.
+      // por un límite de ritmo, por reintentar, esperando a otro o enviándose)
+      // sale primero. Solo si aún tiene su trabajo en la cola: uno que lo perdió
+      // no frena la conversación, y los que lo tienen terminan al tope de entregas.
       const [ahead] = await tx
         .select({ id: message.id })
         .from(message)
@@ -233,7 +268,7 @@ export async function processOutbound(
         .limit(1)
       if (ahead) {
         waiting = true
-        return
+        return null
       }
       const built: OutboundMessage = await buildOutbound(row, deps)
       // Respuesta citada (ADR 0050): el id del proveedor del mensaje citado.
@@ -248,55 +283,75 @@ export async function processOutbound(
           outbound = { ...built, replyToExternalId: quoted.externalId }
         }
       }
-      let externalId: string
       if (deps.senderMode === "mock") {
-        externalId = `mock-${randomUUID()}`
-      } else {
-        const config = decryptConfig(deps.secretsKey, row.connection.configEncrypted)
-        const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
-        if (!adapter) throw new Error(`Proveedor desconocido: ${row.connection.provider}`)
-        // Solo la del botón y sin marcar: las demás conexiones (la app propia, una demo) no llevan este estado.
-        const token = config["accessToken"]
-        if (row.connection.signup && row.connection.signup.tokenProblem !== SIGNUP_TOKEN_DEAD && typeof token === "string") {
-          signupToken = { connectionId: row.connection.id, token, expiresAt: row.connection.signup.tokenExpiresAt ?? null }
-        }
-        // Con la app propia, la clave la pegó la clínica: si Meta la rechaza, también se avisa.
-        if (row.connection.ownApp && !row.connection.signup && typeof token === "string") {
-          ownAppToken = { connectionId: row.connection.id, token }
-        }
-        providerAttempted = true
-        externalId = (await adapter.sendMessage(config, outbound, { fetch: deps.fetch, webhookSecret: row.connection.webhookSecret })).externalId
+        // Sin proveedor no hay efecto externo que proteger: queda enviado aquí mismo.
+        await markSent(tx, orgId, messageId, row.conversation.id, `mock-${randomUUID()}`, false)
+        return null
+      }
+      const config = decryptConfig(deps.secretsKey, row.connection.configEncrypted)
+      const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
+      if (!adapter) throw new Error(`Proveedor desconocido: ${row.connection.provider}`)
+      // Solo la del botón y sin marcar: las demás conexiones (la app propia, una demo) no llevan este estado.
+      const token = config["accessToken"]
+      if (row.connection.signup && row.connection.signup.tokenProblem !== SIGNUP_TOKEN_DEAD && typeof token === "string") {
+        signupToken = { connectionId: row.connection.id, token, expiresAt: row.connection.signup.tokenExpiresAt ?? null }
+      }
+      // Con la app propia, la clave la pegó la clínica: si Meta la rechaza, también se avisa.
+      if (row.connection.ownApp && !row.connection.signup && typeof token === "string") {
+        ownAppToken = { connectionId: row.connection.id, token }
       }
       await tx
         .update(message)
-        .set({
-          status: "sent", externalId, error: null,
-          // El envío de demostración no acredita aceptación de un proveedor.
-          sentAt: deps.senderMode === "live" ? sql`coalesce(${message.sentAt}, clock_timestamp())` : null,
-        })
-        .where(eq(message.id, messageId))
+        .set({ sendAttemptedAt: sql`clock_timestamp()` })
+        .where(and(eq(message.id, messageId), eq(message.status, "queued")))
+      return {
+        conversationId: row.conversation.id,
+        outbound,
+        config,
+        adapter,
+        webhookSecret: row.connection.webhookSecret,
+        clearOwnAppConnectionId: ownAppToken && row.connection.ownApp?.tokenRejectedAt ? row.connection.id : null,
+      }
+    })
+    if (!prepared) return waiting ? "waiting" : "done"
+    // 2. La llamada al proveedor, fuera de toda transacción.
+    providerAttempted = true
+    const accepted = (
+      await prepared.adapter.sendMessage(prepared.config, prepared.outbound, {
+        fetch: deps.fetch,
+        webhookSecret: prepared.webhookSecret,
+      })
+    ).externalId
+    acceptedExternalId = accepted
+    // 3. Lo aceptó: queda enviado.
+    await withOrgContext(db, orgId, async (tx) => {
+      await markSent(tx, orgId, messageId, prepared.conversationId, accepted, true)
       // Meta volvió a aceptar un envío con la app propia: la clave sirve y los avisos se retiran.
       // En su punto de guardado: si falla, el mensaje igual queda como enviado.
-      if (ownAppToken && row.connection.ownApp?.tokenRejectedAt) {
-        const connectionId = row.connection.id
+      const connectionId = prepared.clearOwnAppConnectionId
+      if (connectionId) {
         await tx.transaction((inner) => clearOwnAppTokenRejected(inner, orgId, connectionId)).catch((failure: unknown) => {
           console.error(`worker: no se pudo quitar la marca de la clave (${connectionId})`, failure)
         })
       }
-      await notify(tx, {
-        orgId,
-        kind: "message.updated",
-        conversationId: row.conversation.id,
-        messageId,
-        at: new Date().toISOString(),
-      })
     })
-    return waiting ? "waiting" : "done"
+    return "done"
   } catch (error) {
+    if (acceptedExternalId !== null) {
+      // El canal lo aceptó y no se pudo anotar: no se marca como dudoso ni se
+      // reenvía. Al volver de la cola, el intento anotado lo deja `unknown`.
+      console.error(`worker: el canal aceptó el mensaje ${messageId} y no se pudo anotar`, error)
+      return "retry"
+    }
     if (providerAttempted) {
       const detail = error instanceof Error ? error.message : String(error)
       if (error instanceof ProviderThrottledError && msg.read_ct < MAX_DELIVERIES) {
         await withOrgContext(db, orgId, async (tx) => {
+          // No salió: el próximo intento empieza limpio.
+          await tx
+            .update(message)
+            .set({ sendAttemptedAt: null })
+            .where(and(eq(message.id, messageId), eq(message.organizationId, orgId), eq(message.status, "queued")))
           await tx.insert(auditEvent).values({
             organizationId: orgId,
             action: "message.updated",
@@ -366,6 +421,20 @@ export async function processOutbound(
     }
     return "retry"
   }
+}
+
+
+/** El proveedor aceptó el mensaje (o es una demostración): queda enviado y la Bandeja lo sabe. */
+async function markSent(tx: Db, orgId: string, messageId: string, conversationId: string, externalId: string, live: boolean) {
+  await tx
+    .update(message)
+    .set({
+      status: "sent", externalId, error: null,
+      // El envío de demostración no acredita aceptación de un proveedor.
+      sentAt: live ? sql`coalesce(${message.sentAt}, clock_timestamp())` : null,
+    })
+    .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
+  await notify(tx, { orgId, kind: "message.updated", conversationId, messageId, at: new Date().toISOString() })
 }
 
 /** Ciclo completo: envía y recién entonces hace ack (delete) del mensaje. */

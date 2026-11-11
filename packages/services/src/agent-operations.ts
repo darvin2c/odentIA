@@ -2319,11 +2319,12 @@ export async function createProposal(
     finalKey = `${key.slice(0, 100)}:r${Date.now().toString(36)}`
   }
   const mode = autonomyModeOf(input.action)
-  if (!sameKey) {
+  {
     // Lo único que queda pendiente es lo que confirma el interlocutor (las
     // citas): mientras espera su «sí», ningún otro acto que no sea un mensaje
     // entra en el hilo, porque un mismo «sí» no puede autorizar dos cosas. Los
-    // mensajes coexisten siempre.
+    // mensajes coexisten siempre. También cuando se reintenta con la clave de
+    // una propuesta que venció o falló: la nueva entra igual que cualquier otra.
     const pending = await tx
       .select({ id: agentProposal.id, action: agentProposal.action })
       .from(agentProposal)
@@ -2729,7 +2730,16 @@ export async function confirmProposalByContact(
   }
   const since = new Date(noticeShown?.createdAt ?? current.createdAt).getTime()
   const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= since
-  const byWords = items.find((m) => afterProposal(m) && isAffirmative(m.body))
+  // El sí por palabras contesta lo último que se le dijo: solo cuenta lo que
+  // escribió después del último mensaje de la clínica, y nada de lo que escribió
+  // después lo retira («sí» y luego «mejor el jueves» no confirma). Un «sí» a
+  // otra pregunta que vino después de la propuesta, o uno ya retirado, no sirve.
+  const lastOut = items.filter((m) => m.direction === "out").at(-1)
+  const answerSince = Math.max(since, lastOut ? new Date(lastOut.createdAt).getTime() : 0)
+  const answer = items.filter((m) => m.direction === "in" && new Date(m.createdAt).getTime() >= answerSince)
+  const yesAt = answer.findIndex((m) => isAffirmative(m.body))
+  const byWords =
+    yesAt >= 0 && answer.slice(yesAt + 1).every((m) => isAffirmative(m.body) || onlyCourtesy(m.body)) ? answer[yesAt] : undefined
   // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
   const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
   const latestIn = items.filter((m) => m.direction === "in").at(-1)

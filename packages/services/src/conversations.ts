@@ -21,7 +21,7 @@ import {
 import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, notInArray, or, type SQL, sql } from "drizzle-orm"
 import { createTask } from "./tasks.js"
 import { personSearchCondition } from "./person-search.js"
 import { foldedWordsMatch } from "./search-text.js"
@@ -173,6 +173,7 @@ export interface MessageItem {
 export function deliveryNoteOf(status: string, error: string | null): string | null {
   if (status === "failed") {
     if (error === "connection-disabled") return "No se entregó: la conexión del canal estaba desactivada."
+    if (error?.startsWith("confirmado por el equipo")) return "No salió: lo confirmó el equipo. Si hace falta, escríbele de nuevo o avísale por otra vía."
     if (error?.startsWith("interno:")) return "No se entregó: el sistema no pudo enviarlo. Si es importante, avísale por otra vía."
     return whatsappFailureWords(error) ?? "No se entregó: el canal no lo aceptó. Si es importante, avísale por otra vía."
   }
@@ -698,11 +699,6 @@ async function applyReaction(
 }
 
 /**
- * Aplica estados del proveedor por externalId. Registra el primer
- * sent/delivered/read en sent_at si sigue nulo; un fallo guarda el motivo que
- * entrega el adaptador (de ahí lo lee `reconcileDeliveries`).
- */
-/**
  * WhatsApp no pudo entregar un mensaje porque el número no tiene WhatsApp
  * (decisión 23, caso 1): su identidad queda marcada. La ficha lo dice y no se
  * le vuelve a escribir por ahí hasta que escriba desde ese número o el equipo
@@ -717,6 +713,21 @@ async function markNotOnWhatsApp(tx: Db, orgId: string, conversationId: string):
       and ci.channel = 'whatsapp' and ci.no_whatsapp_at is null`)
 }
 
+/**
+ * Los estados desde los que un aviso del proveedor ya no mueve el mensaje: el
+ * mismo o uno posterior. «No salió» es final y no lo cambia ningún aviso.
+ */
+const STATUS_AFTER: Record<NormalizedStatus["status"], string[]> = {
+  delivered: ["delivered", "read", "failed"],
+  read: ["read", "failed"],
+  failed: ["failed", "delivered", "read"],
+}
+
+/**
+ * Aplica estados del proveedor por externalId. Registra el primer
+ * delivered/read en sent_at si sigue nulo; un fallo guarda el motivo que
+ * entrega el adaptador (de ahí lo lee `reconcileDeliveries`).
+ */
 export async function applyStatus(
   tx: Db,
   orgId: string,
@@ -726,19 +737,36 @@ export async function applyStatus(
 ): Promise<number> {
   let applied = 0
   for (const s of statuses) {
-    const status: string = s.status
-    const firstSent = status === "sent" || status === "delivered" || status === "read"
-    const [updated] = firstSent
-      ? await tx
-          .update(message)
-          .set({ status: s.status, sentAt: sql`coalesce("sent_at", now())` })
-          .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
-          .returning({ id: message.id, conversationId: message.conversationId })
-      : await tx
-          .update(message)
-          .set({ status: s.status, ...(s.error ? { error: s.error.slice(0, 500) } : {}) })
-          .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
-          .returning({ id: message.id, conversationId: message.conversationId })
+    const status = s.status
+    // Los avisos del proveedor llegan sin orden y repetidos: un estado solo
+    // avanza (enviado → entregado → leído) y «no salió» no se pisa. Un
+    // «entregado» tardío no baja un «leído», ni deshace un «no salió»; un
+    // «no salió» tampoco borra que llegó. Repetir el mismo estado no cambia nada.
+    const reached = STATUS_AFTER[status]
+    const [updated] =
+      status === "failed"
+        ? await tx
+            .update(message)
+            .set({ status, ...(s.error ? { error: s.error.slice(0, 500) } : {}) })
+            .where(
+              and(
+                eq(message.organizationId, orgId),
+                eq(message.externalId, s.externalMessageId),
+                notInArray(message.status, reached),
+              ),
+            )
+            .returning({ id: message.id, conversationId: message.conversationId })
+        : await tx
+            .update(message)
+            .set({ status, sentAt: sql`coalesce("sent_at", now())` })
+            .where(
+              and(
+                eq(message.organizationId, orgId),
+                eq(message.externalId, s.externalMessageId),
+                notInArray(message.status, reached),
+              ),
+            )
+            .returning({ id: message.id, conversationId: message.conversationId })
     if (updated && s.notOnWhatsApp) await markNotOnWhatsApp(tx, orgId, updated.conversationId)
     if (updated && status === "failed" && onFailed) await onFailed(tx, updated.id)
     if (updated) {

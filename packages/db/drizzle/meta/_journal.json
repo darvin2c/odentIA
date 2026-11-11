@@ -680,6 +680,13 @@
       "when": 1794353794168,
       "tag": "0096_ayuda_responde_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1794403128668,
+      "tag": "0097_mensaje_intento_de_envio",
+      "breakpoints": true
     }
   ]
 }

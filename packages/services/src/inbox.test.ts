@@ -105,7 +105,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   const { items } = await list()
   const of = (id: string) => items.find((item) => item.id === id)?.attention
-  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, sendFailed: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false, othersPhone: null }
+  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, sendFailed: false, sendUncertain: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false, othersPhone: null }
   expect(of(waiting.id)).toEqual({ ...base, agentAttending: true, unanswered: true })
   expect(of(answered.id)).toEqual({ ...base, agentAttending: true, awaitingPatientSince: outAt.toISOString(), nudgedAt: "2026-10-15T12:00:00.000Z" })
   // Sus dos temas, el urgente primero; sin mensajes no hay mensaje citado.
@@ -176,7 +176,7 @@ it("lo último que no salió pasa a «Por atender» sin contarse dos veces, y sa
   await out(afterAnswer.id, "sent", at(9))
   await out(afterAnswer.id, "failed", at(8))
   await proposal(afterAnswer, "reservar_cita")
-  // Lo que no se sabe si salió no cambia de vista: no es un rechazo.
+  // Lo que no se sabe si salió también pide a una persona: nadie confirma que le llegó, y lo resuelve con «Salió» o «No salió».
   const unknown = await thread("No se sabe")
   await out(unknown.id, "unknown", at(9))
   // Un fallo viejo con algo aceptado después ya no cuenta.
@@ -189,12 +189,12 @@ it("lo último que no salió pasa a «Por atender» sin contarse dos veces, y sa
 
   const ids = async (view: "attend" | "agent" | "awaiting_patient" | "closed") =>
     (await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { view }))).items.map((item) => item.id).sort()
-  expect(await ids("attend")).toEqual([rejected.id, afterAnswer.id].sort())
-  expect(await ids("agent")).toEqual([unknown.id])
+  expect(await ids("attend")).toEqual([rejected.id, afterAnswer.id, unknown.id].sort())
+  expect(await ids("agent")).toEqual([])
   expect(await ids("awaiting_patient")).toEqual([recovered.id])
   expect(await ids("closed")).toEqual([closed.id])
   // Los totales suman: nadie está en dos pestañas.
-  expect(await withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 4, attend: 2, agent: 1, awaitingPatient: 1, closed: 1, spam: 0 })
+  expect(await withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 4, attend: 3, agent: 0, awaitingPatient: 1, closed: 1, spam: 0 })
 
   const { items } = await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, {}))
   const of = (id: string) => items.find((item) => item.id === id)?.attention
@@ -202,13 +202,15 @@ it("lo último que no salió pasa a «Por atender» sin contarse dos veces, y sa
   expect(of(rejected.id)).toMatchObject({ sendFailed: true, agentAttending: true, unanswered: true })
   expect(of(afterAnswer.id)).toMatchObject({ sendFailed: true, agentAttending: true, pendingContact: 1 })
   expect(of(recovered.id)?.sendFailed).toBe(false)
-  expect(of(unknown.id)?.sendFailed).toBe(false)
+  expect(of(unknown.id)).toMatchObject({ sendFailed: true, sendUncertain: true })
+  expect(of(rejected.id)?.sendUncertain).toBe(false)
   expect(of(closed.id)?.sendFailed).toBe(false)
 
   // Un envío aceptado después la saca de «Por atender».
   await out(rejected.id, "sent", at(1))
+  await out(unknown.id, "sent", at(1))
   expect(await ids("attend")).toEqual([afterAnswer.id])
-  expect(await ids("awaiting_patient")).toEqual([rejected.id, recovered.id].sort())
+  expect(await ids("awaiting_patient")).toEqual([rejected.id, recovered.id, unknown.id].sort())
   // Si la persona vuelve a escribir, la vuelve a atender el agente.
   await ownerDb.insert(message).values({ organizationId: orgId, conversationId: afterAnswer.id, direction: "in", senderKind: "contact", body: "¿Sigue?", status: "received", createdAt: at(0) })
   expect(await ids("attend")).toEqual([])

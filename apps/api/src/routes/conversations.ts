@@ -1,5 +1,6 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  resolveUncertainMessage,
   BLOCK_REASONS,
   blockPerson,
   confirmPhoneMatch,
@@ -255,6 +256,23 @@ export function createConversationsRoute(deps: CrmDeps) {
           userId,
           content: { type: "text", text: parsed.data.text },
           replyToMessageId: parsed.data.replyToMessageId ?? null,
+        }),
+      ),
+    )
+  })
+
+  // «Salió» / «No salió»: el canal no confirmó si aceptó el mensaje y una persona lo resuelve.
+  app.post("/:id/messages/:messageId/delivery", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z.object({ outcome: z.enum(["sent", "failed"]) }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        resolveUncertainMessage(tx, orgId, {
+          conversationId: c.req.param("id"),
+          messageId: c.req.param("messageId"),
+          userId,
+          outcome: parsed.data.outcome,
         }),
       ),
     )

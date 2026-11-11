@@ -83,7 +83,9 @@ function rowLine(item: ConversationListItem, myUserId: string, receptionName: st
   const words = conversationWords({ ...item, myUserId, receptionName })
   if (words?.tone === "closed") return words
   // Lo que no salió va antes que lo último que hizo el agente: es lo que hay que resolver.
-  if (item.attention?.sendFailed) return { text: `No se pudo enviar · «${previewWords(item.preview)}»`, tone: "team" }
+  if (item.attention?.sendFailed) {
+    return { text: `${item.attention.sendUncertain ? "No se sabe si salió" : "No se pudo enviar"} · «${previewWords(item.preview)}»`, tone: "team" }
+  }
   const action = item.lastAction
   if (action) {
     const what = action.what ? ` · ${action.what}` : ""

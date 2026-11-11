@@ -8,6 +8,7 @@ import {
   awaitingPatientSinceSql,
   type ConversationView,
   lastIsFailedOutSql,
+  lastIsUncertainOutSql,
   teamLiveSql,
   unansweredSql,
 } from "./conversation-state.js"
@@ -41,6 +42,8 @@ export interface ConversationAttention {
   unanswered: boolean
   /** El último mensaje del hilo no salió: pide a una persona aunque el agente la atienda (`needsPersonSql`). */
   sendFailed: boolean
+  /** De eso, el canal no confirmó si salió (`unknown`): se dice «no se sabe si salió», no «no se pudo enviar». */
+  sendUncertain: boolean
   /**
    * Se espera al paciente desde este momento: abierta, lo último es un
    * saliente aceptado y no hay derivación abierta. Nulo si no.
@@ -117,6 +120,7 @@ const NO_ATTENTION: ConversationAttention = {
   handoffPriority: null,
   unanswered: false,
   sendFailed: false,
+  sendUncertain: false,
   awaitingPatientSince: null,
   nudgedAt: null,
   assignedName: null,
@@ -150,6 +154,7 @@ async function conversationAttention(
     agent_attending: boolean
     unanswered: boolean
     send_failed: boolean
+    send_uncertain: boolean
     awaiting_since: Date | string | null
     nudged_at: Date | string | null
     assigned_name: string | null
@@ -161,6 +166,7 @@ async function conversationAttention(
   }>(sql`
     select c.id, ${agentAttendingSql(c)} as agent_attending, ${unansweredSql(c)} as unanswered, ${teamLiveSql(c)} as team_live,
       (c.status = 'open' and ${lastIsFailedOutSql(c)}) as send_failed,
+      (c.status = 'open' and ${lastIsUncertainOutSql(c)}) as send_uncertain,
       ${awaitingPatientSinceSql(c)} as awaiting_since, c.nudged_at,
       ua.name as assigned_name, c.close_reason, c.closed_at, uc.name as closed_by_name,
       (case when cn.provider = 'web_chat' and not c.is_test then c.contact_id end) as webchat_contact
@@ -177,6 +183,7 @@ async function conversationAttention(
       handoffPriority: null,
       unanswered: row.unanswered === true,
       sendFailed: row.send_failed === true,
+      sendUncertain: row.send_uncertain === true,
       awaitingPatientSince: iso(row.awaiting_since),
       nudgedAt: iso(row.nudged_at),
       assignedName: row.assigned_name,

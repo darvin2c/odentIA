@@ -129,7 +129,11 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         title: row.contactName ?? "Persona sin nombre",
         ask: row.quote,
         detail: joined([
-          row.undelivered ? `No le llegó lo último que se le escribió (${ago(row.since)})` : `Escribió ${ago(row.since)}`,
+          row.undelivered
+            ? row.uncertain
+              ? `No sabemos si le llegó lo último que se le escribió (${ago(row.since)})`
+              : `No le llegó lo último que se le escribió (${ago(row.since)})`
+            : `Escribió ${ago(row.since)}`,
           row.channel ? channelLabel(row.channel) : null,
         ]),
         action: row.windowClosed ? "Escribirle" : "Responder",

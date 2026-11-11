@@ -80,6 +80,8 @@ export interface ConversationAttention {
   unanswered?: boolean
   /** El último mensaje del hilo no salió: pide a una persona aunque el agente la atienda. */
   sendFailed?: boolean
+  /** De eso, el canal no confirmó si salió: «No se sabe si salió», no «No se pudo enviar». */
+  sendUncertain?: boolean
 }
 
 /** Motivos de cierre (`conversation.close_reason`). */

@@ -22,7 +22,7 @@ import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
-import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
+import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, lastIsUncertainOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
 import { checkEncounterClosing, encounterHasRecords } from "./encounters.js"
 import { notFound, validation } from "./errors.js"
@@ -674,17 +674,18 @@ function pendingConversationsWhere(orgId: string, assignedTo: string | null): SQ
  */
 async function waitingConversations(tx: Db, orgId: string, assignedTo: string | null): Promise<{ waiting: number; items: WaitingPerson[] }> {
   const conv = sql.raw("c")
-  const rows = await tx.execute<{ conversationId: string; contactId: string; contactName: string | null; channel: string | null; undelivered: boolean; since: string; quote: string | null; total: number }>(sql`
+  const rows = await tx.execute<{ conversationId: string; contactId: string; contactName: string | null; channel: string | null; undelivered: boolean; uncertain: boolean; since: string; quote: string | null; total: number }>(sql`
     with waiting as (
       select c.id, c.contact_id, c.channel_connection_id,
         coalesce(${failedSinceSql(conv)}, ${unansweredSinceSql(conv)}) as since,
-        ${lastIsFailedOutSql(conv)} as undelivered
+        ${lastIsFailedOutSql(conv)} as undelivered,
+        ${lastIsUncertainOutSql(conv)} as uncertain
       from conversation c where ${pendingConversationsWhere(orgId, assignedTo)}
     ), pending as (
       select f.*, dense_rank() over (order by f.first_since, f.contact_id) as place
       from (select w.*, min(w.since) over (partition by w.contact_id) as first_since from waiting w where w.since is not null) f
     )
-    select p.id as "conversationId", p.contact_id as "contactId", ct.display_name as "contactName", ch.channel, p.undelivered,
+    select p.id as "conversationId", p.contact_id as "contactId", ct.display_name as "contactName", ch.channel, p.undelivered, p.uncertain,
       ${iso(sql`p.since`)} as since,
       (select left(regexp_replace(m.body, '[[:space:]]+', ' ', 'g'), 280) from message m
         where m.organization_id = ${orgId} and m.conversation_id = p.id and m.direction = 'in' and m.body is not null
