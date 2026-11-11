@@ -130,14 +130,30 @@ describe("ScheduleAgendaList", () => {
       />,
     )
     // Solo lo que está por confirmar pide confirmación.
-    expect(screen.getAllByRole("button", { name: "Confirmar" })).toHaveLength(5)
+    // Cada botón dice de quién es: «Confirmar: Lucía Fernández».
+    expect(screen.getAllByRole("button", { name: /^Confirmar: / })).toHaveLength(5)
     const lucia = screen.getByText("Lucía Fernández").closest("li") as HTMLElement
-    fireEvent.click(within(lucia).getByRole("button", { name: "Confirmar" }))
+    fireEvent.click(within(lucia).getByRole("button", { name: "Confirmar: Lucía Fernández" }))
     expect(confirm).toHaveBeenCalledWith("Lucía Fernández")
     expect(onOpen).not.toHaveBeenCalled()
     expect(within(lucia).getByRole("button", { name: "Más acciones para Lucía Fernández" })).toBeTruthy()
     fireEvent.click(within(lucia).getByRole("button", { name: "Lucía Fernández" }))
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Lucía Fernández" }))
+  })
+
+  it("tras «Llegó» el foco vuelve a la fila aunque pase a «En la clínica»", () => {
+    const action = ({ entry }: ScheduleAgendaItem) =>
+      entry.stage === "llego" ? { label: "Atender", onSelect: () => {} } : entry.title === "Andrés Vargas" ? { label: "Llegó", onSelect: () => {} } : null
+    const view = render(<ScheduleAgendaList items={TODAY_ITEMS} timeZone={TZ} now={AGENDA_NOW} primaryAction={action} onOpen={() => {}} />)
+    const arrived = screen.getByRole("button", { name: "Llegó: Andrés Vargas" })
+    arrived.focus()
+    fireEvent.click(arrived)
+    // El servidor la marca: cambia de grupo y su fila se vuelve a crear.
+    const after = TODAY_ITEMS.map((item) =>
+      item.entry.title === "Andrés Vargas" ? { ...item, entry: { ...item.entry, stage: "llego" as const, stateLabel: "Llegó 10:20" } } : item,
+    )
+    view.rerender(<ScheduleAgendaList items={after} timeZone={TZ} now={AGENDA_NOW} primaryAction={action} onOpen={() => {}} />)
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Atender: Andrés Vargas" }))
   })
 
   it("el estado se dice con palabras, no solo con color", () => {

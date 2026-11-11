@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { openAppointmentAnywhere } from "../../components/agenda/schedule-host"
-import { AlsoList, CallPanel, CameUnrecordedPanel, DuplicatePanel, EncounterPanel, InventoryPanel, OldUnclosedPanel, PromotionPanel, VisitPanel } from "../../components/home/row-panels"
+import { AlsoList, CallPanel, CameUnrecordedPanel, DuplicatePanel, EncounterPanel, InventoryPanel, MyControlsPanel, OldUnclosedPanel, PromotionPanel, VisitPanel } from "../../components/home/row-panels"
 import { BudgetReviewDrawer } from "../../components/patient/plan/budget-review"
 import { PersonPanel, type PersonPanelTarget } from "../../components/person/person-panel"
 import { invalidateAgentWork } from "../../lib/agent-work"
@@ -241,7 +241,9 @@ function HomePage() {
     switch (row.kind) {
       case "case":
         return row.conversationId !== null ? true : row.taskId !== null && canReadTasks
+      // Lo que no se sabe si salió se resuelve en la Bandeja, con «Salió» o «No salió»: no al lado, donde solo se puede volver a escribir.
       case "person":
+        return !row.uncertain
       case "advice":
       case "unreached":
       case "budgets":
@@ -306,8 +308,9 @@ function HomePage() {
         setBudgetsOpen(true)
         return
       case "overdueControls":
-        // La lista de la línea de Argos «Avisar un control»: la misma, con «Solo esta vez».
-        setAdvice("recordatorio_control")
+        // Los del profesional: su propia lista. Los de la clínica: la línea de Argos «Avisar un control».
+        if (row.mine) setOpened(row)
+        else setAdvice("recordatorio_control")
         return
       case "unsentBudget":
         setReviewing({ patientId: row.patientId, budgetId: row.id })
@@ -444,6 +447,7 @@ function HomePage() {
     {context && opened?.kind === "unclosed" ? (
       <VisitPanel key={opened.id} row={opened} also={openedAlso} context={context} canAttend={canAttend} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
     ) : null}
+    {opened?.kind === "overdueControls" ? <MyControlsPanel row={opened} onClose={closePanel} /> : null}
     {context && opened?.kind === "cameUnrecorded" ? (
       <CameUnrecordedPanel key={opened.id} row={opened} also={openedAlso} context={context} myUserId={myUserId} onClose={closePanel} onChanged={refresh} />
     ) : null}

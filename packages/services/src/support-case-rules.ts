@@ -6,7 +6,7 @@ import { type AnyColumn, type SQL, sql } from "drizzle-orm"
  * Reglas de un caso de soporte que comparten la cola, Inicio, el menú y los
  * avisos por correo. Son fragmentos sobre `support_case` sin alias: se usan
  * dentro de un `from support_case`. La migración que desatascó los casos
- * (0099_administracion_hoy_reglas.sql) repite a mano `clinicActsSinceSql`.
+ * (0101_administracion_hoy_reglas.sql) repite a mano `clinicActsSinceSql`.
  */
 
 /**

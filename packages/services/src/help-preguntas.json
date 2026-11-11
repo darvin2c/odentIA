@@ -839,7 +839,7 @@
     {"q":"y la montura vuelve al stock","expected":["pedidos"],"producto":"vistia","antes":{"q":"como anulo un pedido","donde":"Pedidos"},"faqs":["¿Cómo anulo un pedido?"]}
   ],
   "ronda": [
-    {"q":"¿Dónde veo a los pacientes a los que Sofi no pudo escribir porque el WhatsApp falló?","expected":["bandeja","administrador"],"producto":"odentia","pantalla":"/home","faqs":["¿Qué es «No salieron» en la Bandeja?","¿Por qué Sofi no le escribió a una persona?"],"temas":["bandeja"]},
+    {"q":"¿Dónde veo a los pacientes a los que Sofi no pudo escribir porque el WhatsApp falló?","expected":["bandeja","administrador"],"producto":"odentia","pantalla":"/home","faqs":["¿Qué es «Envíos por revisar» en la Bandeja?","¿Por qué Sofi no le escribió a una persona?"],"temas":["bandeja"]},
     {"q":"¿Por qué la vista Día dice 15 citas y la vista Agenda dice 19 citas para el mismo día?","expected":[],"producto":"odentia","pantalla":"/agenda","es":"ninguna"},
     {"q":"¿Por qué no veo las tareas de los demás?","expected":["tareas"],"producto":"odentia","pantalla":"/tasks","faqs":["¿Por qué no veo las tareas de los demás?"]},
     {"q":"¿Qué significa Faltan datos y por qué sale en casi todos?","expected":["pacientes"],"producto":"odentia","pantalla":"/people","faqs":["¿Qué significa «Faltan datos para la atención»?"]},

@@ -99,6 +99,8 @@ export interface WaitingPerson {
   windowClosed: boolean
   /** Lo último que se le quiso decir no salió: nadie se lo dijo todavía. */
   undelivered: boolean
+  /** De eso, el canal no confirmó si salió (`unknown`). */
+  uncertain: boolean
 }
 
 export interface WaitingTask {
@@ -117,6 +119,10 @@ export interface WaitingTask {
   area?: string | null
   /** La oportunidad de la que sale, si el rol puede verla. */
   opportunityTitle: string | null
+  /** Te la pasó un colega por un paciente (una derivación): quién. Va en su propia fila. */
+  referredBy?: string | null
+  /** En una derivación, de qué paciente es. */
+  patientName?: string | null
 }
 
 export interface WaitingAdvice {
@@ -331,6 +337,8 @@ export interface WaitingAcceptedUnbooked {
  * recomienda en «Te espera», es esa fila y esta no sale (ADR 0025 y 0127).
  */
 export interface WaitingOverdueControls {
+  /** Solo los que indicó quien mira (su Inicio de profesional). */
+  mine?: boolean
   controls: number
   patients: number
 }
@@ -460,6 +468,11 @@ export interface WaitingParts {
   overdueTasks: WaitingTask[]
   /** La siguiente tarea abierta que no está vencida. */
   nextTask: WaitingTask | null
+  /**
+   * Lo que un colega te pasó por un paciente (una derivación): cada una en su fila,
+   * aunque no tenga fecha. Antes competía con la gestión y quedaba en «y N tareas más».
+   */
+  referredTasks?: WaitingTask[]
   /** Total de tareas abiertas de quien mira (o del equipo, para quien dirige). */
   openTasks: number
   advice: WaitingAdvice[]
@@ -497,7 +510,8 @@ function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
       // Tiene plazo: nunca va plegado.
       return today && row.dueOn < today ? "ahora" : "hoy"
     case "task":
-      return row.due === "overdue" || row.due === "today" ? "hoy" : "sin_apuro"
+      // Una derivación sin fecha la dejó un colega para que la mires: no va plegada.
+      return row.due === "overdue" || row.due === "today" || (row.referredBy && row.due === "none") ? "hoy" : "sin_apuro"
     case "advice":
       return row.key === ADVICE_OF_TODAY ? "hoy" : "sin_apuro"
     case "staleEncounter":
@@ -604,7 +618,8 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   for (const item of othersShown.filter(isClinical)) rows.push({ kind: "case", ...item })
 
   // Un pedido sobre sus datos tiene plazo legal: va justo después de lo urgente.
-  for (const item of (parts.dataRequests ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "dataRequest", ...item })
+  // Con plazo legal: todos, sin tope (no se esconde ninguno sin decirlo).
+  for (const item of parts.dataRequests ?? []) rows.push({ kind: "dataRequest", ...item })
 
   // La ficha de esa persona sigue trabada por un borrador de otro día: va antes que lo del día.
   for (const item of parts.staleEncounters ?? []) rows.push({ kind: "staleEncounter", ...item })
@@ -613,7 +628,8 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   for (const item of parts.cameUnrecorded ?? []) rows.push({ kind: "cameUnrecorded", ...item })
 
   // Terminó su registro y su cita es hoy: ya se le puede atender al llegar.
-  for (const item of (parts.registrationsDone ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "registrationDone", ...item })
+  // Son de hoy y se van solos al llegar: todos.
+  for (const item of parts.registrationsDone ?? []) rows.push({ kind: "registrationDone", ...item })
 
   // Lo que pasó y nadie cerró va antes que lo que viene: sin cerrar, sus cifras no cuentan.
   if (parts.unclosed && parts.unclosed.total > 0) {
@@ -660,7 +676,10 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
     if (left > 0) rows.push({ kind: "more", of: "conversations", count: left })
   }
 
-  const overdue = parts.overdueTasks.slice(0, WAITING_LIMITS.overdueTasks)
+  const referred = parts.referredTasks ?? []
+  const referredIds = new Set(referred.map((item) => item.id))
+  for (const item of referred) rows.push({ kind: "task", ...item, more: 0 })
+  const overdue = parts.overdueTasks.filter((item) => !referredIds.has(item.id)).slice(0, WAITING_LIMITS.overdueTasks)
   for (const item of overdue) rows.push({ kind: "task", ...item, more: 0 })
 
   for (const item of othersShown.filter((item) => !isClinical(item))) rows.push({ kind: "case", ...item })
@@ -670,15 +689,17 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
 
   if (parts.stillOpen && parts.stillOpen.total > 0) rows.push({ kind: "stillOpen", ...parts.stillOpen })
 
-  const tasksLeft = Math.max(parts.openTasks - overdue.length - (parts.nextTask ? 1 : 0), 0)
-  if (parts.nextTask) rows.push({ kind: "task", ...parts.nextTask, more: tasksLeft })
+  const next = parts.nextTask && !referredIds.has(parts.nextTask.id) ? parts.nextTask : null
+  const tasksLeft = Math.max(parts.openTasks - referred.length - overdue.length - (next ? 1 : 0), 0)
+  if (next) rows.push({ kind: "task", ...next, more: tasksLeft })
   else if (tasksLeft > 0) rows.push({ kind: "more", of: "tasks", count: tasksLeft })
 
   // El inventario de cada sede: lo que hace falta y lo vencido, para quien pide.
-  for (const item of (parts.inventory ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "inventory", ...item })
+  // Una fila por sede: todas.
+  for (const item of parts.inventory ?? []) rows.push({ kind: "inventory", ...item })
 
   // Lo que una atención no pudo hacer porque falta publicar su consentimiento.
-  for (const item of (parts.consentsToPublish ?? []).slice(0, WAITING_LIMITS.otherCases))
+  for (const item of parts.consentsToPublish ?? [])
     rows.push({ kind: "consentToPublish", ...item })
 
   // Los avisos que WhatsApp pasó a promoción, juntos: se arreglan de una vez (ADR 0040).

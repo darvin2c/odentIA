@@ -42,6 +42,7 @@ import {
   moveAppointment,
   setAppointmentStatus,
 } from "./appointments.js"
+import { answersEarlierDate } from "./automation.js"
 import {
   listMessages,
   sendOutbound,
@@ -560,6 +561,8 @@ export type ContactConfirmOutcome =
     }
   | { outcome: "ninguna" }
   | { outcome: "varias"; options: ContactAppointmentOption[] }
+  /** La cita cambió de día después del recordatorio al que responde: se le dice la fecha nueva y se le pregunta. */
+  | { outcome: "cambio"; options: ContactAppointmentOption[] }
 
 /** Cuánto tiempo un «sí» sin decir cuál responde al último recordatorio. */
 const REMINDER_REPLY_HOURS = 72
@@ -655,6 +658,12 @@ export async function confirmAppointmentByContact(
     const reminded = await lastReminderAppointments(tx, orgId, input.contactId, input.conversationId)
     const together = options.filter((option) => reminded.includes(option.appointmentId))
     const waiting = options.filter((option) => option.status === "programada")
+    // Ese recordatorio decía la fecha anterior y aún no se le dijo la nueva: su «sí» no la confirma.
+    const moved: typeof options = []
+    for (const option of together) {
+      if (option.status === "programada" && (await answersEarlierDate(tx, orgId, option.appointmentId, input.conversationId))) moved.push(option)
+    }
+    if (moved.length > 0) return { outcome: "cambio", options: moved.map(strip) }
     if (together.length > 0) chosen = together
     // El último recordatorio fue de citas que ya no puede confirmar (la de un hijo que cumplió
     // 18): su «sí» respondía a esas, así que no se confirma otra sin preguntar.
@@ -2319,11 +2328,12 @@ export async function createProposal(
     finalKey = `${key.slice(0, 100)}:r${Date.now().toString(36)}`
   }
   const mode = autonomyModeOf(input.action)
-  if (!sameKey) {
+  {
     // Lo único que queda pendiente es lo que confirma el interlocutor (las
     // citas): mientras espera su «sí», ningún otro acto que no sea un mensaje
     // entra en el hilo, porque un mismo «sí» no puede autorizar dos cosas. Los
-    // mensajes coexisten siempre.
+    // mensajes coexisten siempre. También cuando se reintenta con la clave de
+    // una propuesta que venció o falló: la nueva entra igual que cualquier otra.
     const pending = await tx
       .select({ id: agentProposal.id, action: agentProposal.action })
       .from(agentProposal)
@@ -2602,6 +2612,31 @@ export function isAffirmative(text: string | null): boolean {
   return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
 }
 
+/**
+ * Lo que retira un sí ya dado: «no», «mejor no», «ya no», «espera», «cancela»,
+ * «cambia la hora», «mejor otro día». Una pregunta no retira nada («¿tengo que
+ * llevar otra cosa?», «¿no hay problema si llego antes?»): eso lo contesta Sofi.
+ */
+const RETRACT_ALONE = new Set(["espera", "esperame", "cancela", "cancelala", "cancelar", "cambia", "cambiar", "cambiala", "olvidalo", "olvida"])
+const RETRACT_OTHER = new Set(["dia", "hora", "horario", "fecha", "turno", "semana"])
+
+export function retractsYes(text: string | null): boolean {
+  if (!text || text.includes("?")) return false
+  const words = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+  return words.some(
+    (word, index) =>
+      RETRACT_ALONE.has(word) ||
+      (word === "no" && (index === 0 || ["mejor", "ya", "pero"].includes(words[index - 1] ?? ""))) ||
+      ((word === "otro" || word === "otra") && RETRACT_OTHER.has(words[index + 1] ?? "")),
+  )
+}
+
 /** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */
 export function onlyCourtesy(text: string | null): boolean {
   const words = plainWords(text)
@@ -2729,7 +2764,18 @@ export async function confirmProposalByContact(
   }
   const since = new Date(noticeShown?.createdAt ?? current.createdAt).getTime()
   const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= since
-  const byWords = items.find((m) => afterProposal(m) && isAffirmative(m.body))
+  // El sí por palabras contesta la propuesta: cuenta lo que escribió en su
+  // primera respuesta después de ella (hasta que la clínica le volvió a
+  // escribir), y nada de lo que escribió después lo retira («sí» y luego
+  // «mejor no»). Un «sí» a otra pregunta que vino después no la confirma; lo
+  // que la clínica escribió después del sí (pedirle su correo, «¡listo!») no lo borra.
+  const at = (m: (typeof items)[number]) => new Date(m.createdAt).getTime()
+  const firstIn = items.find((m) => m.direction === "in" && at(m) >= since)
+  const nextOut = firstIn ? items.find((m) => m.direction === "out" && at(m) > at(firstIn)) : undefined
+  const firstAnswer = items.filter((m) => m.direction === "in" && at(m) >= since && (!nextOut || at(m) < at(nextOut)))
+  const yes = firstAnswer.find((m) => isAffirmative(m.body))
+  const retracted = yes ? items.some((m) => m.direction === "in" && at(m) > at(yes) && retractsYes(m.body)) : false
+  const byWords = yes && !retracted ? yes : undefined
   // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
   const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
   const latestIn = items.filter((m) => m.direction === "in").at(-1)
@@ -3060,7 +3106,7 @@ export async function executeProposal(
       // la misma del enlace y el portal (no empezó, hora futura, horizonte).
       const moved = locked.contactId
         ? await moveOwnAppointment(tx, orgId, actorUserId, liveAppt, move)
-        : await moveAppointment(tx, orgId, actorUserId, appointmentId, move, { notice: false, requested: true })
+        : await moveAppointment(tx, orgId, actorUserId, appointmentId, move, { notice: false, requested: true, byPatient: locked.proposedBy !== "user" })
       result = { appointmentId: moved.id, startsAt: moved.startsAt }
     } else if (action === "cancelar_cita") {
       const appointmentId = payload.appointmentId as string

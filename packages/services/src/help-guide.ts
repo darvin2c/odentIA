@@ -103,7 +103,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Inicio",
     parent: null,
     purpose:
-      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder, o te lleva a la pantalla donde se resuelve; en una tarea («Hecha») y en quien terminó su registro («Llegó») el botón lo hace ahí mismo y tocar el resto de la fila abre el detalle: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), cuántos tienen algo aceptado sin cita (para quien ve Reportes, con «Ver en Pacientes», que abre «Por agendar»; si Argos ya te recomienda «Presupuesto aceptado sin cita», va en esa fila), los controles vencidos sin ninguna cita (para quien ve la agenda de la sede, como recepción, la dueña o la administración, con la lista de la línea de Argos «Avisar un control»; si Argos ya te la recomienda, va en esa fila), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y, con el Administrador encendido, las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder, o te lleva a la pantalla donde se resuelve; en una tarea («Hecha») y en quien terminó su registro («Llegó») el botón lo hace ahí mismo y tocar el resto de la fila abre el detalle: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), cuántos tienen algo aceptado sin cita (para quien ve Reportes, con «Ver en Pacientes», que abre «Por agendar»; si Argos ya te recomienda «Presupuesto aceptado sin cita», va en esa fila), los controles vencidos sin ninguna cita (para quien ve la agenda de la sede, como recepción, la dueña o la administración, con la lista de la línea de Argos «Avisar un control»; si Argos ya te la recomienda, va en esa fila; si atiendes, los que indicaste tú, con su lista), lo que un colega te pasó por un paciente (con su nombre), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y, con el Administrador encendido, las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. Sin una sede elegida, Inicio y la Agenda abren en la que hoy tiene más citas; la que eliges se recuerda para ti, no para el equipo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
     terms: [
       "resumen del día",
       "pendientes",
@@ -156,7 +156,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "¿Me avisa aunque tenga la app cerrada?",
           "Notificaciones push",
         ],
-        a: "Abre la campana y prende «Recibir avisos en este equipo»; el navegador te pide permiso y llega un aviso de «Listo». Es de ese equipo y de esta clínica: si trabajas en otra, actívalo también ahí. Te avisa cuando alguien te escribe o el agente te pasa a alguien, solo en el horario de atención de la clínica (lo de la noche llega al abrir), y a cualquier hora si WhatsApp o el agente dejan de funcionar y tú lo ves en la campana. El aviso no dice el nombre de la persona ni lo que escribió: eso se ve al tocarlo, en la clínica. Leerlo en el celular no lo resuelve: sigue en «Te espera» hasta que alguien lo atiende. En iPhone, primero agrega la clínica a tu inicio desde Safari (Compartir › Agregar a inicio) y actívalo desde ese ícono. No lo actives en la tablet que le pasas al paciente. Al cerrar sesión en la clínica, ese equipo deja de recibir tus avisos de esa clínica.",
+        a: "Abre la campana y prende «Recibir avisos en este equipo»; el navegador te pide permiso y llega un aviso de «Listo». Es de ese equipo y de esta clínica: si trabajas en otra, actívalo también ahí. Te avisa cuando alguien te escribe o el agente te pasa a alguien, solo en el horario de atención de la clínica (lo de la noche llega al abrir); si atiendes, también cuando recepción marca que llegó tu paciente (dice la hora de su cita, no su nombre); y a cualquier hora si WhatsApp o el agente dejan de funcionar y tú lo ves en la campana. El aviso no dice el nombre de la persona ni lo que escribió: eso se ve al tocarlo, en la clínica. Leerlo en el celular no lo resuelve: sigue en «Te espera» hasta que alguien lo atiende. En iPhone, primero agrega la clínica a tu inicio desde Safari (Compartir › Agregar a inicio) y actívalo desde ese ícono. No lo actives en la tablet que le pasas al paciente. Al cerrar sesión en la clínica, ese equipo deja de recibir tus avisos de esa clínica.",
       },
       {
         id: "instalar-clinica-app",
@@ -252,7 +252,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar o no se sabe si salió), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -291,9 +291,17 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "facebook",
       "correos de pacientes",
       "sin responder",
+      "no sabemos si llegó",
+      "no se sabe si llegó",
+      "no se sabe si salió",
     ],
     writePermission: "conversations.write",
     faqs: [
+      {
+        id: "no-se-sabe-si-salio",
+        q: "Un mensaje dice «No se sabe si salió», ¿qué hago?",
+        a: "El canal no confirmó si aceptó el mensaje, y no se reenvía solo para que la persona no lo reciba dos veces. La conversación queda en «Por atender». Compruébalo por otra vía (en el celular de la clínica o preguntándole a la persona) y, debajo del mensaje, pulsa «Salió» o «No salió». Si no salió, escríbele de nuevo si hace falta; si era la respuesta de un tema, el tema vuelve a quedar pendiente.",
+      },
       {
         id: "escribo-alguien-nunca-escribio",
         q: "¿Cómo le escribo a alguien que nunca me escribió?",
@@ -392,13 +400,31 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "vino tarde",
       "atendida sin registrar",
       "citas viejas",
+      "mover cita confirmada",
+      "volvió a por confirmar",
+      "ya no está confirmada",
+      "cambié una cita de día",
+      "confirmarla otra vez",
+      "volver a confirmar",
     ],
     writePermission: "appointments.write",
     faqs: [
       {
         id: "bloqueo-horario",
         q: "¿Cómo bloqueo un horario?",
-        a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (días enteros o unas horas) o un feriado o cierre de la sede. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
+        a: "La ausencia de un profesional (días enteros o unas horas) se anota en la Agenda, en «Más opciones» (los tres puntos de arriba): recepción, la de cualquiera («Anotar una ausencia»), y quien atiende, la suya («Anotar mi ausencia»); si te equivocas, el aviso trae «Deshacer». Quien configura también la anota en Configuración › Horarios y ausencias, junto con los feriados y cierres de la sede. Una ausencia vale en todas las sedes. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
+        forms: ["¿Cómo anoto que voy a faltar?", "voy a faltar", "anotar mi ausencia", "cómo aviso que no vengo", "registrar vacaciones del doctor", "el doctor no viene mañana"],
+      },
+      {
+        id: "sede-al-abrir",
+        q: "¿Por qué Inicio y la Agenda abren en otra sede?",
+        a: "Abren en la sede que eligió cada persona la última vez; si nunca eligió, en la que hoy tiene más citas. Cada persona tiene la suya: en una computadora compartida, quien entra no hereda la sede de quien estuvo antes. Se cambia en la Agenda (o, si la tienes, en la sede de «Agenda de hoy» en Inicio) y queda recordada para ti.",
+        forms: ["¿Por qué Inicio abre en otra sede?", "abre en otra sede", "inicio abre en la sede vacía", "por qué veo otra sede", "no veo las citas de mi sede"],
+      },
+      {
+        id: "mover-cita-confirmada",
+        q: "Moví una cita que ya estaba confirmada, ¿sigue confirmada?",
+        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha, y se le recuerda de nuevo para la fecha nueva. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
       },
       {
         id: "aparece-profesional-agenda",

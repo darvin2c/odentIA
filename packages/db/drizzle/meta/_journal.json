@@ -691,15 +691,29 @@
     {
       "idx": 98,
       "version": "7",
-      "when": 1794423450929,
-      "tag": "0098_administracion_hoy",
+      "when": 1794418181467,
+      "tag": "0098_mensaje_intento_de_envio",
       "breakpoints": true
     },
     {
       "idx": 99,
       "version": "7",
-      "when": 1794423455230,
-      "tag": "0099_administracion_hoy_reglas",
+      "when": 1794418194972,
+      "tag": "0099_mensaje_intento_de_envio_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1794431901375,
+      "tag": "0100_administracion_hoy",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1794431919564,
+      "tag": "0101_administracion_hoy_reglas",
       "breakpoints": true
     }
   ]

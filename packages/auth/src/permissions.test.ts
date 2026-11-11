@@ -249,3 +249,19 @@ describe("historia bloqueada (ADR 0080)", () => {
     for (const role of ["reception", "clinician", "cashier", "member"]) expect(canAccess(role, "patients.erase")).toBe(false)
   })
 })
+
+describe("todo permiso de la lista existe para canAccess", () => {
+  // Sumar un permiso pide tocar el tipo, la lista, los roles e `isPermission`: si falta
+  // uno, ni el propietario lo tiene (pasó con «appointments.absences», entrega 2 de Inicio).
+  it("el propietario tiene cada permiso de ALL_PERMISSIONS", () => {
+    for (const permission of ALL_PERMISSIONS) expect([permission, canAccess("owner", permission)]).toEqual([permission, true])
+  })
+
+  it("anotar ausencias: recepción y Ventas sí; quien atiende y caja no (quien atiende anota la suya por otra vía)", () => {
+    expect(canAccess("reception", "appointments.absences")).toBe(true)
+    expect(canAccess("sales", "appointments.absences")).toBe(true)
+    expect(canAccess("clinician", "appointments.absences")).toBe(false)
+    expect(canAccess("cashier", "appointments.absences")).toBe(false)
+    expect(canAccess("workshop", "appointments.absences")).toBe(false)
+  })
+})

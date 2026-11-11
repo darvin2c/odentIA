@@ -46,7 +46,7 @@ import {
   updateBranch,
   updateOrgRegion,
 } from "@odentia/services"
-import { and, eq, gt, inArray, sql } from "drizzle-orm"
+import { and, eq, getTableColumns, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
@@ -982,7 +982,22 @@ export function createApp(deps: AppDeps) {
   guarded.get("/branches", async (c) => {
     const { orgId } = orgContextOf(c)
     const rows = await withOrgContext(db, orgId, (tx) =>
-      tx.select().from(branch).where(eq(branch.organizationId, orgId)).orderBy(branch.name),
+      tx
+        .select({
+          ...getTableColumns(branch),
+          // Las citas de hoy de cada sede: sin una sede elegida, la pantalla abre la que tiene más.
+          // Por rango del día (usa el índice), con la zona de la sede o, sin ella, la de la clínica.
+          // Con la tabla escrita: dentro de la subconsulta, «id» sin tabla sería el de la cita.
+          todayAppointments: sql<number>`(select count(*)::int from appointment a
+            cross join lateral (select coalesce("branch"."timezone", (select op.timezone from org_profile op where op.organization_id = "branch"."organization_id"), 'UTC') as tz) z
+            where a.organization_id = "branch"."organization_id" and a.branch_id = "branch"."id" and not a.is_test
+              and a.status in ('programada','confirmada','atendida')
+              and a.starts_at >= ((now() at time zone z.tz)::date::timestamp at time zone z.tz)
+              and a.starts_at < (((now() at time zone z.tz)::date + 1)::timestamp at time zone z.tz))`,
+        })
+        .from(branch)
+        .where(eq(branch.organizationId, orgId))
+        .orderBy(branch.name),
     )
     return c.json({ data: rows })
   })

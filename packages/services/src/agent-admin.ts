@@ -239,7 +239,14 @@ async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale, limi
  * › «Control vencido» y de su fila de Inicio. Aquí cuenta controles; allá,
  * personas: el título dice las dos cifras cuando no coinciden.
  */
-async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
+async function overdueControls(
+  tx: Db,
+  orgId: string,
+  zone: OrgLocale,
+  limit: number = ADMIN_LIST_LIMIT,
+  /** Solo los que indicó este profesional (lo creó él o salió de una atención suya). */
+  professionalUserId?: string,
+): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; due_at: Date | string; total: number; people: number; old: number }>(sql`
     with due as (
       select f.id, p.id as patient_id, pp.display_name as name, f.title, f.due_at
@@ -247,6 +254,8 @@ async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: nu
       join patient p on p.id = f.patient_id and p.organization_id = f.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
       where f.organization_id = ${orgId} and pp.is_active and not pp.is_test
         and ${overdueControlSql({ organizationId: sql`f.organization_id`, patientId: sql`f.patient_id`, status: sql`f.status`, dueAt: sql`f.due_at` }, zone.timezone)}
+        ${professionalUserId ? sql`and (f.created_by = ${professionalUserId} or exists (select 1 from encounter e
+          where e.organization_id = f.organization_id and e.id = f.origin_encounter_id and e.professional_user_id = ${professionalUserId}))` : sql``}
     )
     select due.*, count(*) over ()::int as total,
            (select count(distinct d.patient_id) from due d)::int as people,
@@ -277,20 +286,31 @@ async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: nu
   }
 }
 
+/**
+ * Hasta cuándo un presupuesto «espera respuesta»: uno de hace más de seis meses ya
+ * no espera (QA del 10 nov, C28); escribirle por él suena a otra época.
+ */
+const BUDGET_ANSWER_MONTHS = 6
+
 async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days: number, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; presented_at: Date | string; total: number }>(sql`
-    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.presented_at,
-           count(*) over ()::int as total
-    from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    where b.organization_id = ${orgId} and b.status = 'presentado'
-      and b.presented_at < now() - make_interval(days => ${days})
-      and pp.is_active
-    order by b.presented_at asc
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; presented_at: Date | string; total: number; people: number }>(sql`
+    with due as (
+      select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.presented_at
+      from treatment_budget b
+      join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+      where b.organization_id = ${orgId} and b.status = 'presentado'
+        and b.presented_at < now() - make_interval(days => ${days})
+        and b.presented_at > now() - make_interval(months => ${BUDGET_ANSWER_MONTHS})
+        and pp.is_active
+    )
+    select due.*, count(*) over ()::int as total, (select count(distinct d.patient_id) from due d)::int as people
+    from due
+    order by due.presented_at asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
+    people: Number(rows[0]?.people ?? 0),
     items: rows.map((row) => ({
       ...blank,
       id: row.id,
@@ -302,7 +322,7 @@ async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days
     })),
     title: `${total} ${plural(total, "presupuesto espera", "presupuestos esperan")} respuesta desde hace más de ${days} ${plural(days, "día", "días")}`,
     detail: "Ordenados del más antiguo al más reciente.",
-    how: `Presupuestos presentados hace más de ${days} ${plural(days, "día", "días")} que siguen sin respuesta, de pacientes activos.`,
+    how: `Presupuestos presentados hace más de ${days} ${plural(days, "día", "días")} y menos de ${BUDGET_ANSWER_MONTHS} meses que siguen sin respuesta, de pacientes activos.`,
   }
 }
 
@@ -799,6 +819,8 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
     // Un aviso de cita no busca que reserve otra: solo se dice si llegó.
     if (row.kind !== "recordatorio_cita" && !isAppointmentNotice(row.kind) && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
     if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Sofi.`, fix: null, cause: null }
+    // El canal no confirmó si lo aceptó: no se reenvía solo y lo resuelve una persona en la Bandeja.
+    if (row.message_status === "unknown") return { outcome: "enviando", text: `No se sabe si salió ${via}: el canal no lo confirmó. Revísalo en la Bandeja.`, fix: null, cause: null }
     const delivery: JobDelivery | null = deliveryOf(row.message_status)
     if (delivery === "entregado" || delivery === "leido") return { outcome: "entregado", text: `Entregado ${via}${delivery === "leido" ? "; lo leyó" : ""}. Sin respuesta todavía.`, fix: null, cause: null }
     return { outcome: "enviando", text: `Enviado ${via}; todavía sin confirmación de entrega.`, fix: null, cause: null }
@@ -1308,10 +1330,11 @@ function toRecommendation(line: AdminLine, rule: RuleRow | null, result: CaseRes
       : writes
         ? {
             label: `Escribirles esta vez`,
+            // Cuenta casos (presupuestos, controles…), no personas: lo dice así.
             detail:
               total > ADMIN_ONCE_LIMIT
-                ? `Sofi les escribe a ${ADMIN_ONCE_LIMIT} de estas ${total} personas, las primeras de la lista, por única vez. A quien no pueda, lo dice con el motivo.`
-                : `Sofi les escribe a ${total === 1 ? "esta persona" : `estas ${total} personas`}, por única vez. A quien no pueda, lo dice con el motivo.`,
+                ? `Sofi escribe por ${ADMIN_ONCE_LIMIT} de estos ${total} casos, los primeros de la lista, por única vez. Si no puede escribir por alguno, dice el motivo.`
+                : `Sofi escribe por ${total === 1 ? "este caso" : `estos ${total} casos`}, por única vez. Si no puede escribir por alguno, dice el motivo.`,
           }
         : {
             label: `Crear ${Math.min(total, ADMIN_ONCE_LIMIT)} ${plural(Math.min(total, ADMIN_ONCE_LIMIT), "tarea", "tareas")}`,
@@ -1397,9 +1420,30 @@ export async function getAdminRecommendations(
  * Inicio cuando Argos no la recomienda ahí. Es la misma consulta, y la fila abre
  * la misma lista.
  */
-export async function countOverdueControls(tx: Db, orgId: string): Promise<{ controls: number; patients: number }> {
-  const result = await overdueControls(tx, orgId, await getOrgLocale(tx, orgId), 1)
+export async function countOverdueControls(
+  tx: Db,
+  orgId: string,
+  professionalUserId?: string,
+): Promise<{ controls: number; patients: number }> {
+  const result = await overdueControls(tx, orgId, await getOrgLocale(tx, orgId), 1, professionalUserId)
   return { controls: result.total, patients: result.people ?? 0 }
+}
+
+/**
+ * Los controles vencidos sin cita que indicó un profesional: los ve en su Inicio
+ * (QA del 10 nov, C45), con quién es y desde cuándo, para avisarle o reservarlo.
+ */
+export async function listMyOverdueControls(
+  tx: Db,
+  orgId: string,
+  professionalUserId: string,
+): Promise<Array<{ controlId: string; patientId: string; personName: string; line: string }>> {
+  const result = await overdueControls(tx, orgId, await getOrgLocale(tx, orgId), ADMIN_LIST_LIMIT, professionalUserId)
+  return result.items.flatMap((item) =>
+    item.patientId && item.controlId
+      ? [{ controlId: item.controlId, patientId: item.patientId, personName: item.personName, line: item.line }]
+      : [],
+  )
 }
 
 /** Una recomendación con su lista completa (hasta el tope), para revisar y decidir. */

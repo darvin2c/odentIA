@@ -14,7 +14,7 @@ const unconfirmedOf = (id: string): WaitingUnconfirmed => ({
   branchName: "Centro", serviceName: "Evaluación",
 })
 const personOf = (id: string): WaitingPerson => ({
-  conversationId: id, contactId: `contacto-${id}`, contactName: id, channel: "whatsapp", quote: "¿Atienden hoy?", since: "2026-10-12T13:00:00.000Z", urgent: false, windowClosed: false, undelivered: false,
+  conversationId: id, contactId: `contacto-${id}`, contactName: id, channel: "whatsapp", quote: "¿Atienden hoy?", since: "2026-10-12T13:00:00.000Z", urgent: false, windowClosed: false, undelivered: false, uncertain: false,
 })
 const duplicateOf = (id: string): WaitingPossibleDuplicate => ({
   id, source: "enlace", patientId: `p-${id}`, personId: `persona-${id}`, patientName: id, personName: null, detail: "", createdAt: "2026-10-12T13:00:00.000Z",

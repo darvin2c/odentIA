@@ -569,7 +569,7 @@ describe("«Escribirles esta vez» escribe a todas las personas, como promete", 
     // La lista de la pantalla se corta en 200; lo que promete el botón, no.
     expect(advice.total).toBe(205)
     expect(advice.items).toHaveLength(200)
-    expect(advice.once?.detail).toContain("estas 205 personas")
+    expect(advice.once?.detail).toContain("estos 205 casos")
     const result = await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))
     expect(result).toEqual({ created: 205, total: 205, writes: true, all: 205 })
     expect((await jobsOf(c)).filter((job) => job.kind === "seguimiento_no_asistencia")).toHaveLength(205)

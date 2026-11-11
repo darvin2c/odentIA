@@ -1136,7 +1136,78 @@ export async function newPersonRemindersVia(tx: Db, orgId: string): Promise<"wha
 export function remindedUnconfirmedSql(appt: SQL): SQL {
   return sql`(${appt}.status = 'programada' and ${appt}.starts_at > now() and exists (select 1 from automation_job j_rem
     where j_rem.organization_id = ${appt}.organization_id and j_rem.appointment_id = ${appt}.id
-      and j_rem.kind = 'recordatorio_cita' and j_rem.status = 'enviado'))`
+      and j_rem.kind = 'recordatorio_cita' and j_rem.status = 'enviado'
+      and j_rem.dedupe_key not like ${`%${EARLIER_DATE_MARK}%`}))`
+}
+
+/**
+ * Marca en la clave de un recordatorio que fue de una fecha anterior de la cita: la cita pasó a
+ * otro día y esos avisos ya no cuentan para la fecha nueva. Siguen en la historia como salieron.
+ */
+const EARLIER_DATE_MARK = ":antes:"
+
+/**
+ * La cita pasó a otro día: sus recordatorios empiezan de nuevo. Los que ya salieron (o ya no
+ * iban a salir) quedan como de la fecha anterior, y `syncAppointmentReminders` programa los de la
+ * fecha nueva. Los pendientes solo cambian de hora (`rescheduleAppointmentReminders`).
+ */
+export async function restartAppointmentReminders(tx: Db, orgId: string, appointmentId: string, version: number): Promise<void> {
+  await tx.execute(sql`
+    update automation_job set dedupe_key = dedupe_key || ${`${EARLIER_DATE_MARK}${version}`}, updated_at = updated_at
+    where organization_id = ${orgId} and appointment_id = ${appointmentId} and kind = 'recordatorio_cita'
+      and status <> 'pendiente' and dedupe_key not like ${`%${EARLIER_DATE_MARK}%`}`)
+}
+
+/**
+ * A la persona se le recordó esta cita, después la cita pasó a otro día y por esta conversación
+ * todavía no se le escribió nada: su «sí» (el botón del recordatorio o un mensaje) responde a la
+ * fecha anterior. No se confirma: se le dice la fecha nueva y se le pregunta.
+ */
+export async function answersEarlierDate(tx: Db, orgId: string, appointmentId: string, conversationId: string): Promise<boolean> {
+  const rows = await tx.execute<{ stale: boolean }>(sql`
+    select exists (
+      select 1 from automation_job j
+      where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.kind = 'recordatorio_cita'
+        and j.status = 'enviado' and j.dedupe_key like ${`%${EARLIER_DATE_MARK}%`}
+        and not exists (
+          select 1 from message m
+          where m.organization_id = ${orgId} and m.conversation_id = ${conversationId} and m.direction = 'out'
+            and m.created_at > (
+              select max(a.created_at) from audit_event a
+              where a.organization_id = ${orgId} and a.entity = 'appointment' and a.entity_id = ${appointmentId}
+                and a.action = 'appointment.moved' and a.metadata->>'remindersMark' is not null))
+    ) as stale`)
+  return rows[0]?.stale === true
+}
+
+/** Lo que se le contesta a quien dice sí a la fecha anterior de una cita que cambió de día. */
+export async function newDateQuestion(tx: Db, orgId: string, appointmentId: string): Promise<string | null> {
+  const [appt] = await tx
+    .select({ startsAt: appointment.startsAt, branchId: appointment.branchId })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  if (!appt) return null
+  const when = new Intl.DateTimeFormat((await findOrgLocale(tx, orgId)).locale, {
+    timeZone: await timezoneOf(tx, orgId, appt.branchId),
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(appt.startsAt)
+  return `Tu cita cambió de fecha después de ese recordatorio: ahora es el ${when}. ¿Te queda bien? Responde «sí» y la confirmo.`
+}
+
+/** «Deshacer» ese movimiento: los recordatorios de la fecha a la que vuelve cuentan otra vez. */
+export async function restoreAppointmentReminders(tx: Db, orgId: string, appointmentId: string, version: number): Promise<void> {
+  const mark = `${EARLIER_DATE_MARK}${version}`
+  await tx.execute(sql`
+    update automation_job j set dedupe_key = left(j.dedupe_key, length(j.dedupe_key) - ${mark.length}::int)
+    where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.kind = 'recordatorio_cita'
+      and right(j.dedupe_key, ${mark.length}::int) = ${mark}
+      and not exists (select 1 from automation_job o where o.organization_id = j.organization_id
+        and o.dedupe_key = left(j.dedupe_key, length(j.dedupe_key) - ${mark.length}::int))`)
 }
 
 /**
@@ -1171,7 +1242,7 @@ export async function syncAppointmentReminders(
         lte(appointment.startsAt, horizon),
         sql`(select count(*) from automation_job j
           where j.organization_id = ${orgId} and j.rule_id = ${rule.id} and j.kind = 'recordatorio_cita'
-            and j.appointment_id = ${appointment.id})
+            and j.appointment_id = ${appointment.id} and j.dedupe_key not like ${`%${EARLIER_DATE_MARK}%`})
           < (select count(*) from (values ${fitting}) as hh(h)
               where ${appointment.startsAt} - hh.h * interval '1 hour' >= ${now.toISOString()}::timestamptz - interval '30 minutes')`,
       ),
@@ -2553,6 +2624,7 @@ export async function deliverJob(
     return { jobId: job.id, outcome: "cancelado", detail: "Sofi no escribe en esta línea" }
   }
   // Si el recordatorio de la misma cita sale ahora (o acaba de salir), ese mensaje ya dice la fecha.
+  // El que salió antes de este aviso no: lo que decía es la fecha de antes del cambio.
   if (isAppointmentNotice(job.kind) && job.kind !== "aviso_cita_cancelada" && job.appointmentId) {
     const [reminder] = await tx
       .select({ id: automationJob.id })
@@ -2569,7 +2641,7 @@ export async function deliverJob(
             ),
             and(
               eq(automationJob.status, "enviado"),
-              gte(automationJob.updatedAt, new Date(now.getTime() - GROUP_WINDOW_MS)),
+              gte(automationJob.updatedAt, new Date(Math.max(now.getTime() - GROUP_WINDOW_MS, job.createdAt.getTime()))),
             ),
           ),
         ),
@@ -3266,6 +3338,8 @@ export async function appointmentConfirmationPlan(
         eq(automationJob.organizationId, orgId),
         eq(automationJob.appointmentId, appt.id),
         eq(automationJob.kind, "recordatorio_cita"),
+        // Lo que se le pidió para una fecha anterior de la cita no es un pedido de esta.
+        sql`${automationJob.dedupeKey} not like ${`%${EARLIER_DATE_MARK}%`}`,
       ),
     )
     .orderBy(asc(automationJob.scheduledFor))
@@ -3817,6 +3891,7 @@ export async function handleAutomationReply(
   const appointmentIds = [...new Set(together.map((row) => row.appointmentId).filter((id): id is string => !!id))]
   if (appointmentIds.length === 0) return false
   const items: ConfirmedItem[] = []
+  const changed: string[] = []
   for (const appointmentId of appointmentIds) {
     const [appt] = await tx
       .select({
@@ -3834,8 +3909,22 @@ export async function handleAutomationReply(
     if (!appt || appt.startsAt.getTime() < Date.now()) continue
     if (appt.status === "confirmada") items.push({ patientName: appt.patientName, self: appt.self, was: "ya_confirmada", startsAt: appt.startsAt })
     if (appt.status !== "programada") continue
+    // El botón es del recordatorio de la fecha anterior: no confirma la nueva sin habérsela dicho.
+    if (await answersEarlierDate(tx, orgId, appointmentId, input.conversationId)) {
+      changed.push(appointmentId)
+      continue
+    }
     await setAppointmentStatus(tx, orgId, null, appointmentId, "confirmada", { via: "respuesta" })
     items.push({ patientName: appt.patientName, self: appt.self, was: "confirmada", startsAt: appt.startsAt })
+  }
+  // La cita cambió de día después de ese recordatorio: se le dice la fecha nueva y se le pregunta.
+  // Con varias citas en el mismo mensaje lo sigue el agente, que ve la conversación.
+  if (items.length === 0 && changed.length === 1) {
+    const text = await newDateQuestion(tx, orgId, changed[0]!)
+    if (text) {
+      await sendOutbound(tx, orgId, { conversationId: input.conversationId, senderKind: "agent", content: { type: "text", text } })
+      return true
+    }
   }
   // Cita cancelada, atendida o ya pasada: no hay nada que confirmar y lo
   // correcto es que alguien lea la conversación.

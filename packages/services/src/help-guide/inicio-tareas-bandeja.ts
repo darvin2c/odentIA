@@ -245,9 +245,9 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       },
       {
         id: "bandeja-no-salieron",
-        q: "¿Qué es «No salieron» en la Bandeja?",
-        a: "Al final de la lista, junta las conversaciones en las que solo falló un envío, aparte de las que esperan respuesta. «Ver» las muestra y «Ocultar» las pliega.",
-        forms: ["mensajes que no se enviaron en la bandeja", "que significa no salieron"],
+        q: "¿Qué es «Envíos por revisar» en la Bandeja?",
+        a: "Al final de «Por atender», junta las conversaciones en las que lo único pendiente es un envío que no salió o del que no se sabe si salió, aparte de las que esperan respuesta. «Ver» las muestra y «Ocultar» las pliega. En cada una, el mensaje dice qué pasó; si no se sabe si salió, compruébalo y pulsa «Salió» o «No salió».",
+        forms: ["mensajes que no se enviaron en la bandeja", "que significa no salieron", "que es envios por revisar"],
       },
       {
         id: "bandeja-contexto",
