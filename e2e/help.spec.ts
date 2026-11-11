@@ -203,7 +203,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await page.getByRole("menuitem", { name: "Ayuda", exact: true }).click()
   const sheet = page.getByRole("dialog", { name: "Ayuda" })
   await sheet.getByRole("button", { name: "¿Cómo bloqueo un horario?" }).click()
-  await expect(sheet).toContainText("registra una ausencia del profesional")
+  await expect(sheet).toContainText("La ausencia de un profesional")
   // En teléfono el enlace se acorta y los controles miden lo que un dedo necesita.
   for (const name of ["Preguntar", "Escribir a soporte", "Reportar un problema", "Sí"]) {
     const control = sheet.getByRole("button", { name, exact: true })
