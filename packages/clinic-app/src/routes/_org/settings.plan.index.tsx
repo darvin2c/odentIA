@@ -114,7 +114,9 @@ function PlanContent() {
   const terms = useSaasTerms().data
   const subscription = useQuery({
     queryKey: ["billing", organizationId, "subscription"],
-    queryFn: () => apiFetch<{ data: BillingSummary }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
+    // `readOnlyAt`: en gracia, el día en que pasa a solo lectura, el mismo de la franja y del correo.
+    queryFn: () =>
+      apiFetch<{ data: BillingSummary & { readOnlyAt?: string | null } }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
     retry: false,
   })
   const consumption = useQuery({
@@ -237,7 +239,15 @@ function PlanContent() {
             </div>
           </dl>
           {inReview ? (
-            <p className="text-sm text-muted-foreground">{appWords().name} está revisando tu pago. Mientras tanto la clínica sigue igual.</p>
+            <p className="text-sm text-muted-foreground">
+              {appWords().name} está revisando tu pago.{" "}
+              {/* En gracia, un comprobante en revisión no aplaza la solo lectura: se dice el día. */}
+              {summary.status === "gracia" && summary.readOnlyAt
+                ? new Date(summary.readOnlyAt).getTime() > Date.now()
+                  ? `Si no se confirma antes, la clínica pasa a solo lectura el ${shortDay(summary.readOnlyAt)}.`
+                  : "Si no se confirma, hoy la clínica pasa a solo lectura."
+                : "Mientras tanto la clínica sigue igual."}
+            </p>
           ) : (
             <>
               {rejectedProof ? <p className="text-sm [overflow-wrap:anywhere]">{rejectedProofText(rejectedProof)}</p> : null}

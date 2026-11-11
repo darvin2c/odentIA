@@ -1554,15 +1554,31 @@ export interface OrganizationBillingSummary {
   pauseReason: string | null
   outstandingByCurrency: SaasMoneyByCurrency[]
   proofExtensionUntil: Date | null
+  /** En gracia, el día en que pasa a solo lectura (`readOnlyAtOf`); si no, nulo. */
+  readOnlyAt: Date | null
   usage30d: SaasUsageSummary
   /** Entró por invitación (Fundadores): hasta cuándo valen sus condiciones; null si no aplica o ya terminaron. */
   guaranteedUntil: Date | null
+}
+
+/**
+ * El día en que la clínica en gracia pasa a solo lectura (C6): el fin de la
+ * gracia o, si la prórroga de un comprobante sigue vigente y termina después,
+ * el de la prórroga. Un comprobante pendiente no aplaza nada por sí solo: la
+ * prórroga ya exige cubrir todo el saldo y respeta el tope. Una sola fecha para
+ * la franja, el correo de la víspera, Plan y pagos y el ciclo. Sin gracia, nula.
+ */
+export function readOnlyAtOf(sub: { graceEndsAt: Date | null; proofExtensionUntil: Date | null }, now: Date): Date | null {
+  if (!sub.graceEndsAt) return null
+  const extension = sub.proofExtensionUntil && sub.proofExtensionUntil > now ? sub.proofExtensionUntil : null
+  return extension && extension > sub.graceEndsAt ? extension : sub.graceEndsAt
 }
 
 /** Resumen de suscripción + saldo + uso para ficha de clínica, panel y banner. */
 export async function getOrganizationBillingSummary(
   tx: Db,
   organizationId: string,
+  now = new Date(),
 ): Promise<OrganizationBillingSummary> {
   const sub = await getSaasSubscription(tx, organizationId)
   let plan: SaasPlanSummary | null = null
@@ -1596,8 +1612,9 @@ export async function getOrganizationBillingSummary(
     pauseReason: sub?.pauseReason ?? null,
     outstandingByCurrency: outstanding,
     proofExtensionUntil: sub?.proofExtensionUntil ?? null,
+    readOnlyAt: sub && !sub.isDemo && sub.status === "gracia" ? readOnlyAtOf(sub, now) : null,
     usage30d,
-    guaranteedUntil: sub?.guaranteedUntil && sub.guaranteedUntil > new Date() ? sub.guaranteedUntil : null,
+    guaranteedUntil: sub?.guaranteedUntil && sub.guaranteedUntil > now ? sub.guaranteedUntil : null,
   }
 }
 
@@ -3148,28 +3165,29 @@ export async function tickSaasBilling(
     )
   }
 
-  // 1d. Mañana termina la gracia (ADR 0065): último correo antes de solo
-  // lectura. Con un comprobante en revisión no se avisa: el servidor espera.
-  const gracesEndingTomorrow = await tx
+  // 1d. Mañana pasa a solo lectura (ADR 0065): último correo antes, con el
+  // mismo día que dice la franja (`readOnlyAtOf`: el fin de la gracia o la
+  // prórroga vigente). Un comprobante en revisión que no dio prórroga ya no lo
+  // detiene: tampoco aplaza la solo lectura.
+  const dayAhead = new Date(now.getTime() + 86_400_000)
+  const readOnlySoon = await tx
     .select()
     .from(saasSubscription)
     .where(
       and(
         eq(saasSubscription.status, "gracia"),
         eq(saasSubscription.isDemo, false),
-        gt(saasSubscription.graceEndsAt, now),
-        lte(saasSubscription.graceEndsAt, new Date(now.getTime() + 86_400_000)),
+        or(
+          and(gt(saasSubscription.graceEndsAt, now), lte(saasSubscription.graceEndsAt, dayAhead)),
+          and(gt(saasSubscription.proofExtensionUntil, now), lte(saasSubscription.proofExtensionUntil, dayAhead)),
+        ),
       ),
     )
-  for (const sub of gracesEndingTomorrow) {
-    const [inReview] = await tx
-      .select({ id: saasPayment.id })
-      .from(saasPayment)
-      .where(and(eq(saasPayment.organizationId, sub.organizationId), eq(saasPayment.status, "pendiente")))
-      .limit(1)
-    if (inReview || !sub.graceEndsAt) continue
+  for (const sub of readOnlySoon) {
+    const readOnlyAt = readOnlyAtOf(sub, now)
+    if (!readOnlyAt || readOnlyAt <= now || readOnlyAt > dayAhead) continue
     const emailTo = await orgEmail(sub.organizationId)
-    const day = sub.graceEndsAt.toISOString().slice(0, 10)
+    const day = readOnlyAt.toISOString().slice(0, 10)
     const locale = await getOrgLocale(tx, sub.organizationId).catch(() => null)
     const amounts = (await outstandingByCurrency(tx, sub.organizationId))
       .filter((entry) => entry.cents > 0)
@@ -3286,14 +3304,11 @@ export async function tickSaasBilling(
     )
   for (const sub of gracesOver) {
     gracesEnded += 1
-    if (sub.proofExtensionUntil && sub.proofExtensionUntil > now) continue
-    // Con comprobante pendiente reciente se espera la confirmación admin: los
-    // días que regían cuando llegó.
-    const pendingProofs = await tx
-      .select({ createdAt: saasPayment.createdAt })
-      .from(saasPayment)
-      .where(and(eq(saasPayment.organizationId, sub.organizationId), eq(saasPayment.status, "pendiente")))
-    if (pendingProofs.some((proof) => addDays(proof.createdAt, terms.at(proof.createdAt).proofExtensionDays) > now)) continue
+    // Solo protege una prórroga vigente (`readOnlyAtOf`), que ya exige cubrir todo el saldo
+    // y respeta el tope. Un comprobante pendiente no aplaza por sí solo: subir uno tras otro
+    // (y que se rechacen) ya no encadena días. La prórroga ya dada no se retira.
+    const readOnlyAt = readOnlyAtOf(sub, now)
+    if (readOnlyAt && readOnlyAt > now) continue
     const due = await outstandingCents(tx, sub.organizationId)
     // Sin plan no se reactiva gratis aunque no haya saldo: falta elegir plan.
     if (due <= 0 && sub.planId) {

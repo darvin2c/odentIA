@@ -14,7 +14,14 @@ import { withOrgContext, type Db } from "@odentia/db"
 import { invitation, member, user } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
 import { auditEvent } from "@odentia/db/schema/org"
-import { saasCharge, saasCommissionSettlement, saasPayment, saasSellerCommission, saasSubscription } from "@odentia/db/schema/saas-billing"
+import {
+  saasCharge,
+  saasCommissionSettlement,
+  saasNotice,
+  saasPayment,
+  saasSellerCommission,
+  saasSubscription,
+} from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
@@ -622,6 +629,89 @@ it("rechazar libera el cargo: la clínica registra otro comprobante y la adminis
   expect(manual.charge).toMatchObject({ status: "pagada", paidCents: 10000 })
   const statuses = (await listSaasPayments(ownerDb, f.orgId)).map((row) => row.status).sort()
   expect(statuses).toEqual(["confirmado", "rechazado", "rechazado"])
+})
+
+/**
+ * La clínica de C6: su gracia termina el dom 15 nov a las 10:00 de Lima, con
+ * un cargo vencido sin pagar. El sáb 14 sube un comprobante por todo el saldo,
+ * que le da la prórroga hasta el mar 17 (3 días, una vez).
+ */
+const GRACE_ENDS = new Date("2026-11-15T15:00:00Z")
+const SAT_14 = new Date("2026-11-14T15:00:00Z")
+const EXTENSION_ENDS = new Date("2026-11-17T15:00:00Z")
+
+async function graceWithExtension(f: BillingFixture) {
+  await startSaasTrial(ownerDb, f.orgId, { planCode: `base-${f.orgId}` }, new Date("2026-09-01T12:00:00Z"))
+  const charge = await createSaasCharge(ownerDb, f.orgId, f.admin, {
+    planCode: `base-${f.orgId}`,
+    periodStart: new Date("2026-10-01T00:00:00Z"),
+    periodEnd: new Date("2026-11-01T00:00:00Z"),
+    dueAt: new Date("2026-11-08T15:00:00Z"),
+  })
+  await ownerDb
+    .update(saasSubscription)
+    .set({ status: "gracia", trialEndsAt: null, graceEndsAt: GRACE_ENDS, activatedAt: new Date("2026-10-01T00:00:00Z") })
+    .where(eq(saasSubscription.organizationId, f.orgId))
+  const first = await f.run((tx) =>
+    submitSaasReceipt(tx, { storage: storageStub }, f.orgId, f.admin, { chargeId: charge.id, ...receipt(10000, randomUUID()) }, SAT_14),
+  )
+  expect((await subscriptionOf(f.orgId))?.proofExtensionUntil?.toISOString()).toBe(EXTENSION_ENDS.toISOString())
+  return { charge, first }
+}
+
+async function eveNotices(orgId: string) {
+  return ownerDb
+    .select({ dedupeKey: saasNotice.dedupeKey, emailTo: saasNotice.emailTo })
+    .from(saasNotice)
+    .where(and(eq(saasNotice.organizationId, orgId), eq(saasNotice.kind, "restriccion_manana")))
+}
+
+it("un comprobante rechazado no encadena prórrogas: el segundo pendiente ya no aplaza la solo lectura", async () => {
+  const f = await billingFixture("bil-21")
+  const { charge, first } = await graceWithExtension(f)
+  // El lun 16 Ada rechaza el primero y ese mismo día la clínica sube otro.
+  await rejectSaasReceipt(ownerDb, f.orgId, f.admin, first.id, "No se ve el número de operación", new Date("2026-11-16T14:00:00Z"))
+  const second = await f.run((tx) =>
+    submitSaasReceipt(tx, { storage: storageStub }, f.orgId, f.admin, { chargeId: charge.id, ...receipt(10000, randomUUID()) }, new Date("2026-11-16T15:00:00Z")),
+  )
+  // No da más días: la prórroga ya se usó.
+  expect((await subscriptionOf(f.orgId))?.proofExtensionUntil?.toISOString()).toBe(EXTENSION_ENDS.toISOString())
+
+  // La víspera sale aunque haya un comprobante en revisión que no dio prórroga.
+  await tickSaasBilling(ownerDb, new Date("2026-11-16T16:00:00Z"))
+  expect(await eveNotices(f.orgId)).toMatchObject([{ dedupeKey: "restriccion-manana:2026-11-17" }])
+  expect((await subscriptionOf(f.orgId))?.status).toBe("gracia")
+
+  // Al terminar la prórroga, el ciclo la deja en solo lectura: el segundo pendiente no la protege.
+  await tickSaasBilling(ownerDb, new Date("2026-11-17T16:00:00Z"))
+  expect(await subscriptionOf(f.orgId)).toMatchObject({ status: "restringida", restrictReason: "gracia_vencida" })
+
+  // El mié 18 Ada rechaza el segundo: sigue en solo lectura y el cargo, sin pagar.
+  await rejectSaasReceipt(ownerDb, f.orgId, f.admin, second.id, "Comprobante repetido", new Date("2026-11-18T14:00:00Z"))
+  expect((await subscriptionOf(f.orgId))?.status).toBe("restringida")
+  expect(await chargeOf(charge.id)).toMatchObject({ paidCents: 0 })
+})
+
+it("la víspera sale tras un rechazo cuando la gracia ya pasó y la prórroga vence mañana", async () => {
+  const f = await billingFixture("bil-22")
+  const { first } = await graceWithExtension(f)
+  // El sáb 14, con la prórroga vigente, mañana no pasa a solo lectura: no hay víspera.
+  await tickSaasBilling(ownerDb, new Date("2026-11-14T16:00:00Z"))
+  expect(await eveNotices(f.orgId)).toHaveLength(0)
+  await rejectSaasReceipt(ownerDb, f.orgId, f.admin, first.id, "No corresponde a este cargo", new Date("2026-11-16T14:00:00Z"))
+  // El lun 16 la gracia ya pasó y la prórroga vence mañana: el último correo sale con ese día.
+  await tickSaasBilling(ownerDb, new Date("2026-11-16T16:00:00Z"))
+  const eve = await eveNotices(f.orgId)
+  expect(eve).toHaveLength(1)
+  expect(eve[0]?.dedupeKey).toBe("restriccion-manana:2026-11-17")
+  expect(eve[0]?.emailTo).toContain("@example.test")
+  expect((await subscriptionOf(f.orgId))?.status).toBe("gracia")
+  // Plan y pagos lee el mismo día que el correo y la franja.
+  const summary = await getOrganizationBillingSummary(ownerDb, f.orgId, new Date("2026-11-16T16:00:00Z"))
+  expect(summary.readOnlyAt?.toISOString()).toBe(EXTENSION_ENDS.toISOString())
+  // Una sola vez.
+  await tickSaasBilling(ownerDb, new Date("2026-11-16T17:00:00Z"))
+  expect(await eveNotices(f.orgId)).toHaveLength(1)
 })
 
 it("solo se rechaza un comprobante pendiente", async () => {
