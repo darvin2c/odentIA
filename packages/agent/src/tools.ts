@@ -68,6 +68,7 @@ import {
   listTasks,
   newerInboundThan,
   noteLessonUse,
+  getService,
   operationAgentSchema,
   PERSONAL_LINK_TTL_DAYS,
   PRICES_PER_CONVERSATION,
@@ -201,6 +202,13 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
 const MAX_UNSUPPORTED_REPLIES = 2
 
 /** El profesional no es una referencia de buscar_huecos: el agente nunca escribe ids de usuario. */
+/** Un servicio inventado (un identificador vacío como 00000000-…) hacía caer el enlace con la hora a una propuesta por el chat, y al reservar fallaba. */
+/** Lo que reserva o mueve una cita: con eso, la propuesta ya no espera y «quedó reservada» es cierto. */
+const APPOINTMENT_BOOKINGS: ReadonlySet<string> = new Set(["reservar_cita", "reprogramar_cita"])
+
+const UNKNOWN_SERVICE =
+  "Ese servicio no es de la clínica: usa el id exacto de «Servicios» o no indiques serviceId. Nunca inventes identificadores."
+
 const UNKNOWN_PROFESSIONAL =
   "Ese profesional no es de un hueco de buscar_huecos: usa el dato «profesional» exacto (pro-…) del hueco elegido. Nunca inventes identificadores."
 
@@ -358,6 +366,14 @@ export interface AgentToolCtx {
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
   claimNudged?: boolean
+  /** Hay una cita propuesta que espera su sí (`attentionProgress().pending`): todavía no está reservada. */
+  awaitingYes?: boolean
+  /** En esta corrida se propuso una cita que quedó esperando su sí. */
+  proposedNow?: boolean
+  /** En esta corrida se reservó o movió una cita al confirmar su sí. */
+  bookedNow?: boolean
+  /** Ya se le pidió una vez en esta corrida que no la diga reservada mientras espera su sí. */
+  bookedNudged?: boolean
   /**
    * En el chat web consta dónde avisarle (`claimsOf`): lo guardó guardar_contacto en esta
    * corrida, ya había por dónde (`webchatReplyRoutes`) o la clínica ya la conoce.
@@ -1025,6 +1041,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const unbackedClaim = (text: string): string | null => {
     if (ctx.claimNudged) return null
     const claims = claimsOf(text)
+    // Caso 12 de la auditoría del 8 nov: tras cinco «no es un sí», dijo «ya quedó reservada» con la
+    // propuesta todavía esperando. Solo frena ese caso: una cita reservada en su enlace, por recepción
+    // o en otra atención no espera nada, y decirla reservada es cierto.
+    if (claims.booked && (ctx.awaitingYes || ctx.proposedNow) && !ctx.bookedNow && !ctx.bookedNudged) {
+      ctx.bookedNudged = true
+      return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: dices que la cita quedó reservada y la que le propusiste todavía espera su sí. Si ya te dijo que sí, confírmala con confirmar_propuesta antes de decirlo; si no se pudo, dile lo que pasa, sin decir que quedó reservada.`
+    }
     if (!claims.team && !claims.note) return null
     const used = new Set(ctx.toolsUsed)
     const passed = ctx.handedOff || used.has("request_human_handoff") || used.has("recordar_tema") || (ctx.caseOnFile?.topics ?? 0) > 0
@@ -1758,12 +1781,44 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return link ? { link, url: bookingPickAddress(origin, personalLinkRef(link.linkId), { branchId, professionalUserId, startsAt }) } : null
     })
 
-  /** Ya le dio en esta atención el enlace con esa misma hora: no se le manda otra vez. */
-  const PICK_LINK_GIVEN =
-    "Ya le diste su enlace con esa hora en esta atención: no se lo vuelvas a mandar ni le repitas la cita. Respóndele en una frase a lo que dice; si no quiere o no puede usar el enlace, pasa el caso a recepción con request_human_handoff, con esa hora, y no le digas que se reserva por aquí."
-  const pickGiven = (startsAt: string): boolean => {
+  /** Ya le dio en esta atención el enlace con esa misma hora. */
+  const pickLinkGiven = (startsAt: string): boolean => {
     const at = Date.parse(startsAt)
     return !Number.isNaN(at) && (ctx.pickLinks ?? []).some((given) => Date.parse(given) === at)
+  }
+  /**
+   * Ya le dio su enlace con esa hora. No se le repite a cada «ya», pero si lo pide de nuevo («mándame
+   * el link otra vez, no lo veo») se le devuelve el mismo para que se lo escriba tal cual: no
+   * repetirlo no es negárselo (auditoría del 8 nov: 0 de 4 lo reenviaba). Se vuelve a pedir al
+   * servicio, que devuelve el mismo enlace vivo con su referencia: el historial que lee el modelo
+   * lo muestra sin token (`hidePersonalLinkRefs`) y copiado de ahí no abriría.
+   */
+  const pickLinkAgain = async (
+    origin: string | Promise<string | null>,
+    slot: Parameters<typeof pickLink>[1],
+  ): Promise<string> => {
+    const url = await (async () => {
+      const at = await origin
+      return at ? ((await pickLink(at, slot))?.url ?? null) : null
+    })().catch((error: unknown) => {
+      if (error instanceof ServiceError) return null
+      throw error
+    })
+    const resend = url
+      ? `Si te lo pidió otra vez o dice que no le llegó o no lo ve, escríbeselo de nuevo tal cual, en una frase: ${url}`
+      : "Si te lo pidió otra vez o dice que no le llegó, pasa el caso a recepción con request_human_handoff, con esa hora."
+    return `Ya le diste su enlace con esa hora en esta atención: no se lo repitas por iniciativa tuya ni le repitas la cita. ${resend} Si no, respóndele en una frase a lo que dice; si no quiere o no puede usar el enlace, pasa el caso a recepción con request_human_handoff, con esa hora, y no le digas que se reserva por aquí.`
+  }
+  /** El servicio que trae el modelo es de la clínica; si no lo es, se le pide el correcto en vez de seguir sin él. */
+  const unknownService = async (serviceId: string | undefined): Promise<boolean> => {
+    if (!serviceId) return false
+    return inOrg((tx) => getService(tx, ctx.orgId, serviceId)).then(
+      () => false,
+      (error: unknown) => {
+        if (error instanceof ServiceError) return true
+        throw error
+      },
+    )
   }
 
   /** Lo que se le dice al modelo para enviar ese enlace: con sus palabras, como lo pidió la clínica (ADR 0109). */
@@ -1807,6 +1862,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // El agente solo conoce al profesional por su referencia («pro-…»): el usuario lo pone el servidor.
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
+      if (await unknownService(input.serviceId)) return UNKNOWN_SERVICE
       // Si a la clínica le falta algo del paciente (un dato obligatorio o el aviso de privacidad), esa
       // hora se reserva en su enlace al confirmarlo, no con su sí en el chat (ADR 0109). Sin dirección
       // pública, con una cita por venir (su enlace le mostraría esa cita) o si el enlace no se puede
@@ -1815,7 +1871,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const publicUrl = ctx.publicUrl
         const branchId = input.branchId ?? offeredBranch(input)
         if (!publicUrl || !branchId) return null
-        if (pickGiven(input.startsAt)) return PICK_LINK_GIVEN
+        if (pickLinkGiven(input.startsAt)) {
+          return pickLinkAgain(inOrg((tx) => clinicLinkOrigin(tx, publicUrl)), {
+            patientId: input.patientId,
+            branchId,
+            ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+            professionalUserId,
+            startsAt: input.startsAt,
+          })
+        }
         try {
           const found = await inOrg(async (tx) => {
             const origin = await clinicLinkOrigin(tx, publicUrl)
@@ -1848,6 +1912,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
         created = p
       })
+      if (created?.status === "propuesta") ctx.proposedNow = true
       // En el chat web, si cierra la pestaña no le llega nada: la propuesta queda
       // creada y la reserva espera a tener dónde avisarle (se exige al confirmar).
       if (await webchatNeedsContact()) {
@@ -1909,9 +1974,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
+      if (await unknownService(input.serviceId)) return UNKNOWN_SERVICE
       const branchId = input.branchId ?? offeredBranch(input)
       if (!branchId) return "Falta la sede del hueco que eligió: vuelve a llamar con su branchId exacto (el dato «sede» del hueco de buscar_huecos)."
-      if (pickGiven(input.startsAt)) return PICK_LINK_GIVEN
+      if (pickLinkGiven(input.startsAt)) {
+        return pickLinkAgain(origin, {
+          branchId,
+          ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+          professionalUserId,
+          startsAt: input.startsAt,
+          ...(linked.length > 0 ? { newPerson: true } : {}),
+        })
+      }
       const toTeam = "pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que lo registre y le confirme; no le digas que quedó reservada."
       let issued: Awaited<ReturnType<typeof pickLink>>
       try {
@@ -2344,6 +2418,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (proposal.status === "ejecutada") {
         if (proposal.action === "enviar_mensaje") ctx.replySettled = true
+        if (APPOINTMENT_BOOKINGS.has(proposal.action)) ctx.bookedNow = true
         // A quien le faltan datos se le da su enlace en la misma confirmación (no hay otro aviso de esta cita).
         // Quien se registró con este sí (ADR 0101) es el paciente que trae el resultado.
         const bookedFor = typeof proposal.payload.patientId === "string" ? proposal.payload.patientId : proposal.result?.patientId
@@ -2364,6 +2439,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           }
         }
         return `Confirmado y ejecutado (id ${proposal.id}).`
+      }
+      // Ya no espera nada: lo que diga ahora («esa hora ya está reservada, ¿te reservo otra?») no se frena.
+      if (proposal.status === "fallida" || proposal.status === "expirada") {
+        ctx.awaitingYes = false
+        ctx.proposedNow = false
       }
       if (proposal.status === "fallida") {
         const rawError = proposal.error?.trim() ?? ""

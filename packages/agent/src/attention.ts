@@ -86,6 +86,8 @@ export interface AttentionProgress {
   offered: boolean
   /** La cita propuesta que espera su sí: «Reservar cita — Cita: …». */
   pending: string | null
+  /** Lo que espera su sí es reservar una cita nueva (no moverla ni cancelarla): todavía no está reservada. */
+  pendingBooking: boolean
   /** Lo último que quedó hecho con su cita en esta atención. */
   done: string | null
   /**
@@ -135,6 +137,7 @@ export function attentionProgress(input: {
     replies: said.length,
     offered: input.state.lookups.some((item) => item.tool === "buscar_huecos" && inAttention(item.at)),
     pending: pending ? describe(pending) : null,
+    pendingBooking: pending?.action === "reservar_cita",
     done: done ? describe(done) : null,
     // La pregunta automática de novedades (con el nombre y el trato de la clínica) no le dice lo hecho.
     doneTold:
@@ -179,7 +182,7 @@ export function attentionLines(
   // quien no quería usarlo (ronda del ADR 0109).
   if (progress.pickLinks.length) {
     lines.push(
-      "Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar ni le repitas la cita. Si escribe de nuevo, respóndele en una frase a lo que dice: al confirmar sus datos en esa página queda reservada, y se le avisa por aquí. Si no quiere o no puede usar el enlace, no insistas ni le digas que se reserva por aquí: pasa el caso a recepción una sola vez con request_human_handoff, con la hora que eligió, para que se la reserven.",
+      "Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar por iniciativa tuya ni le repitas la cita. Si te pide el enlace otra vez o dice que no le llegó o no lo ve, vuelve a llamar a la misma herramienta con el mismo hueco: te devuelve ese enlace para que se lo escribas de nuevo. Si escribe otra cosa, respóndele en una frase a lo que dice: al confirmar sus datos en esa página queda reservada, y se le avisa por aquí. Si no quiere o no puede usar el enlace, no insistas ni le digas que se reserva por aquí: pasa el caso a recepción una sola vez con request_human_handoff, con la hora que eligió, para que se la reserven.",
     )
   }
   if (progress.done && !progress.doneTold) {
