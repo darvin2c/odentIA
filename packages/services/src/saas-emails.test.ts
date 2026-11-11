@@ -8,6 +8,7 @@ import {
   saasRestrictedEmail,
   saasSettlementEmail,
   saasTrialEndedEmail,
+  waitlistTeamNoticeEmail,
 } from "./saas-emails.js"
 
 const url = saasBillingUrl("https://app.odentia32.com/", "org_1")
@@ -119,5 +120,39 @@ describe("correos de Plan y pagos", () => {
     expect(mail.text).toContain("Total a pagarte: 118,45 USD")
     expect(mail.text).toContain("si algo no cuadra, escríbele a tu contacto en la administración")
     expect(mail.text).not.toContain("escríbenos desde Ayuda")
+  })
+})
+
+describe("aviso al equipo de una solicitud nueva en la lista de espera", () => {
+  const reviewUrl = "https://admin.odentia32.com/waitlist?solicitud=7f1c"
+
+  it("dice la clínica, el producto, la ciudad y el país, con el botón a esa solicitud y el texto escapado", () => {
+    const mail = waitlistTeamNoticeEmail({
+      clinicName: "Consultorio <Latido> & Cía",
+      product: "medical",
+      city: "Arequipa",
+      countryCode: "PE",
+      reviewUrl,
+    })
+    expect(mail.subject).toBe("Solicitud nueva en la lista de espera: Consultorio <Latido> & Cía (latidIA)")
+    // Interno: con la marca de odentIA aunque la solicitud sea de latidIA.
+    expect(mail.brand).toBeUndefined()
+    expect(mail.html).toContain("Interno · Lista de espera")
+    expect(mail.text).toContain("Producto: latidIA")
+    expect(mail.text).toContain("Clínica: Consultorio <Latido> & Cía")
+    expect(mail.text).toContain("Ciudad: Arequipa")
+    expect(mail.text).toContain("País: Perú")
+    expect(mail.text).toContain(`Abrir la solicitud: ${reviewUrl}`)
+    expect(mail.html).toContain(`href="${reviewUrl}"`)
+    // El nombre lo escribió quien pidió: en el HTML va escapado.
+    expect(mail.html).not.toContain("<Latido>")
+    expect(mail.html).toContain("Consultorio &lt;Latido&gt; &amp; Cía")
+  })
+
+  it("odentIA con su nombre; sin la dirección de la administración, sin botón", () => {
+    const mail = waitlistTeamNoticeEmail({ clinicName: "Clínica Sonrisa", product: "dental", city: "Cusco", countryCode: "PE", reviewUrl: null })
+    expect(mail.subject).toBe("Solicitud nueva en la lista de espera: Clínica Sonrisa (odentIA)")
+    expect(mail.text).not.toContain("Abrir la solicitud")
+    expect(mail.text).toContain("Lista de espera")
   })
 })
