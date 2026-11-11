@@ -316,7 +316,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   const panel = surface(page, { name: "Recordar la cita", exact: true })
   await expect(panel).toContainText("Aprobado")
   await expect(panel.getByRole("region", { name: "Así le llega a la persona" })).toContainText("Te recordamos la cita en")
-  await expect(panel.getByRole("region", { name: "Qué pasa cuando toca un botón" })).toContainText("La cita queda confirmada al momento.")
+  await expect(panel.getByRole("region", { name: "Qué pasa cuando toca un botón" })).toContainText("La cita queda confirmada al momento, en la fecha que dice el mensaje")
   // «Ver la línea» lleva a Agente: quien administra puede abrirla.
   await expect(panel.getByRole("link", { name: "Ver la línea", exact: true })).toHaveAttribute("href", /\/agent\/administrador\?linea=recordatorio_cita$/)
 
