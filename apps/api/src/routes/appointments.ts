@@ -363,7 +363,13 @@ export function createAgendaRoute(deps: CrmDeps) {
       (absence && parsed.data.professionalUserId === userId && canAccess(memberRole, "clinical.write"))
     if (!allowed) {
       return c.json(
-        errorBody(c, "FORBIDDEN", absence ? "Solo puedes anotar tu propia ausencia" : "No tienes permiso para configurar bloqueos"),
+        errorBody(
+          c,
+          "FORBIDDEN",
+          absence && canAccess(memberRole, "clinical.write")
+            ? "Solo puedes anotar tu propia ausencia"
+            : "No tienes permiso para anotar ausencias ni bloqueos",
+        ),
         403,
       )
     }

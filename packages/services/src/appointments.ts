@@ -1659,7 +1659,8 @@ export async function moveAppointment(
   const arrivalCleared = current.arrivedAt !== null && otherDay
   // Confirmó otro día: el nuevo no lo confirmó. Vuelve a «por confirmar» y el recordatorio
   // se lo pide (QA del 10 nov, C31).
-  const unconfirmed = current.status === "confirmada" && !current.arrivedAt && otherDay && !options.byPatient
+  // También si había llegado (esa llegada se borra): la del día nuevo nadie la confirmó.
+  const unconfirmed = current.status === "confirmada" && otherDay && !options.byPatient
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {

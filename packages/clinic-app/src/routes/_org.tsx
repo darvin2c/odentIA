@@ -52,7 +52,7 @@ import {
   UserRound,
   Wallet,
 } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useLayoutEffect } from "react"
 import { NoticesColumnProvider } from "../components/notices-column"
 import { noAccessSection } from "../lib/no-access"
 import { AGENT_WORK_EVENTS, invalidateAgentWork, useAgentSummary } from "../lib/agent-work"
@@ -357,6 +357,9 @@ function OrgLayout() {
   // La app en este equipo: tocar un aviso con la app abierta navega aquí, sin recargar.
   useEffect(() => registerAppWorker((href) => void navigate({ href })), [navigate])
   useEffect(() => syncThemeColor(), [])
+  // Al cargar la página entera, `beforeLoad` corre en el servidor: aquí la sede recordada pasa a
+  // ser de esta persona antes de que la pantalla la use (con «useLayoutEffect», sin parpadeo).
+  useLayoutEffect(() => setActiveBranchOwner(session.userId), [session.userId])
   // Una sola suscripción SSE para el layout: agenda, trabajo del agente y el número de «Inicio».
   useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_WORK_EVENTS, ...WAITING_EVENTS], (kind, data) => {
     if (WAITING_EVENTS.includes(kind)) {

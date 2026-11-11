@@ -16,7 +16,9 @@ let storageKey = STORAGE_PREFIX
 
 /** La sede recordada es de quien entró: se fija al saber quién es. */
 export function setActiveBranchOwner(userId: string | null | undefined): void {
-  storageKey = userId ? `${STORAGE_PREFIX}:${userId}` : STORAGE_PREFIX
+  const next = userId ? `${STORAGE_PREFIX}:${userId}` : STORAGE_PREFIX
+  if (next === storageKey) return
+  storageKey = next
   for (const listener of listeners) listener()
 }
 

@@ -978,9 +978,10 @@ export function createApp(deps: AppDeps) {
           ...getTableColumns(branch),
           // Las citas de hoy de cada sede: sin una sede elegida, la pantalla abre la que tiene más.
           // Por rango del día (usa el índice), con la zona de la sede o, sin ella, la de la clínica.
+          // Con la tabla escrita: dentro de la subconsulta, «id» sin tabla sería el de la cita.
           todayAppointments: sql<number>`(select count(*)::int from appointment a
-            cross join lateral (select coalesce(${branch.timezone}, (select op.timezone from org_profile op where op.organization_id = ${branch.organizationId}), 'UTC') as tz) z
-            where a.organization_id = ${branch.organizationId} and a.branch_id = ${branch.id} and not a.is_test
+            cross join lateral (select coalesce("branch"."timezone", (select op.timezone from org_profile op where op.organization_id = "branch"."organization_id"), 'UTC') as tz) z
+            where a.organization_id = "branch"."organization_id" and a.branch_id = "branch"."id" and not a.is_test
               and a.status in ('programada','confirmada','atendida')
               and a.starts_at >= ((now() at time zone z.tz)::date::timestamp at time zone z.tz)
               and a.starts_at < (((now() at time zone z.tz)::date + 1)::timestamp at time zone z.tz))`,
