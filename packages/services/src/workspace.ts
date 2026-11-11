@@ -995,15 +995,17 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const [next] = await tx.execute<Row>(sql`${select} and (t.due_at is null or t.due_at >= now()) order by t.due_at asc nulls last, t.id limit 1`)
   const [count] = await tx.execute<{ open: number }>(sql`select count(*)::int as open from task t where ${scope}`)
   // Lo que un colega te pasó por un paciente: suya, con paciente y creada por otra persona del equipo.
-  const referred = await tx.execute<Row>(sql`select * from (${select} and t.assignee_user_id=${userId} and t.patient_id is not null
-      and t.created_by <> ${userId} and exists (select 1 from member m where m.organization_id = t.organization_id
-        and m.user_id = t.created_by and m.role in ('clinician','owner','admin'))
-      order by t.created_at desc, t.id limit 10) r`)
-  const referredBy = new Map(
-    (await tx.execute<{ id: string; name: string | null }>(sql`
-      select t.id, cu.name from task t join "user" cu on cu.id = t.created_by
-      where t.organization_id=${orgId} and t.id in (${referred.length ? sql.join(referred.map((row) => sql`${row.id}::uuid`), sql`, `) : sql`null`})`)).map((row) => [row.id, row.name]),
-  )
+  // `created_by` dice el tipo de autor («user»); quién la creó lo dice su «task.created».
+  const referred = await tx.execute<Row & { referredBy: string | null }>(sql`select r.*, cu.name as "referredBy" from (
+      ${select} and t.assignee_user_id=${userId} and t.patient_id is not null and t.created_by = 'user'
+      order by t.created_at desc, t.id limit 50) r
+    cross join lateral (select e.actor_user_id from audit_event e
+      where e.organization_id = ${orgId} and e.entity = 'task' and e.entity_id = r.id::text and e.action = 'task.created'
+      order by e.created_at limit 1) made
+    join member m on m.organization_id = ${orgId} and m.user_id = made.actor_user_id and m.role in ('clinician','owner','admin')
+    join "user" cu on cu.id = made.actor_user_id
+    where made.actor_user_id <> ${userId}
+    order by r."dueAt" nulls last limit 10`)
   // Una tarea de una conversación abre el hilo; las demás (de una oportunidad,
   // de una persona o sueltas) se abren en Tareas con la tarea a la vista.
   const place = ({ conversationId, ...task }: Row): WaitingTask => ({
@@ -1014,7 +1016,7 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
     overdue: overdue.map(place),
     next: next ? place(next) : null,
     open: count?.open ?? 0,
-    referred: referred.slice(0, 10).map((row) => ({ ...place(row), referredBy: referredBy.get(row.id) ?? null })),
+    referred: referred.map(({ referredBy, ...row }) => ({ ...place(row), referredBy })),
   }
 }
 
@@ -1170,7 +1172,9 @@ async function waitingUnsentBudgets(
 async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: boolean): Promise<WaitingBudgets> {
   const awaiting = budgetAwaitsAnswerSql({ id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` })
   // Quien atiende ve los de lo que él indicó o preparó (el plan es uno por persona).
+  // Lo de hace más de seis meses ya no «espera»: la misma regla que la línea de Argos.
   const scope = sql`b.organization_id=${orgId} and ${awaiting}
+    and (b.presented_at is null or b.presented_at > now() - make_interval(months => 6))
     and (not ${ownOnly} or b.created_by=${userId} or exists (select 1 from treatment_budget_item own_line
       join treatment_plan_item own_item on own_item.id=own_line.plan_item_id and own_item.organization_id=own_line.organization_id
       where own_line.organization_id=${orgId} and own_line.budget_id=b.id and own_item.created_by=${userId}))`

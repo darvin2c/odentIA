@@ -188,7 +188,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
             row.controls === row.patients
               ? plural(row.controls, "control que indicaste venció sin cita", "controles que indicaste vencieron sin cita")
               : `${row.controls} controles que indicaste vencieron sin cita (${plural(row.patients, "persona", "personas")})`,
-          detail: "Ya pasó su día y no tienen ninguna cita por venir",
+          detail: row.patients === 1 ? "Ya pasó su día y no tiene ninguna cita por venir" : "Ya pasó su día y no tienen ninguna cita por venir",
           action: "Ver",
         }
       // La misma lista de la línea de Argos «Avisar un control».
@@ -197,7 +197,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
           row.controls === row.patients
             ? plural(row.controls, "control vencido sin cita", "controles vencidos sin cita")
             : `${row.controls} controles vencidos de ${plural(row.patients, "persona", "personas")} sin cita`,
-        detail: "Ya pasó su día y no tienen ninguna cita por venir",
+        detail: row.patients === 1 ? "Ya pasó su día y no tiene ninguna cita por venir" : "Ya pasó su día y no tienen ninguna cita por venir",
         action: "Ver",
       }
     case "stillOpen":
@@ -242,6 +242,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
       }
     case "budgets":
       return {
+        // Los de los últimos seis meses: lo más viejo ya no «espera».
         title: row.total === 1 ? "1 presupuesto espera respuesta" : `${row.total} presupuestos esperan respuesta`,
         detail: row.oldestPresentedAt
           ? `${row.total === 1 ? "Se presentó" : "El más antiguo se presentó"} ${daysAgo(row.oldestPresentedAt, context)}`

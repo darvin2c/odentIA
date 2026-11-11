@@ -11,7 +11,7 @@ import { scheduleBlock } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { clinicalFollowUp } from "@odentia/db/schema/clinical"
 import { crmTask } from "@odentia/db/schema/crm"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { pushSubscription } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -103,9 +103,18 @@ it("«Llegó tu paciente»: al profesional le llega cuando recepción marca la l
 it("la derivación de un colega va en su propia fila con quién la pasó; la tarea propia sin fecha no", async () => {
   const c = await clinic()
   const person = await c.patient("Jorge Ramos")
-  await ownerDb.insert(crmTask).values([
-    { organizationId: c.orgId, assigneeUserId: c.ids.ana, patientId: person.id, title: "Evaluar la 36 para endodoncia", createdBy: c.ids.luis },
-    { organizationId: c.orgId, assigneeUserId: c.ids.ana, title: "Pedir resina", createdBy: c.ids.ana },
+  // Como la crea la app: el autor es «user» y quién fue lo dice su «task.created».
+  const tasks = await ownerDb
+    .insert(crmTask)
+    .values([
+      { organizationId: c.orgId, assigneeUserId: c.ids.ana, patientId: person.id, title: "Evaluar la 36 para endodoncia", createdBy: "user" },
+      { organizationId: c.orgId, assigneeUserId: c.ids.ana, patientId: person.id, title: "Llamarla mañana", createdBy: "user" },
+    ])
+    .returning({ id: crmTask.id })
+  await ownerDb.insert(auditEvent).values([
+    { organizationId: c.orgId, actorUserId: c.ids.luis, action: "task.created", entity: "task", entityId: tasks[0]!.id, metadata: { createdBy: "user" } },
+    // La que ella misma se dejó no es una derivación.
+    { organizationId: c.orgId, actorUserId: c.ids.ana, action: "task.created", entity: "task", entityId: tasks[1]!.id, metadata: { createdBy: "user" } },
   ])
   const home = await c.tx((db) => getWorkspaceHome(db, c.orgId, c.ids.ana, { ...clinicianAccess, tasks: true }))
   const referred = rowsOf(home.waiting, "task").filter((row) => row.referredBy)
