@@ -6,6 +6,7 @@ import { FDI_ADULT, toothNameOf } from "@odentia/dental"
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
+import { signatureFaq } from "../../lib/signature-faq"
 import { ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
@@ -22,7 +23,7 @@ const includes = [
   { title: "Periodontograma", text: "Seis sitios por pieza, sangrado, placa, clasificación y la comparación entre fechas." },
   { title: "Tomografía en el navegador", text: "Subes la carpeta del CD y la ves en panorámica y cortes, con medidas. Sin instalar nada." },
   { title: "Diagnósticos con su código", text: "De la lista que eliges: CIE-10 o CIE-11 de la OMS." },
-  { title: "Documentos e imágenes", text: "Recetas, consentimientos firmados y radiografías en una sola lista, por pieza." },
+  { title: "Consentimientos con firma electrónica", text: "En la tablet, desde su celular o en papel; con las recetas y las radiografías en una sola lista, por pieza." },
   { title: "Alergias que avisan", text: "Una receta con un medicamento al que es alérgico avisa antes de emitirse." },
 ]
 
@@ -38,6 +39,7 @@ const faq: FaqItem[] = [
     q: "¿Puedo imprimir el odontograma firmado?",
     a: "Sí. El odontograma, las recetas, las órdenes y los consentimientos tienen su versión para imprimir. En Perú el odontograma se firma como pide la norma y lo firmado ya no se altera.",
   },
+  signatureFaq("el odontólogo"),
   ...[asked("¿Quién puede ver la historia clínica?")].filter((item): item is FaqItem => Boolean(item)),
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -48,7 +50,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="wrap hh-in">
       <div class="hh-copy">
         <span class="tag tag-d rise">[ Historia y odontograma ]</span>
-        <h1 class="hh-h1 rise d1">Historia clínica dental y odontograma, <span class="acc">en una sola ficha.</span></h1>
+        <h1 class="hh-h1 rise d1">Historia clínica electrónica dental y odontograma, <span class="acc">en una sola ficha.</span></h1>
         <p class="hh-lead rise d2">El odontograma en herradura con la notación FDI, el periodontograma, la tomografía y cada atención en orden. Clío prepara lo que dictas y tú lo confirmas.</p>
         <div class="hh-ctas rise d3">
           <a class="btn btn-p" href={cta.href}>{cta.label}</a>
