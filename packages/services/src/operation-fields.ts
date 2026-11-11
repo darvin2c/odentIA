@@ -128,6 +128,7 @@ export const OPERATIONS = {
       endsAt: { kind: "instant", label: "Nuevo fin", description: "Fin exacto, cuando cambia la duración.", body: "optional", agent: "person" },
       outsideSchedule: { kind: "flag", label: "Fuera de horario", description: "Excepción: mover aunque el horario del profesional no cubra esa hora. Solo lo decide una persona del equipo.", body: "optional", agent: "person" },
       overrideBusy: { kind: "flag", label: "Hora ocupada", description: "Excepción: mover sobre un bloqueo, una ausencia u otra cita del profesional. Solo lo decide una persona del equipo.", body: "optional", agent: "person" },
+      stillConfirmed: { kind: "flag", label: "Ya lo confirmó", description: "La persona ya confirmó el día nuevo con el equipo: la cita confirmada sigue confirmada aunque cambie de día. Solo lo dice una persona del equipo.", body: "optional", agent: "person" },
       reason,
     },
   },

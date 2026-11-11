@@ -392,6 +392,12 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "vino tarde",
       "atendida sin registrar",
       "citas viejas",
+      "mover cita confirmada",
+      "volvió a por confirmar",
+      "ya no está confirmada",
+      "cambié una cita de día",
+      "confirmarla otra vez",
+      "volver a confirmar",
     ],
     writePermission: "appointments.write",
     faqs: [
@@ -406,6 +412,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Por qué Inicio y la Agenda abren en otra sede?",
         a: "Abren en la sede que eligió cada persona la última vez; si nunca eligió, en la que hoy tiene más citas. Cada persona tiene la suya: en una computadora compartida, quien entra no hereda la sede de quien estuvo antes. Se cambia en la Agenda (o, si la tienes, en la sede de «Agenda de hoy» en Inicio) y queda recordada para ti.",
         forms: ["¿Por qué Inicio abre en otra sede?", "abre en otra sede", "inicio abre en la sede vacía", "por qué veo otra sede", "no veo las citas de mi sede"],
+      },
+      {
+        id: "mover-cita-confirmada",
+        q: "Moví una cita que ya estaba confirmada, ¿sigue confirmada?",
+        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha, y se le recuerda de nuevo para la fecha nueva. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
       },
       {
         id: "aparece-profesional-agenda",

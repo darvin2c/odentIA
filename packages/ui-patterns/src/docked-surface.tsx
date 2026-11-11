@@ -21,8 +21,12 @@ import { OPEN_POPUP_SELECTOR } from "./surface.js"
 const CHOICE_SELECTOR =
   "[role=option],[role=checkbox],[role=switch],[role=radio],[role=menuitemcheckbox],[role=menuitemradio]"
 
+/**
+ * `data-draft-ignore`: una casilla que solo acompaña a la acción del pie (no es un dato que se
+ * pierda al salir) no arma el aviso de «salir sin guardar».
+ */
 function isChoice(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(CHOICE_SELECTOR) !== null
+  return target instanceof Element && target.closest(CHOICE_SELECTOR) !== null && target.closest("[data-draft-ignore]") === null
 }
 
 /** Un cajón más ancho que esto es una vista inmersiva (visor, comparador): no va a la columna. */
@@ -158,7 +162,8 @@ function DockedColumn({
           setArmed(false)
           setTouched(false)
         }}
-        onInputCapture={() => {
+        onInputCapture={(event) => {
+          if (event.target instanceof Element && event.target.closest("[data-draft-ignore]")) return
           setArmed(true)
           setTouched(true)
         }}
