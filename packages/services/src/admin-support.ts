@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
@@ -128,7 +129,8 @@ export interface SupportDiagnostic {
   } | null
   channels: { channel: string; provider: string; displayName: string; status: string }[]
   services: { total: number }
-  membersByRole: { role: string; total: number }[]
+  /** Cuántos hay de cada rol; `label`, el nombre del rol en el producto de la clínica («Recepción», «Odontólogo»). */
+  membersByRole: { role: string; label: string; total: number }[]
 }
 
 export interface SupportMetrics {
@@ -446,6 +448,33 @@ function requireWritableByClient(row: typeof supportCase.$inferSelect): void {
     throw validation("El caso está resuelto: reábrelo para agregar adjuntos")
 }
 
+/**
+ * La clínica hizo algo en su caso (escribió, adjuntó o autorizó el acceso) y
+ * el caso vuelve a nosotros: si esperaba a la clínica o estaba resuelto, pasa
+ * a «En atención» (desde resuelto cuenta la reapertura) y avisa al buzón de
+ * soporte. `sourceId` identifica el hecho para no avisar dos veces.
+ */
+async function clinicActed(tx: Db, kase: typeof supportCase.$inferSelect, sourceId: string): Promise<void> {
+  const reopening = kase.status === "resuelto"
+  const now = new Date()
+  await tx
+    .update(supportCase)
+    .set({
+      status: reopening || kase.status === "esperando_clinica" ? "en_atencion" : kase.status,
+      resolvedAt: reopening ? null : kase.resolvedAt,
+      reopenedCount: reopening ? kase.reopenedCount + 1 : kase.reopenedCount,
+      clientSeenAt: now,
+      updatedAt: now,
+    })
+    .where(eq(supportCase.id, kase.id))
+  await enqueueSupportInboxNotice(tx, {
+    caseId: kase.id,
+    organizationId: kase.organizationId,
+    kind: "clinica_respondio",
+    sourceId,
+  })
+}
+
 /** La clínica responde en su caso; si estaba resuelto, se reabre. */
 export async function replyToMySupportCase(
   tx: Db,
@@ -460,7 +489,6 @@ export async function replyToMySupportCase(
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
   await requireCaseReader(tx, kase, orgId, userId)
-  const reopening = kase.status === "resuelto"
   const [message] = await tx
     .insert(supportMessage)
     .values({
@@ -472,18 +500,7 @@ export async function replyToMySupportCase(
     })
     .returning()
   if (!message) throw new Error("No se pudo enviar la respuesta")
-  await enqueueSupportInboxNotice(tx, { caseId: kase.id, organizationId: orgId, kind: "clinica_respondio", sourceId: message.id })
-  const now = new Date()
-  await tx
-    .update(supportCase)
-    .set({
-      status: reopening ? "en_atencion" : kase.status,
-      resolvedAt: reopening ? null : kase.resolvedAt,
-      reopenedCount: reopening ? kase.reopenedCount + 1 : kase.reopenedCount,
-      clientSeenAt: now,
-      updatedAt: now,
-    })
-    .where(eq(supportCase.id, kase.id))
+  await clinicActed(tx, kase, message.id)
   return toMessage(message)
 }
 
@@ -580,6 +597,8 @@ export async function attachToMySupportCase(
     })
     .returning()
   if (!attachment) throw new Error("No se pudo registrar el adjunto")
+  // Con un mensaje, el mensaje ya avisó; suelto, el adjunto es la respuesta.
+  if (!input.messageId) await clinicActed(tx, kase, attachment.id)
   return toAttachment(attachment)
 }
 
@@ -634,6 +653,8 @@ export async function grantSupportAccess(
     })
     .returning()
   if (!grant) throw new Error("No se pudo autorizar el acceso")
+  // Autorizar es la respuesta de la clínica: el caso vuelve a nosotros.
+  await clinicActed(tx, kase, grant.id)
   return toGrant(grant)
 }
 
@@ -752,7 +773,6 @@ export async function replyToAccountSupportCase(
   if (text.length > 4000) throw invalidField("body", "Escribe como mucho 4000 caracteres.")
   const [kase] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   if (!kase || kase.openedBy !== userId) throw notFound("Caso")
-  const reopening = kase.status === "resuelto"
   const [message] = await db
     .insert(supportMessage)
     .values({
@@ -764,23 +784,7 @@ export async function replyToAccountSupportCase(
     })
     .returning()
   if (!message) throw new Error("No se pudo enviar la respuesta")
-  await enqueueSupportInboxNotice(db, {
-    caseId: kase.id,
-    organizationId: kase.organizationId,
-    kind: "clinica_respondio",
-    sourceId: message.id,
-  })
-  const now = new Date()
-  await db
-    .update(supportCase)
-    .set({
-      status: reopening ? "en_atencion" : kase.status,
-      resolvedAt: reopening ? null : kase.resolvedAt,
-      reopenedCount: reopening ? kase.reopenedCount + 1 : kase.reopenedCount,
-      clientSeenAt: now,
-      updatedAt: now,
-    })
-    .where(eq(supportCase.id, kase.id))
+  await clinicActed(db, kase, message.id)
   return toMessage(message)
 }
 
@@ -965,54 +969,114 @@ export async function supportHomeRows(db: Db, actor: AdminActor, now: Date = new
 }
 
 export interface StaffCaseFilters {
-  status?: SupportStatus
-  assigneeStaffId?: string
+  organizationId?: string
+  /** «me»: los míos; «none»: sin responsable; o el id de alguien del equipo. */
+  assignee?: "me" | "none" | (string & {})
   kind?: SupportKind
+  /** Por omisión, los que no están resueltos («sin_resolver»). */
+  status?: SupportStatus | "sin_resolver"
   limit?: number
   offset?: number
 }
 
-function staffListItem(
-  row: typeof supportCase.$inferSelect,
-  orgName: string | null,
-  messageCount: number,
-): SupportCaseListItem {
-  return { ...toListItem(row, messageCount), organizationName: orgName }
+/** Una fila de la cola: el caso y dónde está su espera. */
+export interface StaffSupportCaseListItem extends SupportCaseListItem {
+  /** Nos espera (la misma regla de Inicio y del menú). */
+  waitingOnUs: boolean
+  /** Desde cuándo nos espera; nulo si no nos espera. */
+  waitingSince: string | null
+  /** «Responder hasta el…»: solo mientras nadie respondió (o la revisión de cobro, para la administración). */
+  answerBy: string | null
+  /** Nuestra última respuesta pública (o el pedido a la clínica). */
+  lastStaffReplyAt: string | null
+  /** Hasta cuándo rige el acceso de diagnóstico autorizado. */
+  accessUntil: string | null
 }
 
-/** Cola de casos para el equipo: sin cuerpos de mensajes, solo triaje. */
+export interface StaffSupportCaseList {
+  items: StaffSupportCaseListItem[]
+  total: number
+  /** Con «sin_resolver»: cuántos resueltos quedan fuera con los mismos filtros. */
+  resolvedCount: number
+}
+
+/**
+ * Cola de casos para el equipo: sin cuerpos de mensajes, solo triaje. Ordena
+ * con la regla de «nos espera» y pagina por desplazamiento. Soporte no recibe
+ * los casos de cobro.
+ */
 export async function listSupportCasesForStaff(
   db: Db,
   actor: AdminActor,
-  filters: StaffCaseFilters,
-): Promise<{ items: SupportCaseListItem[]; total: number }> {
+  filters: StaffCaseFilters = {},
+  now: Date = new Date(),
+): Promise<StaffSupportCaseList> {
   const limit = Math.min(Math.max(filters.limit ?? 30, 1), 100)
   const offset = Math.max(filters.offset ?? 0, 0)
-  const conditions = [
-    filters.status ? eq(supportCase.status, filters.status) : undefined,
-    filters.assigneeStaffId ? eq(supportCase.assigneeStaffId, filters.assigneeStaffId) : undefined,
+  const status = filters.status ?? "sin_resolver"
+  const assignee =
+    filters.assignee === "none"
+      ? isNull(supportCase.assigneeStaffId)
+      : filters.assignee
+        ? eq(supportCase.assigneeStaffId, filters.assignee === "me" ? actor.userId : filters.assignee)
+        : undefined
+  const scope = [
+    visibleKindsFor(actor),
+    filters.organizationId ? eq(supportCase.organizationId, filters.organizationId) : undefined,
+    assignee,
     filters.kind ? eq(supportCase.kind, filters.kind) : undefined,
   ]
+  const conditions = [
+    ...scope,
+    status === "sin_resolver" ? ne(supportCase.status, "resuelto") : eq(supportCase.status, status),
+  ]
   const rows = await db
-    .select({ kase: supportCase, orgName: organization.name })
+    .select({
+      kase: supportCase,
+      orgName: organization.name,
+      waitingOnUs: waitingOnUsSql,
+      waitingSince: waitingSinceSql,
+      accessUntil: accessUntilSql(now),
+    })
     .from(supportCase)
     .leftJoin(organization, eq(supportCase.organizationId, organization.id))
     .where(and(...conditions))
-    .orderBy(desc(supportCase.updatedAt))
+    .orderBy(...queueOrderSql)
     .limit(limit)
     .offset(offset)
-  const [{ total }] = await db
-    .select({ total: count() })
+  const [totals] = await db
+    .select({
+      total: sql<number>`count(*) filter (where ${and(...conditions)})::int`,
+      resolved: sql<number>`count(*) filter (where ${supportCase.status} = 'resuelto')::int`,
+    })
     .from(supportCase)
-    .where(and(...conditions))
-    .then((result) => (result.length > 0 ? result : [{ total: 0 }]))
+    .where(and(...scope))
+  const answerBy = await answerByOf(
+    db,
+    actor,
+    rows.map((row) => row.kase),
+  )
   await writeAdminAudit(db, actor, {
     action: "support.cases.list",
-    metadata: { status: filters.status ?? null },
+    metadata: {
+      status,
+      kind: filters.kind ?? null,
+      assignee: filters.assignee ?? null,
+      organizationId: filters.organizationId ?? null,
+    },
   })
   return {
-    items: rows.map(({ kase, orgName }) => staffListItem(kase, orgName, 0)),
-    total: Number(total),
+    items: rows.map((row) => ({
+      ...toListItem(row.kase, 0),
+      organizationName: row.orgName,
+      waitingOnUs: row.waitingOnUs === true,
+      waitingSince: dateOrNull(row.waitingSince)?.toISOString() ?? null,
+      answerBy: answerBy.get(row.kase.id)?.toISOString() ?? null,
+      lastStaffReplyAt: row.kase.lastPublicMessageAt?.toISOString() ?? null,
+      accessUntil: dateOrNull(row.accessUntil)?.toISOString() ?? null,
+    })),
+    total: Number(totals?.total ?? 0),
+    resolvedCount: status === "sin_resolver" ? Number(totals?.resolved ?? 0) : 0,
   }
 }
 
@@ -1028,7 +1092,7 @@ export async function getSupportCaseForStaff(
     .leftJoin(organization, eq(supportCase.organizationId, organization.id))
     .where(eq(supportCase.id, caseId))
     .limit(1)
-  if (!row) throw notFound("Caso")
+  if (!row || !staffSees(actor, row.kase)) throw notFound("Caso")
   const messages = await db
     .select()
     .from(supportMessage)
@@ -1065,6 +1129,7 @@ async function staffWrite(
   kase: typeof supportCase.$inferSelect,
   values: Partial<typeof supportCase.$inferSelect>,
   auditAction: string,
+  metadata?: Record<string, unknown>,
 ): Promise<void> {
   await db
     .update(supportCase)
@@ -1074,12 +1139,20 @@ async function staffWrite(
     action: auditAction,
     organizationId: kase.organizationId,
     entityId: kase.id,
+    ...(metadata ? { metadata } : {}),
   })
 }
 
-async function requireStaffCase(db: Db, caseId: string): Promise<typeof supportCase.$inferSelect> {
+/** ¿Ve este actor este caso? Un caso de cobro es solo de la administración (ADR 0094 y 0180). */
+const staffSees = (actor: AdminActor, kase: { kind: string }): boolean => kase.kind !== "cobro" || actor.role === "admin"
+
+/**
+ * El caso para el equipo. Para el rol Soporte, un caso de cobro no existe: el
+ * mismo 404 que un caso que no está, en la ficha y en cada acción.
+ */
+async function requireStaffCaseFor(db: Db, actor: AdminActor, caseId: string): Promise<typeof supportCase.$inferSelect> {
   const [row] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
-  if (!row) throw notFound("Caso")
+  if (!row || !staffSees(actor, row)) throw notFound("Caso")
   return row
 }
 
@@ -1101,7 +1174,7 @@ export async function replyToSupportCase(
   body: unknown,
 ): Promise<SupportMessageItem> {
   const text = staffBodyOf(body)
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [message] = await db
     .insert(supportMessage)
     .values({
@@ -1134,7 +1207,7 @@ export async function addSupportInternalNote(
   body: unknown,
 ): Promise<SupportMessageItem> {
   const text = staffBodyOf(body)
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [message] = await db
     .insert(supportMessage)
     .values({
@@ -1158,7 +1231,7 @@ export async function assignSupportCase(
   caseId: string,
   staffUserId: string | null,
 ): Promise<void> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   await staffWrite(
     db,
     actor,
@@ -1178,7 +1251,7 @@ export async function setSupportCaseStatus(
   caseId: string,
   status: SupportStatus,
 ): Promise<void> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   // Una «Revisión de cobro» se resuelve al decidirla, con su respuesta (ADR 0054).
   if (kase.kind === "cobro" && status === "resuelto") {
     const [pending] = await db
@@ -1203,6 +1276,7 @@ export async function setSupportCaseStatus(
       ...(asksClinic ? { lastPublicMessageAt: new Date() } : {}),
     },
     "support.case.status",
+    { de: kase.status, a: status },
   )
 }
 
@@ -1224,7 +1298,7 @@ export async function replyToSupportCasesMany(
   if (uniqueIds.length === 0) throw validation("Elige al menos un caso")
   if (uniqueIds.length > 50) throw validation("No más de 50 casos por respuesta")
   const rows = await db.select().from(supportCase).where(inArray(supportCase.id, uniqueIds))
-  if (rows.length !== uniqueIds.length) throw notFound("Caso")
+  if (rows.length !== uniqueIds.length || rows.some((row) => !staffSees(actor, row))) throw notFound("Caso")
   const actual = uniqueStrings(rows.map((row) => String(row.organizationId))).sort()
   const confirmed = uniqueStrings(input.confirmOrganizationIds.map((org) => String(org))).sort()
   if (actual.length !== confirmed.length || actual.some((org, index) => org !== confirmed[index])) {
@@ -1283,6 +1357,7 @@ export async function supportKnowledgeGroups(
            count(distinct organization_id)::int as organizations,
            array_agg(distinct screen) as screens, min(created_at) as first_at
     from support_case where status <> 'resuelto'
+      and (kind <> 'cobro' or ${actor.role === "admin"})
     group by dedupe_key order by count(*) desc, min(created_at) asc limit 200`)
   await writeAdminAudit(db, actor, { action: "support.knowledge.list" })
   return rows.map((row) => ({
@@ -1309,7 +1384,7 @@ export async function readSupportDiagnostic(
   actor: AdminActor,
   caseId: string,
 ): Promise<SupportDiagnostic> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   if (!kase.organizationId)
     throw new ServiceError("FORBIDDEN", 403, "Este caso no tiene clínica asociada")
   const orgId = kase.organizationId
@@ -1340,16 +1415,21 @@ export async function readSupportDiagnostic(
       .where(eq(organization.id, orgId))
       .limit(1)
     if (!org) throw notFound("Organización")
-    const [profile] = await tx
+    const [profileRow] = await tx
       .select({
         countryCode: orgProfile.countryCode,
         currency: orgProfile.currency,
         timezone: orgProfile.timezone,
         locale: orgProfile.locale,
+        product: orgProfile.product,
       })
       .from(orgProfile)
       .where(eq(orgProfile.organizationId, orgId))
       .limit(1)
+    const product: ClinicalProduct = isClinicalProduct(profileRow?.product) ? profileRow.product : "dental"
+    const profile = profileRow
+      ? { countryCode: profileRow.countryCode, currency: profileRow.currency, timezone: profileRow.timezone, locale: profileRow.locale }
+      : undefined
     const branches = await tx
       .select({
         id: branch.id,
@@ -1397,7 +1477,11 @@ export async function readSupportDiagnostic(
       agent: agent ?? null,
       channels,
       services: { total: Number(services?.total ?? 0) },
-      membersByRole: membersByRole.map((row) => ({ role: row.role, total: Number(row.total) })),
+      membersByRole: membersByRole.map((row) => ({
+        role: row.role,
+        label: (ORG_ROLES as readonly string[]).includes(row.role) ? roleLabel(row.role as OrgRole, product) : row.role,
+        total: Number(row.total),
+      })),
     }
   })
   await db.insert(supportAccessAudit).values({
@@ -1439,6 +1523,9 @@ export async function revokeSupportGrantAsStaff(
     .where(eq(supportAccessGrant.id, grantId))
     .limit(1)
   if (!grant) throw notFound("Permiso")
+  await requireStaffCaseFor(db, actor, grant.caseId).catch(() => {
+    throw notFound("Permiso")
+  })
   if (grant.revokedAt !== null) return
   await db
     .update(supportAccessGrant)
@@ -1464,7 +1551,7 @@ export async function listSupportAccessAudit(
   actor: AdminActor,
   caseId: string,
 ): Promise<{ id: string; staffUserId: string; action: string; createdAt: string }[]> {
-  await requireStaffCase(db, caseId)
+  await requireStaffCaseFor(db, actor, caseId)
   const rows = await db
     .select()
     .from(supportAccessAudit)
@@ -1482,18 +1569,22 @@ export async function listSupportAccessAudit(
 /* ---------- Métricas: conteos y tiempos, nunca preguntas sin enviar ---------- */
 
 export async function supportMetrics(db: Db, actor: AdminActor): Promise<SupportMetrics> {
+  // Soporte tampoco cuenta los casos de cobro: no existen para su rol.
+  const visible = visibleKindsFor(actor)
   const byStatus = await db
     .select({ status: supportCase.status, total: count() })
     .from(supportCase)
+    .where(visible)
     .groupBy(supportCase.status)
   const byKind = await db
     .select({ kind: supportCase.kind, total: count() })
     .from(supportCase)
+    .where(visible)
     .groupBy(supportCase.kind)
   const [withoutAssignee] = await db
     .select({ total: count() })
     .from(supportCase)
-    .where(and(isNull(supportCase.assigneeStaffId), ne(supportCase.status, "resuelto")))
+    .where(and(isNull(supportCase.assigneeStaffId), ne(supportCase.status, "resuelto"), visible))
   const [grants] = await db
     .select({ total: count() })
     .from(supportAccessGrant)
@@ -1503,6 +1594,7 @@ export async function supportMetrics(db: Db, actor: AdminActor): Promise<Support
       select c.id, c.created_at as opened, min(m.created_at) as first_reply
       from support_case c join support_message m on m.case_id = c.id
       where m.author_kind = 'staff' and m.is_internal = false
+        and (c.kind <> 'cobro' or ${actor.role === "admin"})
       group by c.id
     ) replied`)
   await writeAdminAudit(db, actor, { action: "support.metrics.read" })
@@ -1625,7 +1717,7 @@ export async function staffSupportAttachmentUrl(
   attachmentId: string,
   storage: SupportStorage,
 ): Promise<string> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [attachment] = await db
     .select()
     .from(supportAttachment)
@@ -1701,10 +1793,11 @@ export async function markAccountSupportCaseSeen(
  */
 export async function assertStaffAttachmentTarget(
   db: Db,
+  actor: AdminActor,
   caseId: string,
   messageId?: string,
 ): Promise<void> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   if (messageId) {
     const [message] = await db
       .select()
@@ -1727,8 +1820,8 @@ export async function staffAttachToSupportCase(
     size: number
   },
 ): Promise<SupportAttachmentItem> {
-  await assertStaffAttachmentTarget(db, caseId, input.messageId)
-  const kase = await requireStaffCase(db, caseId)
+  await assertStaffAttachmentTarget(db, actor, caseId, input.messageId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [attachment] = await db
     .insert(supportAttachment)
     .values({
@@ -1874,6 +1967,8 @@ export async function attachToAccountSupportCase(
     })
     .returning()
   if (!attachment) throw new Error("No se pudo registrar el adjunto")
+  // El adjunto de la cuenta va siempre suelto: es su respuesta, como en la clínica.
+  await clinicActed(db, kase, attachment.id)
   return toAttachment(attachment)
 }
 

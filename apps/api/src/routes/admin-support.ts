@@ -44,9 +44,12 @@ export interface AdminSupportDeps {
 }
 
 const listQuery = z.object({
-  status: z.enum(["abierto", "en_atencion", "esperando_clinica", "resuelto"]).optional(),
+  /** Por omisión, los que no están resueltos. */
+  status: z.enum(["sin_resolver", "abierto", "en_atencion", "esperando_clinica", "resuelto"]).optional(),
   kind: z.enum(["pregunta", "problema", "acceso", "cobro"]).optional(),
-  assignee: z.string().optional(),
+  /** «me»: los míos; «none»: sin responsable; o el id de alguien del equipo. */
+  assignee: z.string().min(1).max(200).optional(),
+  organizationId: z.string().min(1).max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 })
@@ -102,7 +105,8 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
       listSupportCasesForStaff(deps.ownerDb, staffOf(c), {
         status: query.status,
         kind: query.kind,
-        assigneeStaffId: query.assignee,
+        assignee: query.assignee,
+        organizationId: query.organizationId,
         limit: query.limit,
         offset: query.offset,
       }),
@@ -235,7 +239,7 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
     const messageId =
       typeof rawMessageId === "string" && rawMessageId.length > 0 ? rawMessageId : undefined
     try {
-      await assertStaffAttachmentTarget(deps.ownerDb, caseId, messageId)
+      await assertStaffAttachmentTarget(deps.ownerDb, actor, caseId, messageId)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }

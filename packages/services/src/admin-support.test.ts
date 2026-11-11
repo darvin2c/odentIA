@@ -1,6 +1,8 @@
 import { type Db, withOrgContext } from "@odentia/db"
+import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
 import { helpAsk } from "@odentia/db/schema/workspace"
+import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import {
@@ -13,12 +15,16 @@ import {
   clientSupportAttachmentUrl,
   createAccessSupportCase,
   getAccountSupportCase,
+  getAdminSupportAttention,
   getMySupportCase,
   getSupportCaseForStaff,
   grantSupportAccess,
   listMySupportCases,
+  listSupportCasesForStaff,
+  openSupportCaseFromHelp,
   readSupportDiagnostic,
   reopenMySupportCase,
+  replyToAccountSupportCase,
   replyToMySupportCase,
   replyToSupportCase,
   replyToSupportCasesMany,
@@ -28,9 +34,11 @@ import {
   staffAttachToSupportCase,
   type SupportCaseListItem,
   supportHelpStats,
+  supportHomeRows,
+  supportKnowledgeGroups,
 } from "./admin-support.js"
 import { sendHelpRequest } from "./help.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Soporte: hilos privados por clínica, notas internas separadas y acceso delegado con permiso vigente. */
 setupTestDb()
@@ -41,11 +49,56 @@ const OTHER_CLIENT = "support-client-b"
 const OWNER = "support-owner-a"
 const STAFF_ID = "support-staff"
 
+const ADMIN_ID = "support-admin"
+/** Una clínica por bloque de la cola: así sus listas no dependen de las otras pruebas. */
+const QUEUE = "org_cola"
+const FILTERS = "org_filtros"
+const QUEUE_CLIENT = "support-client-cola"
+
 const staff: AdminActor = { userId: STAFF_ID, role: "support" }
+const admin: AdminActor = { userId: ADMIN_ID, role: "admin" }
 const storage = { attachmentUrl: async (objectKey: string) => `https://firmada.test/${objectKey}` }
 
 function run<T>(fn: (tx: Db) => Promise<T>, org = ORG): Promise<T> {
   return withOrgContext(appDb, org, fn)
+}
+
+async function statusOf(caseId: string): Promise<string | undefined> {
+  const [row] = await ownerDb.select({ status: supportCase.status }).from(supportCase).where(eq(supportCase.id, caseId))
+  return row?.status
+}
+
+/** Lo que ya salió al buzón: así un aviso nuevo no se junta con uno pendiente. */
+async function inboxSent(caseId: string): Promise<void> {
+  await ownerDb.update(supportNotice).set({ emailState: "enviado" }).where(eq(supportNotice.caseId, caseId))
+}
+
+async function inboxReplies(caseId: string): Promise<number> {
+  const rows = await ownerDb
+    .select({ id: supportNotice.id })
+    .from(supportNotice)
+    .where(and(eq(supportNotice.caseId, caseId), eq(supportNotice.kind, "clinica_respondio")))
+  return rows.length
+}
+
+async function setCreatedAt(caseId: string, at: Date): Promise<void> {
+  await ownerDb.update(supportCase).set({ createdAt: at, updatedAt: at }).where(eq(supportCase.id, caseId))
+}
+
+/** Un caso «Revisión de cobro» como el que abre «Pedir revisión» (con el importe en la pregunta). */
+function seedBillingCase(question: string): Promise<SupportCaseListItem> {
+  return run((tx) =>
+    openSupportCaseFromHelp(tx, ORG, {
+      userId: OWNER,
+      kind: "cobro",
+      question,
+      detail: null,
+      screen: "/billing/acciones",
+      role: "Propietario",
+      appVersion: null,
+      dedupeKey: `revision:${question}`,
+    }),
+  )
 }
 
 /** Lo que una persona envía desde la Ayuda: abre su caso (la única fuente). */
@@ -62,11 +115,17 @@ beforeAll(async () => {
     { id: OTHER_CLIENT, name: "Clínica B", email: "b@support.test", emailVerified: true },
     { id: OWNER, name: "Dueña A", email: "duena@support.test", emailVerified: true },
     { id: STAFF_ID, name: "Soporte", email: "staff@support.test", emailVerified: true },
+    { id: ADMIN_ID, name: "Administración", email: "admin@support.test", emailVerified: true },
+    { id: QUEUE_CLIENT, name: "Recepción Cola", email: "cola@support.test", emailVerified: true },
   ])
+  await insertOrg(ownerDb, QUEUE, "cola")
+  await insertOrg(ownerDb, FILTERS, "filtros")
   await ownerDb.insert(member).values([
     { id: "m-support-a", userId: CLIENT, organizationId: ORG, role: "reception", createdAt: new Date() },
     { id: "m-support-owner-a", userId: OWNER, organizationId: ORG, role: "owner", createdAt: new Date() },
     { id: "m-support-b", userId: OTHER_CLIENT, organizationId: OTHER, role: "owner", createdAt: new Date() },
+    { id: "m-support-cola", userId: QUEUE_CLIENT, organizationId: QUEUE, role: "reception", createdAt: new Date() },
+    { id: "m-support-filtros", userId: QUEUE_CLIENT, organizationId: FILTERS, role: "reception", createdAt: new Date() },
   ])
 })
 
@@ -205,6 +264,13 @@ describe("acceso delegado", () => {
     expect(diagnostic.organizationId).toBe(ORG)
     expect(diagnostic.channels).toEqual([])
     expect(diagnostic.scope).toMatch(/Nunca abre/)
+    // Los roles llegan en español, en el producto de la clínica.
+    expect(diagnostic.membersByRole).toEqual(
+      expect.arrayContaining([
+        { role: "owner", label: "Propietario", total: 1 },
+        { role: "reception", label: "Recepción", total: 1 },
+      ]),
+    )
 
     await run((tx) => revokeSupportAccess(tx, ORG, OWNER, true, grant.id))
     await expect(readSupportDiagnostic(ownerDb, staff, kase.id)).rejects.toThrow(/permiso vigente/i)
@@ -228,6 +294,153 @@ describe("acceso delegado", () => {
     await expect(
       run((tx) => clientSupportAttachmentUrl(tx, OTHER, OTHER_CLIENT, kase.id, attachment.id, storage), OTHER),
     ).rejects.toThrow(/no encontrado/i)
+  })
+})
+
+describe("lo que hace la clínica vuelve el caso a nosotros", () => {
+  it("su respuesta saca el caso de «Esperando a la clínica», en la clínica y en la cuenta", async () => {
+    const kase = await seedRequest(ORG, CLIENT, "No me llegan los recordatorios de cita")
+    await replyToSupportCase(ownerDb, staff, kase.id, "¿Desde qué día?")
+    await setSupportCaseStatus(ownerDb, staff, kase.id, "esperando_clinica")
+    await run((tx) => replyToMySupportCase(tx, ORG, CLIENT, kase.id, "Desde el lunes"))
+    expect(await statusOf(kase.id)).toBe("en_atencion")
+
+    const account = await createAccessSupportCase(ownerDb, OTHER_CLIENT, { question: "No puedo cambiar mi correo" })
+    await setSupportCaseStatus(ownerDb, staff, account.id, "esperando_clinica")
+    await replyToAccountSupportCase(ownerDb, OTHER_CLIENT, account.id, "Ya lo intenté otra vez")
+    expect(await statusOf(account.id)).toBe("en_atencion")
+  })
+
+  it("autorizar el acceso o adjuntar sin escribir también es responder, y avisa al buzón", async () => {
+    const granted = await seedRequest(ORG, CLIENT, "No puedo imprimir el ticket desde Caja")
+    await setSupportCaseStatus(ownerDb, staff, granted.id, "esperando_clinica")
+    await inboxSent(granted.id)
+    await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, granted.id, 30))
+    expect(await statusOf(granted.id)).toBe("en_atencion")
+    expect(await inboxReplies(granted.id)).toBe(1)
+
+    const attached = await seedRequest(ORG, CLIENT, "Les mando la captura del error de Caja")
+    await setSupportCaseStatus(ownerDb, staff, attached.id, "esperando_clinica")
+    await inboxSent(attached.id)
+    await run((tx) =>
+      attachToMySupportCase(tx, ORG, CLIENT, attached.id, {
+        objectKey: `support/${attached.id}/caja.png`,
+        mimeType: "image/png",
+        filename: "caja.png",
+        size: 1024,
+      }),
+    )
+    expect(await statusOf(attached.id)).toBe("en_atencion")
+    expect(await inboxReplies(attached.id)).toBe(1)
+  })
+})
+
+describe("la cola de soporte", () => {
+  it("soporte no ve los casos de cobro en ningún lado; la administración sí", async () => {
+    const billing = await seedBillingCase("Revisión de cobro · Conversación del 2026-11-02 · 0,40 USD · No la pedí")
+    const seen = await listSupportCasesForStaff(ownerDb, staff, { limit: 100 })
+    expect(seen.items.map((item) => item.id)).not.toContain(billing.id)
+    expect(JSON.stringify(seen)).not.toContain("USD")
+    await expect(getSupportCaseForStaff(ownerDb, staff, billing.id)).rejects.toThrow(/no encontrado/i)
+    await expect(replyToSupportCase(ownerDb, staff, billing.id, "Lo revisamos")).rejects.toThrow(/no encontrado/i)
+    await expect(addSupportInternalNote(ownerDb, staff, billing.id, "Nota")).rejects.toThrow(/no encontrado/i)
+    await expect(assignSupportCase(ownerDb, staff, billing.id, STAFF_ID)).rejects.toThrow(/no encontrado/i)
+    await expect(setSupportCaseStatus(ownerDb, staff, billing.id, "en_atencion")).rejects.toThrow(/no encontrado/i)
+    await expect(readSupportDiagnostic(ownerDb, staff, billing.id)).rejects.toThrow(/no encontrado/i)
+    const knowledge = await supportKnowledgeGroups(ownerDb, staff)
+    expect(knowledge.some((group) => group.kind === "cobro")).toBe(false)
+    expect(JSON.stringify(knowledge)).not.toContain("USD")
+    const home = await supportHomeRows(ownerDb, staff)
+    expect(home.map((row) => row.id)).not.toContain(billing.id)
+    expect(JSON.stringify(home)).not.toContain("USD")
+
+    const adminList = await listSupportCasesForStaff(ownerDb, admin, { limit: 100 })
+    expect(adminList.items.map((item) => item.id)).toContain(billing.id)
+    expect((await getSupportCaseForStaff(ownerDb, admin, billing.id)).question).toContain("USD")
+    expect((await supportHomeRows(ownerDb, admin)).map((row) => row.id)).toContain(billing.id)
+    expect((await supportKnowledgeGroups(ownerDb, admin)).some((group) => group.kind === "cobro")).toBe(true)
+    const forStaff = await getAdminSupportAttention(ownerDb, staff)
+    const forAdmin = await getAdminSupportAttention(ownerDb, admin)
+    expect(forAdmin.openCount).toBe(forStaff.openCount + 1)
+    expect(await getAdminSupportAttention(ownerDb)).toEqual(forStaff)
+  })
+
+  it("lo ya respondido no nos espera hasta que la clínica vuelve a escribir, desde ese mensaje", async () => {
+    const kase = await seedRequest(QUEUE, QUEUE_CLIENT, "El odontograma no guarda la pieza 18")
+    const waitingIds = async () => (await supportHomeRows(ownerDb, staff)).map((row) => row.id)
+    expect(await waitingIds()).toContain(kase.id)
+    const before = await getAdminSupportAttention(ownerDb, staff)
+
+    await replyToSupportCase(ownerDb, staff, kase.id, "¿Qué navegador usas?")
+    expect(await statusOf(kase.id)).toBe("en_atencion")
+    expect(await waitingIds()).not.toContain(kase.id)
+    expect((await getAdminSupportAttention(ownerDb, staff)).openCount).toBe(before.openCount - 1)
+
+    const message = await run((tx) => replyToMySupportCase(tx, QUEUE, QUEUE_CLIENT, kase.id, "Chrome, en la computadora de recepción"), QUEUE)
+    const row = (await supportHomeRows(ownerDb, staff)).find((item) => item.id === kase.id)
+    expect(row?.waitingSince).toBe(message.createdAt)
+    expect((await getAdminSupportAttention(ownerDb, staff)).openCount).toBe(before.openCount)
+    const listed = (await listSupportCasesForStaff(ownerDb, staff, { organizationId: QUEUE })).items.find((item) => item.id === kase.id)
+    expect(listed).toMatchObject({ waitingOnUs: true, waitingSince: message.createdAt })
+  })
+
+  it("ordena por la espera más larga, después lo que espera a la clínica, y deja fuera lo resuelto", async () => {
+    const day = 86_400_000
+    const now = Date.now()
+    const oldest = await seedRequest(FILTERS, QUEUE_CLIENT, "Orden: el más viejo sin responder")
+    await setCreatedAt(oldest.id, new Date(now - 3 * day))
+    const newer = await seedRequest(FILTERS, QUEUE_CLIENT, "Orden: el más nuevo sin responder")
+    await setCreatedAt(newer.id, new Date(now - day))
+    // Abierto hace 5 días y respondido: nos espera solo desde que la clínica volvió a escribir.
+    const answered = await seedRequest(FILTERS, QUEUE_CLIENT, "Orden: respondido y la clínica volvió a escribir")
+    await setCreatedAt(answered.id, new Date(now - 5 * day))
+    await replyToSupportCase(ownerDb, staff, answered.id, "Prueba otra vez")
+    await run((tx) => replyToMySupportCase(tx, FILTERS, QUEUE_CLIENT, answered.id, "Sigue igual"), FILTERS)
+    const asked = await seedRequest(FILTERS, QUEUE_CLIENT, "Orden: esperamos a la clínica")
+    await setSupportCaseStatus(ownerDb, staff, asked.id, "esperando_clinica")
+    const solved = await seedRequest(FILTERS, QUEUE_CLIENT, "Orden: ya resuelto")
+    await setSupportCaseStatus(ownerDb, staff, solved.id, "resuelto")
+
+    const queue = await listSupportCasesForStaff(ownerDb, staff, { organizationId: FILTERS })
+    expect(queue.items.map((item) => item.id)).toEqual([oldest.id, newer.id, answered.id, asked.id])
+    expect(queue.resolvedCount).toBe(1)
+    expect(queue.items.map((item) => item.waitingOnUs)).toEqual([true, true, true, false])
+    const home = (await supportHomeRows(ownerDb, staff)).filter((row) => row.organizationId === FILTERS)
+    expect(home.map((row) => row.id)).toEqual([oldest.id, newer.id, answered.id])
+    const resolved = await listSupportCasesForStaff(ownerDb, staff, { organizationId: FILTERS, status: "resuelto" })
+    expect(resolved.items.map((item) => item.id)).toEqual([solved.id])
+
+    // Los filtros: los míos, sin responsable y uno por id.
+    await assignSupportCase(ownerDb, staff, newer.id, STAFF_ID)
+    await assignSupportCase(ownerDb, admin, oldest.id, ADMIN_ID)
+    const ids = async (assignee: string) =>
+      (await listSupportCasesForStaff(ownerDb, staff, { organizationId: FILTERS, assignee })).items.map((item) => item.id)
+    expect(await ids("me")).toEqual([newer.id])
+    expect(await ids(ADMIN_ID)).toEqual([oldest.id])
+    expect(await ids("none")).toEqual([answered.id, asked.id])
+    expect((await supportHomeRows(ownerDb, staff)).find((row) => row.id === newer.id)?.assigneeName).toBe("Soporte")
+  })
+
+  it("«Responder hasta» es la apertura más 2 días hábiles, mientras nadie respondió y si lo abrió una persona", async () => {
+    const kase = await seedRequest(QUEUE, QUEUE_CLIENT, "Plazo: el viernes abre un caso")
+    await setCreatedAt(kase.id, new Date("2026-11-13T15:00:00.000Z"))
+    const itemOf = async (id: string, actor: AdminActor = staff) =>
+      (await listSupportCasesForStaff(ownerDb, actor, { limit: 100 })).items.find((item) => item.id === id)
+    expect((await itemOf(kase.id))?.answerBy).toBe("2026-11-17T15:00:00.000Z")
+    expect((await supportHomeRows(ownerDb, staff)).find((row) => row.id === kase.id)?.answerBy).toBe("2026-11-17T15:00:00.000Z")
+    await replyToSupportCase(ownerDb, staff, kase.id, "Ya lo vemos")
+    expect((await itemOf(kase.id))?.answerBy).toBeNull()
+    expect((await itemOf(kase.id))?.lastStaffReplyAt).not.toBeNull()
+
+    // El automático de odentIA («Modelo sin responder») no es de ninguna clínica ni tiene plazo.
+    const [automatic] = await ownerDb
+      .insert(supportCase)
+      .values({ organizationId: null, kind: "problema", question: "Modelo sin responder · Plazo", dedupeKey: "plazo-automatico" })
+      .returning()
+    if (!automatic) throw new Error("sin caso automático")
+    expect((await itemOf(automatic.id))?.answerBy).toBeNull()
+    const home = (await supportHomeRows(ownerDb, staff)).find((row) => row.id === automatic.id)
+    expect(home).toMatchObject({ organizationName: "odentIA · automático", answerBy: null })
   })
 })
 
