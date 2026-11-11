@@ -927,7 +927,11 @@ function AgendaPage() {
       const back = input.back
       toast.success(text, {
         // Confirmó otro día: se dice aquí, donde se movió, que hay que volver a confirmarla.
-        description: result.data.unconfirmed ? "Cambió de día: vuelve a «por confirmar»." : undefined,
+        description: result.data.unconfirmed
+          ? "Cambió de día: vuelve a «por confirmar»."
+          : result.data.reconfirmed
+            ? "Sigue confirmada."
+            : undefined,
         // Arrastrar se hace rápido: volver atrás es un toque, sin buscar la hora de antes.
         action: back
           ? {
@@ -943,7 +947,9 @@ function AgendaPage() {
             }
           : undefined,
       })
-      setMessage(result.data.unconfirmed ? `${text}. Cambió de día: vuelve a «por confirmar».` : text)
+      setMessage(
+        result.data.unconfirmed ? `${text}. Cambió de día: vuelve a «por confirmar».` : result.data.reconfirmed ? `${text}. Sigue confirmada.` : text,
+      )
       await invalidate()
     },
     // El servicio rechazó el hueco: se dice por qué y la cita vuelve a su sitio.

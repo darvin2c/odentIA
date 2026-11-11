@@ -426,15 +426,21 @@ describe("al cambiar la cita, el agente le avisa", () => {
     // Rehacer lo deshecho no es otro «Deshacer»: va a un día al que nadie dijo sí.
     const redone = await move(undone.version, to)
     expect(redone).toMatchObject({ status: "programada", unconfirmed: true })
-    // Confirmada a mano en el día nuevo, y de vuelta al primero: ahí también había dicho sí.
+    // Confirmó a mano el día nuevo y la devuelven al primero: su último sí fue al nuevo, así que vuelve a «por confirmar»…
     const manual = await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, booked.id, "confirmada"))
-    const home = await move(manual.version, new Date(at.getTime() + HOUR / 2))
-    expect(home).toMatchObject({ status: "confirmada" })
+    const returnedHome = await move(manual.version, new Date(at.getTime() + HOUR / 2))
+    expect(returnedHome).toMatchObject({ status: "programada", unconfirmed: true })
+    // …y «Deshacer» eso la deja donde estaba confirmada.
+    const backThere = await move(returnedHome.version, to)
+    expect(backThere).toMatchObject({ status: "confirmada", reconfirmed: true })
+    const home = await move(backThere.version, new Date(at.getTime() + HOUR / 2))
+    expect(home).toMatchObject({ status: "programada" })
     // Se editó en medio (otra versión) y el recordatorio de su fecha igual vuelve a contar.
     expect((await jobsOf(c)).filter((job) => job.kind === "recordatorio_cita").map((job) => job.dedupeKey)).toEqual([key])
 
     // Si recepción ya lo confirmó con la persona, o la hora nueva la eligió ella, sigue confirmada.
-    const withTeam = await move(home.version, new Date(to.getTime() + DAY), { stillConfirmed: true })
+    const confirmedHome = await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, booked.id, "confirmada"))
+    const withTeam = await move(confirmedHome.version, new Date(to.getTime() + DAY), { stillConfirmed: true })
     expect(withTeam).toMatchObject({ status: "confirmada" })
     const byPerson = await move(withTeam.version, new Date(to.getTime() + 2 * DAY), {}, { byPerson: true })
     expect(byPerson).toMatchObject({ status: "confirmada" })

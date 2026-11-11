@@ -219,6 +219,8 @@ export interface AppointmentItem {
   notice?: { queued: boolean }
   /** Solo al mover: estaba confirmada, pasó a otro día y volvió a «por confirmar». */
   unconfirmed?: boolean
+  /** Solo al mover: «Deshacer» la devolvió al día que tenía confirmado. */
+  reconfirmed?: boolean
   /**
    * Cita de prueba (ADR 0094): de qué prueba salió, quién la hizo en «Probar»
    * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.
@@ -1608,7 +1610,7 @@ async function lastMoveBack(
   orgId: string,
   id: string,
   startsAt: Date,
-): Promise<{ wasConfirmed: boolean; remindersMark: number | null } | null> {
+): Promise<{ unconfirmed: boolean; keptConfirmed: boolean; remindersMark: number | null } | null> {
   const [last] = await tx
     .select({ metadata: auditEvent.metadata, createdAt: auditEvent.createdAt })
     .from(auditEvent)
@@ -1627,7 +1629,8 @@ async function lastMoveBack(
   if (!back) return null
   return {
     // En la hora a la que vuelve estaba confirmada: ese movimiento le quitó el sí, o el equipo dijo que seguía.
-    wasConfirmed: metadata?.unconfirmed === true || metadata?.confirmedWithTeam === true,
+    unconfirmed: metadata?.unconfirmed === true,
+    keptConfirmed: metadata?.confirmedWithTeam === true,
     remindersMark: typeof metadata?.remindersMark === "number" ? metadata.remindersMark : null,
   }
 }
@@ -1713,8 +1716,11 @@ export async function moveAppointment(
   // confirmar» y sus recordatorios empiezan de nuevo. Dentro del mismo día sigue confirmada (le
   // llega el aviso del cambio), y también si la hora nueva la eligió ella. «Deshacer» ese
   // movimiento la devuelve confirmada: vuelve a la fecha a la que dijo sí. Cualquier otra vuelta
-  // (rehacer lo deshecho, devolver la que movió la persona) sigue la regla de siempre.
-  const undoesConfirmed = dayChanged && back?.wasConfirmed === true
+  // (rehacer lo deshecho, devolver la que movió la persona, o volver después de que confirmó el
+  // día nuevo: su último sí fue a ese) sigue la regla de siempre.
+  const undoesConfirmed =
+    dayChanged &&
+    ((back?.unconfirmed === true && current.status === "programada") || (back?.keptConfirmed === true && current.status === "confirmada"))
   const leavesConfirmedDay = current.status === "confirmada" && dayChanged && !options.byPerson && !undoesConfirmed
   const keptConfirmed = leavesConfirmedDay && input.stillConfirmed === true
   const unconfirmed = leavesConfirmedDay && !keptConfirmed
@@ -1787,7 +1793,7 @@ export async function moveAppointment(
       moved && active && options.notice !== false ? await enqueueAppointmentNotice(tx, orgId, id, "movida") : null
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, id)
-    return { ...item, ...(notice ? { notice } : {}), ...(unconfirmed ? { unconfirmed: true } : {}) }
+    return { ...item, ...(notice ? { notice } : {}), ...(unconfirmed ? { unconfirmed: true } : {}), ...(reconfirmed ? { reconfirmed: true } : {}) }
   } catch (error) {
     if (isExclusionViolation(error)) {
       throw appointmentConflict(exclusionTarget(error), roomName)

@@ -89,6 +89,8 @@ export interface AgendaAppointment {
   notice?: { queued: boolean }
   /** Solo al mover: estaba confirmada, pasó a otro día y volvió a «por confirmar». */
   unconfirmed?: boolean
+  /** Solo al mover: «Deshacer» la devolvió al día que tenía confirmado. */
+  reconfirmed?: boolean
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   visit: AppointmentVisit

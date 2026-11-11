@@ -334,6 +334,14 @@ function RealAppointmentDrawer({
     appointment.status === "confirmada" &&
     target != null &&
     zonedDateOf(target.start, timeZone) !== zonedDateOf(appointment.startsAt, timeZone)
+  // La marca vale para el día que se eligió: con otro día se pregunta de nuevo. Y aparece a la
+  // vista, junto al botón: queda debajo de las horas.
+  const targetDay = target ? zonedDateOf(target.start, timeZone) : ""
+  const confirmedRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    setStillConfirmed(false)
+    if (asksConfirmed) confirmedRef.current?.scrollIntoView({ block: "nearest" })
+  }, [targetDay, asksConfirmed])
   const move = useMutation({
     // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
     mutationFn: (range: { start: string; end: string; columnId: string }) =>
@@ -513,7 +521,7 @@ function RealAppointmentDrawer({
           <div ref={moveRoot} className="grid gap-4">
             <WhenFields form={moveForm} fields="when" when={when} />
             {asksConfirmed ? (
-              <div className="grid gap-1.5">
+              <div ref={confirmedRef} className="grid gap-1.5">
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="cita-mover-ya-confirmo"
@@ -526,7 +534,8 @@ function RealAppointmentDrawer({
                   </FieldLabel>
                 </div>
                 <p id="cita-mover-ya-confirmo-ayuda" className="text-sm text-muted-foreground">
-                  Había confirmado otro día. Sin marcar, la cita vuelve a «por confirmar» y se le recuerda de nuevo.
+                  {appointment.patientName} había confirmado otro día. Sin marcar, la cita vuelve a «por confirmar» y se le
+                  pide confirmar la fecha nueva.
                 </p>
               </div>
             ) : null}

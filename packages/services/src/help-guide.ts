@@ -395,6 +395,9 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "mover cita confirmada",
       "volvió a por confirmar",
       "ya no está confirmada",
+      "cambié una cita de día",
+      "confirmarla otra vez",
+      "volver a confirmar",
     ],
     writePermission: "appointments.write",
     faqs: [
