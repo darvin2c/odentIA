@@ -608,8 +608,9 @@ describe("el seguimiento de un prospecto", () => {
       answer: { kind: "contactada", day: "2026-11-12" },
     })
     expect(await homeOf(admin, THU, id)).toEqual([])
-    // Un día pasado, uno a más de un año o un texto vacío no se guardan.
-    for (const followUpOn of ["2026-11-11", "2027-11-13", "12/11/2026"]) {
+    // Un día pasado, uno a más de un año, uno que no existe o un texto vacío no se guardan:
+    // el mes 13 y el día 32 tienen la forma de una fecha y dicen el campo, no un error del servidor.
+    for (const followUpOn of ["2026-11-11", "2027-11-13", "12/11/2026", "2026-13-01", "2026-12-32", "2026-02-30"]) {
       await expect(addWaitlistFollowUp(ownerDb, admin, id, { body: "Otra vez", followUpOn }, THU)).rejects.toMatchObject({
         fields: { followUpOn: expect.any(String) },
       })

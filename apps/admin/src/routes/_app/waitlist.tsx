@@ -43,6 +43,8 @@ import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { countByProduct, matchesProduct, perProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { webUrl } from "../../lib/host"
+import { FOLLOW_UP_CHOICES, type FollowUpChoice, openingFollowUpChoice } from "../../lib/follow-up-choice"
+import { invitationDueWords } from "../../lib/invitation-words"
 import { KpiSkeleton } from "../../components/skeletons/page-loading"
 import { WaitlistPageSkeleton, WaitlistSkeleton } from "../../components/skeletons/waitlist"
 
@@ -215,14 +217,14 @@ function whenText(iso: string, now: Date): string {
 /**
  * El plazo de una solicitud, con las palabras del servidor: la misma frase en
  * la columna Plazo, la cabecera del cajón e Inicio. «Vence» queda solo para
- * las invitaciones.
+ * las invitaciones, que se dicen con `invitationDueWords` (en Lima, con
+ * «vence hoy» y el mismo rojo que Inicio).
  */
 function deadlineOf(item: Row, today: string, now: Date): { text: string; tone: "destructive" | "warning" | "muted" } {
   if (item.status === "invitada" && item.inviteExpiresAt) {
-    const expires = new Date(item.inviteExpiresAt)
-    if (expires <= now) return { text: `La invitación venció el ${formatDay(item.inviteExpiresAt)}`, tone: "destructive" }
-    const left = Math.ceil((expires.getTime() - now.getTime()) / 86_400_000)
-    return { text: `La invitación vence el ${formatDay(item.inviteExpiresAt)}`, tone: left <= 3 ? "warning" : "muted" }
+    const due = invitationDueWords(item.inviteExpiresAt, now)
+    const left = Math.ceil((new Date(item.inviteExpiresAt).getTime() - now.getTime()) / 86_400_000)
+    return { text: `La invitación ${due.text}`, tone: due.urgent ? "destructive" : left <= 3 ? "warning" : "muted" }
   }
   const answer = item.answer
   if (answer?.kind === "por_responder") {
@@ -486,10 +488,6 @@ function ListEmpty({ stage, searched }: { stage: StageFilter; searched: boolean 
   )
 }
 
-/** Cuándo volver a contactarla: lo pendiente, un día de los que se ofrecen, otro o ninguno. */
-type FollowUpChoice = "mantener" | "manana" | "habiles" | "semana" | "otra" | "cerrar"
-const FOLLOW_UP_CHOICES: readonly string[] = ["mantener", "manana", "habiles", "semana", "otra", "cerrar"]
-
 function RequestDrawer({ id, isAdmin, onClose }: { id: string; isAdmin: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
   // La solicitud se pide por su id: el cajón abre aunque la lista de detrás mire otra etapa u otro producto.
@@ -511,12 +509,13 @@ function RequestDrawer({ id, isAdmin, onClose }: { id: string; isAdmin: boolean;
     void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
   }
 
-  // Cuándo volver: si hay una fecha pendiente de hoy en adelante, al abrir viene «Mantener»;
-  // cerrar el recordatorio se elige a propósito y el botón lo dice.
+  // Cuándo volver: lo que viene elegido al abrir nunca cierra el recordatorio
+  // (`openingFollowUpChoice`); cerrarlo se elige a propósito y el botón lo dice.
   const pending = item?.nextFollowUpOn ?? null
   const canKeep = pending !== null && choices !== null && pending >= choices.today
   const [picked, setPicked] = React.useState<FollowUpChoice | null | undefined>(undefined)
-  const choice: FollowUpChoice | null = picked === undefined ? (canKeep ? "mantener" : null) : picked
+  const choice: FollowUpChoice | null =
+    picked === undefined ? openingFollowUpChoice(pending, choices?.today ?? null) : picked
   const [otherDay, setOtherDay] = React.useState("")
   const [dayError, setDayError] = React.useState<string | null>(null)
   const dayOf = (value: FollowUpChoice | null): string | null => {
@@ -831,9 +830,9 @@ function RequestDrawer({ id, isAdmin, onClose }: { id: string; isAdmin: boolean;
                 {seats ? (
                   <p className="text-sm text-muted-foreground">
                     {item.status === "invitada" && item.inviteExpiresAt
-                      ? `Invitada con ${item.planName ?? seats.planName}. ${
-                          new Date(item.inviteExpiresAt) > now ? "Vence" : "Venció"
-                        } el ${formatDay(item.inviteExpiresAt)}. Reenviar da un enlace nuevo de 14 días y anula el anterior.`
+                      ? `Invitada con ${item.planName ?? seats.planName}. ${upperFirst(
+                          invitationDueWords(item.inviteExpiresAt, now).text,
+                        )}. Reenviar da un enlace nuevo de 14 días y anula el anterior.`
                       : `Entra con el plan ${seats.planName}. La invitación vale para ${item.email} y vence a los 14 días.${
                           seats.limit !== null && nextSeat !== null ? ` Le toca el lugar ${nextSeat} de ${seats.limit}.` : ""
                         }`}

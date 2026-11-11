@@ -609,7 +609,9 @@ export interface WaitlistFollowUpInput {
 function checkFollowUpOn(day: string | null, now: Date): string | null {
   if (day === null) return null
   const { today, latest } = followUpChoices(now)
-  const real = ISO_DAY.test(day) && isoDay(dayStart(day)) === day
+  // «2026-13-01» pasa la forma pero no es una fecha: sin mirar antes, toISOString lanzaría.
+  const start = ISO_DAY.test(day) ? dayStart(day) : null
+  const real = start !== null && !Number.isNaN(start.getTime()) && isoDay(start) === day
   if (!real || day < today || day > latest) throw invalidField("followUpOn", "Elige un día desde hoy hasta dentro de un año")
   return day
 }
