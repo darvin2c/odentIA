@@ -121,6 +121,7 @@ import {
   healthGapWords,
   type SessionAnswers,
   needsNextControlDay,
+  endTimeBounds,
   resolvingOnSign,
   SignatureRegistrationFields,
   useClosingForm,
@@ -1146,14 +1147,14 @@ export function EncounterEditor({
   }
 
   /**
-   * Hora de fin declarada: hoy a la hora indicada, en la zona de la clínica. El
-   * minuto de inicio (con sus segundos en 0) queda antes del inicio: se toma
-   * el inicio mismo.
+   * Hora de fin declarada: el día de la atención (hoy, o el de su cita si es de
+   * otro día) a la hora indicada, en la zona de la clínica. El minuto de inicio
+   * (con sus segundos en 0) queda antes del inicio: se toma el inicio mismo.
    */
   const endedAtIso = (endTime: string): string | null => {
     if (!endTime) return null
-    const today = clinicDateTimeValue(new Date().toISOString()).slice(0, 10)
-    const iso = instantFromClinicValue(`${today}T${endTime}`)
+    const { day } = endTimeBounds(encounter.startedAt)
+    const iso = instantFromClinicValue(`${day}T${endTime}`)
     const startedAt = encounter.startedAt
     if (iso && startedAt) {
       const early = new Date(startedAt).getTime() - new Date(iso).getTime()

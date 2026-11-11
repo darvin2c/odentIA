@@ -618,7 +618,9 @@ export async function getOpenEncounterRef(
     id: row.id,
     professionalUserId: row.professionalUserId,
     startedAt: row.startedAt,
-    today: day(row.startedAt) === day(new Date()),
+    // De hoy, o abierta hoy para una cita pasada (lleva la fecha de la cita, pero no quedó
+    // abierta de otro día: se está registrando ahora).
+    today: day(row.startedAt) === day(new Date()) || (row.appointmentId !== null && day(row.createdAt) === day(new Date())),
     empty: !(await encounterHasRecords(tx, orgId, row)),
   }
 }
@@ -750,7 +752,31 @@ export async function createEncounter(
       .for("update", { of: appointment })
       .limit(1)
     if (!row) throw notFound("Cita")
-    if (!["programada", "confirmada"].includes(row.status)) {
+    // «Vino» deja la cita atendida sin su atención: su profesional la registra después
+    // («Su cita del 9 nov quedó atendida sin registrar»). Solo si nadie la registró aún.
+    const cameWithoutRecord =
+      row.status === "atendida" &&
+      !(await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(
+          and(
+            eq(encounter.organizationId, orgId),
+            eq(encounter.appointmentId, row.id),
+            ne(encounter.status, "anulada"),
+          ),
+        )
+        .limit(1)
+        .then((found) => found.length > 0)) &&
+      // Solo la que cerró «Vino»: la atendida cuya atención se anuló no se vuelve a abrir así.
+      (await tx
+        .execute<{ by: string | null }>(sql`
+          select metadata->>'by' as by from audit_event
+          where organization_id = ${orgId} and entity = 'appointment' and entity_id = ${row.id}
+            and action = 'appointment.status_atendida'
+          order by created_at desc limit 1`)
+        .then((found) => found[0]?.by === "vino"))
+    if (!["programada", "confirmada"].includes(row.status) && !cameWithoutRecord) {
       throw conflict(
         "APPOINTMENT_NOT_ATTENDABLE",
         "Solo se atiende una cita programada o confirmada",
@@ -840,6 +866,11 @@ export async function createEncounter(
         appointmentId: fromAppointment?.id ?? null,
         status: "borrador",
         reason,
+        // La atención de una cita de otro día es de ese día: la historia la fecha cuando fue,
+        // no cuando se escribió (la auditoría guarda cuándo se registró).
+        ...(fromAppointment && localDateIn(fromAppointment.startsAt, fromAppointment.timeZone) < localDateIn(new Date(), fromAppointment.timeZone)
+          ? { startedAt: fromAppointment.startsAt }
+          : {}),
       })
       .returning()
     if (!row) throw new Error("No se pudo crear la atención")
@@ -2694,6 +2725,11 @@ export async function dueControlsOf(
   }))
 }
 
+/** El más tardío de dos días «YYYY-MM-DD». */
+function notBefore(day: string, earliest: string): string {
+  return day < earliest ? earliest : day
+}
+
 /**
  * «¿Cuándo vuelve?» al firmar (ADR 0152): los atajos en días de la clínica,
  * los controles que esta visita cumple y el próximo que ya tiene la persona
@@ -2709,6 +2745,7 @@ async function closingControlsOf(
   const { timezone } = await findOrgLocale(tx, orgId)
   const { recallMonths } = await productHooks(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
+  const visitDay = dayKeyIn(row.startedAt, timezone) < today ? dayKeyIn(row.startedAt, timezone) : today
   const due = await dueControlsOf(tx, orgId, actorUserId, row, timezone)
   const dueIds = new Set(due.map((control) => control.id))
   const open = await tx
@@ -2762,7 +2799,12 @@ async function closingControlsOf(
       repeatEveryMonths,
       byName: originProfessionalName ?? null,
     })),
-    shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
+    // Desde el día de la visita (la de una cita pasada que se registra después), nunca antes de mañana.
+    shortcuts: {
+      week: notBefore(addDaysToDay(visitDay, 7), addDaysToDay(today, 1)),
+      month: notBefore(addMonthsToDay(visitDay, 1), addDaysToDay(today, 1)),
+      recall: notBefore(addMonthsToDay(visitDay, recallMonths), addDaysToDay(today, 1)),
+    },
     due,
     open: open
       .filter((control) => !byAppointment.includes(control))
@@ -2977,6 +3019,7 @@ async function applySessionAnswers(
   encounterId: string,
   input: FinalizeEncounterInput,
   sessions: ClosingCheckBase["sessions"],
+  at?: Date,
 ): Promise<{ addSessions: () => Promise<void>; keptOpen: SessionKeptOpen[] }> {
   const chosen = [...new Set(input.completePlanItemIds ?? [])]
   const addSession = [...new Set(input.addSessionPlanItemIds ?? [])]
@@ -2990,7 +3033,7 @@ async function applySessionAnswers(
   field(chosen, "completePlanItemIds")
   field(addSession, "addSessionPlanItemIds")
   for (const itemId of chosen)
-    await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId })
+    await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId, at })
   // Lo que llega a sus previstas se termina salvo «Falta otra sesión». Lo que viene
   // elegido no frena la firma: si algo impide completarlo (un presupuesto anulado
   // a medias), queda en curso como antes y el resultado lo dice. La traza distingue
@@ -3000,7 +3043,7 @@ async function applySessionAnswers(
     if (chosen.includes(session.planItemId) || addSession.includes(session.planItemId)) continue
     try {
       await tx.transaction(async (inner) => {
-        await setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId })
+        await setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId, at })
         await audit(inner as Db, orgId, actorUserId, "plan.item_completed_on_sign", "treatment_plan_item", session.planItemId, {
           patientId,
           encounterId,
@@ -3081,6 +3124,20 @@ export async function finalizeEncounter(
   if (nextDay !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(nextDay) || nextDay <= dayKeyIn(now, timezone)))
     throw invalidField("nextControl.dueAt", "Elige un día desde mañana.")
   let endedAt = now
+  // La atención de otro día (la de una cita pasada, o un borrador de ayer) termina ese día:
+  // sin hora indicada, a la hora de fin de su cita o, sin cita, media hora después de empezar.
+  if (!input.endedAt && dayKeyIn(locked.startedAt, timezone) < dayKeyIn(now, timezone)) {
+    const [visit] = locked.appointmentId
+      ? await tx
+          .select({ endsAt: appointment.endsAt })
+          .from(appointment)
+          .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, locked.appointmentId)))
+          .limit(1)
+      : []
+    const planned = visit && visit.endsAt > locked.startedAt ? visit.endsAt : new Date(locked.startedAt.getTime() + 30 * 60_000)
+    // Nunca después de ahora: una de anoche que se firma de madrugada termina, a lo sumo, ahora.
+    endedAt = planned < now ? planned : now
+  }
   if (input.endedAt) {
     endedAt = new Date(input.endedAt)
     if (Number.isNaN(endedAt.getTime())) throw invalidField("endedAt", "Elige la hora de fin de la lista")
@@ -3092,11 +3149,14 @@ export async function finalizeEncounter(
   // «¿Terminaste?» (lo respondido, o «Sí, terminar» si nadie lo cambió), en la misma
   // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
   // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
-  const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  // La visita es cuando fue: lo que se cierra con ella (tratamientos, controles, diagnósticos)
+  // queda con su hora de fin; la firma (`finalizedAt`) queda con la de ahora.
+  const visitAt = endedAt
+  const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions, visitAt)
   // Los controles que dejó lo terminado, como quedaron en el cierre (otro día, o quitados).
   await applyFinishingControlChanges(tx, { orgId, actorUserId, patientId, encounterId }, input.finishControlChanges ?? [])
   // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
-  await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], now)
+  await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], visitAt)
   const procedures = await tx
     .select()
     .from(encounterProcedure)
@@ -3150,8 +3210,8 @@ export async function finalizeEncounter(
     at: now,
     signer: signature,
   })
-  if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
-  const fulfilled = await fulfillDueControls(tx, orgId, actorUserId, row, fulfilling.map((control) => control.id), now)
+  if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, visitAt)
+  const fulfilled = await fulfillDueControls(tx, orgId, actorUserId, row, fulfilling.map((control) => control.id), visitAt)
   // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0031).
   await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
   // Los cargos caen solos al finalizar, con el precio final acordado:

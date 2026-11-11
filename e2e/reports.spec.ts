@@ -113,7 +113,7 @@ for (const width of [1440, 390]) {
       await tabs.getByRole("link", { name: "Agenda" }).click()
       await expect(page).toHaveURL(/tab=agenda/)
       const agendaFigures = page.getByRole("region", { name: "Cifras de agenda" })
-      await expect(agendaFigures.getByRole("region", { name: "Citas atendidas" })).toContainText("De 5 citas que ya pasaron")
+      await expect(agendaFigures.getByRole("region", { name: "Citas atendidas" })).toContainText("De 5 citas cerradas")
       await expect(agendaFigures.getByRole("region", { name: "Agenda ocupada" })).toContainText("Sin horario")
       await expect(page.getByRole("region", { name: "Cuándo queda libre la agenda" }).getByRole("link", { name: "Ir a los horarios" })).toBeVisible()
       await observe(page, info, "agenda")

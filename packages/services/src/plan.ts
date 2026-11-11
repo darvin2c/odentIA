@@ -1388,7 +1388,8 @@ export async function setPlanItemStatus(
   actorUserId: string,
   patientId: string,
   itemId: string,
-  input: { status: string; encounterId?: string | null; statusReason?: string | null },
+  /** `at`: cuándo ocurrió (la visita de una atención registrada después); sin él, ahora. */
+  input: { status: string; encounterId?: string | null; statusReason?: string | null; at?: Date },
 ): Promise<PlanItemWithDecision> {
   if (!(PLAN_ITEM_STATUSES as readonly string[]).includes(input.status))
     throw validation("status inválido")
@@ -1469,8 +1470,8 @@ export async function setPlanItemStatus(
       status: input.status,
       statusReason: reason,
       updatedAt: now,
-      ...(input.status === "en_curso" && !current.startedAt ? { startedAt: now } : {}),
-      ...(input.status === "realizado" ? { completedAt: now } : {}),
+      ...(input.status === "en_curso" && !current.startedAt ? { startedAt: input.at ?? now } : {}),
+      ...(input.status === "realizado" ? { completedAt: input.at ?? now } : {}),
     })
     .where(
       and(

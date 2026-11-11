@@ -189,7 +189,8 @@ const APPOINTMENT_STATUS_WORDS: Record<string, string> = {
   programada: "Dejó una cita como programada",
   confirmada: "Confirmó una cita",
   cancelada: "Canceló una cita",
-  atendida: "Cerró una cita con su atención",
+  // Con su atención al firmarla, o con «Vino» sin ella: lo cierto en los dos es que quedó atendida.
+  atendida: "Cerró una cita como atendida",
   en_atencion: "Marcó que una cita está en atención",
   en_sala: "Marcó la llegada de un paciente a su cita",
   inasistencia: "Marcó una inasistencia",
@@ -245,6 +246,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "appointment.updated": say("Cambió una cita"),
   "appointment.arrived": say("Marcó que un paciente llegó a su cita"),
   "appointment.arrival_undone": say("Deshizo la llegada de un paciente a su cita"),
+  "appointment.came_undone": say("Deshizo «Vino» en una cita"),
+  "appointment.record_skipped": say("Dejó una cita atendida sin registrar su atención"),
   "schedule_block.created": say("Bloqueó un horario de la agenda"),
   "schedule_block.removed": say("Quitó un bloqueo de la agenda"),
   "schedule_block.absence_created": say("Registró una ausencia"),
