@@ -94,7 +94,7 @@ export type Permission =
   | "clinical.prescription"
   | "orders.prescription"
   // Anotar la ausencia de cualquier profesional (vacaciones, permiso) sin tocar la
-  // configuración; quien atiende anota la suya con «appointments.write» (mesa del 10 nov).
+  // configuración; quien atiende anota la suya con «clinical.write» (mesa del 10 nov).
   | "appointments.absences";
 
 /** Etiquetas en español para la UI de miembros. */
@@ -286,7 +286,8 @@ function isPermission(permission: string): permission is Permission {
     permission === "inventory.stock" ||
     permission === "inventory.receive" ||
     permission === "clinical.prescription" ||
-    permission === "orders.prescription"
+    permission === "orders.prescription" ||
+    permission === "appointments.absences"
   ) return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;

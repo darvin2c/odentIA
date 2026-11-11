@@ -139,7 +139,7 @@ export function AbsenceForm({
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch("/api/agenda/blocks", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<{ data: { id: string } }>("/api/agenda/blocks", { method: "POST", body: JSON.stringify(body) }),
   })
   const form = useAppForm({
     defaultValues: {
@@ -157,7 +157,7 @@ export function AbsenceForm({
       const chosen = reasons.find((item) => item.id === value.reason) ?? reasons[0]
       const text = value.reason === "otro" ? value.other.trim() : chosen?.label
       const { startsAt, endsAt } = rangeOf(value, timeZone)
-      await save.mutateAsync({
+      const created = await save.mutateAsync({
         branchId,
         professionalUserId: who,
         roomId: value.roomId || null,
@@ -166,7 +166,25 @@ export function AbsenceForm({
         startsAt,
         endsAt,
       })
-      toast.success(person ? "Ausencia guardada" : "Feriado o cierre guardado")
+      // Anotada por error se deshace aquí: quien la anota desde la Agenda no tiene Configuración.
+      const id = created?.data?.id
+      toast.success(person ? "Ausencia guardada" : "Feriado o cierre guardado", {
+        duration: 10_000,
+        ...(id
+          ? {
+              action: {
+                label: "Deshacer",
+                onClick: () =>
+                  void apiFetch(`/api/agenda/blocks/${id}`, { method: "DELETE" })
+                    .then(async () => {
+                      toast.success(person ? "Se quitó la ausencia" : "Se quitó el feriado o cierre")
+                      await onSaved()
+                    })
+                    .catch(() => toast.error("No se pudo quitar: revisa la Agenda")),
+              },
+            }
+          : {}),
+      })
       await onSaved()
     },
   })

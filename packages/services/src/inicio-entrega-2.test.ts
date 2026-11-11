@@ -166,12 +166,26 @@ it("una cita confirmada que se mueve a otro día queda por confirmar", async () 
   )
   expect(moved.status).toBe("programada")
   // El mismo día, a otra hora, sigue confirmada.
-  const again = await c.tx((db) =>
-    moveAppointment(db, c.orgId, c.ids.rita, visit.id, {
-      expectedVersion: moved.version,
-      startsAt: new Date(startsAt.getTime() + 2 * 86_400_000 + 3_600_000).toISOString(),
+  const other = await c.book({ patientId: person.id, professional: c.ids.luis, branchId: c.branches.first, roomId: c.rooms.a, startsAt })
+  const sameDay = await c.tx((db) =>
+    moveAppointment(db, c.orgId, c.ids.rita, other.id, {
+      expectedVersion: other.version,
+      startsAt: new Date(startsAt.getTime() + 3_600_000).toISOString(),
       outsideSchedule: true,
     }),
   )
-  expect(again.status).toBe("programada")
+  expect(sameDay.status).toBe("confirmada")
+  // La que pide la propia persona (su enlace o su conversación) sigue confirmada: eligió la hora.
+  const asked = await c.book({ patientId: person.id, professional: c.ids.ana, branchId: c.branches.second, roomId: c.rooms.b, startsAt })
+  const byPatient = await c.tx((db) =>
+    moveAppointment(
+      db,
+      c.orgId,
+      c.ids.rita,
+      asked.id,
+      { expectedVersion: asked.version, startsAt: new Date(startsAt.getTime() + 3 * 86_400_000).toISOString(), outsideSchedule: true },
+      { byPatient: true },
+    ),
+  )
+  expect(byPatient.status).toBe("confirmada")
 })

@@ -419,8 +419,10 @@ async function homeBranch(tx: Db, orgId: string, branchId?: string) {
     select b.id, b.name, b.timezone, (select count(*)::int from appointment a
         where a.organization_id = b.organization_id and a.branch_id = b.id and not a.is_test
           and a.status in ('programada','confirmada','atendida')
-          and (a.starts_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date) as today
-    from branch b where b.organization_id=${orgId} and b.is_active order by b.created_at, b.id`)
+          and a.starts_at >= ((now() at time zone coalesce(b.timezone, op.timezone, 'UTC'))::date::timestamp at time zone coalesce(b.timezone, op.timezone, 'UTC'))
+          and a.starts_at < (((now() at time zone coalesce(b.timezone, op.timezone, 'UTC'))::date + 1)::timestamp at time zone coalesce(b.timezone, op.timezone, 'UTC'))) as today
+    from branch b left join org_profile op on op.organization_id = b.organization_id
+    where b.organization_id=${orgId} and b.is_active order by b.created_at, b.id`)
   const busiest = [...rows].sort((a, b) => b.today - a.today)[0]
   const chosen = rows.find(row => row.id === branchId) ?? (busiest && busiest.today > 0 ? busiest : rows[0]) ?? null
   return { branch: chosen ? { id: chosen.id, name: chosen.name, timezone: chosen.timezone } : null, many: rows.length > 1 }
@@ -994,7 +996,9 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const [count] = await tx.execute<{ open: number }>(sql`select count(*)::int as open from task t where ${scope}`)
   // Lo que un colega te pasó por un paciente: suya, con paciente y creada por otra persona del equipo.
   const referred = await tx.execute<Row>(sql`select * from (${select} and t.assignee_user_id=${userId} and t.patient_id is not null
-      and t.created_by <> ${userId} and exists (select 1 from member m where m.organization_id = t.organization_id and m.user_id = t.created_by)) r`)
+      and t.created_by <> ${userId} and exists (select 1 from member m where m.organization_id = t.organization_id
+        and m.user_id = t.created_by and m.role in ('clinician','owner','admin'))
+      order by t.created_at desc, t.id limit 10) r`)
   const referredBy = new Map(
     (await tx.execute<{ id: string; name: string | null }>(sql`
       select t.id, cu.name from task t join "user" cu on cu.id = t.created_by

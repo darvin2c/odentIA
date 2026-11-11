@@ -273,7 +273,7 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
     </span>
   )
   const attended = today.summary.attended
-  const people = new Set(today.appointments.map((item) => item.patientId)).size
+  const people = new Set(today.appointments.filter((item) => item.visit !== "no_vino").map((item) => item.patientId)).size
   const attendButton = (item: WorkspaceAppointment) =>
     canAttend ? (
       <SubmitButton

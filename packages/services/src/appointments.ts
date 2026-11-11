@@ -1588,8 +1588,12 @@ export async function moveAppointment(
   actorUserId: string,
   id: string,
   input: MoveAppointmentInput,
-  /** `requested`: lo pide una persona (el equipo, Sofi o la persona en su enlace), como al crearla. */
-  options: { notice?: boolean; requested?: boolean } = {},
+  /**
+   * `requested`: lo pide una persona (el equipo, Sofi o la persona en su enlace), como al crearla.
+   * `byPatient`: lo pidió la propia persona (su enlace o su conversación): eligió la hora nueva,
+   * así que sigue confirmada.
+   */
+  options: { notice?: boolean; requested?: boolean; byPatient?: boolean } = {},
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id)
   // Solo se mueve lo que sigue en pie: lo atendido, cancelado o que no vino ya pasó.
@@ -1655,7 +1659,7 @@ export async function moveAppointment(
   const arrivalCleared = current.arrivedAt !== null && otherDay
   // Confirmó otro día: el nuevo no lo confirmó. Vuelve a «por confirmar» y el recordatorio
   // se lo pide (QA del 10 nov, C31).
-  const unconfirmed = current.status === "confirmada" && !current.arrivedAt && otherDay
+  const unconfirmed = current.status === "confirmada" && !current.arrivedAt && otherDay && !options.byPatient
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {

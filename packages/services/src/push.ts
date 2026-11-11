@@ -261,8 +261,10 @@ export async function collectOrgPushes(tx: Db, orgId: string, now: Date = new Da
         from appointment a join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
         where a.organization_id = ${orgId} and a.professional_user_id = ${row.userId} and not a.is_test
           and a.status = 'confirmada' and a.arrived_at > ${row.arrivalsSince}::timestamptz
+          -- Lo de hoy: no recorre la historia del profesional en cada vuelta.
+          and a.starts_at > ${now.toISOString()}::timestamptz - interval '1 day' and a.starts_at < ${now.toISOString()}::timestamptz + interval '1 day'
           -- Quien la marca es otra persona: si la marcó quien atiende, ya lo sabe.
-          and a.arrived_by <> ${row.userId}
+          and a.arrived_by is distinct from ${row.userId}
           and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
         order by a.arrived_at`)
       const last = arrivals.at(-1)

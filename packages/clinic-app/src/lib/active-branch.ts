@@ -79,7 +79,12 @@ export function preferredBranchId(
   const first = firstActiveBranchId(rows)
   const busiest = rows
     .filter((item) => item.isActive && (item.todayAppointments ?? 0) > 0)
-    .sort((a, b) => (b.todayAppointments ?? 0) - (a.todayAppointments ?? 0) || (a.id === first ? -1 : b.id === first ? 1 : 0))[0]
+    .sort(
+      (a, b) =>
+        (b.todayAppointments ?? 0) - (a.todayAppointments ?? 0) ||
+        a.createdAt.localeCompare(b.createdAt) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    )[0]
   return busiest?.id ?? first
 }
 
