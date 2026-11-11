@@ -49,5 +49,6 @@ const { legalOnly = false } = Astro.props
   .short { padding: 0 0 24px; }
   .short .legal { margin-top: 0; border-top: 0; }
   @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .brand { grid-column: 1 / -1; } }
-  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
+  /* En el teléfono, dos columnas: con cada enlace de 44 px, una sola columna hacía el pie muy largo. */
+  @media (max-width: 480px) { .grid { gap: 24px 16px; } }
 </style>

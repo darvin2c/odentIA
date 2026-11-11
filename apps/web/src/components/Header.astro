@@ -2,6 +2,8 @@
 // Cabecera: se superpone a la portada oscura de cada página; en teléfono, un menú desplegable.
 // «Ingresar» está siempre a la vista, en cualquier ancho: quien ya es cliente entra en un toque, sin
 // abrir el menú. En escritorio va junto al botón principal; en teléfono y tableta, junto al menú.
+// A mitad de una página, al subir, la cabecera vuelve fija arriba (y se va al bajar): se pone encima
+// de la página, sin correr nada. La clara (páginas legales) queda pegada arriba siempre.
 // Una entrada con `menu` («Agentes» y «El sistema») abre su desplegable con clic o Enter, y se
 // cierra con Esc o afuera; solo uno abierto a la vez.
 import { LOGO } from "../lib/logos"
@@ -82,6 +84,41 @@ const logo = LOGO[variant]
 </header>
 
 <script>
+  // Al subir a mitad de la página, la cabecera oscura vuelve fija arriba; al bajar se esconde. Fuera del
+  // flujo desde siempre, fijarla no mueve nada; vuelve a su lugar al llegar arriba del todo.
+  const head = document.querySelector<HTMLElement>(".site-head.dark")
+  if (head) {
+    let lastY = window.scrollY
+    let queued = false
+    const update = () => {
+      queued = false
+      const y = window.scrollY
+      if (y <= 2) head.classList.remove("pinned", "shown")
+      else if (y > head.offsetHeight + 240) head.classList.add("pinned")
+      if (head.classList.contains("pinned")) {
+        if (y < lastY - 6) head.classList.add("shown")
+        else if (y > lastY + 6 && !head.contains(document.activeElement)) {
+          head.classList.remove("shown")
+          for (const dd of head.querySelectorAll<HTMLDetailsElement>("details[open]")) dd.open = false
+        }
+      }
+      lastY = y
+    }
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (queued) return
+        queued = true
+        requestAnimationFrame(update)
+      },
+      { passive: true },
+    )
+    // Con el teclado, la cabecera aparece al recibir el foco.
+    head.addEventListener("focusin", () => {
+      if (head.classList.contains("pinned")) head.classList.add("shown")
+    })
+  }
+
   // Cada desplegable se cierra con Esc (vuelve el foco a su botón), al hacer clic afuera y al abrir otro.
   const menus = [...document.querySelectorAll<HTMLDetailsElement>("[data-dd]")]
   for (const dd of menus) {
@@ -97,13 +134,22 @@ const logo = LOGO[variant]
     document.addEventListener("click", (event) => {
       if (dd.open && !dd.contains(event.target as Node)) dd.open = false
     })
+    // Con el teclado, al salir del desplegable se cierra: así no queda abierto tapando lo que sigue.
+    dd.addEventListener("focusout", (event) => {
+      if (dd.open && !dd.contains(event.relatedTarget as Node | null)) dd.open = false
+    })
   }
 </script>
 
 <style>
   /* Con nombre propio en la transición entre páginas, la cabecera no se funde con el resto. */
   .site-head { position: absolute; top: 0; left: 0; right: 0; z-index: 10; view-transition-name: site-head; }
-  .site-head.light { position: relative; background: var(--paper); border-bottom: 1px solid var(--line); }
+  .site-head.light { position: sticky; top: 0; background: var(--paper); border-bottom: 1px solid var(--line); }
+  /* Fija al subir: escondida arriba hasta que se sube, y entra deslizándose sobre la página. */
+  .site-head.pinned { position: fixed; background: color-mix(in srgb, var(--night) 94%, transparent); backdrop-filter: blur(10px); box-shadow: 0 10px 30px -18px rgba(0, 0, 0, .6); transform: translateY(-110%); transition: transform .25s ease; }
+  .site-head.pinned.shown { transform: none; }
+  .site-head.pinned .row { padding-top: 10px; padding-bottom: 10px; }
+  @media (prefers-reduced-motion: reduce) { .site-head.pinned { transition: none; } }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 22px; padding-bottom: 22px; }
   /* El logo se toca en 44 px de alto aunque se vea más chico. */
   .logo { display: flex; align-items: center; width: 150px; min-height: 44px; }

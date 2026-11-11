@@ -27,11 +27,15 @@ const STATES = ["Sin abrir", "Abierta desde 09:20", "Lista para cerrar"]
 const soles = (v: number) => `S/ ${v.toFixed(2).replace(".", ",")}`
 
 export default function CashDay() {
-  // La tarjeta de la caja mide siempre lo que el día terminado: los cobros entran en espacio reservado.
-  const steady = useSteadyHeight<HTMLDivElement>()
   // Se arma en el servidor con el día terminado: sin JavaScript se lee igual.
   const [n, setN] = useState(LAST)
   const timer = useRef<number | undefined>(undefined)
+  // La tarjeta de la caja mide siempre lo que el día terminado: los cobros entran en espacio reservado.
+  // Al girar el teléfono, el día se muestra terminado y se mide de nuevo.
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    window.clearInterval(timer.current)
+    setN(LAST)
+  })
 
   const play = useCallback(() => {
     window.clearInterval(timer.current)

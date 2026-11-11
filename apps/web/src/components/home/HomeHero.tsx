@@ -217,7 +217,11 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
     const fit = () => {
       const k = Math.min(1, wrap.clientWidth / 840)
       scene.style.transform = "scale(" + k.toFixed(4) + ")"
-      wrap.style.height = Math.round(680 * k) + "px"
+      // El recuadro reserva el alto de su frase más larga y puede pasar del borde de la escena: la caja
+      // crece con él, así no queda cortado cuando la portada se achica (entre 721 y 960 px).
+      const panel = scene.querySelector<HTMLElement>(".zpanel")
+      const tall = Math.max(680, panel ? panel.offsetTop + panel.offsetHeight + 8 : 680)
+      wrap.style.height = Math.round(tall * k) + "px"
     }
     fit()
     if (!window.ResizeObserver) return
@@ -278,7 +282,7 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
 
   const v = d3vals(d.step, hover, d.cycle, still)
   const togglePause = () => pauseStore.set(!paused)
-  const pauseLabel = paused ? "Activar movimiento" : "Pausar movimiento"
+  const pauseLabel = paused ? "Reanudar movimiento" : "Pausar movimiento"
 
   const key = (
     <div className="zkey">

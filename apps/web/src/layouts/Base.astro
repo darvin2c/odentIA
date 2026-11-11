@@ -90,6 +90,14 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
           { rootMargin: "0px 0px 8% 0px" },
         )
         for (const el of blocks) seen.observe(el)
+        // Con el teclado, lo que recibe el foco se ve al instante, aunque aún no haya asomado.
+        document.addEventListener("focusin", (event) => {
+          const block = event.target instanceof Element ? event.target.closest('[data-rv=""]') : null
+          if (block) {
+            block.setAttribute("data-rv", "in")
+            seen.unobserve(block)
+          }
+        })
       })()
     </script>
   </body>

@@ -67,6 +67,9 @@
 .om-line-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 .om-line-btn { font-size: 14px; font-weight: 700; border-radius: 999px; padding: 9px 16px; background: rgba(255, 255, 255, .1); }
 .om-line-btn.main { background: var(--sky-2); color: var(--night); }
+/* Es una ilustración: los «botones» se ven como en la app, sin puntero de mano, y la nota lo dice. */
+.om-line-btn { cursor: default; }
+.om-line-ex { flex: 1 1 100%; font-family: var(--agent-font); font-size: 11.5px; color: var(--on-night-3); }
 
 .om-faq { background: var(--paper); }
 

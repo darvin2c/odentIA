@@ -145,7 +145,7 @@ export default function CaseSteps() {
             </span>
           </p>
         ))}
-        <p className="case-now" aria-live="polite">
+        <p className="case-now">
           {now && moving ? (
             <>
               <span className="mono">

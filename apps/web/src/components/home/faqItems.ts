@@ -45,6 +45,10 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false):
     a: "Con Ctrl K (⌘K en Mac) desde cualquier pantalla, o con la lupa en el teléfono. Escribe parte del nombre sin preocuparte por las tildes, el teléfono, el DNI o el número de historia, y aparece la persona con su próxima cita, su última conversación, lo que debe y el presupuesto por aceptar. Las citas, los mensajes, la historia clínica, los presupuestos y los pagos también se encuentran por lo que dicen, cada uno debajo de su persona y según lo que tu rol puede ver. Los documentos e imágenes se encuentran por su nombre.",
   },
   {
+    q: "¿Puedo traer a mis pacientes?",
+    a: "Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus pacientes por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan. Desde ahí, lo que escriban por cualquier canal cae en su ficha, y los nuevos se registran solos con el código QR o el enlace de registro de tu clínica.",
+  },
+  {
     q: "¿Puedo usar odentIA desde el celular?",
     a: "Sí. Se abre en el navegador del teléfono, con las mismas pantallas adaptadas. Si quieres, instalas tu clínica como una app con su ícono, sin tienda, y te avisa, en tu horario de atención, cuando alguien queda esperándote o Sofi te pasa a alguien, aunque la tengas cerrada. El aviso no dice el nombre de la persona ni lo que escribió: eso se ve al abrirlo.",
   },

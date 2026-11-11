@@ -415,6 +415,10 @@ details.q p {
   .wrap {
     padding: 0 16px;
   }
+  /* La barra fija de abajo no tapa lo que recibe el foco con el teclado. */
+  html:has(.sticky-cta, .lsticky) {
+    scroll-padding-bottom: 96px;
+  }
   .section {
     padding: 64px 0;
   }

@@ -131,9 +131,17 @@ export default function DayAgenda() {
         </div>
       </div>
 
+      {/* El aviso de Sofi tiene su lugar desde el principio y aparece cuando llega: el pie no baja. */}
       <div className="da-toast-slot" aria-live="polite">
-        {s.toast && (
-          <button type="button" className="da-toast" onClick={() => setDay(today ? "manana" : "hoy")}>
+        {(
+          <button
+            type="button"
+            className="da-toast"
+            data-off={!s.toast || undefined}
+            aria-hidden={!s.toast || undefined}
+            tabIndex={s.toast ? undefined : -1}
+            onClick={() => setDay(today ? "manana" : "hoy")}
+          >
             <span className="da-sofi" aria-hidden="true">
               S
             </span>

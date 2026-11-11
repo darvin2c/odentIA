@@ -34,7 +34,7 @@ export function homeFaq(gift: string | null): FaqItem[] {
     },
     {
       q: "¿Puedo traer a mis clientes?",
-      a: "Sí. Los registras con sus datos y, desde ese momento, lo que escriban por cualquier canal cae en su ficha. También se registran solos con el código QR o el enlace de registro, desde su celular, y tú eliges qué datos se les piden.",
+      a: "Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus clientes por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan. Desde ahí, lo que escriban por cualquier canal cae en su ficha, y los nuevos se registran solos con el código QR o el enlace de registro de tu óptica.",
     },
     {
       q: "¿Hay aplicación para el celular?",

@@ -64,6 +64,15 @@ export default function SofiDemo() {
   // por eso solo va en la confirmación.
   const confirmText = emoji ? `${confirm} 🙂` : confirm
   const shown = (on: boolean) => ({ className: on ? "sd-on" : "sd-off", "aria-hidden": on ? undefined : true })
+  /** Mientras escribe, la respuesta ya ocupa su lugar sin verse y «escribiendo…» va encima: la burbuja no cambia de alto. */
+  const said = (text: string, typing: boolean) => (
+    <span className="fit">
+      <span className={typing ? "fit-ghost" : undefined} aria-hidden={typing || undefined}>
+        {text}
+      </span>
+      {typing && <span>{TYPING}</span>}
+    </span>
+  )
 
   return (
     <div className="sd">
@@ -95,13 +104,13 @@ export default function SofiDemo() {
           Hola, buenas noches. ¿Tienen cita para mañana? Me duele una muela.
         </p>
         <p {...shown(step >= 1)} data-side="out" data-typing={step === 1 || undefined}>
-          {step === 1 ? TYPING : reply}
+          {said(reply, step === 1)}
         </p>
         <p {...shown(step >= 3)} data-side="in">
           A las 16:30, por favor.
         </p>
         <p {...shown(step >= 4)} data-side="out" data-typing={step === 4 || undefined}>
-          {step === 4 ? TYPING : confirmText}
+          {said(confirmText, step === 4)}
         </p>
         <div {...shown(step >= LAST)} data-side="agenda" data-marked={step >= LAST || undefined}>
           <span>

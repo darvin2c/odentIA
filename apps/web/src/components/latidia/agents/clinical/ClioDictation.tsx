@@ -43,10 +43,14 @@ const BANNERS = [
 type Item = { from: number; text: string; sub: string; doc?: boolean; corrected?: boolean }
 
 export default function ClioDictation() {
-  const steady = useSteadyHeight<HTMLDivElement>()
   // En el servidor y sin movimiento, el estado final: la página se lee entera sin animación.
   const [step, setStep] = useState(LAST)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Al girar el teléfono, el dictado se muestra terminado y se mide de nuevo.
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    if (timer.current) clearInterval(timer.current)
+    setStep(LAST)
+  })
 
   const play = useCallback(() => {
     if (timer.current) clearInterval(timer.current)

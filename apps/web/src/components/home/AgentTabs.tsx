@@ -73,22 +73,29 @@ const ADM = [
 const END = { chat: 7, note: 5, adm: 5 }
 
 export default function AgentTabs() {
-  // Cada tarjeta que se llena sola mide siempre lo que su estado final.
-  const recBox = useSteadyHeight<HTMLDivElement>()
-  const cliBox = useSteadyHeight<HTMLDivElement>()
-  const suggBox = useSteadyHeight<HTMLDivElement>()
-  const admBox = useSteadyHeight<HTMLDivElement>()
   const moving = useMoving()
   const [tab, setTab] = useState<Tab>("rec")
-  const [chat, setChat] = useState(END.chat)
+  const [chatAt, setChat] = useState(END.chat)
   const [wait, setWait] = useState(0)
   const [slotPick, setSlotPick] = useState("16:30")
   const [tone, setTone] = useState<Tone>("cercano")
   const [emojis, setEmojis] = useState<Emojis>("no")
-  const [note, setNote] = useState(END.note)
+  const [noteAt, setNote] = useState(END.note)
   const [noteDone, setNoteDone] = useState<"" | "ok" | "no">("")
-  const [adm, setAdm] = useState(END.adm)
+  const [admAt, setAdm] = useState(END.adm)
   const n = useRef(0)
+  // En pausa (el botón de la portada) cada demostración se ve completa, no a medio camino.
+  const chat = moving ? chatAt : END.chat
+  const note = moving ? noteAt : END.note
+  const adm = moving ? admAt : END.adm
+  // Mientras la persona tiene el dedo o el puntero en el chat, los horarios no se eligen solos.
+  const choosing = useRef(false)
+  // Cada tarjeta que se llena sola mide siempre lo que su estado final; al girar el teléfono, cada
+  // demostración se muestra terminada y se mide de nuevo.
+  const recBox = useSteadyHeight<HTMLDivElement>(undefined, () => setChat(END.chat))
+  const cliBox = useSteadyHeight<HTMLDivElement>(undefined, () => setNote(END.note))
+  const suggBox = useSteadyHeight<HTMLDivElement>(undefined, () => setNote(END.note))
+  const admBox = useSteadyHeight<HTMLDivElement>(undefined, () => setAdm(END.adm))
 
   // Al aparecer, la conversación de Sofi empieza desde el primer mensaje.
   useEffect(() => {
@@ -102,7 +109,9 @@ export default function AgentTabs() {
       if (chat < 3) setChat(chat + 1)
       else if (chat === 3) {
         // Espera a que la persona elija una hora; si no elige, elige la de la tarde.
-        if (wait >= 4) {
+        if (choosing.current) {
+          // Espera: está por tocar una hora.
+        } else if (wait >= 6) {
           setChat(4)
           setSlotPick("16:30")
         } else setWait(wait + 1)
@@ -226,7 +235,16 @@ export default function AgentTabs() {
         {/* Sofi */}
         <div className="ag-panel" hidden={tab !== "rec"}>
           <div className="ag-grid">
-            <div className="chatbox" ref={recBox}>
+            <div
+              className="chatbox"
+              ref={recBox}
+              onPointerEnter={() => {
+                choosing.current = true
+              }}
+              onPointerLeave={() => {
+                choosing.current = false
+              }}
+            >
               <AgentHead
                 agent="sofi"
                 name="Sofi · Clínica Sonrisa Norte"

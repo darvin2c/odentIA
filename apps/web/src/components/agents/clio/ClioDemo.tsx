@@ -40,10 +40,14 @@ const BEFORE: Partial<Record<number, ExampleFinding>> = { 46: "ausente", 11: "co
 const AFTER: Partial<Record<number, ExampleFinding>> = { ...BEFORE, 36: "caries" }
 
 export default function ClioDemo() {
-  const steady = useSteadyHeight<HTMLDivElement>()
   // En el servidor y sin movimiento, el estado final: la página se lee entera sin animación.
   const [step, setStep] = useState(LAST)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Al girar el teléfono, el dictado se muestra terminado y se mide de nuevo.
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    if (timer.current) clearTimeout(timer.current)
+    setStep(LAST)
+  })
 
   const stop = useCallback(() => {
     if (timer.current) clearTimeout(timer.current)

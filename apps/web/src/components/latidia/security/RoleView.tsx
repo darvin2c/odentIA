@@ -208,26 +208,34 @@ export default function RoleView({ variant = "medical" }: { variant?: Variant })
           <span className="lt-roles-age">{set.who.sub}</span>
         </span>
       </div>
-      <ul className="lt-roles-rows">
-        {set.sections.map((s) => {
-          const [ok, text] = s.see[role]
-          return (
-            <li key={s.title} data-ok={ok === "some" ? "some" : ok || undefined}>
-              <span className="lt-roles-icon" aria-hidden="true">
-                {ok === "some" ? "◐" : ok ? "✓" : "—"}
-              </span>
-              <span className="lt-roles-text">
-                <b>{s.title}</b>
-                <span className="lt-roles-see">
-                  <span className="sr-only">{ok === "some" ? "Lo ve en parte: " : ok ? "Lo ve: " : "No lo ve: "}</span>
-                  {text}
-                </span>
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-      <p className="lt-roles-note">{set.notes[role]}</p>
+      {/* Lo que ve cada rol ocupa la misma celda (las demás vistas, sin verse): la tarjeta mide lo que
+          la vista más larga y pasar de un rol a otro no corre lo que está debajo. */}
+      <div className="fit">
+        {set.roles.map(([key]) => (
+          <div key={key} className={`lt-roles-view${key === role ? "" : " fit-ghost"}`} aria-hidden={key === role ? undefined : true}>
+            <ul className="lt-roles-rows">
+              {set.sections.map((s) => {
+                const [ok, text] = s.see[key]
+                return (
+                  <li key={s.title} data-ok={ok === "some" ? "some" : ok || undefined}>
+                    <span className="lt-roles-icon" aria-hidden="true">
+                      {ok === "some" ? "◐" : ok ? "✓" : "—"}
+                    </span>
+                    <span className="lt-roles-text">
+                      <b>{s.title}</b>
+                      <span className="lt-roles-see">
+                        <span className="sr-only">{ok === "some" ? "Lo ve en parte: " : ok ? "Lo ve: " : "No lo ve: "}</span>
+                        {text}
+                      </span>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="lt-roles-note">{set.notes[key]}</p>
+          </div>
+        ))}
+      </div>
       <span className="lt-roles-demo">Demostración con datos de ejemplo. Toca un rol.</span>
     </div>
   )

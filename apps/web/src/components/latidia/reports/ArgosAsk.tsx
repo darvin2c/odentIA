@@ -183,8 +183,47 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
   }, [play, stop])
 
   const cur = QUESTIONS[pick]
-  const max = Math.max(...cur.bars.map(([, v]) => v))
   const done = phase === 2
+
+  /**
+   * La respuesta a una pregunta. Las de las otras preguntas van en la misma celda sin verse (`ghost`):
+   * la tarjeta mide siempre lo que la respuesta más larga y pasar de una a otra no corre la página.
+   */
+  const answer = (question: Question, visible: boolean, ghost: boolean) => {
+    const top = Math.max(...question.bars.map(([, v]) => v))
+    return (
+      <div
+        key={question.label}
+        className={ghost ? "lt-ask-answer fit-ghost" : "lt-ask-answer"}
+        data-done={visible || undefined}
+        aria-hidden={!ghost && visible ? undefined : true}
+      >
+        <p className="lt-ask-text">
+          <Rich text={question.answer} />
+        </p>
+        <div className="lt-ask-bars">
+          {question.bars.map(([name, v, value]) => (
+            <div key={name} className="lt-ask-bar">
+              <span className="lt-ask-bar-l">{name}</span>
+              <span className="lt-ask-track">
+                <span className="lt-ask-fill" style={{ width: visible ? `${Math.max(3, Math.round((v / top) * 100))}%` : "0%" }} />
+              </span>
+              <b>{value}</b>
+            </div>
+          ))}
+        </div>
+        <p className="lt-ask-how">
+          <b>Así lo calculé:</b> {question.how}
+        </p>
+        <div className="lt-ask-acts" aria-hidden="true">
+          <span className="lt-ask-act" data-primary>
+            {question.action}
+          </span>
+          <span className="lt-ask-act">Descargar</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="lt-ask" ref={steady}>
@@ -198,10 +237,18 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
         </span>
       </div>
       <div className="lt-ask-field">
-        <span className="lt-ask-q">
-          {cur.q.slice(0, chars)}
-          <span className="lt-ask-caret" aria-hidden="true" data-on={phase === 0 || undefined}>
-            |
+        {/* La pregunta más larga reserva sus líneas: escribirla letra a letra no corre lo de abajo. */}
+        <span className="fit lt-ask-q-fit">
+          {QUESTIONS.map((question) => (
+            <span key={question.label} className="lt-ask-q fit-ghost" aria-hidden="true">
+              {question.q}|
+            </span>
+          ))}
+          <span className="lt-ask-q">
+            {cur.q.slice(0, chars)}
+            <span className="lt-ask-caret" aria-hidden="true" data-on={phase === 0 || undefined}>
+              |
+            </span>
           </span>
         </span>
         <span className="lt-ask-ask" aria-hidden="true">
@@ -216,7 +263,11 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
           </button>
         ))}
       </fieldset>
-      <div className="lt-ask-stage">
+      {/* Las respuestas de las otras preguntas van en la misma celda sin verse, y mientras piensa sus
+          pasos van encima: la tarjeta no cambia de alto. El anuncio va en la celda, que no cambia. */}
+      <div className="lt-ask-stage fit" aria-live="polite">
+        {QUESTIONS.map((question, i) => (i === pick ? null : answer(question, true, true)))}
+        {answer(cur, done, false)}
         {phase === 1 && (
           <div className="lt-ask-think">
             <span>· Leyendo la pregunta</span>
@@ -225,31 +276,6 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
             ))}
           </div>
         )}
-        <div className="lt-ask-answer" data-done={done || undefined} aria-hidden={done ? undefined : true} aria-live="polite">
-          <p className="lt-ask-text">
-            <Rich text={cur.answer} />
-          </p>
-          <div className="lt-ask-bars">
-            {cur.bars.map(([name, v, value]) => (
-              <div key={name} className="lt-ask-bar">
-                <span className="lt-ask-bar-l">{name}</span>
-                <span className="lt-ask-track">
-                  <span className="lt-ask-fill" style={{ width: done ? `${Math.max(3, Math.round((v / max) * 100))}%` : "0%" }} />
-                </span>
-                <b>{value}</b>
-              </div>
-            ))}
-          </div>
-          <p className="lt-ask-how">
-            <b>Así lo calculé:</b> {cur.how}
-          </p>
-          <div className="lt-ask-acts" aria-hidden="true">
-            <span className="lt-ask-act" data-primary>
-              {cur.action}
-            </span>
-            <span className="lt-ask-act">Descargar</span>
-          </div>
-        </div>
       </div>
       <span className="lt-ask-note">Demostración con datos de ejemplo. Toca una pregunta.</span>
     </div>

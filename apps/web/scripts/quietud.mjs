@@ -5,7 +5,9 @@
 //
 // Abre cada página en un Chromium sin interfaz con todo a la vista a la vez (así todas las escenas se
 // arman y corren), espera a que arranquen y durante `segundos` anota, sin tocar nada, el alto de cada
-// escena y la posición de cada enlace, botón y campo. Sin rutas, recorre las que enlaza el inicio.
+// escena y la posición de cada enlace, botón y campo. Después cambia el ancho a mitad de las
+// animaciones (girar el teléfono) y vuelve a mirar. La ventana muy alta cambia lo que se mide con
+// `vh`: lo que dependa del alto de la pantalla se mira además a mano. Sin rutas, recorre las que enlaza el inicio.
 // Sale con 1 si algo se movió más de 2 px. Usa el Playwright de e2e (`pnpm --filter @odentia/e2e exec
 // playwright install chromium` la primera vez). Mide lo que pasa solo: no reemplaza mirar la página.
 import { createRequire } from "node:module"
@@ -41,7 +43,52 @@ async function linkedRoutes() {
   return ["/", ...routes.filter((route) => route !== "/" && !legal.test(route))]
 }
 
-/** Lo que cambió en una página mientras nadie la tocaba. */
+/** Corre en la página: anota durante `ms` el alto de cada escena y la posición de cada control. */
+const observe = (ms) =>
+  new Promise((resolve) => {
+    const name = (el) => {
+      const scene = el.closest("astro-island")?.getAttribute("component-url")?.split("/").pop()?.split("?")[0]
+      const text = (el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ").slice(0, 36)
+      return `«${text}»${scene ? ` en ${scene}` : ""}`
+    }
+    const scenes = [...document.querySelectorAll("astro-island")].flatMap((island) =>
+      [...island.children].map((el) => ({
+        el,
+        who: island.getAttribute("component-url")?.split("/").pop()?.split("?")[0] ?? "?",
+        min: Number.POSITIVE_INFINITY,
+        max: Number.NEGATIVE_INFINITY,
+      })),
+    )
+    const controls = [...document.querySelectorAll("a[href], button, summary, input, select, textarea")]
+      .filter((el) => el.offsetParent !== null)
+      .map((el) => ({ el, top: [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], left: [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY] }))
+    const start = performance.now()
+    const tick = () => {
+      for (const scene of scenes) {
+        const h = scene.el.offsetHeight
+        scene.min = Math.min(scene.min, h)
+        scene.max = Math.max(scene.max, h)
+      }
+      for (const control of controls) {
+        if (!control.el.isConnected) continue
+        const rect = control.el.getBoundingClientRect()
+        if (rect.width === 0 && rect.height === 0) continue
+        control.top = [Math.min(control.top[0], rect.top + scrollY), Math.max(control.top[1], rect.top + scrollY)]
+        control.left = [Math.min(control.left[0], rect.left), Math.max(control.left[1], rect.left)]
+      }
+      if (performance.now() - start < ms) return setTimeout(tick, 120)
+      resolve({
+        controls: controls.length,
+        scenes: scenes.filter((scene) => scene.max - scene.min > 1).map((scene) => `${scene.who}: alto ${scene.min}–${scene.max} px`),
+        moved: controls
+          .map((control) => ({ who: name(control.el), dy: Math.round(control.top[1] - control.top[0]), dx: Math.round(control.left[1] - control.left[0]) }))
+          .filter((move) => move.dy > 2 || move.dx > 2),
+      })
+    }
+    tick()
+  })
+
+/** Lo que cambió en una página mientras nadie la tocaba, y después de girarla. */
 async function watch(route) {
   const narrow = width < 500
   const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: narrow, isMobile: narrow })
@@ -52,52 +99,18 @@ async function watch(route) {
     const height = await page.evaluate(() => document.documentElement.scrollHeight)
     await page.setViewportSize({ width, height: Math.min(height + 100, 30_000) })
     await page.waitForTimeout(6000)
-    return await page.evaluate(
-      (ms) =>
-        new Promise((resolve) => {
-          const name = (el) => {
-            const scene = el.closest("astro-island")?.getAttribute("component-url")?.split("/").pop()?.split("?")[0]
-            const text = (el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ").slice(0, 36)
-            return `«${text}»${scene ? ` en ${scene}` : ""}`
-          }
-          const scenes = [...document.querySelectorAll("astro-island")].flatMap((island) =>
-            [...island.children].map((el) => ({
-              el,
-              who: island.getAttribute("component-url")?.split("/").pop()?.split("?")[0] ?? "?",
-              min: Number.POSITIVE_INFINITY,
-              max: Number.NEGATIVE_INFINITY,
-            })),
-          )
-          const controls = [...document.querySelectorAll("a[href], button, summary, input, select, textarea")]
-            .filter((el) => el.offsetParent !== null)
-            .map((el) => ({ el, top: [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], left: [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY] }))
-          const start = performance.now()
-          const tick = () => {
-            for (const scene of scenes) {
-              const h = scene.el.offsetHeight
-              scene.min = Math.min(scene.min, h)
-              scene.max = Math.max(scene.max, h)
-            }
-            for (const control of controls) {
-              if (!control.el.isConnected) continue
-              const rect = control.el.getBoundingClientRect()
-              if (rect.width === 0 && rect.height === 0) continue
-              control.top = [Math.min(control.top[0], rect.top + scrollY), Math.max(control.top[1], rect.top + scrollY)]
-              control.left = [Math.min(control.left[0], rect.left), Math.max(control.left[1], rect.left)]
-            }
-            if (performance.now() - start < ms) return setTimeout(tick, 120)
-            resolve({
-              controls: controls.length,
-              scenes: scenes.filter((scene) => scene.max - scene.min > 1).map((scene) => `${scene.who}: alto ${scene.min}–${scene.max} px`),
-              moved: controls
-                .map((control) => ({ who: name(control.el), dy: Math.round(control.top[1] - control.top[0]), dx: Math.round(control.left[1] - control.left[0]) }))
-                .filter((move) => move.dy > 2 || move.dx > 2),
-            })
-          }
-          tick()
-        }),
-      seconds * 1000,
-    )
+    const first = await page.evaluate(observe, seconds * 1000)
+    // Girar: la misma página con otro ancho (el teléfono acostado, la ventana más angosta), a mitad de
+    // las animaciones. Una escena que se mide mal al cambiar de ancho empuja la página después.
+    const turned = width < 500 ? 844 : width <= 900 ? 1280 : 820
+    await page.setViewportSize({ width: turned, height: Math.min(height + 100, 30_000) })
+    await page.waitForTimeout(1500)
+    const second = await page.evaluate(observe, (seconds * 1000) / 2)
+    return {
+      controls: first.controls,
+      scenes: [...first.scenes, ...second.scenes.map((scene) => `al girar a ${turned} px, ${scene}`)],
+      moved: [...first.moved, ...second.moved.map((move) => ({ ...move, who: `al girar a ${turned} px, ${move.who}` }))],
+    }
   } finally {
     await context.close()
   }

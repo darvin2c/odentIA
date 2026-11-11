@@ -157,7 +157,6 @@ export default function ArgosQuestions() {
       <div
         key={question.label}
         className={ghost ? "laq-answer fit-ghost" : visible ? "laq-answer on" : "laq-answer"}
-        aria-live={ghost ? undefined : "polite"}
         aria-hidden={!ghost && visible ? undefined : true}
       >
         <div className="laq-figures">
@@ -249,7 +248,8 @@ export default function ArgosQuestions() {
         ))}
       </fieldset>
       {/* Mientras piensa, sus pasos van encima de la respuesta, en la misma celda: no ocupan alto propio. */}
-      <div className="fit laq-stage">
+      {/* El anuncio va en la celda, que no cambia: la respuesta de adentro sí se rearma en cada pregunta. */}
+      <div className="fit laq-stage" aria-live="polite">
         {QUESTIONS.map((question, i) => (i === pick ? null : answer(question, true, true)))}
         {answer(cur, shown, false)}
         {thinking && (

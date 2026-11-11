@@ -41,11 +41,14 @@ const OC = [
 const CH = ["WhatsApp", "Instagram", "Messenger", "Telegram", "Chat de tu web", "Correo"]
 
 export default function Omnichannel() {
-  // La tarjeta de la conversación mide siempre lo que la conversación completa.
-  const steady = useSteadyHeight<HTMLDivElement>()
   const moving = useMoving()
   const [oc, setOc] = useState(OC.length)
   const hold = useRef(0)
+  // La tarjeta de la conversación mide siempre lo que la conversación completa (también al girar).
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    hold.current = 0
+    setOc(OC.length)
+  })
 
   // Al aparecer en pantalla empieza desde el primer mensaje (salvo con menos movimiento).
   useEffect(() => {
@@ -61,7 +64,8 @@ export default function Omnichannel() {
     }
   }, 1150)
 
-  const shown = OC.slice(0, Math.min(oc, OC.length))
+  // En pausa, la conversación completa.
+  const shown = OC.slice(0, moving ? Math.min(oc, OC.length) : OC.length)
   const used: Record<string, boolean> = {}
   shown.forEach((m) => {
     used[m.ch] = true
@@ -129,7 +133,7 @@ export default function Omnichannel() {
               <span>{m.text}</span>
             </div>
           ))}
-          {oc >= 7 && <div className="sys">Una persona · 3 canales · 1 historia</div>}
+          {shown.length >= 7 && <div className="sys">Una persona · 3 canales · 1 historia</div>}
         </div>
       </div>
       <p className="oc-note">
