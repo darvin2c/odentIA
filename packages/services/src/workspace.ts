@@ -409,10 +409,23 @@ export interface WorkspaceAgendaLine {
 /** Filas de la agenda de una sede que viajan a Inicio; el resto se ve en la Agenda. */
 const TODAY_BRANCH_ROWS = 6
 
+/**
+ * La sede de Inicio: la elegida o, sin elegir, la que hoy tiene más citas (la misma regla que
+ * `preferredBranchId` de la pantalla), y con empate la primera (`created_at, id`). Así quien
+ * entra no ve «Hoy no hay citas» de una sede vacía mientras la otra está llena.
+ */
 async function homeBranch(tx: Db, orgId: string, branchId?: string) {
-  const rows = await tx.execute<{ id: string; name: string; timezone: string | null }>(sql`
-    select id, name, timezone from branch where organization_id=${orgId} and is_active order by created_at, id`)
-  return { branch: rows.find(row => row.id === branchId) ?? rows[0] ?? null, many: rows.length > 1 }
+  const rows = await tx.execute<{ id: string; name: string; timezone: string | null; today: number }>(sql`
+    select b.id, b.name, b.timezone, (select count(*)::int from appointment a
+        where a.organization_id = b.organization_id and a.branch_id = b.id and not a.is_test
+          and a.status in ('programada','confirmada','atendida')
+          and a.starts_at >= ((now() at time zone coalesce(b.timezone, op.timezone, 'UTC'))::date::timestamp at time zone coalesce(b.timezone, op.timezone, 'UTC'))
+          and a.starts_at < (((now() at time zone coalesce(b.timezone, op.timezone, 'UTC'))::date + 1)::timestamp at time zone coalesce(b.timezone, op.timezone, 'UTC'))) as today
+    from branch b left join org_profile op on op.organization_id = b.organization_id
+    where b.organization_id=${orgId} and b.is_active order by b.created_at, b.id`)
+  const busiest = [...rows].sort((a, b) => b.today - a.today)[0]
+  const chosen = rows.find(row => row.id === branchId) ?? (busiest && busiest.today > 0 ? busiest : rows[0]) ?? null
+  return { branch: chosen ? { id: chosen.id, name: chosen.name, timezone: chosen.timezone } : null, many: rows.length > 1 }
 }
 
 /** El día de hoy en una zona, como rango de instantes. */
@@ -574,7 +587,8 @@ async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, tim
 }
 
 /** Atenciones de otro día sin cerrar que llegan a «Te espera» a la vez. */
-const WAITING_STALE_ENCOUNTERS = 5
+// Son de quien mira y traban la ficha de cada persona: hasta 20 a la vez, no 5.
+const WAITING_STALE_ENCOUNTERS = 20
 
 /** De estas conversaciones, las de Instagram o Messenger donde ya no se puede escribirle. */
 async function shutConversations(tx: Db, orgId: string, ids: string[]): Promise<Set<string>> {
@@ -796,7 +810,7 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
     where a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada') and a.arrived_at is null
       and (a.starts_at at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date = (now() at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date
       and sent.at is not null
-    order by sent.at desc, a.id limit ${WAITING_LIMITS.otherCases}`)
+    order by sent.at desc, a.id limit 20`)
   return [...rows]
 }
 
@@ -919,9 +933,9 @@ async function acceptedUnbookedOf(tx: Db, orgId: string): Promise<WaitingAccepte
 }
 
 /** Los controles vencidos sin cita: la misma consulta de la línea de Argos «Avisar un control». */
-async function overdueControlsOf(tx: Db, orgId: string): Promise<WaitingOverdueControls | null> {
-  const counts = await countOverdueControls(tx, orgId)
-  return counts.controls > 0 ? counts : null
+async function overdueControlsOf(tx: Db, orgId: string, professionalUserId?: string): Promise<WaitingOverdueControls | null> {
+  const counts = await countOverdueControls(tx, orgId, professionalUserId)
+  return counts.controls > 0 ? { ...counts, ...(professionalUserId ? { mine: true } : {}) } : null
 }
 
 async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
@@ -981,13 +995,34 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const overdue = await tx.execute<Row>(sql`${select} and t.due_at < now() order by t.due_at, t.id limit ${WAITING_LIMITS.overdueTasks}`)
   const [next] = await tx.execute<Row>(sql`${select} and (t.due_at is null or t.due_at >= now()) order by t.due_at asc nulls last, t.id limit 1`)
   const [count] = await tx.execute<{ open: number }>(sql`select count(*)::int as open from task t where ${scope}`)
+  // Lo que un colega te pasó por un paciente: suya, con paciente y creada por otra persona del equipo.
+  // `created_by` dice el tipo de autor («user»); quién la creó lo dice su «task.created».
+  const referred = await tx.execute<Row & { referredBy: string | null; patientName: string | null }>(sql`select r.*, cu.name as "referredBy",
+      -- La fila nombra al paciente: «Evaluar la 36» solo no dice de quién es.
+      (select pc.display_name from task t2 join patient p on p.id = t2.patient_id and p.organization_id = t2.organization_id
+        join contact pc on pc.id = p.person_id and pc.organization_id = p.organization_id where t2.id = r.id) as "patientName"
+    from (
+      ${select} and t.assignee_user_id=${userId} and t.patient_id is not null and t.created_by = 'user'
+      order by t.created_at desc, t.id limit 50) r
+    cross join lateral (select e.actor_user_id from audit_event e
+      where e.organization_id = ${orgId} and e.entity = 'task' and e.entity_id = r.id::text and e.action = 'task.created'
+      order by e.created_at limit 1) made
+    join member m on m.organization_id = ${orgId} and m.user_id = made.actor_user_id and m.role in ('clinician','owner','admin')
+    join "user" cu on cu.id = made.actor_user_id
+    where made.actor_user_id <> ${userId}
+    order by r."dueAt" nulls last limit 10`)
   // Una tarea de una conversación abre el hilo; las demás (de una oportunidad,
   // de una persona o sueltas) se abren en Tareas con la tarea a la vista.
   const place = ({ conversationId, ...task }: Row): WaitingTask => ({
     ...task,
     href: access.conversations && conversationId ? `/inbox?conversation=${conversationId}` : `/tasks?task=${task.id}`,
   })
-  return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
+  return {
+    overdue: overdue.map(place),
+    next: next ? place(next) : null,
+    open: count?.open ?? 0,
+    referred: referred.map(({ referredBy, patientName, ...row }) => ({ ...place(row), referredBy, patientName })),
+  }
 }
 
 /**
@@ -1142,7 +1177,9 @@ async function waitingUnsentBudgets(
 async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: boolean): Promise<WaitingBudgets> {
   const awaiting = budgetAwaitsAnswerSql({ id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` })
   // Quien atiende ve los de lo que él indicó o preparó (el plan es uno por persona).
+  // Lo de hace más de seis meses ya no «espera»: la misma regla que la línea de Argos.
   const scope = sql`b.organization_id=${orgId} and ${awaiting}
+    and (b.presented_at is null or b.presented_at > now() - make_interval(months => 6))
     and (not ${ownOnly} or b.created_by=${userId} or exists (select 1 from treatment_budget_item own_line
       join treatment_plan_item own_item on own_item.id=own_line.plan_item_id and own_item.organization_id=own_line.organization_id
       where own_line.organization_id=${orgId} and own_line.budget_id=b.id and own_item.created_by=${userId}))`
@@ -1181,7 +1218,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const agendaLine: WorkspaceAgendaLine | null = branchDay?.branch ? { branch: branchDay.branch, summary: branchDay.summary } : null
   const cash = access.finance && branch ? await getCashToday(tx, orgId, { branchId: branch.id }) : null
 
-  const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
+  const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0, referred: [] }
   const system = access.tasks && access.patients ? await waitingSystemTasks(tx, orgId, userId, access) : { duplicates: [], reentries: [] }
   // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador,
   // y solo las que quien mira puede atender. Quien atiende solo ve lo suyo, y las
@@ -1220,7 +1257,10 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       access.appointments && !access.ownAppointments && options.can?.("appointments.read") &&
       !advice.some((item) => item.key === "recordatorio_control")
         ? await overdueControlsOf(tx, orgId)
-        : null,
+        // Quien atiende ve los que él indicó: un control vencido es una pregunta clínica abierta.
+        : access.ownAppointments && access.attends
+          ? await overdueControlsOf(tx, orgId, userId)
+          : null,
     // Quien ve la agenda de la sede sabe quién ya completó su registro para su cita de hoy.
     registrationsDone: access.appointments && !access.ownAppointments ? await waitingRegistrationsDone(tx, orgId) : [],
     // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).
@@ -1234,6 +1274,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,
     nextTask: tasks.next,
+    referredTasks: tasks.referred,
     openTasks: tasks.open,
     advice: advice.map(({ key, title, detail, actor }) => ({ key, title, detail, actor })),
     unreached: unreached && unreached.total > 0 ? { total: unreached.total, byCause: unreached.byCause.map(({ total, reason }) => ({ total, reason })) } : null,

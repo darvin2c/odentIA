@@ -1,4 +1,4 @@
-import { ALL_PERMISSIONS, canAccess } from "@odentia/auth/permissions"
+import { ALL_PERMISSIONS, canAccess, canAttend } from "@odentia/auth/permissions"
 import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, organization } from "@odentia/db/schema/auth"
@@ -48,7 +48,7 @@ export interface PushKeys {
 export interface PushMessage {
   title: string
   body: string
-  tag: "te-espera" | "servicio" | "listo"
+  tag: "te-espera" | "servicio" | "listo" | "llego"
   href: string
   icon: string
 }
@@ -173,6 +173,18 @@ const PRODUCT_ICONS: Record<ClinicalProduct, string> = {
  * (un aviso perdido se ve igual en Inicio; uno repetido aturde). Las filas se
  * toman con `skip locked`, así dos workers no avisan dos veces lo mismo.
  */
+/** «Llegó tu paciente de las 10:00» o «Llegaron 2 pacientes tuyos»: sin nombre. */
+export function arrivalPushBody(arrivals: Array<{ startsAt: Date | string; timezone: string | null }>): string {
+  if (arrivals.length > 1) return `Llegaron ${arrivals.length} pacientes tuyos: están en la sala de espera.`
+  const first = arrivals[0]!
+  const hour = new Intl.DateTimeFormat("es", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: first.timezone ?? "UTC",
+  }).format(new Date(first.startsAt))
+  return `Llegó tu paciente de las ${hour}: está en la sala de espera.`
+}
+
 export async function collectOrgPushes(tx: Db, orgId: string, now: Date = new Date()): Promise<PushDelivery[]> {
   const rows = await tx.execute<{
     id: string
@@ -184,8 +196,10 @@ export async function collectOrgPushes(tx: Db, orgId: string, now: Date = new Da
     waitingSeen: string[]
     waitingPushedAt: string | null
     noticesSince: string
+    arrivalsSince: string
   }>(sql`select id, user_id as "userId", endpoint, p256dh, auth, welcomed_at::text as "welcomedAt",
-      waiting_seen as "waitingSeen", waiting_pushed_at::text as "waitingPushedAt", notices_since::text as "noticesSince"
+      waiting_seen as "waitingSeen", waiting_pushed_at::text as "waitingPushedAt", notices_since::text as "noticesSince",
+      arrivals_since::text as "arrivalsSince"
     from push_subscription where organization_id = ${orgId} order by created_at for update skip locked`)
   if (rows.length === 0) return []
   const [clinic] = await tx.select({ name: organization.name, product: orgProfile.product }).from(organization)
@@ -236,6 +250,29 @@ export async function collectOrgPushes(tx: Db, orgId: string, now: Date = new Da
     if (latest) {
       send({ tag: "servicio", body: latest.title, href: latest.href }, 6 * 3600, "high")
       update.noticesSince = sql`${latest.createdAt}::timestamptz`
+    }
+
+    // «Llegó tu paciente»: recepción marcó la llegada de una cita suya (mesa del 10 nov,
+    // decisión 5). Sin nombre, como todo aviso en el equipo; solo con la clínica abierta.
+    if (canAttend(role)) {
+      const arrivals = await tx.execute<{ startsAt: Date | string; arrivedAt: string; timezone: string | null }>(sql`
+        select a.starts_at as "startsAt", a.arrived_at::text as "arrivedAt",
+          coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = a.organization_id)) as timezone
+        from appointment a join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
+        where a.organization_id = ${orgId} and a.professional_user_id = ${row.userId} and not a.is_test
+          and a.status = 'confirmada' and a.arrived_at > ${row.arrivalsSince}::timestamptz
+          -- Lo de hoy: no recorre la historia del profesional en cada vuelta.
+          and a.starts_at > ${now.toISOString()}::timestamptz - interval '1 day' and a.starts_at < ${now.toISOString()}::timestamptz + interval '1 day'
+          -- Quien la marca es otra persona: si la marcó quien atiende, ya lo sabe.
+          and a.arrived_by is distinct from ${row.userId}
+          and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
+        order by a.arrived_at`)
+      const last = arrivals.at(-1)
+      if (last) {
+        if (open) send({ tag: "llego", body: arrivalPushBody(arrivals), href: "/home" }, 30 * 60, "high")
+        // Fuera de horario no se avisa después: la llegada ya pasó.
+        update.arrivalsSince = sql`${last.arrivedAt}::timestamptz`
+      }
     }
 
     // «Te espera»: alguien que no estaba. Quien se fue y vuelve cuenta como nuevo.

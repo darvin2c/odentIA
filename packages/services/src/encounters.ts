@@ -1304,7 +1304,7 @@ async function encounterBudgetsOf(
 async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | null): Promise<string | null> {
   if (!appointmentId) return null
   const [booked] = await tx
-    .select({ reason: appointment.reason })
+    .select({ reason: appointment.reason, serviceName: appointment.serviceName })
     .from(appointment)
     .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
     .limit(1)
@@ -1349,7 +1349,9 @@ async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | nul
       ),
     )
     .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
-  if (items.length === 0) return null
+  // Sin tratamientos ni controles, lo que dice la cita: su servicio («Limpieza»). Antes
+  // decía «Sin cita» aunque la persona viniera con una (QA del 10 nov, C16).
+  if (items.length === 0) return booked.serviceName?.trim() || null
   const { site } = await productHooks(tx, orgId)
   // «de la 46», como se dice la pieza en el resto de textos; sin pieza (o en latidIA), solo el título.
   const words = items.map((item) => {
@@ -2693,6 +2695,16 @@ export async function dueControlsOf(
   row: EncounterRow,
   timezone: string,
 ): Promise<ClosingDueControl[]> {
+  // Los que llevaba la cita y soltó «Vino» (recepción la cerró antes): esta atención es esa
+  // visita, así que vienen marcados aunque su ventana no esté abierta; quien firma decide.
+  const cameReleased = row.appointmentId
+    ? (
+        await tx.execute<{ id: string }>(sql`
+          select distinct e.entity_id as id from audit_event e
+          where e.organization_id = ${orgId} and e.entity = 'clinical_follow_up' and e.action = 'follow_up.unscheduled'
+            and e.metadata->>'appointmentId' = ${row.appointmentId} and e.metadata->>'by' = 'vino'`)
+      ).map((found) => found.id)
+    : []
   const rows = await tx
     .select({
       id: clinicalFollowUp.id,
@@ -2713,14 +2725,19 @@ export async function dueControlsOf(
         eq(clinicalFollowUp.patientId, row.patientId),
         eq(clinicalFollowUp.status, "pendiente"),
         sql`${clinicalFollowUp.originEncounterId} is distinct from ${row.id}`,
-        controlWindowOpenSql({ dueAt: clinicalFollowUp.dueAt, createdAt: clinicalFollowUp.createdAt }, timezone),
+        cameReleased.length > 0
+          ? or(
+              controlWindowOpenSql({ dueAt: clinicalFollowUp.dueAt, createdAt: clinicalFollowUp.createdAt }, timezone),
+              inArray(clinicalFollowUp.id, cameReleased),
+            )
+          : controlWindowOpenSql({ dueAt: clinicalFollowUp.dueAt, createdAt: clinicalFollowUp.createdAt }, timezone),
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
   return rows.map(({ originProfessional, ...control }) => ({
     ...control,
     mine: originProfessional === actorUserId,
-    chosen: row.visitFollowUpId === control.id,
+    chosen: row.visitFollowUpId === control.id || cameReleased.includes(control.id),
     originProfessionalUserId: originProfessional ?? null,
   }))
 }

@@ -1,5 +1,5 @@
 {
-  "id": "55d98514-0a64-4583-8880-ca62f31930aa",
+  "id": "659c1c3b-4d8b-4460-8734-a53e17ec2565",
   "prevId": "66677dbe-98d3-40a6-b449-861a8817e1af",
   "version": "7",
   "dialect": "postgresql",
@@ -26716,12 +26716,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "send_attempted_at": {
-          "name": "send_attempted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "template_name": {
           "name": "template_name",
           "type": "text",
@@ -33396,6 +33390,13 @@
         },
         "notices_since": {
           "name": "notices_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "arrivals_since": {
+          "name": "arrivals_since",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,

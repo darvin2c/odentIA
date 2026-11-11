@@ -21,7 +21,8 @@ import {
   undoAppointmentCame,
 } from "./appointments.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { createEncounter, finalizeEncounter, updateEncounterDraft } from "./encounters.js"
+import { createEncounter, finalizeEncounter, getEncounterClosing, updateEncounterDraft } from "./encounters.js"
+import { createFollowUp, listFollowUps, scheduleFollowUp } from "./follow-ups.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -209,4 +210,26 @@ it("deshacer un «Vino» de antes quita la llegada que inventaba; la llegada de 
   await ownerDb.update(branch).set({ timezone: "America/Lima" }).where(eq(branch.id, row!.branchId))
   const { getAppointment } = await import("./appointments.js")
   expect((await f.run((tx) => getAppointment(tx, "org_a", booked.id))).visit).toBe("sin_cerrar")
+})
+
+it("el control que llevaba una cita cerrada con «Vino» viene marcado al registrar la atención; quien firma decide si se cumple", async () => {
+  for (const keep of [true, false]) {
+    const f = await clinicalFixture()
+    await f.ready(f.encounter.id)
+    await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+    const book = await booker(f)
+    const booked = await book(1)
+    const control = await f.run((tx) => createFollowUp(tx, ...f.args, { kind: "mantenimiento", title: "Control de la limpieza", dueAt: booked.startsAt }))
+    await f.run((tx) => scheduleFollowUp(tx, ...f.args, control.id, { appointmentId: booked.id }))
+    await inThePast(booked.id, 2)
+    await f.run((tx) => markAppointmentCame(tx, "org_a", f.actor, booked.id))
+    const opened = await f.run((tx) => createEncounter(tx, "org_a", f.actor, f.patient.id, { appointmentId: booked.id }))
+    const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, opened.id))
+    expect(closing.controls.due.find((row) => row.id === control.id)).toMatchObject({ chosen: true })
+    await f.run((tx) => updateEncounterDraft(tx, ...f.args, opened.id, { reason: "Control" }))
+    await f.ready(opened.id)
+    await f.run((tx) => finalizeEncounter(tx, ...f.args, opened.id, keep ? {} : { followUpIds: [] }))
+    const [row] = await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id))
+    expect([keep, row?.status]).toEqual([keep, keep ? "realizado" : "pendiente"])
+  }
 })
