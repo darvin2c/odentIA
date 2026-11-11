@@ -1269,6 +1269,25 @@ async function requireSchedulableItems(tx: Db, orgId: string, patientId: string,
 /** Cuánto antes de ahora puede empezar una cita nueva: el reloj de quien la pide puede ir un poco atrás. */
 const PAST_START_TOLERANCE_MS = 5 * 60_000
 
+/** Lo más que dura una cita, se diga con minutos o con su hora de fin (el mismo tope de `durationMin`). */
+export const APPOINTMENT_MAX_MINUTES = 480
+
+function assertDuration(startsAt: Date, endsAt: Date): void {
+  if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
+  if (endsAt.getTime() - startsAt.getTime() > APPOINTMENT_MAX_MINUTES * 60_000)
+    throw invalidField("endsAt", `Una cita dura ${APPOINTMENT_MAX_MINUTES / 60} horas como mucho: si es más larga, reserva otra a continuación.`)
+}
+
+/**
+ * La pantalla dice qué versión de la cita miraba (QA del 10 nov, C4): con un cajón o una fila
+ * abiertos antes de que otra persona la cambiara, el botón no se aplica sobre lo que no vio.
+ * Quien no la manda (el enlace, el agente, el cierre de la atención) actúa sobre la cita de ahora.
+ */
+function assertSeenVersion(current: { version: number }, expectedVersion: number | undefined): void {
+  if (expectedVersion !== undefined && current.version !== expectedVersion)
+    throw conflict("STALE_VERSION", "La cita cambió mientras la mirabas; vuelve a abrirla e intenta de nuevo")
+}
+
 export async function createAppointment(
   tx: Db,
   orgId: string,
@@ -1311,7 +1330,8 @@ export async function createAppointment(
   const endsAt = input.endsAt
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + duration * 60000)
-  if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
+  if (options.requested) assertDuration(startsAt, endsAt)
+  else if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   await requireAppointmentPatient(tx, orgId, input.patientId)
   await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
   const chosenItems = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
@@ -1512,7 +1532,8 @@ export async function moveAppointment(
   actorUserId: string,
   id: string,
   input: MoveAppointmentInput,
-  options: { notice?: boolean } = {},
+  /** `requested`: la mueve una persona o el agente. Como en `createAppointment`, no a una hora que ya pasó. */
+  options: { notice?: boolean; requested?: boolean } = {},
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id)
   // Solo se mueve lo que sigue en pie: lo atendido, cancelado o que no vino ya pasó.
@@ -1532,7 +1553,12 @@ export async function moveAppointment(
   const endsAt = input.endsAt
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + durationMs)
-  if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
+  if (input.endsAt && options.requested) assertDuration(startsAt, endsAt)
+  else if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
+  // Como al reservar: una cita no se lleva a una hora que ya pasó (QA del 10 nov, C3). Alargarla
+  // o cambiarle la unidad sin tocar su hora sí vale, aunque ya haya empezado.
+  if (options.requested && startsAt.getTime() !== current.startsAt.getTime() && startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS)
+    throw invalidField("startsAt", "Esa hora ya pasó. Elige una hora de ahora en adelante.")
   const professionalUserId = input.professionalUserId ?? current.professionalUserId
   const active = current.status === "programada" || current.status === "confirmada"
   // Sin unidad dental indicada la cita conserva la suya; si a la nueva hora está ocupada, pasa a una libre.
@@ -1652,6 +1678,9 @@ export async function updateAppointment(
   input: UpdateAppointmentInput,
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id)
+  // Lo atendido, cancelado o que no vino ya es historia: su motivo y su servicio no se reescriben.
+  if (current.status !== "programada" && current.status !== "confirmada")
+    throw conflict("APPOINTMENT_STATUS", "Esta cita ya no se puede cambiar: solo se cambian las programadas o confirmadas")
   const set: Partial<typeof appointment.$inferInsert> = {
     version: current.version + 1,
     updatedAt: new Date(),
@@ -1728,7 +1757,20 @@ export async function updateAppointment(
         "La cita cambió mientras la editabas; recarga e intenta de nuevo",
       )
     }
-    await audit(tx, orgId, actorUserId, "appointment.updated", id, {})
+    // Qué cambió, sin el texto del motivo: la actividad dice de qué fue el cambio.
+    const serviceChanged = set.serviceId !== undefined && set.serviceId !== current.serviceId
+    await audit(tx, orgId, actorUserId, "appointment.updated", id, {
+      changed: [
+        ...(set.reason !== undefined && set.reason !== current.reason ? ["reason"] : []),
+        ...(serviceChanged ? ["service"] : []),
+        ...(set.professionalUserId ? ["professional"] : []),
+        ...(set.roomId ? ["room"] : []),
+        ...(set.endsAt ? ["duration"] : []),
+      ],
+      ...(serviceChanged ? { serviceFrom: current.serviceName, serviceTo: set.serviceName ?? null } : {}),
+      ...(set.professionalUserId ? { professionalFrom: current.professionalUserId, professionalTo: set.professionalUserId } : {}),
+      ...(set.endsAt ? { durationFrom: current.durationMin, durationTo: set.durationMin } : {}),
+    })
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     return await getAppointment(tx, orgId, id)
   } catch (error) {
@@ -1992,9 +2034,11 @@ export async function markAppointmentCame(
   orgId: string,
   actorUserId: string,
   id: string,
+  expectedVersion?: number,
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (current.status === "atendida") return getAppointment(tx, orgId, id)
+  assertSeenVersion(current, expectedVersion)
   if (current.status !== "programada" && current.status !== "confirmada")
     throw conflict("APPOINTMENT_STATUS", "Solo se marca «Vino» en una cita que sigue en pie")
   if (current.startsAt.getTime() > Date.now())
@@ -2042,6 +2086,10 @@ export type AppointmentCancelReason = (typeof APPOINTMENT_CANCEL_REASONS)[number
  * Lo que la cita no admite (ADR 0032): «atendida» solo llega al firmar su
  * atención, una cita atendida ya no cambia, y la que tiene llegada o una
  * atención en curso no se cancela ni se marca «No vino» sin deshacer antes eso.
+ * El estado no vuelve atrás (QA del 10 nov, C4 y C5): de «Cancelada» y de
+ * «No vino» no se sale por aquí (quien llega tarde es «Llegó»,
+ * `setAppointmentArrival`; lo demás es otra cita), una confirmada no vuelve a
+ * «por confirmar», y «No vino» se marca cuando su hora ya llegó.
  */
 async function assertStatusTransition(
   tx: Db,
@@ -2062,6 +2110,12 @@ async function assertStatusTransition(
     }
     return
   }
+  if (current.status === "cancelada")
+    throw conflict("APPOINTMENT_CANCELLED", "La cita está cancelada: reserva otra con «Reagendar»")
+  if (current.status === "no_asistio")
+    throw conflict("APPOINTMENT_NO_SHOW", "La cita quedó como «No vino»: si llegó tarde, «Llegó»; si no, reserva otra con «Reagendar»")
+  if (next === "programada")
+    throw conflict("APPOINTMENT_STATUS", "Una cita confirmada no vuelve a «por confirmar»")
   if (linked?.status === "borrador") {
     throw conflict(
       "APPOINTMENT_IN_ATTENTION",
@@ -2076,6 +2130,8 @@ async function assertStatusTransition(
         : "La persona ya llegó: deshaz la llegada antes de cambiar la cita",
     )
   }
+  if (next === "no_asistio" && current.startsAt.getTime() > Date.now())
+    throw conflict("APPOINTMENT_NOT_YET", "Todavía no es su hora: «No vino» se marca cuando ya pasó. Si avisó que no viene, cancela la cita.")
 }
 
 /** La cita es de hoy en la zona de su sede. */
@@ -2099,10 +2155,12 @@ export async function setAppointmentArrival(
   id: string,
   arrived: boolean,
   now: Date = new Date(),
+  expectedVersion?: number,
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (arrived) {
     if (current.arrivedAt) return getAppointment(tx, orgId, id)
+    assertSeenVersion(current, expectedVersion)
     assertNotAttendingTest(current, "atendida")
     if (current.status === "atendida") throw conflict("APPOINTMENT_ATTENDED", "La cita ya se atendió")
     if (current.status === "cancelada") {
@@ -2140,6 +2198,7 @@ export async function setAppointmentArrival(
     await invalidateAppointmentTokens(tx, orgId, id)
   } else {
     if (!current.arrivedAt) return getAppointment(tx, orgId, id)
+    assertSeenVersion(current, expectedVersion)
     if (current.status === "atendida" || (await linkedEncounter(tx, orgId, id))) {
       throw conflict(
         "ATTENTION_STARTED",
@@ -2224,11 +2283,12 @@ export async function setAppointmentStatus(
   actorUserId: string | null,
   id: string,
   status: string,
-  detail?: { cancelReason?: string; cancelNote?: string; via?: string; conversationId?: string; notice?: boolean },
+  detail?: { cancelReason?: string; cancelNote?: string; via?: string; conversationId?: string; notice?: boolean; expectedVersion?: number },
 ): Promise<AppointmentItem> {
   const next = assertStatus(status)
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (current.status === next) return getAppointment(tx, orgId, id)
+  assertSeenVersion(current, detail?.expectedVersion)
   assertNotAttendingTest(current, next)
   await assertStatusTransition(tx, orgId, current, next)
   const metadata: Record<string, unknown> = { from: current.status }

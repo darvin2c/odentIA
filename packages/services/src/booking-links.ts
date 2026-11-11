@@ -28,6 +28,7 @@ import { consentStatusOf } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
 import {
   assertOwnAppointmentChangeable,
+  assertOwnNewTime,
   cancelOwnAppointment,
   confirmOwnAppointment,
   moveOwnAppointment,
@@ -1694,6 +1695,8 @@ export async function reserveBookingLink(
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true)
+  // Como al cambiarla (`moveOwnAppointment`): la persona reserva de ahora en adelante y dentro del horizonte.
+  assertOwnNewTime(input.startsAt)
   const forTreatment = (input.planItemIds?.length ?? 0) > 0
   const another = input.another === true && !forTreatment
   if (another) {
@@ -1809,9 +1812,18 @@ export async function getBookingLinkCalendar(
   return appointmentCalendarDownload(tx, orgId, link.appointment.id)
 }
 
-function changeableAppointment(link: ResolvedPersonalLink): ShownAppointment {
+/**
+ * La cita del enlace que la persona tiene a la vista. «Su cita» se elige al abrir la página
+ * (`shownAppointment`): si ya no es la que miraba (la canceló en otra pestaña o tocó dos veces
+ * y el enlace pasó a su cita siguiente), el botón no se aplica sobre otra (QA de la Agenda del 10 nov).
+ * La página dice cuál miraba con su hora (`seenStartsAt`): es lo que la persona lee, y el
+ * identificador de la cita no sale a una página sin sesión.
+ */
+function changeableAppointment(link: ResolvedPersonalLink, seenStartsAt?: string): ShownAppointment {
   const current = link.appointment
   if (!current) throw linkExpired()
+  if (seenStartsAt && current.startsAt.getTime() !== new Date(seenStartsAt).getTime())
+    throw new ServiceError("BOOKING_APPOINTMENT_CHANGED", 409, "Esa cita ya cambió. Vuelve a abrir tu enlace para ver cómo quedó.")
   assertOwnAppointmentChangeable(current)
   return current
 }
@@ -1825,12 +1837,13 @@ export async function changeBookingLinkAppointment(
   tx: Db,
   orgId: string,
   token: string,
-  input: { startsAt: string; professionalUserId: string; roomId?: string },
+  input: { startsAt: string; professionalUserId: string; roomId?: string; seenStartsAt?: string },
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
-  const current = changeableAppointment(link)
-  await moveOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, input)
+  const { seenStartsAt: seen, ...choice } = input
+  const current = changeableAppointment(link, seen)
+  await moveOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, choice)
   // La cita que cambió es la del enlace: sigue a la vista hasta su nueva hora.
   await tx
     .update(appointmentBookingLink)
@@ -1866,10 +1879,10 @@ export async function cancelBookingLinkAppointment(
   tx: Db,
   orgId: string,
   token: string,
-  deps: { secretsKey?: Buffer } = {},
+  deps: { secretsKey?: Buffer; seenStartsAt?: string } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
-  const current = changeableAppointment(link)
+  const current = changeableAppointment(link, deps.seenStartsAt)
   const before = await appointmentView(tx, orgId, current.id)
   await cancelOwnAppointment(
     tx,
@@ -1912,10 +1925,10 @@ export async function confirmBookingLinkAppointment(
   tx: Db,
   orgId: string,
   token: string,
-  deps: { secretsKey?: Buffer } = {},
+  deps: { secretsKey?: Buffer; seenStartsAt?: string } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
-  const current = changeableAppointment(link)
+  const current = changeableAppointment(link, deps.seenStartsAt)
   const { already } = await confirmOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "enlace")
   const view = await appointmentView(tx, orgId, current.id)
   if (!view) throw notFound("Cita")

@@ -89,7 +89,18 @@ const patchInput = z
   })
   .strict()
 
-const arrivalInput = z.object({ arrived: z.boolean() }).strict()
+// La versión de la cita que miraba quien pulsa: si otra persona la cambió antes, el botón no se aplica.
+const seenVersion = z.number().int().min(0).optional()
+
+const arrivalInput = z.object({ arrived: z.boolean(), expectedVersion: seenVersion }).strict()
+
+const cameInput = z.object({ expectedVersion: seenVersion }).strict()
+
+/**
+ * El origen de una cita que reserva el equipo lo pone esta ruta: «recepcion» o, si salió de una
+ * conversación, «conversacion». Los demás orígenes los pone cada servicio (el agente, el enlace).
+ */
+const teamSource = (source: string | undefined) => (source === "conversacion" ? "conversacion" : "recepcion")
 
 const moveInput = operationBodySchema("cita.mover")
 
@@ -101,6 +112,7 @@ const statusInput = z.object({
   notice: z.literal(false).optional(),
   // Cómo confirmó la persona, cuando lo anota el equipo: queda en la actividad de la cita.
   via: z.enum(["telefono", "en_persona", "mensaje"]).optional(),
+  expectedVersion: seenVersion,
 })
 
 const roomInput = z.object({
@@ -435,7 +447,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const created = await createAppointment(tx, orgId, userId, parsed.data, { requested: true })
+        const created = await createAppointment(tx, orgId, userId, { ...parsed.data, source: teamSource(parsed.data.source) }, { requested: true })
         // Si el recordatorio le llegará: «Carmen no recibirá el recordatorio: aún no tiene WhatsApp».
         return { ...created, reminderReach: await appointmentReminderReach(tx, orgId, created.patientId) }
       }),
@@ -517,9 +529,11 @@ export function createAppointmentsRoute(deps: CrmDeps) {
         403,
       )
     }
+    const parsed = cameInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        markAppointmentCame(tx, orgId, userId, c.req.param("id")),
+        markAppointmentCame(tx, orgId, userId, c.req.param("id"), parsed.data.expectedVersion),
       ),
     )
   })
@@ -551,7 +565,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        moveAppointment(tx, orgId, userId, c.req.param("id"), parsed.data),
+        moveAppointment(tx, orgId, userId, c.req.param("id"), parsed.data, { requested: true }),
       ),
     )
   })
@@ -569,7 +583,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        setAppointmentArrival(tx, orgId, userId, c.req.param("id"), parsed.data.arrived),
+        setAppointmentArrival(tx, orgId, userId, c.req.param("id"), parsed.data.arrived, new Date(), parsed.data.expectedVersion),
       ),
     )
   })
@@ -588,6 +602,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
           cancelNote: parsed.data.cancelNote,
           ...(parsed.data.via ? { via: parsed.data.via } : {}),
           ...(parsed.data.notice === false ? { notice: false } : {}),
+          ...(parsed.data.expectedVersion !== undefined ? { expectedVersion: parsed.data.expectedVersion } : {}),
         }),
       ),
     )

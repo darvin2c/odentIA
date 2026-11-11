@@ -974,7 +974,7 @@ function AgendaPage() {
         {
           key: "deshacer",
           label: "Deshacer la llegada",
-          onSelect: () => arrival.mutate({ id: item.id, arrived: false }),
+          onSelect: () => arrival.mutate({ id: item.id, arrived: false, version: item.version }),
         },
       ]
     }
@@ -990,7 +990,7 @@ function AgendaPage() {
             {
               key: "ausente",
               label: "No vino",
-              onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }),
+              onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio", version: item.version }),
             },
           ]
         : []),
@@ -1017,7 +1017,7 @@ function AgendaPage() {
     const step = stepBeforeArrival(item, now, isToday(item))
     if (step === "cerrar") {
       if (canAttend) return { label: "Registrar la atención", pending: busy(item.id), onSelect: () => attendItem(item) }
-      return canWrite ? { label: "No vino", pending: statusMutation.isPending && statusMutation.variables?.id === item.id, onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }) } : null
+      return canWrite ? { label: "No vino", pending: statusMutation.isPending && statusMutation.variables?.id === item.id, onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio", version: item.version }) } : null
     }
     if (!canWrite) return null
     // Hoy, cerca de la hora, lo que toca es marcar que llegó (eso también la confirma).
@@ -1025,11 +1025,11 @@ function AgendaPage() {
       return {
         label: "Confirmar cita",
         pending: statusMutation.isPending && statusMutation.variables?.id === item.id,
-        onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada" }),
+        onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada", version: item.version }),
       }
     }
     return step === "llego"
-      ? { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item) }) }
+      ? { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item), version: item.version }) }
       : null
   }
 

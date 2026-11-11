@@ -320,7 +320,7 @@ export function ChooseAppointment({
         setPromotionsSaved(true)
       }
       const where = { startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }
-      if (changing) return changeBooking(slug, { token, ...where })
+      if (changing) return changeBooking(slug, { token, ...where, ...(current ? { seenStartsAt: current.startsAt } : {}) })
       return reserveBooking(slug, {
         token,
         branchId: branchId ?? "",

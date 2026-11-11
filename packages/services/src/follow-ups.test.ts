@@ -87,9 +87,10 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
     (await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id)))[0].scheduledAt?.toISOString(),
   ).toBe(`${f.date}T16:00:00.000Z`)
   for (const status of ["cancelada", "no_asistio", "atendida"]) {
-    // «Atendida» solo la pone el cierre de su atención (ADR 0032): aquí basta el estado en la base.
-    if (status === "atendida") await ownerDb.update(appointment).set({ status }).where(eq(appointment.id, id))
-    else await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
+    // «Atendida» solo la pone el cierre de su atención (ADR 0032) y de «Cancelada» no se sale
+    // por el servicio: para esos dos aquí basta el estado en la base.
+    if (status === "cancelada") await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
+    else await ownerDb.update(appointment).set({ status }).where(eq(appointment.id, id))
     const [row] = await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id))
     // Cancelar la cita suelta el control (ADR 0152): vuelve a estar por reservar, sin cita.
     expect(row).toMatchObject({

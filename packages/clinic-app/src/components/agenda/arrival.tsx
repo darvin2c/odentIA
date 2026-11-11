@@ -14,15 +14,21 @@ import { errorMessage } from "./shared"
 export interface ArrivalInput {
   id: string
   arrived: boolean
+  /** La versión de la cita que la pantalla mostraba: si otra persona la cambió antes, el servidor lo dice y no la toca. */
+  version?: number
   /** Para «Reagendar» cuando la cita no se puede recuperar. */
   patient?: { id: string; name: string }
 }
 
 export interface VisitStatusInput {
   id: string
+  /** La versión de la cita que la pantalla mostraba. */
+  version?: number
   /** «atendida» es «Vino»: la cita pasada queda atendida sin abrir otra atención (decisión B1). */
   status: "confirmada" | "no_asistio" | "atendida"
 }
+
+const seen = (version: number | undefined) => (version === undefined ? {} : { expectedVersion: version })
 
 /** Lo que se dice al confirmar una cita o marcar que no vino, en la fila y en el cajón: de quién, y si el agente le avisa. */
 export function announceVisitStatus(
@@ -51,11 +57,11 @@ export function useAppointmentVisitStatus(options: { onDone?: (text: string) => 
       input.status === "atendida"
         ? apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/came`, {
             method: "POST",
-            body: "{}",
+            body: JSON.stringify(seen(input.version)),
           })
         : apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, {
             method: "POST",
-            body: JSON.stringify({ status: input.status }),
+            body: JSON.stringify({ status: input.status, ...seen(input.version) }),
           }),
     onSuccess: async (result) => {
       options.onDone?.(announceVisitStatus(result.data))
@@ -83,7 +89,7 @@ export function useAppointmentArrival(options: {
     mutationFn: (input: ArrivalInput) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/arrival`, {
         method: "POST",
-        body: JSON.stringify({ arrived: input.arrived }),
+        body: JSON.stringify({ arrived: input.arrived, ...seen(input.version) }),
       }),
     onSuccess: async (result, input) => {
       await invalidateAppointmentQueries(queryClient)
