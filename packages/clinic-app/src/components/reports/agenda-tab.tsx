@@ -149,11 +149,12 @@ function AgendaCards({ data, onOpenList }: { data: AgendaReport; onOpenList: (li
         better="up"
         detail={
           <>
-            De {passed} {passed === 1 ? "cita que ya pasó" : "citas que ya pasaron"}
+            {/* Lo sin cerrar también pasó: se dice aparte y no entra en el porcentaje. */}
+            De {passed} {passed === 1 ? "cita cerrada" : "citas cerradas"}
             {current.unmarked > 0 ? (
               <>
                 {" · "}
-                {current.unmarked} sin marcar · <ListButton onClick={() => onOpenList("unmarked")}>Ver cuáles</ListButton>
+                {current.unmarked} sin cerrar · <ListButton onClick={() => onOpenList("unmarked")}>Ver cuáles</ListButton>
               </>
             ) : null}
           </>

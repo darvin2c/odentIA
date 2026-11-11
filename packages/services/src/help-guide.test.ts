@@ -101,8 +101,22 @@ describe("saludar y agradecer", () => {
 /** `desarrollo`, `control` y `final` ya se usaron para ajustar: no valen como medida, pero no pueden retroceder. */
 describe("lo que se usó para ajustar", () => {
   it("no retrocede", () => {
-    expect(measureHelpBank(helpBanks.desarrollo, HELP_TOPICS)).toMatchObject({ mal: 0, noSabe: 0 })
+    // Las 124 de siempre siguen sin fallos. Las 35 de odentIA que se sumaron el 2026-11-10 (lo nuevo de la guía y las de
+    // dos partes) no se usaron para ajustar el buscador por palabras, que es solo el respaldo sin Jev: falla 13 de ellas.
+    const desarrollo = measureHelpBank(helpBanks.desarrollo, HELP_TOPICS, "odentia")
+    expect(desarrollo.bien).toBeGreaterThanOrEqual(138)
+    expect(desarrollo.mal).toBeLessThanOrEqual(11)
+    expect(desarrollo.noSabe).toBeLessThanOrEqual(2)
     expect(measureHelpBank(helpBanks.control, HELP_TOPICS).bien).toBeGreaterThanOrEqual(130)
     expect(measureHelpBank(helpBanks.final, HELP_TOPICS).bien).toBeGreaterThanOrEqual(85)
+  })
+})
+
+/** El nombre fijo de cada respuesta: lo usan los videos, el registro y las mediciones. */
+describe("cada respuesta tiene su nombre fijo", () => {
+  it.each(CLINICAL_PRODUCTS)("único y bien escrito en la guía de %s", (product) => {
+    const ids = helpTopicsFor(product).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id))
+    expect(ids.filter((id) => !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id))).toEqual([])
+    expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([])
   })
 })

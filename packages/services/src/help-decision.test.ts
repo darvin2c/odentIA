@@ -51,7 +51,7 @@ const read = (r: DecisionResult, at = 0.6) => readHelpSelection(r, OPTIONS, at)
 const names = (options: HelpOption[]) => options.map((option) => (option.kind === "faq" ? option.faq.q : option.topic.id))
 
 describe("la pregunta help.v1", () => {
-  it("ofrece toda la guía, «datos» y «ninguna», dentro del límite de knowledge.v1", () => {
+  it("ofrece las respuestas que recibe, «datos» y «ninguna»", () => {
     expect(QUESTION.kind).toBe("choice")
     expect(ENLACE).toBeGreaterThanOrEqual(0)
     expect(PIPELINES).toBeGreaterThanOrEqual(0)
@@ -59,7 +59,7 @@ describe("la pregunta help.v1", () => {
     expect(values).toContain("none")
     expect(values).toContain("data")
     expect(new Set(values).size).toBe(values.length)
-    expect(values.length).toBeLessThanOrEqual(HELP_SELECT_MAX_OPTIONS + 2)
+    // La guía completa ya no cabe en una pregunta: Jev la busca por categorías (`help-flow.test.ts`).
     for (const option of QUESTION.kind === "choice" ? QUESTION.options : []) expect(option.description?.length ?? 0).toBeLessThanOrEqual(240)
   })
 
@@ -76,13 +76,14 @@ describe("la pregunta help.v1", () => {
   })
 
   it("con más opciones de las que caben, se queda con las más parecidas sin cambiar su orden", () => {
-    const many = Array.from({ length: 3 }, () => OPTIONS.map((option) => ({ ...option }))).flat()
+    const many = OPTIONS.map((option) => ({ ...option }))
     expect(many.length).toBeGreaterThan(HELP_SELECT_MAX_OPTIONS)
     const kept = helpCandidates(many, "¿Qué es «Su enlace»?")
     expect(kept).toHaveLength(HELP_SELECT_MAX_OPTIONS)
     expect(kept.some((option) => option.kind === "faq" && option.faq.q === "¿Qué es «Su enlace»?")).toBe(true)
     expect(kept.map((option) => many.indexOf(option))).toEqual([...kept.map((option) => many.indexOf(option))].sort((a, b) => a - b))
-    expect(helpCandidates(OPTIONS, "lo que sea")).toEqual(OPTIONS)
+    const few = OPTIONS.slice(0, HELP_SELECT_MAX_OPTIONS)
+    expect(helpCandidates(few, "lo que sea")).toEqual(few)
   })
 
   it("al proveedor viajan la pregunta y el nombre de la pantalla, nunca su ruta", () => {

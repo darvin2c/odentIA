@@ -398,7 +398,7 @@ function AgentSupervisionPage() {
           respuesta; «en sombra» solo se registra. Ninguna acredita acierto por sí sola.
         </p>
         {decisionsQuery.isPending ? <SkeletonRegion message="Cargando las decisiones…"><AgentDecisionsSkeleton /></SkeletonRegion> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
-          <EmptyState title="Sin decisiones registradas" description="Elige un modelo de decisión en Configuración › Integraciones › Modelo del agente; cada mensaje entrante dejará aquí lo que decidió." />
+          <EmptyState title="Sin decisiones registradas" description="Cada mensaje entrante dejará aquí lo que decidió el agente." />
         ) : (
           <ul className="mt-3 flex flex-col divide-y">
             {decisionsQuery.data.data.map((item) => (

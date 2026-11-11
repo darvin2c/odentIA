@@ -34,15 +34,23 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await ask("¿Dónde configuro los horarios?")
   const first = help.getByRole("listitem").filter({ hasText: "¿Dónde configuro los horarios?" })
   await expect(first).toContainText("En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención.")
-  // El destino va resaltado en el texto y el botón solo dice «Llévame».
+  // El destino va resaltado en el texto y escrito en el botón.
   await expect(first.locator("strong")).toHaveText("Configuración › Horarios y ausencias")
-  await expect(first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" })).toHaveText("Llévame")
+  await expect(first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" })).toHaveText("Llévame a Configuración › Horarios y ausencias")
   await expect(first).toContainText("En qué se basó")
   await expect(first).toContainText("El mapa del sistema: Configuración › Horarios y ausencias.")
   await first.getByRole("button", { name: "Sí" }).click()
   await expect(first).toContainText("Gracias. Lo anotamos.")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("ayuda-respuesta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // --- La pregunta siguiente lleva la anterior y la pantalla de su respuesta, para entender «¿y cómo…?» (ADR 0178) ---
+  const followUp = page.waitForRequest((request) => request.url().includes("/api/help/ask") && request.method() === "POST")
+  await ask("¿Cómo bloqueo un horario?")
+  expect((await followUp).postDataJSON()).toMatchObject({
+    question: "¿Cómo bloqueo un horario?",
+    previous: { question: "¿Dónde configuro los horarios?", where: "Configuración › Horarios y ausencias" },
+  })
 
   // --- Por qué no puedo: lo que falta de verdad en esta clínica, que aún no tiene unidades dentales ni horarios ---
   await ask("¿Por qué no puedo reservar una cita?")
@@ -80,6 +88,9 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(doubt).toContainText("No encontré tu respuesta en la guía.")
   // El botón desaparece: el foco pasa al texto que se enviaría.
   await expect(doubt.getByLabel("Tu pregunta · puedes cambiarla")).toBeFocused()
+  // Queda anotado, sin el texto, que nada de lo ofrecido era su pregunta: soporte lo cuenta como sin respuesta.
+  await expect.poll(async () => (await fixtureDb.select({ noneFits: helpAsk.noneFits }).from(helpAsk).where(and(eq(helpAsk.organizationId, org.id), eq(helpAsk.verdict, "duda")))).map((row) => row.noneFits))
+    .toContain(true)
   await doubt.getByRole("button", { name: "No, gracias" }).click()
 
   // --- Las cifras de la clínica no son de la guía: con Argos encendido y Reportes en su rol, se las pregunta a Argos ---
@@ -120,6 +131,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id)).orderBy(helpAsk.createdAt)
   expect(logged.map((row) => [row.screen, row.topicId, row.via, row.verdict, row.helpful])).toEqual([
     ["/agenda", "disponibilidad", "exacta", null, true],
+    ["/agenda", "agenda", "exacta", null, null],
     ["/agenda", "agenda", "jev", "duda", null],
     ["/agenda", "pacientes", "exacta", null, false],
     ["/agenda", null, "jev", "duda", null],
@@ -217,8 +229,8 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(phoneDoubt).toContainText("No encontré tu respuesta en la guía.")
   await expect(phoneDoubt.getByLabel("Tu pregunta · puedes cambiarla")).toBeFocused()
   await askOnPhone(UNKNOWN)
-  // La primera fila con esa pregunta es la de la conversación; la de «Tus casos con soporte» va después.
-  await expect(sheet.getByRole("listitem").filter({ hasText: UNKNOWN }).first()).toContainText("Esto no está en la guía, y no quiero inventarlo.")
+  // La última fila con esa pregunta es la de la conversación; la de «Tus casos con soporte» queda arriba.
+  await expect(sheet.getByRole("listitem").filter({ hasText: UNKNOWN }).last()).toContainText("Esto no está en la guía, y no quiero inventarlo.")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("ayuda-movil-duda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 

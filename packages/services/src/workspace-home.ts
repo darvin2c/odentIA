@@ -282,6 +282,36 @@ export interface WaitingUnclosed {
   professionalName: string | null
   serviceName: string | null
   branchName: string
+  /** Marcó «Llegó» ese día y nadie registró su atención: sigue sin cerrar. */
+  arrived?: boolean
+  /** La versión que ve la fila: cerrarla desde aquí no pisa lo que cambió otro. */
+  version?: number
+}
+
+/**
+ * Las citas sin cerrar de hace más de un mes, juntas en una fila (decisión 3 de
+ * la mesa del 10 nov): se revisan de una vez y no tapan lo reciente.
+ */
+export interface WaitingUnclosedOld {
+  count: number
+  oldestAt: string
+}
+
+/**
+ * Una cita que recepción cerró con «Vino» y su profesional todavía no registró:
+ * «Su cita del 9 nov quedó atendida sin registrar». Se va al registrar la
+ * atención o con «No hace falta»; no se va sola.
+ */
+export interface WaitingCameUnrecorded {
+  id: string
+  patientId: string
+  personId?: string | null
+  patientName: string
+  startsAt: string
+  serviceName: string | null
+  markedAt: string
+  markedByName: string | null
+  version: number
 }
 
 /**
@@ -371,6 +401,8 @@ export type WaitingRow =
   | ({ kind: "registrationDone" } & WaitingRegistrationDone)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unclosed" } & WaitingUnclosed)
+  | ({ kind: "unclosedOld" } & WaitingUnclosedOld)
+  | ({ kind: "cameUnrecorded" } & WaitingCameUnrecorded)
   | ({ kind: "acceptedUnbooked" } & WaitingAcceptedUnbooked)
   | ({ kind: "overdueControls" } & WaitingOverdueControls)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
@@ -402,8 +434,13 @@ export interface WaitingParts {
   registrationsDone?: WaitingRegistrationDone[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
-  /** Citas de días anteriores sin cerrar, de la más antigua a la más reciente, y cuántas son. */
-  unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null } | null
+  /**
+   * Citas de días anteriores sin cerrar del último mes, de la más reciente a la más
+   * antigua, y cuántas son; `older`, las de antes, que van juntas en una fila.
+   */
+  unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null; older?: WaitingUnclosedOld | null } | null
+  /** Las citas propias cerradas con «Vino» que falta registrar, de la más reciente a la más antigua. */
+  cameUnrecorded?: WaitingCameUnrecorded[]
   /** Quienes tienen algo aceptado sin cita, con lo que suma (null o 0: nadie). */
   acceptedUnbooked?: WaitingAcceptedUnbooked | null
   /** Los controles vencidos sin cita, si Argos no los recomienda ya (null o 0: ninguno). */
@@ -438,6 +475,13 @@ export interface WaitingParts {
   today?: string
 }
 
+/**
+ * Una duda clínica que espera a quien mira (suya o sin tomar): no se corta ni
+ * se pliega (QA del 10 nov, C13). La que ya lleva otra persona sigue las reglas
+ * de cualquier caso: quien dirige no la tiene que responder.
+ */
+const isClinical = (item: { topicKind?: string; assigneeName?: string | null }) => item.topicKind === "clinico" && !item.assigneeName
+
 /** La recomendación de recordar las citas de mañana: eso sí es de hoy; las demás pueden esperar. */
 const ADVICE_OF_TODAY = "recordatorio_cita"
 
@@ -445,7 +489,8 @@ const ADVICE_OF_TODAY = "recordatorio_cita"
 function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
   switch (row.kind) {
     case "case":
-      return row.urgent ? "ahora" : row.priority === "baja" ? "sin_apuro" : "hoy"
+      // Una duda clínica nunca va plegada en «Sin apuro»: la decide quien atiende, hoy.
+      return row.urgent ? "ahora" : row.priority === "baja" && !isClinical(row) ? "sin_apuro" : "hoy"
     case "person":
       return row.urgent ? "ahora" : "hoy"
     case "dataRequest":
@@ -459,6 +504,7 @@ function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
     case "registrationDone":
     case "unconfirmed":
     case "unclosed":
+    case "cameUnrecorded":
     case "acceptedUnbooked":
     case "overdueControls":
     case "unsentBudget":
@@ -472,15 +518,21 @@ function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
   }
 }
 
-/** De quién es la fila, si es de una persona. Un pedido sobre sus datos no se pliega: tiene plazo. */
+/**
+ * De quién es la fila, si es de una persona. Un pedido sobre sus datos no se
+ * pliega: tiene plazo. Una duda clínica tampoco: plegada en otra cosa de la
+ * misma persona, quien atiende no la vería.
+ */
 function personOf(row: WaitingRow): string | null {
   switch (row.kind) {
     case "case":
+      return isClinical(row) ? null : (row.contactId ?? null)
     case "person":
       return row.contactId ?? null
     case "staleEncounter":
     case "unconfirmed":
     case "unclosed":
+    case "cameUnrecorded":
     case "registrationDone":
     case "unsentBudget":
     case "portalReentry":
@@ -503,14 +555,14 @@ const talks = (row: WaitingRow) => row.kind === "case" || row.kind === "person"
 
 /**
  * Agrupa y deja una fila por persona: la más urgente y, si empatan, lo que
- * alguien escribió. Lo demás suyo va como «También». «N más» cierra su grupo.
+ * alguien escribió. Lo de `onlyAlso` nunca abre la fila: solo acompaña. Lo demás suyo va como «También». «N más» cierra su grupo.
  */
-export function bandWaiting(rows: WaitingRow[], today?: string): WaitingEntry[] {
+export function bandWaiting(rows: WaitingRow[], today?: string, onlyAlso?: ReadonlySet<WaitingRow>): WaitingEntry[] {
   const entries = rows.map((row, index) => ({ row, index, band: bandOf(row, today) }))
   const best = new Map<string, (typeof entries)[number]>()
   for (const entry of entries) {
     const person = personOf(entry.row)
-    if (!person) continue
+    if (!person || onlyAlso?.has(entry.row)) continue
     const current = best.get(person)
     const better =
       !current ||
@@ -538,15 +590,27 @@ export function bandWaiting(rows: WaitingRow[], today?: string): WaitingEntry[] 
 
 export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   const rows: WaitingRow[] = []
+  // Una duda clínica va primera entre los suyos y no cuenta para el tope: nunca se corta.
+  const shownOf = (items: WaitingCase[], limit: number) => [...items.filter(isClinical), ...items.filter((item) => !isClinical(item)).slice(0, limit)]
   const urgent = parts.cases.filter((item) => item.urgent)
-  const urgentShown = urgent.slice(0, WAITING_LIMITS.urgentCases)
+  const urgentShown = shownOf(urgent, WAITING_LIMITS.urgentCases)
   for (const item of urgentShown) rows.push({ kind: "case", ...item })
+
+  // «Hoy» antes que «Sin apuro»; lo que no encaja en ninguna se trata como «Hoy».
+  const rank = (priority: string) => (priority === "baja" ? 1 : 0)
+  const others = parts.cases.filter((item) => !item.urgent).sort((a, b) => rank(a.priority) - rank(b.priority))
+  const othersShown = shownOf(others, WAITING_LIMITS.otherCases)
+  // La duda clínica abre «Hoy»: en el teléfono solo se ven las primeras filas de cada grupo.
+  for (const item of othersShown.filter(isClinical)) rows.push({ kind: "case", ...item })
 
   // Un pedido sobre sus datos tiene plazo legal: va justo después de lo urgente.
   for (const item of (parts.dataRequests ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "dataRequest", ...item })
 
   // La ficha de esa persona sigue trabada por un borrador de otro día: va antes que lo del día.
   for (const item of parts.staleEncounters ?? []) rows.push({ kind: "staleEncounter", ...item })
+
+  // Vino y nadie registró lo que se hizo: la historia de esa visita está vacía.
+  for (const item of parts.cameUnrecorded ?? []) rows.push({ kind: "cameUnrecorded", ...item })
 
   // Terminó su registro y su cita es hoy: ya se le puede atender al llegar.
   for (const item of (parts.registrationsDone ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "registrationDone", ...item })
@@ -558,6 +622,8 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
     const left = parts.unclosed.total - shown.length
     if (left > 0) rows.push({ kind: "more", of: "unclosed", count: left, startsAt: parts.unclosed.nextAt ?? null })
   }
+  // Lo de hace más de un mes no tapa lo reciente: una fila para revisarlo de una vez.
+  if (parts.unclosed?.older && parts.unclosed.older.count > 0) rows.push({ kind: "unclosedOld", ...parts.unclosed.older })
 
   if (parts.unconfirmed && parts.unconfirmed.total > 0) {
     const shown = parts.unconfirmed.items.slice(0, WAITING_LIMITS.unconfirmed)
@@ -597,13 +663,10 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   const overdue = parts.overdueTasks.slice(0, WAITING_LIMITS.overdueTasks)
   for (const item of overdue) rows.push({ kind: "task", ...item, more: 0 })
 
-  // «Hoy» antes que «Sin apuro»; lo que no encaja en ninguna se trata como «Hoy».
-  const rank = (priority: string) => (priority === "baja" ? 1 : 0)
-  const others = parts.cases.filter((item) => !item.urgent).sort((a, b) => rank(a.priority) - rank(b.priority))
-  const othersShown = others.slice(0, WAITING_LIMITS.otherCases)
-  for (const item of othersShown) rows.push({ kind: "case", ...item })
+  for (const item of othersShown.filter((item) => !isClinical(item))) rows.push({ kind: "case", ...item })
   const casesLeft = Math.max(parts.casesTotal ?? parts.cases.length, parts.cases.length) - urgentShown.length - othersShown.length
-  if (casesLeft > 0) rows.push({ kind: "more", of: "cases", count: casesLeft })
+  const casesMore: Extract<WaitingRow, { kind: "more" }> | null = casesLeft > 0 ? { kind: "more", of: "cases", count: casesLeft } : null
+  if (casesMore) rows.push(casesMore)
 
   if (parts.stillOpen && parts.stillOpen.total > 0) rows.push({ kind: "stillOpen", ...parts.stillOpen })
 
@@ -623,5 +686,28 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
 
   for (const item of parts.advice) rows.push({ kind: "advice", ...item })
   if (parts.budgets && parts.budgets.total > 0) rows.push({ kind: "budgets", ...parts.budgets })
-  return bandWaiting(rows, parts.today)
+
+  // El caso que no cabe y es de alguien que ya tiene fila va a su «También», no a «N más»:
+  // se agrupa por persona antes de cortar, para que nada suyo se pierda de vista.
+  // Solo si esa fila es al menos tan urgente como el caso: plegado en «Sin apuro», o un
+  // «Ahora» bajo una fila de «Hoy», se vería menos que en «N más».
+  const rowBand = new Map<string, number>()
+  for (const row of rows) {
+    const person = personOf(row)
+    if (person) rowBand.set(person, Math.min(rowBand.get(person) ?? Infinity, BAND_RANK[bandOf(row, parts.today)]))
+  }
+  const shownCases = new Set([...urgentShown, ...othersShown])
+  // Solo acompañan: la fila de la persona sigue siendo la que ya tenía, en su sitio.
+  const folded = new Set<WaitingRow>()
+  for (const item of parts.cases) {
+    if (shownCases.has(item) || !item.contactId) continue
+    const row: WaitingRow = { kind: "case", ...item }
+    const band = rowBand.get(item.contactId)
+    if (band === undefined || band > BAND_RANK[bandOf(row, parts.today)]) continue
+    rows.push(row)
+    folded.add(row)
+    if (casesMore) casesMore.count -= 1
+  }
+  if (casesMore && casesMore.count <= 0) rows.splice(rows.indexOf(casesMore), 1)
+  return bandWaiting(rows, parts.today, folded)
 }

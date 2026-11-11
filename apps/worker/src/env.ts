@@ -27,6 +27,14 @@ const envSchema = z.object({
     .toLowerCase()
     .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. vistia20.com")
     .default(""),
+  /**
+   * Los videos de la Ayuda (ADR 0178): la clave de la API de datos de YouTube y la lista de
+   * reproducción de cada producto. Sin clave, o sin la lista de un producto, no se lee.
+   */
+  YOUTUBE_API_KEY: z.string().trim().optional(),
+  HELP_VIDEOS_PLAYLIST: z.string().trim().optional(),
+  MEDICAL_HELP_VIDEOS_PLAYLIST: z.string().trim().optional(),
+  OPTICAL_HELP_VIDEOS_PLAYLIST: z.string().trim().optional(),
   /** Versión del Graph API de Meta, la misma de la API: WhatsApp, Messenger e Instagram. */
   META_GRAPH_VERSION: z
     .string()

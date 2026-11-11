@@ -152,7 +152,7 @@ function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppoint
   const attendable = (query.data?.data ?? []).filter(
     (item) =>
       item.visit === "llego" ||
-      ((item.visit === "por_confirmar" || item.visit === "confirmada") && !item.doneFor),
+      ((item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "sin_cerrar") && !item.doneFor),
   )
   return (
     attendable.find((item) => item.visit === "llego") ??

@@ -29,3 +29,19 @@ export function mayIdentifySomeone(text: string): boolean {
   if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(asked)) return true
   return (asked.match(WORDS) ?? []).length <= 3 && !looksLikeQuestion(asked)
 }
+
+/**
+ * Lo escrito, sin lo que puede ser el dato de una persona, para que pueda
+ * viajar a un modelo: «¿cómo cobro 1200 mitad Yape?» viaja sin la cifra. Quita
+ * correos y cifras; si lo que queda sigue pareciendo un dato (un nombre
+ * suelto, nada), devuelve nulo y no viaja.
+ */
+export function withoutPersonData(text: string): string | null {
+  if (!mayIdentifySomeone(text)) return text.trim() || null
+  const cleaned = text
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, " ")
+    .replace(/\d[\d\s.,+()/-]*\d|\d/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  return cleaned && !mayIdentifySomeone(cleaned) ? cleaned : null
+}

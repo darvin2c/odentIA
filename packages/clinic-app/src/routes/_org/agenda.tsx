@@ -576,11 +576,6 @@ function AgendaPage() {
     [appointments],
   )
   const dayAppointments = appointments.filter((item) => zonedDateOf(item.startsAt, TZ) === day)
-  const dayStanding = dayAppointments.filter((item) => occupies(item.status)).length
-  // Lo que no ocupa la rejilla se dice en la cuenta: la lista del día trae todas (X9).
-  const dayNoShow = dayAppointments.filter((item) => item.status === "no_asistio").length
-  const dayCancelled = dayAppointments.filter((item) => item.status === "cancelada").length
-  const pending = dayAppointments.filter((item) => item.status === "programada").length
 
   const open = React.useMemo(
     (): ScheduleAvailability[] =>
@@ -761,6 +756,17 @@ function AgendaPage() {
   const menuColumns = view === "lista" ? team : dayColumns
   const chosen = whoList.filter((id) => menuColumns.some((item) => item.id === id))
   const isChosen = (id: string) => chosen.length === 0 || chosen.includes(id)
+  /** «Por confirmar» es lo que aún no pasa: lo que pasó sin cerrarse es «sin cerrar». */
+  const awaitingConfirmation = (item: AgendaAppointment) => item.status === "programada" && !isUnclosed(item, now)
+
+  // La cuenta del día dice lo que se ve: las de quienes están elegidos, como la rejilla y la lista.
+  const shownDay = dayAppointments.filter((item) => isChosen(item.professionalUserId))
+  const dayStanding = shownDay.filter((item) => occupies(item.status)).length
+  // Lo que no ocupa la rejilla se dice en la cuenta: la lista del día trae todas (X9).
+  const dayNoShow = shownDay.filter((item) => item.status === "no_asistio").length
+  const dayCancelled = shownDay.filter((item) => item.status === "cancelada").length
+  const dayUnclosed = shownDay.filter((item) => isUnclosed(item, now)).length
+  const pending = shownDay.filter(awaitingConfirmation).length
 
   // ----- Carriles -----
   const lanesOf = (date: string): ScheduleLane[] =>
@@ -947,7 +953,8 @@ function AgendaPage() {
 
   const started = (item: AgendaAppointment) => Date.parse(item.startsAt) <= Date.parse(now)
   /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
-  const before = (item: AgendaAppointment) => item.visit === "por_confirmar" || item.visit === "confirmada"
+  // También la que quedó sin cerrar: se reprograma o se cancela igual.
+  const before = (item: AgendaAppointment) => item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "sin_cerrar"
   const isToday = (item: AgendaAppointment) => zonedDateOf(item.startsAt, TZ) === today
   /** Su hora pasó sin llegada ni atención: «Ya pasaron · sin cerrar». */
   const unclosed = (item: AgendaAppointment) => isUnclosed(item, now)
@@ -963,7 +970,13 @@ function AgendaPage() {
   const attendItem = (item: AgendaAppointment) =>
     attend.mutate({
       patientId: item.patientId,
-      appointment: { id: item.id, professionalUserId: item.professionalUserId, professionalName: item.professionalName },
+      appointment: {
+        id: item.id,
+        professionalUserId: item.professionalUserId,
+        professionalName: item.professionalName,
+        // La de otro día que se registra después: su atención es de ese día.
+        pastVisit: !isToday(item) && isUnclosed(item, now),
+      },
     })
   const patientOf = (item: AgendaAppointment) => ({ id: item.patientId, name: item.patientName })
   const menuFor = (entry: ScheduleEntry): RowActionItem[] => {
@@ -1015,9 +1028,15 @@ function AgendaPage() {
       return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item), item) } : null
     }
     const step = stepBeforeArrival(item, now, isToday(item))
+    // Hoy, ya pasada su hora: quien llega tarde es lo común; «Llegó» primero, sin pasar por «No vino».
+    if (step === "tarde") {
+      if (canWrite) return { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item) }) }
+      return canAttend ? { label: "Registrar la atención", pending: busy(item.id), onSelect: () => attendItem(item) } : null
+    }
+    // Otro día: quien atiende la registra; recepción pregunta «¿Vino?» en la cita (Vino, Registrar o No vino).
     if (step === "cerrar") {
       if (canAttend) return { label: "Registrar la atención", pending: busy(item.id), onSelect: () => attendItem(item) }
-      return canWrite ? { label: "No vino", pending: statusMutation.isPending && statusMutation.variables?.id === item.id, onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }) } : null
+      return canWrite ? { label: "¿Vino?", onSelect: () => setDetail({ id: item.id, mode: "view" }) } : null
     }
     if (!canWrite) return null
     // Hoy, cerca de la hora, lo que toca es marcar que llegó (eso también la confirma).
@@ -1044,7 +1063,12 @@ function AgendaPage() {
   const itemsOn = (date: string): ScheduleAgendaItem[] =>
     agendaAppointments
       .filter((item) => zonedDateOf(item.startsAt, TZ) === date)
-      .filter((item) => !statusFilter || item.status === statusFilter)
+      // «Por confirmar» no trae lo que ya pasó: eso está sin cerrar.
+      .filter(
+        (item) =>
+          !statusFilter ||
+          (item.status === statusFilter && !((statusFilter === "programada" || statusFilter === "confirmada") && isUnclosed(item, now))),
+      )
       .map((item) => ({
         entry: {
           id: item.id,
@@ -1067,14 +1091,16 @@ function AgendaPage() {
   const agendaDays = agendaDates.flatMap((date) => {
     const items = itemsOn(date)
     if (items.length === 0) return []
-    const waiting = items.filter((item) => item.entry.status === "programada").length
+    const waiting = agendaAppointments.filter((item) => zonedDateOf(item.startsAt, TZ) === date && awaitingConfirmation(item)).length
     const summary = `${items.length} ${items.length === 1 ? "cita" : "citas"}${
       waiting > 0 && statusFilter !== "programada" ? ` · ${waiting} por confirmar` : ""
     }`
     return [{ date, items, summary }]
   })
+  // «Por confirmar» y «Confirmada» son lo que aún no pasa: lo que pasó sin cerrarse se cuenta en la cabecera.
   const counts: Partial<Record<ScheduleStatus, number>> = {}
   for (const item of agendaAppointments) {
+    if ((item.status === "programada" || item.status === "confirmada") && isUnclosed(item, now)) continue
     counts[item.status] = (counts[item.status] ?? 0) + 1
   }
 
@@ -1465,6 +1491,7 @@ function AgendaPage() {
                 {dayStanding} {dayStanding === 1 ? "cita" : "citas"}
                 {dayNoShow > 0 ? ` · ${dayNoShow} no ${dayNoShow === 1 ? "vino" : "vinieron"}` : ""}
                 {dayCancelled > 0 ? ` · ${dayCancelled} ${dayCancelled === 1 ? "cancelada" : "canceladas"}` : ""}
+                {dayUnclosed > 0 ? ` · ${dayUnclosed} sin cerrar` : ""}
                 {pending > 0 ? " ·" : ""}
               </span>
               {/* Si falta sitio, lo que se recorta es el total: esto pide hacer algo. */}

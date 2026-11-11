@@ -7,7 +7,7 @@
  */
 
 import { cn } from "@odentia/ui"
-import { Ban, Check, CheckCheck, Clock, DoorOpen, Stethoscope, UserX } from "lucide-react"
+import { Ban, Check, CheckCheck, CircleHelp, Clock, DoorOpen, Stethoscope, UserX } from "lucide-react"
 
 import type { ScheduleEntry, ScheduleState, ScheduleStatus } from "./types.js"
 
@@ -17,6 +17,7 @@ export const SCHEDULE_STATE_LABELS: Record<ScheduleState, string> = {
   confirmada: "Confirmada",
   llego: "Llegó",
   en_atencion: "En atención",
+  sin_cerrar: "Sin cerrar",
   atendida: "Atendida",
   no_asistio: "No vino",
   cancelada: "Cancelada",
@@ -56,6 +57,7 @@ export function StatusDot({ status, className }: { status: ScheduleState; classN
         status === "confirmada" && "bg-success",
         status === "llego" && "bg-info",
         status === "en_atencion" && "bg-primary",
+        status === "sin_cerrar" && "border-2 border-warning bg-transparent",
         status === "atendida" && "bg-muted-foreground",
         status === "no_asistio" && "border-2 border-destructive bg-transparent",
         status === "cancelada" && "border-2 border-dashed border-muted-foreground bg-transparent",
@@ -79,6 +81,7 @@ const STATUS_ICONS = {
   confirmada: Check,
   llego: DoorOpen,
   en_atencion: Stethoscope,
+  sin_cerrar: CircleHelp,
   atendida: CheckCheck,
   no_asistio: UserX,
   cancelada: Ban,
@@ -91,6 +94,7 @@ export function statusTextClass(status: ScheduleState): string {
     status === "confirmada" && "text-success",
     status === "llego" && "text-info",
     status === "en_atencion" && "text-primary",
+    status === "sin_cerrar" && "text-warning",
     status === "atendida" && "text-muted-foreground",
     status === "no_asistio" && "text-destructive",
     status === "cancelada" && "text-muted-foreground",
@@ -109,6 +113,7 @@ export function statusSurfaceClass(status: ScheduleState): string {
     status === "confirmada" && "bg-success-soft text-foreground",
     status === "llego" && "bg-info-soft text-foreground",
     status === "en_atencion" && "bg-primary-soft text-foreground",
+    status === "sin_cerrar" && "border border-warning bg-warning-soft text-foreground",
     status === "atendida" && "bg-secondary text-muted-foreground",
     status === "no_asistio" && "bg-danger-soft text-foreground",
     status === "cancelada" &&

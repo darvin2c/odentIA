@@ -4,7 +4,7 @@
  * carácter por carácter, con el de antes de separarlos (`__golden__`). Si una
  * diferencia es a propósito, se mide el agente antes de aceptar la nueva.
  */
-import { type AgentConfig, type HelpTopic, helpOptions, helpQuestion, type OrgLocale } from "@odentia/services"
+import { type AgentConfig, type HelpTopic, helpAreaQuestion, helpDataQuestion, helpAreas, helpJoinQuestion, helpOptions, helpQuestion, helpWriteInstructions, type OrgLocale } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { agentTextsFor, argosCatalogText, argosFiguresText, compileArgosFigure } from "@odentia/services"
@@ -69,12 +69,16 @@ describe("prompts de odentIA, iguales a los de antes", () => {
         purpose: "Las citas por día y la semana del equipo.",
         terms: [],
         faqs: [
-          { q: "¿Cómo bloqueo un horario?", a: "En Horarios y ausencias.", forms: ["bloquear un horario"] },
-          { q: "¿Hay un manual?", a: "El manual soy yo.", general: true },
+          { id: "bloquear-horario", q: "¿Cómo bloqueo un horario?", a: "En Horarios y ausencias.", forms: ["bloquear un horario"] },
+          { id: "manual", q: "¿Hay un manual?", a: "El manual soy yo.", general: true },
         ],
       },
     ]
     await expect(json(helpQuestion(helpOptions(guide), DENTAL))).toMatchFileSnapshot(golden("ayuda.json"))
+    // ADR 0178 y 0179: antes, la categoría y si pide un dato de su clínica; y si la respuesta está repartida, si las partes se completan.
+    await expect(json([helpAreaQuestion(helpAreas(guide), DENTAL), helpDataQuestion(DENTAL), helpJoinQuestion(DENTAL), helpWriteInstructions(DENTAL)])).toMatchFileSnapshot(
+      golden("ayuda-pasos.json"),
+    )
   })
 
   it("Argos", async () => {

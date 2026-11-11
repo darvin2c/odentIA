@@ -64,7 +64,7 @@ import { FreedAppointmentButtons } from "../patient/freed-appointments"
 import { CoordinationControls } from "../patient/plan/plan-coordination"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
-import { announceVisitStatus, useAppointmentArrival } from "./arrival"
+import { announceVisitStatus, undoCame, useAppointmentArrival } from "./arrival"
 import { TestAppointmentDrawer } from "./test-appointment-drawer"
 import { dayShort, rangeSaid, whenSaid } from "./shared"
 import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "./when"
@@ -189,9 +189,16 @@ function RealAppointmentDrawer({
   const started = Date.parse(appointment.startsAt) <= Date.parse(now)
   const isToday = zonedDateOf(appointment.startsAt, timeZone) === today
   /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
-  const before = appointment.visit === "por_confirmar" || appointment.visit === "confirmada"
-  /** Ya pasó su hora y nadie la cerró: «Registrar la atención» o «No vino», igual que la lista. */
-  const unclosed = stepBeforeArrival(appointment, now, isToday) === "cerrar"
+  // También la que quedó sin cerrar: se puede reprogramar o cancelar (llamó y viene otro día).
+  const before = appointment.visit === "por_confirmar" || appointment.visit === "confirmada" || appointment.visit === "sin_cerrar"
+  /**
+   * Ya pasó su hora y nadie la cerró, igual que la lista: hoy, «Llegó» (llegó tarde),
+   * «Registrar la atención» o «No vino»; otro día, «Vino», «Registrar la atención» o «No vino».
+   */
+  const step = stepBeforeArrival(appointment, now, isToday)
+  const unclosed = step === "cerrar" || step === "tarde"
+  /** «Vino» la dejó atendida y nadie registró qué se hizo: se puede deshacer o registrar. */
+  const cameUnrecorded = appointment.visit === "atendida" && !appointment.encounter && Boolean(context?.came)
   const patient = { id: appointment.patientId, name: appointment.patientName }
   const startAttention = () =>
     attend.mutate({
@@ -200,7 +207,7 @@ function RealAppointmentDrawer({
         id: appointment.id,
         professionalUserId: appointment.professionalUserId,
         professionalName: appointment.professionalName,
-        pastVisit: unclosed && !isToday,
+        pastVisit: step === "cerrar" || (cameUnrecorded && !isToday),
       },
     })
 
@@ -216,11 +223,12 @@ function RealAppointmentDrawer({
       input.status === "atendida"
         ? apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/came`, {
             method: "POST",
-            body: "{}",
+            body: JSON.stringify({ expectedVersion: appointment.version }),
           })
         : apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
             method: "POST",
-            body: JSON.stringify(input),
+            // La versión que se ve: un cajón abierto antes no revive una cita que otro canceló.
+            body: JSON.stringify({ ...input, expectedVersion: appointment.version }),
           }),
     onSuccess: async (result) => {
       if (
@@ -228,7 +236,7 @@ function RealAppointmentDrawer({
         result.data.status === "no_asistio" ||
         result.data.status === "atendida"
       )
-        announceVisitStatus(result.data)
+        announceVisitStatus(result.data, { onUndone: () => void onChanged() })
       else
         toast.success(STATUS_DONE[result.data.status], {
           description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
@@ -252,6 +260,15 @@ function RealAppointmentDrawer({
         onClose()
       }
     },
+  })
+  const undoVino = useMutation({
+    mutationFn: () => undoCame(appointment.id),
+    onSuccess: async (result) => {
+      toast.success(`Se deshizo «Vino» de ${result.data.patientName}`)
+      setActionError("")
+      await onChanged()
+    },
+    onError: (cause) => setActionError(submitErrorMessage(cause)),
   })
   /** Confirmar o «No vino»: si falla, se dice en el cajón. */
   const changeStatus = (status: AppointmentStatus) =>
@@ -391,7 +408,7 @@ function RealAppointmentDrawer({
   const savingDetails = useStore(editForm.store, (state) => state.isSubmitting)
   const dirty = useStore(editForm.store, (state) => mode === "edit" && state.isDirty)
 
-  const busy = setStatus.isPending || movingNow || savingDetails || arrival.isPending || attend.isPending
+  const busy = setStatus.isPending || movingNow || savingDetails || arrival.isPending || attend.isPending || undoVino.isPending
   const back = () => {
     setActionError("")
     moveForm.reset()
@@ -539,9 +556,13 @@ function RealAppointmentDrawer({
                   : appointment.visit === "llego" && appointment.arrivedAt
                     ? visitLabel(appointment, { now, timeZone }).replace(/^Llegó /, "Llegó a las ")
                     : unclosed
-                      ? // Ya pasó: «Por confirmar» no decía nada (QA del 9 nov, «¿Vino?»).
-                        "Ya pasó y nadie la cerró: falta decir si vino"
-                      : visitLabel(appointment, { now, timeZone })}
+                      ? // Un solo nombre para la cita que pasó sin cerrarse, en toda la aplicación.
+                        step === "tarde"
+                        ? "Sin cerrar · su hora ya pasó: si llegó tarde, «Llegó»"
+                        : "Sin cerrar · falta decir si vino"
+                      : cameUnrecorded
+                        ? "Atendida · sin su atención registrada"
+                        : visitLabel(appointment, { now, timeZone })}
               </span>
               {/* Lo que queda por reservar, no una frase fija: un control indicado hoy sigue pendiente. */}
               {appointment.visit === "atendida" ? (
@@ -552,14 +573,21 @@ function RealAppointmentDrawer({
                   Lo ven quienes ven la agenda; no es parte de la historia.
                 </span>
               ) : null}
+              {/* «Vino» sin atención: quién lo marcó y cuándo (no hay hora de llegada que mostrar). */}
+              {cameUnrecorded && context?.came ? (
+                <span className="text-[13px] text-muted-foreground">
+                  «Vino» lo marcó {context.came.byName ?? "alguien del equipo"} {whenSaid(context.came.at, timeZone, today)}.
+                  Lo que se hizo lo registra {appointment.professionalName}.
+                </span>
+              ) : null}
 
               {/* Para lo que ya se terminó: se dice y se ofrece usarla o liberarla (QA del 10 nov, M1). */}
               {active && appointment.doneFor && !appointment.encounter ? (
                 <DoneForNotice appointment={appointment} canWrite={canWrite} />
               ) : null}
-              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. Ya pasada, «Llegó» no aplica:
-                  queda «Vino» (QA de la ficha del 10 nov, U4). */}
-              {canWrite && before && isToday && !unclosed ? (
+              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. Hoy, ya pasada su hora, también
+                  «Llegó»: quien llega tarde no pasa por «No vino» (mesa del 10 nov, decisión 2). */}
+              {canWrite && isToday && ((before && !unclosed) || step === "tarde") ? (
                 <SubmitButton
                   className="h-11"
                   disabled={busy}
@@ -597,13 +625,19 @@ function RealAppointmentDrawer({
                 </DropdownMenu>
               ) : null}
               {/* Ya pasó su hora sin cerrarse: se registra la atención o se marca que no vino. */}
-              {unclosed && canAttend ? (
-                <SubmitButton className="h-11" disabled={busy} pending={attend.isPending} onClick={startAttention}>
+              {(unclosed || cameUnrecorded) && canAttend ? (
+                <SubmitButton
+                  className="h-11"
+                  variant={step === "tarde" && canWrite ? "outline" : "default"}
+                  disabled={busy}
+                  pending={attend.isPending}
+                  onClick={startAttention}
+                >
                   Registrar la atención
                 </SubmitButton>
               ) : null}
               {/* «No vino» solo cuando pasó la hora y no llegó. */}
-              {canWrite && before && started ? (
+              {canWrite && before && started && !appointment.arrivedAt ? (
                 <SubmitButton
                   variant="outline"
                   className="h-11 bg-card"
@@ -614,8 +648,9 @@ function RealAppointmentDrawer({
                   No vino
                 </SubmitButton>
               ) : null}
-              {/* «Vino» sin abrir otra atención: vino a pagar, a recoger algo, o ya lo atendieron (B1). */}
-              {unclosed && canWrite ? (
+              {/* Otro día, «Vino» sin abrir otra atención: vino a pagar, a recoger algo, o ya lo
+                  atendieron (B1). Hoy no: quien llegó tarde se marca con «Llegó». */}
+              {step === "cerrar" && canWrite ? (
                 <SubmitButton
                   variant="outline"
                   className="h-11 bg-card"
@@ -626,11 +661,23 @@ function RealAppointmentDrawer({
                   Vino
                 </SubmitButton>
               ) : null}
-              {unclosed && canWrite ? (
+              {step === "cerrar" && canWrite ? (
                 <p className="text-sm text-muted-foreground">
                   «Vino» la deja atendida sin abrir otra atención; lo que se le hizo lo registra{" "}
-                  {canAttend ? "quien la atendió" : appointment.professionalName}.
+                  {canAttend ? "quien la atendió" : appointment.professionalName}, a quien le aparece en «Te espera».
                 </p>
+              ) : null}
+              {/* Cerrada con «Vino» y sin registrar: se deshace mientras nadie registre su atención. */}
+              {cameUnrecorded && canWrite ? (
+                <SubmitButton
+                  variant="outline"
+                  className="h-11 bg-card"
+                  disabled={busy}
+                  pending={undoVino.isPending}
+                  onClick={() => undoVino.mutate()}
+                >
+                  Deshacer «Vino»
+                </SubmitButton>
               ) : null}
 
               {/* Llegó: «Atender» para quien atiende y «Deshacer» mientras no empiece la atención. */}
@@ -667,6 +714,18 @@ function RealAppointmentDrawer({
               ) : null}
 
               {/* No vino o cancelada: se reagenda; si llega tarde hoy, «Llegó» recupera la cita. */}
+              {/* «No vino» por error en otro día: si sí vino, «Vino» la corrige (sin abrir otra atención). */}
+              {canWrite && appointment.visit === "no_vino" && !isToday ? (
+                <SubmitButton
+                  variant="outline"
+                  className="h-11 bg-card"
+                  disabled={busy}
+                  pending={setStatus.isPending && setStatus.variables?.status === "atendida"}
+                  onClick={() => changeStatus("atendida")}
+                >
+                  Sí vino
+                </SubmitButton>
+              ) : null}
               {canWrite && appointment.visit === "no_vino" && isToday ? (
                 <SubmitButton
                   className="h-11"

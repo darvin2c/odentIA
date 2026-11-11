@@ -1,0 +1,66 @@
+Ayuda · help.v2 · proveedor jev (jev-1.13.0)
+  guía odentia: 30 pantallas, 457 preguntas frecuentes, 33 categorías; la mayor tiene 53 opciones
+  guía latidia: 30 pantallas, 455 preguntas frecuentes, 33 categorías; la mayor tiene 51 opciones
+  guía vistia: 31 pantallas, 471 preguntas frecuentes, 34 categorías; la mayor tiene 48 opciones
+  bancos: desarrollo 244 · control 180 · final 150
+
+Por banco:
+  banco          n  seguro bien  seguro mal  redactadas  duda c/correcta  duda sin  duda calla  ninguna bien  ninguna mal  datos bien  datos mal  sin Jev
+  desarrollo   244          142           1          12               61         7          17            11            4           1          0        3
+  control      180           62           2           6               61        10          15            28            2           0          0        5
+  final        150           35           3           3               67         5          10            26            3           1          0        5
+  «redactadas»: Jev dijo que dos o tres respuestas se completan. Sin --redactar cuentan como duda; con él, como seguro si todas sus partes corresponden.
+
+Ajuste (desarrollo + control + final), n = 574:
+  De lo que muestra como respuesta, corresponde: 97.6 % (cota inferior 95 %: 94.8 %; mínimo 95.0 %)
+  Lo que la guía no responde y no recibe una respuesta: 96.5 % (mínimo 95.0 %)
+  Lo que la guía responde y se resuelve solo o con un toque: 93.2 % (mínimo 70.0 %)
+  Seguro y mal: 6 · «datos» bien dicho: 7.4 %
+  Primer paso: de 371 con categoría segura, acertó 357 (96.2 %); en 172 buscó en toda la guía o dijo «ninguna» en el primer paso
+  Cumple los mínimos: sí
+
+Llamadas a Jev por pregunta: habitual 2 · máximo 5 (1353 en total)
+Demora por pregunta, con todos sus pasos: p50 469 ms · p95 675 ms (mínimo para salir ≤ 2000 ms)
+Costo de Jev por pregunta: habitual USD 0.000335 · máximo USD 0.001413 · esta corrida USD 0.309358 (561 preguntas con precio, de 561)
+1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.435500, sin contar lo redactado
+
+Seguro y se equivoca (6):
+  - [desarrollo · odentia] «¿Cómo subo una foto del paciente?» → seguro en clinica: FAQ «¿Dónde subo una radiografía?»; esperado: FAQ «¿Cómo pongo la foto de un paciente?»
+  - [control · odentia] «quien me debe plata» → seguro: FAQ «¿Dónde veo quiénes deben?»; esperado: datos
+  - [control · odentia] «no me aparece el comprobante del pago que hice» → seguro en plan-y-pagos: FAQ «¿Cómo registro el comprobante de mi pago?»; esperado: ninguna
+  - [final · odentia] «no me deja poner una cita a las 8 de la noche» → seguro en agenda: FAQ «¿Cómo doy una cita más temprano o más tarde de lo que muestra la agenda?»; esperado: FAQ «¿Puedo dar una cita fuera de horario o a una hora ocupada?»
+  - [final · odentia] «cuales citas de mañana faltan confirmar» → seguro: FAQ «¿Cómo veo las citas que faltan confirmar?»; esperado: datos
+  - [final · odentia] «por que me rechazaron la plantilla del recordatorio» → seguro en whatsapp: FAQ «¿Cómo cambio el texto del recordatorio de WhatsApp?»; esperado: ninguna
+
+Lo demás que no resolvió (31):
+  - [desarrollo · odentia] «el paciente no vino, ¿qué hago?» → duda en agenda: FAQ «¿Cómo cancelo una cita?», FAQ «¿Y si llega tarde después de marcar «No vino»?», FAQ «¿Cómo reprogramo una cita?»; esperado: FAQ «¿Dónde quedó «Atendida»?» o FAQ «¿Puedo confirmar o reagendar una cita desde Inicio?»
+  - [desarrollo · odentia] «¿Dónde veo el diagnóstico?» → duda en clinica: FAQ «¿Cómo agrego o quito un diagnóstico de la atención?», FAQ «¿Cómo pongo el estadio y el grado de la periodontitis?», FAQ «¿Cómo veo completa una atención anterior?»; esperado: FAQ «¿Dónde quedaron Atenciones, Recetas u Órdenes?»
+  - [desarrollo · odentia] «¿Cómo le doy acceso al portal?» → duda en equipo: FAQ «¿Cómo invito a alguien a mi equipo?», párrafo de equipo, párrafo de acceso_pacientes; esperado: FAQ «¿Cómo le doy acceso al portal?»
+  - [desarrollo · odentia] «¿Qué sabe Sofi?» → duda: FAQ «¿Qué recuerda Sofi de una persona?», párrafo de chat_web, párrafo de bandeja; esperado: FAQ «¿Cómo le enseño algo al agente?»
+  - [desarrollo · odentia] «¿Cuál es tu nombre?» → ninguna: nada; esperado: FAQ «¿Quién es Ariadna?»
+  - [desarrollo · latidia] «cuantas consultas hizo la doctora ruiz esta semana» → ninguna: nada; esperado: datos
+  - [desarrollo · latidia] «cuantos pacientes nuevos llegaron por instagram este mes» → ninguna: nada; esperado: datos
+  - [desarrollo · vistia] «ya llego el cliente de las 11, donde lo pongo» → duda: FAQ «El paciente me confirmó por teléfono, ¿dónde lo pongo?», párrafo de agenda, FAQ «¿Cómo sé quién me espera?»; esperado: FAQ «¿Cómo marco que llegó?»
+  - [desarrollo · odentia] «la mama es la que paga, como sale su nombre en el ticket» → duda en medios-de-pago: FAQ «¿Cómo registro quién es el representante legal, quién está autorizado o quién paga por un paciente?», párrafo de medios-de-pago; esperado: FAQ «¿Cómo pongo que paga otra persona, como la mamá?»
+  - [desarrollo · odentia] «como se si la promo de blanqueamiento sirvio de algo» → ninguna: nada; esperado: FAQ «¿Cómo sé si una promoción funcionó?»
+  - [desarrollo · odentia] «donde veo todo lo que la clinica tiene por pagar» → duda en finanzas: FAQ «¿Cómo anoto una factura que pago después, como la del laboratorio?», párrafo de finanzas, FAQ «¿Cómo busco un gasto?»; esperado: FAQ «¿Cuánto debe la clínica?»
+  - [control · odentia] «¿Se puede responder el correo de un paciente desde el sistema?» → duda en bandeja: FAQ «¿Cómo respondo yo en vez de Sofi?», FAQ «¿Por qué no puedo escribir en una conversación?»; esperado: FAQ «¿Cómo conecto el correo de la clínica?»
+  - [control · odentia] «quiero pasarle este chat a mi compañera para que lo atienda» → duda: FAQ «¿Cómo hago que Sofi me pase las quejas?», FAQ «¿Cómo le asigno una tarea a otra persona?», FAQ «¿Dónde veo por qué Sofi me pasó una conversación?»; esperado: FAQ «¿Cómo respondo yo en vez de Sofi?»
+  - [control · odentia] «necesito leer que le dijeron a un paciente por el chat» → duda en bandeja: FAQ «¿Cómo veo en qué se basó una respuesta de Sofi?», FAQ «¿Qué trae «Contexto»?», FAQ «¿Por qué le llegó un mensaje automático?»; esperado: FAQ «¿Dónde veo lo que una persona ha conversado con la clínica y sus oportunidades?» o párrafo de bandeja
+  - [control · odentia] «el paciente no vino como lo marco» → duda: FAQ «¿Y si llega tarde después de marcar «No vino»?», FAQ «¿Por qué algunas filas dicen «El paciente o su contacto»?», FAQ «¿Qué son las citas «sin marcar» de Reportes?»; esperado: FAQ «¿Dónde quedó «Atendida»?» o FAQ «¿Puedo confirmar o reagendar una cita desde Inicio?»
+  - [control · odentia] «quiero separar un turno para la dra rojas» → duda en agenda: FAQ «¿Cómo bloqueo un horario?», FAQ «¿Cómo veo solo la agenda de un profesional?», FAQ «¿Cómo le reservo una cita desde la conversación?»; esperado: párrafo de agenda
+  - [control · odentia] «donde veo el consentimiento que firmo el paciente» → duda en clinica: FAQ «¿Cómo revoco un consentimiento firmado o anulo uno pendiente?», FAQ «¿Dónde hago la receta, el consentimiento o la orden de la atención?», FAQ «¿Cómo firma la persona su consentimiento?»; esperado: FAQ «¿Dónde quedaron Atenciones, Recetas u Órdenes?»
+  - [control · odentia] «que sabe el bot de mi clinica» → duda: FAQ «¿Qué recuerda Sofi de una persona?», FAQ «¿Quién es Ariadna?», párrafo de chat_web; esperado: FAQ «¿Cómo le enseño algo al agente?»
+  - [control · odentia] «donde veo a los interesados que todavia no se atienden» → duda en oportunidades: párrafo de bandeja, FAQ «¿Cómo veo solo las conversaciones de un canal?», FAQ «¿Cómo veo solo mis oportunidades o todas las que se perdieron?»; esperado: párrafo de oportunidades
+  - [control · odentia] «quiero seguir a los que preguntaron por ortodoncia y no se decidieron» → duda: FAQ «¿Cómo filtro la actividad del equipo?», párrafo de pipelines, FAQ «¿Cómo veo solo mis oportunidades o todas las que se perdieron?»; esperado: párrafo de oportunidades
+  - [control · odentia] «como apago los mensajes automaticos de seguimiento» → duda en administrador: FAQ «¿Cómo cambio cuándo sale un recordatorio?», FAQ «¿Cómo borro una línea que le pedí a Argos?», FAQ «¿Qué hago con una recomendación de Argos?»; esperado: párrafo de administrador
+  - [control · odentia] «ayuda» → ninguna: nada; esperado: FAQ «¿Hay un manual?» o FAQ «¿Quién es Ariadna?»
+  - [control · odentia] «mmm no entiendo nada» → ninguna: nada; esperado: FAQ «¿Hay un manual?»
+  - [final · odentia] «correos que mandan los pacientes a la clinica, donde los leo» → duda en bandeja: párrafo de bandeja; esperado: FAQ «¿Cómo conecto el correo de la clínica?»
+  - [final · odentia] «pedro no vino hoy a su curacion, donde lo marco» → duda en agenda: FAQ «¿Y si llega tarde después de marcar «No vino»?», párrafo de agenda, FAQ «¿Cómo marco que llegó?»; esperado: FAQ «¿Dónde quedó «Atendida»?» o FAQ «¿Puedo confirmar o reagendar una cita desde Inicio?»
+  - [final · odentia] «sacar una consulta con la doctora de medicina general para el lunes» → ninguna: nada; esperado: párrafo de agenda
+  - [final · odentia] «no encuentro el papel que firmo maria para su extraccion» → duda en clinica: FAQ «¿Cómo revoco un consentimiento firmado o anulo uno pendiente?», FAQ «¿Dónde hago la receta, el consentimiento o la orden de la atención?», FAQ «¿Cómo firma la persona su consentimiento?»; esperado: FAQ «¿Dónde quedaron Atenciones, Recetas u Órdenes?»
+  - [final · odentia] «apagar los mensajes de seguimiento que salen solos despues de una limpieza» → duda en administrador: FAQ «¿Cómo cambio cuándo sale un recordatorio?», FAQ «¿Cómo apago a Sofi?», FAQ «¿Dónde enciendo los recordatorios de cita?»; esperado: párrafo de administrador
+  - [final · odentia] «ver a los que preguntaron por carillas y todavia no cierran» → duda en oportunidades: FAQ «¿Cómo veo solo mis oportunidades o todas las que se perdieron?», FAQ «¿Cómo veo solo las conversaciones de un canal?», párrafo de bandeja; esperado: párrafo de oportunidades
+  - [final · odentia] «ayuda» → ninguna: nada; esperado: FAQ «¿Quién es Ariadna?» o FAQ «¿Hay un manual?»
+  - [final · odentia] «ya fue, no entiendo nada» → ninguna: nada; esperado: FAQ «¿Hay un manual?»

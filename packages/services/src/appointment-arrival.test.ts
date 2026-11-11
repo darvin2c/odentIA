@@ -98,7 +98,9 @@ it("«Llegó» confirma la cita, cancela sus recordatorios pendientes y «Deshac
   expect((await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, visit.id, true))).arrivedAt).toBe(arrived.arrivedAt)
 
   const undone = await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, visit.id, false))
-  expect(undone).toMatchObject({ status: "programada", visit: "por_confirmar", arrivedAt: null })
+  // Vuelve a como estaba: por confirmar o, si su hora ya terminó, sin cerrar.
+  const pending = Date.parse(visit.endsAt) <= Date.now() ? "sin_cerrar" : "por_confirmar"
+  expect(undone).toMatchObject({ status: "programada", visit: pending, arrivedAt: null })
   const actions = await ownerDb
     .select({ action: auditEvent.action })
     .from(auditEvent)
@@ -204,7 +206,9 @@ it("dos citas el mismo día: sin indicar cuál, la atención se une a la que lle
   await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, later.id, true))
   const opened = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Control" }))
   expect(opened.appointmentId).toBe(later.id)
-  expect((await f.run((tx) => getAppointment(tx, "org_a", near.id))).visit).toBe("por_confirmar")
+  expect((await f.run((tx) => getAppointment(tx, "org_a", near.id))).visit).toBe(
+    Date.parse(near.endsAt) <= Date.now() ? "sin_cerrar" : "por_confirmar",
+  )
 })
 
 it("«Espera en sala» mide de la llegada al inicio de la atención, por profesional, y sin llegadas dice que no hay datos", async () => {

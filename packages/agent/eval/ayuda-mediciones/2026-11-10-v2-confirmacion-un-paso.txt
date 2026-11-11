@@ -1,0 +1,26 @@
+Ayuda · help.v1 · proveedor jev (jev-1.13.0)
+  guía odentia: 30 pantallas y 457 preguntas frecuentes → 489 opciones con «datos» y «ninguna», 72920 caracteres (≈ 18230 tokens a 4 car./token, sin tokenizador)
+  guía latidia: 30 pantallas y 455 preguntas frecuentes → 487 opciones con «datos» y «ninguna», 73009 caracteres (≈ 18252 tokens a 4 car./token, sin tokenizador)
+  guía vistia: 31 pantallas y 471 preguntas frecuentes → 504 opciones con «datos» y «ninguna», 75808 caracteres (≈ 18952 tokens a 4 car./token, sin tokenizador)
+  bancos: ciego 245 (10 repetidas de los de ajuste, fuera) · ronda 14 · cifras 38
+
+Por banco, con el umbral 0.9:
+  banco          n  seguro bien  seguro mal  (2.ª mal)  (pantalla bien)  duda c/correcta  duda sin  ninguna bien  ninguna mal  datos bien  datos mal  fallos
+  ciego        245           85           3          0                2               76        38            18            6           0          0       0
+  ronda         14            1           0          0                0                6         1             0            1           1          0       0
+  cifras        38            4           0          0                0                8         1             0            2           1          0       0
+  «seguro bien»: todo lo que mostró corresponde. «seguro mal» incluye (2.ª mal), la primera bien y la segunda no, y (pantalla bien), la pantalla correcta con otra respuesta.
+
+Confirmación con el umbral 0.9, en ronda + ciego + cifras (n = 297; nadie los usó para ajustar):
+  umbral     mostrado  cota inf.  sin respuesta  con respuesta  seguro y    «datos»  fallos  cumple
+             correcto       95 %    no responde       resuelve       mal bien dicho
+  mínimo       ≥ 95 %                    ≥ 95 %         ≥ 70 %                                p95 ≤ 2 s
+  0.90         96.8 %     90.9 %         98.6 %         80.7 %         3      5.7 %       0      sí
+
+Demora (297 llamadas, también las que fallaron): p50 267 ms · p95 315 ms (mínimo para salir ≤ 2000 ms; plazo de esta medición 5000 ms)
+  Tokens de entrada por pregunta: mínimo 12445 · habitual 12556 · máximo 13629; de salida, habitual 2416
+  Costo por pregunta: habitual USD 0.000527 · máximo USD 0.000572 · esta corrida USD 0.156988 (297 llamadas con precio, de 297)
+  1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.685100
+
+Seguro y se equivoca con el umbral 0.9 (3):
+  … y 3 en los bancos de confirmación: --ver-ciegos las muestra, y mirarlas para ajustar los gasta.

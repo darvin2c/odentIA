@@ -103,6 +103,6 @@ export async function moveOwnAppointment(
       ...(input.professionalUserId ? { professionalUserId: input.professionalUserId } : {}),
       ...(input.roomId ? { roomId: input.roomId } : {}),
     },
-    { notice: false },
+    { notice: false, requested: true },
   )
 }

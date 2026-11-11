@@ -21,6 +21,7 @@ import type { WaitingRow } from "./workspace-home.js"
 import {
   createWorkspaceNotification,
   getWorkspaceHome,
+  listOldUnclosed,
   listWorkspaceAudit,
   listWorkspaceNotifications,
   readAllWorkspaceNotifications,
@@ -30,6 +31,7 @@ import {
   countWorkspaceWaiting,
 } from "./workspace.js"
 import { insertTestPatients } from "./test-patient.js"
+import { markAppointmentCame, skipAppointmentRecord } from "./appointments.js"
 
 setupTestDb()
 const recipient = randomUUID()
@@ -755,11 +757,72 @@ it("«Te espera» pide cerrar las citas de días anteriores sin llegada ni atenc
   await ownerDb.insert(encounter).values({ organizationId: orgId, patientId: attending.patientId, professionalUserId: ana, appointmentId: attending.appointmentId })
 
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, { ...restricted, appointments: true }))
-  expect(rowsOf(home.waiting, "unclosed").map(row => row.patientName)).toEqual(["Confirmada sin cerrar", "Sin cerrar"])
+  // De la más reciente a la más antigua: lo de ayer no queda debajo de lo de hace meses.
+  expect(rowsOf(home.waiting, "unclosed").map(row => row.patientName)).toEqual(["Sin cerrar", "Confirmada sin cerrar"])
   // Quien solo ve sus citas (el odontólogo) recibe las suyas: si vino, le toca registrar la atención.
   const own = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, ana, { ...restricted, appointments: true, ownAppointments: true }))
   expect(rowsOf(own.waiting, "unclosed").map(row => row.professionalUserId)).toEqual([ana, ana])
   // Y no las de otro profesional.
   const other = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, { ...restricted, appointments: true, ownAppointments: true }))
   expect(rowsOf(other.waiting, "unclosed")).toEqual([])
+})
+
+it("«Te espera»: lo sin cerrar de hace más de un mes va junto en una fila; la llegada de otro día sin atención también está sin cerrar", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `sin-cerrar-viejo-${orgId.slice(0, 8)}`)
+  const ana = randomUUID()
+  await ownerDb.insert(user).values({ id: ana, name: "Dra. Ana Torres", email: `${ana}@sin-cerrar-viejo.test`, emailVerified: true })
+  const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
+  let slot = 0
+  const visit = async (name: string, daysAgo: number, extra: { arrived?: boolean } = {}) => {
+    const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) })
+    slot += 1
+    const startsAt = new Date(Date.now() - daysAgo * 86_400_000 - slot * 3_600_000)
+    const [row] = await ownerDb.insert(appointment).values({
+      organizationId: orgId, patientId: person!.id, professionalUserId: ana, status: "confirmada", serviceName: "Control",
+      branchId: centro!.id, roomId: room!.id, startsAt, endsAt: new Date(startsAt.getTime() + 30_000), durationMin: 1,
+      ...(extra.arrived ? { arrivedAt: startsAt, arrivedBy: ana } : {}),
+    }).returning({ id: appointment.id })
+    return row!.id
+  }
+  await visit("Ayer", 1)
+  await visit("Llegó y nadie la atendió", 3, { arrived: true })
+  await visit("Hace 40 días", 40)
+  await visit("Hace 90 días", 90)
+  const access = { ...restricted, appointments: true }
+  const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, access))
+  expect(rowsOf(home.waiting, "unclosed").map(row => [row.patientName, row.arrived])).toEqual([["Ayer", false], ["Llegó y nadie la atendió", true]])
+  const [old] = rowsOf(home.waiting, "unclosedOld")
+  expect(old).toMatchObject({ count: 2 })
+  // La lista para cerrarlas de una vez: de la más antigua a la más reciente, con la versión que cierra cada una.
+  const list = await withOrgContext(appDb, orgId, tx => listOldUnclosed(tx, orgId, recipient, access))
+  expect(list.map(row => row.patientName)).toEqual(["Hace 90 días", "Hace 40 días"])
+  expect(list.every(row => typeof row.version === "number")).toBe(true)
+})
+
+it("«Te espera»: la cita propia cerrada con «Vino» le pide a su profesional registrarla, hasta que la registra o dice que no hace falta", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `vino-${orgId.slice(0, 8)}`)
+  const ana = randomUUID()
+  await ownerDb.insert(user).values({ id: ana, name: "Dra. Ana Torres", email: `${ana}@vino.test`, emailVerified: true })
+  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: ana, role: "clinician", createdAt: new Date() })
+  const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
+  const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Rosa Quispe", patientNumber: Math.floor(Math.random() * 1_000_000) })
+  const startsAt = new Date(Date.now() - 2 * 86_400_000)
+  const [row] = await ownerDb.insert(appointment).values({
+    organizationId: orgId, patientId: person!.id, professionalUserId: ana, status: "confirmada", serviceName: "Control",
+    branchId: centro!.id, roomId: room!.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
+  }).returning({ id: appointment.id })
+  const came = await withOrgContext(appDb, orgId, tx => markAppointmentCame(tx, orgId, recipient, row!.id))
+  // Sin hora de llegada inventada: no se sabe a qué hora llegó.
+  expect(came).toMatchObject({ status: "atendida", arrivedAt: null })
+  const access = { ...restricted, appointments: true, ownAppointments: true, attends: true }
+  const rows = async () => rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, ana, access))).waiting, "cameUnrecorded")
+  expect(await rows()).toMatchObject([{ id: row!.id, patientName: "Rosa Quispe" }])
+  // A otro profesional no le sale.
+  expect(rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, access))).waiting, "cameUnrecorded")).toEqual([])
+  await withOrgContext(appDb, orgId, tx => skipAppointmentRecord(tx, orgId, ana, row!.id))
+  expect(await rows()).toEqual([])
 })

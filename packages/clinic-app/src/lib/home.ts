@@ -120,7 +120,8 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         // Lo que preguntó dice más que el motivo; el motivo lo escribe el servidor y nombra a «Sofi».
         ask: row.quote ?? (row.contactName ? withReceptionName(row.reason, context.receptionName) : null),
         // «Te lo pasó Sofi hace 25 min · WhatsApp»; la urgencia ya la dice el grupo.
-        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, row.channel ? channelLabel(row.channel) : null, row.assigneeName ? `Con ${row.assigneeName}` : null]),
+        // La duda clínica se dice primero: es de quien atiende y no se confunde con una consulta de recepción.
+        detail: joined([row.topicKind === "clinico" ? "Duda clínica" : null, `${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, row.channel ? channelLabel(row.channel) : null, row.assigneeName ? `Con ${row.assigneeName}` : null]),
         action: !row.conversationId ? "Ver la tarea" : row.canReply ? "Responder" : row.windowClosed && !row.assigneeName ? "Escribirle" : row.assigneeName ? "" : "Ver el caso",
       }
     case "person":
@@ -154,6 +155,21 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         action: "¿Vino?",
       }
     }
+    case "unclosedOld":
+      // Lo viejo no tapa lo reciente: una fila para cerrarlo de una vez.
+      return {
+        title: plural(row.count, "cita de hace más de un mes sin cerrar", "citas de hace más de un mes sin cerrar"),
+        detail: `La más antigua, de ${appointmentWhen(row.oldestAt, context)}`,
+        action: "Revisar",
+      }
+    case "cameUnrecorded":
+      // La visita ocurrió y su historia está vacía: la registra quien la atendió.
+      return {
+        title: row.patientName,
+        ask: `Su cita de ${daysAgo(row.startsAt, context)} a las ${formatClock(row.startsAt, context.locale, context.timezone)} quedó atendida sin registrar`,
+        detail: joined([row.markedByName ? `«Vino» lo marcó ${row.markedByName}` : null, row.serviceName]),
+        action: "Registrar la atención",
+      }
     case "acceptedUnbooked":
       // El mismo número de Pacientes › «Por agendar», adonde lleva: ahí cada fila tiene «Reservar cita».
       return {
@@ -387,10 +403,13 @@ export function alsoLine(also: readonly WaitingRow[]): string | null {
 export function alsoWords(row: WaitingRow): string {
   switch (row.kind) {
     case "case":
+      return row.topicKind === "clinico" ? "una duda clínica" : "una pregunta"
     case "person":
       return "una pregunta"
     case "unclosed":
       return "su cita sin cerrar"
+    case "cameUnrecorded":
+      return "su atención sin registrar"
     case "unconfirmed":
       return "su cita sin confirmar"
     case "staleEncounter":
@@ -422,7 +441,8 @@ export function replyName(row: WaitingRow): string | null {
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "unclosed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry" || row.kind === "dataRequest") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "unclosed" || row.kind === "cameUnrecorded" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry" || row.kind === "dataRequest") return `${row.kind}:${row.id}`
+  if (row.kind === "unclosedOld") return "unclosedOld"
   if (row.kind === "registrationDone") return `registrationDone:${row.appointmentId}`
   if (row.kind === "person") return `person:${row.conversationId}`
   if (row.kind === "advice") return `advice:${row.key}`
@@ -439,6 +459,7 @@ export function agendaSummary(summary: WorkspaceTodaySummary): string {
     `${summary.waiting} en sala`,
     summary.attending > 0 ? `${summary.attending} en atención` : null,
     plural(summary.attended, "atendida", "atendidas"),
+    summary.unclosed > 0 ? `${summary.unclosed} sin cerrar` : null,
     `${summary.upcoming} por venir`,
   ])
 }
@@ -448,7 +469,9 @@ export function patientsSummary(summary: WorkspaceTodaySummary): string {
   return joined([
     plural(summary.total, "paciente", "pacientes"),
     summary.waiting > 0 ? `${summary.waiting} en sala` : null,
+    summary.attending > 0 ? `${summary.attending} en atención` : null,
     plural(summary.attended, "atendido", "atendidos"),
+    summary.unclosed > 0 ? `${summary.unclosed} sin cerrar` : null,
     `${summary.upcoming} por venir`,
   ])
 }

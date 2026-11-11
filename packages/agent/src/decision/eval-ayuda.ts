@@ -55,9 +55,9 @@ import {
 } from "./help-measure.js"
 import { createDecisionModel, type DecisionModel, type DecisionResult } from "./index.js"
 
-type Product = "odentia" | "latidia"
+type Product = "odentia" | "latidia" | "vistia"
 
-const PRODUCTS = { odentia: "dental", latidia: "medical" } as const
+const PRODUCTS = { odentia: "dental", latidia: "medical", vistia: "optical" } as const
 /** Ya se usaron para ajustar el buscador: con ellos se elige el umbral. */
 const TUNE = ["desarrollo", "control", "final"]
 /** Nadie los usó para ajustar: confirman el umbral elegido, una vez. */

@@ -12,6 +12,7 @@ import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
   clinicalFollowUpItem,
+  encounter,
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -119,8 +120,15 @@ export async function createFinishControls(
   if (controls.length === 0) return
   const { timezone } = await findOrgLocale(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
+  // Desde el día de la visita (la de una cita pasada que se registra después), nunca antes de mañana.
+  const [visit] = encounterId
+    ? await tx.select({ startedAt: encounter.startedAt }).from(encounter).where(and(eq(encounter.organizationId, orgId), eq(encounter.id, encounterId))).limit(1)
+    : []
+  const from = visit && dayKeyIn(visit.startedAt, timezone) < today ? dayKeyIn(visit.startedAt, timezone) : today
+  const tomorrow = addDays(today, 1)
   for (const control of controls) {
-    const day = addDays(today, control.afterDays)
+    const planned = addDays(from, control.afterDays)
+    const day = planned < tomorrow ? tomorrow : planned
     const dueAt = zonedTimeToUtc(day, CONTROL_MINUTES, timezone)
     // Ya lo tiene por este tratamiento (se terminó dos veces): nada.
     const [mine] = await tx

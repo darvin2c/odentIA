@@ -40,6 +40,7 @@ function iconOf(row: WaitingRow, title: string): ReactNode {
     case "staleEncounter":
     case "unconfirmed":
     case "unclosed":
+    case "cameUnrecorded":
     case "unsentBudget":
     case "registrationDone":
     case "possibleDuplicate":
@@ -60,6 +61,8 @@ function iconOf(row: WaitingRow, title: string): ReactNode {
       return <TypeIcon icon={FileText} />
     case "overdueControls":
       return <TypeIcon icon={CalendarClock} />
+    case "unclosedOld":
+      return <TypeIcon icon={CalendarX2} />
     case "stillOpen":
       return <TypeIcon icon={MessagesSquare} />
     case "advice":
