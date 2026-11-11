@@ -209,13 +209,11 @@ export function AbsenceForm({
     queryKey: ["agenda", "ausencia", branchId, who, values.roomId, startsAt, endsAt],
     enabled: valid,
     queryFn: () => {
-      const params = new URLSearchParams({
-        branchId,
-        from: startsAt,
-        to: endsAt,
-        status: "programada,confirmada",
-      })
+      const params = new URLSearchParams({ from: startsAt, to: endsAt, status: "programada,confirmada" })
+      // La ausencia de un profesional vale en todas las sedes: avisa de sus citas en cualquiera.
+      // Un feriado o cierre es de esta sede.
       if (who) params.set("professionals", who)
+      else params.set("branchId", branchId)
       if (values.roomId) params.set("rooms", values.roomId)
       return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
     },
