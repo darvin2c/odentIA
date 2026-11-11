@@ -130,9 +130,10 @@ describe("ScheduleAgendaList", () => {
       />,
     )
     // Solo lo que está por confirmar pide confirmación.
-    expect(screen.getAllByRole("button", { name: "Confirmar" })).toHaveLength(5)
+    // Cada botón dice de quién es: «Confirmar: Lucía Fernández».
+    expect(screen.getAllByRole("button", { name: /^Confirmar: / })).toHaveLength(5)
     const lucia = screen.getByText("Lucía Fernández").closest("li") as HTMLElement
-    fireEvent.click(within(lucia).getByRole("button", { name: "Confirmar" }))
+    fireEvent.click(within(lucia).getByRole("button", { name: "Confirmar: Lucía Fernández" }))
     expect(confirm).toHaveBeenCalledWith("Lucía Fernández")
     expect(onOpen).not.toHaveBeenCalled()
     expect(within(lucia).getByRole("button", { name: "Más acciones para Lucía Fernández" })).toBeTruthy()
