@@ -42,6 +42,7 @@ import {
   WAITING_LIMITS,
   type WaitingAcceptedUnbooked,
   type WaitingBudgets,
+  type WaitingCameUnrecorded,
   type WaitingCase,
   type WaitingOverdueControls,
   type WaitingPerson,
@@ -380,6 +381,8 @@ export interface WorkspaceTodaySummary {
   attended: number
   upcoming: number
   unconfirmed: number
+  /** Ya terminó su hora y nadie dijo si vino: con estas, las cifras suman `total`. */
+  unclosed: number
 }
 
 /**
@@ -432,13 +435,13 @@ async function hasOwnAppointmentsToday(tx: Db, orgId: string, userId: string, ti
 
 /** Orden de lectura: la sala (por llegada), lo que está en atención, lo que falta y, al final, lo terminado. */
 const VISIT_ORDER: Record<AppointmentVisit, number> = {
-  llego: 0, en_atencion: 1, por_confirmar: 2, confirmada: 2, atendida: 3, no_vino: 4, cancelada: 5,
+  llego: 0, en_atencion: 1, por_confirmar: 2, confirmada: 2, sin_cerrar: 2, atendida: 3, no_vino: 4, cancelada: 5,
 }
 
 async function workspaceToday(
   tx: Db, orgId: string, userId: string, own: boolean, branch: { id: string; name: string; timezone: string | null } | null, timezone: string,
 ): Promise<WorkspaceToday> {
-  const empty: WorkspaceTodaySummary = { total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0 }
+  const empty: WorkspaceTodaySummary = { total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0, unclosed: 0 }
   if (!own && !branch) return { scope: "branch", branch: null, timezone, summary: empty, appointments: [] }
   // El día se parte con la zona de la sede, como en la Agenda; las citas propias, con la de la clínica.
   const zone = own ? timezone : (branch?.timezone ?? timezone)
@@ -472,7 +475,7 @@ async function workspaceToday(
       and ${own ? sql`a.professional_user_id=${userId}` : sql`a.branch_id=${branch?.id ?? null}`}
     order by a.starts_at, a.id limit 300`)
   const items = rows.map(({ encounterId, encounterStatus, encounterStartedAt, encounterProfessionalUserId, encounterProfessionalName, ...row }) => {
-    const visit = appointmentVisit({ status: row.status, arrivedAt: row.arrivedAt, encounterStatus })
+    const visit = appointmentVisit({ status: row.status, arrivedAt: row.arrivedAt, encounterStatus, endsAt: row.endsAt })
     const encounter = encounterId && encounterStatus === "borrador" && encounterStartedAt && encounterProfessionalUserId
       ? { id: encounterId, startedAt: encounterStartedAt, professionalUserId: encounterProfessionalUserId, professionalName: encounterProfessionalName ?? "" }
       : null
@@ -485,9 +488,10 @@ async function workspaceToday(
     waiting: count("llego"),
     attending: count("en_atencion"),
     attended: count("atendida"),
-    // Por venir: lo que aún no terminó. A las 23:00 lo de la mañana ya no está «por venir».
-    upcoming: items.filter((item) => (item.visit === "por_confirmar" || item.visit === "confirmada") && item.open).length,
+    // Por venir: lo que aún no terminó; lo que terminó sin llegada es «sin cerrar».
+    upcoming: count("por_confirmar", "confirmada"),
     unconfirmed: count("por_confirmar"),
+    unclosed: count("sin_cerrar"),
   }
   const pending = items.filter(item => item.visit === "por_confirmar" || item.visit === "confirmada")
   const nextId = pending.find(item => item.open)?.id ?? null
@@ -500,7 +504,8 @@ async function workspaceToday(
   // llegar tarde o marcarse «No vino») y, al final, quien no vino (para reagendar).
   const waitingRank = (item: (typeof sorted)[number]) =>
     item.visit === "llego" || item.visit === "en_atencion" ? 0
-      : item.visit === "por_confirmar" || item.visit === "confirmada" ? (item.open ? 1 : 2)
+      : item.visit === "por_confirmar" || item.visit === "confirmada" ? 1
+        : item.visit === "sin_cerrar" ? 2
         : item.visit === "no_vino" ? 3 : 4
   const shown = own
     ? sorted
@@ -523,7 +528,7 @@ async function workspaceToday(
 
 /** La cita de hoy para lo que ya se terminó lo dice en Inicio, con la regla de la Agenda. */
 async function withDoneFor(tx: Db, orgId: string, rows: WorkspaceAppointment[]): Promise<WorkspaceAppointment[]> {
-  const live = rows.filter((row) => row.visit === "por_confirmar" || row.visit === "confirmada")
+  const live = rows.filter((row) => row.visit === "por_confirmar" || row.visit === "confirmada" || row.visit === "sin_cerrar")
   if (live.length === 0) return rows
   const { appointmentsDoneForOf } = await import("./appointments.js")
   const done = await appointmentsDoneForOf(tx, orgId, live.map((row) => ({ id: row.id, serviceId: null })))
@@ -791,29 +796,104 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
   return [...rows]
 }
 
+/** Hasta cuándo una cita sin cerrar va en su propia fila: lo de antes se junta en una (decisión 3 del 10 nov). */
+export const UNCLOSED_RECENT_DAYS = 30
+
 /**
- * Citas de un día que ya terminó (en la zona de su sede o, sin ella, la de la clínica) que siguen en pie sin
- * llegada: nadie dijo si vinieron. De la más antigua a la más reciente.
+ * Las citas de días que ya terminaron (en la zona de su sede o, sin ella, la de
+ * la clínica) que siguen en pie sin atención: nadie dijo si vinieron, o marcó
+ * «Llegó» y nadie registró qué se hizo. `older`: las de antes de
+ * `UNCLOSED_RECENT_DAYS`, sin fila propia.
  */
-async function waitingUnclosed(tx: Db, orgId: string, timezone: string, professionalUserId: string | null): Promise<{ items: WaitingUnclosed[]; total: number; nextAt: string | null }> {
+function unclosedSql(orgId: string, timezone: string, professionalUserId: string | null): SQL {
+  return sql`a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada')
+      ${professionalUserId ? sql`and a.professional_user_id = ${professionalUserId}` : sql``}
+      and (a.starts_at at time zone coalesce(b.timezone, ${timezone}))::date < (now() at time zone coalesce(b.timezone, ${timezone}))::date
+      -- Con su atención empezada no está sin cerrar: está en atención (y su borrador ya sale aparte).
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')`
+}
+
+/** Lo sin cerrar del último mes: de la más reciente a la más antigua, para que lo de ayer no quede debajo de lo de hace meses. */
+async function waitingUnclosed(
+  tx: Db, orgId: string, timezone: string, professionalUserId: string | null,
+): Promise<{ items: WaitingUnclosed[]; total: number; nextAt: string | null; older: { count: number; oldestAt: string } | null }> {
+  const recent = sql`a.starts_at >= now() - make_interval(days => ${UNCLOSED_RECENT_DAYS})`
   const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] } & { total: number }>(sql`
     select a.id, a.patient_id as "patientId", p.person_id as "personId", pp.display_name as "patientName", ${iso(sql`a.starts_at`)} as "startsAt",
       a.professional_user_id as "professionalUserId", u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
+      a.arrived_at is not null as arrived, a.version,
       count(*) over ()::int as total
     from appointment a
     join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
     join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
     join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join "user" u on u.id = a.professional_user_id
-    where a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada') and a.arrived_at is null
-      ${professionalUserId ? sql`and a.professional_user_id = ${professionalUserId}` : sql``}
-      and (a.starts_at at time zone coalesce(b.timezone, ${timezone}))::date < (now() at time zone coalesce(b.timezone, ${timezone}))::date
-      -- Con su atención empezada no está sin cerrar: está en atención (y su borrador ya sale aparte).
-      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
-    order by a.starts_at, a.id limit ${WAITING_LIMITS.unclosed + 1}`)
+    where ${unclosedSql(orgId, timezone, professionalUserId)} and ${recent}
+    order by a.starts_at desc, a.id limit ${WAITING_LIMITS.unclosed + 1}`)
   const items = rows.map(({ total: _total, ...row }) => row)
+  const [older] = await tx.execute<{ count: number; oldestAt: string | null }>(sql`
+    select count(*)::int as count, min(${iso(sql`a.starts_at`)}) as "oldestAt"
+    from appointment a join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
+    where ${unclosedSql(orgId, timezone, professionalUserId)} and not (${recent})`)
   // La primera que no cabe: «N más» lleva a su día en la Agenda, donde se cierra.
-  return { items: items.slice(0, WAITING_LIMITS.unclosed), total: rows[0]?.total ?? 0, nextAt: items[WAITING_LIMITS.unclosed]?.startsAt ?? null }
+  return {
+    items: items.slice(0, WAITING_LIMITS.unclosed),
+    total: rows[0]?.total ?? 0,
+    nextAt: items[WAITING_LIMITS.unclosed]?.startsAt ?? null,
+    older: older && older.count > 0 && older.oldestAt ? { count: older.count, oldestAt: older.oldestAt } : null,
+  }
+}
+
+/**
+ * Las citas sin cerrar de hace más de un mes, para revisarlas de una vez desde
+ * Inicio: de la más antigua a la más reciente, con la versión que cierra cada una.
+ */
+export async function listOldUnclosed(
+  tx: Db, orgId: string, userId: string, access: WorkspaceAccess, limit = 200,
+): Promise<WaitingUnclosed[]> {
+  if (!access.appointments) return []
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] }>(sql`
+    select a.id, a.patient_id as "patientId", p.person_id as "personId", pp.display_name as "patientName", ${iso(sql`a.starts_at`)} as "startsAt",
+      a.professional_user_id as "professionalUserId", u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
+      a.arrived_at is not null as arrived, a.version
+    from appointment a
+    join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
+    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    left join "user" u on u.id = a.professional_user_id
+    where ${unclosedSql(orgId, timezone, access.ownAppointments ? userId : null)}
+      and a.starts_at < now() - make_interval(days => ${UNCLOSED_RECENT_DAYS})
+    order by a.starts_at, a.id limit ${limit}`)
+  return [...rows]
+}
+
+/**
+ * Las citas propias que recepción cerró con «Vino» y nadie registró: la visita
+ * ocurrió y su historia está vacía. Solo el último mes; «No hace falta» la quita
+ * (`appointment.record_skipped`) y registrar su atención también.
+ */
+async function waitingCameUnrecorded(tx: Db, orgId: string, userId: string): Promise<WaitingCameUnrecorded[]> {
+  const rows = await tx.execute<{ [K in keyof WaitingCameUnrecorded]: WaitingCameUnrecorded[K] }>(sql`
+    select a.id, a.patient_id as "patientId", p.person_id as "personId", pp.display_name as "patientName",
+      ${iso(sql`a.starts_at`)} as "startsAt", a.service_name as "serviceName",
+      ${iso(sql`came.created_at`)} as "markedAt", mu.name as "markedByName", a.version
+    from appointment a
+    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    cross join lateral (
+      select e.created_at, e.actor_user_id, e.metadata from audit_event e
+      where e.organization_id = a.organization_id and e.entity = 'appointment' and e.entity_id = a.id::text
+        and e.action = 'appointment.status_atendida'
+      order by e.created_at desc limit 1) came
+    left join "user" mu on mu.id = came.actor_user_id
+    where a.organization_id = ${orgId} and not a.is_test and a.status = 'atendida' and a.professional_user_id = ${userId}
+      and came.metadata->>'by' = 'vino' and came.created_at > now() - make_interval(days => ${UNCLOSED_RECENT_DAYS})
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
+      and not exists (select 1 from audit_event s where s.organization_id = a.organization_id and s.entity = 'appointment'
+        and s.entity_id = a.id::text and s.action = 'appointment.record_skipped' and s.created_at >= came.created_at)
+    order by a.starts_at desc, a.id limit ${WAITING_LIMITS.unclosed}`)
+  return [...rows]
 }
 
 /**
@@ -1113,6 +1193,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       : { cases: [] }),
     // Ningún borrador queda abandonado: la atención de otro día le sale a quien la lleva.
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
+    // Ni una visita sin su historia: lo que se cerró con «Vino» le sale a su profesional.
+    cameUnrecorded: access.attends ? await waitingCameUnrecorded(tx, orgId, userId) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
     // Y cierra lo que ya pasó: ¿vino o no vino? Quien atiende, las suyas: si vino, le toca registrar la atención.

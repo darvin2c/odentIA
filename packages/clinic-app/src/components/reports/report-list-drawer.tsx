@@ -79,7 +79,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     showNext: true,
   },
   unmarked: {
-    title: "Sin marcar",
+    title: "Sin cerrar",
     noun: { one: "cita", many: "citas" },
     how: (period) => `Citas de ${period} cuya hora ya pasó y siguen por confirmar o confirmadas. En la Agenda se cierran con «Registrar la atención» o «No vino».`,
     where: { to: "/agenda", label: "Abrir la Agenda" },

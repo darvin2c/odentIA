@@ -49,6 +49,7 @@ export type AppointmentStatus =
 export type AppointmentVisit =
   | "por_confirmar"
   | "confirmada"
+  | "sin_cerrar"
   | "llego"
   | "en_atencion"
   | "atendida"
@@ -151,6 +152,7 @@ export function appointmentSessionsText(
 const VISIT_STATE: Record<AppointmentVisit, ScheduleState> = {
   por_confirmar: "programada",
   confirmada: "confirmada",
+  sin_cerrar: "sin_cerrar",
   llego: "llego",
   en_atencion: "en_atencion",
   atendida: "atendida",
@@ -164,10 +166,12 @@ export function visitName(visit: AppointmentVisit): string {
 }
 
 /**
- * Su hora pasó sin llegada ni atención: la Agenda la pone en «Ya pasaron · sin
- * cerrar» y pide «Registrar la atención» o «No vino». Nadie la marca sola.
+ * Su hora pasó sin llegada ni atención: «Sin cerrar». Lo dice el servidor
+ * (`sin_cerrar`); `now` cubre la cita que terminó mientras la pantalla seguía
+ * abierta. Nadie la marca sola.
  */
 export function isUnclosed(item: { visit: AppointmentVisit; endsAt: string }, now: string): boolean {
+  if (item.visit === "sin_cerrar") return true
   return (item.visit === "por_confirmar" || item.visit === "confirmada") && Date.parse(item.endsAt) <= Date.parse(now)
 }
 
@@ -177,9 +181,9 @@ export function visitState(visit: AppointmentVisit): ScheduleState {
   return VISIT_STATE[visit]
 }
 
-/** Llegó o está en atención: lo que la rejilla y la lista dicen por encima del estado guardado. */
+/** Llegó, está en atención o quedó sin cerrar: lo que la rejilla y la lista dicen por encima del estado guardado. */
 export function visitStage(visit: AppointmentVisit): ScheduleStage | undefined {
-  return visit === "llego" || visit === "en_atencion" ? visit : undefined
+  return visit === "llego" || visit === "en_atencion" || visit === "sin_cerrar" ? visit : undefined
 }
 
 /** «la Dra. Ana», «el Dr. Luis» o «Ana»: cómo se nombra en una frase a quien atiende. */
@@ -344,16 +348,20 @@ const ARRIVAL_WINDOW_MS = 60 * 60_000
 
 /**
  * El paso de una cita que aún no llega, con la misma regla en la lista de la
- * Agenda, su cajón e Inicio: pasada su hora se cierra («Registrar la atención»
- * o «No vino»); hoy, cerca de la hora, «Llegó»; y antes, confirmarla.
+ * Agenda, su cajón e Inicio:
+ * - hoy, pasada su hora (`tarde`): quien llega tarde es lo común, así que
+ *   «Llegó» primero, y después «Registrar la atención» o «No vino»;
+ * - otro día, pasada su hora (`cerrar`): «¿Vino?», con «Vino», «Registrar la
+ *   atención» o «No vino»;
+ * - hoy, cerca de la hora, «Llegó»; y antes, confirmarla.
  */
 export function stepBeforeArrival(
   item: { visit: AppointmentVisit; startsAt: string; endsAt: string },
   now: string,
   isToday: boolean,
-): "cerrar" | "llego" | "confirmar" | null {
-  if (item.visit !== "por_confirmar" && item.visit !== "confirmada") return null
-  if (Date.parse(item.endsAt) <= Date.parse(now)) return "cerrar"
+): "tarde" | "cerrar" | "llego" | "confirmar" | null {
+  if (item.visit !== "por_confirmar" && item.visit !== "confirmada" && item.visit !== "sin_cerrar") return null
+  if (item.visit === "sin_cerrar" || Date.parse(item.endsAt) <= Date.parse(now)) return isToday ? "tarde" : "cerrar"
   const soon = isToday && Date.parse(item.startsAt) - Date.parse(now) <= ARRIVAL_WINDOW_MS
   if (item.visit === "por_confirmar" && !soon) return "confirmar"
   return isToday ? "llego" : null

@@ -141,6 +141,24 @@ export type WaitingRow =
       professionalName: string | null
       serviceName: string | null
       branchName: string
+      /** Marcó «Llegó» ese día y nadie registró su atención. */
+      arrived?: boolean
+      version?: number
+    }
+  /** Las citas sin cerrar de hace más de un mes, juntas: se revisan de una vez. */
+  | { kind: "unclosedOld"; count: number; oldestAt: string }
+  /** Recepción la cerró con «Vino» y su profesional (quien mira) no registró lo que se hizo. */
+  | {
+      kind: "cameUnrecorded"
+      id: string
+      patientId: string
+      personId?: string | null
+      patientName: string
+      startsAt: string
+      serviceName: string | null
+      markedAt: string
+      markedByName: string | null
+      version: number
     }
   /** Quienes tienen algo aceptado sin una cita que lo lleve: lleva a Pacientes › «Por agendar». */
   | { kind: "acceptedUnbooked"; patients: number; cents: number; currency: string }
@@ -276,6 +294,8 @@ export interface WorkspaceTodaySummary {
   attended: number
   upcoming: number
   unconfirmed: number
+  /** Su hora terminó y nadie dijo si vino: con esta, las cifras suman `total`. */
+  unclosed: number
 }
 export interface WorkspaceToday {
   scope: "branch" | "mine"

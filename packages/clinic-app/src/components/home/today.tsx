@@ -104,11 +104,10 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
     }
     if (item.visit === "no_vino") return canWrite ? { label: "Reagendar", primary: false, run: () => rebook(patient) } : null
     const step = stepBeforeArrival(item, now, true)
-    if (step === "cerrar") {
-      if (canAttend) return { label: "Registrar la atención", primary: true, run: () => attendItem(item) }
-      return canWrite
-        ? { label: "No vino", primary: false, run: () => visitStatus.mutate({ id: item.id, status: "no_asistio" }) }
-        : null
+    // Ya pasó su hora: quien llega tarde es lo común; «Llegó» primero (el cajón trae «No vino»).
+    if (step === "tarde" || step === "cerrar") {
+      if (canWrite) return { label: "Llegó", primary: true, run: () => arrival.mutate({ id: item.id, arrived: true, patient }) }
+      return canAttend ? { label: "Registrar la atención", primary: true, run: () => attendItem(item) } : null
     }
     if (!canWrite) return null
     // Para lo que ya se terminó no se confirma: se abre la cita para usarla o liberarla (M1).
@@ -196,7 +195,7 @@ function PatientRow({
   action: ReactNode
 }) {
   const what = detailOf([item.doneFor ? `era para ${item.doneFor}, que ya se terminó` : item.serviceName, multiBranch && item.branchName])
-  const later = item.visit === "por_confirmar" || item.visit === "confirmada"
+  const later = item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "sin_cerrar"
   return (
     <li className="flex items-center gap-2 py-0.5">
       <Link to="/patients/$patientId" params={{ patientId: item.patientId }} className={cn(buttonVariants({ variant: "ghost" }), ROW)}>
@@ -235,10 +234,44 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
   const mine = { who: myUserId }
   const waiting = today.appointments.filter((item) => item.visit === "llego")
   const attending = today.appointments.filter((item) => item.visit === "en_atencion")
-  // Lo que aún no llega: «Más tarde» si su hora no terminó; si ya terminó, aparte (aún puede llegar tarde).
-  const notYet = today.appointments.filter((item) => item.visit === "por_confirmar" || item.visit === "confirmada")
-  const later = notYet.filter((item) => Date.parse(item.endsAt) > Date.parse(now))
-  const missed = notYet.filter((item) => Date.parse(item.endsAt) <= Date.parse(now))
+  // Lo que aún no llega: «Más tarde» si su hora no terminó; si ya terminó, «Sin cerrar» (aún puede llegar tarde).
+  const notYet = today.appointments.filter(
+    (item) => item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "sin_cerrar",
+  )
+  const later = notYet.filter((item) => item.visit !== "sin_cerrar" && Date.parse(item.endsAt) > Date.parse(now))
+  const missed = notYet.filter((item) => !later.includes(item))
+  const canWrite = usePermission("appointments.write")
+  const arrival = useAppointmentArrival({ onRebook: (patient) => openBookingAnywhere({ patient, lockedPatient: true }) })
+  /** Su paciente llegó tarde: «Llegó» lo pasa a la sala; o registra la atención si ya la atendió. */
+  const missedActions = (item: WorkspaceAppointment) => (
+    <span className="flex shrink-0 gap-1.5">
+      {canWrite ? (
+        <SubmitButton
+          size="sm"
+          className="min-h-11 shrink-0 sm:min-h-8"
+          pending={arrival.isPending && arrival.variables?.id === item.id}
+          aria-label={`Llegó: ${item.patientName}`}
+          onClick={() => arrival.mutate({ id: item.id, arrived: true, patient: { id: item.patientId, name: item.patientName } })}
+        >
+          Llegó
+        </SubmitButton>
+      ) : null}
+      {canAttend ? (
+        <SubmitButton
+          size="sm"
+          variant="outline"
+          className="min-h-11 shrink-0 sm:min-h-8"
+          pending={attend.isPending && attend.variables?.appointment.id === item.id}
+          aria-label={`Registrar la atención: ${item.patientName}`}
+          onClick={() =>
+            attend.mutate({ patientId: item.patientId, appointment: { id: item.id, professionalUserId: item.professionalUserId, professionalName: item.professionalName } })
+          }
+        >
+          Registrar la atención
+        </SubmitButton>
+      ) : null}
+    </span>
+  )
   const attended = today.summary.attended
   const attendButton = (item: WorkspaceAppointment) =>
     canAttend ? (
@@ -295,7 +328,7 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
           )}
           {/* Si nadie espera ni se está atendiendo, la siguiente se atiende desde aquí: «Atender» marca la llegada. */}
           {group("Más tarde", later, (item, index) => (index === 0 && waiting.length === 0 && attending.length === 0 ? attendButton(item) : null))}
-          {group("Pasó su hora sin llegar", missed, () => null)}
+          {group("Sin cerrar", missed, missedActions)}
           {attended > 0 ? (
             <p className="text-[13px] text-muted-foreground">
               {attended === 1 ? "1 paciente atendido hoy" : `${attended} pacientes atendidos hoy`}

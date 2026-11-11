@@ -642,7 +642,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     tab: "agenda",
     better: "up",
     groups: ["mes", "sede", "profesional"],
-    values: async (ctx, spans, branchId) => (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => count(item.attended)),
+    values: async (ctx, spans, branchId) => (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now, timezone: ctx.scope.timezone }, spans)).map((item) => count(item.attended)),
     breakdown: (ctx, _group, branchId) => byProfessional(ctx, branchId, (row) => count(row.attended)),
   },
   {
@@ -659,7 +659,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     groups: ["mes", "sede", "profesional"],
     list: { key: "no_show", noun: APPOINTMENTS, feminine: true, count: (total) => total.part ?? 0, question: "¿Quiénes no vinieron?" },
     values: async (ctx, spans, branchId) =>
-      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => rateValue(item.noShow, markedOf(item))),
+      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now, timezone: ctx.scope.timezone }, spans)).map((item) => rateValue(item.noShow, markedOf(item))),
     breakdown: (ctx, _group, branchId) => byProfessional(ctx, branchId, (row) => rateValue(row.noShow, markedOf(row))),
   },
   {
@@ -675,7 +675,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     groups: ["mes", "sede", "profesional"],
     list: { key: "cancelled", noun: APPOINTMENTS, feminine: true, count: (total) => total.part ?? 0, question: "¿Cuáles se cancelaron?" },
     values: async (ctx, spans, branchId) =>
-      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => rateValue(item.cancelled, markedOf(item))),
+      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now, timezone: ctx.scope.timezone }, spans)).map((item) => rateValue(item.cancelled, markedOf(item))),
     breakdown: (ctx, _group, branchId) => byProfessional(ctx, branchId, (row) => rateValue(row.cancelled, markedOf(row))),
   },
   {

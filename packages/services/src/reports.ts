@@ -33,13 +33,24 @@ export type AppointmentTotals = {
   unmarked: number
 }
 
-/** Una cita cuenta si ya tiene desenlace o si su hora pasó; la que aún no ocurre no es de ningún grupo. */
-function settledAppointment(now: Date): SQL {
-  return sql`(a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))`
+/**
+ * Sin cerrar, la misma regla que Inicio y la Agenda (`appointmentVisit`): en pie,
+ * su hora terminó y sin atención; sin llegada o con una llegada de otro día (quien
+ * está hoy en la sala o en atención no es «sin marcar»).
+ */
+function unclosedAppointment(now: Date, timezone: string): SQL {
+  return sql`(a.status in ('programada','confirmada') and a.ends_at < ${at(now)}
+    and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
+    and (a.arrived_at is null or (a.starts_at at time zone ${timezone})::date < (${at(now)} at time zone ${timezone})::date))`
+}
+
+/** Una cita cuenta si ya tiene desenlace o si quedó sin cerrar; la que aún no ocurre o está en curso no es de ningún grupo. */
+function settledAppointment(now: Date, timezone: string): SQL {
+  return sql`(a.status in ('atendida','no_asistio','cancelada') or ${unclosedAppointment(now, timezone)})`
 }
 
 /** Las citas de cada tramo por grupo, en una sola consulta (`spansSql`). */
-export async function appointmentTotalsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch" | "now">, spans: Span[]): Promise<AppointmentTotals[]> {
+export async function appointmentTotalsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch" | "now" | "timezone">, spans: Span[]): Promise<AppointmentTotals[]> {
   const rows = await tx.execute<{ idx: number } & Omit<AppointmentTotals, "total">>(sql`
     select b.idx, count(*) filter (where a.status='atendida')::int as attended,
       count(*) filter (where a.status='no_asistio')::int as "noShow",
@@ -47,7 +58,7 @@ export async function appointmentTotalsMany(tx: Db, orgId: string, scope: Pick<R
       count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
     from ${spansSql(spans)}
     join appointment a on a.organization_id=${orgId} and a.starts_at >= b.start_at and a.starts_at < b.end_at
-      and not a.is_test and ${settledAppointment(scope.now)}
+      and not a.is_test and ${settledAppointment(scope.now, scope.timezone)}
       ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
     group by b.idx`)
   return bySpan(
@@ -311,7 +322,7 @@ export async function getReportList(
         ? sql`a.status='no_asistio'`
         : query.list === "cancelled"
           ? sql`a.status='cancelada'`
-          : sql`a.status in ('programada','confirmada') and a.ends_at < ${at(now)}`
+          : unclosedAppointment(now, scope.timezone)
     rows = [
       ...(await tx.execute<Row>(sql`
         select a.id, a.starts_at as at, a.patient_id as "patientId", pp.display_name as "personName",

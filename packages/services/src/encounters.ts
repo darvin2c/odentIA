@@ -750,7 +750,23 @@ export async function createEncounter(
       .for("update", { of: appointment })
       .limit(1)
     if (!row) throw notFound("Cita")
-    if (!["programada", "confirmada"].includes(row.status)) {
+    // «Vino» deja la cita atendida sin su atención: su profesional la registra después
+    // («Su cita del 9 nov quedó atendida sin registrar»). Solo si nadie la registró aún.
+    const cameWithoutRecord =
+      row.status === "atendida" &&
+      !(await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(
+          and(
+            eq(encounter.organizationId, orgId),
+            eq(encounter.appointmentId, row.id),
+            ne(encounter.status, "anulada"),
+          ),
+        )
+        .limit(1)
+        .then((found) => found.length > 0))
+    if (!["programada", "confirmada"].includes(row.status) && !cameWithoutRecord) {
       throw conflict(
         "APPOINTMENT_NOT_ATTENDABLE",
         "Solo se atiende una cita programada o confirmada",
@@ -840,6 +856,11 @@ export async function createEncounter(
         appointmentId: fromAppointment?.id ?? null,
         status: "borrador",
         reason,
+        // La atención de una cita de otro día es de ese día: la historia la fecha cuando fue,
+        // no cuando se escribió (la auditoría guarda cuándo se registró).
+        ...(fromAppointment && localDateIn(fromAppointment.startsAt, fromAppointment.timeZone) < localDateIn(new Date(), fromAppointment.timeZone)
+          ? { startedAt: fromAppointment.startsAt }
+          : {}),
       })
       .returning()
     if (!row) throw new Error("No se pudo crear la atención")
@@ -3081,6 +3102,18 @@ export async function finalizeEncounter(
   if (nextDay !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(nextDay) || nextDay <= dayKeyIn(now, timezone)))
     throw invalidField("nextControl.dueAt", "Elige un día desde mañana.")
   let endedAt = now
+  // La atención de otro día (la de una cita pasada, o un borrador de ayer) termina ese día:
+  // sin hora indicada, a la hora de fin de su cita o, sin cita, media hora después de empezar.
+  if (!input.endedAt && dayKeyIn(locked.startedAt, timezone) < dayKeyIn(now, timezone)) {
+    const [visit] = locked.appointmentId
+      ? await tx
+          .select({ endsAt: appointment.endsAt })
+          .from(appointment)
+          .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, locked.appointmentId)))
+          .limit(1)
+      : []
+    endedAt = visit && visit.endsAt > locked.startedAt ? visit.endsAt : new Date(locked.startedAt.getTime() + 30 * 60_000)
+  }
   if (input.endedAt) {
     endedAt = new Date(input.endedAt)
     if (Number.isNaN(endedAt.getTime())) throw invalidField("endedAt", "Elige la hora de fin de la lista")
