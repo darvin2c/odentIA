@@ -3088,6 +3088,14 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   expect(againRef).toBe(ref![0])
   resendCtx.evidence.push({ kind: "sistema", source: "Enlace que entregó el sistema", text: webAddressesIn(again).join("\n") })
   expect(await send(`Claro, aquí está de nuevo: ${againRef}`)).not.toContain("No enviado")
+  // Ya salió en este hilo: copiado del historial, se le da tal cual se envió, con su referencia,
+  // sin contarlo como dato sin sustento (así sirve también para «completa tus datos», que no tiene herramienta).
+  const nextCtx = ctxFor(withPatient.conversationId, fx.contactId)
+  nextCtx.evidence = [{ kind: "conversacion", source: "Respuestas anteriores del agente", text: `Claro, aquí está de nuevo: ${copied}` }]
+  const sendNext = (text: string) => makeAgentTools(nextCtx).find((item) => item.name === "send_reply")!.invoke({ text }).then(String)
+  expect(await sendNext(`Aquí lo tienes otra vez: ${copied}`)).toContain(`Escríbelo así, tal cual: ${againRef}`)
+  expect(nextCtx.checkFailures ?? 0).toBe(0)
+  expect(await sendNext(`Aquí lo tienes otra vez: ${againRef}`)).not.toContain("No enviado")
   expect(sent).toContain("Paciente enlace")
   // «Su enlace» vale una semana y es el mismo si ya tenía uno.
   expect(sent).toContain("vale 7 días")

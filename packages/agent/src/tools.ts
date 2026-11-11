@@ -95,6 +95,7 @@ import {
   searchClinic,
   searchPublishedKnowledge,
   sendReceiptInConversation,
+  sentLinkBehind,
   topicKindOf,
   updateContact,
   composeDisplayName,
@@ -468,6 +469,8 @@ export interface AgentToolCtx {
   emojis?: "no" | "pocos"
   /** Respuestas del turno que no salieron por un dato sin sustento. */
   checkFailures?: number
+  /** Ya se le dio, en esta corrida, el enlace tapado que copió del historial tal como se envió. */
+  hiddenLinkTold?: boolean
   /** Comprobaciones de la última respuesta (también en simulación). */
   lastChecks?: AnswerCheck[]
   /** Modelo que escribe en esta corrida, para la traza. */
@@ -1121,9 +1124,26 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       await traceAnswer(text, "bloqueada", verdict.checks, null)
       return { verdict, blocked: `${ctx.dryRun ? "[SIMULACIÓN] " : ""}${capped}` }
     }
+    const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
+    // Copiado del historial, «Su enlace» no lleva su token (`token=…`) y así no abre. Si salió en un
+    // mensaje de esta conversación, se le da tal cual se envió, con su referencia: no es un dato sin
+    // sustento, sino el mismo enlace que la persona ya recibió. Una vez por corrida.
+    const hidden = verdict.unsupported.filter((check) => check.kind === "enlace" && isHiddenPersonalLink(check.value))
+    if (hidden.length > 0 && hidden.length === verdict.unsupported.length && !ctx.hiddenLinkTold && !ctx.dryRun) {
+      const sent = await inOrg((tx) => Promise.all(hidden.map((check) => sentLinkBehind(tx, ctx.orgId, ctx.conversationId, check.value))))
+        .catch(() => [])
+      if (sent.length === hidden.length && sent.every((link): link is string => link !== null)) {
+        ctx.hiddenLinkTold = true
+        ctx.evidence = [...(ctx.evidence ?? []), { kind: "sistema", source: "Enlace que entregó el sistema", text: sent.join("\n") }]
+        await traceAnswer(text, "bloqueada", verdict.checks, null)
+        return {
+          verdict,
+          blocked: `No enviado: ese enlace es el de tu mensaje anterior como lo ves en el historial, sin su parte final, y así no abre. Escríbelo así, tal cual: ${sent.join(" ")} Vuelve a enviar la respuesta sola en su paso.`,
+        }
+      }
+    }
     ctx.checkFailures = (ctx.checkFailures ?? 0) + 1
     const missing = describeUnsupported(verdict)
-    const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
     await traceAnswer(text, "bloqueada", verdict.checks, null)
     if (ctx.checkFailures >= MAX_UNSUPPORTED_REPLIES) {
       await performHandoff(
@@ -1138,11 +1158,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         blocked: `${prefix}No enviado: ${missing} no figura en lo consultado. El caso pasa a una persona; no envíes más mensajes.`,
       }
     }
-    // Copiado del historial, «Su enlace» no lleva su token: se vuelve a pedir a la herramienta que lo da.
-    if (verdict.unsupported.some((check) => check.kind === "enlace" && isHiddenPersonalLink(check.value))) {
+    // Tapado y sin un mensaje del hilo que lo traiga: el de elegir su cita se vuelve a pedir a su herramienta.
+    if (hidden.length > 0) {
       const offered = ctx.offeredTools ?? toolNames
-      const again = offered.has("enviar_enlace_cita")
-        ? " Si es el de elegir su cita, vuelve a llamar a enviar_enlace_cita, que da el mismo enlace, y escríbelo tal cual."
+      const again = offered.has("enviar_enlace_cita") && hidden.every((check) => /\/reserva\?/.test(check.value))
+        ? " Para dárselo de nuevo, vuelve a llamar a enviar_enlace_cita, que da el mismo enlace, y escríbelo tal cual."
         : ""
       return {
         verdict,

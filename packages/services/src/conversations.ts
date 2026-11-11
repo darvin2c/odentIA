@@ -1541,6 +1541,37 @@ export async function listAttentionMessages(
   return { items: rows.reverse().map((row) => toMessageItem(row)), startedAt: thread.startedAt.toISOString(), inAttention }
 }
 
+/** Un enlace con la referencia de su token al final (`{{su-enlace:<id>}}`, ADR 0037). */
+const LINK_WITH_REF = /https?:\/\/[^\s"<>«»]*?\{\{su-enlace:[0-9a-f-]{36}\}\}/g
+
+/**
+ * El enlace que el historial muestra tapado (`toMessageItem` cambia la referencia de
+ * su token por «…»), tal como salió en un mensaje de esta conversación: con su
+ * referencia, que el worker cambia por el token al enviarlo. Así el agente puede
+ * volver a escribir el mismo enlace a quien ya lo recibió por aquí. Nulo si ningún
+ * mensaje enviado del hilo lo trae.
+ */
+export async function sentLinkBehind(tx: Db, orgId: string, conversationId: string, shown: string): Promise<string | null> {
+  const rows = await tx
+    .select({ body: message.body })
+    .from(message)
+    .where(
+      and(
+        eq(message.organizationId, orgId),
+        eq(message.conversationId, conversationId),
+        eq(message.direction, "out"),
+        sql`${message.body} like '%{{su-enlace:%'`,
+      ),
+    )
+    .orderBy(desc(message.createdAt), desc(message.id))
+    .limit(50)
+  for (const row of rows) {
+    const sent = (row.body ?? "").match(LINK_WITH_REF)?.find((link) => hidePersonalLinkRefs(link) === shown)
+    if (sent) return sent
+  }
+  return null
+}
+
 export interface CrossThreadMessage {
   direction: string
   senderKind: string
