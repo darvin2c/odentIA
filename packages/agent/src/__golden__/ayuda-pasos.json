@@ -23,6 +23,15 @@
     ]
   },
   {
+    "id": "help_data",
+    "kind": "yesno",
+    "instructions": "Alguien del equipo de una clínica dental escribió esto en la Ayuda de odentIA, el sistema que usa para trabajar. ¿Pide una cifra, una lista o un dato de su propia clínica dental, o pregunta cómo se usa el sistema?",
+    "criteria": {
+      "yes": "Pide un número, una lista o un dato concreto de su clínica, de un paciente o de alguien del equipo (cuánto se cobró, cuántos pacientes hubo, quién debe, cuánto queda, qué citas faltan), o por qué una cifra suya es la que es o no cuadra. Para responderlo habría que mirar sus datos.",
+      "no": "Pregunta cómo se hace algo, dónde está una pantalla o un botón, qué significa algo o por qué no puede hacer algo en el sistema; o es otra cosa (un saludo, un tema ajeno). Se responde sin mirar los datos de su clínica."
+    }
+  },
+  {
     "id": "help_join",
     "kind": "yesno",
     "instructions": "Alguien del equipo escribió una pregunta en la Ayuda de odentIA y hay varios textos de la guía. ¿Leídos juntos, responden por completo lo que pregunta?",
