@@ -252,6 +252,9 @@
   background: #ecfdf3;
   padding: 6px 12px;
 }
+.lcd-bar-fit > .lcd-bar {
+  align-self: stretch;
+}
 .lcd-bulk .lcd-btn {
   padding: 8px 14px;
 }

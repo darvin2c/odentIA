@@ -60,6 +60,54 @@ export default function TrioDemo() {
   const current = step >= 8 ? 2 : step >= 4 ? 1 : 0
   const finished = step >= LEN - 1
 
+  /** Los tres tramos con `openAt` abierto, en el paso `at` de la demo. */
+  const stages = (openAt: number, at: number) =>
+    STAGES.map((s, i) => {
+      const open = i === openAt
+      const shown = (n: number) => at >= s.from + n
+      return (
+        <div
+          key={s.key}
+          className={`tr-stage ${s.key}${open ? " open" : i < openAt ? " past" : " next"}`}
+        >
+          <div className="tr-head">
+            <span className="tr-badge" aria-hidden="true">
+              {i < openAt ? "✓" : s.name[0]}
+            </span>
+            <span className="tr-title">
+              <b>
+                {s.name} <span>{s.role}</span>
+              </b>
+              <span>{i < openAt ? s.done : open ? s.when : "Esperando"}</span>
+            </span>
+          </div>
+          {open && (
+            <div className="tr-body">
+              {s.lines.map((line, n) => (
+                <div key={line.text} className={`tr-line ${line.kind}${shown(n) ? " on" : ""}`}>
+                  {line.kind === "said" && <span aria-hidden="true">🎙 </span>}
+                  {line.kind === "chip" && <span aria-hidden="true">✓ </span>}
+                  {line.label ? (
+                    <>
+                      <span className="tr-sugg">
+                        <b>{line.label}</b>
+                        <span>{line.text}</span>
+                      </span>
+                      <span className={`tr-btn${at >= s.from + 3 ? " ok" : ""}`}>
+                        {at >= s.from + 3 ? "✓ Confirmado" : "Confirmar"}
+                      </span>
+                    </>
+                  ) : (
+                    line.text
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    })
+
   return (
     <figure className="tr" aria-label="Demostración: los tres agentes en la consulta de Rosa">
       <div className="tr-top">
@@ -73,47 +121,15 @@ export default function TrioDemo() {
         </ol>
       </div>
 
-      <div className="tr-stages">
-        {STAGES.map((s, i) => {
-          const open = i === current
-          const shown = (n: number) => step >= s.from + n
-          return (
-            <div key={s.key} className={`tr-stage ${s.key}${open ? " open" : i < current ? " past" : " next"}`}>
-              <div className="tr-head">
-                <span className="tr-badge" aria-hidden="true">
-                  {i < current ? "✓" : s.name[0]}
-                </span>
-                <span className="tr-title">
-                  <b>
-                    {s.name} <span>{s.role}</span>
-                  </b>
-                  <span>{i < current ? s.done : open ? s.when : "Esperando"}</span>
-                </span>
-              </div>
-              {open && (
-                <div className="tr-body">
-                  {s.lines.map((line, n) => (
-                    <div key={line.text} className={`tr-line ${line.kind}${shown(n) ? " on" : ""}`}>
-                      {line.kind === "said" && <span aria-hidden="true">🎙 </span>}
-                      {line.kind === "chip" && <span aria-hidden="true">✓ </span>}
-                      {line.label ? (
-                        <>
-                          <span className="tr-sugg">
-                            <b>{line.label}</b>
-                            <span>{line.text}</span>
-                          </span>
-                          <span className={`tr-btn${step >= s.from + 3 ? " ok" : ""}`}>{step >= s.from + 3 ? "✓ Confirmado" : "Confirmar"}</span>
-                        </>
-                      ) : (
-                        line.text
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        })}
+      {/* El tramo abierto cambia de alto según el agente: los tres van en la misma celda (dos solo
+          reservan su alto), así la tarjeta no crece ni se encoge y «Pausar» y «Repetir» quedan quietos. */}
+      <div className="fit">
+        {STAGES.map((s, i) => (
+          <div key={s.key} className="tr-stages fit-ghost" aria-hidden="true">
+            {stages(i, LEN)}
+          </div>
+        ))}
+        <div className="tr-stages">{stages(current, step)}</div>
       </div>
 
       <div className="tr-foot">

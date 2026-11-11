@@ -6,6 +6,7 @@
 import { useState } from "react"
 import { useLoop } from "./loop"
 import "./dictation-demo.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 /** Lo que dice la doctora en cada paso (el 0 es antes de dictar; el 7 y el 8, el final). */
 const PHRASES = [
@@ -32,6 +33,7 @@ export const ECG =
   "M0 50 L40 50 Q48 42 56 50 L76 50 L84 58 L92 8 L100 72 L108 50 L128 50 Q142 36 156 50 L200 50 L240 50 Q248 42 256 50 L276 50 L284 58 L292 8 L300 72 L308 50 L328 50 Q342 36 356 50 L400 50 L440 50 Q448 42 456 50 L476 50 L484 58 L492 8 L500 72 L508 50 L528 50 Q542 36 556 50 L600 50"
 
 export default function DictationDemo() {
+  const steady = useSteadyHeight<HTMLElement>()
   const [paused, setPaused] = useState(false)
   const { step, restart } = useLoop({ len: 9, hold: 3, ms: 1900, paused })
   const fixed = step >= 6
@@ -56,7 +58,11 @@ export default function DictationDemo() {
   const headSub = done ? "El descanso se emite aparte, con tu firma." : step >= 7 ? "5 listas. Todavía no hay nada en la historia." : "Cada cosa cae en su bloque."
 
   return (
-    <figure className="ld" aria-label="Demostración: Clío ordena la consulta que dicta la Dra. Vela">
+    <figure
+      className="ld"
+      ref={steady}
+      aria-label="Demostración: Clío ordena la consulta que dicta la Dra. Vela"
+    >
       <div className="ld-top">
         <span className="ld-who">
           <span className="ld-wide">Rosa Paredes · Dra. Vela</span>

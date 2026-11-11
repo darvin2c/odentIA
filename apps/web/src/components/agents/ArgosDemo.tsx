@@ -7,6 +7,7 @@
 //
 // Las cifras (S/ 4.820, Dr. Ríos 18 %…) son de una clínica de ejemplo, no precios de odentIA.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { useSteadyHeight } from "../../lib/steady"
 import { AgentFoot, AgentHead } from "./frame/AgentFrame"
 import "./argos-demo.css"
 
@@ -84,7 +85,9 @@ export default function ArgosDemo({
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
   const [phase, setPhase] = useState<0 | 1 | 2>(2)
   const timers = useRef<number[]>([])
+  // El alto de la demo queda fijo: una respuesta más corta que otra no empuja la página.
   const box = useRef<HTMLDivElement | null>(null)
+  useSteadyHeight(box)
 
   const stop = useCallback(() => {
     for (const t of timers.current) {
@@ -138,9 +141,70 @@ export default function ArgosDemo({
   }
 
   const cur = questions[pick]
-  const max = Math.max(...cur.bars.map(([, v]) => v))
   const done = phase === 2
   const typed = cur.q.slice(0, chars)
+
+  const answer = (question: ArgosQuestion, visible: boolean, ghost: boolean) => {
+    const top = Math.max(...question.bars.map(([, v]) => v))
+    return (
+      <div
+        key={question.label}
+        className={ghost ? "ad-answer fit-ghost" : "ad-answer"}
+        data-done={visible || undefined}
+        aria-hidden={!ghost && visible ? undefined : true}
+      >
+        <p className="ad-text">
+          <Rich text={question.answer} />
+        </p>
+        {chart === "bars" ? (
+          <div className="ad-bars">
+            {question.bars.map(([name, v, value]) => (
+              <div key={name} className="ad-bar">
+                <span className="ad-bar-l">
+                  <span>{name}</span>
+                  <b>{value}</b>
+                </span>
+                <span className="ad-track">
+                  <span
+                    className="ad-fill"
+                    style={{ width: visible ? `${Math.round((v / top) * 100)}%` : "0%" }}
+                  />
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="ad-cols">
+            {question.bars.map(([name, v, value], i) => (
+              <div key={name} className="ad-col">
+                <span
+                  className="ad-col-bar"
+                  data-i={i}
+                  style={{
+                    height: visible ? `${Math.max(4, Math.round((v / top) * 96))}px` : "0px",
+                  }}
+                />
+                <span className="ad-col-l">
+                  {name} · {value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="ad-how">
+          <b>Así lo calculé:</b> {question.how}
+        </p>
+        <div className="ad-acts">
+          {actions.map((a) => (
+            <span key={a.label} className="ad-act" data-primary={a.primary || undefined}>
+              {a.label}
+            </span>
+          ))}
+          {source && <span className="ad-source">{source}</span>}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="ad" ref={box}>
@@ -170,13 +234,20 @@ export default function ArgosDemo({
         </div>
       )}
       <div className={`ad-field ad-${field}`}>
-        <span className="ad-q">
-          {typed}
-          {caret && (
-            <span className="ad-caret" aria-hidden="true" data-on={phase === 0 || undefined}>
-              |
+        <span className="fit ad-q-fit">
+          {questions.map((question) => (
+            <span key={question.label} className="ad-q fit-ghost" aria-hidden="true">
+              {question.q}|
             </span>
-          )}
+          ))}
+          <span className="ad-q">
+            {typed}
+            {caret && (
+              <span className="ad-caret" aria-hidden="true" data-on={phase === 0 || undefined}>
+                |
+              </span>
+            )}
+          </span>
         </span>
         <span className="ad-ask" aria-hidden="true">
           Preguntar
@@ -191,55 +262,17 @@ export default function ArgosDemo({
           ))}
         </div>
       )}
-      <div className="ad-stage">
-      {phase === 1 && (
-        <div className="ad-think">
-          <span>· Leyendo la pregunta</span>
-          <span>· {cur.consulting}</span>
-        </div>
-      )}
-      <div className="ad-answer" data-done={done || undefined} aria-hidden={done ? undefined : true}>
-        <p className="ad-text">
-          <Rich text={cur.answer} />
-        </p>
-        {chart === "bars" ? (
-          <div className="ad-bars">
-            {cur.bars.map(([name, v, value]) => (
-              <div key={name} className="ad-bar">
-                <span className="ad-bar-l">
-                  <span>{name}</span>
-                  <b>{value}</b>
-                </span>
-                <span className="ad-track">
-                  <span className="ad-fill" style={{ width: done ? `${Math.round((v / max) * 100)}%` : "0%" }} />
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="ad-cols">
-            {cur.bars.map(([name, v, value], i) => (
-              <div key={name} className="ad-col">
-                <span className="ad-col-bar" data-i={i} style={{ height: done ? `${Math.max(4, Math.round((v / max) * 96))}px` : "0px" }} />
-                <span className="ad-col-l">
-                  {name} · {value}
-                </span>
-              </div>
-            ))}
+      {/* Las respuestas de las otras preguntas van en la misma celda sin verse: la tarjeta mide siempre lo
+          que la más larga, y pasar sola de una pregunta a otra no mueve la página. */}
+      <div className="ad-stage fit">
+        {questions.map((question, i) => (i === pick ? null : answer(question, true, true)))}
+        {answer(cur, done, false)}
+        {phase === 1 && (
+          <div className="ad-think">
+            <span>· Leyendo la pregunta</span>
+            <span>· {cur.consulting}</span>
           </div>
         )}
-        <p className="ad-how">
-          <b>Así lo calculé:</b> {cur.how}
-        </p>
-        <div className="ad-acts">
-          {actions.map((a) => (
-            <span key={a.label} className="ad-act" data-primary={a.primary || undefined}>
-              {a.label}
-            </span>
-          ))}
-          {source && <span className="ad-source">{source}</span>}
-        </div>
-      </div>
       </div>
       {agent ? (
         <AgentFoot note={note} replay={replay} onReplay={again} />

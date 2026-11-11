@@ -6,6 +6,7 @@
 // las del Consultorio San Martín; en odentIA, las de Clínica Sonrisa Norte. En soles: no son precios.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import "./argos-ask.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 type Question = {
   /** El nombre corto del chip para elegirla. */
@@ -129,6 +130,7 @@ function Rich({ text }: { text: string }) {
 }
 
 export default function ArgosAsk({ variant = "medical" }: { variant?: Variant }) {
+  const steady = useSteadyHeight<HTMLDivElement>()
   const QUESTIONS = QUESTION_SETS[variant]
   // Se arma en el servidor con la primera respuesta completa: sin JavaScript se lee igual.
   const [pick, setPick] = useState(0)
@@ -185,7 +187,7 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
   const done = phase === 2
 
   return (
-    <div className="lt-ask">
+    <div className="lt-ask" ref={steady}>
       <div className="lt-ask-head">
         <b>Reportes</b>
         <span className="lt-ask-side">

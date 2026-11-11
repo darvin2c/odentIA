@@ -1,6 +1,7 @@
 // «Actúan, no solo conversan»: registro de lo que los agentes cambian en el sistema (ejemplo).
 // Cada pocos segundos entra una acción nueva arriba; en teléfono se ven cuatro.
 import { type CSSProperties, useState } from "react"
+import { useSteadyHeight } from "../../lib/steady"
 import { useInterval, useMoving } from "./motion"
 
 const ACTS = [
@@ -52,6 +53,7 @@ const ACTS = [
 const ACOL = ["#0e7490", "#1f9d7a", "#c98a1c"]
 
 export default function ActsLog() {
+  const steady = useSteadyHeight<HTMLOListElement>()
   const moving = useMoving()
   const [al, setAl] = useState(0)
   useInterval(() => {
@@ -59,7 +61,7 @@ export default function ActsLog() {
   }, 2300)
 
   return (
-    <ol className="acts" aria-live="polite">
+    <ol className="acts" aria-live="polite" ref={steady}>
       {Array.from({ length: 5 }, (_, k) => {
         const x = ACTS[(al - k + ACTS.length * 4) % ACTS.length]
         return (

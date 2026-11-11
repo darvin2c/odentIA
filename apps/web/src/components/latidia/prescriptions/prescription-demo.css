@@ -10,7 +10,9 @@
 .rx-cases button:hover { filter: brightness(.96); }
 .rx-cases button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
-.rx-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-height: 470px; background: #fbfafe; }
+/* Los casos comparten celda: cada formulario se estira al alto del más largo y su pie queda abajo. */
+.rx-fit > .rx-body { align-self: stretch; }
+.rx-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; background: #fbfafe; }
 .rx-who { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rx-av { width: 40px; height: 40px; flex: none; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
 .rx-name { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
@@ -48,5 +50,4 @@
 @media (max-width: 720px) {
   .rx { border-radius: 20px; }
   .rx-top, .rx-body { padding: 14px; }
-  .rx-body { min-height: 0; }
 }

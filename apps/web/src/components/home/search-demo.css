@@ -512,6 +512,9 @@
   font-size: 12px;
   color: #64748b;
 }
+.sd-foot-touch {
+  display: none;
+}
 .sd-foot.said {
   background: var(--teal-soft);
   color: var(--teal-hover);
@@ -554,8 +557,21 @@
   .sd-kbd-hint,
   .sd-row.on .sd-kbd-hint,
   .sd-meta,
-  .sd-foot:not(.said) {
+  .sd-foot-keys {
     display: none;
+  }
+  /* El pie queda siempre, con el alto de dos líneas: al decir adónde lleva una fila no empuja la página. */
+  .sd-foot {
+    min-height: 54px;
+  }
+  .sd-foot-touch {
+    display: inline;
+  }
+  .sd-said {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
   .sd-kind {
     width: auto;

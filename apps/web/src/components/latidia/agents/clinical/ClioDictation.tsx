@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AgentFoot, AgentHead, prefersStill, VoiceBubble } from "../../../agents/frame/AgentFrame"
 import "./clio-dictation.css"
+import { useSteadyHeight } from "../../../../lib/steady"
 
 const LAST = 9
 const STEP_MS = 1700
@@ -22,9 +23,27 @@ const HEARD = [
   "«Descanso médico por tres días.»",
 ]
 
+/** Las mismas frases sin comillas, para el globo (que pone las suyas). */
+const SAID = HEARD.map((phrase) => phrase.replace(/^«|»$/g, ""))
+
+/** Lo que dice la barra en cada momento: dictando, terminado, confirmado y todo en la historia. */
+const BANNERS = [
+  { title: "Dictando…", sub: "Habla como le contarías a un colega." },
+  {
+    title: "Dictado terminado: 5 sugerencias",
+    sub: "4 listas. Todavía no hay nada en la historia.",
+  },
+  { title: "4 confirmadas", sub: "Falta emitir el descanso médico: se emite con tu firma." },
+  {
+    title: "Todo en la historia",
+    sub: "Descanso médico emitido. Falta solo «Finalizar y firmar».",
+  },
+]
+
 type Item = { from: number; text: string; sub: string; doc?: boolean; corrected?: boolean }
 
 export default function ClioDictation() {
+  const steady = useSteadyHeight<HTMLDivElement>()
   // En el servidor y sin movimiento, el estado final: la página se lee entera sin animación.
   const [step, setStep] = useState(LAST)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -84,16 +103,10 @@ export default function ClioDictation() {
     },
   ]
 
-  const banner = dictating
-    ? { title: "Dictando…", sub: "Habla como le contarías a un colega." }
-    : step === 7
-      ? { title: "Dictado terminado: 5 sugerencias", sub: "4 listas. Todavía no hay nada en la historia." }
-      : step === 8
-        ? { title: "4 confirmadas", sub: "Falta emitir el descanso médico: se emite con tu firma." }
-        : { title: "Todo en la historia", sub: "Descanso médico emitido. Falta solo «Finalizar y firmar»." }
+  const bannerNow = dictating ? 0 : step === 7 ? 1 : step === 8 ? 2 : 3
 
   return (
-    <div className="af-card lcd">
+    <div className="af-card lcd" ref={steady}>
       <AgentHead
         agent="clio"
         name="Clío · en la consulta"
@@ -106,25 +119,34 @@ export default function ClioDictation() {
       <VoiceBubble
         initials="EV"
         who="Dra. Vela"
-        text={HEARD[Math.min(step, 6)].replace(/^«|»$/g, "")}
+        text={SAID[Math.min(step, 6)]}
+        reserve={SAID}
         speaking={dictating}
         idle="dictado terminado · 12 min"
       />
-      {/* Al terminar, lo que falta; con todo en la historia lo dice el estado de arriba. */}
-      {!dictating && step < 9 && (
-        <div className="lcd-bar" role="status">
-          <span className="lcd-bar-text">
-            <b>{banner.title}</b>
-            <span>{banner.sub}</span>
-          </span>
-          {step === 7 && (
-            <div className="lcd-bulk" aria-hidden="true">
-              <span className="lcd-btn p">Confirmar las 4 listas</span>
-              <span className="lcd-btn g">Seguir dictando</span>
-            </div>
-          )}
-        </div>
-      )}
+      {/* La barra está siempre, con lo que toca en cada momento; sus cuatro textos ocupan la misma celda
+          y mide lo que el más largo: antes aparecía y se iba, y cambiaba el alto de la tarjeta. */}
+      <div className="fit lcd-bar-fit">
+        {BANNERS.map((banner, i) => (
+          <div
+            key={banner.title}
+            className={`lcd-bar${i === bannerNow ? "" : " fit-ghost"}`}
+            role={i === bannerNow ? "status" : undefined}
+            aria-hidden={i === bannerNow ? undefined : true}
+          >
+            <span className="lcd-bar-text">
+              <b>{banner.title}</b>
+              <span>{banner.sub}</span>
+            </span>
+            {i === 1 && (
+              <div className="lcd-bulk" aria-hidden="true">
+                <span className="lcd-btn p">Confirmar las 4 listas</span>
+                <span className="lcd-btn g">Seguir dictando</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
 
       {blocks.map((block) => {
         const items = block.items.filter((item) => step >= item.from)

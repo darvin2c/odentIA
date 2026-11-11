@@ -8,6 +8,7 @@
 // y sube la tomografía que trae el paciente sin abrirla (`clinical.receive`): se marca «en parte».
 import { useEffect, useRef, useState } from "react"
 import "./role-view.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 type Variant = "medical" | "dental"
 
@@ -169,6 +170,7 @@ const SETS: Record<Variant, RoleSet> = { medical: MEDICAL, dental: DENTAL }
 const NEXT_MS = 3600
 
 export default function RoleView({ variant = "medical" }: { variant?: Variant }) {
+  const steady = useSteadyHeight<HTMLDivElement>()
   const set = SETS[variant]
   // Se arma en el servidor con la vista del primer rol: sin JavaScript se lee igual.
   const [role, setRole] = useState<string>(set.roles[0][0])
@@ -188,7 +190,7 @@ export default function RoleView({ variant = "medical" }: { variant?: Variant })
   }
 
   return (
-    <div className="lt-roles">
+    <div className="lt-roles" ref={steady}>
       <fieldset className="lt-roles-roles">
         <legend>Entra como…</legend>
         <div>

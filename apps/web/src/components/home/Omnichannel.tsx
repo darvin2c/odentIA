@@ -1,6 +1,7 @@
 // 01 · Omnicanal: una conversación que cambia de canal y sigue en la misma ficha.
 // El HTML generado trae la conversación completa; al verla, se reproduce paso a paso.
 import { useEffect, useRef, useState } from "react"
+import { useSteadyHeight } from "../../lib/steady"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
 const OC = [
@@ -40,6 +41,8 @@ const OC = [
 const CH = ["WhatsApp", "Instagram", "Messenger", "Telegram", "Chat de tu web", "Correo"]
 
 export default function Omnichannel() {
+  // La tarjeta de la conversación mide siempre lo que la conversación completa.
+  const steady = useSteadyHeight<HTMLDivElement>()
   const moving = useMoving()
   const [oc, setOc] = useState(OC.length)
   const hold = useRef(0)
@@ -95,7 +98,7 @@ export default function Omnichannel() {
           </span>
         </div>
       </div>
-      <div className="oc-chat">
+      <div className="oc-chat" ref={steady}>
         {/* «Volver a ver» va arriba, junto al primer mensaje: al tocarlo se ve empezar la conversación. */}
         <div className="oc-head">
           <span className="stack oc-title">

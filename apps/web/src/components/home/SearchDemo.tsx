@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useSteadyHeight } from "../../lib/steady"
 import { prefersReducedMotion, useMoving } from "./motion"
 import {
   DEMO_TYPE_LABELS,
@@ -177,7 +178,9 @@ export default function SearchDemo({
   const [opened, setOpened] = useState<ReactNode>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const [mac, setMac] = useState(false)
+  // El alto de la demo queda fijo: lo que cambia (lo escrito, los resultados) no empuja la página.
   const root = useRef<HTMLDivElement>(null)
+  useSteadyHeight(root)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const filterButton = useRef<HTMLButtonElement>(null)
@@ -773,8 +776,9 @@ export default function SearchDemo({
             <span className="sd-said">{opened}</span>
           ) : (
             <>
-              <span>↑ ↓ moverse · Enter abrir · Esc borrar</span>
-              <span>{kbd} K busca desde cualquier pantalla</span>
+              <span className="sd-foot-keys">↑ ↓ moverse · Enter abrir · Esc borrar</span>
+              <span className="sd-foot-keys">{kbd} K busca desde cualquier pantalla</span>
+              <span className="sd-foot-touch">Toca una fila para ver adónde lleva.</span>
             </>
           )}
         </div>

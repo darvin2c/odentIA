@@ -2,6 +2,8 @@
 // Rosa a medianoche al control de Luis cada 3 meses. Avanza solo; elegir un paso lo detiene ahí.
 // En el escritorio, la lista a la izquierda y el paso a la derecha; en el teléfono, los números
 // arriba y «Anterior», pausa y «Siguiente» abajo. Sin movimiento se queda en el paso 3.
+// Los siete pasos ocupan la misma celda y solo se ve el actual: la tarjeta mide lo que el paso más
+// largo y «Anterior», pausa y «Siguiente» no se mueven mientras el caso avanza solo.
 import { useEffect, useState } from "react"
 import { prefersReducedMotion } from "./loop"
 import "./day-case.css"
@@ -131,8 +133,6 @@ export default function DayCase() {
     setCur((i + N) % N)
     setAuto(false)
   }
-  const step = STEPS[cur]
-  const tone = AGENT_CLASS[step.agent]
   const autoLabel = auto ? "Pausar el recorrido" : "Reproducir el recorrido"
 
   return (
@@ -178,27 +178,37 @@ export default function DayCase() {
           ))}
         </fieldset>
 
-        <div className={`dc-panel ${tone}`}>
-          <div className="dc-panel-head">
-            <span className="dc-panel-title">
-              <b>{step.title}</b>
-              <span>{step.text}</span>
-            </span>
-            <span className="dc-pos">
-              Paso {cur + 1} de {N}
-            </span>
+        <div className="dc-panel">
+          <div className="fit">
+            {STEPS.map((step, i) => (
+              <div
+                key={step.title}
+                className={`dc-view ${AGENT_CLASS[step.agent]}${i === cur ? "" : " fit-ghost"}`}
+                aria-hidden={i === cur ? undefined : true}
+              >
+                <div className="dc-panel-head">
+                  <span className="dc-panel-title">
+                    <b>{step.title}</b>
+                    <span>{step.text}</span>
+                  </span>
+                  <span className="dc-pos">
+                    Paso {i + 1} de {N}
+                  </span>
+                </div>
+                <div className="dc-chline">
+                  <span className="dc-ch">{step.ch}</span>
+                  <span className="dc-when">{step.when}</span>
+                </div>
+                {step.items.map((item) => (
+                  <div key={item.label + item.text} className={`dc-item ${item.kind}`}>
+                    <span className="dc-label">{item.label}</span>
+                    <span className="dc-text">{item.text}</span>
+                    {item.chip && <span className="dc-chip">{item.chip}</span>}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
-          <div className="dc-chline">
-            <span className="dc-ch">{step.ch}</span>
-            <span className="dc-when">{step.when}</span>
-          </div>
-          {step.items.map((item) => (
-            <div key={item.label + item.text} className={`dc-item ${item.kind}`}>
-              <span className="dc-label">{item.label}</span>
-              <span className="dc-text">{item.text}</span>
-              {item.chip && <span className="dc-chip">{item.chip}</span>}
-            </div>
-          ))}
           <div className="dc-dots" aria-hidden="true">
             {STEPS.map((s, i) => (
               <i key={s.title} className={i <= cur ? "on" : undefined}></i>

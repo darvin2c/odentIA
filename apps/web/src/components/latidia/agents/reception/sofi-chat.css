@@ -1,6 +1,8 @@
 /* Conversación de Sofi en latidIA (SofiChat.tsx, tablero «Sofi»). Todo bajo .lsc. El turquesa es el
    color de Sofi (no el primario de la web, que en latidIA es lila); los controles de escena, lila. */
 .lsc {
+  display: flex;
+  flex-direction: column;
   background: #fff;
   color: var(--ink);
   border-radius: 26px;
@@ -142,6 +144,7 @@
 }
 
 .lsc-chat {
+  flex: 1 0 auto;
   background: #efeaf7;
   padding: 12px 16px;
   min-height: 380px;
@@ -157,6 +160,21 @@
   background: rgba(255, 255, 255, 0.7);
   border-radius: 999px;
   padding: 4px 10px;
+}
+/* Cada mensaje en su celda: la burbuja y, mientras se escribe, los tres puntos encima. */
+.lsc-slot {
+  display: grid;
+}
+.lsc-slot > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  align-self: start;
+}
+.lsc-slot[data-kind="in"] > * {
+  justify-self: start;
+}
+.lsc-slot[data-kind="out"] > * {
+  justify-self: end;
 }
 .lsc-msg {
   transition: opacity 0.45s ease, transform 0.45s ease, box-shadow 0.45s ease;

@@ -473,6 +473,18 @@
     transform: scale(1.3);
   }
 }
+/* La portada trae las dos disposiciones y aquí se elige la del ancho: no espera al JavaScript. */
+.home .hh-ph {
+  display: none;
+}
+@media (max-width: 720px) {
+  .home .hh-desk {
+    display: none !important;
+  }
+  .home .hh-ph {
+    display: block;
+  }
+}
 /* Teléfono: escenario de 300 px con solo la vía activa */
 .home .zstage {
   position: relative;
@@ -962,8 +974,17 @@
   flex: 999 1 560px;
   min-width: 0;
 }
+/* El agente que no se ve sigue armado, fuera del flujo y sin verse: sus tarjetas ya saben cuánto miden
+   terminadas (useSteadyHeight) y, al abrir su pestaña, la demo corre sin cambiar de alto. */
+.home .ag-body {
+  position: relative;
+}
 .home .ag-panel[hidden] {
-  display: none;
+  display: block;
+  position: absolute;
+  inset: 0 0 auto;
+  visibility: hidden;
+  pointer-events: none;
 }
 .home .ag-grid {
   display: grid;
@@ -1296,6 +1317,9 @@
   font-size: 15px;
   line-height: 1.5;
   color: #cfe2e7;
+}
+.home .dict-org[data-off] {
+  visibility: hidden;
 }
 .home .dict-org {
   font-size: 13px;

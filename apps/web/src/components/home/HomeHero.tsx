@@ -1,6 +1,9 @@
 // Portada del inicio («D3»): cada trabajo de un jueves de ejemplo entra por un canal, un agente
 // lo resuelve y se enciende una de las 32 piezas. En escritorio, la fila de siete vías arriba;
 // en teléfono, solo la vía activa. Se puede pausar y señalar las piezas para leer qué se hizo.
+// Las dos disposiciones van en el HTML y el CSS muestra la del ancho de la pantalla: así la portada
+// llega del servidor ya con su forma y no salta cuando arranca en el teléfono. La escena 3D se dibuja
+// solo en el lienzo que se ve.
 import {
   type CSSProperties,
   type PointerEvent,
@@ -28,12 +31,38 @@ type Cur = {
   cls: string
 }
 
+const FULL_TEXT =
+  "Un jueves completo de ejemplo: 32 trabajos que llegaron por siete vías y quedaron resueltos mientras tu equipo atendía."
+const START_TEXT = "Empieza el día en una clínica de ejemplo."
+
+// El recuadro que narra cada trabajo no cambia de alto: debajo de lo que se ve van, sin verse, la
+// frase, la fila de quién y la cuenta más largas del día, y la caja mide siempre lo que la mayor.
+// Así el texto que cambia cada segundo y medio no empuja lo que está debajo (en el teléfono, toda
+// la página).
+const GHOST_TEXTS = [...new Set([FULL_TEXT, START_TEXT, ...DAY.ev.map((e) => e.text)])]
+const GHOST_ROWS = [
+  ...new Map(
+    DAY.ev.map((e) => [
+      `${e.agent}|${via(e)}|${e.where}`,
+      { agent: AGENTS[e.agent].name, ch: via(e), where: e.where },
+    ]),
+  ).values(),
+]
+/** La línea de la hora más ancha que puede salir (la de la pieza señalada). */
+const GHOST_META = "La pieza que señalas · 00:00"
+
 const OUT: [string, string, string][] = [
   ["cita", "cita agendada", "citas agendadas"],
   ["nota", "nota confirmada", "notas confirmadas"],
   ["vuelta", "paciente de vuelta", "pacientes de vuelta"],
   ["tarea", "caso para tu equipo", "casos para tu equipo"],
 ]
+
+/** La cuenta del día terminado (las cifras y las palabras más anchas), para reservar su alto. */
+const GHOST_OUTS = OUT.map(([k, , many]) => ({
+  n: String(DAY.ev.filter((e) => e.out === k).length),
+  label: many,
+}))
 
 function d3vals(sStep: number, hover: number, cycle: number, still: boolean) {
   const D = DAY,
@@ -63,7 +92,7 @@ function d3vals(sStep: number, hover: number, cycle: number, still: boolean) {
       ch: "",
       where: "",
       meta: "Jueves · 32 de 32",
-      text: "Un jueves completo de ejemplo: 32 trabajos que llegaron por siete vías y quedaron resueltos mientras tu equipo atendía.",
+      text: FULL_TEXT,
       cls: "ztxt",
     }
   } else if (step === 0) {
@@ -73,7 +102,7 @@ function d3vals(sStep: number, hover: number, cycle: number, still: boolean) {
       ch: "",
       where: "",
       meta: "Jueves · 06:59",
-      text: "Empieza el día en una clínica de ejemplo.",
+      text: START_TEXT,
       cls: "ztxt",
     }
   } else {
@@ -131,7 +160,12 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
   const [d, setD] = useState({ step: 0, hold: 0, cycle: 0 })
   const [hover, setHover] = useState(-1)
 
-  const cvRef = useRef<HTMLCanvasElement | null>(null)
+  const deskCv = useRef<HTMLCanvasElement | null>(null)
+  const phoneCv = useRef<HTMLCanvasElement | null>(null)
+  /** El lienzo que se ve: el del teléfono o el de escritorio. */
+  const cvRef = narrow ? phoneCv : deskCv
+  const cvNow = useRef(cvRef)
+  cvNow.current = cvRef
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const sceneElRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<ToothScene | null>(null)
@@ -144,12 +178,12 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
       state: () => live.current,
       anchor: (ch) =>
         live.current.narrow
-          ? [(cvRef.current ? cvRef.current.clientWidth : 390) / 2, 38]
+          ? [(cvNow.current.current ? cvNow.current.current.clientWidth : 390) / 2, 38]
           : [CHANS[ch].ax, 42],
       panelPt: () =>
         live.current.narrow
-          ? cvRef.current
-            ? [cvRef.current.clientWidth / 2, cvRef.current.clientHeight]
+          ? cvNow.current.current
+            ? [cvNow.current.current.clientWidth / 2, cvNow.current.current.clientHeight]
             : [195, 300]
           : [150, 505],
       cap: null,
@@ -161,9 +195,8 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
   const host = hostRef.current
 
   // Arranca la escena WebGL; en teléfono y escritorio el lienzo es otro, así que se rehace al cambiar.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: narrow cambia el canvas al que apunta cvRef y obliga a rehacer la escena.
   useEffect(() => {
-    const cv = cvRef.current
+    const cv = (narrow ? phoneCv : deskCv).current
     if (!cv) return
     const sc = new ToothScene(host)
     sceneRef.current = sc
@@ -259,34 +292,65 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
   )
   const panel = (
     <div className="zpanel" role="status" aria-live="polite">
-      <div className="zrow">
-        <span className="zwho" style={cssVar({ "--c": v.cur.color })}>
-          <i aria-hidden="true"></i>
-          {v.cur.agent}
-          {v.cur.ch && <span className="zbdg">{v.cur.ch}</span>}
-          {v.cur.where && <span className="zbdg to">→ {v.cur.where}</span>}
-        </span>
-        <span className="mono zmeta">{v.cur.meta}</span>
+      <div className="fit">
+        {GHOST_ROWS.map((g) => (
+          <div key={g.agent + g.ch + g.where} className="zrow fit-ghost" aria-hidden="true">
+            <span className="zwho">
+              <i></i>
+              {g.agent}
+              <span className="zbdg">{g.ch}</span>
+              <span className="zbdg to">→ {g.where}</span>
+            </span>
+            <span className="mono zmeta">{GHOST_META}</span>
+          </div>
+        ))}
+        <div className="zrow">
+          <span className="zwho" style={cssVar({ "--c": v.cur.color })}>
+            <i aria-hidden="true"></i>
+            {v.cur.agent}
+            {v.cur.ch && <span className="zbdg">{v.cur.ch}</span>}
+            {v.cur.where && <span className="zbdg to">→ {v.cur.where}</span>}
+          </span>
+          <span className="mono zmeta">{v.cur.meta}</span>
+        </div>
       </div>
-      <span className={v.cur.cls}>{v.cur.text}</span>
+      <span className="fit">
+        {GHOST_TEXTS.map((text) => (
+          <span key={text} className="ztxt fit-ghost" aria-hidden="true">
+            {text}
+          </span>
+        ))}
+        <span className={v.cur.cls}>{v.cur.text}</span>
+      </span>
       <div className="zbar" aria-hidden="true">
         <span style={{ width: v.progress }}></span>
       </div>
-      <div className="zout">
-        {v.outs.map((o) => (
-          <span key={o.label}>
-            <b>{o.n}</b>
-            {o.label}
-          </span>
-        ))}
+      <div className="fit">
+        <div className="zout fit-ghost" aria-hidden="true">
+          {GHOST_OUTS.map((o) => (
+            <span key={o.label}>
+              <b>{o.n}</b>
+              {o.label}
+            </span>
+          ))}
+        </div>
+        <div className="zout">
+          {v.outs.map((o) => (
+            <span key={o.label}>
+              <b>{o.n}</b>
+              {o.label}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   )
-  const lines = (
+  // Las líneas y el rótulo que mueve la escena son los de la disposición que se ve (`live`).
+  const lines = (live: boolean) => (
     <>
       <line
         ref={(el) => {
-          host.lineIn = el
+          if (live) host.lineIn = el
         }}
         x1="0"
         y1="0"
@@ -299,7 +363,7 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
       ></line>
       <line
         ref={(el) => {
-          host.lineOut = el
+          if (live) host.lineOut = el
         }}
         x1="0"
         y1="0"
@@ -312,7 +376,7 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
       ></line>
       <circle
         ref={(el) => {
-          host.dot = el
+          if (live) host.dot = el
         }}
         cx="0"
         cy="0"
@@ -366,94 +430,89 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
               "Sin tarjeta para probar. Tú decides qué puede hacer cada agente, y lo que no da resultado no se cobra."
             )}
           </p>
-          {!narrow && (
-            <div className="hh-key rise d4">
-              {key}
-              <div className="hh-pause">
-                <button type="button" className="pill" onClick={togglePause} aria-pressed={paused}>
-                  {pauseLabel}
-                </button>
-                <span>
-                  Cada pieza es un trabajo de un jueves de ejemplo: llega por un canal, un agente lo
-                  resuelve y queda registrado. Pasa el cursor por las que brillan.
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {!narrow ? (
-        <div className="scene-wrap" ref={wrapRef}>
-          <div className="scene" ref={sceneElRef}>
-            <div className="scene-shadow" aria-hidden="true"></div>
-            {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: un canvas sin tabIndex no recibe el foco; es decorativo. */}
-            <canvas key="d" ref={cvRef} aria-hidden="true"></canvas>
-            <svg aria-hidden="true" viewBox="0 0 840 680" className="scene-svg">
-              {lines}
-            </svg>
-            <ul className="zchans" aria-label="Por dónde llega el trabajo">
-              {v.chans.map((c) => (
-                <li
-                  key={c.label}
-                  className={c.cls}
-                  style={cssVar({
-                    left: c.left + "px",
-                    width: c.width + "px",
-                    "--c": c.color,
-                    "--d": c.delay,
-                  })}
-                >
-                  {c.label}
-                </li>
-              ))}
-            </ul>
-            <div
-              className="zcap"
-              ref={(el) => {
-                host.cap = el
-              }}
-              aria-hidden="true"
-              style={cssVar({ "--c": v.cap.color })}
-            >
-              <span className="mono">{v.cap.dir}</span>
-              <span>{v.cap.msg}</span>
-            </div>
-            {panel}
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="zstage" aria-hidden="true">
-            <canvas key="p" ref={cvRef}></canvas>
-            <svg className="zstage-svg" aria-hidden="true">
-              {lines}
-            </svg>
-            <span className={v.one.cls} style={cssVar({ "--c": v.one.color })}>
-              {v.one.label}
-            </span>
-            <div
-              className="zcap"
-              ref={(el) => {
-                host.cap = el
-              }}
-              style={cssVar({ "--c": v.cap.color })}
-            >
-              <span>{v.cap.msg}</span>
-            </div>
-          </div>
-          <div className="hh-phone">
-            {panel}
+          <div className="hh-key hh-desk rise d4">
             {key}
-            <div className="hh-pause-ph">
-              <span>Cada pieza es un trabajo de un jueves de ejemplo. Toca las que brillan.</span>
+            <div className="hh-pause">
               <button type="button" className="pill" onClick={togglePause} aria-pressed={paused}>
                 {pauseLabel}
               </button>
+              <span>
+                Cada pieza es un trabajo de un jueves de ejemplo: llega por un canal, un agente lo
+                resuelve y queda registrado. Pasa el cursor por las que brillan.
+              </span>
             </div>
           </div>
-        </>
-      )}
+        </div>
+      </div>
+
+      <div className="scene-wrap hh-desk" ref={wrapRef}>
+        <div className="scene" ref={sceneElRef}>
+          <div className="scene-shadow" aria-hidden="true"></div>
+          {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: un canvas sin tabIndex no recibe el foco; es decorativo. */}
+          <canvas ref={deskCv} aria-hidden="true"></canvas>
+          <svg aria-hidden="true" viewBox="0 0 840 680" className="scene-svg">
+            {lines(!narrow)}
+          </svg>
+          <ul className="zchans" aria-label="Por dónde llega el trabajo">
+            {v.chans.map((c) => (
+              <li
+                key={c.label}
+                className={c.cls}
+                style={cssVar({
+                  left: c.left + "px",
+                  width: c.width + "px",
+                  "--c": c.color,
+                  "--d": c.delay,
+                })}
+              >
+                {c.label}
+              </li>
+            ))}
+          </ul>
+          <div
+            className="zcap"
+            ref={(el) => {
+              if (!narrow) host.cap = el
+            }}
+            aria-hidden="true"
+            style={cssVar({ "--c": v.cap.color })}
+          >
+            <span className="mono">{v.cap.dir}</span>
+            <span>{v.cap.msg}</span>
+          </div>
+          {panel}
+        </div>
+      </div>
+      <div className="hh-ph">
+        <div className="zstage" aria-hidden="true">
+          <canvas ref={phoneCv}></canvas>
+          <svg className="zstage-svg" aria-hidden="true">
+            {lines(narrow)}
+          </svg>
+          <span className={v.one.cls} style={cssVar({ "--c": v.one.color })}>
+            {v.one.label}
+          </span>
+          <div
+            className="zcap"
+            ref={(el) => {
+              if (narrow) host.cap = el
+            }}
+            style={cssVar({ "--c": v.cap.color })}
+          >
+            <span>{v.cap.msg}</span>
+          </div>
+        </div>
+        <div className="hh-phone">
+          {panel}
+          {key}
+          <div className="hh-pause-ph">
+            <span>Cada pieza es un trabajo de un jueves de ejemplo. Toca las que brillan.</span>
+            <button type="button" className="pill" onClick={togglePause} aria-pressed={paused}>
+              {pauseLabel}
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
   )
 }

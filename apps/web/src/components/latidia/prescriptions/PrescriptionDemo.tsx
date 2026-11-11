@@ -71,30 +71,25 @@ const TICK = 110
 const LAST_TICK = 60
 const DONE = 99
 
-export default function PrescriptionDemo() {
-  const [kase, setKase] = useState<CaseId>("embarazo")
-  // En el servidor y sin movimiento se ve el primer caso terminado.
-  const [t, setT] = useState(DONE)
-  const [auto, setAuto] = useState(true)
-  const [reduced, setReduced] = useState(false)
+/** Un paso en que el niño ya tiene el medicamento escrito y el peso todavía no. */
+const NINO_SIN_PESO = CASES.nino.dci.length + 10
 
-  useEffect(() => {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      setReduced(true)
-      return
-    }
-    setT(0)
-    const id = setInterval(() => setT((n) => n + 1), TICK)
-    return () => clearInterval(id)
-  }, [])
-
-  // Al terminar un caso, si nadie tocó, se pasa al siguiente.
-  useEffect(() => {
-    if (t < LAST_TICK || t >= DONE || !auto) return
-    setKase((k) => ORDER[(ORDER.indexOf(k) + 1) % ORDER.length])
-    setT(0)
-  }, [t, auto])
-
+/**
+ * El formulario de un caso en el paso `t`. También se usa, sin verse, para reservar el alto: los tres
+ * casos terminados (y el del niño mientras falta el peso) ocupan la misma celda que el que se ve, así
+ * la tarjeta mide siempre lo que el caso más largo y pasar de uno a otro no mueve la página.
+ */
+function CaseForm({
+  kase,
+  t,
+  live,
+  ghost = false,
+}: {
+  kase: CaseId
+  t: number
+  live: "off" | "polite"
+  ghost?: boolean
+}) {
   const c = CASES[kase]
   const done = t >= c.dci.length + 4
   const typed = c.dci.slice(0, Math.min(c.dci.length, t))
@@ -136,6 +131,99 @@ export default function PrescriptionDemo() {
     }
   }
 
+  return (
+    <div className={`rx-body${ghost ? " fit-ghost" : ""}`} aria-hidden={ghost || undefined}>
+      <div className="rx-who">
+        <span className="rx-av" aria-hidden="true">
+          {c.initials}
+        </span>
+        <span className="rx-name">
+          <b>{c.patient}</b>
+          <span>{c.detail}</span>
+        </span>
+        <span className={`rx-chip ${c.chipKind}`}>{c.chip}</span>
+      </div>
+      {c.reminder && <div className="rx-reminder">{c.reminder}</div>}
+      <div className="rx-form">
+        <span className="rx-field full">
+          <span className="rx-label">DCI (denominación común)</span>
+          <span className={`rx-input dci${done ? "" : " typing"}`}>
+            <span>{typed}</span>
+            {!done && <span className="rx-caret" aria-hidden="true" />}
+          </span>
+        </span>
+        <span className="rx-field">
+          <span className="rx-label">Concentración</span>
+          <span className="rx-input">{done ? c.conc : ""}</span>
+        </span>
+        <span className="rx-field">
+          <span className="rx-label">Forma farmacéutica</span>
+          <span className="rx-input">{done ? c.forma : ""}</span>
+        </span>
+        <span className="rx-field">
+          <span className="rx-label">Dosis y frecuencia</span>
+          <span className="rx-input">{done ? c.dosis : ""}</span>
+        </span>
+        <span className="rx-field">
+          <span className="rx-label">Duración</span>
+          <span className="rx-input">{done ? c.dur : ""}</span>
+        </span>
+        {kase === "nino" && done && (
+          <span className="rx-field full">
+            <span className="rx-label">Peso (kg)</span>
+            <span className={`rx-input${weightDone ? " strong" : " missing"}`}>
+              {weight || "Escribe el peso"}
+            </span>
+          </span>
+        )}
+      </div>
+      {/* Mientras los casos pasan solos no se anuncian; después de tocar uno, sí. */}
+      <div className="rx-checks" aria-live={ghost ? undefined : live}>
+        {block && (
+          <div className={`rx-block ${block.kind}`}>
+            <b>{block.title}</b>
+            <span>{block.text}</span>
+          </div>
+        )}
+        {done && kase === "embarazo" && (
+          <span className="rx-field">
+            <span className="rx-label">Motivo (opcional)</span>
+            <span className="rx-input motive">Si lo escribes, queda en la receta…</span>
+          </span>
+        )}
+      </div>
+      <div className="rx-foot">
+        <span className="rx-status">{status}</span>
+        <span className={`rx-emit${emitOk ? " ok" : ""}`}>{emitLabel}</span>
+      </div>
+    </div>
+  )
+}
+
+export default function PrescriptionDemo() {
+  const [kase, setKase] = useState<CaseId>("embarazo")
+  // En el servidor y sin movimiento se ve el primer caso terminado.
+  const [t, setT] = useState(DONE)
+  const [auto, setAuto] = useState(true)
+  const [reduced, setReduced] = useState(false)
+
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setReduced(true)
+      return
+    }
+    setT(0)
+    const id = setInterval(() => setT((n) => n + 1), TICK)
+    return () => clearInterval(id)
+  }, [])
+
+  // Al terminar un caso, si nadie tocó, se pasa al siguiente.
+  useEffect(() => {
+    if (t < LAST_TICK || t >= DONE || !auto) return
+    setKase((k) => ORDER[(ORDER.indexOf(k) + 1) % ORDER.length])
+    setT(0)
+  }, [t, auto])
+
   const pick = (id: CaseId) => {
     setKase(id)
     setT(reduced ? DONE : 0)
@@ -158,68 +246,12 @@ export default function PrescriptionDemo() {
           ))}
         </fieldset>
       </div>
-      <div className="rx-body">
-        <div className="rx-who">
-          <span className="rx-av" aria-hidden="true">
-            {c.initials}
-          </span>
-          <span className="rx-name">
-            <b>{c.patient}</b>
-            <span>{c.detail}</span>
-          </span>
-          <span className={`rx-chip ${c.chipKind}`}>{c.chip}</span>
-        </div>
-        {c.reminder && <div className="rx-reminder">{c.reminder}</div>}
-        <div className="rx-form">
-          <span className="rx-field full">
-            <span className="rx-label">DCI (denominación común)</span>
-            <span className={`rx-input dci${done ? "" : " typing"}`}>
-              <span>{typed}</span>
-              {!done && <span className="rx-caret" aria-hidden="true" />}
-            </span>
-          </span>
-          <span className="rx-field">
-            <span className="rx-label">Concentración</span>
-            <span className="rx-input">{done ? c.conc : ""}</span>
-          </span>
-          <span className="rx-field">
-            <span className="rx-label">Forma farmacéutica</span>
-            <span className="rx-input">{done ? c.forma : ""}</span>
-          </span>
-          <span className="rx-field">
-            <span className="rx-label">Dosis y frecuencia</span>
-            <span className="rx-input">{done ? c.dosis : ""}</span>
-          </span>
-          <span className="rx-field">
-            <span className="rx-label">Duración</span>
-            <span className="rx-input">{done ? c.dur : ""}</span>
-          </span>
-          {kase === "nino" && done && (
-            <span className="rx-field full">
-              <span className="rx-label">Peso (kg)</span>
-              <span className={`rx-input${weightDone ? " strong" : " missing"}`}>{weight || "Escribe el peso"}</span>
-            </span>
-          )}
-        </div>
-        {/* Mientras los casos pasan solos no se anuncian; después de tocar uno, sí. */}
-        <div className="rx-checks" aria-live={auto ? "off" : "polite"}>
-          {block && (
-            <div className={`rx-block ${block.kind}`}>
-              <b>{block.title}</b>
-              <span>{block.text}</span>
-            </div>
-          )}
-          {done && kase === "embarazo" && (
-            <span className="rx-field">
-              <span className="rx-label">Motivo (opcional)</span>
-              <span className="rx-input motive">Si lo escribes, queda en la receta…</span>
-            </span>
-          )}
-        </div>
-        <div className="rx-foot">
-          <span className="rx-status">{status}</span>
-          <span className={`rx-emit${emitOk ? " ok" : ""}`}>{emitLabel}</span>
-        </div>
+      <div className="fit rx-fit">
+        {ORDER.map((id) => (
+          <CaseForm key={id} kase={id} t={DONE} live="off" ghost />
+        ))}
+        <CaseForm kase="nino" t={NINO_SIN_PESO} live="off" ghost />
+        <CaseForm kase={kase} t={t} live={auto ? "off" : "polite"} />
       </div>
       <div className="rx-note">Demostración con datos de ejemplo. Elige un caso: las mismas reglas se revisan otra vez al emitir.</div>
     </div>

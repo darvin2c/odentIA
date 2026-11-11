@@ -131,24 +131,39 @@ export default function CaseSteps() {
           </li>
         ))}
       </ol>
-      <p className="case-now" aria-live="polite">
-        {now && moving ? (
-          <>
+      {/* El pie cambia en cada paso; reserva el alto del más largo para no mover lo que sigue. */}
+      <div className="fit">
+        {CASE.map((c, i) => (
+          <p key={c.when} className="case-now fit-ghost" aria-hidden="true">
             <span className="mono">
-              Paso {shown} de 7 · {now.when}
+              Paso {i + 1} de 7 · {c.when}
             </span>
-            <span style={{ "--c": CC[now.a] } as CSSProperties}>
-              <i aria-hidden="true"></i>
-              {AN[now.a]}, por{" "}
-              {now.ch === "Consulta" || now.ch === "Historia"
-                ? `la ${now.ch.toLowerCase()}`
-                : now.ch}
+            <span>
+              <i></i>
+              {AN[c.a]}, por{" "}
+              {c.ch === "Consulta" || c.ch === "Historia" ? `la ${c.ch.toLowerCase()}` : c.ch}
             </span>
-          </>
-        ) : (
-          <span className="mono">Siete pasos, tres agentes y una sola historia.</span>
-        )}
-      </p>
+          </p>
+        ))}
+        <p className="case-now" aria-live="polite">
+          {now && moving ? (
+            <>
+              <span className="mono">
+                Paso {shown} de 7 · {now.when}
+              </span>
+              <span style={{ "--c": CC[now.a] } as CSSProperties}>
+                <i aria-hidden="true"></i>
+                {AN[now.a]}, por{" "}
+                {now.ch === "Consulta" || now.ch === "Historia"
+                  ? `la ${now.ch.toLowerCase()}`
+                  : now.ch}
+              </span>
+            </>
+          ) : (
+            <span className="mono">Siete pasos, tres agentes y una sola historia.</span>
+          )}
+        </p>
+      </div>
     </>
   )
 }

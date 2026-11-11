@@ -2,6 +2,7 @@
 // Clío arma la nota a partir del dictado y Argos trae de vuelta a Rosa.
 // Las tres pestañas quedan en el HTML generado; solo se ve la elegida.
 import { useEffect, useRef, useState } from "react"
+import { useSteadyHeight } from "../../lib/steady"
 import { AgentFoot, AgentHead, VoiceBubble } from "../agents/frame/AgentFrame"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
@@ -72,6 +73,11 @@ const ADM = [
 const END = { chat: 7, note: 5, adm: 5 }
 
 export default function AgentTabs() {
+  // Cada tarjeta que se llena sola mide siempre lo que su estado final.
+  const recBox = useSteadyHeight<HTMLDivElement>()
+  const cliBox = useSteadyHeight<HTMLDivElement>()
+  const suggBox = useSteadyHeight<HTMLDivElement>()
+  const admBox = useSteadyHeight<HTMLDivElement>()
   const moving = useMoving()
   const [tab, setTab] = useState<Tab>("rec")
   const [chat, setChat] = useState(END.chat)
@@ -220,7 +226,7 @@ export default function AgentTabs() {
         {/* Sofi */}
         <div className="ag-panel" hidden={tab !== "rec"}>
           <div className="ag-grid">
-            <div className="chatbox">
+            <div className="chatbox" ref={recBox}>
               <AgentHead
                 agent="sofi"
                 name="Sofi · Clínica Sonrisa Norte"
@@ -328,7 +334,7 @@ export default function AgentTabs() {
         {/* Clío */}
         <div className="ag-panel" hidden={tab !== "cli"}>
           <div className="ag-grid">
-            <div className="chatbox dict">
+            <div className="chatbox dict" ref={cliBox}>
               <AgentHead
                 agent="clio"
                 name="Clío · en la consulta"
@@ -350,10 +356,21 @@ export default function AgentTabs() {
                   />
                 ))}
               </div>
-              {note === 4 && <p className="mono dict-org">Clío está ordenando la nota…</p>}
-              <AgentFoot note="Hablas como siempre. Clío escucha y propone." replay="Volver a escuchar" onReplay={() => replay("cli")} />
+              {/* Siempre en su sitio: aparece y se va sin cambiar el alto de la tarjeta. */}
+              <p
+                className="mono dict-org"
+                data-off={note !== 4 || undefined}
+                aria-hidden={note !== 4 || undefined}
+              >
+                Clío está ordenando la nota…
+              </p>
+              <AgentFoot
+                note="Hablas como siempre. Clío escucha y propone."
+                replay="Volver a escuchar"
+                onReplay={() => replay("cli")}
+              />
             </div>
-            <div className="card sugg">
+            <div className="card sugg" ref={suggBox}>
               <div className="sugg-h">
                 <strong>Sugerencias para la historia</strong>
                 <span className="mono">{noteStatus}</span>
@@ -431,7 +448,7 @@ export default function AgentTabs() {
         {/* Argos */}
         <div className="ag-panel" hidden={tab !== "adm"}>
           <div className="ag-grid">
-            <div className="card admc">
+            <div className="card admc" ref={admBox}>
               <AgentHead
                 agent="argos"
                 name="Argos · Clínica Sonrisa Norte"

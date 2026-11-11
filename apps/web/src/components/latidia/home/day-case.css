@@ -25,7 +25,7 @@
 .dc-agent { flex: none; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; background: var(--at); color: var(--ac); }
 
 .dc-nums { display: none; }
-.dc-panel { background: #f7f5fc; border: 1px solid #e9e2f7; border-radius: 26px; padding: 22px; display: flex; flex-direction: column; gap: 14px; min-height: 520px; }
+.dc-panel { background: #f7f5fc; border: 1px solid #e9e2f7; border-radius: 26px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
 .dc-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #e9e2f7; }
 .dc-panel-title { display: flex; flex-direction: column; gap: 2px; }
 .dc-panel-title b { font-size: 18px; }
@@ -33,7 +33,10 @@
 .dc-pos { font-family: var(--agent-font); font-size: 12px; color: var(--soft); white-space: nowrap; }
 .dc-chline { display: flex; gap: 8px; align-items: center; }
 .dc-ch { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 5px 12px; background: var(--at); color: var(--ac); }
-.dc-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; animation: dc-in .4s ease both; }
+.dc-view { display: flex; flex-direction: column; gap: 14px; }
+.dc-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; }
+/* Al pasar a ser el paso que se ve, sus mensajes entran; los que solo reservan el alto no se animan. */
+.dc-view:not(.fit-ghost) .dc-item { animation: dc-in .4s ease both; }
 .dc-item.in { align-self: flex-start; max-width: 82%; background: var(--paper); border: 1px solid #e9e2f7; border-radius: 16px 16px 16px 4px; }
 .dc-item.out { align-self: flex-end; max-width: 86%; background: var(--at); border-radius: 16px 16px 4px 16px; }
 .dc-item.card { background: var(--paper); border: 1px solid #e9e2f7; border-left: 4px solid var(--ac); border-radius: 14px; }
@@ -55,7 +58,8 @@
   .dc-dotbtn { flex: 1; min-width: 0; height: 44px; border-radius: 12px; font-size: 14px; font-weight: 800; border: 0; background: #eef0f4; color: var(--soft); }
   .dc-dotbtn.past { background: var(--teal-soft); color: var(--teal); }
   .dc-dotbtn.on { background: var(--teal); color: #fff; }
-  .dc-panel { border-radius: 22px; padding: 16px; gap: 12px; min-height: 440px; }
+  .dc-panel { border-radius: 22px; padding: 16px; gap: 12px; }
+  .dc-view { gap: 12px; }
   .dc-panel-head { order: 1; padding-bottom: 0; border-bottom: 0; }
   .dc-chline { order: 0; justify-content: space-between; }
   .dc-item { order: 2; }

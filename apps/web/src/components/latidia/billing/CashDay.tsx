@@ -5,6 +5,7 @@
 // movimiento reducido se ve el día terminado, sin animar. Los montos son del tarifario de ejemplo del consultorio, no precios de latidIA.
 import { useCallback, useEffect, useRef, useState } from "react"
 import "./cash-day.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 const STEP_MS = 1700
 const LAST = 6
@@ -19,10 +20,15 @@ const DAY: Charge[] = [
   { at: 5, time: "17:30", who: "Luis Gómez Salas", what: "Paga lo que faltaba", amount: 30, method: "Efectivo" },
 ]
 
+/** Lo que dice el estado de la caja a lo largo del día. */
+const STATES = ["Sin abrir", "Abierta desde 09:20", "Lista para cerrar"]
+
 /** «S/ 80,00»: los soles del tarifario de ejemplo. */
 const soles = (v: number) => `S/ ${v.toFixed(2).replace(".", ",")}`
 
 export default function CashDay() {
+  // La tarjeta de la caja mide siempre lo que el día terminado: los cobros entran en espacio reservado.
+  const steady = useSteadyHeight<HTMLDivElement>()
   // Se arma en el servidor con el día terminado: sin JavaScript se lee igual.
   const [n, setN] = useState(LAST)
   const timer = useRef<number | undefined>(undefined)
@@ -53,20 +59,29 @@ export default function CashDay() {
   const byMethod = new Map<string, number>()
   for (const d of shown) byMethod.set(d.method, (byMethod.get(d.method) ?? 0) + d.amount)
   const state = n === 0 ? "closed" : n >= LAST ? "ready" : "open"
-  const stateText = n === 0 ? "Sin abrir" : n >= LAST ? "Lista para cerrar" : "Abierta desde 09:20"
+  const stateText = n === 0 ? STATES[0] : n >= LAST ? STATES[2] : STATES[1]
 
   return (
     <div className="lt-cash">
-      <div className="lt-cash-card">
+      <div className="lt-cash-card" ref={steady}>
         <div className="lt-cash-top">
           <div className="lt-cash-title">
             <b>Caja de hoy</b>
             <span>Sede San Martín · sábado 24 oct.</span>
           </div>
           <span className="lt-cash-side">
-            <span className="lt-cash-state" data-state={state}>
-              <i aria-hidden="true" />
-              {stateText}
+            {/* El estado más largo reserva su ancho: «Repetir el día» no se corre cuando cambia. */}
+            <span className="fit fit-inline">
+              {STATES.map((text) => (
+                <span key={text} className="lt-cash-state fit-ghost" aria-hidden="true">
+                  <i />
+                  {text}
+                </span>
+              ))}
+              <span className="lt-cash-state" data-state={state}>
+                <i aria-hidden="true" />
+                {stateText}
+              </span>
             </span>
             <button type="button" className="lt-cash-replay" onClick={play}>
               <span aria-hidden="true">↻</span> Repetir el día

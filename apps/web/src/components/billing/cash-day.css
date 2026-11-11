@@ -32,6 +32,8 @@
 .fc-stat-main b { font-size: 26px; }
 .fc-sub { font-size: 12px; color: var(--muted); }
 .fc-block { border: 1px solid var(--fc-line); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+/* Los movimientos se quedan con el espacio que sobra: lo de abajo no baja con cada cobro. */
+.fc-block:last-of-type { flex: 1 0 auto; }
 .fc-block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .fc-block-head b { font-size: 15px; }
 .fc-block-head span { font-size: 12px; color: var(--muted); }

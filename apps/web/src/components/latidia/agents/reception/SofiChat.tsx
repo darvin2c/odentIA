@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { AgentFoot, AgentHead } from "../../../agents/frame/AgentFrame"
 import "./sofi-chat.css"
+import { useSteadyHeight } from "../../../../lib/steady"
 
 type Scene = "agenda" | "urgencia"
 type Tone = "cercano" | "neutro" | "formal"
@@ -57,6 +58,7 @@ const LAST = 8
 const STEP_MS = 1500
 
 export default function SofiChat() {
+  const steady = useSteadyHeight<HTMLDivElement>()
   const [scene, setScene] = useState<Scene>("agenda")
   const [tone, setTone] = useState<Tone>("cercano")
   const [emoji, setEmoji] = useState(false)
@@ -116,7 +118,7 @@ export default function SofiChat() {
   })
 
   return (
-    <div className="lsc">
+    <div className="lsc" ref={steady}>
       <div className="lsc-top">
         <AgentHead
           agent="sofi"
@@ -154,23 +156,25 @@ export default function SofiChat() {
       <div className="lsc-chat" aria-live="polite">
         <span className="lsc-day">HOY</span>
         {messages.map((m) => (
-          <div
-            key={`${scene}-${m.start}`}
-            className={`lsc-msg ${m.visible ? "on" : "off"}`}
-            data-kind={m.kind}
-            aria-hidden={m.visible ? undefined : true}
-          >
-            {m.typing ? (
-              <span className="lsc-dots" role="img" aria-label="Sofi está escribiendo">
-                <i />
-                <i />
-                <i />
-              </span>
-            ) : (
-              <>
-                <span className="lsc-text">{m.text}</span>
-                <span className="lsc-time">{m.meta}</span>
-              </>
+          // El mensaje ocupa su lugar desde el principio; mientras Sofi escribe, los tres puntos van
+          // encima, en la misma celda: el chat no cambia de alto y «Volver a ver» no se mueve.
+          <div key={`${scene}-${m.start}`} className="lsc-slot" data-kind={m.kind}>
+            <div
+              className={`lsc-msg ${m.visible && !m.typing ? "on" : "off"}`}
+              data-kind={m.kind}
+              aria-hidden={m.visible && !m.typing ? undefined : true}
+            >
+              <span className="lsc-text">{m.text}</span>
+              <span className="lsc-time">{m.meta}</span>
+            </div>
+            {m.typing && (
+              <div className="lsc-msg on" data-kind="out">
+                <span className="lsc-dots" role="img" aria-label="Sofi está escribiendo">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </div>
             )}
           </div>
         ))}

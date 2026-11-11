@@ -51,6 +51,13 @@
   font-size: 15px;
   min-height: 22px;
 }
+.laq-ask > .fit {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.laq-stage > .laq-answer {
+  align-self: stretch;
+}
 .laq-caret {
   color: #6d3fc0;
   margin-left: 1px;

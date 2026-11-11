@@ -72,6 +72,7 @@ export function VoiceBubble({
   text,
   speaking,
   idle,
+  reserve,
 }: {
   initials: string
   who: string
@@ -79,6 +80,8 @@ export function VoiceBubble({
   speaking: boolean
   /** Lo que dice el globo cuando ya no habla (p. ej. «Dictado terminado · 1 min 12 s»). */
   idle?: string
+  /** Las demás frases que dirá este mismo globo: reserva el alto de la más larga, para que no salte. */
+  reserve?: readonly string[]
 }) {
   const words = text.split(" ")
   const [shown, setShown] = useState(words.length)
@@ -108,6 +111,12 @@ export function VoiceBubble({
       <div className="af-bubble">
         <span className="af-voice-head">
           <b>{who}</b>
+          {/* La onda va en la misma fila que el nombre: al callar se apaga sin quitar una línea. */}
+          <span className="af-wave" aria-hidden="true">
+            {WAVE.map((bar) => (
+              <i key={bar} />
+            ))}
+          </span>
           <span className="af-mic">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -116,18 +125,22 @@ export function VoiceBubble({
             {speaking ? "le dicta a Clío" : (idle ?? "terminó de dictar")}
           </span>
         </span>
-        <span className="af-wave" aria-hidden="true">
-          {WAVE.map((bar) => (
-            <i key={bar} />
-          ))}
-        </span>
-        <span className="af-said">
-          «{words.slice(0, shown).join(" ")}
-          {shown < words.length ? (
-            <span className="af-rest">{` ${words.slice(shown).join(" ")}»`}</span>
-          ) : (
-            "»"
-          )}
+        <span className="fit">
+          {reserve
+            ?.filter((other) => other !== text)
+            .map((other) => (
+              <span key={other} className="af-said fit-ghost" aria-hidden="true">
+                «{other}»
+              </span>
+            ))}
+          <span className="af-said">
+            «{words.slice(0, shown).join(" ")}
+            {shown < words.length ? (
+              <span className="af-rest">{` ${words.slice(shown).join(" ")}»`}</span>
+            ) : (
+              "»"
+            )}
+          </span>
         </span>
       </div>
     </div>
