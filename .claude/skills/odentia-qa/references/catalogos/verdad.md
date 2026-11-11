@@ -3,7 +3,7 @@
 Catálogo del auditor. Cada entrada es una cifra, un estado o un dato, con todos los lugares donde se ve y la cuenta para rehacerlo a mano. Es el piso, no el techo: se revisan las entradas que el área toca, comprobación por comprobación, y además el auditor arma sus casos y hace sus giras (`mesa.md`).
 Crece con lo que cada recorrido devuelve en «Para mi catálogo» y con lo que se escapó. También se poda: lo que ya no existe se quita y lo repetido se une.
 Antes de dar un fallo por cierto, mira «A mano»: varias diferencias son a propósito y están dichas ahí. Los casos son ficticios; si la demo no los trae, se crean.
-Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/components/`, `R` = `packages/clinic-app/src/routes/`. Códigos: `DIN` dinero, `EST` estados, `DAT` el mismo dato, `PRO` promesas, `RAS` rastro.
+Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/components/`, `R` = `packages/clinic-app/src/routes/`, `A` = `apps/admin/src/`. Códigos: `DIN` dinero, `EST` estados, `DAT` el mismo dato, `PRO` promesas, `RAS` rastro.
 
 ---
 
@@ -209,6 +209,50 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** «Piezas tratadas: 36, 46» con solo la 36 hecha.
 **Caso:** el 9 de marzo: caries oclusal y distal en la 46, pulpitis, y resina en la 36. Firmado: tratada la 36; la 46, un solo hallazgo vigente. El 23 se cementa la corona de la 46: su diagnóstico no es la pulpitis ya resuelta.
+
+## V-DAT-05 Lo que espera al equipo en la administración
+**Aparece en:** Inicio de la administración («Prospectos por responder» y «Casos de soporte por atender», `A/routes/_app/index.tsx`), el número de «Lista de espera» y de «Soporte» en el menú (`A/routes/_app.tsx`) y las primeras filas de la cola de soporte (`A/routes/_app/support.tsx`). La regla: `S/saas-founders.ts` (`waitlistHomeRows`, `countWaitlistToReview`) y `S/admin-support.ts` (`supportHomeRows`, `getAdminSupportAttention`).
+**A mano:** un prospecto espera respuesta si está por revisar y nadie anotó un contacto, o si su invitación vence en 3 días o ya venció. Un caso nos espera si no está resuelto ni esperando a la clínica, y nunca le respondimos o la clínica escribió, adjuntó o autorizó el acceso después de nuestra última respuesta. El rol Soporte no cuenta los casos de cobro. Un seguimiento de hoy sale en Inicio y no suma al número del menú. Inicio trae como mucho 50 casos; el menú los cuenta todos.
+- [ ] El número de «Lista de espera» es el de filas de «Prospectos por responder».
+- [ ] El número de «Soporte» es el de filas de «Casos de soporte por atender», y esas filas son las primeras de la cola, en el mismo orden y con la misma frase.
+- [ ] Un caso ya respondido no sale en Inicio ni suma al menú; cuando la clínica responde, vuelve a los dos.
+- [ ] Con el rol Soporte, ningún número ni fila incluye un caso de cobro.
+- [ ] Una solicitud que está en las dos secciones sale una sola vez, con el seguimiento como segunda línea.
+
+**Ya falló:** Inicio contaba los casos abiertos o en atención aunque ya les hubiéramos respondido, y «Soporte» no tenía número en el menú.
+**Caso:** Dental Smile tiene una pregunta sin responder desde ayer, el caso de recordatorios que respondimos hoy y una revisión de cobro sin responder. Con el rol Administración, Inicio y el menú dicen 2, con la pregunta primero; con el rol Soporte, 1. Si la clínica responde el de recordatorios, pasan a 3 y 2, y ese caso sube en la cola.
+
+## V-DAT-06 Una solicitud de la lista de espera: plazo, etapa e invitación
+**Aparece en:** Inicio, la columna Plazo y el filtro «Etapa» de la lista de espera, la cabecera del cajón y su seguimiento (`A/routes/_app/waitlist.tsx`), la ficha › Equipo de la clínica y el aviso de «Reenviar» (`A/routes/_app/organizations_.$organizationId.tsx`, `A/lib/invitation-words.ts`). La regla: `S/saas-founders.ts` (`waitlistStage`, `waitlistAnswer`).
+**A mano:** el plazo son los días hábiles de las condiciones desde que pidió entrar; hoy se cuentan en UTC y sin feriados, y eso sigue pendiente. La etapa sale del estado guardado, del vencimiento de la invitación y de los pagos confirmados de su clínica. «Vence» se dice solo de una invitación.
+- [ ] Inicio, la columna Plazo y la cabecera del cajón dicen el mismo día con las mismas palabras: «Respuesta vencida el…», «Responder hoy» o «Responder hasta el…».
+- [ ] La etapa es la misma en el filtro, el cajón y su seguimiento, y los números del filtro suman «Todas».
+- [ ] El vencimiento de una invitación es el mismo en Inicio, el cajón, la ficha › Equipo y el aviso de «Reenviar».
+- [ ] Reenviar una invitación vigente dice que va con el mismo enlace y la misma fecha; renovar una vencida la saca de Inicio.
+
+**Ya falló:** una invitación vencida seguía como «Invitada» y no salía en Inicio.
+**Caso:** Clínica Norte fue invitada como Fundador y su enlace vence el mar 17. Desde el sáb 14 sale en Inicio con «vence el mar 17 nov», lo mismo que dice su cajón; el mié 18 su etapa es «Invitación vencida» en el filtro, en el cajón y en su fila de Inicio.
+
+## V-DAT-07 El comprobante rechazado y el día de solo lectura
+**Aparece en:** en la clínica, Plan y pagos («Historial de pagos», «Próximo cobro» y la tarjeta de la suscripción; `R/_org/settings.plan.index.tsx`) y el aviso de arriba (`S/clinic-notices.ts`); en la administración, el historial de pagos (`A/routes/_app/billing.tsx`) y la auditoría; el correo de la víspera y el ciclo de cobro (`S/saas-billing.ts`, `readOnlyAtOf`).
+**A mano:** el motivo es el que escribió quien rechazó, tal cual. El día de solo lectura es el mayor entre el fin de la gracia y la prórroga vigente; un comprobante en revisión no lo mueve.
+- [ ] El historial de la clínica dice «Rechazado: motivo» y el medio por su nombre; «Próximo cobro» y el aviso dicen «No pudimos confirmar tu comprobante «‹archivo›»: motivo.».
+- [ ] El historial de la administración dice el mismo motivo, quién y cuándo, y la auditoría lo guarda.
+- [ ] El cargo de un comprobante rechazado debe lo mismo en los dos lados.
+- [ ] «Pasa a solo lectura el…» es el mismo día en el aviso, en Plan y pagos, en el correo de la víspera y en el ciclo, nunca un día que ya pasó, y Plan y pagos no muestra una prórroga que ya venció.
+
+**Ya falló:** con la prórroga de un comprobante hasta el martes, el aviso decía que la clínica pasaba a solo lectura el domingo.
+**Caso:** la gracia termina el dom 15 a las 10:00. El sáb 14 sube un comprobante por todo el saldo y recibe prórroga hasta el mar 17. El lun 16 se rechaza: el aviso y «Próximo cobro» dicen el motivo, el aviso dice «mar 17» y el correo de la víspera sale el lun 16. Ese mismo día sube otro comprobante: no da más días.
+
+## V-DAT-08 Clínicas y personas en la administración
+**Aparece en:** Organizaciones (el filtro de producto y la etiqueta «Alta incompleta», `A/routes/_app/organizations.tsx`), «Altas por completar» en Inicio, la ficha de la clínica y su Equipo (`A/routes/_app/organizations_.$organizationId.tsx`), Usuarios (`A/routes/_app/users.tsx`) y la ficha del caso de soporte.
+**A mano:** un alta está incompleta si le falta el perfil o la sede; las demos no cuentan. «Todos» es la suma de cada producto. Los roles de una clínica los dice el servidor (`roleLabel`), con la palabra de su producto.
+- [ ] «Altas por completar» es el número de clínicas con la etiqueta «Alta incompleta», y su ficha dice qué falta.
+- [ ] «Todos» del filtro es la suma de odentIA, latidIA y vistIA.
+- [ ] Un mismo rol se dice igual, en español, en Usuarios, en la ficha › Equipo y en la ficha del caso.
+
+**Ya falló:** «Todos 10» con 11 clínicas, porque vistIA no sumaba; «Altas por completar» no contaba el alta asistida sin sede; Usuarios decía «owner» y «admin».
+**Caso:** la demo con 11 clínicas, una de vistIA y un alta asistida sin sede: el filtro dice «Todos 11 · vistIA 1», «Altas por completar» cuenta esa alta igual que su etiqueta, y la misma propietaria se lee «Propietario» en las tres pantallas.
 
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».

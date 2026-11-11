@@ -4,7 +4,7 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 
 **Cómo se mide:** pantallas, cajones, clics o toques, tecleos (campos escritos), saltos (salir de donde estaba) y decisiones, siempre con el ancho. «A mantener» = no debe subir. «A mejorar» = todavía cuesta de más. «Medida vieja» = la pantalla cambió después; se mide de nuevo antes de comparar. Una voz simulada contó estos pasos: no es el tiempo de una clínica real.
 
-**Abreviaturas:** `CA` = `packages/clinic-app/src/components/`, `R` = `packages/clinic-app/src/routes/_org/`, `UP` = `packages/ui-patterns/src/`, `UI` = `packages/ui/src/components/`. Cuántas veces al día se hace cada tarea es **supuesto** en todas: ninguna tiene fuente de una clínica real.
+**Abreviaturas:** `CA` = `packages/clinic-app/src/components/`, `R` = `packages/clinic-app/src/routes/_org/`, `UP` = `packages/ui-patterns/src/`, `UI` = `packages/ui/src/components/`, `A` = `apps/admin/src/`. Cuántas veces al día se hace cada tarea es **supuesto** en todas: ninguna tiene fuente de una clínica real.
 
 **Lista común** (se revisa en cada tarea, además de lo propio):
 
@@ -315,3 +315,54 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Quien vende sabe a quién le toca sin salir de la venta.
 - [ ] Un valor fuera de rango avisa sin frenar.
 **Patrones:** `Field` y `FieldGroup` (`UI/field.tsx`); `UI/input-group.tsx`.
+
+## Administración (equipo interno)
+
+Las cuentas de odentIA en la administración, con el rol Administración o Soporte. «Antes» se contó en las capturas del 11 nov; lo de este cambio se contó en su código, sin recorrer la pantalla nueva: hay que medirlo antes de compararlo.
+
+### M-ADM-01 Abrir desde Inicio lo primero del día
+**Quién:** administración y soporte; al empezar el día y varias veces más (supuesto).
+**Dónde:** `A/routes/_app/index.tsx`, `A/lib/support-words.ts`, `A/lib/invitation-words.ts`, `A/components/skeletons/home.tsx`.
+**Medida:** antes (1440 px), un número por cola: 2 clics y 1 salto para abrir un prospecto o un caso, después de buscarlo a ojo en la lista. Con este cambio, en el código: 1 clic en su fila, 1 salto a la pantalla con el elemento ya abierto, 0 búsquedas y 0 decisiones sobre el orden. **Volver a medir.**
+
+- [ ] Cada fila dice quién, qué espera y hasta cuándo sin abrirla, y el botón nombra lo que abre.
+- [ ] Al volver, la lista de detrás conserva sus filtros y la fila resuelta ya no está en Inicio.
+- [ ] El filtro de producto es una sola parada de teclado y se recorre con flechas.
+- [ ] Mientras carga, el esqueleto tiene forma de filas; si una parte falla, las demás siguen.
+- [ ] A 390 px cada fila se lee entera, con su botón.
+**Ya falló:** contadores que no decían a quién; el elemento se buscaba otra vez en la lista.
+**Patrones:** `EmptyState`, `ErrorState` y `SkeletonRegion` (`UP/`); `ProductFilter` (`A/components/product.tsx`).
+
+### M-ADM-02 Anotar un contacto con la fecha para volver
+**Quién:** administración y soporte; varias veces al día mientras haya prospectos (supuesto).
+**Dónde:** `A/routes/_app/waitlist.tsx` (el cajón, «Seguimiento»).
+**Medida:** antes (1440 px), 2 clics y 1 tecleo («Guardar nota»), sin fecha posible. Con este cambio, en el código: 1 clic para abrir la solicitud, 1 tecleo («¿Qué pasó?»), 1 toque para la fecha (0 si sigue la que había) y 1 clic en «Anotar…»: 2 o 3 clics, 1 cajón, 0 saltos. **Volver a medir.**
+
+- [ ] La fecha se elige en un grupo de botones que es una sola parada de teclado, y anuncia cuál está elegida.
+- [ ] Cerrar el recordatorio se elige a propósito; nunca viene elegido al abrir.
+- [ ] El botón dice qué va a pasar con la fecha antes de pulsarlo.
+- [ ] Lo escrito sin anotar avisa antes de cerrar el cajón o de ir a otra pantalla.
+**Ya falló:** una sola nota que se reemplazaba, sin autor ni fecha para volver.
+**Patrones:** `DetailDrawer` (`UP/`); `ToggleGroup` (`UI/toggle-group.tsx`); `DatePickerButton` (`UP/`).
+
+### M-ADM-03 Pedir el acceso de diagnóstico, y que la clínica lo autorice
+**Quién:** soporte; algunas veces por semana (supuesto). Del otro lado, la propietaria o un administrador de la clínica.
+**Dónde:** `A/routes/_app/support.tsx` («Pedir acceso de diagnóstico…»); en la clínica, `CA/support-cases.tsx` («Autorizar acceso»).
+**Medida:** antes, no había botón: el pedido se escribía a mano en la respuesta y solo lo veía quien abrió el caso. Con este cambio, en el código: soporte, 3 clics y 0 tecleos desde la cola (abrir el caso, el botón y «Pedir acceso» en el diálogo); la clínica, 2 clics desde el caso abierto en Ayuda (la «Duración» viene en 30 minutos y «Autorizar acceso»). **Volver a medir.**
+
+- [ ] El diálogo muestra el texto exacto y a quién le llega antes de enviarlo.
+- [ ] Si quien abrió no puede autorizar, la pantalla de la clínica le dice quién puede, sin un paso más.
+- [ ] Autorizar no pide escribir nada: el caso vuelve a soporte solo.
+**Ya falló:** quien abrió el caso no podía autorizar y nadie más de la clínica lo veía.
+**Patrones:** `ConfirmDialog` (`UP/confirm-dialog.tsx`) con el mensaje dentro.
+
+### M-ADM-04 Rechazar un comprobante
+**Quién:** administración; algunas veces por semana (supuesto).
+**Dónde:** `A/routes/_app/billing.tsx` («Comprobantes por confirmar»), `A/components/reason-dialog.tsx`.
+**Medida:** antes (1440 px), no se podía: «Reversar» fallaba sobre un pendiente. Con este cambio, en el código: 2 clics y 1 tecleo («Rechazar», el motivo y «Rechazar»), 1 diálogo y 0 saltos; «Ver» el archivo antes es 1 clic más. **Volver a medir.**
+
+- [ ] El diálogo dice el archivo, el importe y la clínica en el título, y que no sale correo.
+- [ ] El campo del motivo no deja pasarse del largo que acepta el servidor.
+- [ ] La fila sale de la lista al momento, sin recargar.
+**Ya falló:** un botón que siempre daba error.
+**Patrones:** `ReasonDialog` (`A/components/reason-dialog.tsx`).

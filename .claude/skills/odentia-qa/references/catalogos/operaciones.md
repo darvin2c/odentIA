@@ -305,6 +305,50 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** «Pagar» pagó al instante con el importe de siempre; anotar un sueldo «todavía no» lo dio por pagado hoy; «Dejar de repetir» borró el mes vencido sin pagar; el sueldo del mes anterior salió vencido el día en que se paga; «Cambiar lo que se repite» al importe de siempre no cambió nada; lo que se repite dejó de poder anotarse en dólares; «Ver el reporte» abrió otro mes y «Pagar en Gastos» otra sede.
 
+## O-ADM-01 Rechazar un comprobante de la suscripción
+
+**Dónde:** `S/saas-billing.ts` (rechazar, la prórroga y `readOnlyAtOf`), `S/clinic-notices.ts` (lo que lee la clínica arriba), `API/saas-billing.ts`.
+
+- [ ] Solo el rol Administración rechaza, y solo un comprobante pendiente. El motivo es obligatorio y tiene un largo máximo que la pantalla respeta.
+- [ ] Rechazar es final: un rechazado no cambia más, y rechazar dos veces devuelve lo mismo. Confirmar después responde que ya no está pendiente.
+- [ ] Rechazar no suma al cargo, no da comisión y no retira la prórroga que ese comprobante ya dio. El cargo queda libre para otro comprobante.
+- [ ] Un rechazo por error se corrige registrando el pago en el cargo, no cambiando el comprobante.
+- [ ] La clínica lee el mismo motivo en su historial, en «Próximo cobro» y en el aviso de arriba. No se le promete un correo que no existe.
+- [ ] Un comprobante en revisión no aplaza la solo lectura: solo una prórroga vigente, y otro comprobante después de un rechazo no encadena días.
+- [ ] El ciclo, la franja, el correo de la víspera y Plan y pagos dicen el mismo día de solo lectura, nunca uno que ya pasó.
+- [ ] Queda en la auditoría quién lo rechazó, cuándo y por qué.
+
+**Ya falló:** «Reversar» sobre un comprobante pendiente siempre daba error y no había otra forma de cerrarlo; un comprobante en revisión aplazaba la solo lectura por sí solo y, después de una prórroga, la franja decía el fin de la gracia en vez del día real.
+
+## O-ADM-02 Pedir el acceso de diagnóstico de soporte
+
+**Dónde:** `S/admin-support.ts` (el pedido, quién lee el caso, «nos espera» y `clinicActed`), `S/support-notices.ts` (los avisos), `API/admin-support.ts`; motivos en `docs/decisions/0180-quien-ve-un-caso-de-soporte.md`.
+
+- [ ] Se pide solo en un caso con clínica, sin resolver, que no sea de cobro ni de entrar a su cuenta y sin un acceso vigente; si no, el error dice por qué.
+- [ ] Pedirlo otra vez sin que la clínica haya hecho nada no escribe otro mensaje ni otro aviso.
+- [ ] El mensaje que queda es el mismo que mostró el diálogo, y el caso pasa a «Esperando a la clínica».
+- [ ] Desde el pedido, la propietaria y los administradores leen el caso y reciben «necesita algo», uno por persona con su tope. Nadie más de la clínica lo lee.
+- [ ] Autorizar, escribir o adjuntar es la respuesta de la clínica: el caso vuelve a «En atención», sube en la cola y avisa al buzón una vez.
+- [ ] El acceso dura lo que se autorizó, se corta al revocarlo y solo lee configuración: nunca pacientes ni secretos.
+- [ ] El rol Soporte no llega a un caso de cobro por ninguna ruta: la ficha y sus acciones responden «no existe».
+
+**Ya falló:** la respuesta de la clínica dejaba el caso en «Esperando a la clínica» y no volvía a la cola; si quien abrió el caso no podía autorizar, nadie de la clínica que podía hacerlo lo veía.
+
+## O-ADM-03 Anotar el seguimiento de un prospecto
+
+**Dónde:** `S/saas-founders.ts` (la etapa, la bitácora y las filas de Inicio), `API/admin-founders.ts`; la tabla `admin.saas_follow_up` y su regla en la base.
+
+- [ ] Las entradas solo se agregan. Lo único que cambia después es «solo administración», de no a sí, y solo lo hace ese rol; la base rechaza cualquier otro cambio.
+- [ ] La fecha para volver es un día de Lima, de hoy a un año. A las 19:30 de Lima «hoy» sigue siendo hoy, aunque en UTC ya sea mañana.
+- [ ] La próxima acción es la fecha de la última entrada: sin fecha se cierra el recordatorio, y descartar lo cierra.
+- [ ] La ruta vieja de la nota agrega una entrada y conserva la fecha pendiente.
+- [ ] Lo que anota soporte nunca es solo de administración. De una entrada que sí lo es, soporte no recibe el texto por ninguna ruta.
+- [ ] La auditoría dice qué se anotó, nunca el texto.
+- [ ] La etapa se calcula al leer: «Paga» es al menos un pago confirmado de su clínica, no la suscripción activa, y los conteos por etapa suman «Todas».
+- [ ] El número de «Lista de espera» en el menú es el de «Prospectos por responder» en Inicio, contado con la misma regla.
+
+**Ya falló:** la nota del equipo era un solo campo que se reemplazaba, sin autor ni fecha; una invitación vencida seguía contando como «Invitada».
+
 ## Casos
 
 Un caso por operación, dicho como estado del dato. Se recorren en el código y, lo que se pueda, en la pantalla.
@@ -334,3 +378,6 @@ Un caso por operación, dicho como estado del dato. Se recorren en el código y,
 | CO21 | En el borde: una cita de hoy a las 16:30 se estira o se mueve a las 12:00 cuando son las 13:00, y después «Vino». | AGE-02 | El cambio se rechaza o avisa que ya pasó; «Vino» deja quién y se deshace. |
 | CO22 | Otro estado: recepción cancela y, con el cajón viejo en otra pestaña, alguien pulsa «Confirmar cita». | AGE-02 | La segunda recibe «la cita cambió»; la cita sigue cancelada. |
 | CO23 | A medias: cita 17:30–18:00 al final del turno; «Editar detalles» le pone un servicio de 90 minutos. | AGE-02 | Avisa que sale del horario, como al mover, y queda rastro de qué cambió. |
+| CO24 | Repetido y de otro día: la gracia termina el domingo; el comprobante del sábado da prórroga al martes; se rechaza el lunes y ese día sube otro falso. | ADM-01 | El segundo no da más días; el lunes la franja dice «martes» y el ciclo la pasa a solo lectura al terminar la prórroga. |
+| CO25 | Repetido y otro rol: soporte pulsa dos veces «Pedir acceso» en un caso que abrió recepción; la propietaria autoriza sin escribir. | ADM-02 | Un mensaje; la propietaria lo lee y recibe el aviso; el caso vuelve a «En atención» y el buzón recibe un solo aviso. |
+| CO26 | En el borde: soporte anota a las 19:30 de Lima con «Mañana», y desde una pestaña vieja guarda una nota con la ruta anterior. | ADM-03 | La fecha es la del día siguiente en Lima; la nota vieja es otra entrada y no borra esa fecha. |
