@@ -110,7 +110,7 @@ describe("«Tus lentes están listos» (entrega 5)", () => {
     await ownerDb.update(message).set({ status: "unknown" }).where(eq(message.id, row!.readyMessageId!))
     const doubtful = await run(c, (tx) => getJobOrder(tx, c.orgId, ready.id))
     expect(doubtful.readyNotice).toMatchObject({ status: "dudoso", canResend: false })
-    expect(doubtful.readyNotice?.words).toMatch(/No sabemos si llegó/)
+    expect(doubtful.readyNotice?.words).toMatch(/No se sabe si salió/)
     await expect(run(c, (tx) => sendOrderReadyNotice(tx, c.orgId, c.ownerId, ready.id, { resend: true }))).rejects.toMatchObject({
       code: "NOTICE_DOUBTFUL",
     })

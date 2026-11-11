@@ -91,7 +91,7 @@ export function conversationWords(input: {
     }
   }
   // Como en «Por atender»: va antes que esperar al paciente o que la atienda el agente.
-  if (attention.sendFailed) return { text: "No se pudo enviar", tone: "team" }
+  if (attention.sendFailed) return { text: attention.sendUncertain ? "No se sabe si salió" : "No se pudo enviar", tone: "team" }
   // Solo si el agente la atiende tiene sentido decir que espera.
   if (attention.teamLive && attention.agentAttending) return { text: `Conversa alguien del equipo · ${agent} espera`, tone: "team" }
   // Mismo orden que las pestañas del servidor: esperar al paciente va antes que «Por responder».

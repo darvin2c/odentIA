@@ -115,6 +115,43 @@ it("fallo ambiguo live no reintenta ni duplica el envío", async () => {
   expect((await messageState(messageId))?.status).toBe("unknown")
 })
 
+it("si el worker se detiene en medio del envío, el mensaje no sale dos veces: queda «no se sabe si salió»", async () => {
+  const { messageId } = await seedQueuedText()
+  let calls = 0
+  const liveOk = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => {
+      calls++
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 7 } }), { status: 200 })
+    }) as typeof fetch,
+  }
+  // Lo que deja un worker que anotó el intento y se cayó antes de anotar la respuesta del canal.
+  await ownerDb.execute(sql`update "message" set "send_attempted_at" = now() where "id" = ${messageId}::uuid`)
+  expect(await processOutbound(appDb, liveOk, outJob(messageId, 2))).toBe("done")
+  expect(calls).toBe(0)
+  expect((await messageState(messageId))?.status).toBe("unknown")
+})
+
+it("el intento se anota y se confirma antes de llamar al canal", async () => {
+  const { messageId } = await seedQueuedText()
+  let seenDuringCall: unknown = "sin llamar"
+  const liveOk = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => {
+      // Otra conexión ve la marca: ya está confirmada mientras se llama al canal.
+      const rows = await ownerDb.execute(sql`select "send_attempted_at" from "message" where "id" = ${messageId}::uuid`)
+      seenDuringCall = (rows as unknown as { send_attempted_at: unknown }[])[0]?.send_attempted_at ?? null
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 8 } }), { status: 200 })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, liveOk, outJob(messageId))).toBe("done")
+  expect(seenDuringCall).not.toBeNull()
+  expect(seenDuringCall).not.toBe("sin llamar")
+  expect((await messageState(messageId))?.status).toBe("sent")
+})
+
 it("live con stub de proveedor marca sent", async () => {
   const { messageId } = await seedQueuedText()
   const liveOk = {

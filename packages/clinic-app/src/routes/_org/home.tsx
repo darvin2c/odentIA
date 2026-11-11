@@ -241,7 +241,9 @@ function HomePage() {
     switch (row.kind) {
       case "case":
         return row.conversationId !== null ? true : row.taskId !== null && canReadTasks
+      // Lo que no se sabe si salió se resuelve en la Bandeja, con «Salió» o «No salió»: no al lado, donde solo se puede volver a escribir.
       case "person":
+        return !row.uncertain
       case "advice":
       case "unreached":
       case "budgets":

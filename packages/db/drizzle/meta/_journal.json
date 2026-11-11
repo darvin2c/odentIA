@@ -687,6 +687,20 @@
       "when": 1794371167952,
       "tag": "0097_aviso_llego_tu_paciente",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1794418181467,
+      "tag": "0098_mensaje_intento_de_envio",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1794418194972,
+      "tag": "0099_mensaje_intento_de_envio_reglas",
+      "breakpoints": true
     }
   ]
 }

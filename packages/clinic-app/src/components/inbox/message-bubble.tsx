@@ -103,6 +103,8 @@ export function MessageBubble({
   channel,
   orgSlug,
   onShowTrace,
+  onResolveDelivery,
+  resolvingDelivery = false,
   highlight,
   selected,
   onReply,
@@ -117,6 +119,9 @@ export function MessageBubble({
   orgSlug: string
   /** Presente solo si el mensaje tiene traza: abre «En qué se basó». */
   onShowTrace?: () => void
+  /** El canal no confirmó si salió: la persona dice lo que comprobó (solo con permiso para escribir). */
+  onResolveDelivery?: (outcome: "sent" | "failed") => void
+  resolvingDelivery?: boolean
   /** Es del tema que hay que contestar: se resalta, y en rojo solo si es «Ahora». */
   highlight?: "topic" | "urgent"
   /** Es el mensaje al que responde la caja en este momento. */
@@ -224,6 +229,17 @@ export function MessageBubble({
           <p className={`text-xs ${msg.status === "failed" ? "text-destructive" : "text-warning"} text-right`}>
             {msg.deliveryNote}
           </p>
+        ) : null}
+        {/* No se reenvía solo: quien lo comprobó por otra vía lo dice. Escribir de nuevo lo decide la persona. */}
+        {out && msg.status === "unknown" && onResolveDelivery ? (
+          <div className="flex flex-wrap items-center justify-end gap-2" role="group" aria-label={`¿Salió este mensaje? «${(msg.body ?? "").slice(0, 60)}»`}>
+            <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={resolvingDelivery} onClick={() => onResolveDelivery("sent")}>
+              Salió
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={resolvingDelivery} onClick={() => onResolveDelivery("failed")}>
+              No salió
+            </Button>
+          </div>
         ) : null}
       </MessageContent>
   )

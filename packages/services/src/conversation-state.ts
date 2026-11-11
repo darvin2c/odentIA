@@ -147,15 +147,24 @@ export function lastIsAcceptedOutSql(conv: SQL): SQL {
 }
 
 /**
- * El último mensaje del hilo es un saliente que no salió (`failed`): de agente,
- * equipo o una línea del Administrador. Nadie recibió lo último que se le quiso
- * decir, así que no lo está atendiendo nadie y pide a una persona.
+ * El último mensaje del hilo es un saliente que no salió (`failed`) o del que
+ * no se sabe si salió (`unknown`): de agente, equipo o una línea del
+ * Administrador. Nadie confirma que recibió lo último que se le quiso decir,
+ * así que pide a una persona: lo resuelve con «Salió» o «No salió».
  */
 export function lastIsFailedOutSql(conv: SQL): SQL {
   return sql`exists (select 1 from (select m_fail.direction, m_fail.status from message m_fail
       where m_fail.organization_id = ${conv}.organization_id and m_fail.conversation_id = ${conv}.id
       order by m_fail.created_at desc, m_fail.id desc limit 1) as last_fail
-    where last_fail.direction = 'out' and last_fail.status = 'failed')`
+    where last_fail.direction = 'out' and last_fail.status in ('failed', 'unknown'))`
+}
+
+/** De lo último que no se confirmó (`lastIsFailedOutSql`), el canal no dijo si salió (`unknown`): no es un rechazo. */
+export function lastIsUncertainOutSql(conv: SQL): SQL {
+  return sql`exists (select 1 from (select m_unk.direction, m_unk.status from message m_unk
+      where m_unk.organization_id = ${conv}.organization_id and m_unk.conversation_id = ${conv}.id
+      order by m_unk.created_at desc, m_unk.id desc limit 1) as last_unk
+    where last_unk.direction = 'out' and last_unk.status = 'unknown')`
 }
 
 /**
