@@ -308,7 +308,7 @@ function byWords(question: string, topics: readonly HelpTopic[]): HelpSelection 
  * (`ninguna`), Jev no estaba o no pudo (`sin_jev`), o lo escrito puede ser el
  * dato de una persona y no se le preguntó (`dato`).
  */
-type Decided = {
+export type HelpDecided = {
   via: (typeof HELP_ASK_VIA)[number]
   selection: HelpSelection
   why: "ninguna" | "sin_jev" | "dato"
@@ -373,7 +373,7 @@ const errorCodeOf = (error: unknown): string => {
  * sí o no), quien escribe las une, y lo redactado se comprueba sin modelo. Si
  * Jev falla, se niega o no da probabilidades, deciden las palabras.
  */
-async function decideHelp(
+export async function decideHelp(
   question: string,
   screenName: string | null,
   topics: readonly HelpTopic[],
@@ -381,7 +381,7 @@ async function decideHelp(
   decider: HelpDecider | null,
   writer: HelpWriter | null = null,
   previous: HelpPrevious | null = null,
-): Promise<Decided> {
+): Promise<HelpDecided> {
   if (decider) {
     try {
       const state = helpState(question, screenName, previous)
@@ -457,7 +457,7 @@ function readPrevious(input: unknown, topics: readonly HelpTopic[]): HelpPreviou
 }
 
 /** Lo que dice cuando no responde, según por qué. */
-const NOT_ANSWERED: Record<Decided["why"], string> = {
+const NOT_ANSWERED: Record<HelpDecided["why"], string> = {
   ninguna: "Esto no está en la guía, y no quiero inventarlo.",
   sin_jev: "Ahora no puedo buscar bien en la guía.",
   dato: "No lo encontré en la guía. Si buscas a una persona o un número, usa «Buscar en todo».",
@@ -518,7 +518,7 @@ export async function askHelp(
   const exact = exactHelpOption(asked, topics)
   // A un modelo viaja sin cifras ni correos; si lo que queda puede ser el dato de una persona, no viaja.
   const forModel = exact ? null : withoutPersonData(asked)
-  const decided: Decided = exact
+  const decided: HelpDecided = exact
     ? { via: "exacta", selection: { verdict: "seguro", shown: [exact], offered: [], top: null }, why: "ninguna" }
     : forModel === null
       ? { via: "respaldo", selection: byWords(asked, topics), why: "dato" }
@@ -734,3 +734,6 @@ export async function sendHelpRequest(
     dedupeKey: helpDedupeKeyOf(question),
   })
 }
+
+/** Lo que de una pregunta viaja a un modelo: sin cifras ni correos, o nulo si no viaja (para las mediciones). */
+export const helpTextForModel = withoutPersonData
