@@ -42,7 +42,7 @@ type Step = "sede" | "cuando" | "revisa"
 /** Sin preferencia: cada hora con quien la tenga libre. */
 const ANYONE = "cualquiera"
 /** El enlace ya no sirve para esto: se dice con el texto del servidor. */
-const LINK_ENDED = ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CHANGEABLE"]
+const LINK_ENDED = ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CHANGEABLE", "BOOKING_APPOINTMENT_CHANGED"]
 /** La hora dejó de estar libre mientras elegía (otra cita, la unidad o un bloqueo). */
 const SLOT_TAKEN = ["APPOINTMENT_CONFLICT", "NO_ROOM", "STALE_VERSION", "VALIDATION"]
 const EXPIRED_TEXT = "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo."
@@ -320,7 +320,7 @@ export function ChooseAppointment({
         setPromotionsSaved(true)
       }
       const where = { startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }
-      if (changing) return changeBooking(slug, { token, ...where })
+      if (changing) return changeBooking(slug, { token, ...where, ...(current ? { seenStartsAt: current.startsAt } : {}) })
       return reserveBooking(slug, {
         token,
         branchId: branchId ?? "",

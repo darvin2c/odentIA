@@ -10,9 +10,11 @@ import {
   createAppointment,
   createRoom,
   getAppointment,
+  markAppointmentCame,
   moveAppointment,
   setAppointmentArrival,
   setAppointmentStatus,
+  updateAppointment,
 } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -304,4 +306,113 @@ it("mover una cita: solo la programada o confirmada y sin atención; lo atendido
   await expect(
     f.run((tx) => moveAppointment(tx, "org_a", f.actor, cancelled.id, { expectedVersion: after.version, startsAt: nextDay(cancelled.startsAt) })),
   ).rejects.toMatchObject({ code: "APPOINTMENT_STATUS" })
+})
+
+// ----- Las reglas del estado y del reloj viven en la operación (QA del 10 nov, C3, C4, C5 y C33) -----
+
+/** Lleva la cita a hace `minutes` minutos, como si su hora ya hubiera pasado. */
+async function startedAgo(id: string, minutes: number) {
+  const startsAt = new Date(Date.now() - minutes * 60_000)
+  await ownerDb.update(appointment).set({ startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000) }).where(eq(appointment.id, id))
+}
+
+it("el estado no vuelve atrás: de «Cancelada» y de «No vino» no se sale por el cambio de estado", async () => {
+  const f = await scene()
+  const cancelled = await f.book(1, 9)
+  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, cancelled.id, "cancelada", { notice: false }))
+  for (const next of ["confirmada", "programada", "no_asistio"])
+    await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, cancelled.id, next))).rejects.toMatchObject({ code: "APPOINTMENT_CLOSED", status: 409 })
+  // Repetir lo mismo no es un error: ya estaba así.
+  expect((await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, cancelled.id, "cancelada"))).status).toBe("cancelada")
+
+  const missed = await f.book(1, 10)
+  await startedAgo(missed.id, 90)
+  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, missed.id, "no_asistio"))
+  for (const next of ["confirmada", "programada", "cancelada"])
+    await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, missed.id, next))).rejects.toMatchObject({ code: "APPOINTMENT_CLOSED", status: 409 })
+
+  // Una confirmada tampoco vuelve a «por confirmar».
+  const confirmed = await f.book(1, 11, { status: "confirmada" })
+  await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, confirmed.id, "programada"))).rejects.toMatchObject({ code: "APPOINTMENT_STATUS" })
+})
+
+it("«No vino» se marca cuando su hora ya llegó: antes se rechaza y la cita sigue en pie", async () => {
+  const f = await scene()
+  const tomorrow = await f.book(1, 9)
+  await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, tomorrow.id, "no_asistio"))).rejects.toMatchObject({ code: "APPOINTMENT_NOT_YET", status: 409 })
+  expect((await f.run((tx) => getAppointment(tx, "org_a", tomorrow.id))).status).toBe("programada")
+  await startedAgo(tomorrow.id, 5)
+  expect((await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, tomorrow.id, "no_asistio"))).status).toBe("no_asistio")
+})
+
+it("el botón de una pantalla abierta antes del cambio no se aplica: confirmar, «No vino», «Llegó» y «Vino» miran la versión", async () => {
+  const f = await scene()
+  const visit = await f.book(0, 13)
+  await startedAgo(visit.id, 10)
+  // Otra persona la alarga: la versión sube.
+  const fresh = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
+  const edited = await f.run((tx) => updateAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: fresh.version, reason: "Control" }))
+  expect(edited.version).toBe(fresh.version + 1)
+  const stale = { code: "STALE_VERSION", status: 409 }
+  await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, visit.id, "confirmada", { expectedVersion: fresh.version }))).rejects.toMatchObject(stale)
+  await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, visit.id, "no_asistio", { expectedVersion: fresh.version }))).rejects.toMatchObject(stale)
+  await expect(f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, visit.id, true, new Date(), { expectedVersion: fresh.version }))).rejects.toMatchObject(stale)
+  await expect(f.run((tx) => markAppointmentCame(tx, "org_a", f.actor, visit.id, { expectedVersion: fresh.version }))).rejects.toMatchObject(stale)
+  expect(await f.run((tx) => getAppointment(tx, "org_a", visit.id))).toMatchObject({ status: "programada", arrivedAt: null, version: edited.version })
+  // Con la versión que se ve, sí; y quien no la manda (el agente, el enlace) actúa sobre la cita de ahora.
+  expect((await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, visit.id, "confirmada", { expectedVersion: edited.version }))).status).toBe("confirmada")
+  expect((await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, visit.id, true))).visit).toBe("llego")
+})
+
+it("quien pide mover una cita no la lleva a una hora que ya pasó; alargarla sin tocar su hora sí vale", async () => {
+  const f = await scene()
+  const visit = await f.book(1, 9)
+  const yesterday = new Date(Date.now() - 24 * 3_600_000).toISOString()
+  await expect(
+    f.run((tx) => moveAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: visit.version, startsAt: yesterday }, { requested: true })),
+  ).rejects.toMatchObject({ code: "VALIDATION", fields: { startsAt: expect.stringContaining("ya pasó") } })
+  expect((await f.run((tx) => getAppointment(tx, "org_a", visit.id))).startsAt).toBe(visit.startsAt)
+  // Una cita no dura más de ocho horas, se diga con minutos o con su hora de fin.
+  await expect(
+    f.run((tx) => moveAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: visit.version, startsAt: visit.startsAt, endsAt: new Date(new Date(visit.startsAt).getTime() + 3 * 24 * 3_600_000).toISOString() }, { requested: true })),
+  ).rejects.toMatchObject({ code: "VALIDATION", fields: { endsAt: expect.stringContaining("8 horas") } })
+  // «Deshacer»: la cita de hoy sin cerrar que se arrastró por error vuelve a su hora, aunque ya pasó.
+  const late = await f.book(1, 11)
+  await startedAgo(late.id, 60)
+  const before = await f.run((tx) => getAppointment(tx, "org_a", late.id))
+  const dragged = await f.run((tx) =>
+    moveAppointment(tx, "org_a", f.actor, late.id, { expectedVersion: before.version, startsAt: new Date(Date.now() + 2 * 24 * 3_600_000).toISOString() }, { requested: true, notice: false }),
+  )
+  const undone = await f.run((tx) =>
+    moveAppointment(tx, "org_a", f.actor, late.id, { expectedVersion: dragged.version, startsAt: before.startsAt }, { requested: true, notice: false }),
+  )
+  expect(undone.startsAt).toBe(before.startsAt)
+  // Solo a la hora de la que salió: otra hora pasada sigue sin valer.
+  await expect(
+    f.run((tx) => moveAppointment(tx, "org_a", f.actor, late.id, { expectedVersion: undone.version, startsAt: yesterday }, { requested: true })),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  // Ya empezó y se alarga un cuarto de hora: su hora de inicio no cambia.
+  await startedAgo(visit.id, 10)
+  const started = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
+  const longer = await f.run((tx) =>
+    moveAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: started.version, startsAt: started.startsAt, endsAt: new Date(new Date(started.startsAt).getTime() + 45 * 60_000).toISOString() }, { requested: true }),
+  )
+  expect(longer.durationMin).toBe(45)
+})
+
+it("los detalles de una cita que ya no está en pie no se reescriben, y editar deja dicho qué cambió", async () => {
+  const f = await scene()
+  const visit = await f.book(1, 9, { reason: "Dolor" })
+  const edited = await f.run((tx) => updateAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: visit.version, reason: "Dolor de muela" }))
+  const [event] = await ownerDb
+    .select({ metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.entityId, visit.id), eq(auditEvent.action, "appointment.updated")))
+  expect(event?.metadata).toMatchObject({ changed: ["reason"] })
+  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, visit.id, "cancelada", { notice: false }))
+  const cancelled = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
+  await expect(
+    f.run((tx) => updateAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: cancelled.version, reason: "Otro motivo" })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_STATUS", status: 409 })
+  expect((await f.run((tx) => getAppointment(tx, "org_a", visit.id))).reason).toBe(edited.reason)
 })

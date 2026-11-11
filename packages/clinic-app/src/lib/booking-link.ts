@@ -328,22 +328,25 @@ export function resendPersonalLink(slug: string, token: string): Promise<{ data:
   return post(`${base(slug)}/resend`, { token })
 }
 
-/** Cambia de horario la cita del enlace. */
+/**
+ * Cambia de horario la cita del enlace. `seenStartsAt` es la hora de la cita que la persona
+ * tenía a la vista: si «su cita» ya es otra (otra pestaña, dos toques), el servidor no la toca.
+ */
 export function changeBooking(
   slug: string,
-  input: { token: string; startsAt: string; professionalUserId: string; roomId?: string },
+  input: { token: string; startsAt: string; professionalUserId: string; roomId?: string; seenStartsAt?: string },
 ): Promise<{ data: BookingAppointment }> {
   return post(`${base(slug)}/change`, input)
 }
 
 /** Cancela la cita del enlace. */
-export function cancelBooking(slug: string, token: string): Promise<{ data: BookingAppointment }> {
-  return post(`${base(slug)}/cancel`, { token })
+export function cancelBooking(slug: string, token: string, seenStartsAt?: string): Promise<{ data: BookingAppointment }> {
+  return post(`${base(slug)}/cancel`, { token, ...(seenStartsAt ? { seenStartsAt } : {}) })
 }
 
 /** Confirma la cita del enlace. */
-export function confirmBooking(slug: string, token: string): Promise<{ data: BookingAppointment }> {
-  return post(`${base(slug)}/confirm`, { token })
+export function confirmBooking(slug: string, token: string, seenStartsAt?: string): Promise<{ data: BookingAppointment }> {
+  return post(`${base(slug)}/confirm`, { token, ...(seenStartsAt ? { seenStartsAt } : {}) })
 }
 
 export interface PersonalDataForm {

@@ -14,6 +14,8 @@ import { errorMessage } from "./shared"
 export interface ArrivalInput {
   id: string
   arrived: boolean
+  /** La versión de la cita que la pantalla mostraba: si otra persona la cambió antes, el servidor lo dice y no la toca. */
+  version?: number
   /** Para «Reagendar» cuando la cita no se puede recuperar. */
   patient?: { id: string; name: string }
 }
@@ -113,7 +115,7 @@ export function useAppointmentArrival(options: {
     mutationFn: (input: ArrivalInput) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/arrival`, {
         method: "POST",
-        body: JSON.stringify({ arrived: input.arrived }),
+        body: JSON.stringify({ arrived: input.arrived, ...(input.version ? { expectedVersion: input.version } : {}) }),
       }),
     onSuccess: async (result, input) => {
       await invalidateAppointmentQueries(queryClient)
