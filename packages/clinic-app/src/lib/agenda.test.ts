@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isUnclosed, stepBeforeArrival, visitName } from "./agenda"
+import { isUnclosed, movedNote, stepBeforeArrival, visitName } from "./agenda"
 
 /** La cita pasada (mesa de Inicio y Agenda del 10 nov): un nombre y el paso según sea hoy u otro día. */
 describe("la cita que pasó sin cerrarse", () => {
@@ -20,5 +20,14 @@ describe("la cita que pasó sin cerrarse", () => {
     expect(stepBeforeArrival({ visit: "sin_cerrar", ...ended }, now, false)).toBe("cerrar")
     expect(stepBeforeArrival({ visit: "confirmada", ...soon }, now, true)).toBe("llego")
     expect(stepBeforeArrival({ visit: "llego", ...ended }, now, true)).toBeNull()
+  })
+})
+
+describe("el aviso de mover una cita", () => {
+  it("dice si quedó por confirmar, si volvió a quedar confirmada y si el agente avisa", () => {
+    expect(movedNote({ status: "confirmada" }, { status: "programada" })).toBe("Queda por confirmar: confirmó el otro día.")
+    expect(movedNote({ status: "programada" }, { status: "confirmada" })).toBe("Vuelve a quedar confirmada.")
+    expect(movedNote({ status: "confirmada" }, { status: "confirmada", notice: { queued: true } })).toBe("El agente le avisa la nueva fecha.")
+    expect(movedNote({ status: "programada" }, { status: "programada" })).toBeUndefined()
   })
 })

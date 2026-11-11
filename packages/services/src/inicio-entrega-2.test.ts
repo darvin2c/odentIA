@@ -199,3 +199,39 @@ it("una cita confirmada que se mueve a otro día queda por confirmar", async () 
   )
   expect(byPatient.status).toBe("confirmada")
 })
+
+it("«Deshacer» el movimiento a otro día le devuelve la confirmación y la llegada", async () => {
+  const c = await clinic()
+  const person = await c.patient("Marta Salas")
+  // Llegó a su cita de hoy y se la arrastró a otro día por error.
+  const startsAt = new Date(Date.now() + 10 * 60_000)
+  const visit = await c.book({ patientId: person.id, professional: c.ids.ana, branchId: c.branches.first, roomId: c.rooms.a, startsAt })
+  const arrivedAt = new Date(Date.now() - 5 * 60_000)
+  await ownerDb.update(appointment).set({ arrivedAt, arrivedBy: c.ids.rita }).where(eq(appointment.id, visit.id))
+  const moved = await c.tx((db) =>
+    moveAppointment(
+      db, c.orgId, c.ids.rita, visit.id,
+      { expectedVersion: visit.version, startsAt: new Date(startsAt.getTime() + 2 * 86_400_000).toISOString(), outsideSchedule: true },
+      { requested: true },
+    ),
+  )
+  expect(moved).toMatchObject({ status: "programada", arrivedAt: null })
+  const back = await c.tx((db) =>
+    moveAppointment(
+      db, c.orgId, c.ids.rita, visit.id,
+      { expectedVersion: moved.version, startsAt: startsAt.toISOString(), outsideSchedule: true },
+      { requested: true },
+    ),
+  )
+  expect(back.status).toBe("confirmada")
+  expect(back.arrivedAt && new Date(back.arrivedAt).getTime()).toBe(arrivedAt.getTime())
+  // Moverla de nuevo a otro día, ya no como «Deshacer», la deja otra vez por confirmar.
+  const again = await c.tx((db) =>
+    moveAppointment(
+      db, c.orgId, c.ids.rita, visit.id,
+      { expectedVersion: back.version, startsAt: new Date(startsAt.getTime() + 3 * 86_400_000).toISOString(), outsideSchedule: true },
+      { requested: true },
+    ),
+  )
+  expect(again.status).toBe("programada")
+})

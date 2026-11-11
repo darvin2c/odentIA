@@ -1593,12 +1593,22 @@ export interface MoveAppointmentInput {
 /** Cuánto dura el «Deshacer» de un movimiento hacia una hora que ya pasó. */
 const UNDO_MOVE_MS = 10 * 60_000
 
+/** Lo que guardó el último movimiento de una cita, para deshacerlo. */
+interface MoveTrace {
+  from?: string
+  unconfirmed?: boolean
+  arrivalCleared?: boolean
+  arrivedAt?: string
+  arrivedBy?: string | null
+}
+
 /**
  * «Deshacer» un movimiento devuelve la cita a donde estaba, aunque esa hora ya haya pasado: una
- * cita de hoy sin cerrar que se arrastró por error vuelve a su sitio. Solo vale la hora exacta de
- * la que salió en su último movimiento, y por unos minutos.
+ * cita de hoy sin cerrar que se arrastró por error vuelve a su sitio, con la confirmación y la
+ * llegada que ese movimiento le quitó. Solo vale la hora exacta de la que salió en su último
+ * movimiento, y por unos minutos. Devuelve lo que guardó ese movimiento, o null si no lo deshace.
  */
-async function undoesLastMove(tx: Db, orgId: string, id: string, startsAt: Date): Promise<boolean> {
+async function undoneMove(tx: Db, orgId: string, id: string, startsAt: Date): Promise<MoveTrace | null> {
   const [last] = await tx
     .select({ metadata: auditEvent.metadata, createdAt: auditEvent.createdAt })
     .from(auditEvent)
@@ -1612,8 +1622,10 @@ async function undoesLastMove(tx: Db, orgId: string, id: string, startsAt: Date)
     )
     .orderBy(desc(auditEvent.createdAt))
     .limit(1)
-  const from = (last?.metadata as { from?: string } | null)?.from
-  return !!last && !!from && new Date(from).getTime() === startsAt.getTime() && Date.now() - last.createdAt.getTime() <= UNDO_MOVE_MS
+  const trace = (last?.metadata ?? null) as MoveTrace | null
+  return last && trace?.from && new Date(trace.from).getTime() === startsAt.getTime() && Date.now() - last.createdAt.getTime() <= UNDO_MOVE_MS
+    ? trace
+    : null
 }
 
 export async function moveAppointment(
@@ -1643,13 +1655,14 @@ export async function moveAppointment(
     )
   }
   const startsAt = parseInstant(input.startsAt, "startsAt")
+  const undone = startsAt.getTime() !== current.startsAt.getTime() ? await undoneMove(tx, orgId, id, startsAt) : null
   // A una hora que ya pasó no se lleva una cita: lo que pasó se cierra («Vino», «No vino»
   // o su atención), no se vuelve a reservar. La misma regla que al crearla, aquí y no solo en la pantalla.
   if (
     options.requested &&
     startsAt.getTime() !== current.startsAt.getTime() &&
     startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS &&
-    !(await undoesLastMove(tx, orgId, id, startsAt))
+    !undone
   )
     throw invalidField("startsAt", "Esa hora ya pasó. Elige una hora de ahora en adelante.")
   const durationMs = current.endsAt.getTime() - current.startsAt.getTime()
@@ -1699,6 +1712,12 @@ export async function moveAppointment(
   // se lo pide (QA del 10 nov, C31).
   // También si había llegado (esa llegada se borra): la del día nuevo nadie la confirmó.
   const unconfirmed = current.status === "confirmada" && otherDay && !options.byPatient
+  // «Deshacer» ese movimiento le devuelve lo que le quitó: la confirmación y la llegada.
+  const reconfirmed = undone?.unconfirmed === true && current.status === "programada"
+  const restoredArrival =
+    undone?.arrivalCleared && undone.arrivedAt && undone.arrivedBy && current.arrivedAt === null
+      ? { arrivedAt: new Date(undone.arrivedAt), arrivedBy: undone.arrivedBy }
+      : null
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {
@@ -1712,7 +1731,9 @@ export async function moveAppointment(
         roomId,
         overlapAllowed: input.overrideBusy === true,
         ...(arrivalCleared ? { arrivedAt: null, arrivedBy: null } : {}),
+        ...(restoredArrival ?? {}),
         ...(unconfirmed ? { status: "programada" } : {}),
+        ...(reconfirmed ? { status: "confirmada" } : {}),
         version: current.version + 1,
         updatedAt: new Date(),
       })
@@ -1735,8 +1756,12 @@ export async function moveAppointment(
       startsAt: startsAt.toISOString(),
       professionalUserId,
       roomId,
-      ...(arrivalCleared ? { arrivalCleared: true } : {}),
+      // La llegada que se borra queda guardada: «Deshacer» la devuelve tal como estaba.
+      ...(arrivalCleared ? { arrivalCleared: true, arrivedAt: current.arrivedAt!.toISOString(), arrivedBy: current.arrivedBy } : {}),
       ...(unconfirmed ? { unconfirmed: true } : {}),
+      ...(undone ? { undone: true } : {}),
+      ...(reconfirmed ? { reconfirmed: true } : {}),
+      ...(restoredArrival ? { arrivalRestored: true } : {}),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
       ...(input.overrideBusy ? { overrideBusy: true } : {}),
     })
