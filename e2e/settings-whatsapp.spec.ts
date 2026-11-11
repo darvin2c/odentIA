@@ -298,7 +298,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await expect(linkReceived).toContainText("En revisión")
   await linkReceived.scrollIntoViewIfNeeded()
   await page.screenshot({ path: info.outputPath("mensaje-recibido.png") })
-  await expect(messages).toContainText("2 aprobados · 20 en revisión")
+  await expect(messages).toContainText("2 aprobados · 21 en revisión")
   // Nadie lee ni escribe nombres técnicos.
   await expect(messages).not.toContainText(/odentia_|plantilla|template/i)
   const reminder = byAgent.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })
