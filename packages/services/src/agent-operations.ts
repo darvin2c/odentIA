@@ -3060,7 +3060,7 @@ export async function executeProposal(
       // la misma del enlace y el portal (no empezó, hora futura, horizonte).
       const moved = locked.contactId
         ? await moveOwnAppointment(tx, orgId, actorUserId, liveAppt, move)
-        : await moveAppointment(tx, orgId, actorUserId, appointmentId, move, { notice: false, requested: true, byPerson: true })
+        : await moveAppointment(tx, orgId, actorUserId, appointmentId, move, { notice: false, requested: true, byPerson: locked.proposedBy !== "user" })
       result = { appointmentId: moved.id, startsAt: moved.startsAt }
     } else if (action === "cancelar_cita") {
       const appointmentId = payload.appointmentId as string

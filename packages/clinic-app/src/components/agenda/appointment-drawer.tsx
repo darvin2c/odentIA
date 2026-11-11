@@ -369,6 +369,7 @@ function RealAppointmentDrawer({
                 .join(" ") || undefined,
           },
         )
+        setStillConfirmed(false)
         setMode("view")
         await onChanged()
       } catch (cause) {

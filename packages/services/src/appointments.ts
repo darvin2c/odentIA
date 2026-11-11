@@ -1603,7 +1603,12 @@ const UNDO_MOVE_MS = 10 * 60_000
  * cita de hoy sin cerrar que se arrastró por error vuelve a su sitio. Solo vale la hora exacta de
  * la que salió en su último movimiento, y por unos minutos.
  */
-async function lastMoveBack(tx: Db, orgId: string, id: string, startsAt: Date): Promise<{ unconfirmed: boolean } | null> {
+async function lastMoveBack(
+  tx: Db,
+  orgId: string,
+  id: string,
+  startsAt: Date,
+): Promise<{ wasConfirmed: boolean; remindersMark: number | null } | null> {
   const [last] = await tx
     .select({ metadata: auditEvent.metadata, createdAt: auditEvent.createdAt })
     .from(auditEvent)
@@ -1617,9 +1622,14 @@ async function lastMoveBack(tx: Db, orgId: string, id: string, startsAt: Date): 
     )
     .orderBy(desc(auditEvent.createdAt))
     .limit(1)
-  const metadata = last?.metadata as { from?: string; unconfirmed?: boolean } | null
+  const metadata = last?.metadata as { from?: string; unconfirmed?: boolean; confirmedWithTeam?: boolean; remindersMark?: number } | null
   const back = !!last && !!metadata?.from && new Date(metadata.from).getTime() === startsAt.getTime() && Date.now() - last.createdAt.getTime() <= UNDO_MOVE_MS
-  return back ? { unconfirmed: metadata?.unconfirmed === true } : null
+  if (!back) return null
+  return {
+    // En la hora a la que vuelve estaba confirmada: ese movimiento le quitó el sí, o el equipo dijo que seguía.
+    wasConfirmed: metadata?.unconfirmed === true || metadata?.confirmedWithTeam === true,
+    remindersMark: typeof metadata?.remindersMark === "number" ? metadata.remindersMark : null,
+  }
 }
 
 export async function moveAppointment(
@@ -1702,11 +1712,17 @@ export async function moveAppointment(
   // La persona dijo sí a otro día: si el equipo la lleva a un día distinto, la cita vuelve a «por
   // confirmar» y sus recordatorios empiezan de nuevo. Dentro del mismo día sigue confirmada (le
   // llega el aviso del cambio), y también si la hora nueva la eligió ella. «Deshacer» ese
-  // movimiento la devuelve confirmada.
-  const keptConfirmed = current.status === "confirmada" && dayChanged && !options.byPerson && !back && input.stillConfirmed === true
-  const unconfirmed = current.status === "confirmada" && dayChanged && !options.byPerson && !back && !keptConfirmed
-  const reconfirmed = current.status === "programada" && back?.unconfirmed === true
+  // movimiento la devuelve confirmada: vuelve a la fecha a la que dijo sí. Cualquier otra vuelta
+  // (rehacer lo deshecho, devolver la que movió la persona) sigue la regla de siempre.
+  const undoesConfirmed = dayChanged && back?.wasConfirmed === true
+  const leavesConfirmedDay = current.status === "confirmada" && dayChanged && !options.byPerson && !undoesConfirmed
+  const keptConfirmed = leavesConfirmedDay && input.stillConfirmed === true
+  const unconfirmed = leavesConfirmedDay && !keptConfirmed
+  const reconfirmed = current.status === "programada" && undoesConfirmed
   const status = unconfirmed ? "programada" : reconfirmed ? "confirmada" : current.status
+  // Los recordatorios de la fecha a la que vuelve cuentan otra vez; a un día nuevo, empiezan de nuevo.
+  const restoresReminders = dayChanged && back?.remindersMark != null
+  const remindersMark = dayChanged && !restoresReminders ? current.version + 1 : null
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {
@@ -1747,6 +1763,7 @@ export async function moveAppointment(
       ...(unconfirmed ? { unconfirmed: true } : {}),
       // Recepción dijo que la persona ya confirmó con ella el día nuevo.
       ...(keptConfirmed ? { confirmedWithTeam: true } : {}),
+      ...(remindersMark !== null ? { remindersMark } : {}),
       ...(reconfirmed ? { reconfirmed: true } : {}),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
       ...(input.overrideBusy ? { overrideBusy: true } : {}),
@@ -1764,10 +1781,8 @@ export async function moveAppointment(
     }
     if (moved) await rescheduleAppointmentReminders(tx, orgId, id, startsAt)
     // Otro día, otros recordatorios: los que ya salieron eran de la fecha anterior.
-    if (dayChanged) {
-      if (back) await restoreAppointmentReminders(tx, orgId, id, current.version)
-      else await restartAppointmentReminders(tx, orgId, id, current.version + 1)
-    }
+    if (restoresReminders) await restoreAppointmentReminders(tx, orgId, id, back!.remindersMark!)
+    else if (remindersMark !== null) await restartAppointmentReminders(tx, orgId, id, remindersMark)
     const notice =
       moved && active && options.notice !== false ? await enqueueAppointmentNotice(tx, orgId, id, "movida") : null
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
