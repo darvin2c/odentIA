@@ -157,7 +157,8 @@ it("con la persona en la clínica no se marca «No vino» ni se cancela, «Atend
       startsAt: new Date(Date.parse(visit.startsAt) + 86_400_000).toISOString(),
     }),
   )
-  expect(moved).toMatchObject({ arrivedAt: null, visit: "confirmada" })
+  // Otro día: la llegada se borra y queda por confirmar, porque confirmó el otro día.
+  expect(moved).toMatchObject({ arrivedAt: null, visit: "por_confirmar" })
 })
 
 it("«Atender» desde la cita abre sin pedir motivo, marca la llegada a la hora de empezar y la cita queda atendida al firmar", async () => {

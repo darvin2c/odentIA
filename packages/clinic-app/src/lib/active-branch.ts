@@ -1,16 +1,26 @@
 /**
  * Sede activa de las pantallas que trabajan por sede (Agenda, Horarios y
  * bloqueos). Una sola regla para todas: manda la sede del enlace (`?branch=`);
- * si no la hay, la última que la persona eligió en este navegador; y si
- * tampoco, la primera activa, que resuelve el servidor.
+ * si no la hay, la última que eligió **esta persona** (en un mostrador
+ * compartido, quien entra no hereda la sede de quien estuvo antes); y si
+ * tampoco, la que hoy tiene más citas, como Inicio.
  */
 import { useListSearch } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import * as React from "react"
 import { apiFetch } from "./api"
 
-/** Cada organización vive en su propio origen: la clave no necesita su nombre. */
-const STORAGE_KEY = "odentia:sede-activa"
+/** Cada organización vive en su propio origen: la clave lleva solo a la persona. */
+const STORAGE_PREFIX = "odentia:sede-activa"
+let storageKey = STORAGE_PREFIX
+
+/** La sede recordada es de quien entró: se fija al saber quién es. */
+export function setActiveBranchOwner(userId: string | null | undefined): void {
+  const next = userId ? `${STORAGE_PREFIX}:${userId}` : STORAGE_PREFIX
+  if (next === storageKey) return
+  storageKey = next
+  for (const listener of listeners) listener()
+}
 
 export interface BranchOption {
   id: string
@@ -19,7 +29,7 @@ export interface BranchOption {
 
 function readStored(): string | undefined {
   try {
-    return localStorage.getItem(STORAGE_KEY) ?? undefined
+    return localStorage.getItem(storageKey) ?? undefined
   } catch {
     return undefined
   }
@@ -29,8 +39,8 @@ const listeners = new Set<() => void>()
 
 function writeStored(id: string | undefined): void {
   try {
-    if (id === undefined) localStorage.removeItem(STORAGE_KEY)
-    else localStorage.setItem(STORAGE_KEY, id)
+    if (id === undefined) localStorage.removeItem(storageKey)
+    else localStorage.setItem(storageKey, id)
   } catch {
     // Sin almacenamiento (modo privado): la sede sigue en el enlace.
   }
@@ -61,6 +71,25 @@ export function firstActiveBranchId(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0]?.id
 }
 
+/**
+ * Sin una sede elegida: la que hoy tiene más citas y, con empate (o sin citas),
+ * la primera activa. La misma regla que Inicio en el servidor (`homeBranch`).
+ */
+export function preferredBranchId(
+  rows: ReadonlyArray<{ id: string; isActive: boolean; createdAt: string; todayAppointments?: number }>,
+): string | undefined {
+  const first = firstActiveBranchId(rows)
+  const busiest = rows
+    .filter((item) => item.isActive && (item.todayAppointments ?? 0) > 0)
+    .sort(
+      (a, b) =>
+        (b.todayAppointments ?? 0) - (a.todayAppointments ?? 0) ||
+        a.createdAt.localeCompare(b.createdAt) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    )[0]
+  return busiest?.id ?? first
+}
+
 export function useActiveBranch(): {
   /** Sedes activas de la organización. */
   branches: BranchOption[]
@@ -79,7 +108,9 @@ export function useActiveBranch(): {
   const query = useQuery({
     queryKey: ["branches", "activas"],
     queryFn: () =>
-      apiFetch<{ data: Array<{ id: string; name: string; isActive: boolean; createdAt: string }> }>("/api/branches"),
+      apiFetch<{ data: Array<{ id: string; name: string; isActive: boolean; createdAt: string; todayAppointments?: number }> }>(
+        "/api/branches",
+      ),
     staleTime: 60_000,
   })
   const branches = React.useMemo(
@@ -121,6 +152,6 @@ export function useActiveBranch(): {
     },
     [setParams],
   )
-  const firstActive = React.useMemo(() => firstActiveBranchId(query.data?.data ?? []), [query.data])
+  const firstActive = React.useMemo(() => preferredBranchId(query.data?.data ?? []), [query.data])
   return { branches, branchId, effectiveId: branchId ?? firstActive, choose }
 }

@@ -135,12 +135,14 @@ function AgendaRow({
   primaryAction,
   menuItems,
   onOpen,
+  onActed,
 }: {
   item: ScheduleAgendaItem
   timeZone: string
   primaryAction?: ScheduleAgendaListProps["primaryAction"]
   menuItems?: ScheduleAgendaListProps["menuItems"]
   onOpen?: ScheduleAgendaListProps["onOpen"]
+  onActed?: (id: string) => void
 }) {
   const { entry } = item
   const action = primaryAction?.(item) ?? null
@@ -175,6 +177,7 @@ function AgendaRow({
         {onOpen ? (
           <button
             type="button"
+            data-row-open
             onClick={() => onOpen(entry)}
             className="truncate text-left text-[15px] font-semibold outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
           >
@@ -225,13 +228,18 @@ function AgendaRow({
       </span>
 
       {action || menu.length > 0 ? (
-        <div className="relative z-10 flex shrink-0 items-center justify-end gap-1 sm:w-44">
+        <div data-row-actions className="relative z-10 flex shrink-0 items-center justify-end gap-1 sm:w-44">
           {action ? (
             <SubmitButton
               variant="outline"
               className="h-10 bg-card font-bold text-primary-soft-foreground shadow-xs hover:bg-card/80"
               pending={action.pending}
-              onClick={action.onSelect}
+              // Con el nombre: diez «Llegó» iguales no le dicen al lector de pantalla de quién es cada uno.
+              aria-label={`${action.label}: ${entry.title}`}
+              onClick={() => {
+                onActed?.(entry.id)
+                action.onSelect()
+              }}
             >
               {action.label}
             </SubmitButton>
@@ -264,6 +272,30 @@ export function ScheduleAgendaList({
 }: ScheduleAgendaListProps) {
   const [showPast, setShowPast] = React.useState(false)
   const pastId = React.useId()
+  // Tras «Llegó» la cita cambia de grupo («En la clínica») y su fila se vuelve a crear: el foco
+  // caería al cuerpo de la página. Unos segundos después de actuar, vuelve a esa fila.
+  const rootRef = React.useRef<HTMLElement>(null)
+  const acted = React.useRef<{ id: string; until: number } | null>(null)
+  const onActed = React.useCallback((id: string) => {
+    acted.current = { id, until: Date.now() + 4000 }
+  }, [])
+  React.useEffect(() => {
+    const want = acted.current
+    if (!want) return
+    if (Date.now() > want.until) {
+      acted.current = null
+      return
+    }
+    const active = document.activeElement
+    if (active && active !== document.body) {
+      // Siguió con otra cosa: no se le quita el foco.
+      if (!rootRef.current?.contains(active)) acted.current = null
+      return
+    }
+    const row = rootRef.current?.querySelector<HTMLElement>(`[data-entry="${CSS.escape(want.id)}"]`)
+    if (!row || row.querySelector("[data-row-actions] button:disabled")) return
+    ;(row.querySelector<HTMLElement>("[data-row-actions] button") ?? row.querySelector<HTMLElement>("[data-row-open]"))?.focus()
+  })
 
   const sorted = React.useMemo(
     () => [...items].sort((a, b) => a.entry.start.localeCompare(b.entry.start)),
@@ -310,16 +342,21 @@ export function ScheduleAgendaList({
       primaryAction={primaryAction}
       menuItems={menuItems}
       onOpen={onOpen}
+      onActed={onActed}
     />
   )
 
   // Otro día (sin «ahora») o uno que ya pasó entero se lee completo: no hay nada «por venir» que priorizar.
   if (now === undefined || (current.length === 0 && upcoming.length === 0)) {
-    return <ul className={cn("flex flex-col gap-2", className)}>{sorted.map(row)}</ul>
+    return (
+      <ul ref={rootRef as React.RefObject<HTMLUListElement>} className={cn("flex flex-col gap-2", className)}>
+        {sorted.map(row)}
+      </ul>
+    )
   }
 
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    <div ref={rootRef as React.RefObject<HTMLDivElement>} className={cn("flex flex-col gap-2", className)}>
       {current.length > 0 ? (
         <>
           <h3 className="px-1 pt-1 text-sm font-bold text-muted-foreground">

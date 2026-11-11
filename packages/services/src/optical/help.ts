@@ -68,6 +68,8 @@ const SALES_TOO: ReadonlyArray<readonly [string, string]> = [
   ["caja y Administración", "caja, Ventas y Administración"],
   ["Lo ven caja, la dueña y la administración", "Lo ven caja, Ventas, la dueña y la administración"],
   ["Recepción, quien atiende y caja los ven", "Recepción, Ventas, quien atiende y caja los ven"],
+  ["recepción, la de cualquiera", "recepción y Ventas, la de cualquiera"],
+  ["cuando recepción marca que llegó tu paciente", "cuando recepción o Ventas marca que llegó tu paciente"],
 ]
 
 const withSales = (text: string) => SALES_TOO.reduce((out, [phrase, withRole]) => out.replaceAll(phrase, withRole), text)

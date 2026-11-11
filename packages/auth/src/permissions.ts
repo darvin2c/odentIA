@@ -92,7 +92,10 @@ export type Permission =
   | "inventory.stock"
   | "inventory.receive"
   | "clinical.prescription"
-  | "orders.prescription";
+  | "orders.prescription"
+  // Anotar la ausencia de cualquier profesional (vacaciones, permiso) sin tocar la
+  // configuración; quien atiende anota la suya con «clinical.write» (mesa del 10 nov).
+  | "appointments.absences";
 
 /** Etiquetas en español para la UI de miembros. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
@@ -152,6 +155,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "clinical.prescription",
   // La copia de la receta en el pedido, para hacerlo (Taller en vistIA, ADR 0171).
   "orders.prescription",
+  "appointments.absences",
 ];
 
 /**
@@ -166,6 +170,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "patients.write",
     "appointments.read",
     "appointments.write",
+    "appointments.absences",
     "crm.read",
     "crm.write",
     "conversations.read",
@@ -232,6 +237,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "patients.write",
     "appointments.read",
     "appointments.write",
+    "appointments.absences",
     "crm.read",
     "crm.write",
     "conversations.read",
@@ -280,7 +286,8 @@ function isPermission(permission: string): permission is Permission {
     permission === "inventory.stock" ||
     permission === "inventory.receive" ||
     permission === "clinical.prescription" ||
-    permission === "orders.prescription"
+    permission === "orders.prescription" ||
+    permission === "appointments.absences"
   ) return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;

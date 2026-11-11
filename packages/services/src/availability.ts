@@ -16,7 +16,7 @@ import {
 import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or } from "drizzle-orm"
 import { branchNotFound, invalidField, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { looksLikeId } from "./ids.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
@@ -364,7 +364,8 @@ export async function listScheduleBlocks(
     .where(
       and(
         eq(scheduleBlock.organizationId, orgId),
-        eq(scheduleBlock.branchId, input.branchId),
+        // La ausencia de un profesional vale en todas las sedes (no está en dos lugares a la vez).
+        or(eq(scheduleBlock.branchId, input.branchId), absenceAnywhere()),
         lt(scheduleBlock.startsAt, to),
         gte(scheduleBlock.endsAt, from),
       ),
@@ -442,8 +443,27 @@ export async function deleteScheduleBlock(
   id: string,
   /** Quién lo quita: queda en Actividad del equipo. */
   actorUserId: string | null = null,
+  /**
+   * Quien no configura la agenda solo quita ausencias: las de cualquiera
+   * (`absenceOf: null`, recepción) o solo la suya (`absenceOf`: quien atiende).
+   */
+  scope?: { absenceOf: string | null },
 ): Promise<void> {
   if (!looksLikeId(id)) throw notFound("Bloqueo")
+  if (scope) {
+    const [current] = await tx
+      .select({ kind: scheduleBlock.kind, professionalUserId: scheduleBlock.professionalUserId })
+      .from(scheduleBlock)
+      .where(and(eq(scheduleBlock.organizationId, orgId), eq(scheduleBlock.id, id)))
+      .limit(1)
+    if (!current) throw notFound("Bloqueo")
+    const allowed =
+      current.kind === "ausencia" &&
+      current.professionalUserId !== null &&
+      (scope.absenceOf === null || current.professionalUserId === scope.absenceOf)
+    if (!allowed)
+      throw new ServiceError("FORBIDDEN", 403, "Solo puedes quitar una ausencia que puedes anotar: los bloqueos se cambian en Configuración")
+  }
   const [deleted] = await tx
     .delete(scheduleBlock)
     .where(and(eq(scheduleBlock.organizationId, orgId), eq(scheduleBlock.id, id)))
@@ -486,6 +506,11 @@ export interface AvailabilityCheck {
   forTest?: boolean
 }
 
+/** La ausencia de un profesional (no un bloqueo de sede o de unidad): vale en todas las sedes. */
+function absenceAnywhere() {
+  return and(eq(scheduleBlock.kind, "ausencia"), isNotNull(scheduleBlock.professionalUserId))
+}
+
 async function overlappingBlocks(
   tx: Db,
   orgId: string,
@@ -503,7 +528,7 @@ async function overlappingBlocks(
     .where(
       and(
         eq(scheduleBlock.organizationId, orgId),
-        eq(scheduleBlock.branchId, check.branchId),
+        or(eq(scheduleBlock.branchId, check.branchId), absenceAnywhere()),
         professionalScope,
         roomScope,
         lt(scheduleBlock.startsAt, check.endsAt),
@@ -866,7 +891,7 @@ export async function listAvailableSlots(
       .where(
         and(
           eq(scheduleBlock.organizationId, orgId),
-          eq(scheduleBlock.branchId, input.branchId),
+          or(eq(scheduleBlock.branchId, input.branchId), absenceAnywhere()),
           lt(scheduleBlock.startsAt, to),
           gte(scheduleBlock.endsAt, from),
         ),
