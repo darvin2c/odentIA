@@ -204,8 +204,8 @@ interface MoveRequest {
   why?: string
   /** Dónde estaba, para «Deshacer». */
   back?: { startsAt: string; endsAt: string; professionalUserId: string; roomId: string }
-  /** Cómo estaba antes de moverla: el aviso dice si quedó por confirmar. */
-  fromStatus?: AppointmentStatus
+  /** Cómo estaba antes de moverla: el aviso dice si se quitó «Llegó» o quedó por confirmar. */
+  was?: Pick<AgendaAppointment, "status" | "arrivedAt">
   /** Este movimiento ya es un «Deshacer»: no ofrece otro. */
   undoOf?: string
 }
@@ -932,7 +932,7 @@ function AgendaPage() {
     onSuccess: async (result, input) => {
       const text = input.undoOf ? `Cita de ${result.data.patientName} de vuelta en su sitio` : `Cita de ${result.data.patientName} reprogramada`
       const back = input.back
-      const note = input.fromStatus ? movedNote({ status: input.fromStatus }, result.data) : undefined
+      const note = input.was ? movedNote(input.was, result.data) : undefined
       toast.success(text, {
         description: note,
         // Arrastrar se hace rápido: volver atrás es un toque, sin buscar la hora de antes.
@@ -946,7 +946,7 @@ function AgendaPage() {
                   expectedVersion: result.data.version,
                   exception: moveException(result.data, back.startsAt, back.endsAt, back.professionalUserId),
                   undoOf: input.id,
-                  fromStatus: result.data.status,
+                  was: { status: result.data.status, arrivedAt: result.data.arrivedAt },
                 }),
             }
           : undefined,
@@ -1312,7 +1312,7 @@ function AgendaPage() {
     const full: MoveRequest = {
       ...request,
       back: { startsAt: item.startsAt, endsAt: item.endsAt, professionalUserId: item.professionalUserId, roomId: item.roomId },
-      fromStatus: item.status,
+      was: { status: item.status, arrivedAt: item.arrivedAt },
     }
     if (exception) setPendingMove({ ...full, exception, why: exception.why })
     else moveMutation.mutate(full)

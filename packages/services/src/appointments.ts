@@ -1711,13 +1711,16 @@ export async function moveAppointment(
   // Confirmó otro día: el nuevo no lo confirmó. Vuelve a «por confirmar» y el recordatorio
   // se lo pide (QA del 10 nov, C31).
   // También si había llegado (esa llegada se borra): la del día nuevo nadie la confirmó.
-  const unconfirmed = current.status === "confirmada" && otherDay && !options.byPatient
-  // «Deshacer» ese movimiento le devuelve lo que le quitó: la confirmación y la llegada.
-  const reconfirmed = undone?.unconfirmed === true && current.status === "programada"
+  // «Deshacer» ese movimiento le devuelve lo que le quitó: la llegada y la confirmación. Vuelve a
+  // la hora que la persona confirmó (o a la que llegó), así que queda confirmada aunque entre
+  // medias alguien la haya confirmado para el otro día; y con llegada no puede quedar sin confirmar.
   const restoredArrival =
     undone?.arrivalCleared && undone.arrivedAt && undone.arrivedBy && current.arrivedAt === null
       ? { arrivedAt: new Date(undone.arrivedAt), arrivedBy: undone.arrivedBy }
       : null
+  const backConfirmed = undone?.unconfirmed === true || restoredArrival !== null
+  const unconfirmed = current.status === "confirmada" && otherDay && !options.byPatient && !backConfirmed
+  const reconfirmed = backConfirmed && current.status === "programada"
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {
@@ -1778,8 +1781,11 @@ export async function moveAppointment(
     }
     const moved = startsAt.getTime() !== current.startsAt.getTime()
     if (moved) await rescheduleAppointmentReminders(tx, orgId, id, startsAt)
+    // Con su llegada de vuelta, la persona está en la clínica: como al marcar «Llegó», no le sale
+    // ningún recordatorio ni el aviso de que su cita cambió.
+    if (restoredArrival) await cancelPendingForAppointment(tx, orgId, id, "llegó a la cita")
     const notice =
-      moved && active && options.notice !== false ? await enqueueAppointmentNotice(tx, orgId, id, "movida") : null
+      moved && active && !restoredArrival && options.notice !== false ? await enqueueAppointmentNotice(tx, orgId, id, "movida") : null
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, id)
     return notice ? { ...item, notice } : item

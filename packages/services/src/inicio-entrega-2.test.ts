@@ -225,6 +225,8 @@ it("«Deshacer» el movimiento a otro día le devuelve la confirmación y la lle
   )
   expect(back.status).toBe("confirmada")
   expect(back.arrivedAt && new Date(back.arrivedAt).getTime()).toBe(arrivedAt.getTime())
+  // Está en la clínica: no le sale el aviso de que su cita cambió.
+  expect(back.notice).toBeUndefined()
   // Moverla de nuevo a otro día, ya no como «Deshacer», la deja otra vez por confirmar.
   const again = await c.tx((db) =>
     moveAppointment(
@@ -234,4 +236,31 @@ it("«Deshacer» el movimiento a otro día le devuelve la confirmación y la lle
     ),
   )
   expect(again.status).toBe("programada")
+})
+
+it("devolverla a su hora la deja confirmada aunque entre medias la confirmaran para el otro día", async () => {
+  const c = await clinic()
+  const person = await c.patient("Julia Paredes")
+  const move = (id: string, version: number, at: Date) =>
+    c.tx((db) => moveAppointment(db, c.orgId, c.ids.rita, id, { expectedVersion: version, startsAt: at.toISOString(), outsideSchedule: true }, { requested: true }))
+  const confirm = async (id: string) => {
+    const [row] = await ownerDb.select({ version: appointment.version }).from(appointment).where(eq(appointment.id, id))
+    await ownerDb.update(appointment).set({ status: "confirmada", version: row!.version + 1 }).where(eq(appointment.id, id))
+    return row!.version + 1
+  }
+  // Con llegada: la base no admite una llegada sin confirmar.
+  const startsAt = new Date(Date.now() + 10 * 60_000)
+  const arrived = await c.book({ patientId: person.id, professional: c.ids.ana, branchId: c.branches.first, roomId: c.rooms.a, startsAt })
+  await ownerDb.update(appointment).set({ arrivedAt: new Date(), arrivedBy: c.ids.rita }).where(eq(appointment.id, arrived.id))
+  const away = await move(arrived.id, arrived.version, new Date(startsAt.getTime() + 2 * 86_400_000))
+  expect(away).toMatchObject({ status: "programada", arrivedAt: null })
+  const back = await move(arrived.id, await confirm(arrived.id), startsAt)
+  expect(back.status).toBe("confirmada")
+  expect(back.arrivedAt).not.toBeNull()
+  // Sin llegada: confirmó esa hora, y vuelve a ella.
+  const later = new Date(Date.now() + 3 * 86_400_000)
+  const plain = await c.book({ patientId: person.id, professional: c.ids.luis, branchId: c.branches.first, roomId: c.rooms.a, startsAt: later })
+  const moved = await move(plain.id, plain.version, new Date(later.getTime() + 86_400_000))
+  expect(moved.status).toBe("programada")
+  expect((await move(plain.id, await confirm(plain.id), later)).status).toBe("confirmada")
 })

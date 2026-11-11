@@ -370,16 +370,28 @@ export function stepBeforeArrival(
 }
 
 /**
- * Lo que dice el aviso tras mover una cita, además de adónde fue: si quedó por confirmar (confirmó
- * el otro día), si «Deshacer» la dejó confirmada otra vez y si el agente le avisa a la persona.
+ * Lo que dice el aviso tras mover una cita, además de adónde fue: si se quitó su llegada o quedó
+ * por confirmar (confirmó el otro día), si «Deshacer» le devolvió la llegada o la confirmación y
+ * si el agente le avisa a la persona.
  */
 export function movedNote(
-  before: Pick<AgendaAppointment, "status">,
-  after: Pick<AgendaAppointment, "status" | "notice">,
+  before: Pick<AgendaAppointment, "status" | "arrivedAt">,
+  after: Pick<AgendaAppointment, "status" | "arrivedAt" | "notice">,
 ): string | undefined {
+  const unconfirmed = before.status === "confirmada" && after.status === "programada"
   const notes = [
-    before.status === "confirmada" && after.status === "programada" ? "Queda por confirmar: confirmó el otro día." : null,
-    before.status === "programada" && after.status === "confirmada" ? "Vuelve a quedar confirmada." : null,
+    before.arrivedAt && !after.arrivedAt
+      ? unconfirmed
+        ? "Se quitó «Llegó» y queda por confirmar."
+        : "Se quitó «Llegó»."
+      : unconfirmed
+        ? "Queda por confirmar: confirmó el otro día."
+        : null,
+    !before.arrivedAt && after.arrivedAt
+      ? "Vuelve a figurar que llegó."
+      : before.status === "programada" && after.status === "confirmada"
+        ? "Vuelve a quedar confirmada."
+        : null,
     after.notice?.queued ? "El agente le avisa la nueva fecha." : null,
   ]
   return notes.filter(Boolean).join(" ") || undefined
