@@ -514,6 +514,13 @@ describe("al cambiar la cita, el agente le avisa", () => {
     expect(kept.status).toBe("confirmada")
     expect((await sentNotice(booked.id)).buttons).toEqual(["No podré ir"])
 
+    // Quien apagó los recordatorios igual recibe el aviso, con «Confirmar», y la cita dice que se le pidió.
+    const marta = await person(c, "Marta Salazar", { refused: ["recordatorio"], openWindow: true })
+    const fourth = await book(c, marta.patientId, new Date(at.getTime() + 6 * HOUR), { notice: false })
+    await move(fourth.id, fourth.version, new Date(at.getTime() + 6 * HOUR + 3 * DAY))
+    expect((await sentNotice(fourth.id)).buttons).toEqual(["Confirmar", "No podré ir"])
+    expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, fourth.id))).toMatchObject({ askAt: null, askedAt: expect.any(String) })
+
     // Si después de ese aviso la cita pasó a otro día, su «Confirmar» no confirma la nueva: se le dice y se le pregunta.
     const lucia = await person(c, "Lucía Mendoza", { consent: ["recordatorio"], openWindow: true })
     const second = await book(c, lucia.patientId, new Date(at.getTime() + 2 * HOUR), { notice: false })

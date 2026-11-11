@@ -3408,22 +3408,8 @@ export async function appointmentConfirmationPlan(
   if (!rule?.agentPart) return null
   const runtime = await adminRuntime(tx, orgId)
   if (!runtime.adminOn || !runtime.receptionOn) return null
-  const contactId = await preferredContact(tx, orgId, appt.patientId)
-  if (!contactId || !(await mayWriteFirst(tx, orgId, contactId, "recordatorio"))) return null
-  const jobs = await tx
-    .select({ status: automationJob.status, scheduledFor: automationJob.scheduledFor, updatedAt: automationJob.updatedAt })
-    .from(automationJob)
-    .where(
-      and(
-        eq(automationJob.organizationId, orgId),
-        eq(automationJob.appointmentId, appt.id),
-        eq(automationJob.kind, "recordatorio_cita"),
-        // Lo que se le pidió para una fecha anterior de la cita no es un pedido de esta.
-        sql`${automationJob.dedupeKey} not like ${`%${EARLIER_DATE_MARK}%`}`,
-      ),
-    )
-    .orderBy(asc(automationJob.scheduledFor))
-  // El aviso del cambio con «Confirmar» de la fecha que tiene ahora también se lo pidió (ADR 0180).
+  // El aviso del cambio con «Confirmar» de la fecha que tiene ahora también se lo pidió (ADR 0180). Es un aviso:
+  // sale aunque haya apagado los recordatorios, así que se mira antes de su permiso (QA del 11 nov).
   // Por día, como su botón: movida dentro del día, ese aviso sigue valiendo.
   const notices = await tx
     .select({ updatedAt: automationJob.updatedAt, payload: automationJob.payload })
@@ -3445,6 +3431,22 @@ export async function appointmentConfirmationPlan(
         return !!announced && dayKeyIn(new Date(announced), zone) === dayKeyIn(appt.startsAt, zone)
       })
     : undefined
+  const contactId = await preferredContact(tx, orgId, appt.patientId)
+  if (!contactId || !(await mayWriteFirst(tx, orgId, contactId, "recordatorio")))
+    return notice ? { askAt: null, askedAt: notice.updatedAt.toISOString() } : null
+  const jobs = await tx
+    .select({ status: automationJob.status, scheduledFor: automationJob.scheduledFor, updatedAt: automationJob.updatedAt })
+    .from(automationJob)
+    .where(
+      and(
+        eq(automationJob.organizationId, orgId),
+        eq(automationJob.appointmentId, appt.id),
+        eq(automationJob.kind, "recordatorio_cita"),
+        // Lo que se le pidió para una fecha anterior de la cita no es un pedido de esta.
+        sql`${automationJob.dedupeKey} not like ${`%${EARLIER_DATE_MARK}%`}`,
+      ),
+    )
+    .orderBy(asc(automationJob.scheduledFor))
   const sent = jobs.find((job) => job.status === "enviado")
   const asked = [sent?.updatedAt, notice?.updatedAt].filter((at): at is Date => !!at).sort((a, b) => b.getTime() - a.getTime())[0]
   if (asked) return { askAt: null, askedAt: asked.toISOString() }
