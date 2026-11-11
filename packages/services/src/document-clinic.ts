@@ -16,6 +16,7 @@ import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
+import { PDFDocument } from "pdf-lib"
 import sharp from "sharp"
 import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import type { DocumentClinic, DocumentLogo } from "./document-kit.js"
@@ -72,7 +73,13 @@ async function readLetterheadPdf(letterhead: Letterhead): Promise<Uint8Array | n
       }),
     ])
     if (!bytes) return null
-    if (bytes.byteLength <= SHEET_CACHE_BYTES) {
+    // Se dibuja con pdf-lib: si no la lee, es como si no se hubiera podido leer.
+    try {
+      ;(await PDFDocument.load(bytes)).getPage(0)
+    } catch {
+      return null
+    }
+    if (bytes.byteLength <= SHEET_CACHE_BYTES && !sheetCache.has(letterhead.id)) {
       sheetCache.set(letterhead.id, bytes)
       sheetCacheBytes += bytes.byteLength
       for (const [id, old] of sheetCache) {
@@ -197,7 +204,8 @@ export async function clinicLogoColors(tx: Db, orgId: string): Promise<string[]>
 export async function loadDocumentClinic(
   tx: Db,
   orgId: string,
-  options: { at?: Date | string | null } = {},
+  /** `sheet: false`: el papel no la usa (el ticket térmico, o trae la suya), no se lee. */
+  options: { at?: Date | string | null; sheet?: boolean } = {},
 ): Promise<DocumentClinic> {
   const [profile] = await tx
     .select()
@@ -214,9 +222,12 @@ export async function loadDocumentClinic(
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .limit(2)
   const only = branches.length === 1 ? branches[0]! : null
-  const letterhead = options.at
-    ? await getLetterheadAt(tx, orgId, new Date(options.at))
-    : await getCurrentLetterhead(tx, orgId)
+  const letterhead =
+    options.sheet === false
+      ? null
+      : options.at
+        ? await getLetterheadAt(tx, orgId, new Date(options.at))
+        : await getCurrentLetterhead(tx, orgId)
   const sheet = await sheetOf(letterhead)
   return {
     tradeName: profile.tradeName || profile.legalName || "",
@@ -252,8 +263,10 @@ export async function loadFrozenDocumentClinic(
   orgId: string,
   frozen: { clinic: TicketFrozen["clinic"]; branch: { id: string; name: string } | null },
   at?: Date | string | null,
+  /** El ticket térmico no lleva la hoja: no se lee. */
+  options: { sheet?: boolean } = {},
 ): Promise<DocumentClinic> {
-  const today = await loadDocumentClinic(tx, orgId, { at })
+  const today = await loadDocumentClinic(tx, orgId, { at, sheet: options.sheet })
   let phone: string | null = null
   if (frozen.branch) {
     const [row] = await tx
@@ -303,7 +316,12 @@ export interface DocumentLetterhead {
  * El membrete de la hoja que se firma en pantalla (ADR 0148): los mismos datos que
  * `loadDocumentClinic` pone en el PDF, sin leer el logo del almacenamiento.
  */
-export async function loadDocumentLetterhead(tx: Db, orgId: string): Promise<DocumentLetterhead> {
+export async function loadDocumentLetterhead(
+  tx: Db,
+  orgId: string,
+  /** La hoja membretada de ese momento (un presupuesto ya entregado); sin él, la de hoy. */
+  at?: Date | string | null,
+): Promise<DocumentLetterhead> {
   const [profile] = await tx
     .select({
       tradeName: orgProfile.tradeName,
@@ -331,7 +349,7 @@ export async function loadDocumentLetterhead(tx: Db, orgId: string): Promise<Doc
   const fiscal = profile?.fiscalDocNumber
     ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
     : null
-  const letterhead = await getCurrentLetterhead(tx, orgId)
+  const letterhead = at ? await getLetterheadAt(tx, orgId, new Date(at)) : await getCurrentLetterhead(tx, orgId)
   if (letterhead) {
     // Como el papel: su diseño dice quién es; abajo, la razón social y su documento.
     return {

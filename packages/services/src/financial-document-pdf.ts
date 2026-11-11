@@ -503,6 +503,7 @@ export async function getRefundReceiptPdf(
     orgId,
     { clinic: frozen.clinic, branch: frozen.branch },
     frozen.refundedAt,
+    { sheet: !!paper },
   )
   const money = (cents: number) => formatMoney(cents, frozen.currency, org.locale)
   const title = "Constancia de devolución"
@@ -600,6 +601,7 @@ export async function renderReturnPdf(
     orgId,
     { clinic: frozen.clinic, branch: frozen.branch },
     row.createdAt,
+    { sheet: !!paper },
   )
   const money = (cents: number) => formatMoney(cents, row.currency, org.locale)
   const numberLabel = String(row.returnNumber).padStart(6, "0")

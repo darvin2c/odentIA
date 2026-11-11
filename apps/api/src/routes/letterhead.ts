@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   clampLetterheadMargins,
   cleanLetterheadImage,
+  adjustLetterhead,
   clinicLogoFolder,
   getCurrentLetterhead,
   LETTERHEAD_MAX_BYTES,
@@ -42,6 +43,9 @@ const marginsInput = z.object({
 })
 
 const restoreInput = z.object({ id: z.uuid() }).strict()
+
+/** La hoja que tenía a la vista quien guarda: su id, o «none» si no había. */
+const currentInput = z.union([z.literal("none"), z.uuid()]).optional()
 
 function fileOf(form: FormData, name: string): File | null {
   const value = form.get(name)
@@ -117,7 +121,7 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
       const page = { widthPt: sheet.widthPt, heightPt: sheet.heightPt }
       const clamped = clampLetterheadMargins(page, margins.data)
       const { clinic, signer } = await withOrgContext(deps.db, orgId, async (tx) => ({
-        clinic: await loadDocumentClinic(tx, orgId),
+        clinic: await loadDocumentClinic(tx, orgId, { sheet: false }),
         signer: await letterheadSampleSigner(tx, orgId, userId),
       }))
       const pdf = await renderLetterheadSamplePdf(
@@ -161,33 +165,11 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
         errorBody(c, "VALIDATION", "Vuelve a elegir la hoja", { file: "Vuelve a elegir la hoja" }),
         400,
       )
+    // La hoja que quien guarda tenía a la vista: si otra persona la cambió, no se pisa.
+    const seen = currentInput.safeParse(form.get("current") ?? undefined)
+    if (!seen.success) return validationError(c, seen.error.issues)
+    const expected = seen.data === undefined ? undefined : seen.data === "none" ? null : seen.data
     return runService(c, 200, async () => {
-      const current = file
-        ? null
-        : await withOrgContext(deps.db, orgId, (tx) => getCurrentLetterhead(tx, orgId))
-      if (!file && !current)
-        throw new ServiceError("VALIDATION", 400, "Elige la hoja", { file: "Elige la hoja" })
-      let pdfKey = current?.pdfKey ?? ""
-      let page = current
-        ? { widthPt: current.pageWidthPt, heightPt: current.pageHeightPt }
-        : { widthPt: 0, heightPt: 0 }
-      if (file) {
-        const source = await bytesOf(file)
-        if (source.byteLength > LETTERHEAD_MAX_BYTES)
-          throw new ServiceError("VALIDATION", 400, "La hoja no puede superar 5 MB", {
-            file: "La hoja no puede superar 5 MB",
-          })
-        const sheet = await normalizeLetterhead(source)
-        if (!deps.storage.putAttachmentAt)
-          throw new ServiceError(
-            "STORAGE_UNAVAILABLE",
-            503,
-            "No se pudo guardar la hoja. Inténtalo de nuevo.",
-          )
-        pdfKey = letterheadPdfKey(orgId)
-        await deps.storage.putAttachmentAt(pdfKey, sheet.pdf, "application/pdf")
-        page = { widthPt: sheet.widthPt, heightPt: sheet.heightPt }
-      }
       const folder = clinicLogoFolder(orgId)
       const put = async (image: File, field: string) =>
         (
@@ -198,25 +180,57 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
             ext: "png",
           })
         ).url
-      const [topBandUrl, bottomBandUrl, thumbnailUrl] = await Promise.all([
-        put(top, "topBand"),
-        put(bottom, "bottomBand"),
-        put(thumbnail, "thumbnail"),
-      ])
-      const fileName = (file?.name || current?.fileName || "Hoja membretada").slice(0, 200)
+      const putBands = async () => {
+        const [topBandUrl, bottomBandUrl, thumbnailUrl] = await Promise.all([
+          put(top, "topBand"),
+          put(bottom, "bottomBand"),
+          put(thumbnail, "thumbnail"),
+        ])
+        return { topBandUrl, bottomBandUrl, thumbnailUrl }
+      }
       const { hasContact, ...rest } = margins.data
+      if (!file) {
+        // Ajustar la de hoy: el mismo PDF, con sus franjas recortadas de nuevo.
+        if (!expected)
+          throw new ServiceError("VALIDATION", 400, "Elige la hoja", { file: "Elige la hoja" })
+        const bands = await putBands()
+        const adjusted = await withOrgContext(deps.db, orgId, (tx) =>
+          adjustLetterhead(tx, orgId, userId, { ...rest, hasContact, ...bands }, expected),
+        )
+        return { letterhead: summaryOf(adjusted) }
+      }
+      const source = await bytesOf(file)
+      if (source.byteLength > LETTERHEAD_MAX_BYTES)
+        throw new ServiceError("VALIDATION", 400, "La hoja no puede superar 5 MB", {
+          file: "La hoja no puede superar 5 MB",
+        })
+      const sheet = await normalizeLetterhead(source)
+      if (!deps.storage.putAttachmentAt)
+        throw new ServiceError(
+          "STORAGE_UNAVAILABLE",
+          503,
+          "No se pudo guardar la hoja. Inténtalo de nuevo.",
+        )
+      const pdfKey = letterheadPdfKey(orgId)
+      await deps.storage.putAttachmentAt(pdfKey, sheet.pdf, "application/pdf")
+      const page = { widthPt: sheet.widthPt, heightPt: sheet.heightPt }
+      const bands = await putBands()
       const saved = await withOrgContext(deps.db, orgId, (tx) =>
-        saveLetterhead(tx, orgId, userId, {
-          pdfKey,
-          topBandUrl,
-          bottomBandUrl,
-          thumbnailUrl,
-          pageWidthPt: page.widthPt,
-          pageHeightPt: page.heightPt,
-          ...clampLetterheadMargins(page, rest),
-          hasContact,
-          fileName,
-        }),
+        saveLetterhead(
+          tx,
+          orgId,
+          userId,
+          {
+            pdfKey,
+            ...bands,
+            pageWidthPt: page.widthPt,
+            pageHeightPt: page.heightPt,
+            ...clampLetterheadMargins(page, rest),
+            hasContact,
+            fileName: (file.name || "Hoja membretada").slice(0, 200),
+          },
+          expected,
+        ),
       )
       return { letterhead: summaryOf(saved) }
     })

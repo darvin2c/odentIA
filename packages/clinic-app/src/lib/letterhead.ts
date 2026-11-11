@@ -217,6 +217,26 @@ export function detectMargins({
   }
 }
 
+/**
+ * Dónde va el texto como lo guardará el servidor (`clampLetterheadMargins`): al menos
+ * 5 mm desde cada borde, y la mitad del ancho y el 40 % del alto siempre para el texto.
+ * Con esto se dibuja el recuadro y se recortan las franjas, para que coincidan con el papel.
+ */
+export function clampMargins(
+  page: { widthPt: number; heightPt: number },
+  margins: LetterheadMargins,
+): LetterheadMargins {
+  const widthMm = page.widthPt * MM_PER_PT
+  const heightMm = page.heightPt * MM_PER_PT
+  const floor = (value: number) => (Number.isFinite(value) ? Math.max(5, value) : 5)
+  const fit = (a: number, b: number, room: number): [number, number] =>
+    a + b <= room ? [a, b] : [(a * room) / (a + b), (b * room) / (a + b)]
+  const [leftMm, rightMm] = fit(floor(margins.leftMm), floor(margins.rightMm), widthMm * 0.5)
+  const [topMm, bottomMm] = fit(floor(margins.topMm), floor(margins.bottomMm), heightMm * 0.6)
+  const half = (value: number) => Math.round(value * 2) / 2
+  return { topMm: half(topMm), bottomMm: half(bottomMm), leftMm: half(leftMm), rightMm: half(rightMm) }
+}
+
 function toPng(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) =>
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Sin imagen"))), "image/png"),
@@ -318,11 +338,14 @@ export function previewLetterhead(
 /** Guarda la hoja: nueva (`file`) o la de hoy con otros márgenes o casilla. */
 export function saveLetterhead(input: {
   file: File | null
+  /** La hoja que se tenía a la vista al abrir (su id), o «none»: si otra persona la cambió, no se pisa. */
+  current: string
   margins: LetterheadMargins
   hasContact: boolean
   images: { topBand: Blob; bottomBand: Blob; thumbnail: Blob }
 }): Promise<{ letterhead: LetterheadSummary }> {
   const form = marginsForm(input.margins, input.hasContact)
+  form.append("current", input.current)
   if (input.file) form.append("file", input.file)
   form.append("topBand", input.images.topBand, "arriba.png")
   form.append("bottomBand", input.images.bottomBand, "abajo.png")

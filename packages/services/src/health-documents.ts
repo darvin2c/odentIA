@@ -382,7 +382,8 @@ export async function renderHealthDocumentPdf(
   if (data.document.patientId !== patientId) throw notFound("Consentimiento")
   const doc = data.document
   if (doc.status === "pendiente") {
-    const clinic = await loadDocumentClinic(tx, orgId)
+    // Si ya firmó en su enlace, con la hoja de entonces: la misma del PDF que se guardará.
+    const clinic = await loadDocumentClinic(tx, orgId, { at: doc.personSignedAt })
     return {
       bytes: doc.personSignedAt
         ? await renderConsentPdf(data, clinic)

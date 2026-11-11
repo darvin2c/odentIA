@@ -137,7 +137,12 @@ export async function normalizeLetterhead(bytes: Uint8Array): Promise<Normalized
   }
   let image: Awaited<ReturnType<PDFDocument["embedPng"]>>
   try {
-    image = kind === "png" ? await out.embedPng(bytes) : await out.embedJpg(bytes)
+    // Derecha como la ve el navegador: una foto del celular trae su giro aparte (EXIF).
+    const upright = sharp(bytes, { failOn: "error", limitInputPixels: 60_000_000 }).rotate()
+    image =
+      kind === "png"
+        ? await out.embedPng(await upright.png().toBuffer())
+        : await out.embedJpg(await upright.jpeg({ quality: 92 }).toBuffer())
   } catch {
     throw validation("No pudimos leer esa imagen", { [FILE_FIELD]: "No pudimos leer esa imagen" })
   }
@@ -301,30 +306,60 @@ async function putVersion(
   return row
 }
 
-/** Sube una hoja nueva (o vuelve a poner una anterior con «Deshacer»). */
+function changedMeanwhile(): ServiceError {
+  return new ServiceError(
+    "LETTERHEAD_CHANGED",
+    409,
+    "Alguien cambió la hoja membretada mientras la tenías abierta. Ciérrala y vuelve a abrirla.",
+  )
+}
+
+/**
+ * La hoja que quien guarda tenía a la vista (`expected`: su id, o null si no había):
+ * si otra persona la cambió entretanto, no se pisa. Sin `expected`, no se comprueba.
+ */
+async function assertCurrent(tx: Db, orgId: string, expected: string | null | undefined) {
+  if (expected === undefined) return null
+  const current = await getCurrentLetterhead(tx, orgId)
+  if ((current?.id ?? null) !== expected) throw changedMeanwhile()
+  return current
+}
+
+/** Sube una hoja nueva. */
 export async function saveLetterhead(
   tx: Db,
   orgId: string,
   userId: string,
   input: LetterheadInput,
+  expected?: string | null,
 ): Promise<Letterhead> {
+  await assertCurrent(tx, orgId, expected)
   return putVersion(tx, orgId, userId, input, "org_profile.letterhead_set")
 }
 
-/** Corrige dónde va el texto o la casilla de la hoja vigente, sin volver a subirla. */
+/**
+ * Corrige dónde va el texto o la casilla de la hoja vigente, sin volver a subirla: el
+ * mismo PDF con sus franjas recortadas de nuevo.
+ */
 export async function adjustLetterhead(
   tx: Db,
   orgId: string,
   userId: string,
-  changes: LetterheadMargins & { hasContact: boolean },
+  changes: LetterheadMargins &
+    Pick<Letterhead, "hasContact"> &
+    Partial<Pick<Letterhead, "topBandUrl" | "bottomBandUrl" | "thumbnailUrl">>,
+  expected?: string,
 ): Promise<Letterhead> {
-  const current = await getCurrentLetterhead(tx, orgId)
+  const current = (await assertCurrent(tx, orgId, expected)) ?? (await getCurrentLetterhead(tx, orgId))
   if (!current) throw notFound("Hoja membretada")
   const { id: _id, createdAt: _at, ...rest } = current
   return putVersion(tx, orgId, userId, { ...rest, ...changes }, "org_profile.letterhead_adjusted")
 }
 
-/** «Deshacer»: vuelve a poner una versión anterior como una versión nueva. */
+/**
+ * «Deshacer» después de quitarla: la vuelve a poner como una versión nueva. Si entretanto
+ * pusieron otra hoja, no la pisa.
+ */
 export async function restoreLetterhead(
   tx: Db,
   orgId: string,
@@ -333,6 +368,7 @@ export async function restoreLetterhead(
 ): Promise<Letterhead> {
   const previous = await getLetterheadById(tx, orgId, id)
   if (!previous) throw notFound("Hoja membretada")
+  if (await getCurrentLetterhead(tx, orgId)) throw changedMeanwhile()
   const { id: _id, createdAt: _at, ...rest } = previous
   return putVersion(tx, orgId, userId, rest, "org_profile.letterhead_set")
 }

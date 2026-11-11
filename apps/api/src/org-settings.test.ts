@@ -554,8 +554,9 @@ it("la hoja membretada: solo quien configura la sube, la ve sobre una receta de 
   const png = new Blob([await sharp({ create: { width: 40, height: 10, channels: 3, background: "#fff" } }).png().toBuffer()], {
     type: "image/png",
   })
-  const form = (file: Blob | null) => {
+  const form = (file: Blob | null, current?: string) => {
     const body = new FormData()
+    if (current) body.append("current", current)
     for (const [key, value] of Object.entries({ topMm: "50", bottomMm: "41", leftMm: "19", rightMm: "19", hasContact: "true" }))
       body.append(key, value)
     if (file) body.append("file", file, "hoja.pdf")
@@ -588,13 +589,17 @@ it("la hoja membretada: solo quien configura la sube, la ve sobre una receta de 
   expect(preview.pages).toBe(1)
   expect(preview.margins).toEqual({ topMm: 50, bottomMm: 41, leftMm: 19, rightMm: 19 })
 
-  const saved = await data<{ letterhead: Record<string, unknown> }>(await send("owner", "PUT", "", form(pdf)))
+  const saved = await data<{ letterhead: Record<string, unknown> & { id: string } }>(
+    await send("owner", "PUT", "", form(pdf, "none")),
+  )
   expect(saved.letterhead).toMatchObject({ topMm: 50, hasContact: true, fileName: "hoja.pdf" })
   // La pantalla nunca sabe dónde está guardado su PDF.
   expect(saved.letterhead).not.toHaveProperty("pdfKey")
   expect(privateObjects.size).toBe(1)
   // Corregir sin volver a subirla no guarda otro PDF.
-  await data(await send("owner", "PUT", "", form(null)))
+  await data(await send("owner", "PUT", "", form(null, saved.letterhead.id)))
+  // Quien la tenía abierta antes de este cambio no lo pisa.
+  expect((await send("owner", "PUT", "", form(null, saved.letterhead.id))).status).toBe(409)
   expect(privateObjects.size).toBe(1)
   // La de hoy, otra vez, para «Cambiar la hoja»; otra clínica no tiene ninguna.
   expect((await send("owner", "GET", "/pdf")).headers.get("content-type")).toBe("application/pdf")

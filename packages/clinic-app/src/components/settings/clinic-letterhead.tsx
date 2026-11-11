@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import {
+  clampMargins,
   detectMargins,
   getLetterhead,
   getLetterheadPdf,
@@ -299,11 +300,14 @@ function LetterheadDrawer({
     setSaving(true)
     setSaveError(null)
     try {
+      // Las franjas, con los márgenes que guardará el servidor: coinciden con el papel.
+      const used = clampMargins(rendered, margins)
       await saveLetterhead({
         file,
-        margins,
+        current: current?.id ?? "none",
+        margins: used,
         hasContact: contact.line ? hasContact : false,
-        images: await letterheadImages(rendered, margins),
+        images: await letterheadImages(rendered, used),
       })
       await onSaved()
     } catch (cause) {
@@ -316,13 +320,14 @@ function LetterheadDrawer({
   }
 
   const sheetWidthMm = rendered ? rendered.widthPt * MM_PER_PT : 210
+  const shown = rendered && margins ? clampMargins(rendered, margins) : null
   const box =
-    preview && margins
+    preview && shown
       ? {
-          top: (margins.topMm / sheetWidthMm / preview.aspect) * 100,
-          bottom: (margins.bottomMm / sheetWidthMm / preview.aspect) * 100,
-          left: (margins.leftMm / sheetWidthMm) * 100,
-          right: (margins.rightMm / sheetWidthMm) * 100,
+          top: (shown.topMm / sheetWidthMm / preview.aspect) * 100,
+          bottom: (shown.bottomMm / sheetWidthMm / preview.aspect) * 100,
+          left: (shown.leftMm / sheetWidthMm) * 100,
+          right: (shown.rightMm / sheetWidthMm) * 100,
         }
       : null
   const ownPaper = sheetSize === "Letter" ? "Letter" : "A4"

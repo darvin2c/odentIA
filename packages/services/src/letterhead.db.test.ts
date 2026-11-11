@@ -158,3 +158,27 @@ it("la hoja que se firma en pantalla trae sus franjas y no repite lo que la hoja
   expect(letterhead.address).toBeNull()
   expect(letterhead.phone).toBeNull()
 })
+
+it("no se pisa lo que otra persona cambió entretanto, y «Deshacer» no quita una hoja más nueva", async () => {
+  const { orgId, userId, run } = await clinicWithOwner()
+  const first = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("una"), null))
+  // Quien abrió sin hoja no pisa la que otra persona puso entretanto.
+  await expect(run((tx) => saveLetterhead(tx, orgId, userId, sheet("otra"), null))).rejects.toMatchObject({
+    code: "LETTERHEAD_CHANGED",
+  })
+  const second = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("dos"), first.id))
+  // Ajustar la que ya no está a la vista, tampoco.
+  await expect(
+    run((tx) =>
+      adjustLetterhead(tx, orgId, userId, { topMm: 60, bottomMm: 41, leftMm: 19, rightMm: 19, hasContact: false }, first.id),
+    ),
+  ).rejects.toMatchObject({ code: "LETTERHEAD_CHANGED" })
+  // Quitada y vuelta a poner por otra persona: «Deshacer» de la primera no la pisa.
+  const { removedId } = await run((tx) => removeLetterhead(tx, orgId, userId))
+  expect(removedId).toBe(second.id)
+  const third = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("tres"), null))
+  await expect(run((tx) => restoreLetterhead(tx, orgId, userId, second.id))).rejects.toMatchObject({
+    code: "LETTERHEAD_CHANGED",
+  })
+  expect((await run((tx) => getCurrentLetterhead(tx, orgId)))?.id).toBe(third.id)
+})
