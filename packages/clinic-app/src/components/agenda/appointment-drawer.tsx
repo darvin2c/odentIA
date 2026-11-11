@@ -463,7 +463,8 @@ function RealAppointmentDrawer({
             Cancelar cita
           </Button>
         ) : null}
-        {appointment.status !== "cancelada" ? (
+        {/* Lo atendido, cancelado o que no vino ya es historia: sus detalles no se reescriben. */}
+        {active ? (
           <Button
             variant="ghost"
             onClick={() => {
@@ -592,7 +593,7 @@ function RealAppointmentDrawer({
                   className="h-11"
                   disabled={busy}
                   pending={arrival.isPending}
-                  onClick={() => arrival.mutate({ id: appointment.id, arrived: true, patient })}
+                  onClick={() => arrival.mutate({ id: appointment.id, arrived: true, patient, version: appointment.version })}
                 >
                   Llegó
                 </SubmitButton>
@@ -694,7 +695,7 @@ function RealAppointmentDrawer({
                       className="h-11 bg-card"
                       disabled={busy}
                       pending={arrival.isPending}
-                      onClick={() => arrival.mutate({ id: appointment.id, arrived: false })}
+                      onClick={() => arrival.mutate({ id: appointment.id, arrived: false, version: appointment.version })}
                     >
                       Deshacer
                     </SubmitButton>
@@ -731,7 +732,7 @@ function RealAppointmentDrawer({
                   className="h-11"
                   disabled={busy}
                   pending={arrival.isPending}
-                  onClick={() => arrival.mutate({ id: appointment.id, arrived: true, patient })}
+                  onClick={() => arrival.mutate({ id: appointment.id, arrived: true, patient, version: appointment.version })}
                 >
                   Llegó
                 </SubmitButton>

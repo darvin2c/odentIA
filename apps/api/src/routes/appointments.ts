@@ -98,6 +98,12 @@ const arrivalInput = z.object({ arrived: z.boolean(), expectedVersion }).strict(
 
 const cameInput = z.object({ undo: z.boolean().optional(), expectedVersion }).strict()
 
+/**
+ * El origen de una cita que reserva el equipo lo pone esta ruta: «recepcion» o, si salió de una
+ * conversación, «conversacion». Los demás orígenes los pone cada servicio (el agente, el enlace).
+ */
+const teamSource = (source: string | undefined) => (source === "conversacion" ? "conversacion" : "recepcion")
+
 const moveInput = operationBodySchema("cita.mover")
 
 const statusInput = z.object({
@@ -443,7 +449,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const created = await createAppointment(tx, orgId, userId, parsed.data, { requested: true })
+        const created = await createAppointment(tx, orgId, userId, { ...parsed.data, source: teamSource(parsed.data.source) }, { requested: true })
         // Si el recordatorio le llegará: «Carmen no recibirá el recordatorio: aún no tiene WhatsApp».
         return { ...created, reminderReach: await appointmentReminderReach(tx, orgId, created.patientId) }
       }),

@@ -987,7 +987,7 @@ function AgendaPage() {
         {
           key: "deshacer",
           label: "Deshacer la llegada",
-          onSelect: () => arrival.mutate({ id: item.id, arrived: false }),
+          onSelect: () => arrival.mutate({ id: item.id, arrived: false, version: item.version }),
         },
       ]
     }
@@ -1003,7 +1003,7 @@ function AgendaPage() {
             {
               key: "ausente",
               label: "No vino",
-              onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }),
+              onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio", expectedVersion: item.version }),
             },
           ]
         : []),
@@ -1022,7 +1022,11 @@ function AgendaPage() {
    * atención» o «No vino».
    */
   const primaryFor = (item: AgendaAppointment): { label: string; pending?: boolean; onSelect: () => void } | null => {
-    const busy = (id: string) => (arrival.isPending && arrival.variables?.id === id) || (attend.isPending && attend.variables?.appointment.id === id)
+    // Mientras un cambio de esa cita no termina (y la lista no la relee), su fila no lanza otro: llevaría la versión de antes.
+    const busy = (id: string) =>
+      (arrival.isPending && arrival.variables?.id === id) ||
+      (attend.isPending && attend.variables?.appointment.id === id) ||
+      (statusMutation.isPending && statusMutation.variables?.id === id)
     if (item.visit === "llego") return canAttend ? { label: "Atender", pending: busy(item.id), onSelect: () => attendItem(item) } : null
     if (item.visit === "no_vino" || item.visit === "cancelada") {
       return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item), item) } : null
@@ -1043,12 +1047,12 @@ function AgendaPage() {
     if (step === "confirmar") {
       return {
         label: "Confirmar cita",
-        pending: statusMutation.isPending && statusMutation.variables?.id === item.id,
-        onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada" }),
+        pending: busy(item.id),
+        onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada", expectedVersion: item.version }),
       }
     }
     return step === "llego"
-      ? { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item) }) }
+      ? { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item), version: item.version }) }
       : null
   }
 

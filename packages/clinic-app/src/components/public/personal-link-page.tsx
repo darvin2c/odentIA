@@ -556,7 +556,12 @@ export function PersonalLinkPage({
 
   const cancel = useMutation({
     retry: false,
-    mutationFn: () => cancelBooking(slug ?? "", token ?? ""),
+    mutationFn: () => cancelBooking(slug ?? "", token ?? "", (booked ?? view?.appointment)?.startsAt),
+    // Si «su cita» ya no era la que veía, la página deja lo que recordaba y muestra cómo quedó, junto al motivo.
+    onError: () => {
+      setBooked(null)
+      refresh()
+    },
     onSuccess: (result) => {
       setBooked(result.data)
       setNews("cancelada")
@@ -565,7 +570,12 @@ export function PersonalLinkPage({
   })
   const confirm = useMutation({
     retry: false,
-    mutationFn: () => confirmBooking(slug ?? "", token ?? ""),
+    mutationFn: () => confirmBooking(slug ?? "", token ?? "", (booked ?? view?.appointment)?.startsAt),
+    // Si «su cita» ya no era la que veía, la página deja lo que recordaba y muestra cómo quedó, junto al motivo.
+    onError: () => {
+      setBooked(null)
+      refresh()
+    },
     onSuccess: (result) => {
       setBooked(result.data)
       setNews("confirmada")

@@ -99,6 +99,9 @@ const dataBody = z.strictObject({
     })
     .nullish(),
 })
+// La hora de la cita que la persona tenía a la vista al pulsar: si «su cita» ya es otra, no se aplica.
+const seenStartsAt = z.iso.datetime({ offset: true }).optional()
+
 const reserveBody = z.strictObject({
   token,
   branchId: z.uuid(),
@@ -318,7 +321,7 @@ export function createPublicBookingRoute(deps: {
 
   // Su cita: la cambia de horario, la cancela o la confirma mientras no haya empezado.
   app.post("/:slug/change", async (c) => {
-    const body = reserveBody.omit({ branchId: true, planItemIds: true }).safeParse(await bodyOf(c))
+    const body = reserveBody.omit({ branchId: true, planItemIds: true }).extend({ seenStartsAt: seenStartsAt }).safeParse(await bodyOf(c))
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa el horario elegido"), 400)
     const { token: linkToken, ...choice } = body.data
     return answer(c, 200, () =>
@@ -327,15 +330,15 @@ export function createPublicBookingRoute(deps: {
   })
 
   app.post("/:slug/cancel", async (c) => {
-    const body = z.strictObject({ token }).safeParse(await bodyOf(c))
+    const body = z.strictObject({ token, seenStartsAt }).safeParse(await bodyOf(c))
     if (!body.success) return unavailable(c)
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => cancelBookingLinkAppointment(tx, orgId, body.data.token, { secretsKey: deps.secretsKey })))
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => cancelBookingLinkAppointment(tx, orgId, body.data.token, { secretsKey: deps.secretsKey, seenStartsAt: body.data.seenStartsAt })))
   })
 
   app.post("/:slug/confirm", async (c) => {
-    const body = z.strictObject({ token }).safeParse(await bodyOf(c))
+    const body = z.strictObject({ token, seenStartsAt }).safeParse(await bodyOf(c))
     if (!body.success) return unavailable(c)
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => confirmBookingLinkAppointment(tx, orgId, body.data.token, { secretsKey: deps.secretsKey })))
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => confirmBookingLinkAppointment(tx, orgId, body.data.token, { secretsKey: deps.secretsKey, seenStartsAt: body.data.seenStartsAt })))
   })
 
   // Tus datos: solo lo que falta, una sola vez.
