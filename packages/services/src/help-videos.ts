@@ -20,14 +20,17 @@ import { helpTopicsFor } from "./products.js"
  */
 const TAG = /#ayuda:((?:tema:)?[a-z0-9]+(?:[-_][a-z0-9]+)*)(?:@([0-9ms:]+))?/gi
 
+const MAX_START_SECONDS = 86_400
+
 /** El segundo de inicio como se escribe: «90», «90s», «2m», «1m30», «1m30s» o «1:30». Nulo si no se entiende. */
 function startSecondsOf(text: string | undefined): number | null {
   if (!text) return null
   const clock = /^(\d+):(\d{1,2})$/.exec(text)
-  if (clock) return Number(clock[1]) * 60 + Number(clock[2])
   const spoken = /^(?:(\d+)m)?(?:(\d+)s?)?$/i.exec(text)
-  if (!spoken || (spoken[1] === undefined && spoken[2] === undefined)) return null
-  return Number(spoken[1] ?? 0) * 60 + Number(spoken[2] ?? 0)
+  if (!clock && (!spoken || (spoken[1] === undefined && spoken[2] === undefined))) return null
+  const seconds = clock ? Number(clock[1]) * 60 + Number(clock[2]) : Number(spoken?.[1] ?? 0) * 60 + Number(spoken?.[2] ?? 0)
+  // Un video de la Ayuda no dura un día: una cifra mayor es un error de quien la escribió.
+  return Number.isSafeInteger(seconds) && seconds <= MAX_START_SECONDS ? seconds : null
 }
 /** Cuántos videos se muestran bajo una respuesta. */
 export const HELP_VIDEOS_SHOWN = 2

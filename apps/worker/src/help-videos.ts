@@ -85,6 +85,8 @@ export async function readHelpPlaylist(fetcher: typeof fetch, apiKey: string, pl
     pageToken = data.nextPageToken
     if (!pageToken) break
   }
+  // Leída a medias, lo que falta se daría por quitado de la lista: mejor no tocar nada.
+  if (pageToken) throw new Error(`La lista tiene más de ${MAX_PAGES * PAGE} videos`)
   const durations = new Map<string, number | null>()
   for (let at = 0; at < found.length; at += PAGE) {
     const ids = found.slice(at, at + PAGE).map((video) => video.youtubeId)

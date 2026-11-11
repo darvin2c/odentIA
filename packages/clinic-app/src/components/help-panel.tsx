@@ -133,10 +133,15 @@ const VIDEOS_SHOWN = 2
 const videosOf = (answer: HelpAnswer) => (answer.videos ?? []).filter((video) => /^https:\/\//i.test(video.url))
 /** Los videos que se muestran: los de un texto (`at`) sin pasar el tope de la pregunta, o los de todos juntos. */
 function shownVideos(answers: readonly HelpAnswer[], at?: number): HelpVideo[] {
-  if (at === undefined) return answers.flatMap(videosOf).slice(0, VIDEOS_SHOWN)
-  const before = answers.slice(0, at).flatMap(videosOf).length
+  // Un mismo video puede estar unido a dos respuestas que se muestran juntas: sale una vez.
+  const once = (videos: HelpVideo[]) => videos.filter((video, index) => videos.findIndex((other) => other.url === video.url) === index)
+  if (at === undefined) return once(answers.flatMap(videosOf)).slice(0, VIDEOS_SHOWN)
+  const before = once(answers.slice(0, at).flatMap(videosOf))
   const answer = answers[at]
-  return answer ? videosOf(answer).slice(0, Math.max(0, VIDEOS_SHOWN - before)) : []
+  if (!answer) return []
+  return once(videosOf(answer))
+    .filter((video) => !before.some((other) => other.url === video.url))
+    .slice(0, Math.max(0, VIDEOS_SHOWN - before.length))
 }
 
 /**

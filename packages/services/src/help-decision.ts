@@ -115,6 +115,9 @@ export function helpScreenName(path: string, topics: readonly HelpTopic[]): stri
   return topic ? helpTopicLabel(topic) : null
 }
 
+/** En una línea: lo que escribe la persona no puede abrir otra línea del estado («Pantalla:», «Texto 1»). */
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim()
+
 /** Lo que se acaba de preguntar y responder en esa conversación, para entender «¿y cómo la creo?». */
 export interface HelpPrevious {
   question: string
@@ -129,9 +132,9 @@ export interface HelpPrevious {
  */
 export function helpState(question: string, screen: string | null, previous: HelpPrevious | null = null): string {
   const before = previous
-    ? `Antes preguntó: ${previous.question}${previous.where ? ` (se le respondió sobre ${previous.where})` : ""}\n`
+    ? `Antes preguntó: ${oneLine(previous.question)}${previous.where ? ` (se le respondió sobre ${previous.where})` : ""}\n`
     : ""
-  return `${before}${screen ? `Pantalla: ${screen}\n` : ""}Pregunta: ${question}`
+  return `${before}${screen ? `Pantalla: ${screen}\n` : ""}Pregunta: ${oneLine(question)}`
 }
 
 export interface HelpSelection {
@@ -408,7 +411,7 @@ const partText = (option: HelpOption, index: number) =>
 
 /** Lo que viaja para decidir si se redacta, y para redactar: la pregunta y los textos de la guía. Nada de la clínica. */
 export function helpPartsState(question: string, parts: readonly HelpOption[]): string {
-  return `Pregunta: ${question}\n\n${parts.map(partText).join("\n\n")}`
+  return `Pregunta: ${oneLine(question)}\n\n${parts.map(partText).join("\n\n")}`
 }
 
 /**
@@ -467,7 +470,7 @@ export function helpWrittenProblem(written: string, parts: readonly HelpOption[]
   const text = written.trim()
   if (!text || /^NO_SE\b/.test(text)) return "no_sabe"
   if (text.length > HELP_WRITTEN_MAX_CHARS) return "largo"
-  if (/https?:\/\/|\*\*|^#|^\s*[-*•]\s|\n\s*\d+[.)]\s/m.test(text)) return "formato"
+  if (/https?:\/\/|\bwww\.|\*\*|^#|^\s*[-*•]\s|\n\s*\d+[.)]\s/m.test(text)) return "formato"
   const origin = parts.map((part) => helpAnswerText(part)).join("\n")
   const source = plainText(origin)
   const names = [...text.matchAll(QUOTED)].map((match) => plainText(match[1] ?? ""))

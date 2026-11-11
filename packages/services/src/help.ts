@@ -61,14 +61,16 @@ import { getArgosPanelAllowance } from "./saas-included.js"
 /* ---------- Ariadna, la que responde en Ayuda: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
 /**
- * Ariadna responde con la guía del sistema (ADR 0146): lo escrito igual que en
- * la guía responde sin modelo; lo demás lo elige Jev entre las respuestas de la
- * guía (`help.v1`) y se muestra tal cual, porque el modelo no redacta. Si Jev
+ * Ariadna responde con la guía del sistema (ADR 0146 y 0178): lo escrito igual
+ * que en la guía responde sin modelo; lo demás lo elige Jev en dos pasos
+ * (`help.v2`: la categoría y la respuesta) y se muestra tal cual. Solo si la
+ * respuesta está repartida entre dos o tres de la guía que se completan, el
+ * modelo que escribe las une, y lo redactado se comprueba sin modelo. Si Jev
  * duda, ofrece las más parecidas; si no está en la guía, lo dice; si es de las
  * cifras de la clínica, la lleva a Argos. Sin Jev, solo responde una pregunta
  * frecuente que reconozcan las palabras. No cambia nada ni lee conversaciones,
- * historia clínica ni montos. Lo que cuesta Jev lo paga odentIA (origen
- * `ayuda`); el tope diario protege el servicio.
+ * historia clínica ni montos. Lo que cuestan los modelos lo paga odentIA
+ * (origen `ayuda`); el tope diario protege el servicio.
  */
 export const HELP_DAILY_LIMIT = 200
 const QUESTION_CHARS = 500
@@ -339,17 +341,24 @@ async function pickAnswer(
   texts: ProductAgentTexts,
   decider: HelpDecider,
 ): Promise<{ selection: HelpSelection; parts: HelpOption[] } | null> {
-  const read = await Promise.all(
+  const settled = await Promise.allSettled(
     batches.map(async (batch) => {
       const candidates = helpCandidates(batch, question)
       const result = await decider.decide(state, [helpQuestion(candidates, texts)])
       return { selection: readHelpSelection(result, candidates), parts: helpParts(result, candidates), ranked: helpRanked(result, candidates) }
     }),
   )
-  if (read.length === 0 || read.some((item) => item.selection.top === null)) return null
-  const top = Math.max(...read.map((item) => item.selection.top ?? 0))
+  // Una tanda que falló o vino sin probabilidades no tira a las demás: si otra respondió segura, vale.
+  const read = settled.flatMap((item) => (item.status === "fulfilled" && item.value.selection.top !== null ? [item.value] : []))
   const sure = read.filter((item) => item.selection.verdict === "seguro").sort((a, b) => (b.selection.top ?? 0) - (a.selection.top ?? 0))[0]
   if (sure) return { selection: sure.selection, parts: [] }
+  // Sin una respuesta segura, lo que no se pudo mirar podía tenerla: no se afirma nada con la guía a medias.
+  if (read.length === 0 || read.length < batches.length) {
+    const failed = settled.find((item) => item.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
+    return null
+  }
+  const top = Math.max(...read.map((item) => item.selection.top ?? 0))
   const offering = read.filter((item) => item.selection.verdict === "duda" && item.selection.offered.length > 0)
   if (offering.length > 0) {
     // De todas las tandas, las más probables primero: la de una tanda no tapa a una mejor de otra.
@@ -357,8 +366,8 @@ async function pickAnswer(
       .flatMap((item) => item.ranked.filter((entry) => item.selection.offered.includes(entry.option)))
       .sort((a, b) => b.probability - a.probability)
       .slice(0, HELP_OFFERED)
-      .map((entry) => entry.option)
-    return { selection: { verdict: "duda", shown: [], offered, top }, parts: offering.length === 1 ? (offering[0]?.parts ?? []) : [] }
+    // Queda la probabilidad de lo primero que se ofrece, no la del «ninguna» de otra tanda.
+    return { selection: { verdict: "duda", shown: [], offered: offered.map((entry) => entry.option), top: offered[0]?.probability ?? top }, parts: offering.length === 1 ? (offering[0]?.parts ?? []) : [] }
   }
   if (read.some((item) => item.selection.verdict === "datos")) return { selection: { verdict: "datos", shown: [], offered: [], top }, parts: [] }
   return { selection: { ...NOTHING, top }, parts: [] }
