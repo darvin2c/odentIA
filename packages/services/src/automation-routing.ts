@@ -51,6 +51,8 @@ export interface ComposedMessage {
   text: string
   subject: string
   buttons: ReplyButton[]
+  /** La fecha que dice el mensaje de cada cita (ISO): su «Confirmar» vale para esa y no para otra. */
+  announced: Record<string, string>
 }
 
 export function firstName(person: { givenNames: string | null; displayName: string }): string {
@@ -73,7 +75,7 @@ export function dayPhrase(date: Date, now: Date, timeZone: string, locale: strin
   return day
 }
 
-function timePhrase(date: Date, timeZone: string, locale: string): string {
+export function timePhrase(date: Date, timeZone: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(date)
 }
 
@@ -158,7 +160,9 @@ export async function composeJobMessage(
     spec.key === "cita_sin_llegar" ||
     spec.key === "aviso_cita_reservada" ||
     spec.key === "aviso_cita_reservada_datos" ||
-    spec.key === "aviso_cita_movida"
+    spec.key === "aviso_cita_movida" ||
+    spec.key === "aviso_cita_movida_confirmar"
+  const announced: Record<string, string> = {}
   if (upcoming || pastVisit) {
     const ids = jobs.map((job) => job.appointmentId).filter((id): id is string => !!id)
     if (ids.length === 0) return null
@@ -192,6 +196,7 @@ export async function composeJobMessage(
         parts.push(
           `${who}${dayPhrase(row.startsAt, now, rowZone, locale)}, a las ${timePhrase(row.startsAt, rowZone, locale)}, con ${row.professional}`,
         )
+        announced[row.id] = row.startsAt.toISOString()
       }
       values.citas = parts.join("; ")
     }
@@ -240,6 +245,7 @@ export async function composeJobMessage(
     text,
     subject: `${spec.subject} · ${clinic}`,
     buttons: replyButtons(spec.buttons, lead.id),
+    announced,
   }
 }
 
