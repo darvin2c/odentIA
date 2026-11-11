@@ -251,7 +251,7 @@ export async function composeReportDigest(
     const rose = noShow.value > noShowBefore.value
     let line = `No vinieron ${rose ? "subió" : "bajó"} a ${percentWords(noShow.value, locale)}`
     if (rose && (noShow.part ?? 0) >= 2) {
-      const people = await appointmentsByProfessional(tx, orgId, scope.window, now, undefined)
+      const people = await appointmentsByProfessional(tx, orgId, scope.window, now, undefined, scope.timezone)
       const top = people.sort((a, b) => b.noShow - a.noShow)[0]
       if (top && top.noShow >= 2 && top.noShow < (noShow.part ?? 0)) line += `: ${whole(top.noShow, locale)} de las ${whole(noShow.part ?? 0, locale)} citas eran de ${top.name}`
     }

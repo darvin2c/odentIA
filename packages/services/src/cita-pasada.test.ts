@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { encounter } from "@odentia/db/schema/clinical"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
@@ -187,4 +187,25 @@ it("C3: la atención de una cita de otro día queda con su fecha y termina a la 
   await expect(f.run((tx) => undoAppointmentCame(tx, "org_a", f.actor, other.id))).rejects.toMatchObject({ code: "ATTENTION_STARTED" })
   // Y «No hace falta» no hace nada: ya tiene su atención.
   expect((await f.run((tx) => skipAppointmentRecord(tx, "org_a", f.actor, other.id))).status).toBe("atendida")
+})
+
+it("deshacer un «Vino» de antes quita la llegada que inventaba; la llegada de otro día sin atención está sin cerrar", async () => {
+  const f = await clinicalFixture()
+  const book = await booker(f)
+  const booked = await book(1)
+  const startsAt = await inThePast(booked.id, 4)
+  // Así lo dejaba la versión anterior de «Vino»: llegada a la hora de la cita.
+  await ownerDb.update(appointment).set({ status: "atendida", arrivedAt: startsAt, arrivedBy: f.actor }).where(eq(appointment.id, booked.id))
+  await ownerDb.insert(auditEvent).values({
+    organizationId: "org_a", actorUserId: f.actor, entity: "appointment", entityId: booked.id,
+    action: "appointment.status_atendida", metadata: { from: "confirmada", by: "vino", withoutEncounter: true },
+  })
+  const undone = await f.run((tx) => undoAppointmentCame(tx, "org_a", f.actor, booked.id))
+  expect(undone).toMatchObject({ status: "confirmada", arrivedAt: null, visit: "sin_cerrar" })
+  // Llegó ese día y nadie registró la atención: también está sin cerrar.
+  await ownerDb.update(appointment).set({ arrivedAt: startsAt, arrivedBy: f.actor }).where(eq(appointment.id, booked.id))
+  const [row] = await ownerDb.select({ branchId: appointment.branchId }).from(appointment).where(eq(appointment.id, booked.id))
+  await ownerDb.update(branch).set({ timezone: "America/Lima" }).where(eq(branch.id, row!.branchId))
+  const { getAppointment } = await import("./appointments.js")
+  expect((await f.run((tx) => getAppointment(tx, "org_a", booked.id))).visit).toBe("sin_cerrar")
 })

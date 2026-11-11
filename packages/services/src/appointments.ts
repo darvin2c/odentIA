@@ -28,7 +28,8 @@ import {
 } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm"
+import { saasAction } from "@odentia/db/schema/saas-billing"
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { requireCanAttend } from "./attending.js"
 import {
@@ -147,12 +148,25 @@ export function appointmentVisit(input: {
   encounterStatus: string | null
   endsAt: Date | string
   now?: Date
+  /**
+   * Con su inicio y la zona de su sede, una llegada de un día anterior sin atención
+   * también está sin cerrar: llegó, pero nadie dijo qué se hizo.
+   */
+  startsAt?: Date | string
+  timeZone?: string | null
 }): AppointmentVisit {
   if (input.status === "cancelada") return "cancelada"
   if (input.status === "no_asistio") return "no_vino"
   if (input.status === "atendida") return "atendida"
   if (input.encounterStatus === "borrador") return "en_atencion"
-  if (input.arrivedAt) return "llego"
+  if (input.arrivedAt) {
+    const now = input.now ?? new Date()
+    const before =
+      input.startsAt && input.timeZone && !input.encounterStatus
+        ? localDay(new Date(input.startsAt), input.timeZone) < localDay(now, input.timeZone)
+        : false
+    return before ? "sin_cerrar" : "llego"
+  }
   if (new Date(input.endsAt).getTime() <= (input.now ?? new Date()).getTime()) return "sin_cerrar"
   return input.status === "confirmada" ? "confirmada" : "por_confirmar"
 }
@@ -433,6 +447,8 @@ function appointmentRows(tx: Db, orgId: string) {
         professionalUserId: encounter.professionalUserId,
       },
       encounterProfessionalName: encounterProfessional.name,
+      // La zona de su sede (o de la clínica): una llegada de otro día sin atención está sin cerrar.
+      timeZone: sql<string | null>`coalesce((select b.timezone from branch b where b.id = ${appointment.branchId}), (select op.timezone from org_profile op where op.organization_id = ${appointment.organizationId}))`,
       testCreatedAt: testConversation.createdAt,
       testByUserId: testConversation.testByUserId,
       testByName: testAuthor.name,
@@ -824,6 +840,7 @@ function toItem(row: {
   roomName: string
   encounter: { id: string; status: string; startedAt: Date; endedAt: Date | null; professionalUserId: string } | null
   encounterProfessionalName: string | null
+  timeZone?: string | null
   testCreatedAt?: Date | null
   testByUserId?: string | null
   testByName?: string | null
@@ -863,6 +880,8 @@ function toItem(row: {
       arrivedAt: rowAppointment.arrivedAt,
       encounterStatus: linked?.status ?? null,
       endsAt: rowAppointment.endsAt,
+      startsAt: rowAppointment.startsAt,
+      timeZone: row.timeZone ?? null,
     }),
     encounter: linked
       ? {
@@ -2109,12 +2128,28 @@ export async function undoAppointmentCame(
   const metadata = came?.metadata as { from?: string; by?: string } | null
   if (metadata?.by !== "vino")
     throw conflict("APPOINTMENT_ATTENDED", "La cita se atendió con su atención: su estado no cambia")
+  // Lo que ya se cobró por esta cita (la recuperó Argos o la reservó Sofi) no se deshace por aquí:
+  // el periodo cerrado no cambia. Se corrige con la revisión del cobro.
+  const [charged] = await tx
+    .select({ id: saasAction.id })
+    .from(saasAction)
+    .where(and(eq(saasAction.organizationId, orgId), eq(saasAction.appointmentId, id), isNotNull(saasAction.chargeId)))
+    .limit(1)
+  if (charged)
+    throw conflict("APPOINTMENT_CHARGED", "Esta cita ya se cobró como atendida: «Vino» no se puede deshacer")
   const status = metadata.from === "confirmada" || metadata.from === "no_asistio" ? metadata.from : "programada"
+  // La versión anterior de «Vino» ponía la llegada a la hora de la cita: no ocurrió, se quita.
+  const invented = current.arrivedAt !== null && current.arrivedAt.getTime() === current.startsAt.getTime()
   const roomName = (await roomWord(tx, orgId)).one
   try {
     await tx
       .update(appointment)
-      .set({ status, version: current.version + 1, updatedAt: new Date() })
+      .set({
+        status,
+        ...(invented || status === "no_asistio" ? { arrivedAt: null, arrivedBy: null } : {}),
+        version: current.version + 1,
+        updatedAt: new Date(),
+      })
       .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
   } catch (error) {
     if (isExclusionViolation(error)) {

@@ -45,7 +45,7 @@ function unclosedAppointment(now: Date, timezone: string): SQL {
 }
 
 /** Una cita cuenta si ya tiene desenlace o si quedó sin cerrar; la que aún no ocurre o está en curso no es de ningún grupo. */
-function settledAppointment(now: Date, timezone: string): SQL {
+export function settledAppointment(now: Date, timezone: string): SQL {
   return sql`(a.status in ('atendida','no_asistio','cancelada') or ${unclosedAppointment(now, timezone)})`
 }
 

@@ -87,7 +87,8 @@ export function VisitPanel({
           <div className="flex w-full flex-col gap-2">
             <p className="text-sm font-bold">¿Vino a su cita?</p>
             <div className="flex flex-wrap justify-end gap-2">
-              {canWrite ? (
+              {/* Si ese día se marcó «Llegó», vino: no se marca «No vino». */}
+              {canWrite && !row.arrived ? (
                 <Button
                   type="button"
                   variant="secondary"
@@ -289,6 +290,8 @@ export function OldUnclosedPanel({
     queryFn: () => apiFetch<{ data: { items: Array<RowOf<"unclosed">> } }>("/api/workspace/unclosed-old"),
   })
   const items = list.data?.data.items ?? []
+  // Las que se marcaron «Llegó» ese día vinieron: «Ninguna vino» no las toca.
+  const missing = items.filter((item) => !item.arrived)
   const [confirmAll, setConfirmAll] = useState(false)
   const close = useMutation({
     mutationFn: async (input: { rows: Array<RowOf<"unclosed">>; status: "no_asistio" | "atendida" }) => {
@@ -338,7 +341,7 @@ export function OldUnclosedPanel({
       description={`${row.count} ${row.count === 1 ? "cita" : "citas"}: nadie dijo si vinieron`}
       onClose={onClose}
       actions={
-        canWrite && items.length > 0 ? (
+        canWrite && missing.length > 0 ? (
           <Button type="button" variant="secondary" className={ACTION} disabled={close.isPending} onClick={() => setConfirmAll(true)}>
             Ninguna vino
           </Button>
@@ -374,7 +377,7 @@ export function OldUnclosedPanel({
                     size="sm"
                     variant="outline"
                     className="min-h-11 sm:min-h-8"
-                    disabled={close.isPending}
+                    disabled={close.isPending || item.arrived}
                     aria-label={`No vino: ${item.patientName}`}
                     onClick={() => close.mutate({ rows: [item], status: "no_asistio" })}
                   >
@@ -399,12 +402,12 @@ export function OldUnclosedPanel({
       </div>
       <ConfirmDialog
         open={confirmAll}
-        title={`¿Marcar ${items.length === 1 ? "la cita" : `las ${items.length} citas`} como «No vino»?`}
-        description="Cada una queda como falta y su hueco se libera. Si alguna sí vino, ciérrala antes con «Vino»."
+        title={`¿Marcar ${missing.length === 1 ? "la cita" : `las ${missing.length} citas`} como «No vino»?`}
+        description={`Cada una queda como falta y su hueco se libera. Si alguna sí vino, ciérrala antes con «Vino».${items.length > missing.length ? " Las que tienen «Llegó» no se tocan." : ""}`}
         confirmLabel="Ninguna vino"
         variant="default"
         pending={close.isPending}
-        onConfirm={() => close.mutate({ rows: items, status: "no_asistio" })}
+        onConfirm={() => close.mutate({ rows: missing, status: "no_asistio" })}
         onClose={() => setConfirmAll(false)}
       />
     </DetailDrawer>

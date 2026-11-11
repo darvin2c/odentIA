@@ -953,7 +953,8 @@ function AgendaPage() {
 
   const started = (item: AgendaAppointment) => Date.parse(item.startsAt) <= Date.parse(now)
   /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
-  const before = (item: AgendaAppointment) => item.visit === "por_confirmar" || item.visit === "confirmada"
+  // También la que quedó sin cerrar: se reprograma o se cancela igual.
+  const before = (item: AgendaAppointment) => item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "sin_cerrar"
   const isToday = (item: AgendaAppointment) => zonedDateOf(item.startsAt, TZ) === today
   /** Su hora pasó sin llegada ni atención: «Ya pasaron · sin cerrar». */
   const unclosed = (item: AgendaAppointment) => isUnclosed(item, now)

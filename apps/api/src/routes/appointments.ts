@@ -537,11 +537,12 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     )
   })
 
-  // «No hace falta»: la cita cerrada con «Vino» no tendrá su atención registrada.
+  // «No hace falta»: la cita cerrada con «Vino» no tendrá su atención registrada. Lo decide quien
+  // atiende (escribe en la historia), no recepción: la fila es del profesional.
   app.post("/:id/record-skipped", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar citas"), 403)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Lo decide quien atiende: solo quien escribe en la historia clínica"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => skipAppointmentRecord(tx, orgId, userId, c.req.param("id"))),

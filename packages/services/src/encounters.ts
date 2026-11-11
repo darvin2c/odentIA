@@ -618,7 +618,9 @@ export async function getOpenEncounterRef(
     id: row.id,
     professionalUserId: row.professionalUserId,
     startedAt: row.startedAt,
-    today: day(row.startedAt) === day(new Date()),
+    // De hoy, o abierta hoy para una cita pasada (lleva la fecha de la cita, pero no quedó
+    // abierta de otro día: se está registrando ahora).
+    today: day(row.startedAt) === day(new Date()) || (row.appointmentId !== null && day(row.createdAt) === day(new Date())),
     empty: !(await encounterHasRecords(tx, orgId, row)),
   }
 }
@@ -765,7 +767,15 @@ export async function createEncounter(
           ),
         )
         .limit(1)
-        .then((found) => found.length > 0))
+        .then((found) => found.length > 0)) &&
+      // Solo la que cerró «Vino»: la atendida cuya atención se anuló no se vuelve a abrir así.
+      (await tx
+        .execute<{ by: string | null }>(sql`
+          select metadata->>'by' as by from audit_event
+          where organization_id = ${orgId} and entity = 'appointment' and entity_id = ${row.id}
+            and action = 'appointment.status_atendida'
+          order by created_at desc limit 1`)
+        .then((found) => found[0]?.by === "vino"))
     if (!["programada", "confirmada"].includes(row.status) && !cameWithoutRecord) {
       throw conflict(
         "APPOINTMENT_NOT_ATTENDABLE",
@@ -3112,7 +3122,9 @@ export async function finalizeEncounter(
           .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, locked.appointmentId)))
           .limit(1)
       : []
-    endedAt = visit && visit.endsAt > locked.startedAt ? visit.endsAt : new Date(locked.startedAt.getTime() + 30 * 60_000)
+    const planned = visit && visit.endsAt > locked.startedAt ? visit.endsAt : new Date(locked.startedAt.getTime() + 30 * 60_000)
+    // Nunca después de ahora: una de anoche que se firma de madrugada termina, a lo sumo, ahora.
+    endedAt = planned < now ? planned : now
   }
   if (input.endedAt) {
     endedAt = new Date(input.endedAt)

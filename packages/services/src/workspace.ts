@@ -551,6 +551,8 @@ async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, tim
       eq(encounter.professionalUserId, userId),
       eq(encounter.status, "borrador"),
       sql`${encounter.startedAt} < ${start}`,
+      // La de una cita pasada que se abrió hoy lleva la fecha de la cita, pero se está registrando ahora.
+      sql`not (${encounter.appointmentId} is not null and ${encounter.createdAt} >= ${start})`,
     ))
     .orderBy(asc(encounter.startedAt), asc(encounter.id))
     .limit(WAITING_STALE_ENCOUNTERS)

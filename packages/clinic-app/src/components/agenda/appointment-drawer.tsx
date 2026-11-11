@@ -189,7 +189,8 @@ function RealAppointmentDrawer({
   const started = Date.parse(appointment.startsAt) <= Date.parse(now)
   const isToday = zonedDateOf(appointment.startsAt, timeZone) === today
   /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
-  const before = appointment.visit === "por_confirmar" || appointment.visit === "confirmada"
+  // También la que quedó sin cerrar: se puede reprogramar o cancelar (llamó y viene otro día).
+  const before = appointment.visit === "por_confirmar" || appointment.visit === "confirmada" || appointment.visit === "sin_cerrar"
   /**
    * Ya pasó su hora y nadie la cerró, igual que la lista: hoy, «Llegó» (llegó tarde),
    * «Registrar la atención» o «No vino»; otro día, «Vino», «Registrar la atención» o «No vino».
@@ -197,7 +198,7 @@ function RealAppointmentDrawer({
   const step = stepBeforeArrival(appointment, now, isToday)
   const unclosed = step === "cerrar" || step === "tarde"
   /** «Vino» la dejó atendida y nadie registró qué se hizo: se puede deshacer o registrar. */
-  const cameUnrecorded = appointment.visit === "atendida" && !appointment.encounter
+  const cameUnrecorded = appointment.visit === "atendida" && !appointment.encounter && !appointment.arrivedAt
   const patient = { id: appointment.patientId, name: appointment.patientName }
   const startAttention = () =>
     attend.mutate({
@@ -629,7 +630,7 @@ function RealAppointmentDrawer({
                 </SubmitButton>
               ) : null}
               {/* «No vino» solo cuando pasó la hora y no llegó. */}
-              {canWrite && (before || appointment.visit === "sin_cerrar") && started ? (
+              {canWrite && before && started && !appointment.arrivedAt ? (
                 <SubmitButton
                   variant="outline"
                   className="h-11 bg-card"

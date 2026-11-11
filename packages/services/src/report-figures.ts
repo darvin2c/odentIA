@@ -222,7 +222,7 @@ const EXPENSE_WORDS: Record<string, string> = { comision: "Pago de comisiones", 
 
 /** Las citas de cada profesional en el periodo (la regla de la pestaña Agenda). */
 async function byProfessional(ctx: FigureContext, branchId: string | undefined, pick: (row: { attended: number; noShow: number; cancelled: number; unmarked: number }) => FigureValue): Promise<FigureRow[]> {
-  const rows = await appointmentsByProfessional(ctx.tx, ctx.orgId, ctx.scope.window, ctx.scope.now, branchId)
+  const rows = await appointmentsByProfessional(ctx.tx, ctx.orgId, ctx.scope.window, ctx.scope.now, branchId, ctx.scope.timezone)
   return rows.map((row) => ({ key: row.userId, label: row.name, value: pick(row) }))
 }
 
