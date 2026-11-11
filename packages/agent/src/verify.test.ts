@@ -94,6 +94,12 @@ it("la referencia del enlace que va en el mensaje es parte de la dirección: sus
     expect(verifyReply(`Antes de venir, completa tus datos aquí: ${link}.`, [tool], ca, NOW).checks).toEqual([
       { kind: "enlace", value: link, ok: true, source: "Su enlace" },
     ])
+    // Copiado del historial, donde se ve sin su token, tampoco abre: aunque esté en las respuestas anteriores, no sale.
+    const hidden = link.replace(/\{\{su-enlace:[^}]+\}\}/, "…")
+    const history = { source: "Respuestas anteriores del agente", text: `Completa tus datos aquí: ${hidden}` }
+    expect(verifyReply(`Aquí está de nuevo: ${hidden}`, [history], ca, NOW).unsupported).toEqual([
+      { kind: "enlace", value: hidden, ok: false, source: null },
+    ])
     // Con otra referencia el enlace no abre: no lo trajo ninguna fuente.
     const other = link.replace(id, "99999999-1234-4abc-8def-0123456789ab")
     expect(verifyReply(`Completa tus datos aquí: ${other}`, [tool], ca, NOW).unsupported).toEqual([

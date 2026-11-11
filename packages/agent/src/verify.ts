@@ -489,6 +489,11 @@ const WEB_ADDRESS = /\bhttps?:\/\/[^\s"<>\\^`{|}«»]+(?:\{\{su-enlace:[0-9a-f]{
 export function webAddressesIn(text: string): string[] {
   return text.match(WEB_ADDRESS) ?? []
 }
+
+/** «Su enlace» como lo muestra el historial, con «…» en lugar de su token: así no abre. */
+export function isHiddenPersonalLink(url: string): boolean {
+  return /[?&]token=…/.test(url)
+}
 /** La versión de una cita en `ver_resumen_paciente` («versión 3»): un contador para reprogramarla, no un importe. */
 const APPOINTMENT_VERSION = /\bversión \d+/g
 /**
@@ -731,9 +736,11 @@ export function verifyReply(
   // Un enlace sale solo si lo trajo una fuente del turno (una herramienta, los
   // datos de la clínica): uno armado por el modelo lleva a una página que no
   // existe (auditoría del 27-oct: «…/cita» en vez de «…/reserva?token=…»).
+  // Tampoco sale «Su enlace» copiado del historial: ahí se ve sin su token
+  // (`hidePersonalLinkRefs`) y así no abre, aunque figure en las respuestas anteriores.
   for (const match of normalize(reply).matchAll(WEB_ADDRESS)) {
     const url = match[0].replace(/[.,;:!?)]+$/, "")
-    const found = evidence.find((item) => normalize(item.text).includes(url))
+    const found = isHiddenPersonalLink(url) ? undefined : evidence.find((item) => normalize(item.text).includes(url))
     checks.push({ kind: "enlace", value: url, ok: Boolean(found), source: found?.source ?? null })
   }
 

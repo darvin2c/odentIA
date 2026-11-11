@@ -112,7 +112,7 @@ import type { DecisionModel } from "./decision/port.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
-import { describeUnsupported, type Evidence, pricedSubjectsOf, type ReplyVerdict, refusedPaymentMentions, timesIn, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, isHiddenPersonalLink, pricedSubjectsOf, type ReplyVerdict, refusedPaymentMentions, timesIn, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -1136,6 +1136,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return {
         verdict,
         blocked: `${prefix}No enviado: ${missing} no figura en lo consultado. El caso pasa a una persona; no envíes más mensajes.`,
+      }
+    }
+    // Copiado del historial, «Su enlace» no lleva su token: se vuelve a pedir a la herramienta que lo da.
+    if (verdict.unsupported.some((check) => check.kind === "enlace" && isHiddenPersonalLink(check.value))) {
+      const offered = ctx.offeredTools ?? toolNames
+      const again = offered.has("enviar_enlace_cita")
+        ? " Si es el de elegir su cita, vuelve a llamar a enviar_enlace_cita, que da el mismo enlace, y escríbelo tal cual."
+        : ""
+      return {
+        verdict,
+        blocked: `${prefix}No enviado: ese enlace es el de tu mensaje anterior como lo ves en el historial, sin su parte final, y así no abre.${again} Si no tienes cómo dárselo de nuevo, pasa el caso a recepción con request_human_handoff para que se lo envíe. Vuelve a enviar la respuesta sola en su paso.`,
       }
     }
     return {
