@@ -1186,7 +1186,8 @@ function AgendaPage() {
             {canAbsences ? (
               <>
                 <p className="px-2 py-1 text-xs font-bold text-muted-foreground">Anotar una ausencia</p>
-                {team.map((item) => (
+                {/* Todos los que atienden, también quien no tiene horario en esta sede. */}
+                {(resources?.professionals ?? []).map((item) => (
                   <DropdownMenuItem
                     key={`ausencia-${item.id}`}
                     onClick={() => setAbsence({ kind: "person", professionalUserId: item.id, name: item.label })}

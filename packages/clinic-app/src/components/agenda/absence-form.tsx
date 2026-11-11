@@ -168,7 +168,9 @@ export function AbsenceForm({
       })
       // Anotada por error se deshace aquí: quien la anota desde la Agenda no tiene Configuración.
       const id = created?.data?.id
-      toast.success(person ? "Ausencia guardada" : "Feriado o cierre guardado", {
+      // Qué días: «Ausencia guardada · jue 12 al vie 13».
+      const days = value.allDay && value.to > value.from ? `${formatDateLong(value.from)} al ${formatDateLong(value.to)}` : formatDateLong(value.from)
+      toast.success(`${person ? "Ausencia guardada" : "Feriado o cierre guardado"} · ${days}`, {
         duration: 10_000,
         ...(id
           ? {
