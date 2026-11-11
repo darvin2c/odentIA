@@ -18,7 +18,7 @@ it("lee la lista por páginas: solo lo público, sin repetir, con su duración; 
     contentDetails: { videoId: id, videoPublishedAt: "2026-10-30T10:00:00Z" },
     status: { privacyStatus: privacy },
   })
-  const fetcher = (async (input: URL | RequestInfo) => {
+  const fetcher = (async (input: unknown) => {
     const url = new URL(String(input))
     asked.push(`${url.pathname.split("/").pop()}?${url.searchParams.get("pageToken") ?? url.searchParams.get("id") ?? ""}`)
     expect(url.searchParams.get("key")).toBe("clave")
