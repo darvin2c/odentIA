@@ -438,6 +438,9 @@ export interface WaitingParts {
   today?: string
 }
 
+/** Una duda clínica que el agente le pasó a quien atiende: no se corta ni se pliega (QA del 10 nov, C13). */
+const isClinical = (item: { topicKind?: string }) => item.topicKind === "clinico"
+
 /** La recomendación de recordar las citas de mañana: eso sí es de hoy; las demás pueden esperar. */
 const ADVICE_OF_TODAY = "recordatorio_cita"
 
@@ -445,7 +448,8 @@ const ADVICE_OF_TODAY = "recordatorio_cita"
 function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
   switch (row.kind) {
     case "case":
-      return row.urgent ? "ahora" : row.priority === "baja" ? "sin_apuro" : "hoy"
+      // Una duda clínica nunca va plegada en «Sin apuro»: la decide quien atiende, hoy.
+      return row.urgent ? "ahora" : row.priority === "baja" && !isClinical(row) ? "sin_apuro" : "hoy"
     case "person":
       return row.urgent ? "ahora" : "hoy"
     case "dataRequest":
@@ -498,12 +502,15 @@ function personOf(row: WaitingRow): string | null {
 }
 
 const BAND_RANK: Record<WaitingBand, number> = { ahora: 0, hoy: 1, sin_apuro: 2 }
-/** A igual urgencia, abre la fila lo que alguien escribió: es lo que espera respuesta. */
-const talks = (row: WaitingRow) => row.kind === "case" || row.kind === "person"
+/**
+ * A igual urgencia, abre la fila la duda clínica; después, lo que alguien
+ * escribió: es lo que espera respuesta.
+ */
+const weight = (row: WaitingRow) => (row.kind === "case" && isClinical(row) ? 2 : row.kind === "case" || row.kind === "person" ? 1 : 0)
 
 /**
- * Agrupa y deja una fila por persona: la más urgente y, si empatan, lo que
- * alguien escribió. Lo demás suyo va como «También». «N más» cierra su grupo.
+ * Agrupa y deja una fila por persona: la más urgente y, si empatan, la duda
+ * clínica y luego lo que alguien escribió. Lo demás suyo va como «También». «N más» cierra su grupo.
  */
 export function bandWaiting(rows: WaitingRow[], today?: string): WaitingEntry[] {
   const entries = rows.map((row, index) => ({ row, index, band: bandOf(row, today) }))
@@ -515,7 +522,7 @@ export function bandWaiting(rows: WaitingRow[], today?: string): WaitingEntry[] 
     const better =
       !current ||
       BAND_RANK[entry.band] < BAND_RANK[current.band] ||
-      (BAND_RANK[entry.band] === BAND_RANK[current.band] && talks(entry.row) && !talks(current.row))
+      (BAND_RANK[entry.band] === BAND_RANK[current.band] && weight(entry.row) > weight(current.row))
     if (better) best.set(person, entry)
   }
   return entries
@@ -538,8 +545,10 @@ export function bandWaiting(rows: WaitingRow[], today?: string): WaitingEntry[] 
 
 export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   const rows: WaitingRow[] = []
+  // Una duda clínica va primera entre los suyos y no cuenta para el tope: nunca se corta.
+  const shownOf = (items: WaitingCase[], limit: number) => [...items.filter(isClinical), ...items.filter((item) => !isClinical(item)).slice(0, limit)]
   const urgent = parts.cases.filter((item) => item.urgent)
-  const urgentShown = urgent.slice(0, WAITING_LIMITS.urgentCases)
+  const urgentShown = shownOf(urgent, WAITING_LIMITS.urgentCases)
   for (const item of urgentShown) rows.push({ kind: "case", ...item })
 
   // Un pedido sobre sus datos tiene plazo legal: va justo después de lo urgente.
@@ -600,10 +609,11 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   // «Hoy» antes que «Sin apuro»; lo que no encaja en ninguna se trata como «Hoy».
   const rank = (priority: string) => (priority === "baja" ? 1 : 0)
   const others = parts.cases.filter((item) => !item.urgent).sort((a, b) => rank(a.priority) - rank(b.priority))
-  const othersShown = others.slice(0, WAITING_LIMITS.otherCases)
+  const othersShown = shownOf(others, WAITING_LIMITS.otherCases)
   for (const item of othersShown) rows.push({ kind: "case", ...item })
   const casesLeft = Math.max(parts.casesTotal ?? parts.cases.length, parts.cases.length) - urgentShown.length - othersShown.length
-  if (casesLeft > 0) rows.push({ kind: "more", of: "cases", count: casesLeft })
+  const casesMore: Extract<WaitingRow, { kind: "more" }> | null = casesLeft > 0 ? { kind: "more", of: "cases", count: casesLeft } : null
+  if (casesMore) rows.push(casesMore)
 
   if (parts.stillOpen && parts.stillOpen.total > 0) rows.push({ kind: "stillOpen", ...parts.stillOpen })
 
@@ -623,5 +633,16 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
 
   for (const item of parts.advice) rows.push({ kind: "advice", ...item })
   if (parts.budgets && parts.budgets.total > 0) rows.push({ kind: "budgets", ...parts.budgets })
+
+  // El caso que no cabe y es de alguien que ya tiene fila va a su «También», no a «N más»:
+  // se agrupa por persona antes de cortar, para que nada suyo se pierda de vista.
+  const withRow = new Set(rows.map(personOf).filter((person): person is string => person !== null))
+  const shownCases = new Set([...urgentShown, ...othersShown])
+  for (const item of parts.cases) {
+    if (shownCases.has(item) || !item.contactId || !withRow.has(item.contactId)) continue
+    rows.push({ kind: "case", ...item })
+    if (casesMore) casesMore.count -= 1
+  }
+  if (casesMore && casesMore.count <= 0) rows.splice(rows.indexOf(casesMore), 1)
   return bandWaiting(rows, parts.today)
 }

@@ -196,3 +196,31 @@ it("«¿Es la misma persona?» del registro en línea no se pliega en otra fila 
   expect(rows.map((row) => [row.kind, row.band])).toEqual([["case", "ahora"], ["possibleDuplicate", "hoy"]])
   expect(rows[0]?.also?.map((row) => row.kind)).toEqual(["unclosed"])
 })
+
+it("una duda clínica nunca se corta: va antes que los demás casos y no cuenta para el tope", () => {
+  // Llegan de la más antigua a la más reciente: la duda clínica es la última y antes quedaba fuera.
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases + 1 }, (_, index) => caseOf(`c${index}`, "media"))
+  const doubt = { ...caseOf("ibuprofeno", "baja"), topicKind: "clinico" }
+  expect(shape({ cases: [...calm, doubt] })).toEqual(["case:ibuprofeno", "case:c0", "case:c1", "case:c2", "more:cases:1"])
+  // Tampoco entre los «Ahora»: va primera, y los demás conservan su tope.
+  const urgent = Array.from({ length: WAITING_LIMITS.urgentCases + 1 }, (_, index) => caseOf(`u${index}`, "alta"))
+  const urgentDoubt = { ...caseOf("alergia", "alta"), topicKind: "clinico" }
+  expect(shape({ cases: [...urgent, urgentDoubt] })).toEqual(["case:alergia", "case:u0", "case:u1", "case:u2", "case:u3", "case:u4", "more:cases:1"])
+})
+
+it("una duda clínica no se pliega en «Sin apuro» y abre la fila de su persona", () => {
+  const doubt = { ...caseOf("ibuprofeno", "baja"), topicKind: "clinico", contactId: "elena" }
+  const price = { ...caseOf("precio", "media"), contactId: "elena" }
+  const rows = composeWaiting({ ...nothing, cases: [price, doubt] })
+  expect(rows).toMatchObject([{ kind: "case", id: "ibuprofeno", band: "hoy", also: [{ id: "precio" }] }])
+})
+
+it("el caso que no cabe va al «También» de su persona, si ya tiene una fila", () => {
+  const calm = Array.from({ length: WAITING_LIMITS.otherCases }, (_, index) => ({ ...caseOf(`c${index}`, "media"), contactId: `persona-${index}` }))
+  const again = { ...caseOf("otra-vez", "media"), contactId: "persona-0" }
+  const stranger = { ...caseOf("ajeno", "media"), contactId: "persona-9" }
+  const rows = composeWaiting({ ...nothing, cases: [...calm, again, stranger] })
+  expect(rows.find((row) => row.kind === "case" && row.id === "c0")?.also).toMatchObject([{ id: "otra-vez" }])
+  // El de otra persona sigue contado en «N más»; el que se plegó ya no.
+  expect(rows.at(-1)).toMatchObject({ kind: "more", of: "cases", count: 1 })
+})
