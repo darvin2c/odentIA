@@ -85,6 +85,23 @@ it("el enlace que envía el agente no se lee como importe en la respuesta", () =
   expect(verifyReply(`La limpieza cuesta CAD 42: ${link}`, [tool], ca, NOW).unsupported.map((item) => item.value)).toEqual(["CAD 42"])
 })
 
+it("la referencia del enlace que va en el mensaje es parte de la dirección: sus cifras no son un importe y no se cambia", () => {
+  // El mensaje guarda `{{su-enlace:<id>}}` en lugar del token (ADR 0037): «7cad» o «cad4» de su id se leían como CAD.
+  const ca = { timezone: "America/Toronto", currency: "CAD", locale: "es" }
+  for (const id of ["0b7cad42-1234-4abc-8def-0123456789ab", "12345678-cad4-4abc-8def-0123456789ab"]) {
+    const link = `https://sonrisa.odentia32.com/pendientes?abre=datos&token={{su-enlace:${id}}}`
+    const tool = { source: "Su enlace", text: `Antes de venir, completa tus datos aquí: ${link}` }
+    expect(verifyReply(`Antes de venir, completa tus datos aquí: ${link}.`, [tool], ca, NOW).checks).toEqual([
+      { kind: "enlace", value: link, ok: true, source: "Su enlace" },
+    ])
+    // Con otra referencia el enlace no abre: no lo trajo ninguna fuente.
+    const other = link.replace(id, "99999999-1234-4abc-8def-0123456789ab")
+    expect(verifyReply(`Completa tus datos aquí: ${other}`, [tool], ca, NOW).unsupported).toEqual([
+      { kind: "enlace", value: other, ok: false, source: null },
+    ])
+  }
+})
+
 it("un enlace que no trajo ninguna fuente no sale", () => {
   // Auditoría del 27-oct: el modelo armó «…/cita», una página que no existe.
   const tool = { source: "Datos de la clínica", text: "Sede San Martín: Av. Perú 1820. Cómo llegar: https://sanmartin.latidia72.com/llegar/san-martin" }

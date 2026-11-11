@@ -91,6 +91,7 @@ import { FAKE_REPLY_TEXT } from "./fake-model.js"
 import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { type AgentRuntime, previewLesson, processAgentRun } from "./run.js"
 import { type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
+import { webAddressesIn } from "./verify.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -1196,7 +1197,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
 const linksOf = (text: string) => ({
   kind: "sistema",
   source: "Enlace que entregó el sistema",
-  text: (text.match(/\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi) ?? []).join("\n"),
+  text: webAddressesIn(text).join("\n"),
 })
 
 /** «Su enlace» con la hora elegida, tal como queda en el mensaje: con la referencia del token al final (ADR 0109). */

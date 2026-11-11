@@ -478,8 +478,17 @@ const INTERNAL_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
  * 97 % de los enlaces; igual el token del registro, el mapa de una sede o el
  * dominio. Termina en las comillas porque lo que una herramienta devuelve como
  * objeto llega en JSON sin espacios: el importe que sigue al enlace se lee.
+ * En un mensaje, «Su enlace» termina en la referencia que el worker cambia por
+ * el token (`{{su-enlace:<id>}}`, ADR 0037): es parte de la dirección, porque
+ * las llaves cortaban ahí y las cifras del id quedaban por leer («7cad» como
+ * CAD 7), y con otra referencia el enlace no abre.
  */
-const WEB_ADDRESS = /\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi
+const WEB_ADDRESS = /\bhttps?:\/\/[^\s"<>\\^`{|}«»]+(?:\{\{su-enlace:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}\})?/gi
+
+/** Las direcciones web de un texto, como las lee la comprobación: el enlace de una herramienta la sustenta tal cual. */
+export function webAddressesIn(text: string): string[] {
+  return text.match(WEB_ADDRESS) ?? []
+}
 /** La versión de una cita en `ver_resumen_paciente` («versión 3»): un contador para reprogramarla, no un importe. */
 const APPOINTMENT_VERSION = /\bversión \d+/g
 /**
