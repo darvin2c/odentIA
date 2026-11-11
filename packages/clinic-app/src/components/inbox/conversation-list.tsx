@@ -76,8 +76,9 @@ function rowLine(item: ConversationListItem, myUserId: string, receptionName: st
     const who = !topic.assigneeUserId || topic.assigneeUserId === myUserId ? "Te toca" : `Lo tiene ${topic.assigneeName ?? "otra persona"}`
     const mine = !topic.assigneeUserId || topic.assigneeUserId === myUserId
     return {
-      // Un tema va primero, pero lo último que no salió (o no se sabe) no se calla.
-      text: `${topic.urgent ? "Ahora" : who} · «${topicQuote(topic)}»${item.attention?.sendFailed ? (item.attention.sendUncertain ? " · no se sabe si salió lo último" : " · no salió lo último") : ""}`,
+      // Un tema va primero, pero lo último que no salió (o no se sabe) no se calla: va antes
+      // de la cita, que se corta con «…» en una fila angosta.
+      text: `${topic.urgent ? "Ahora" : who}${item.attention?.sendFailed ? (item.attention.sendUncertain ? " · no se sabe si salió lo último" : " · no salió lo último") : ""} · «${topicQuote(topic)}»`,
       tone: topic.urgent ? "urgent" : mine ? "team" : "patient",
     }
   }
