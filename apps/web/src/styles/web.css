@@ -394,23 +394,20 @@ details.q p {
   }
 }
 
-/* Cada bloque de una sección entra al verse por primera vez (lo marca Base.astro): opacidad y un
-   desplazamiento corto, una sola vez. No se usa en la portada ni en lo que ya está en pantalla al cargar. */
+/* Cada bloque de una sección aparece con un fundido corto al verse por primera vez (lo marca
+   Base.astro). Solo opacidad: nada se desplaza, así lo que se toca está en su lugar desde el primer
+   instante. Ocultarlo no se anima (la transición va solo al aparecer), y no se usa en la portada ni
+   en lo que ya está en pantalla al cargar. */
 [data-rv] {
   opacity: 0;
-  transform: translateY(16px);
-  transition:
-    opacity 0.55s ease var(--rv-d, 0s),
-    transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) var(--rv-d, 0s);
 }
 [data-rv="in"] {
   opacity: 1;
-  transform: none;
+  transition: opacity 0.4s ease var(--rv-d, 0s);
 }
 @media print {
   [data-rv] {
     opacity: 1;
-    transform: none;
   }
 }
 

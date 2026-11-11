@@ -61,10 +61,10 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
     </main>
     <Footer legalOnly={footer === "legal"} />
     <script is:inline>
-      // Cada bloque de una sección entra con suavidad la primera vez que se ve. Solo se prepara lo que
-      // al cargar está más abajo de la pantalla: nada de lo que ya se ve se esconde ni salta, y sin
-      // JavaScript o con menos movimiento todo está a la vista desde el principio. Es opacidad y un
-      // desplazamiento corto dentro del propio bloque: no cambia el alto de nada ni empuja la página.
+      // Cada bloque de una sección aparece con un fundido la primera vez que asoma. Solo se prepara lo
+      // que al cargar está más abajo de la pantalla: nada de lo que ya se ve se esconde, y sin
+      // JavaScript o con menos movimiento todo está a la vista desde el principio. Es solo opacidad: no
+      // cambia el alto ni la posición de nada.
       ;(() => {
         if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) return
         const blocks = []
@@ -73,7 +73,7 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
           for (const el of wrap.children) {
             // Las escenas (islas) traen su propio movimiento y las arma React: no se tocan.
             if (el.tagName === "ASTRO-ISLAND" || el.getBoundingClientRect().top < innerHeight) continue
-            el.style.setProperty("--rv-d", Math.min(n++, 3) * 70 + "ms")
+            el.style.setProperty("--rv-d", Math.min(n++, 3) * 60 + "ms")
             el.setAttribute("data-rv", "")
             blocks.push(el)
           }
@@ -87,7 +87,7 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
               seen.unobserve(entry.target)
             }
           },
-          { rootMargin: "0px 0px -6% 0px" },
+          { rootMargin: "0px 0px 8% 0px" },
         )
         for (const el of blocks) seen.observe(el)
       })()
