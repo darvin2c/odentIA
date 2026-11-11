@@ -207,11 +207,11 @@ export const VISTIA_PAGES = {
         title: "Sofi aprende de tu óptica, y tú apruebas lo que aprende.",
         paragraphs: [
           "Sofi lee al momento los datos de tu óptica: horarios, sedes, servicios, precios y medios de pago. Lo que solo tú sabes, como el estacionamiento o las cuotas, lo agregas en «Conocimiento».",
-          "Si respondió mal, la corriges: tu corrección queda como una lección y Sofi la usa recién cuando alguien la aprueba.",
+          "Si respondió mal, la corriges: tu corrección queda como una lección y Sofi la usa recién cuando quien dirige la óptica la aprueba.",
         ],
         points: [
           { title: "«Conocimiento»", text: "Todo lo que Sofi sabe de tu óptica, en un solo lugar.", agent: SOFI },
-          { title: "«Aprender»", text: "Lo que respondió mal o buscó y no encontró, para corregirlo o darlo por bueno.", agent: SOFI },
+          { title: "«Aprender»", text: "Lo que conviene revisar de sus respuestas, para corregirlo o darlo por bueno.", agent: SOFI },
           { title: "«Probar»", text: "Una conversación real con una persona de prueba, también con Sofi apagada.", agent: SOFI },
         ],
       },
@@ -235,7 +235,7 @@ export const VISTIA_PAGES = {
       },
       {
         q: "¿Le dice a mi cliente cuánto le falta pagar de sus lentes?",
-        a: "Solo a la propia persona, a su representante o a quien paga por ella. A los demás les dice en qué paso está el pedido y para cuándo se prometió. Si no encuentra el pedido, dice que lo confirma con tu equipo: no inventa fechas ni montos.",
+        a: "Solo a la propia persona, a su representante o a quien paga por ella. A quien escribe por ella sin esa facultad le dice en qué paso está el pedido y para cuándo se prometió. Si no encuentra el pedido, dice que lo confirma con tu equipo: no inventa fechas ni montos.",
       },
       { q: "¿Puede agendar para otra persona?", a: "Sí. Si una mamá escribe para agendar a su hijo, la cita es del hijo y la conversación sigue con la mamá. Cada uno con su ficha." },
       { q: "¿Cuánto cobra Sofi?", a: "Una vez por conversación, según lo que hizo: responder, reservar, o que la persona vino a su cita. Los precios están en la página Precios." },
@@ -289,7 +289,7 @@ export const VISTIA_PAGES = {
         title: "Cada cosa que hace Argos, la prendes o la apagas.",
         paragraphs: [
           "Si apagas algo, Argos te deja la lista y tu equipo decide a quién escribir. Responde cifras sin que el modelo vea los nombres de tus clientes.",
-          "Y si quieres algo distinto, se lo pides con tus palabras en «Dile qué quieres que haga»: te lo deja como borrador, con una prueba sobre tus últimos 30 días. Nada cambia hasta que lo prendas.",
+          "Y si quieres algo distinto, se lo pides con tus palabras en «Dile qué quieres que haga»: te lo deja como borrador y, cuando se puede, con una prueba sobre tus últimos 30 días. Nada cambia hasta que lo prendas.",
         ],
         points: [
           { title: "Recordar las citas", text: "Un día antes, por el canal de la persona. No se cobra.", agent: ARGOS },
@@ -520,8 +520,8 @@ export const VISTIA_PAGES = {
           "Cada vez que alguien ve la copia de la receta en un pedido, queda anotado en las consultas a la historia de esa persona.",
         ],
         points: [
-          { title: "Ventas y Caja", text: "Venden, cobran el adelanto y lo que falta, rehacen y anulan." },
-          { title: "Taller", text: "Marca cada paso y reenvía el aviso. Nada más de la óptica." },
+          { title: "Ventas y Caja", text: "Venden, cobran el adelanto y lo que falta, rehacen y anulan. Caja vende sin ver la receta." },
+          { title: "Taller", text: "Marca cada paso y reenvía el aviso. Ve los pedidos y sus tareas." },
           { title: "Recepción y optómetra", text: "Ven cómo va el pedido, sin cambiarlo." },
         ],
         link: { href: "/seguridad", label: "Qué ve cada rol" },
@@ -547,7 +547,7 @@ export const VISTIA_PAGES = {
       },
       {
         q: "¿Y si mi cliente se arrepiente?",
-        a: "«Anular», con el motivo, mientras no se haya entregado. Lo que no se cobró se anula con el pedido y la montura vuelve al inventario; lo ya cobrado queda en su cuenta, para devolverlo o usarlo.",
+        a: "«Anular», con el motivo, mientras no se haya entregado. Lo que no tiene nada cobrado se anula con el pedido y vuelve al inventario. Lo que ya tiene un pago queda en su cuenta: tú decides si lo devuelves o lo cobras.",
       },
       {
         q: "¿El aviso de lentes listos sale siempre por WhatsApp?",
@@ -682,7 +682,7 @@ export const VISTIA_PAGES = {
       },
       {
         q: "¿Puedo cobrar en dólares además de mi moneda?",
-        a: "Sí. Activas una segunda moneda y pones el tipo de cambio de hoy. Desde ahí pones precios, cobras y registras gastos en ella. Cada moneda tiene su caja y su cierre, y nunca se suman.",
+        a: "Sí. Activas una segunda moneda y pones el tipo de cambio de hoy. Desde ahí cobras y registras gastos en ella, y pones en ella el precio de tus servicios; lo que vendes de tu inventario lleva su precio en tu moneda. Cada moneda tiene su caja y su cierre.",
       },
       {
         q: "¿Lleva las comisiones de mis optómetras?",
@@ -725,7 +725,7 @@ export const VISTIA_PAGES = {
         title: "Lo pendiente, en sus manos.",
         items: [
           { title: "Su cita", text: "Reserva, cambia o cancela en los horarios libres. El que deja se libera para otro." },
-          { title: "Sus datos y su firma", text: "Llena sus datos antes de llegar, y lo que declara queda como declarado por la persona. Su consentimiento lo lee y lo firma desde su teléfono." },
+          { title: "Sus datos y su firma", text: "Llena sus datos antes de llegar, y lo que declara queda como declarado por la persona. Su consentimiento lo lee y lo firma desde su teléfono; si es menor, lo firma en la óptica quien lo representa." },
           { title: "Sus mensajes", text: "Elige qué mensajes recibe. Los avisos de su cita le llegan siempre." },
         ],
       },
@@ -735,7 +735,7 @@ export const VISTIA_PAGES = {
         title: "Cada papel le llega en PDF. Y en su portal están todos.",
         lead: "Su enlace no guarda papeles: lleva lo pendiente. Lo que tu óptica le entrega le llega a su chat o a su correo, y queda en su portal.",
         items: [
-          { title: "En PDF, por WhatsApp o por correo", text: "El comprobante, la orden o el consentimiento firmado salen con «Enviar», y el cajón dice antes por dónde le llega." },
+          { title: "En PDF, por WhatsApp o por correo", text: "La orden o el consentimiento firmado salen con «Enviar», y el cajón dice antes por dónde le llega. El comprobante sale por correo al cobrar." },
           { title: "Su portal, con todo lo suyo", text: "Sus citas, sus recetas de lentes, sus documentos y su cuenta. Lo anulado se ve marcado y una receta vencida dice «Vencida»." },
           { title: "«Tus pedidos»", text: "Si sus lentes ya están listos para recoger, para cuándo y lo que le falta pagar.", href: "/pedidos-de-lentes", label: "Ver los pedidos" },
           { title: "Un QR en cada papel", text: "Cualquiera comprueba con el código, sin cuenta, si ese papel sigue vigente." },
@@ -788,7 +788,7 @@ export const VISTIA_PAGES = {
           { title: "Pacientes", text: "Quienes te buscaron por primera vez y hasta dónde llegaron: agendaron, vinieron, pagaron." },
           { title: "Agenda", text: "Las citas atendidas, quién faltó y qué tan llena está la agenda." },
           { title: "Agente", text: "Lo que hicieron Sofi y Argos en el mes: conversaciones, citas y citas recuperadas." },
-          { title: "El resumen del lunes", text: "Un correo cada lunes con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos." },
+          { title: "El resumen del lunes", text: "Un correo cada lunes con cuatro cifras de la semana anterior y, si hay, lo que cambió y lo que recomienda Argos. Le llega a quien creó la óptica; los demás lo prenden para sí." },
         ],
       },
       {
@@ -801,7 +801,7 @@ export const VISTIA_PAGES = {
         ],
         points: [
           { title: "«Fijar en Resumen»", text: "La respuesta que quieres tener a la vista queda en tu Resumen.", agent: ARGOS },
-          { title: "«Descargar»", text: "Cada lista, cada tabla y cada respuesta se descarga." },
+          { title: "«Descargar»", text: "Cada lista se descarga, y también las tablas Por profesional y Comisiones y las respuestas de Argos que traen filas." },
         ],
         link: { href: "/agentes/administrador", label: "Conoce a Argos" },
       },
@@ -844,7 +844,7 @@ export const VISTIA_PAGES = {
           { title: "Optómetra", text: "Atiende con la historia, el examen de la vista, las recetas y las pruebas del ojo. Sin caja." },
           { title: "Caja", text: "Cobra, lleva los gastos, cierra la caja y entrega los pedidos listos. Sin historia clínica ni agenda." },
           { title: "Ventas", text: "Atiende el mostrador: registra clientes, agenda, vende y cobra, con el inventario y sus precios. De la historia ve solo la receta de lentes vigente. No cierra la caja." },
-          { title: "Taller", text: "Ve los pedidos con sus medidas y la copia de la receta con que se hacen, y marca cómo van. Sin importes, y nada más de la óptica." },
+          { title: "Taller", text: "Ve los pedidos con sus medidas y la copia de la receta con que se hacen, y marca cómo van. Sin importes; fuera de los pedidos, solo sus tareas." },
           { title: "Propietario y administrador", text: "Ven todo y configuran la óptica. Solo el propietario nombra o quita a otros propietarios." },
         ],
       },

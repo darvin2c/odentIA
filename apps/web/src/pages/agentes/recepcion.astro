@@ -55,7 +55,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Cómo le enseño algo a Sofi?",
-    a: "Sofi lee al momento los datos de tu clínica: horarios, sedes, servicios y precios, promociones y medios de pago. Lo que solo tú sabes lo agregas en Conocimiento, y cómo quieres que atienda, en «Lo que Sofi debe saber». Si responde mal, la corriges debajo de su mensaje: queda como una lección y la usa cuando alguien la aprueba.",
+    a: "Sofi lee al momento los datos de tu clínica: horarios, sedes, servicios y precios, promociones y medios de pago. Lo que solo tú sabes lo agregas en Conocimiento, y cómo quieres que atienda, en «Lo que Sofi debe saber». Si responde mal, la corriges debajo de su mensaje: queda como una lección y la usa cuando quien dirige la clínica la aprueba.",
   },
   {
     q: "¿Sofi ofrece mis promociones?",
@@ -138,14 +138,14 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     tag="Tú le enseñas"
     tagColor={color.light}
     title="Sabe lo de tu clínica. Y aprende cuando la corriges."
-    lead="No hay que escribirle un manual. Lee tus datos al momento, y lo que aprende lo apruebas tú."
+    lead="No hay que escribirle un manual. Lee tus datos al momento, y lo que aprende lo aprueba quien dirige la clínica."
     min={250}
     small
     white
     items={[
       { title: "Lee tus datos al momento", text: "Horarios, sedes, servicios y precios, promociones y medios de pago. Lo que solo tú sabes, como el estacionamiento o las cuotas, lo agregas en Conocimiento." },
       { title: "Ofrece tu promoción vigente", text: "La creas en Servicios y precios y Sofi ofrece la que aplica, con su precio, el ahorro y la fecha de fin." },
-      { title: "La corriges y aprende", text: "Debajo de su mensaje abres «En qué se basó» y tocas «Corregir». Queda como una lección y Sofi la usa cuando alguien la aprueba." },
+      { title: "La corriges y aprende", text: "Debajo de su mensaje abres «En qué se basó» y tocas «Corregir». Queda como una lección y Sofi la usa cuando quien dirige la clínica la aprueba." },
       { title: "«Probar» antes de encender", text: "Una conversación real con una persona de prueba, también con Sofi apagada. Se borra con la prueba." },
     ]}
   />

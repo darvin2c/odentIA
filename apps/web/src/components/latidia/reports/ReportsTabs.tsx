@@ -87,7 +87,7 @@ const MEDICAL: Data = {
   // gasto, hasta «Lo que deja». La app no descuenta comisiones de tarjeta: no las registra.
   cascade: [
     ["Cobrado", "18.640", 0, 100, false],
-    ["Impuesto (IGV)", "− 2.843", 84.7, 15.3, true],
+    ["IGV", "− 2.843", 84.7, 15.3, true],
     ["Comisiones", "− 2.200", 72.9, 11.8, true],
     ["Alquiler", "− 1.800", 63.3, 9.6, true],
     ["Materiales", "− 1.050", 57.7, 5.6, true],
@@ -96,7 +96,7 @@ const MEDICAL: Data = {
   cascadeEnd: "Lo que deja",
   cascadeNote: "El impuesto no es del consultorio: se separa de lo cobrado antes de decir lo que deja.",
   finance: [
-    { label: "Te deben", value: "S/ 1.230", cmp: "14 personas · Vencido hace más de 30 días: S/ 470", trend: "warn" },
+    { label: "Te deben", value: "S/ 1.230", cmp: "14 personas · Vencido hace más de 30 días: S/ 90 menos que en septiembre", trend: "warn" },
     { label: "Comisiones", value: "S/ 2.200", cmp: "14 % de lo cobrado sin IGV · Por pagar: S/ 800", trend: "flat" },
   ],
   funnel: [
@@ -151,7 +151,7 @@ const DENTAL: Data = {
   ],
   cascade: [
     ["Cobrado", "21.600", 0, 100, false],
-    ["Impuesto (IGV)", "− 3.295", 84.7, 15.3, true],
+    ["IGV", "− 3.295", 84.7, 15.3, true],
     ["Comisiones", "− 2.500", 73.2, 11.6, true],
     ["Materiales", "− 2.100", 63.4, 9.7, true],
     ["Lo que deja", "13.705", 0, 63.4, false],
@@ -159,7 +159,7 @@ const DENTAL: Data = {
   cascadeEnd: "Lo que deja",
   cascadeNote: "El impuesto no es de la clínica: se separa de lo cobrado antes de decir lo que deja.",
   finance: [
-    { label: "Te deben", value: "S/ 4.820", cmp: "23 personas · Vencido hace más de 30 días: S/ 2.220", trend: "warn" },
+    { label: "Te deben", value: "S/ 4.820", cmp: "23 personas · Vencido hace más de 30 días: S/ 200 menos que en septiembre", trend: "warn" },
     { label: "Comisiones", value: "S/ 2.500", cmp: "14 % de lo cobrado sin IGV · Por pagar: S/ 900", trend: "flat" },
   ],
   byService: {

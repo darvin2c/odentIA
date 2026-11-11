@@ -42,7 +42,7 @@ const steps = [
   { title: "Lo abre en el navegador", text: "No descarga nada ni crea una contraseña." },
   {
     title: "Vuelve con su huella o su cara",
-    text: "Si tu clínica le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, responde el mensaje y recibe uno nuevo.",
+    text: "Si tu clínica le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, pide uno nuevo ahí mismo, con «Enviarme uno nuevo».",
   },
 ]
 
@@ -58,14 +58,14 @@ const decides: { title: string; text: string; link?: { href: string; label: stri
     link: { href: "/presupuestos-dentales", label: "Ver los presupuestos" },
   },
   { title: "Sus consentimientos y datos", text: "Lee y firma el consentimiento con calma y completa sus datos y su salud antes de llegar. Lo que declara queda como declarado por él." },
-  { title: "Sus papeles, en PDF", text: "La receta, la orden, el consentimiento firmado y el comprobante le llegan en PDF por WhatsApp o por correo cuando tocas «Enviar»." },
+  { title: "Sus papeles, en PDF", text: "La receta, la orden y el consentimiento firmado le llegan en PDF por WhatsApp o por correo cuando tocas «Enviar». El comprobante sale por correo al cobrar." },
   { title: "Su portal, sin vencer", text: "Con el acceso que le das en la clínica ve todo lo suyo cuando quiera: sus citas, sus presupuestos, su cuenta y sus documentos, también las radiografías con su informe." },
   { title: "Sus mensajes", text: "Elige qué mensajes recibe: recordatorios, controles y novedades. Los avisos de su cita y sus papeles le llegan siempre." },
 ]
 
 // Antes de la primera cita: el registro por QR o enlace y la marca de la clínica en lo que ve el paciente.
 const yours = [
-  { title: "Se registra con un QR o un enlace", text: "Con el código QR de recepción o el enlace de tu clínica, llena sus datos y su salud en su celular. Sofi se lo envía a quien aún no es paciente." },
+  { title: "Se registra con un QR o un enlace", text: "Con el código QR de recepción o el enlace de tu clínica, llena sus datos y su salud en su celular. A quien aún no es paciente, Sofi le envía el enlace de su cita y ahí completa sus datos." },
   { title: "Tú eliges qué preguntar", text: "Dato por dato: «No preguntar», «Opcional» u «Obligatorio». Al lado ves lo que verá el paciente." },
   { title: "Tu logo y tu color", text: "Subes tu logo y eliges el color de tu marca: tus pacientes lo ven en su registro, su enlace y la reserva." },
 ]

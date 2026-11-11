@@ -74,7 +74,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Tengo que entrar a Reportes para saber cómo voy?",
-    a: "No hace falta. Cada lunes a las 8:00 te llega un correo con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. Si la semana no tuvo movimientos, no se envía.",
+    a: "No hace falta. Cada lunes a las 8:00 llega un correo con cuatro cifras de la semana anterior y, si hay, lo que cambió y lo que recomienda Argos. A quien creó el consultorio le llega desde el primer lunes; cada otra persona que ve Reportes lo prende para sí. Si la semana no tuvo movimientos, no se envía.",
   },
   {
     q: "¿Argos inventa las cifras?",
@@ -90,9 +90,9 @@ const faq: FaqItem[] = [
 // Lo que Reportes hace además de mostrar: la meta, el correo del lunes, lo fijado y las descargas.
 const extras = [
   { title: "Pon una meta", text: "«Poner meta» en Cobrado o en Pacientes nuevos. Una raya marca cuánto del mes ya pasó: si la barra va por delante, vas bien." },
-  { title: "El resumen del lunes", text: "Cada lunes a las 8:00, un correo con cuatro cifras de la semana, lo que cambió y lo que recomienda Argos." },
+  { title: "El resumen del lunes", text: "Cada lunes a las 8:00, un correo con cuatro cifras de la semana y, si hay, lo que cambió y lo que recomienda Argos." },
   { title: "Fija lo que más miras", text: "«Fijar en Resumen» deja una respuesta de Argos al final del Resumen, para todos los que ven Reportes." },
-  { title: "Descarga cada lista", text: "Cada lista y cada tabla tiene «Descargar»: un archivo que abre en Excel o en Google Sheets." },
+  { title: "Descarga cada lista", text: "Cada lista tiene «Descargar», y también las tablas Por profesional y Comisiones y las respuestas de Argos que traen filas: un archivo que abre en Excel o en Google Sheets." },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---

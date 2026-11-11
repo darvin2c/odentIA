@@ -18,8 +18,8 @@ const BASE = { when: "Lunes 26 de octubre · 09:00", short: "lunes 26 a las 09:0
 
 /** Los papeles de la consulta del 24 de octubre: le llegaron en PDF y siguen en su portal. */
 const PAPERS = [
-  { id: "receta", name: "Receta N.º 1", sub: "24 oct. · te llegó por WhatsApp" },
-  { id: "comprobante", name: "Comprobante N.º 000001", sub: "24 oct. · te llegó por WhatsApp" },
+  { id: "receta", name: "Receta N.º 1", sub: "Receta · 24 de octubre" },
+  { id: "comprobante", name: "Comprobante N.º 000001", sub: "Comprobante · 24 de octubre" },
 ]
 
 /** Los tres interruptores de «Tus mensajes»; las novedades solo con su sí. */
@@ -191,8 +191,8 @@ export default function PatientPhone() {
             </span>
           </section>
 
-          <section className={card(3)} aria-label="Tus papeles">
-            <span className="pp-h">TUS PAPELES · EN TU PORTAL, SIN VENCER</span>
+          <section className={card(3)} aria-label="Tus documentos">
+            <span className="pp-h">TUS DOCUMENTOS · EN TU PORTAL, SIN VENCER</span>
             {PAPERS.map((p) => (
               <span key={p.id} className="pp-paper">
                 <span className="pp-paper-name">
@@ -204,7 +204,7 @@ export default function PatientPhone() {
                   className={`pp-chip-btn${got[p.id] ? " ok" : ""}`}
                   onClick={() => setGot((g) => ({ ...g, [p.id]: true }))}
                 >
-                  {got[p.id] ? "Descargado ✓" : "Descargar"}
+                  {got[p.id] ? "Abierto ✓" : "Ver"}
                 </button>
               </span>
             ))}

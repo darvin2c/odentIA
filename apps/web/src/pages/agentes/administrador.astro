@@ -35,7 +35,7 @@ const faq: FaqItem[] = [
   ...page.faq,
   {
     q: "¿Puedo pedirle algo con mis palabras?",
-    a: "Sí. En «Dile qué quieres que haga» escribes lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador, con una prueba con tus últimos 30 días, y nada cambia hasta que lo prendas o lo guardes.",
+    a: "Sí. En «Dile qué quieres que haga» escribes lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador y, cuando se puede, con una prueba con tus últimos 30 días, y nada cambia hasta que lo prendas o lo guardes.",
   },
   {
     q: "¿Argos ve los nombres de mis pacientes?",
@@ -128,10 +128,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     min={250}
     small
     items={[
-      { title: "«Dile qué quieres que haga»", text: "Por ejemplo, que le ofrezca otra fecha a quien cancela. Te lo deja como borrador, con una prueba sobre tus últimos 30 días." },
+      { title: "«Dile qué quieres que haga»", text: "Por ejemplo, que le ofrezca otra fecha a quien cancela. Te lo deja como borrador y, cuando se puede, con una prueba sobre tus últimos 30 días." },
       { title: "Cada línea, con su interruptor", text: "Recordar, avisar o retomar se prende o se apaga. Y dice quién lo hace: «Lo hace Argos» o «Le toca a una persona»." },
       { title: "Tareas que se cierran solas", text: "Las que deja a tu equipo se cierran cuando ya no hacen falta: la persona confirmó o el presupuesto se decidió. Y dicen por qué." },
-      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00 con cuatro cifras de la semana, lo que cambió y lo que Argos recomienda." },
+      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00 con cuatro cifras de la semana y, si hay, lo que cambió y lo que Argos recomienda." },
     ]}
   >
     <p class="more-line">También retoma las oportunidades de tu tablero de ventas. <a href="/presupuestos-dentales#oportunidades">Ver Oportunidades →</a></p>

@@ -41,7 +41,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Puedo cobrar en soles y en dólares?",
-    a: "Sí. Lo que está en dólares se debe en dólares hasta que se paga. En el cobro eliges con qué paga y llega el tipo de cambio de hoy; el ticket dice lo que canceló y con qué pagó. Cada moneda tiene su caja y su cierre: nunca se suman.",
+    a: "Sí. Lo que está en dólares se debe en dólares hasta que se paga. En el cobro eliges con qué paga y sale el tipo de cambio que escribiste; el ticket dice lo que canceló y con qué pagó. Cada moneda tiene su caja y su cierre.",
   },
   {
     q: "¿Lleva el inventario de mis insumos?",
@@ -132,7 +132,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         { title: "El ticket", text: "Separa subtotal e impuesto y siempre dice «Recibo interno. No es un documento fiscal.»" },
         { title: "Gastos y efectivo", text: "Ingresos y retiros de efectivo con su motivo. Anular pide motivo y queda quién lo hizo." },
         { title: "Cierre de caja", text: "Al cerrar, imprimes la hoja para firmar la entrega del día." },
-        { title: "Soles y dólares", text: "Si también cobras en dólares, cada moneda tiene su caja y su cierre. El cobro trae el tipo de cambio de hoy." },
+        { title: "Soles y dólares", text: "Si también cobras en dólares, cada moneda tiene su caja y su cierre. En el cobro sale el tipo de cambio que escribiste." },
         { title: "Devolver o anular", text: "«Anular ticket» corrige un error al cobrar. «Devolver» es para otro día: le pagas en el momento o le queda a favor." },
       ]}
     >
@@ -182,7 +182,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         <div class="bp-head">
           <span class="tag bp-tag">[ Gastos, inventario y honorarios ]</span>
           <h2 class="bp-h2">Lo que sale también se cuenta solo.</h2>
-          <p class="bp-lead">La caja no termina en el cobro. Lo que gastas, lo que usas en cada atención y lo que le toca a cada médico llegan a Reportes, hasta «Lo que deja» el mes.</p>
+          <p class="bp-lead">La caja no termina en el cobro. Lo que gastas y lo que le toca a cada médico llegan a Reportes, hasta «Lo que deja» el mes. Los materiales cuentan cuando pagas su compra.</p>
         </div>
         <div class="bp-outs-grid">
           {outs.map((item) => (
@@ -196,7 +196,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
             </div>
           ))}
         </div>
-        <p class="more">Todo llega a Reportes › Finanzas, sin copiar nada. <a href="/reportes">Ver Reportes →</a></p>
+        <p class="more">Los gastos y los honorarios llegan a Reportes › Finanzas, sin copiar nada. <a href="/reportes">Ver Reportes →</a></p>
       </div>
     </section>
 

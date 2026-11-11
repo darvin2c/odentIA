@@ -34,11 +34,11 @@ export function homeFaq(gift: string | null): FaqItem[] {
     },
     {
       q: "¿Cómo sé qué me toca hacer hoy?",
-      a: "Inicio lo dice en «Te espera»: una sola lista, una fila por persona, cada una con un solo botón para resolverla. Si hoy atiendes, al lado ves tu sala de espera: quién llegó, desde qué hora y «Atender».",
+      a: "Inicio lo dice en «Te espera»: una sola lista, casi siempre una fila por persona, con un solo botón para resolverla. Si hoy atiendes, al lado ves tu sala de espera: quién llegó, desde qué hora y «Atender».",
     },
     {
       q: "¿Hay una app para el celular?",
-      a: "latidIA se abre en el navegador del teléfono y, si quieres, la instalas como una app con el nombre de tu consultorio, sin pasar por una tienda. Con los avisos prendidos, te avisa en tu horario de atención cuando alguien escribe, aunque la tengas cerrada. El aviso no dice el nombre de la persona ni lo que escribió.",
+      a: "latidIA se abre en el navegador del teléfono y, si quieres, la instalas como una app con el nombre de tu consultorio, sin pasar por una tienda. Con los avisos prendidos, te avisa en tu horario de atención cuando alguien queda esperándote, aunque la tengas cerrada. El aviso no dice el nombre de la persona ni lo que escribió.",
     },
     {
       q: "¿Puedo traer a mis pacientes?",

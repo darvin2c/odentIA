@@ -23,7 +23,7 @@ const faq: FaqItem[] = [
   ...page.faq,
   {
     q: "¿Dónde veo los presupuestos que nadie ha decidido?",
-    a: "En Oportunidades, el tablero de ventas. Cada interés de una persona avanza solo por cuatro pasos: Interesado, Evaluación agendada, Presupuesto enviado y Decidió, que se ve en Ganadas y Perdidas. Cada tarjeta dice por qué está donde está y cuál es su tarea.",
+    a: "En Oportunidades, el tablero de ventas. Cada interés de una persona avanza solo por cuatro pasos: Interesado, Evaluación agendada, Presupuesto enviado y Decidió, que se ve en Ganadas y Perdidas. Cada tarjeta dice por qué está ahí y, si tiene una, su tarea.",
   },
 ]
 const jsonLd = [
@@ -36,10 +36,10 @@ const jsonLd = [
 
 // El tablero de Oportunidades: los cuatro pasos fijos y cuándo llega sola cada tarjeta.
 const board: Array<{ step: string; when: string; who: string; what: string; note: string; tone?: "won" }> = [
-  { step: "Interesado", when: "Preguntó por un precio", who: "Jorge", what: "Ortodoncia", note: "La anotó Sofi" },
+  { step: "Interesado", when: "Preguntó por un precio", who: "Jorge", what: "Ortodoncia", note: "Lo pidió por WhatsApp hoy" },
   { step: "Evaluación agendada", when: "Al agendar su cita", who: "Rosa", what: "Implante · pieza 46", note: "Jueves 29 · 16:30" },
   { step: "Presupuesto enviado", when: "Al presentarle el presupuesto", who: "Carlos", what: "Resina o corona · pieza 36", note: "Tarea: llamar el viernes" },
-  { step: "Decidió", when: "Al aceptarlo o rechazarlo", who: "Andrea", what: "Resina · pieza 36", note: "Ganada · S/ 300", tone: "won" },
+  { step: "Decidió", when: "Al aceptarlo o rechazarlo", who: "Andrea", what: "Resina y limpieza", note: "Ganada · S/ 300", tone: "won" },
 ]
 
 const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; title: string; text: string }> = [
@@ -118,7 +118,7 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
       <div class="head">
         <span class="tag">[ Oportunidades ]</span>
         <h2 class="h2 t2">Tu tablero de ventas avanza solo.</h2>
-        <p class="lead">Cada interés de una persona es una tarjeta: un precio que preguntó, una evaluación, un presupuesto. Pasa de paso cuando ocurre algo real, y dice por qué está ahí y cuál es su tarea.</p>
+        <p class="lead">Cada interés de una persona es una tarjeta: un precio que preguntó, una evaluación, un presupuesto. Pasa de paso cuando ocurre algo real, y dice por qué está ahí y, si tiene una, su tarea.</p>
       </div>
       {/* Ilustración del tablero de Oportunidades: no son controles de esta página. */}
       <ol class="board" aria-label="Ejemplo del tablero de Oportunidades, con sus cuatro pasos">

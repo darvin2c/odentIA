@@ -367,7 +367,7 @@ export const PAGES = {
             agent: 0,
             title: "Tu agente de recepción",
             label: "Responde, informa y agenda a cualquier hora.",
-            text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente. Y aprende de tus correcciones: cada lección la apruebas tú.",
+            text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente. Y aprende de tus correcciones: cada lección la aprueba quien dirige la clínica.",
             href: "/agentes/recepcion",
           },
           {
@@ -959,10 +959,6 @@ export const PAGES = {
         q: "¿De dónde salen los precios?",
         a: "Del tarifario de tu clínica. Ningún agente escribe ni cambia un precio.",
       },
-      {
-        q: "¿Puedo dejarle una tarea a alguien de mi equipo?",
-        a: "Sí. Con «Nueva tarea», desde Tareas, la página de la persona o su oportunidad, y eliges quién la lleva. Las que deja Argos se cierran solas cuando ya no hacen falta, por ejemplo cuando el presupuesto se decidió, y dicen por qué.",
-      },
     ],
   },
 
@@ -1063,7 +1059,7 @@ export const PAGES = {
       },
       {
         q: "¿Puedo cobrar en soles y en dólares?",
-        a: "Sí. Activas la otra moneda en los datos de tu clínica y escribes el tipo de cambio de hoy. Lo que está en dólares se debe en dólares hasta que se paga, el paciente puede pagarlo en soles y cada moneda tiene su caja y su cierre: nunca se suman.",
+        a: "Sí. Activas la otra moneda en los datos de tu clínica y escribes el tipo de cambio de hoy. Lo que está en dólares se debe en dólares hasta que se paga, el paciente puede pagarlo en soles y cada moneda tiene su caja y su cierre.",
       },
       {
         q: "¿Calcula las comisiones de los odontólogos?",
@@ -1142,7 +1138,7 @@ export const PAGES = {
         tag: "Tú decides",
         title: "Cada clínica decide qué muestra su portal.",
         paragraphs: [
-          "El acceso al portal se da en la clínica, comprobando su documento, y no vence: ve sus citas, sus presupuestos, su cuenta y sus documentos, lo que tu clínica deja ver. Si su enlace venció, el paciente responde el mensaje y recibe uno nuevo.",
+          "El acceso al portal se da en la clínica, comprobando su documento, y no vence: ve sus citas, sus presupuestos, su cuenta y sus documentos, lo que tu clínica deja ver. Si su enlace venció, el paciente pide uno nuevo ahí mismo, con «Enviarme uno nuevo».",
         ],
         link: { href: "/seguridad", label: "Cómo cuidamos los datos" },
       },

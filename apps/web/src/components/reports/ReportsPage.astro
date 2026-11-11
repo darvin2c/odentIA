@@ -72,7 +72,7 @@ const faq: FaqItem[] = [
   { q: "¿Cuántas preguntas le puedo hacer a Argos?", a: argosAnswer },
   {
     q: "¿Qué es el resumen del lunes?",
-    a: "Un correo que llega cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. A quien crea la clínica le llega desde el primer lunes; cada otra persona que ve Reportes lo prende para sí. Si la semana no tuvo movimientos, no se envía.",
+    a: "Un correo que llega cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior y, si hay, lo que cambió y lo que recomienda Argos. A quien crea la clínica le llega desde el primer lunes; cada otra persona que ve Reportes lo prende para sí. Si la semana no tuvo movimientos, no se envía.",
   },
   {
     q: "¿Puedo ponerle una meta al mes?",
@@ -142,9 +142,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     white
     items={[
       { title: "«Poner meta»", text: "En Cobrado o en Pacientes nuevos. Una raya marca cuánto del mes ya pasó: si la barra va por delante, vas bien." },
-      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00 con cuatro cifras de la semana anterior, lo que cambió y lo que Argos recomienda." },
+      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00 con cuatro cifras de la semana anterior y, si hay, lo que cambió y lo que Argos recomienda." },
       { title: "«Fijar en Resumen»", text: "La respuesta de Argos que quieres seguir queda en el Resumen, para todos los que ven Reportes." },
-      { title: "«Descargar»", text: "Cada lista y cada tabla baja en un archivo que abre en Excel o Google Sheets." },
+      { title: "«Descargar»", text: "Cada lista baja en un archivo que abre en Excel o Google Sheets; también las tablas Por profesional y Comisiones y las respuestas de Argos que traen filas." },
     ]}
   />
 

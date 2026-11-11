@@ -38,7 +38,7 @@ export function homeFaq(gift: string | null): FaqItem[] {
     },
     {
       q: "¿Hay aplicación para el celular?",
-      a: "Se abre en el navegador del teléfono, con las mismas pantallas adaptadas. Y puedes instalar tu óptica como una app con su ícono, sin tienda de aplicaciones. Instalada, te avisa en tu horario de atención cuando alguien te escribe o un agente te pasa a alguien, aunque la tengas cerrada.",
+      a: "Se abre en el navegador del teléfono, con las mismas pantallas adaptadas. Y puedes instalar tu óptica como una app con su ícono, sin tienda de aplicaciones. Instalada, te avisa en tu horario de atención cuando alguien queda esperándote o un agente te pasa a alguien, aunque la tengas cerrada.",
     },
     {
       q: "¿Puedo ponerle mi logo y el color de mi marca?",
