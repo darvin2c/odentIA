@@ -43,6 +43,7 @@ import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_ARRIVAL_KEY,
   APPOINTMENT_DATA_NOTICE_KEY,
+  cleanVariable,
   MOVED_TO_CONFIRM_KEY,
   REMINDER_CONFIRMED_KEY,
   REMINDER_DATA_KEY,
@@ -67,8 +68,10 @@ import {
   type ComposedMessage,
   clinicName,
   composeJobMessage,
+  dayPhrase,
   previewMessageRoute,
   routeMessage,
+  timePhrase,
 } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { patientTodo, remoteTodoCount } from "./patient-todo.js"
@@ -1221,15 +1224,11 @@ export async function newDateQuestion(tx: Db, orgId: string, appointmentId: stri
     .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
     .limit(1)
   if (!appt) return null
-  const when = new Intl.DateTimeFormat((await findOrgLocale(tx, orgId)).locale, {
-    timeZone: await timezoneOf(tx, orgId, appt.branchId),
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(appt.startsAt)
-  return `Ojo: tu cita cambió de fecha. Ahora es el ${when}. ¿Te queda bien? Responde «sí» y la confirmo.`
+  const zone = await timezoneOf(tx, orgId, appt.branchId)
+  const { locale } = await findOrgLocale(tx, orgId)
+  // Como la dice el aviso («viernes 13 de noviembre, a las 4:00 p. m.»), sin el punto doble de «p. m.».
+  const when = cleanVariable(`${dayPhrase(appt.startsAt, new Date(), zone, locale)}, a las ${timePhrase(appt.startsAt, zone, locale)}`)
+  return `Ojo: tu cita cambió de fecha. Ahora es ${when}. ¿Te queda bien? Responde «sí» y la confirmo.`
 }
 
 /** «Deshacer» ese movimiento: los recordatorios de la fecha a la que vuelve cuentan otra vez. */
@@ -3425,8 +3424,9 @@ export async function appointmentConfirmationPlan(
     )
     .orderBy(asc(automationJob.scheduledFor))
   // El aviso del cambio con «Confirmar» de la fecha que tiene ahora también se lo pidió (ADR 0180).
-  const [notice] = await tx
-    .select({ updatedAt: automationJob.updatedAt })
+  // Por día, como su botón: movida dentro del día, ese aviso sigue valiendo.
+  const notices = await tx
+    .select({ updatedAt: automationJob.updatedAt, payload: automationJob.payload })
     .from(automationJob)
     .where(
       and(
@@ -3435,11 +3435,16 @@ export async function appointmentConfirmationPlan(
         eq(automationJob.kind, "aviso_cita_movida"),
         eq(automationJob.status, "enviado"),
         sql`${automationJob.payload}->>'asksToConfirm' = 'true'`,
-        sql`${automationJob.payload}->>'announcedStartsAt' = ${appt.startsAt.toISOString()}`,
       ),
     )
     .orderBy(desc(automationJob.updatedAt))
-    .limit(1)
+  const zone = notices.length > 0 ? await timezoneOf(tx, orgId, appt.branchId) : null
+  const notice = zone
+    ? notices.find((row) => {
+        const announced = jobPayloadOf(row.payload).announcedStartsAt
+        return !!announced && dayKeyIn(new Date(announced), zone) === dayKeyIn(appt.startsAt, zone)
+      })
+    : undefined
   const sent = jobs.find((job) => job.status === "enviado")
   const asked = [sent?.updatedAt, notice?.updatedAt].filter((at): at is Date => !!at).sort((a, b) => b.getTime() - a.getTime())[0]
   if (asked) return { askAt: null, askedAt: asked.toISOString() }
@@ -4030,9 +4035,25 @@ export async function handleAutomationReply(
     await setAppointmentStatus(tx, orgId, null, appointmentId, "confirmada", { via: "respuesta" })
     items.push({ patientName: appt.patientName, self: appt.self, was: "confirmada", startsAt: appt.startsAt })
   }
-  // La cita cambió de día después de ese recordatorio: se le dice la fecha nueva y se le pregunta.
+  // La cita cambió de día después de ese mensaje: se le dice la fecha nueva y se le pregunta.
   // Con varias citas en el mismo mensaje lo sigue el agente, que ve la conversación.
   if (items.length === 0 && changed.length === 1) {
+    // Si el aviso del cambio está por salir ahora, él le dice la fecha nueva y trae «Confirmar»:
+    // no se le pregunta dos veces lo mismo (QA del 11 nov).
+    const [coming] = await tx
+      .select({ id: automationJob.id })
+      .from(automationJob)
+      .where(
+        and(
+          eq(automationJob.organizationId, orgId),
+          eq(automationJob.appointmentId, changed[0]!),
+          eq(automationJob.kind, "aviso_cita_movida"),
+          eq(automationJob.status, "pendiente"),
+          lte(automationJob.scheduledFor, new Date()),
+        ),
+      )
+      .limit(1)
+    if (coming) return true
     const text = await newDateQuestion(tx, orgId, changed[0]!)
     if (text) {
       await sendOutbound(tx, orgId, { conversationId: input.conversationId, senderKind: "agent", content: { type: "text", text } })

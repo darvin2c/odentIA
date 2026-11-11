@@ -75,7 +75,7 @@ export function dayPhrase(date: Date, now: Date, timeZone: string, locale: strin
   return day
 }
 
-function timePhrase(date: Date, timeZone: string, locale: string): string {
+export function timePhrase(date: Date, timeZone: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(date)
 }
 

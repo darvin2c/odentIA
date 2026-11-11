@@ -1037,7 +1037,8 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
     "Antes de una cita ya confirmada (la que eligió la persona o la que ya confirmó): en lugar del recordatorio, sin «Confirmar» y con «Cambiar mi cita».",
   cita_sin_llegar: () =>
     "A los 15 minutos de la hora, si la persona no llegó y en su sede ya marcaron llegadas ese día. Solo dentro del horario para escribir.",
-  aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
+  aviso_cita_movida: () =>
+    "Al cambiar la fecha o la hora de una cita que sigue confirmada. A la que queda por confirmar le llega «cambio de fecha, por confirmar», y este solo mientras WhatsApp no aprueba aquel.",
   aviso_cita_movida_confirmar: () =>
     "Al cambiar la fecha o la hora de una cita que queda por confirmar, porque la fecha nueva la eligió tu equipo: en lugar del aviso de cambio, con «Confirmar».",
   aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",

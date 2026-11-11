@@ -410,19 +410,20 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }],
     subject: "Tu cita cambió de fecha",
   },
-  // Dice qué hace cada botón: «No podré ir» no cancela, busca otra fecha (mesa del 11 nov).
+  // Dice qué hace cada botón: «No podré ir» no cancela, busca otra fecha (mesa del 11 nov). Dice
+  // «cambió», no «cambió de fecha»: también sale si solo cambió la hora (QA del 11 nov).
   aviso_cita_movida_confirmar: {
     key: "aviso_cita_movida_confirmar",
     purpose: "avisos",
     category: "utility",
     template: "odentia_aviso_cita_movida_confirmar_v1",
-    body: "Hola, {{1}}. Tu cita en {{2}} cambió de fecha: ahora es {{3}}. Si te queda bien, confírmala. Si no puedes, avísanos y te buscamos otra fecha.",
+    body: "Hola, {{1}}. Tu cita en {{2}} cambió: ahora es {{3}}. Si te queda bien, confírmala. Si no puedes, avísanos y te buscamos otra fecha.",
     variables: ["persona", "lugar", "citas"],
     buttons: [
       { action: "confirmar", title: "Confirmar" },
       { action: "responder", title: "No podré ir", asks: "cambiar" },
     ],
-    subject: "Tu cita cambió de fecha",
+    subject: "Tu cita cambió",
   },
   aviso_cita_cancelada: {
     key: "aviso_cita_cancelada",

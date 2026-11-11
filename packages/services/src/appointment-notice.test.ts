@@ -284,7 +284,7 @@ describe("al cambiar la cita, el agente le avisa", () => {
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
     const notice = (await jobsOf(c)).find((job) => job.kind === "aviso_cita_movida")!
     // Sigue por confirmar: el aviso le pide confirmar la fecha nueva (ADR 0180).
-    expect(await bodyOf(notice.sentMessageId)).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió de fecha: ahora es .+\. Si te queda bien, confírmala\. Si no puedes, avísanos y te buscamos otra fecha\.$/)
+    expect(await bodyOf(notice.sentMessageId)).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió: ahora es .+\. Si te queda bien, confírmala\. Si no puedes, avísanos y te buscamos otra fecha\.$/)
   })
 
   it("no avisa lo que se dijo en la conversación ni nada si «Recordar la cita» está apagada", async () => {
@@ -501,7 +501,7 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const otherDay = await move(booked.id, sameDay.version, newDate)
     expect(otherDay.status).toBe("programada")
     const asking = await sentNotice(booked.id)
-    expect(asking.body).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió de fecha: ahora es .+\. Si te queda bien, confírmala\. Si no puedes, avísanos y te buscamos otra fecha\.$/)
+    expect(asking.body).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió: ahora es .+\. Si te queda bien, confírmala\. Si no puedes, avísanos y te buscamos otra fecha\.$/)
     expect(asking.buttons).toEqual(["Confirmar", "No podré ir"])
     expect(asking.job.payload).toMatchObject({ announcedStartsAt: newDate.toISOString(), asksToConfirm: true })
     // La cita ya dice que se le pidió confirmar, no que se le pedirá.
@@ -521,13 +521,16 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const monday = await sentNotice(second.id)
     expect(monday.buttons).toEqual(["Confirmar", "No podré ir"])
     await move(second.id, toMonday.version, new Date(at.getTime() + 2 * HOUR + 4 * DAY))
+    // Con el aviso de la fecha nueva por salir, tocarlo no confirma y no se le pregunta dos veces: el aviso se lo dice.
     expect(await tap(lucia.conversationId!, monday.job.id)).toBe(true)
     expect(await statusOf(second.id)).toBe("programada")
-    expect(await lastOut(lucia.conversationId!)).toMatch(/^Ojo: tu cita cambió de fecha\. Ahora es el .+\. ¿Te queda bien\? Responde «sí» y la confirmo\.$/)
-    // Aunque ya le llegó el aviso de la fecha nueva, el botón del mensaje viejo sigue sin confirmarla…
+    expect(await lastOut(lucia.conversationId!)).toBe(monday.body)
+    // Ya con el aviso de la fecha nueva, el botón del mensaje viejo sigue sin confirmarla: le dice la fecha y pregunta…
     const tuesday = await sentNotice(second.id)
     expect(await tap(lucia.conversationId!, monday.job.id)).toBe(true)
     expect(await statusOf(second.id)).toBe("programada")
+    expect(await lastOut(lucia.conversationId!)).toMatch(/^Ojo: tu cita cambió de fecha\. Ahora es .+, a las .+\. ¿Te queda bien\? Responde «sí» y la confirmo\.$/)
+    expect(await lastOut(lucia.conversationId!)).not.toContain("..")
     // …y el del aviso nuevo, sí.
     expect(await tap(lucia.conversationId!, tuesday.job.id)).toBe(true)
     expect(await statusOf(second.id)).toBe("confirmada")
