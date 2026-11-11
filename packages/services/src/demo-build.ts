@@ -1731,7 +1731,8 @@ export async function purgeDemoOrganization(
     union all select thumbnail_key from patient_document where organization_id = ${orgId}
     union all select avatar_storage_key from patient where organization_id = ${orgId}
     union all select object_key from support_attachment where organization_id = ${orgId}
-    union all select receipt_object_key from saas_payment where organization_id = ${orgId}`)) as unknown as Array<{ key: string | null }>
+    union all select receipt_object_key from saas_payment where organization_id = ${orgId}
+    union all select pdf_key from clinic_letterhead where organization_id = ${orgId}`)) as unknown as Array<{ key: string | null }>
   const storageKeys = [
     ...documents.map((row) => row.key),
     ...files.map((row) => row.key),

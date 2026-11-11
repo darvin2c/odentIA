@@ -6,6 +6,10 @@
  * El logo se lee del propio almacenamiento, nunca por HTTP: solo la imagen que la
  * clínica subió a su carpeta del bucket público. Una dirección guardada a mano
  * que apunte a otro lado no se sigue (SSRF). Falla en silencio: sale con iniciales.
+ *
+ * La hoja membretada (ADR 0180) se lee del bucket privado: la que la clínica tenía
+ * cuando el papel se emitió o se firmó (`at`), o la de hoy. Si no se puede leer, el
+ * papel sale con nuestro membrete y lo dice (`sheetUnavailable`) para no guardarse así.
  */
 import { brandPaperInk, dominantColors } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -16,6 +20,7 @@ import sharp from "sharp"
 import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import type { DocumentClinic, DocumentLogo } from "./document-kit.js"
 import { validation } from "./errors.js"
+import { getCurrentLetterhead, getLetterheadAt, type Letterhead } from "./letterhead.js"
 import type { TicketFrozen } from "./payments.js"
 import { clinicLogoFolder, type Storage } from "./storage.js"
 
@@ -27,15 +32,80 @@ const LOGO_CACHE_MAX = 64
 /** Lo que no se pudo leer no se vuelve a intentar enseguida. */
 const LOGO_RETRY_MS = 60_000
 
-type LogoReader = Pick<Storage, "readPublicObject">
+type LogoReader = Pick<Storage, "readPublicObject" | "getAttachment">
 
-let logoReader: LogoReader | null = null
+let logoReader: Partial<LogoReader> | null = null
 const logoCache = new Map<string, { logo: DocumentLogo | null; until: number }>()
 
+/** Tiempo máximo para leer la hoja membretada: un papel no espera indefinidamente. */
+const SHEET_TIMEOUT_MS = 4000
+/** Las hojas leídas, por versión (no cambian): hasta este peso en memoria. */
+const SHEET_CACHE_BYTES = 48 * 1024 * 1024
+const sheetCache = new Map<string, Uint8Array>()
+let sheetCacheBytes = 0
+
 /** La API y el worker lo fijan al arrancar, como `configurePublicLinks`. */
-export function configureDocumentLogos(reader: LogoReader | null): void {
+export function configureDocumentLogos(reader: Partial<LogoReader> | null): void {
   logoReader = reader
   logoCache.clear()
+  sheetCache.clear()
+  sheetCacheBytes = 0
+}
+
+/** El PDF de una versión de la hoja, del bucket privado; null si no se pudo leer a tiempo. */
+async function readLetterheadPdf(letterhead: Letterhead): Promise<Uint8Array | null> {
+  const cached = sheetCache.get(letterhead.id)
+  if (cached) {
+    // La más usada queda al final: lo primero que sale es lo que menos se usó.
+    sheetCache.delete(letterhead.id)
+    sheetCache.set(letterhead.id, cached)
+    return cached
+  }
+  const get = logoReader?.getAttachment
+  if (!get) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const bytes = await Promise.race([
+      get(letterhead.pdfKey),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), SHEET_TIMEOUT_MS)
+      }),
+    ])
+    if (!bytes) return null
+    if (bytes.byteLength <= SHEET_CACHE_BYTES) {
+      sheetCache.set(letterhead.id, bytes)
+      sheetCacheBytes += bytes.byteLength
+      for (const [id, old] of sheetCache) {
+        if (sheetCacheBytes <= SHEET_CACHE_BYTES) break
+        sheetCache.delete(id)
+        sheetCacheBytes -= old.byteLength
+      }
+    }
+    return bytes
+  } catch {
+    return null
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** La hoja de un papel, ya leída, o que no se pudo leer. */
+async function sheetOf(
+  letterhead: Letterhead | null,
+): Promise<Pick<DocumentClinic, "sheet" | "sheetUnavailable">> {
+  if (!letterhead) return { sheet: null }
+  const pdf = await readLetterheadPdf(letterhead)
+  if (!pdf) return { sheet: null, sheetUnavailable: true }
+  return {
+    sheet: {
+      pdf,
+      topMm: letterhead.topMm,
+      bottomMm: letterhead.bottomMm,
+      leftMm: letterhead.leftMm,
+      rightMm: letterhead.rightMm,
+      hasContact: letterhead.hasContact,
+    },
+  }
 }
 
 /** PNG o JPG por su firma, no por la extensión. Otro formato (WebP) se convierte antes de embeberlo. */
@@ -120,10 +190,15 @@ export async function clinicLogoColors(tx: Db, orgId: string): Promise<string[]>
 }
 
 /**
- * La clínica como la dice un papel de hoy. El documento no pertenece a una sede: si
- * tiene una sola, lleva su nombre, dirección y teléfono; con varias, los de la clínica.
+ * La clínica como la dice un papel. El documento no pertenece a una sede: si tiene una
+ * sola, lleva su nombre, dirección y teléfono; con varias, los de la clínica. Con `at`,
+ * la hoja membretada es la que tenía entonces (lo emitido no cambia); sin él, la de hoy.
  */
-export async function loadDocumentClinic(tx: Db, orgId: string): Promise<DocumentClinic> {
+export async function loadDocumentClinic(
+  tx: Db,
+  orgId: string,
+  options: { at?: Date | string | null } = {},
+): Promise<DocumentClinic> {
   const [profile] = await tx
     .select()
     .from(orgProfile)
@@ -139,6 +214,10 @@ export async function loadDocumentClinic(tx: Db, orgId: string): Promise<Documen
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .limit(2)
   const only = branches.length === 1 ? branches[0]! : null
+  const letterhead = options.at
+    ? await getLetterheadAt(tx, orgId, new Date(options.at))
+    : await getCurrentLetterhead(tx, orgId)
+  const sheet = await sheetOf(letterhead)
   return {
     tradeName: profile.tradeName || profile.legalName || "",
     legalName: profile.legalName || null,
@@ -150,8 +229,10 @@ export async function loadDocumentClinic(tx: Db, orgId: string): Promise<Documen
       null,
     phone: only?.phone ?? null,
     branchName: only?.name ?? null,
-    logo: await clinicLogoOf(tx, orgId),
+    // Con la hoja, nuestro membrete no sale: el logo no hace falta.
+    logo: sheet.sheet ? null : await clinicLogoOf(tx, orgId),
     brandInk: brandPaperInk(profile.brandColor),
+    ...sheet,
     locale: profile.locale,
     timezone: profile.timezone,
     sheetSize: profile.sheetSize,
@@ -162,14 +243,17 @@ export async function loadDocumentClinic(tx: Db, orgId: string): Promise<Documen
 /**
  * La clínica de un ticket o una devolución: lo que se congeló al cobrar. Lo que no
  * se congelaba antes (documento fiscal) y el teléfono, de hoy; el papel y el logo,
- * de hoy, porque son de la impresora y de la marca, no de lo cobrado.
+ * de hoy, porque son de la impresora y de la marca, no de lo cobrado. La hoja
+ * membretada, la de cuando se cobró (`at`); con ella, el comprobante dice siempre la
+ * dirección: es de quien cobra, aunque la hoja ya la traiga.
  */
 export async function loadFrozenDocumentClinic(
   tx: Db,
   orgId: string,
   frozen: { clinic: TicketFrozen["clinic"]; branch: { id: string; name: string } | null },
+  at?: Date | string | null,
 ): Promise<DocumentClinic> {
-  const today = await loadDocumentClinic(tx, orgId)
+  const today = await loadDocumentClinic(tx, orgId, { at })
   let phone: string | null = null
   if (frozen.branch) {
     const [row] = await tx
@@ -190,6 +274,7 @@ export async function loadFrozenDocumentClinic(
     address: clinic.fiscalAddress ?? today.address,
     phone,
     branchName: frozen.branch?.name ?? null,
+    sheet: today.sheet ? { ...today.sheet, hasContact: false } : today.sheet,
     locale: clinic.locale,
     timezone: clinic.timezone,
   }
@@ -207,6 +292,11 @@ export interface DocumentLetterhead {
   phone: string | null
   /** La línea del membrete y las iniciales, como el papel (`DocumentClinic.brandInk`); sin color, tinta. */
   brandInk: string | null
+  /**
+   * La hoja membretada (ADR 0180): su parte de arriba y la de abajo, de borde a borde del
+   * papel en pantalla. Con `hasContact` la hoja ya dice la dirección y el teléfono.
+   */
+  sheet: { topBand: string; bottomBand: string; hasContact: boolean } | null
 }
 
 /**
@@ -241,6 +331,26 @@ export async function loadDocumentLetterhead(tx: Db, orgId: string): Promise<Doc
   const fiscal = profile?.fiscalDocNumber
     ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
     : null
+  const letterhead = await getCurrentLetterhead(tx, orgId)
+  if (letterhead) {
+    // Como el papel: su diseño dice quién es; abajo, la razón social y su documento.
+    return {
+      name,
+      fiscalLine: [profile?.legalName || name, fiscal].filter(Boolean).join(" · ") || null,
+      logo: null,
+      branchName: letterhead.hasContact ? null : (only?.name ?? null),
+      address: letterhead.hasContact
+        ? null
+        : ((only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null),
+      phone: letterhead.hasContact ? null : (only?.phone ?? null),
+      brandInk: null,
+      sheet: {
+        topBand: letterhead.topBandUrl,
+        bottomBand: letterhead.bottomBandUrl,
+        hasContact: letterhead.hasContact,
+      },
+    }
+  }
   return {
     name,
     fiscalLine:
@@ -251,5 +361,30 @@ export async function loadDocumentLetterhead(tx: Db, orgId: string): Promise<Doc
     address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null,
     phone: only?.phone ?? null,
     brandInk: brandPaperInk(profile?.brandColor ?? null),
+    sheet: null,
   }
+}
+
+/**
+ * Lo que el papel agrega bajo la hoja membretada si la hoja no trae la dirección y el
+ * teléfono (la casilla de la tarjeta lo dice tal cual), y cuántas sedes tiene: con
+ * varias, una dirección escrita en la hoja saldría en los papeles de todas.
+ */
+export async function letterheadContact(
+  tx: Db,
+  orgId: string,
+): Promise<{ line: string | null; branches: number }> {
+  const [profile] = await tx
+    .select({ fiscalAddress: orgProfile.fiscalAddress })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const branches = await tx
+    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+  const only = branches.length === 1 ? branches[0]! : null
+  const address = (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null
+  const line = [only?.name ?? null, address, only?.phone ?? null].filter(Boolean).join(" · ")
+  return { line: line || null, branches: branches.length }
 }

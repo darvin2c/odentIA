@@ -18,10 +18,54 @@ function initialsOf(name: string): string {
 }
 
 /**
+ * El papel en pantalla: claro siempre, también con la app en oscuro (`theme-light`). Con
+ * la hoja membretada de la clínica (ADR 0180) lleva su parte de arriba y la de abajo de
+ * borde a borde, como el PDF; el papel ya va centrado y del ancho de una hoja.
+ */
+export function SheetPaper({
+  clinic,
+  className,
+  children,
+  ...rest
+}: { clinic: ConsentSheetClinic | null | undefined } & React.ComponentProps<"article">): React.JSX.Element {
+  const sheet = clinic?.sheet ?? null
+  return (
+    <article
+      {...rest}
+      className={cn(
+        "theme-light flex flex-col rounded-sm border bg-card text-card-foreground shadow-sm",
+        sheet ? "overflow-hidden" : "px-5 py-6 sm:px-10 sm:py-10",
+        className,
+      )}
+    >
+      {sheet ? (
+        <>
+          <img src={sheet.topBand} alt="" className="block h-auto w-full" />
+          <div className="flex flex-col px-5 pt-1 pb-6 sm:px-10 sm:pb-8">{children}</div>
+          <img src={sheet.bottomBand} alt="" className="block h-auto w-full" />
+        </>
+      ) : (
+        children
+      )}
+    </article>
+  )
+}
+
+/**
  * El membrete del papel, el mismo de su PDF: logo o iniciales, nombre, «razón
  * social · RUC» y, con una sola sede, su dirección. Lo usan las hojas que se firman.
+ * Con la hoja membretada, su diseño dice quién es: queda la línea chica de sus datos.
  */
 export function SheetLetterhead({ clinic }: { clinic: ConsentSheetClinic }): React.JSX.Element {
+  if (clinic.sheet) {
+    const line = [clinic.fiscalLine, clinic.branchName, clinic.address, clinic.phone].filter(Boolean).join(" · ")
+    return (
+      <header className="flex flex-col items-end text-right text-sm text-muted-foreground">
+        <span className="sr-only">{clinic.name}</span>
+        {line ? <span className="break-words">{line}</span> : null}
+      </header>
+    )
+  }
   return (
     <header
       className="flex flex-wrap items-center gap-3 border-b-2 border-foreground pb-3"
@@ -135,14 +179,10 @@ export function ConsentSheet({
       </section>
     ) : null
   return (
-    <article
+    <SheetPaper
+      clinic={clinic}
       aria-labelledby={titleId}
-      className={cn(
-        // Es el papel: claro siempre, también con la app en oscuro (`theme-light`).
-        "theme-light flex flex-col rounded-sm border bg-card px-5 py-6 text-card-foreground shadow-sm sm:px-10 sm:py-10",
-        large ? "text-lg leading-relaxed" : "text-base leading-normal",
-        className,
-      )}
+      className={cn(large ? "text-lg leading-relaxed" : "text-base leading-normal", className)}
     >
       {clinic ? <SheetLetterhead clinic={clinic} /> : null}
 
@@ -244,6 +284,6 @@ export function ConsentSheet({
           {signatureNote ? <p>{signatureNote}</p> : null}
         </footer>
       ) : null}
-    </article>
+    </SheetPaper>
   )
 }

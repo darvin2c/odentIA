@@ -246,6 +246,7 @@ import { seedWorkspace } from "../seed-workspace.js"
 import { createService, quickAddServices, updateService } from "../service-catalog.js"
 import { librarySpecialtyIds } from "../specialties.js"
 import { createStorage } from "../storage.js"
+import { seedDemoLetterhead } from "../seed-letterhead.js"
 import { completeTask, createTask, settleTask, updateTask } from "../tasks.js"
 import { makeImageThumbnail } from "../thumbnails.js"
 import {
@@ -940,6 +941,14 @@ const [miraflores] = await db
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
 await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", country: "PE" }])
+// Su hoja membretada (ADR 0180): la demo muestra la tarjeta con una hoja puesta y sus papeles sobre ella.
+await seedDemoLetterhead(db, storage, {
+  orgId: ORG_B,
+  userId: CORA_ID,
+  name: "Clínica Norte",
+  web: "www.clinicanorte.example",
+  color: "#0f766e",
+})
 
 // --- CRM con servicios ---
 const pipeA = await ensureDefaultPipeline(db, ORG_A)

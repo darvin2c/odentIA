@@ -8,7 +8,7 @@ import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { findingWords } from "../../components/dental/odontogram-notation"
-import { SheetLetterhead, SheetPageStyle } from "../../components/dental/odontogram-sheet"
+import { SheetFooterBand, SheetLetterhead, SheetPageStyle } from "../../components/dental/odontogram-sheet"
 import { fetchOdontogramPrint, type OdontogramEntry } from "../../lib/dental/odontogram"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/print")({
@@ -137,6 +137,7 @@ function OdontogramPrintPage() {
             </ul>
           )}
         </section>
+        <SheetFooterBand establishment={establishment} />
       </article>
     </PageShell>
   )

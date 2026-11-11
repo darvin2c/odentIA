@@ -299,6 +299,7 @@ export async function renderHealthDocumentPdf(
           type,
           patientName: data.patient.displayName,
           voided: rx.status === "anulada" ? { word: "ANULADA", reason: rx.cancelReason } : null,
+          issuedAt: rx.issuedAt,
           draw: (context) => renderPrescriptionPdf(data, context),
         },
         storage,
@@ -320,6 +321,7 @@ export async function renderHealthDocumentPdf(
           type,
           patientName: data.patient.displayName,
           voided: leave.status === "anulado" ? { word: "ANULADO", reason: leave.cancelReason } : null,
+          issuedAt: leave.issuedAt,
           draw: (context) => renderMedicalLeavePdf(data, context),
         },
         storage,
@@ -341,6 +343,7 @@ export async function renderHealthDocumentPdf(
           patientName: data.patient.displayName,
           // Una atención firmada no se anula: la hoja siempre vale.
           voided: null,
+          issuedAt: data.signedAt,
           draw: (context) => renderAttentionSheetPdf(data, context),
         },
         storage,
@@ -363,6 +366,7 @@ export async function renderHealthDocumentPdf(
           type,
           patientName: data.patient.displayName,
           voided: order.status === "cancelado" ? { word: "ANULADA", reason: order.cancelReason } : null,
+          issuedAt: order.createdAt,
           draw: (context) => renderOrderPdf(data, context),
         },
         storage,
@@ -399,7 +403,8 @@ export async function renderHealthDocumentPdf(
   const storedSha = revoked ? (doc.revokePdfSha256 ?? null) : doc.pdfSha256
   if (options.viewing && (!storedId || !storedSha)) {
     // Un anulado nunca tuvo PDF; un firmado cuyo guardado falló no traba a quien lo abre.
-    const clinic = await loadDocumentClinic(tx, orgId)
+    // Con la hoja de cuando se firmó, como el que se guardará.
+    const clinic = await loadDocumentClinic(tx, orgId, { at: doc.personSignedAt ?? doc.signedAt })
     return { ...named, bytes: await renderConsentPdf(data, clinic) }
   }
   // Se envía el PDF que se guardó al firmar, no uno nuevo: es el de la huella (#47).

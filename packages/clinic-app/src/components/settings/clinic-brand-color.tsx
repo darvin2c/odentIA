@@ -253,7 +253,7 @@ export function ClinicBrandColorSettings({
         </h2>
         <p className="text-sm text-muted-foreground">
           Lo verán tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web. En tus
-          documentos va en la línea bajo el logo o, si no hay logo, en el cuadro de sus iniciales. Se guarda aparte, con
+          documentos sin hoja membretada va en la línea bajo el logo o, si no hay logo, en el cuadro de sus iniciales. Se guarda aparte, con
           «Usar este color».
         </p>
       </div>

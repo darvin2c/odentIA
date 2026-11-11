@@ -30,6 +30,7 @@ import { requireDraftLink } from "../clinical.js"
 import { diagnosisTitlesOf, namedDiagnosis, resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
 import { documentCheckUrl } from "../document-check.js"
 import { invalidField, notFound, ServiceError, validation } from "../errors.js"
+import { getCurrentLetterhead } from "../letterhead.js"
 import { requirePatient } from "../patients.js"
 import { drawnSignatureAt, requireProfessionalSignature } from "../professional-profiles.js"
 import { lesionRowsOf, treatedByItem } from "./lesion.js"
@@ -789,14 +790,23 @@ async function establishmentOf(tx: Db, orgId: string) {
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .limit(2)
   const only = branches.length === 1 ? branches[0]! : null
+  // La hoja membretada (ADR 0180): su parte de arriba y la de abajo, sin la marca de agua
+  // bajo el gráfico de la norma. Va en el encabezado que se congela al firmar.
+  const letterhead = await getCurrentLetterhead(tx, orgId)
+  const hideContact = letterhead?.hasContact ?? false
   return {
     ...establishment,
-    address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? org.address,
-    branchName: only?.name ?? null,
-    phone: only?.phone ?? null,
+    address: hideContact
+      ? null
+      : ((only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? org.address),
+    branchName: hideContact ? null : (only?.name ?? null),
+    phone: hideContact ? null : (only?.phone ?? null),
     // La línea del membrete y las iniciales en el color de la marca, como los demás papeles
     // (ADR 0162). Va en el encabezado que se congela al firmar: la hoja firmada no cambia.
     brandInk: brandPaperInk(brandColor),
+    sheet: letterhead
+      ? { topBand: letterhead.topBandUrl, bottomBand: letterhead.bottomBandUrl, hasContact: letterhead.hasContact }
+      : null,
   }
 }
 
@@ -847,10 +857,11 @@ export async function getSignedOdontogramPrint(
   return {
     assessment,
     patient: header ? { ...today, ...header.patient } : today,
-    // Sin encabezado guardado, los datos de hoy pero sin el color: no estaba al firmarla.
+    // Sin encabezado guardado, los datos de hoy pero sin el color ni la hoja: no estaban al
+    // firmarla. Firmada antes de la hoja membretada, su encabezado no la trae (ADR 0180).
     establishment: header
-      ? { ...header.establishment, logo: letterhead?.logo ?? null }
-      : letterhead && { ...letterhead, brandInk: null },
+      ? { ...header.establishment, sheet: header.establishment.sheet ?? null, logo: letterhead?.logo ?? null }
+      : letterhead && { ...letterhead, brandInk: null, sheet: null },
     // La dirección del QR de la hoja: quien la tiene en la mano comprueba que sigue vigente.
     checkUrl: await documentCheckUrl(tx, orgId, "signed_odontogram", assessment.id),
     signerStrokes: await drawnSignatureAt(tx, orgId, assessment.authorUserId, assessment.createdAt),

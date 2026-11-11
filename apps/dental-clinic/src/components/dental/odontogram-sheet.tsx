@@ -36,9 +36,36 @@ function initialsOf(name: string): string {
     .join("")
 }
 
+/** La parte de abajo de la hoja membretada, al final de la hoja (ADR 0180); sin hoja, nada. */
+export function SheetFooterBand({ establishment }: { establishment: PrintEstablishment | null }) {
+  const sheet = establishment?.sheet
+  return sheet ? <img src={sheet.bottomBand} alt="" className="mt-auto block h-auto w-full" /> : null
+}
+
 /** El membrete: logo o iniciales, nombre, razón social, documento fiscal y sede. */
 export function SheetLetterhead({ establishment }: { establishment: PrintEstablishment | null }) {
   const name = establishment?.tradeName || establishment?.legalName || "Establecimiento"
+  const sheet = establishment?.sheet
+  if (sheet) {
+    // Con la hoja membretada, su diseño dice quién es; abajo, la razón social y su documento.
+    const line = [
+      establishment?.legalName || name,
+      establishment?.fiscalDocNumber
+        ? [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" ")
+        : null,
+      establishment?.branchName,
+      establishment?.address,
+      establishment?.phone,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+    return (
+      <header className="flex flex-col gap-1">
+        <img src={sheet.topBand} alt={name} className="block h-auto w-full" />
+        {line ? <p className="text-right text-xs">{line}</p> : null}
+      </header>
+    )
+  }
   const fiscal = [
     establishment?.legalName && establishment.legalName !== name ? establishment.legalName : null,
     establishment?.fiscalDocNumber

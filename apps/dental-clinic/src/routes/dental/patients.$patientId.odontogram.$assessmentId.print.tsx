@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { OdontogramDocument } from "../../components/dental/odontogram-document"
 import {
+  SheetFooterBand,
   SheetLetterhead,
   SheetPageStyle,
   SheetSignature,
@@ -97,6 +98,7 @@ function SignedOdontogramPrintPage() {
             ),
           }}
         />
+        <SheetFooterBand establishment={establishment} />
       </article>
     </PageShell>
   )

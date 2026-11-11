@@ -56,8 +56,23 @@ const unused = async () => {
   throw new Error("no usado")
 }
 const deleted: Array<{ url: string; folder: string }> = []
+/** La hoja membretada: su PDF en el bucket privado y sus franjas en el público. */
+const privateObjects = new Map<string, Uint8Array>()
+const publicImages: string[] = []
 const storageStub = {
-  putAvatar: unused,
+  putAvatar: async ({ userId, ext }: { userId: string; ext: string }) => {
+    const key = `avatars/${userId}/${publicImages.length}.${ext}`
+    publicImages.push(key)
+    return { key, url: `https://cdn.example.com/${key}` }
+  },
+  putAttachmentAt: async (key: string, bytes: Uint8Array) => {
+    privateObjects.set(key, bytes)
+  },
+  getAttachment: async (key: string) => {
+    const bytes = privateObjects.get(key)
+    if (!bytes) throw new Error("no está")
+    return bytes
+  },
   deleteByUrl: async (url: string, folder: string) => {
     deleted.push({ url, folder })
   },
@@ -514,4 +529,84 @@ it("avisos en este equipo: cada persona activa y apaga los suyos, y el servidor 
   expect(await data(await request("other", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: false })
   expect(await data(await request("reception", "DELETE", "/push/subscriptions", { endpoint }))).toEqual({ active: false })
   expect(await data(await request("reception", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: false })
+})
+
+it("la hoja membretada: solo quien configura la sube, la ve sobre una receta de ejemplo, la quita y la vuelve a poner (ADR 0180)", async () => {
+  const sharp = (await import("sharp")).default
+  // Una hoja A4 mínima, escrita a mano: su diseño es un rectángulo arriba.
+  const content = "0.1 0.3 0.5 rg 40 760 515 40 re f"
+  const pdf = new Blob(
+    [
+      [
+        "%PDF-1.4",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << >> >> endobj",
+        `4 0 obj << /Length ${content.length} >> stream`,
+        content,
+        "endstream endobj",
+        "trailer << /Root 1 0 R >>",
+        "%%EOF",
+      ].join(String.fromCharCode(10)),
+    ],
+    { type: "application/pdf" },
+  )
+  const png = new Blob([await sharp({ create: { width: 40, height: 10, channels: 3, background: "#fff" } }).png().toBuffer()], {
+    type: "image/png",
+  })
+  const form = (file: Blob | null) => {
+    const body = new FormData()
+    for (const [key, value] of Object.entries({ topMm: "50", bottomMm: "41", leftMm: "19", rightMm: "19", hasContact: "true" }))
+      body.append(key, value)
+    if (file) body.append("file", file, "hoja.pdf")
+    body.append("topBand", png, "arriba.png")
+    body.append("bottomBand", png, "abajo.png")
+    body.append("thumbnail", png, "mini.png")
+    return body
+  }
+  const send = (who: Who, method: string, path: string, body?: FormData) =>
+    app.request(`/api/org-profile/letterhead${path}`, {
+      method,
+      headers: { "x-test-session": who, "x-odentia-org": who === "other" ? OTHER_SLUG : SLUG },
+      body,
+    })
+
+  // Recepción y caja no la cambian ni la ven: lo dice el servidor, no solo la pantalla.
+  expect((await send("reception", "PUT", "", form(pdf))).status).toBe(403)
+  expect((await send("reception", "POST", "/preview", form(pdf))).status).toBe(403)
+  expect((await send("cashier", "DELETE", "")).status).toBe(403)
+
+  // Lo que no es una hoja se dice junto al archivo.
+  const wrong = await send("owner", "PUT", "", form(new Blob(["hola"], { type: "application/pdf" })))
+  expect(wrong.status).toBe(400)
+  expect(((await wrong.json()) as { error: { fields?: Record<string, string> } }).error.fields).toHaveProperty("file")
+
+  const preview = await data<{ pdf: string; pages: number; margins: Record<string, number> }>(
+    await send("owner", "POST", "/preview", form(pdf)),
+  )
+  expect(Buffer.from(preview.pdf, "base64").subarray(0, 5).toString()).toBe("%PDF-")
+  expect(preview.pages).toBe(1)
+  expect(preview.margins).toEqual({ topMm: 50, bottomMm: 41, leftMm: 19, rightMm: 19 })
+
+  const saved = await data<{ letterhead: Record<string, unknown> }>(await send("owner", "PUT", "", form(pdf)))
+  expect(saved.letterhead).toMatchObject({ topMm: 50, hasContact: true, fileName: "hoja.pdf" })
+  // La pantalla nunca sabe dónde está guardado su PDF.
+  expect(saved.letterhead).not.toHaveProperty("pdfKey")
+  expect(privateObjects.size).toBe(1)
+  // Corregir sin volver a subirla no guarda otro PDF.
+  await data(await send("owner", "PUT", "", form(null)))
+  expect(privateObjects.size).toBe(1)
+  // La de hoy, otra vez, para «Cambiar la hoja»; otra clínica no tiene ninguna.
+  expect((await send("owner", "GET", "/pdf")).headers.get("content-type")).toBe("application/pdf")
+  expect(await data(await send("other", "GET", ""))).toMatchObject({ letterhead: null })
+
+  const removed = await data<{ removedId: string }>(await send("owner", "DELETE", ""))
+  expect(await data(await send("owner", "GET", ""))).toMatchObject({ letterhead: null })
+  const back = await app.request("/api/org-profile/letterhead/restore", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-test-session": "owner", "x-odentia-org": SLUG },
+    body: JSON.stringify({ id: removed.removedId }),
+  })
+  expect(back.status).toBe(200)
+  expect(await data(await send("owner", "GET", ""))).toMatchObject({ letterhead: { topMm: 50 } })
 })
