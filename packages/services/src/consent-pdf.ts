@@ -166,8 +166,9 @@ export async function renderConsentPdf(
   }
   const method = (doc.signatureMethod ?? "clinica") as keyof typeof CONSENT_SIGNATURE_WORDS
   const signerHeading = doc.signerKind === "representante" ? "Representante legal" : "Paciente"
-  // Por enlace, `signedAt` es cuando el profesional confirmó: la persona firmó antes.
-  const signerSignedAt = doc.personSignedAt ?? doc.signedAt
+  // Por enlace, `signedAt` es cuando el profesional confirmó: la persona firmó antes. Si después
+  // lo firmó de nuevo en la clínica («Firmar de nuevo aquí»), vale esa firma, no la del enlace.
+  const signerSignedAt = method === "enlace" ? (doc.personSignedAt ?? doc.signedAt) : doc.signedAt
   const signedAt = signerSignedAt ? `Firmó el ${dayTimeWords(signerSignedAt, zone)}` : ""
   const signerLines = [
     { text: doc.signerName, strong: true },
