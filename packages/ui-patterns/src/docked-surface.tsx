@@ -162,7 +162,8 @@ function DockedColumn({
           setArmed(false)
           setTouched(false)
         }}
-        onInputCapture={() => {
+        onInputCapture={(event) => {
+          if (event.target instanceof Element && event.target.closest("[data-draft-ignore]")) return
           setArmed(true)
           setTouched(true)
         }}
