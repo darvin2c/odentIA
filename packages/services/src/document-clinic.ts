@@ -118,16 +118,10 @@ async function sheetOf(
   if (!letterhead) return { sheet: null }
   const pdf = await readLetterheadPdf(letterhead)
   if (!pdf) return { sheet: null, sheetUnavailable: true }
-  return {
-    sheet: {
-      pdf,
-      topMm: letterhead.topMm,
-      bottomMm: letterhead.bottomMm,
-      leftMm: letterhead.leftMm,
-      rightMm: letterhead.rightMm,
-      hasContact: letterhead.hasContact,
-    },
-  }
+  // Los márgenes, como se guardaron (ya ajustados al guardar): lo que se vuelve a armar
+  // al abrirse, como un comprobante, sale igual aunque la regla cambie después.
+  const { topMm, bottomMm, leftMm, rightMm, hasContact } = letterhead
+  return { sheet: { pdf, topMm, bottomMm, leftMm, rightMm, hasContact } }
 }
 
 /** PNG o JPG por su firma, no por la extensión. Otro formato (WebP) se convierte antes de embeberlo. */
@@ -283,13 +277,15 @@ export async function loadFrozenDocumentClinic(
 ): Promise<DocumentClinic> {
   const today = await loadDocumentClinic(tx, orgId, { at, sheet: options.sheet })
   let phone: string | null = null
+  let branchAddress: string | null = null
   if (frozen.branch) {
     const [row] = await tx
-      .select({ phone: branch.phone })
+      .select({ phone: branch.phone, address: branchAddressColumns })
       .from(branch)
       .where(and(eq(branch.organizationId, orgId), eq(branch.id, frozen.branch.id)))
       .limit(1)
     phone = row?.phone ?? null
+    branchAddress = row ? (await branchAddressWriter(tx, orgId))(row.address) : null
   }
   const clinic = frozen.clinic
   return {
@@ -299,7 +295,8 @@ export async function loadFrozenDocumentClinic(
     fiscalDocType: clinic.fiscalDocType === undefined ? today.fiscalDocType : clinic.fiscalDocType,
     fiscalDocNumber:
       clinic.fiscalDocNumber === undefined ? today.fiscalDocNumber : clinic.fiscalDocNumber,
-    address: clinic.fiscalAddress ?? today.address,
+    // La dirección fiscal; sin ella, la de la sede que cobró: el comprobante la dice siempre.
+    address: clinic.fiscalAddress ?? branchAddress ?? today.address,
     phone,
     branchName: frozen.branch?.name ?? null,
     sheet: today.sheet ? { ...today.sheet, hasContact: false } : today.sheet,
@@ -410,6 +407,8 @@ export async function letterheadContact(
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
   const only = branches.length === 1 ? branches[0]! : null
   const address = (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null
-  const line = [only?.name ?? null, address, only?.phone ?? null].filter(Boolean).join(" · ")
-  return { line: line || null, branches: branches.length }
+  // Sin dirección ni teléfono que agregar, la casilla no hace falta (el nombre de la sede solo no lo es).
+  const phone = only?.phone ?? null
+  const line = address || phone ? [only?.name ?? null, address, phone].filter(Boolean).join(" · ") : null
+  return { line, branches: branches.length }
 }

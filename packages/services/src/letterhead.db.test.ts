@@ -5,10 +5,10 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { auditEvent, clinicLetterhead } from "@odentia/db/schema/org"
+import { auditEvent, branch, clinicLetterhead, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, like } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { loadDocumentLetterhead } from "./document-clinic.js"
+import { loadDocumentLetterhead, loadFrozenDocumentClinic } from "./document-clinic.js"
 import {
   adjustLetterhead,
   getCurrentLetterhead,
@@ -196,4 +196,53 @@ it("no se pisa lo que otra persona cambió entretanto, y «Deshacer» no quita u
     code: "LETTERHEAD_CHANGED",
   })
   expect((await run((tx) => getCurrentLetterhead(tx, orgId)))?.id).toBe(third.id)
+})
+
+it("quitar o ajustar la hoja que ya no está a la vista no pisa la de otra persona", async () => {
+  const { orgId, userId, run } = await clinicWithOwner()
+  const seen = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("vista"), null))
+  const newer = await run((tx) => saveLetterhead(tx, orgId, userId, sheet("nueva"), seen.id))
+  await expect(run((tx) => removeLetterhead(tx, orgId, userId, seen.id))).rejects.toMatchObject({
+    code: "LETTERHEAD_CHANGED",
+  })
+  expect((await run((tx) => getCurrentLetterhead(tx, orgId)))?.id).toBe(newer.id)
+  // Quitada por otra persona mientras se ajustaba: se dice que cambió, no que no existe.
+  await run((tx) => removeLetterhead(tx, orgId, userId, newer.id))
+  await expect(
+    run((tx) =>
+      adjustLetterhead(
+        tx,
+        orgId,
+        userId,
+        { ...bands, topMm: 50, bottomMm: 41, leftMm: 19, rightMm: 19, hasContact: false },
+        newer.id,
+      ),
+    ),
+  ).rejects.toMatchObject({ code: "LETTERHEAD_CHANGED" })
+})
+
+it("el comprobante de una clínica con varias sedes y sin dirección fiscal dice la de la sede que cobró", async () => {
+  const { orgId, run } = await clinicWithOwner()
+  await ownerDb.update(orgProfile).set({ fiscalAddress: null }).where(eq(orgProfile.organizationId, orgId))
+  const [norte] = await ownerDb
+    .insert(branch)
+    .values([
+      { organizationId: orgId, name: "Sede Norte", timezone: "America/Lima", addressLine1: "Av. Norte 100", country: "PE" },
+      { organizationId: orgId, name: "Sede Sur", timezone: "America/Lima", addressLine1: "Av. Sur 200", country: "PE" },
+    ])
+    .returning({ id: branch.id, name: branch.name })
+  if (!norte) throw new Error("No se crearon las sedes de la prueba")
+  const clinic = await run((tx) =>
+    loadFrozenDocumentClinic(
+      tx,
+      orgId,
+      {
+        clinic: { legalName: "Clínica S.A.C.", tradeName: "Clínica", fiscalAddress: null, locale: "es-PE", currency: "PEN", timezone: "America/Lima" },
+        branch: { id: norte.id, name: norte.name },
+      },
+      null,
+      { sheet: false },
+    ),
+  )
+  expect(clinic.address).toContain("Av. Norte 100")
 })
