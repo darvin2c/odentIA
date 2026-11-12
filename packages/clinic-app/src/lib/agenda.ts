@@ -85,8 +85,11 @@ export interface AgendaAppointment {
   /** De dónde salió la cita: recepción, una conversación, el agente o el enlace de reserva. */
   source?: string
   conversationId?: string | null
-  /** Solo al reservar, mover o cancelar: si el agente le avisará a la persona. */
-  notice?: { queued: boolean }
+  /**
+   * Solo al reservar, mover o cancelar: si el agente le avisará a la persona y, si no le llegará,
+   * por qué (`why`, una frase sin punto) y si hay que avisarle a mano (`byHand`).
+   */
+  notice?: { queued: boolean; why?: string; byHand?: boolean; to?: string }
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   visit: AppointmentVisit
@@ -392,7 +395,46 @@ export function movedNote(
       : before.status === "programada" && after.status === "confirmada"
         ? "Vuelve a quedar confirmada."
         : null,
-    after.notice?.queued ? "El agente le avisa la nueva fecha." : null,
+    noticeLine(after.notice, "El agente le avisa la nueva fecha."),
   ]
   return notes.filter(Boolean).join(" ") || undefined
+}
+
+/**
+ * Lo que el aviso flotante dice del aviso a la persona: `sent` si va en camino; si no le llegará,
+ * por qué, sin pedir nada cuando lo decidió la clínica o quedó una tarea. Lo que hay que avisarle
+ * a mano va aparte y fijo (`noticeWarning`): un aviso que sale siempre deja de leerse (mesa del 11 nov).
+ */
+export function noticeLine(notice: AgendaAppointment["notice"], sent: string): string | null {
+  if (!notice || notice.byHand) return null
+  if (notice.why) return notice.queued ? `${notice.why}.` : `No se le avisa. ${notice.why}.`
+  return notice.queued ? sent : null
+}
+
+/** De qué cambio habla el aviso que no le llegará: así no se confunde con otro (QA del 11 nov). */
+export interface NoticeChange {
+  change: "reservada" | "movida" | "cancelada"
+  /** El día y la hora de la cita, como los dice la Agenda («mañana a las 10:00», `whenSaid`); sin ella, no se nombra. */
+  when?: string
+  /** Al reservar: tampoco le llegará el recordatorio, y se dice en el mismo aviso, con una sola orden. */
+  reminderToo?: boolean
+}
+
+/** `whose`: «su cita», o «la cita de Sofía Salas» cuando el aviso es para quien recibe los de ella. */
+const NOTICE_ABOUT: Record<NoticeChange["change"], (whose: string, when: string | undefined) => string> = {
+  reservada: (whose, when) => (when ? `de ${whose}, reservada para ${when}` : `de ${whose}, que se reservó`),
+  movida: (whose, when) => (when ? `de que ${whose} ahora es ${when}` : `de que ${whose} cambió`),
+  cancelada: (whose, when) => (when ? `de que se canceló ${whose}, que era ${when}` : `de que se canceló ${whose}`),
+}
+
+/** El aviso que no le llegará por algo de la persona, para avisarle a mano: queda a la vista hasta cerrarlo. */
+export function noticeWarning(appointment: Pick<AgendaAppointment, "notice" | "patientName">, about: NoticeChange): string | null {
+  const notice = appointment.notice
+  if (!notice?.byHand || !notice.why) return null
+  // A quien recibe sus avisos, si no es el paciente (su madre): la cita se nombra por el paciente.
+  const who = notice.to ?? appointment.patientName
+  const what = NOTICE_ABOUT[about.change](notice.to ? `la cita de ${appointment.patientName}` : "su cita", about.when)
+  return about.reminderToo
+    ? `${who} no recibirá el aviso ${what}, ni el recordatorio. ${notice.why}. Avísale tú ahora y un día antes.`
+    : `${who} no recibirá el aviso ${what}. ${notice.why}. Avísale tú.`
 }

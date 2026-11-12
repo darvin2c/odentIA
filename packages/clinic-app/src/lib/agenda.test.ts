@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isUnclosed, movedNote, stepBeforeArrival, visitName } from "./agenda"
+import { isUnclosed, movedNote, noticeLine, noticeWarning, stepBeforeArrival, visitName } from "./agenda"
 
 /** La cita pasada (mesa de Inicio y Agenda del 10 nov): un nombre y el paso según sea hoy u otro día. */
 describe("la cita que pasó sin cerrarse", () => {
@@ -20,6 +20,41 @@ describe("la cita que pasó sin cerrarse", () => {
     expect(stepBeforeArrival({ visit: "sin_cerrar", ...ended }, now, false)).toBe("cerrar")
     expect(stepBeforeArrival({ visit: "confirmada", ...soon }, now, true)).toBe("llego")
     expect(stepBeforeArrival({ visit: "llego", ...ended }, now, true)).toBeNull()
+  })
+})
+
+describe("lo que se dice del aviso a la persona", () => {
+  it("va en camino, lo decidió la clínica, quedó una tarea o hay que avisarle a mano", () => {
+    const sent = "El agente le avisa la nueva fecha."
+    expect(noticeLine({ queued: true }, sent)).toBe(sent)
+    expect(noticeLine(undefined, sent)).toBeNull()
+    expect(noticeLine({ queued: false }, sent)).toBeNull()
+    expect(noticeLine({ queued: false, why: "«Recordar la cita» está apagada" }, sent)).toBe("No se le avisa. «Recordar la cita» está apagada.")
+    expect(noticeLine({ queued: true, why: "Los agentes están en pausa: queda una tarea para avisarle" }, sent)).toBe(
+      "Los agentes están en pausa: queda una tarea para avisarle.",
+    )
+    // Lo que hay que avisarle a mano no va en la línea: va aparte y fijo.
+    const byHand = { queued: false, why: "Su número no tiene WhatsApp y no tiene correo registrado", byHand: true }
+    expect(noticeLine(byHand, sent)).toBeNull()
+    const moved = { change: "movida" as const, when: "el vie 13 a las 10:00" }
+    expect(noticeWarning({ patientName: "Pedro Ramírez", notice: byHand }, moved)).toBe(
+      "Pedro Ramírez no recibirá el aviso de que su cita ahora es el vie 13 a las 10:00. Su número no tiene WhatsApp y no tiene correo registrado. Avísale tú.",
+    )
+    expect(noticeWarning({ patientName: "Pedro Ramírez", notice: { queued: false, why: "«Recordar la cita» está apagada" } }, moved)).toBeNull()
+    // Sus avisos los recibe su madre: el aviso es para ella, sin confundirla con el paciente.
+    expect(
+      noticeWarning(
+        { patientName: "Juan Rojas", notice: { queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true, to: "Carmen Rojas" } },
+        { change: "cancelada", when: "mañana a las 9:00" },
+      ),
+    ).toBe("Carmen Rojas no recibirá el aviso de que se canceló la cita de Juan Rojas, que era mañana a las 9:00. Pidió no recibir mensajes de la clínica. Avísale tú.")
+    // Al reservar, si tampoco le llegará el recordatorio, una sola orden.
+    expect(noticeWarning({ patientName: "Pedro Ramírez", notice: byHand }, { change: "reservada", when: "mañana a las 10:00", reminderToo: true })).toBe(
+      "Pedro Ramírez no recibirá el aviso de su cita, reservada para mañana a las 10:00, ni el recordatorio. Su número no tiene WhatsApp y no tiene correo registrado. Avísale tú ahora y un día antes.",
+    )
+    expect(movedNote({ status: "confirmada", arrivedAt: null }, { status: "programada", arrivedAt: null, notice: byHand })).toBe(
+      "Queda por confirmar: confirmó el otro día.",
+    )
   })
 })
 

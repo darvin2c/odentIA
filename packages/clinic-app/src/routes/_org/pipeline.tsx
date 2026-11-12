@@ -1026,7 +1026,7 @@ function PipelineListView({
   }
   return (
     <div className="flex flex-col gap-2">
-      <DataTable className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]" table={table} isFetching={listQuery.isFetching && !listQuery.isFetchingNextPage} />
+      <DataTable wrap table={table} isFetching={listQuery.isFetching && !listQuery.isFetchingNextPage} />
       {listQuery.isError ? (
         <p role="alert" className="text-sm text-destructive">
           No se pudo actualizar la lista; se conservan las oportunidades cargadas.{" "}

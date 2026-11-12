@@ -212,7 +212,7 @@ function OrdersWorkspace() {
         header: "Qué es",
         meta: { view: { role: "title" } },
         cell: ({ row }) => (
-          <span className="flex min-w-0 max-w-sm flex-col items-start gap-0.5 whitespace-normal [overflow-wrap:anywhere]">
+          <span className="flex min-w-0 max-w-sm flex-col items-start gap-0.5 [overflow-wrap:break-word] [&>*]:max-w-full">
             <span className="font-medium">{row.original.title}</span>
             <span className="text-sm text-muted-foreground">Lo hace: {row.original.maker}</span>
           </span>
@@ -336,7 +336,7 @@ function OrdersWorkspace() {
         ) : (
           <div className="flex flex-col gap-2">
             <DataTable
-              className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]"
+              wrap
               table={table}
               isFetching={list.isFetching}
               onRowClick={(row: OrderRow) => listSearch.setParam("pedido", row.id)}

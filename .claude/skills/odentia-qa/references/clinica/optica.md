@@ -131,6 +131,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] Sin signos vitales: una óptica no los toma.
 - [ ] Todos los errores vuelven a la vez, cada uno junto a su dato.
 - [ ] En un niño: quién lo acompaña (hoy es opcional y no mira la edad), si se hizo la refracción con cicloplejía (hoy no hay campo) y la agudeza por ojo para detectar la ambliopía.
+- [ ] En la copia de la historia, la refracción sale con su signo como en la pantalla («Refracción OD: ‒1,25 ‒0,50 × 180°»), por `recordLines` (`SO/examination.ts`).
 - [ ] El examen sale igual en la Historia, el PDF y la copia de la historia. En FHIR hoy salen solo Observations del examen: ni la receta como VisionPrescription, ni la distancia pupilar, ni quién acompaña.
 
 **Fuentes:** ISO 21987 (pasos de graduación); HL7 FHIR VisionPrescription; ADR 0170.
@@ -164,7 +165,10 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] El cliente la ve en «Tus documentos» del portal; la externa, solo después de verificada.
 - [ ] Anular la atención anula la receta que se emitió en ella, con su motivo: la ficha la muestra anulada, su QR dice «Documento anulado» y la venta no la ofrece. La externa transcrita no cambia.
 - [ ] «Emitir otra desde su examen» no se ofrece si la receta se anuló con su atención.
-- [ ] En el PDF, cada signo de la graduación sale igual que en la pantalla («−2,00», «+1,50»), nunca «?» ni sin signo.
+- [ ] En el PDF, cada signo de la graduación se lee igual que en la pantalla: el negativo con la raya del ancho de una cifra, a la altura de la barra del «+» y pegada a la cifra («‒2,00»; la letra del papel no tiene «−»), el positivo con «+» («+1,50»), el cero como «Neutro» y la raya larga «—» solo donde no hay dato. Nunca «?» ni una cifra sin signo.
+- [ ] Anulada, la receta lo dice sobre la graduación y no solo arriba, como los demás papeles anulados (`stampVoidedPdf`), y no dice «Válida hasta». Hoy solo lo dice el recuadro de arriba.
+- [ ] Un ojo sin lente se lee como tal en el papel, no como un dato que falta. Hoy sale «— — — — — —».
+- [ ] La graduación copiada del PDF y pegada en un campo se toma con su signo (`typedNumber`, `O/eye-exam.ts`).
 
 **Huecos conocidos:** cuánto dura de verdad la receta (adulto, niño, lentes de contacto) se confirma con la primera óptica real.
 **Fuentes:** ISO 21987; HL7 FHIR VisionPrescription; ADR 0170.
@@ -190,6 +194,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] **Unas lunas graduadas no se piden sin receta.** Hoy el cajón de la venta ofrece «Sin receta» sin aviso (`packages/clinic-app/src/components/orders/sale-drawer.tsx`). Sin receta solo tiene sentido una reparación o la montura propia del cliente (P-OPT-25).
 - [ ] El pedido dice el tipo de luna (monofocal, bifocal o progresivo) y, con progresivos o bifocales, la altura de cada ojo es obligatoria o se avisa si falta. Hoy no hay tipo de luna y las alturas son opcionales, sin aviso.
 - [ ] El taller ve lo que tiene que hacer y nada más de la historia, y su lectura queda registrada.
+- [ ] La orden al laboratorio externo lleva la graduación de cada ojo con su signo, las medidas y las alturas, en papel o por envío. **Supuesto**, por confirmar con la primera óptica. Hoy el pedido no se imprime ni se envía (no hay «Imprimir» en `AO/orders-section.tsx` ni en `components/orders/`): la óptica copia a mano o manda la receta.
 
 **Huecos conocidos:** lo que se mide para montar (distancia al vértice, ángulo pantoscópico, curvatura de la montura) se confirma con la primera óptica real; hoy son las alturas de cada ojo.
 

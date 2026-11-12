@@ -244,6 +244,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         forms: ["puedo usar el sistema desde mi celular", "funciona en el celular", "tienen aplicacion", "hay una app", "hay aplicacion", "tienen aplicacion para iphone"],
         general: true,
       },
+      {
+        id: "ensanchar-panel-derecha",
+        q: "¿Puedo hacer más ancho el formulario que se abre a la derecha?",
+        a: "Sí, en la computadora: arrastra hacia la izquierda el borde del panel, donde está la rayita del medio. Crece mientras la página de al lado conserve lo mínimo para usarse; con el menú de la izquierda en íconos cabe más. Los formularios del mismo tamaño recuerdan ese ancho en el navegador de esa computadora, y doble clic en el borde lo devuelve al de siempre. Con el teclado: Tab hasta el borde, las flechas izquierda y derecha, y Enter para volver al de siempre. Si la lista de atrás queda angosta, se recorre de lado, y sus botones de cada fila (como «Hecha» en Tareas) siguen a la vista a la derecha.",
+        forms: ["hacer mas ancho el formulario", "agrandar el panel de la derecha", "el formulario es muy angosto", "cambiar el ancho del panel", "ensanchar el formulario"],
+        general: true,
+      },
     ],
   },
   {
@@ -455,7 +462,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quien-avisa-persona-cita",
         q: "¿Quién le avisa a la persona su cita?",
-        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si al moverla queda por confirmar, el aviso del cambio ya trae «Confirmar»; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si al moverla queda por confirmar, el aviso del cambio ya trae «Confirmar»; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Con la línea prendida, los avisos de reserva, cambio y cancelación le llegan siempre que haya por dónde escribirle, salvo que haya pedido no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+      },
+      {
+        id: "aviso-no-le-llegara",
+        q: "¿Por qué la Agenda me dice que no le llegará el aviso?",
+        a: "Porque no hay por dónde escribirle (no tiene WhatsApp ni correo, o la clínica no tiene WhatsApp conectado) o pidió no recibir mensajes de la clínica. Al reservar, mover o cancelar, ese aviso dice la cita y el motivo, y queda en pantalla hasta que lo cierras: avísale tú, por teléfono o en persona. Si en cambio «Recordar la cita», Sofi o Argos están apagados, o ya tiene otra cita al cancelarle una, solo lo menciona en el aviso de siempre; con los agentes en pausa, queda una tarea para avisarle.",
+        forms: ["no recibirá el aviso", "avísale tú", "no le llega el aviso de la cita", "por qué no le avisan"],
       },
       {
         id: "marco-llego",
