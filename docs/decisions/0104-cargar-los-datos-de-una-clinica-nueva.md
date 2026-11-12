@@ -15,7 +15,7 @@ Lo que no se negocia: la persona es única (0001), nunca se une a dos personas p
 - **Primero personas y pacientes.** Con quién habla por quién (la madre, el apoderado). Las citas, los saldos y la historia anterior quedan para después: las citas necesitan profesionales con cuenta, y los saldos y la historia necesitan representar lo anterior sin fabricar pagos ni firmas (issue 89).
 - **La carga va en tres pasos, con un plan revisable entre ellos:**
   1. **Preparar.** La skill de carga (`.claude/skills/odentia-carga`) corre en la máquina de quien acompaña el alta. Lee los archivos tal como los tiene la clínica, su Excel (`.xlsx`) o lo que exporta su sistema, con un mapa de columnas (`import:peek`, `import:prepare`), y arma `plan.json` y un informe. Encuentra solo la fila de encabezados bajo el título de un reporte y toma una vez a la persona que se repite en varias filas. Claude escribe el mapa mirando la forma de cada columna, no sus datos. La transformación es código determinista, no texto del modelo.
-  2. **Ensayar.** La administración sube el plan en la ficha de la clínica («Cargar datos») y ve qué pasará con cada fila, sin guardar nada.
+  2. **Ensayar.** Se ve qué pasará con cada fila, sin guardar nada. Desde el 2026-11-12 lo corre la skill en el servidor y la administración solo guarda el registro ([0183](0183-la-carga-corre-en-el-servidor.md)).
   3. **Cargar.** Se carga por tandas de 200, cada una en una transacción corta.
 - **Lo dudoso no se adivina.** Una fecha con el año en dos cifras o un sexo que el mapa no nombra deja la fila fuera, con su motivo, hasta que el mapa o una corrección escrita lo resuelvan. Lo parecido (mismo nombre, mismo teléfono, alguien que ya está en la clínica) se avisa y lo decide una persona.
 - **Las mismas operaciones de siempre.** Cada persona se crea con `createPatient` o `createPerson`, con sus validaciones y su auditoría, y quien habla por ella se vincula como en el registro. Quien ya está en la clínica con ese documento no se toca.
@@ -26,7 +26,7 @@ Lo que no se negocia: la persona es única (0001), nunca se une a dos personas p
 ## Alternativas descartadas
 
 - **Pedirle a la clínica que llene una plantilla nuestra:** le da trabajo justo al empezar y mete errores al copiar. El mapa se adapta a su archivo.
-- **Un script contra la base de producción desde la máquina del equipo:** se salta la autorización con segundo factor y la auditoría, y deja la conexión owner fuera de la API.
+- **Un script contra la base de producción desde la máquina del equipo:** se salta la autorización con segundo factor y la auditoría, y deja la conexión owner fuera de la API. La 0183 corre la carga dentro del servidor, con la misma auditoría, sin abrir la base hacia afuera.
 - **Que Claude lea el archivo y escriba el plan fila por fila:** no escala a miles de filas, no es repetible y pondría cada dato en el modelo. El mapa más el código dan el mismo plan cada vez.
 - **«Pegar mi lista» de pacientes en la clínica, ya:** es el destino si los formatos se repiten, pero hoy se diseñaría sin conocerlos.
 - **WebMCP como vía de carga (issue 88):** el estándar todavía cambia y no resuelve leer los archivos de la clínica.

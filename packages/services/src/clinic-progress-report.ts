@@ -13,6 +13,7 @@
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { adminAudit } from "@odentia/db/schema/admin-core"
+import { user } from "@odentia/db/schema/auth"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { brandPaper, type MailBrand, type MailTemplate, renderEmail } from "@odentia/mail"
 import { z } from "zod"
@@ -411,13 +412,28 @@ export async function finishProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { number: number; to: string; subject: string; stage: string; pdfKey: string; state: "enviado" | "desconocido" },
+  input: {
+    number: number
+    to: string
+    subject: string
+    stage: string
+    pdfKey: string
+    state: "enviado" | "desconocido"
+    /** Cuándo salió, si fue por otra vía antes de registrarlo (ISO 8601). */
+    sentAt?: string
+  },
 ): Promise<void> {
   await writeAdminAudit(tx, actor, {
     action: PROGRESS_REPORT_ACTIONS[input.state],
     organizationId: orgId,
     entityId: `informe-${input.number}`,
-    metadata: { to: input.to, subject: input.subject, stage: input.stage, pdfKey: input.pdfKey },
+    metadata: {
+      to: input.to,
+      subject: input.subject,
+      stage: input.stage,
+      pdfKey: input.pdfKey,
+      ...(input.sentAt ? { sentAt: input.sentAt } : {}),
+    },
   })
 }
 
@@ -433,6 +449,10 @@ export interface ProgressReportRecord {
   to: string | null
   subject: string | null
   stage: string | null
+  /** Quién lo envió o lo registró. */
+  by: string | null
+  /** Salió por otra vía y se registró después: el sistema no lo envió. */
+  registeredLater: boolean
   /** La clave del PDF tal como salió; sin ella, el informe se envió antes de guardarlos. */
   pdfKey: string | null
 }
@@ -440,8 +460,15 @@ export interface ProgressReportRecord {
 /** Los informes de esa clínica, el último estado de cada número, del más nuevo al más viejo. */
 export async function listProgressReports(tx: Db, orgId: string): Promise<ProgressReportRecord[]> {
   const rows = await tx
-    .select({ at: adminAudit.createdAt, action: adminAudit.action, entityId: adminAudit.entityId, metadata: adminAudit.metadata })
+    .select({
+      at: adminAudit.createdAt,
+      action: adminAudit.action,
+      entityId: adminAudit.entityId,
+      metadata: adminAudit.metadata,
+      by: user.name,
+    })
     .from(adminAudit)
+    .leftJoin(user, eq(user.id, adminAudit.actorUserId))
     .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), eq(adminAudit.organizationId, orgId)))
     .orderBy(desc(adminAudit.createdAt))
   const seen = new Map<number, ProgressReportRecord>()
@@ -450,15 +477,77 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
     if (!Number.isInteger(number) || seen.has(number)) continue
     const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
     const meta = row.metadata ?? {}
+    const sentAt = meta.sentAt as string | undefined
     seen.set(number, {
       number,
       state,
-      at: row.at.toISOString(),
+      at: sentAt ?? row.at.toISOString(),
       to: (meta.to as string | undefined) ?? null,
       subject: (meta.subject as string | undefined) ?? null,
       stage: (meta.stage as string | undefined) ?? null,
+      by: row.by ?? null,
+      registeredLater: !!sentAt,
       pdfKey: (meta.pdfKey as string | undefined) ?? null,
     })
   }
   return [...seen.values()].sort((a, b) => b.number - a.number)
+}
+
+/** Una carga en el registro de la clínica: la configuración o los pacientes de un plan. */
+export interface ClinicLoadRecord {
+  kind: "configuracion" | "pacientes"
+  at: string
+  by: string | null
+  /** Lo que quedó, en una frase: «20 nuevos · 2 cambiaron · 7 ya estaban». */
+  summary: string
+}
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+
+/** Las cifras de una carga en palabras; lo que es cero no se dice. */
+function loadSummary(kind: ClinicLoadRecord["kind"], totals: Record<string, number>): string {
+  const n = (key: string) => totals[key] ?? 0
+  const parts =
+    kind === "configuracion"
+      ? [
+          n("nueva") && plural(n("nueva"), "nuevo", "nuevos"),
+          n("cambia") && plural(n("cambia"), "cambió", "cambiaron"),
+          n("igual") && `${n("igual")} ya estaba${n("igual") === 1 ? "" : "n"}`,
+          n("espera") && `${n("espera")} espera${n("espera") === 1 ? "" : "n"} a que acepten su invitación`,
+          n("error") && `${n("error")} no ${n("error") === 1 ? "entró" : "entraron"}`,
+        ]
+      : [
+          n("creadas") && plural(n("creadas"), "persona creada", "personas creadas"),
+          n("existentes") && `${n("existentes")} ya estaba${n("existentes") === 1 ? "" : "n"}`,
+          n("yaCargadas") && `${n("yaCargadas")} ya ${n("yaCargadas") === 1 ? "se había" : "se habían"} cargado`,
+          n("errores") && `${n("errores")} no ${n("errores") === 1 ? "entró" : "entraron"}`,
+        ]
+  return parts.filter(Boolean).join(" · ") || "Nada que cargar"
+}
+
+/**
+ * Las cargas de esa clínica, de la más nueva a la más vieja, con quién las hizo. Los
+ * pacientes se cargan por tandas: las tandas seguidas del mismo plan son una sola carga.
+ */
+export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoadRecord[]> {
+  const rows = await tx.execute<{ action: string; created_at: Date | string; metadata: Record<string, unknown> | null; name: string | null }>(sql`
+    select a.action, a.created_at, a.metadata, u.name
+    from admin_audit a left join "user" u on u.id = a.actor_user_id
+    where a.organization_id = ${orgId} and a.action in ('org.setup_import', 'org.data_import')
+    order by a.created_at desc
+    limit 500`)
+  const loads: Array<{ kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; totals: Record<string, number> }> = []
+  for (const row of rows) {
+    const meta = row.metadata ?? {}
+    const kind = row.action === "org.setup_import" ? "configuracion" : "pacientes"
+    const numbers = Object.fromEntries(Object.entries(meta).filter(([, value]) => typeof value === "number")) as Record<string, number>
+    const { from: _from, to: _to, total: _total, invitations: _invitations, ...totals } = numbers
+    const last = loads.at(-1)
+    if (kind === "pacientes" && last?.kind === "pacientes" && last.plan === meta.planSha256) {
+      for (const [key, value] of Object.entries(totals)) last.totals[key] = (last.totals[key] ?? 0) + value
+      continue
+    }
+    loads.push({ kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, totals })
+  }
+  return loads.slice(0, 100).map(({ kind, at, by, totals }) => ({ kind, at, by, summary: loadSummary(kind, totals) }))
 }

@@ -12,14 +12,14 @@
  *     de pacientes por correo (`clinic-import-letter.ts`).
  *   pnpm --filter @odentia/services import:clinica -- <clinica.fuente.json> [--numero N]
  *     La configuración de la clínica: de la fuente (con rutas a su logo y su hoja), el plan
- *     que carga la administración (`clinica.json`, con los archivos dentro) y el plan de
+ *     que se carga con `import:produccion` (`clinica.json`, con los archivos dentro) y el plan de
  *     carga en PDF para aprobarlo (`clinic-setup-source.ts`). Busca cada servicio en la
  *     biblioteca con su código del país.
  *   pnpm --filter @odentia/services import:informe -- <informe.json> [--plan <clinica.json>]
  *     El informe de avance de una etapa en PDF, junto al JSON, para revisarlo. Con
  *     `--plan`, escribe en el informe el detalle de lo que ese plan cargó (`sections`)
- *     (`clinic-progress-report.ts`). Se envía desde la administración («Cargar
- *     datos» › «Informe a la clínica»), por el correo de producción y una sola vez.
+ *     (`clinic-progress-report.ts`). Se envía con `import:produccion` (`clinic-import-remote.ts`),
+ *     por el correo de producción y una sola vez.
  *
  * Las rutas relativas se leen desde la carpeta donde se escribió el comando.
  */
@@ -141,7 +141,7 @@ function report(plan: ClinicImportPlan, check: ClinicImportCheck, notes: Prepare
   return lines.join("\n")
 }
 
-/** El informe de avance en PDF, para revisarlo antes de enviarlo desde la administración. */
+/** El informe de avance en PDF, para revisarlo antes de enviarlo con `import:produccion`. */
 async function progressReport(reportPath: string): Promise<void> {
   const report = JSON.parse(readFileSync(reportPath, "utf-8")) as Record<string, unknown>
   const planPath = arg("--plan")

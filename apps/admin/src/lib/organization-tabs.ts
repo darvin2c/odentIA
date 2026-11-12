@@ -12,7 +12,7 @@ export const ORGANIZATION_TAB_NAMES: Record<OrganizationTab, string> = {
   precio: "Precio y prueba",
   equipo: "Equipo",
   actividad: "Actividad",
-  carga: "Cargar datos",
+  carga: "Carga",
 }
 
 /** Lo que soporte no abre: importes y precios (decisión D4) y los datos de pacientes que se cargan. */
