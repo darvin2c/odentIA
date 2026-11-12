@@ -207,9 +207,12 @@ it("los pacientes se ensayan, se cargan por tandas y repetir no duplica", async 
   const [count] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where organization_id = ${ORG}`)
   expect(count?.n).toBe(2)
 
-  // Las tandas seguidas del mismo plan son una sola carga en el registro.
+  // Cada pasada es una carga en el registro: la segunda no se suma a la primera.
   const { loads } = await record<{ loads: Array<{ kind: string; by: string | null; summary: string }> }>()
-  expect(loads).toEqual([{ kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 personas creadas · 2 ya se habían cargado" }])
+  expect(loads).toEqual([
+    { kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 ya se habían cargado" },
+    { kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 personas creadas" },
+  ])
 })
 
 it("la configuración se ensaya sin guardar, se carga con su invitación y repetir no duplica", async () => {
@@ -232,7 +235,7 @@ it("la configuración se ensaya sin guardar, se carga con su invitación y repet
   expect(branches?.n).toBe(1)
 
   const { loads } = await record<{ loads: Array<{ kind: string; summary: string }> }>()
-  expect(loads.map((item) => item.kind)).toEqual(["configuracion", "configuracion", "pacientes"])
+  expect(loads.map((item) => item.kind)).toEqual(["configuracion", "configuracion", "pacientes", "pacientes"])
   expect(loads[0]?.summary).not.toMatch(/nuevo/)
   expect(loads[1]?.summary).toMatch(/nuevos?/)
 })
@@ -262,11 +265,38 @@ it("el informe se ve antes, sale con su PDF una sola vez y el registro lo abre",
 it("un informe que salió por otra vía se registra con su fecha, sin enviarse", async () => {
   sent.length = 0
   const second = progressReportSchema.parse({ ...report, number: 2 })
+  await expect(load.registerReport(ORG, admin, { ...second, date: undefined }, "2026-11-12T15:14:00.000Z")).rejects.toMatchObject({ status: 400 })
   await load.registerReport(ORG, admin, second, "2026-11-12T15:14:00.000Z")
   expect(sent).toHaveLength(0)
   const { reports } = await record<{ reports: Array<{ number: number }> }>()
   expect(reports[0]).toMatchObject({ number: 2, at: "2026-11-12T15:14:00.000Z", registeredLater: true, hasPdf: true })
   await expect(load.registerReport(ORG, admin, second, "2026-11-12T15:14:00.000Z")).rejects.toMatchObject({ status: 409 })
+})
+
+it("un informe que no se sabe si salió se cierra como enviado, sin volver a enviarlo", async () => {
+  const failing = createClinicLoad({
+    ownerDb,
+    storage,
+    mailer: {
+      send: async () => {
+        throw new Error("se cortó la conexión")
+      },
+    },
+    webURL: "https://app.odentia.localhost",
+  })
+  const fourth = progressReportSchema.parse({ ...report, number: 4 })
+  await expect(failing.sendReport(ORG, admin, fourth)).rejects.toMatchObject({ code: "SEND_UNKNOWN" })
+  const before = await record<{ reports: Array<{ number: number; state: string; at: string }> }>()
+  const unknown = before.reports.find((item) => item.number === 4)
+  expect(unknown?.state).toBe("desconocido")
+
+  sent.length = 0
+  await expect(load.confirmReportSent(ORG, support, 4)).rejects.toMatchObject({ status: 403 })
+  expect(await load.confirmReportSent(ORG, admin, 4)).toEqual({ confirmed: true, number: 4 })
+  expect(sent).toHaveLength(0)
+  const after = await record<{ reports: Array<{ number: number; state: string; at: string; registeredLater: boolean }> }>()
+  expect(after.reports.find((item) => item.number === 4)).toMatchObject({ state: "enviado", at: unknown?.at, registeredLater: false })
+  await expect(load.confirmReportSent(ORG, admin, 4)).rejects.toMatchObject({ status: 409 })
 })
 
 it("el plan de otra clínica no se carga aquí y el informe no va a alguien de fuera", async () => {

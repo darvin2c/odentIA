@@ -15,7 +15,12 @@
  *   informe-enviar <slug> <informe.json>    El informe por el correo de producción, una sola vez, con su PDF guardado.
  *   informe-registrar <slug> <informe.json> --enviado-el <ISO>
  *                                           Deja en el registro un informe que salió por otra vía.
+ *   informe-salio <slug> <número>           Cierra como enviado un informe que quedó a medias,
+ *                                           ya comprobado en el correo, sin volver a enviarlo.
  *   registro <slug>                         Las cargas y los informes de la clínica.
+ *
+ * El archivo puede ser `-` (la entrada estándar). Lo de pacientes sale sin nombres, salvo
+ * con `--con-nombres`.
  *
  * `--como` es el correo de una persona del personal de odentIA con rol de administración:
  * el registro queda a su nombre. Imprime JSON; un error sale con código 1 y su motivo.
@@ -36,7 +41,7 @@ import {
   progressReportSchema,
   ServiceError,
 } from "@odentia/services"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { env } from "../env.js"
 import { createClinicLoad } from "../lib/clinic-load.js"
 
@@ -45,10 +50,25 @@ const flag = (name: string) => {
   const at = args.indexOf(name)
   return at >= 0 ? args[at + 1] : undefined
 }
-const positionals = args.filter(
-  (arg, index) => !arg.startsWith("--") && !args[index - 1]?.startsWith("--"),
-)
+const positionals = args.filter((arg, index) => {
+  const before = args[index - 1]
+  return !arg.startsWith("--") && !(before?.startsWith("--") && before !== "--con-nombres")
+})
 const [command, slug, file] = positionals
+
+/**
+ * La fecha en que salió un informe registrado después. Sola (AAAA-MM-DD) es un día de Lima:
+ * se guarda a su mediodía, para que ningún huso la corra al día anterior.
+ */
+function sentAtOf(value: string | undefined): string {
+  if (!value) throw new Error("--enviado-el va con la fecha en que salió (AAAA-MM-DD)")
+  const dayOnly = /^\d{4}-\d{2}-\d{2}$/.test(value)
+  const at = new Date(dayOnly ? `${value}T12:00:00-05:00` : value)
+  if (Number.isNaN(at.getTime()) || (dayOnly && at.toISOString().slice(0, 10) !== value))
+    throw new Error(`--enviado-el: «${value}» no es una fecha que exista`)
+  if (at.getTime() > Date.now()) throw new Error("--enviado-el no puede ser una fecha futura")
+  return at.toISOString()
+}
 
 async function main() {
   const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -61,9 +81,14 @@ async function main() {
     .select({ userId: user.id, role: adminStaff.role })
     .from(adminStaff)
     .innerJoin(user, eq(user.id, adminStaff.userId))
-    .where(and(eq(user.email, as), eq(adminStaff.active, true)))
+    .where(and(eq(user.email, as), eq(adminStaff.active, true), eq(user.emailVerified, true)))
     .limit(1)
   if (!staff) throw new Error(`${as} no es personal activo de odentIA`)
+  // Lo mismo que la puerta de la administración: una cuenta bloqueada no firma cargas.
+  const blocked = await ownerDb.execute(
+    sql`select 1 from "user_global_block" where "user_id" = ${staff.userId} and "active" and ("expires_at" is null or "expires_at" > now()) limit 1`,
+  )
+  if (blocked.length) throw new Error(`${as} tiene la cuenta bloqueada`)
   const actor: AdminActor = { userId: staff.userId, role: staff.role as AdminActor["role"] }
 
   const [org] = await ownerDb
@@ -102,9 +127,11 @@ async function main() {
       return domain ? onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain) : env.WEB_URL
     },
   })
+  const names = args.includes("--con-nombres")
+  // `-` es la entrada estándar: la skill manda el archivo por la conexión, sin copia en el servidor.
   const read = () => {
     if (!file) throw new Error("Falta el archivo")
-    return JSON.parse(readFileSync(file, "utf-8")) as unknown
+    return JSON.parse(readFileSync(file === "-" ? 0 : file, "utf-8")) as unknown
   }
 
   switch (command) {
@@ -112,10 +139,31 @@ async function main() {
       return load.rehearseSetup(org.id, actor, clinicSetupPlanSchema.parse(read()))
     case "cargar":
       return load.applySetup(org.id, actor, clinicSetupPlanSchema.parse(read()))
-    case "pacientes-ensayo":
-      return load.previewPatients(org.id, actor, clinicImportPlanSchema.parse(read()))
-    case "pacientes-cargar":
-      return load.applyPatients(org.id, actor, clinicImportPlanSchema.parse(read()))
+    case "pacientes-ensayo": {
+      const preview = await load.previewPatients(
+        org.id,
+        actor,
+        clinicImportPlanSchema.parse(read()),
+      )
+      if (names) return preview
+      // Sin nombres: la clave y la fila del archivo bastan para buscarla en su Excel.
+      const { order, rows, ...rest } = preview
+      return {
+        ...rest,
+        personas: order.length,
+        filas: rows.map((row) => ({
+          key: row.key,
+          origin: row.origin,
+          status: row.status,
+          errores: row.messages.filter((message) => message.level === "error").length,
+          avisos: row.messages.filter((message) => message.level === "aviso").length,
+        })),
+      }
+    }
+    case "pacientes-cargar": {
+      const result = await load.applyPatients(org.id, actor, clinicImportPlanSchema.parse(read()))
+      return names ? result : { ...result, failed: result.failed.map((row) => row.key) }
+    }
     case "informe-ver": {
       const { pdf, ...shown } = await load.previewReport(
         org.id,
@@ -126,16 +174,18 @@ async function main() {
     }
     case "informe-enviar":
       return load.sendReport(org.id, actor, progressReportSchema.parse(read()))
-    case "informe-registrar": {
-      const sentAt = flag("--enviado-el")
-      if (!sentAt || Number.isNaN(Date.parse(sentAt)))
-        throw new Error("--enviado-el va con la fecha ISO en que salió")
+    case "informe-registrar":
       return load.registerReport(
         org.id,
         actor,
         progressReportSchema.parse(read()),
-        new Date(sentAt).toISOString(),
+        sentAtOf(flag("--enviado-el")),
       )
+    case "informe-salio": {
+      const number = Number(file)
+      if (!Number.isInteger(number) || number < 1)
+        throw new Error("informe-salio va con el número del informe")
+      return load.confirmReportSent(org.id, actor, number)
     }
     case "registro":
       return {

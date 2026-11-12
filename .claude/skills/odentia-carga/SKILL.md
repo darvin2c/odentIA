@@ -23,7 +23,7 @@ Todo lo que escribe en producción lo corre la skill, con la aprobación del pas
 pnpm --filter @odentia/services import:produccion -- <orden> <slug> [<archivo>] --como <correo>
 ```
 
-Copia el archivo al servidor por SSH (`vps`), lo pasa al contenedor de la API, corre ahí la orden con la base, el almacenamiento y el correo de producción (`apps/api/src/cli/carga.ts`) y borra las copias, salga bien o mal. `--como` es el correo de quien carga, del personal de odentIA con rol de administración: el registro queda a su nombre. La respuesta es JSON; un error sale con su motivo.
+Corre la orden dentro del contenedor de la API por SSH (`vps`), con la base, el almacenamiento y el correo de producción (`apps/api/src/cli/carga.ts`). El archivo viaja por la conexión: no queda copia en el servidor, ni aunque se corte. Lo de pacientes sale sin nombres (la clave y la fila del archivo); con `--con-nombres`, completo, solo si hace falta. `--como` es el correo de quien carga, del personal de odentIA con rol de administración: el registro queda a su nombre. La respuesta es JSON; un error sale con su motivo.
 
 | Orden | Qué hace | Escribe |
 |---|---|---|
@@ -34,6 +34,7 @@ Copia el archivo al servidor por SSH (`vps`), lo pasa al contenedor de la API, c
 | `informe-ver <slug> <informe.json>` | A quién va, el asunto, las hojas y si ese número ya salió | No |
 | `informe-enviar <slug> <informe.json>` | El informe con su PDF, una sola vez; el PDF queda guardado | Sí |
 | `informe-registrar <slug> <informe.json> --enviado-el <AAAA-MM-DD>` | Deja en el registro un informe que salió por otra vía, sin enviarlo | Sí |
+| `informe-salio <slug> <número>` | Cierra como enviado un informe que quedó «enviándose» o «no se sabe si salió», después de comprobar en Zoho que salió; no lo reenvía | Sí |
 | `registro <slug>` | Las cargas y los informes de la clínica | No |
 
 Lo que se hizo queda en la administración, ficha de la clínica › «Carga»: cada carga con sus cifras y quién la hizo, y cada informe con «Ver el PDF». Esa pestaña solo lee: no carga ni envía.

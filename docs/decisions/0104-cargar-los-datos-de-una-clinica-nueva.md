@@ -44,4 +44,4 @@ Lo que no se negocia: la persona es única (0001), nunca se une a dos personas p
 
 ## Referencias
 
-`packages/services/src/clinic-import-plan.ts`, `clinic-import-prepare.ts`, `clinic-import-cli.ts`, `clinic-import-letter.ts` y `clinic-import.ts`; el lector de `.xlsx` en `packages/db/src/xlsx.ts`, el mismo de la CIE-10 del MINSA (0103); `packages/db/src/schema/admin-imports.ts` y la migración `0017_carga_de_datos.sql`; `apps/api/src/routes/admin-imports.ts`; `apps/admin/src/components/org-import.tsx`; `.claude/skills/odentia-carga/SKILL.md`.
+`packages/services/src/clinic-import-plan.ts`, `clinic-import-prepare.ts`, `clinic-import-cli.ts`, `clinic-import-letter.ts` y `clinic-import.ts`; el lector de `.xlsx` en `packages/db/src/xlsx.ts`, el mismo de la CIE-10 del MINSA (0103); `packages/db/src/schema/admin-imports.ts` y la migración `0017_carga_de_datos.sql`; `apps/api/src/routes/admin-imports.ts`; `apps/admin/src/components/org-load-record.tsx` (el registro, ADR 0183); `.claude/skills/odentia-carga/SKILL.md`.

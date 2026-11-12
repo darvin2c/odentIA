@@ -421,6 +421,8 @@ export async function finishProgressReport(
     state: "enviado" | "desconocido"
     /** Cuándo salió, si fue por otra vía antes de registrarlo (ISO 8601). */
     sentAt?: string
+    /** Salió por otra vía y se registra después: el sistema no lo envió. */
+    registered?: boolean
   },
 ): Promise<void> {
   await writeAdminAudit(tx, actor, {
@@ -433,6 +435,7 @@ export async function finishProgressReport(
       stage: input.stage,
       pdfKey: input.pdfKey,
       ...(input.sentAt ? { sentAt: input.sentAt } : {}),
+      ...(input.registered ? { registered: true } : {}),
     },
   })
 }
@@ -486,7 +489,7 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
       subject: (meta.subject as string | undefined) ?? null,
       stage: (meta.stage as string | undefined) ?? null,
       by: row.by ?? null,
-      registeredLater: !!sentAt,
+      registeredLater: meta.registered === true,
       pdfKey: (meta.pdfKey as string | undefined) ?? null,
     })
   }
@@ -536,18 +539,22 @@ export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoad
     where a.organization_id = ${orgId} and a.action in ('org.setup_import', 'org.data_import')
     order by a.created_at desc
     limit 500`)
-  const loads: Array<{ kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; totals: Record<string, number> }> = []
+  // `open`: las tandas llegan de la más nueva a la más vieja, y la tanda 0 es el comienzo de
+  // esa pasada; la anterior a ella (otra pasada del mismo plan) va en su propia fila.
+  const loads: Array<{ kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; open: boolean; totals: Record<string, number> }> = []
   for (const row of rows) {
     const meta = row.metadata ?? {}
     const kind = row.action === "org.setup_import" ? "configuracion" : "pacientes"
     const numbers = Object.fromEntries(Object.entries(meta).filter(([, value]) => typeof value === "number")) as Record<string, number>
-    const { from: _from, to: _to, total: _total, invitations: _invitations, ...totals } = numbers
+    const { from, to: _to, total: _total, invitations: _invitations, ...totals } = numbers
+    const first = kind === "pacientes" && from === 0
     const last = loads.at(-1)
-    if (kind === "pacientes" && last?.kind === "pacientes" && last.plan === meta.planSha256) {
+    if (kind === "pacientes" && last?.kind === "pacientes" && last.open && last.plan === meta.planSha256) {
       for (const [key, value] of Object.entries(totals)) last.totals[key] = (last.totals[key] ?? 0) + value
+      if (first) last.open = false
       continue
     }
-    loads.push({ kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, totals })
+    loads.push({ kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, open: kind === "pacientes" && !first, totals })
   }
   return loads.slice(0, 100).map(({ kind, at, by, totals }) => ({ kind, at, by, summary: loadSummary(kind, totals) }))
 }

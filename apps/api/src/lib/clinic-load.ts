@@ -364,10 +364,47 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
         "No se sabe si el correo salió: revisa en Zoho antes de volver a enviarlo",
       )
     }
-    await withOrgContext(deps.ownerDb, orgId, (tx) =>
-      finishProgressReport(tx, actor, orgId, { ...sending, state: "enviado" }),
-    )
+    try {
+      await withOrgContext(deps.ownerDb, orgId, (tx) =>
+        finishProgressReport(tx, actor, orgId, { ...sending, state: "enviado" }),
+      )
+    } catch {
+      throw new ServiceError(
+        "SENT_UNRECORDED",
+        500,
+        `El correo salió, pero el registro quedó en «enviándose»: ciérralo con informe-salio ${report.number}, sin volver a enviarlo`,
+      )
+    }
     return { sent: true, to, subject }
+  }
+
+  /**
+   * Cierra como enviado un informe que quedó «enviándose» o «no se sabe si salió», después
+   * de comprobar en el correo que salió. No lo vuelve a enviar.
+   */
+  const confirmReportSent = async (orgId: string, actor: AdminActor, number: number) => {
+    requireLoadAdmin(actor)
+    const reports = await withOrgContext(deps.ownerDb, orgId, (tx) =>
+      listProgressReports(tx, orgId),
+    )
+    const found = reports.find((report) => report.number === number)
+    if (!found)
+      throw new ServiceError("NOT_FOUND", 404, `El informe N.º ${number} no está en el registro`)
+    if (found.state === "enviado")
+      throw new ServiceError("CONFLICT", 409, `El informe N.º ${number} ya figura como enviado`)
+    await withOrgContext(deps.ownerDb, orgId, (tx) =>
+      finishProgressReport(tx, actor, orgId, {
+        number,
+        to: found.to ?? "",
+        subject: found.subject ?? "",
+        stage: found.stage ?? "",
+        pdfKey: found.pdfKey ?? "",
+        state: "enviado",
+        // La hora en que se intentó, no la de hoy: es cuando salió.
+        sentAt: found.at,
+      }),
+    )
+    return { confirmed: true, number }
   }
 
   /**
@@ -380,6 +417,16 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
     report: ProgressReportInput,
     sentAt: string,
   ) => {
+    // El PDF guardado tiene que ser el que salió: con su fecha, no la de hoy.
+    if (!report.date)
+      throw new ServiceError(
+        "VALIDATION",
+        400,
+        "El informe necesita su fecha: la que lleva el PDF que salió",
+        {
+          date: "La fecha en que salió",
+        },
+      )
     const { pdf: bytes, to, subject, sent } = await previewReport(orgId, actor, report)
     if (sent)
       throw new ServiceError(
@@ -400,6 +447,7 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
         pdfKey,
         state: "enviado",
         sentAt,
+        registered: true,
       }),
     )
     return { registered: true, to, subject, sentAt }
@@ -433,6 +481,7 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
     previewReport,
     sendReport,
     registerReport,
+    confirmReportSent,
     listReports,
     reportPdfUrl,
   }
