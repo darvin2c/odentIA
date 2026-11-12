@@ -21,7 +21,7 @@ import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
-import { linkClientToOrganization } from "./admin-clients.js"
+import { clientDuplicatePairsSql, linkClientToOrganization } from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
 import { type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
 import { type SupportHomeRow, supportHomeRows } from "./admin-support.js"
@@ -1668,20 +1668,20 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
   }
 }
 
-/** (12) Duplicados por correo: dos clientes con la misma persona; fusionar lo decide una persona. */
+/**
+ * (12) Duplicados por correo: dos clientes con la misma persona que se pueden
+ * fusionar (la regla única `clientDuplicatePairsSql`, la misma de la señal
+ * «puede estar repetida»); fusionar lo decide una persona.
+ */
 async function ruleDuplicates(pass: Pass): Promise<void> {
   const pairs = await rows<{ keep_id: string; drop_id: string; keep_name: string; email: string }>(
     pass.tx,
-    sql`select distinct on (ca.id, cb.id) ca.id as keep_id, cb.id as drop_id, ca.name as keep_name, a.email
-    from saas_client_contact a
-    join saas_client_contact b on b.email = a.email and b.client_id <> a.client_id
-    join saas_client ca on ca.id = a.client_id
-    join saas_client cb on cb.id = b.client_id
-    where a.email is not null and ca.archived_at is null and cb.archived_at is null
-      and (ca.created_at, ca.id) < (cb.created_at, cb.id)
-      -- Dos con cuenta no se fusionan: no es un duplicado que se pueda resolver aquí.
-      and (ca.organization_id is null or cb.organization_id is null)
-    order by ca.id, cb.id, a.email`,
+    sql`select distinct on (ca.id, cb.id) ca.id as keep_id, cb.id as drop_id, ca.name as keep_name, p.email
+    from (${clientDuplicatePairsSql}) p
+    join saas_client ca on ca.id = p.a_id
+    join saas_client cb on cb.id = p.b_id
+    where (ca.created_at, ca.id) < (cb.created_at, cb.id)
+    order by ca.id, cb.id, p.email`,
   )
   for (const pair of pairs) {
     await pass.item({
@@ -2715,4 +2715,21 @@ export async function recordKairosAiUse(tx: Db, input: KairosAiUseInput): Promis
     .returning({ id: kairosAiUsage.id })
   if (!row) throw new ServiceError("INTERNAL", 500, "No se anotó el gasto del modelo")
   return row
+}
+
+/** Lo que el escritor de Kairós informa de cada llamada (`onUse` de `createKairosWriter`). */
+export interface KairosAiUseReport extends Omit<KairosAiUseInput, "purpose"> {
+  purpose: string
+}
+
+/**
+ * El `onUse` del escritor de Kairós, el mismo en la API y en el worker: anota
+ * cada llamada al modelo en su propia transacción (`recordKairosAiUse`).
+ */
+export function kairosAiUseRecorder(ownerDb: Db): (use: KairosAiUseReport) => Promise<void> {
+  return async (use) => {
+    await ownerDb.transaction((tx) =>
+      recordKairosAiUse(tx as Db, { ...use, purpose: use.purpose as KairosAiPurpose }),
+    )
+  }
 }

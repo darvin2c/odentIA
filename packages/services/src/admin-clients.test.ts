@@ -21,6 +21,7 @@ import {
   archiveClient,
   CLIENT_STAGES,
   type ClientStageFacts,
+  clientSignals,
   clientStage,
   clientTimeline,
   createClient,
@@ -471,6 +472,33 @@ describe("la lista", () => {
     expect(again.items.find((i) => i.id === twin)?.signals.map((s) => s.code)).toContain(
       "duplicado",
     )
+  })
+
+  it("«puede estar repetida» no sale si no se pueden fusionar: las dos con cuenta, o de otro producto", async () => {
+    const accounts = `cuentas-${uniq()}@x.test`
+    const withAccount = [await newClient({ email: accounts }), await newClient({ email: accounts })]
+    for (const id of withAccount) {
+      const orgId = `arm-dup-${uniq()}`
+      await insertOrg(ownerDb, orgId, orgId)
+      await ownerDb.update(saasClient).set({ organizationId: orgId }).where(eq(saasClient.id, id))
+    }
+    const products = `productos-${uniq()}@x.test`
+    const dental = await newClient({ email: products })
+    const medical = await newClient({ email: products, product: "medical" })
+    const signals = await clientSignals(ownerDb, admin, [...withAccount, dental, medical])
+    for (const id of [...withAccount, dental, medical])
+      expect((signals.get(id) ?? []).map((s) => s.code)).not.toContain("duplicado")
+    // `mergeClients` rechaza esas mismas fusiones.
+    await expect(
+      mergeClients(ownerDb, admin, withAccount[0] as string, withAccount[1] as string),
+    ).rejects.toMatchObject({ code: "CLIENT_MERGE_TWO_ACCOUNTS" })
+    await expect(mergeClients(ownerDb, admin, dental, medical)).rejects.toMatchObject({
+      code: "VALIDATION",
+    })
+    // Con una sola con cuenta sí se puede, y sí sale.
+    const single = await newClient({ email: accounts })
+    const withSingle = await clientSignals(ownerDb, admin, [single, ...withAccount])
+    expect((withSingle.get(single) ?? []).map((s) => s.code)).toContain("duplicado")
   })
 })
 

@@ -1,19 +1,19 @@
 ---
 name: odentia-carga
-description: Cargar todo lo de una clínica nueva desde lo que ya tiene, sin plantilla nuestra: su configuración (empresa, marca, hoja membretada, sedes, servicios de la biblioteca con su código, caja, inventario, asistente, formatos y equipo) y sus pacientes (su Excel o lo que exporta su sistema). Pedirle los datos con la carta de bienvenida en PDF, estudiarlos, presentar el plan de carga en PDF para aprobarlo, dejar los planes listos para «Cargar datos» en la administración y, después de cargar, el informe a la clínica en PDF, que se envía desde la administración con aprobación. Usar cuando el equipo trae los datos de una clínica que empieza o pide la carta, el documento o el mensaje para pedírselos a una clínica nueva.
+description: Cargar todo lo de una clínica nueva desde lo que ya tiene, sin plantilla nuestra: su configuración (empresa, marca, hoja membretada, sedes, servicios de la biblioteca con su código, caja, inventario, asistente, formatos y equipo) y sus pacientes (su Excel o lo que exporta su sistema). Pedirle los datos con la carta de bienvenida en PDF, estudiarlos, presentar el plan de carga en PDF para aprobarlo, dejar los planes como borrador en la ficha del cliente en la administración (`import:dejar`) para que una persona los apruebe y los cargue y, después de cargar, el informe a la clínica en PDF, que se deja igual y se envía desde la administración con aprobación. Usar cuando el equipo trae los datos de una clínica que empieza o pide la carta, el documento o el mensaje para pedírselos a una clínica nueva.
 ---
 
 # Cargar los datos de una clínica nueva
 
-El motivo y los límites están en `docs/decisions/0104-cargar-los-datos-de-una-clinica-nueva.md`. Esta skill prepara los planes y no escribe en ninguna base: la carga la hace una persona de administración en la ficha de la clínica.
+El motivo y los límites están en `docs/decisions/0104-cargar-los-datos-de-una-clinica-nueva.md`. Esta skill prepara los planes y no escribe en ninguna base: los deja como borrador en la administración (`import:dejar`) y una persona de Administración los aprueba, los ensaya, los carga y los envía en la ficha del cliente › Alta.
 
 ## El proceso, cada vez que la clínica envía algo
 
 1. **Se estudia todo lo que envió**: el correo entero, cada adjunto y los demás correos del hilo. Con eso se trabaja: no se le pregunta a quien acompaña lo que ya está ahí.
 2. **Se presenta el plan de carga en PDF** (`import:clinica` para la configuración, el informe de `import:prepare` para los pacientes): lo que llegó, lo que se carga y dónde, lo que no y por qué, y lo que hay que decidir, con una recomendación. Nada se carga sin aprobación.
-3. **Aprobado, se carga** en la administración: ficha de la clínica › «Cargar datos».
+3. **Se deja en la administración** con `import:dejar` (abajo) y, **aprobado, se carga** ahí: Clientes › ficha de la clínica › Alta.
 4. **Se presenta el informe a la clínica en PDF** (`import:informe`): lo que recibimos, lo que usamos, lo que hicimos, dónde lo ve y lo que sigue. Es informativo: no habla del contrato ni de la ley, no promete nada y no pide respuesta. El comando rechaza un texto que lo haga.
-5. **Aprobado, se envía** desde la administración, «Cargar datos» › «Informe a la clínica»: sale por el correo de producción con el PDF adjunto, una sola vez por número de informe.
+5. **Se deja con `import:dejar` y, aprobado, se envía** desde la administración, ficha del cliente › Alta › «Informe a la clínica»: sale por el correo de producción con el PDF adjunto, una sola vez por número de informe.
 
 ## No hace falta una plantilla nuestra
 
@@ -116,10 +116,15 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
    - **Lo parecido lo decide la persona, nunca la skill.** Mismo nombre, mismo teléfono o la madre repetida sin documento: pregunta. Si son la misma persona, una queda fuera con `skip` o el niño apunta a la misma madre con `guardian`.
    - Un fijo sin código de país no se puede usar. Pregunta si se carga sin ese teléfono (`invalidPhones: "omitir"`).
 5. **Repetir los pasos 3 y 4** hasta que lo que queda fuera y los errores sean solo lo que la clínica acepta dejar fuera.
-6. **La carga la hace la persona en la administración:** la ficha de la clínica › «Cargar datos» › «Elegir el plan» (`plan.json`).
+6. **Dejar el plan en la administración** (ver «Dejarlo en la administración», abajo):
+   ```bash
+   pnpm --filter @odentia/services import:dejar -- <carpeta>/plan.json --clinica <slug>
+   ```
+   Va sin PDF: el `informe.md` tiene datos de personas y no se sube.
+7. **La carga la hace la persona en la administración:** Clientes › ficha de la clínica › Alta, en «La skill dejó…» aprueba el plan y en «Cargar datos» lo toma del borrador.
    - Primero ve el ensayo: además de lo del plan, dice quién ya estaba en la clínica.
    - Después pulsa «Cargar». Si se corta, «Seguir desde donde quedó» no duplica nada.
-7. **Comprobar la carga**, antes de borrar nada:
+8. **Comprobar la carga**, antes de borrar nada:
    - **Las cifras cuadran**, con el informe y el ensayo:
      - creadas + ya estaban + no entraron = las personas del plan, que son los pacientes más quienes hablan por ellos (una madre que no es paciente también se crea);
      - pacientes del plan + lo que quedó fuera al preparar (incluida la persona repetida que se tomó una vez) = las filas del archivo.
@@ -130,7 +135,7 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
    - **Una muestra a mano**, comparada con el archivo: unas diez fichas elegidas a propósito. Entre ellas, un menor con quien habla por él, un DNI al que se le devolvió el cero, una celda con dos teléfonos, una persona repetida en el archivo y la última fila. Se revisan con la propietaria en la reunión de alta, mirando su pantalla: ni la administración ni el acceso de soporte abren pacientes.
    - **«Faltan datos»** en Personas: los que entraron incompletos, para completarlos con la clínica.
    - **Los datos de la clínica** (sedes, unidades dentales, equipo, servicios y precios) se repasan pantalla por pantalla en la reunión de alta, contra lo que envió.
-8. **Al terminar**, borra los archivos de la clínica, `mapa.json` (sus `overrides` llevan datos de personas), `plan.json` e `informe.md`, la conversación de Claude Code de esa carga (su archivo en `projects/` de la carpeta de configuración de Claude Code), y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista: lo promete el contrato de encargo. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
+9. **Al terminar**, borra los archivos de la clínica, `mapa.json` (sus `overrides` llevan datos de personas), `plan.json` e `informe.md`, la conversación de Claude Code de esa carga (su archivo en `projects/` de la carpeta de configuración de Claude Code), y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista: lo promete el contrato de encargo. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
 
 ## La configuración de la clínica
 
@@ -151,7 +156,7 @@ Deja `clinica.json` (el plan, con el logo y la hoja dentro) y `plan-de-carga-<n>
 - **Formatos propios** (consentimientos y formularios): se cargan en borrador; la clínica los revisa y los publica.
 - **`slug`**: la dirección de la clínica en odentIA («dra-marialicia-calderon»). La administración no carga el plan en otra clínica.
 
-En la administración: ficha de la clínica › «Cargar datos» › «Configuración de la clínica» › «Elegir el plan». El ensayo dice, área por área, qué se crea, qué se actualiza, qué ya está, qué espera a una persona y qué no entra y por qué. «Cargar» lo guarda y envía las invitaciones. Con la primera sede, la clínica se enciende como en su alta. Cuando una persona del equipo acepta su invitación, se vuelve a ensayar y a cargar el mismo plan.
+Se deja con `import:dejar -- <carpeta>/clinica.json --clinica <slug> --numero 1` (con el `plan-de-carga-1.pdf` en `--pdf`, o lo arma de nuevo con la `review` de `clinica.fuente.json` si está al lado). En la administración: Clientes › ficha de la clínica › Alta: «La skill dejó…» › Aprobar, y en «Configuración de la clínica» se toma el plan del borrador. El ensayo dice, área por área, qué se crea, qué se actualiza, qué ya está, qué espera a una persona y qué no entra y por qué. «Cargar» lo guarda y envía las invitaciones. Con la primera sede, la clínica se enciende como en su alta. Cuando una persona del equipo acepta su invitación, se vuelve a ensayar y a cargar el mismo plan.
 
 ## El informe a la clínica
 
@@ -161,7 +166,20 @@ Se escribe `informe-<n>.json` (formato `progressReportSchema`, `packages/service
 pnpm --filter @odentia/services import:informe -- <carpeta>/informe-1.json
 ```
 
-Va a alguien del equipo de la clínica o con su invitación, y responde a quien acompaña, con su correo de odentia32.com (o del producto). Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Aprobado, se envía en «Cargar datos» › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
+Va a alguien del equipo de la clínica o con su invitación, y responde a quien acompaña, con su correo de odentia32.com (o del producto). Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Se deja con `import:dejar -- <carpeta>/informe-1.json --clinica <slug>` (el número es el del informe). Aprobado, se envía en la ficha del cliente › Alta › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
+
+## Dejarlo en la administración
+
+```bash
+pnpm --filter @odentia/services import:dejar -- <archivo.json> --clinica <slug> [--numero N] [--pdf <archivo.pdf>]
+```
+
+- **Qué deja:** reconoce el archivo por su forma: `clinica.json` (plan de configuración), `plan.json` (plan de pacientes) o `informe-N.json` (informe a la clínica). Lo valida como lo validará la administración, sin mostrar datos de personas, y lo sube con su PDF: el que se da en `--pdf` o el que arma con las mismas funciones de `import:clinica` e `import:informe`. El plan de pacientes va sin PDF. `--clinica` es la dirección de la clínica en odentIA; el plan de configuración tiene que ser de esa misma clínica.
+- **Queda como borrador** en Clientes › ficha de la clínica › Alta («La skill dejó…»). Ahí una persona de Administración lo aprueba o lo devuelve con una nota, lo ensaya, lo carga y envía el informe. El mismo número no se deja dos veces: uno devuelto se reemplaza dejando otra vez ese número; si no, se usa el siguiente.
+- **La llave solo deposita borradores.** No aprueba, no ensaya, no carga, no envía y no lee clientes ni pacientes.
+- **Crear la llave:** en la administración, Equipo › Llaves de la skill › Crear (solo Administración). Se muestra una sola vez: cópiala y guárdala en `~/odentia-cargas/.llave-administracion`, sola en el archivo, con permisos 600 (`chmod 600 ~/odentia-cargas/.llave-administracion`; el comando avisa si el archivo lo pueden leer otros). También sirve la variable `ODENTIA_ADMIN_KEY`. Vence a los 90 días; si se pierde o se filtra, se revoca en la misma pantalla y se crea otra. Nunca va al repositorio, al chat ni a un comando escrito: el comando nunca la muestra.
+- **A dónde va:** `https://api.odentia32.com` (o `ODENTIA_API_URL`, por ejemplo `http://localhost:3001` para probar en local).
+- **Si falla**, lo dice en palabras: 401, la llave venció, se revocó o está mal copiada; 403, no es de una persona de Administración con su cuenta activa; 413, el archivo con su PDF pasa de 12 MB (achica el logo, la hoja o el PDF); 409, ese número ya se usó. Si se corta la conexión, no reintenta: mira la ficha antes de volver a dejarlo.
 
 ## El mapa
 
@@ -209,4 +227,4 @@ Lo que el preparador hace solo y deja dicho en el informe:
 
 ## Lo que no hace
 
-No carga citas, saldos ni historia anterior. No toca a quien ya está en la clínica con su documento. No envía mensajes ni enciende agentes. No une personas por su teléfono o su nombre.
+No carga ni aprueba nada en la administración: solo deja borradores. No carga citas, saldos ni historia anterior. No toca a quien ya está en la clínica con su documento. No envía mensajes ni enciende agentes. No une personas por su teléfono o su nombre.

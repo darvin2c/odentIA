@@ -377,6 +377,20 @@ borrado; el correo y su adjunto se borran al terminar la carga y, como máximo, 
 de recibidos, a mano: nada los borra solo. Es la constancia interna de cómo se cumple lo
 que promete la carta, no una evaluación de cumplimiento legal.
 
+### Correo entrante
+
+`soporte@` y `contacto@` de los tres dominios pasan por el Email Worker
+`sallca-correo-entrante` (`infra/cloudflare/email-inbound`, ADR 0183): lo reenvía al buzón de
+siempre (`FORWARD_TO`) y además lo manda firmado a `POST /api/inbound/email`, donde la
+administración lo liga a su cliente. `INBOUND_EMAIL_SECRET` va en la API (entorno de
+producción del proyecto) y, con el mismo valor, como secreto del Worker; sin él la ruta
+responde 503 y el correo sigue llegando solo al buzón. Se genera una vez (`openssl rand -hex 32`);
+rotarlo es cambiarlo en los dos lados a la vez. El Worker no se despliega desde el repositorio
+ni desde el CI: los pasos, las reglas de Email Routing y el paso de `vistia20.com` de Namecheap
+a Cloudflare están en su `README.md`. Los adjuntos que guarda la administración (PDF, imagen,
+xlsx, csv y docx, solo para Administración) los borra el worker a los 30 días; la copia del
+buzón sigue el plazo de arriba, a mano.
+
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT` (`mailto:` de odentIA) son
 las claves de los avisos en el equipo (ADR 0177): la API sirve la pública y el worker
 envía con el par. Son una sola para los tres productos y se generan una vez

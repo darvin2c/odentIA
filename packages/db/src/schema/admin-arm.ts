@@ -749,3 +749,29 @@ export const kairosAiUsage = adminSchema.table(
     ),
   ],
 )
+
+/** Una cifra que cita el resumen de la semana: la pone el cálculo de los reportes, nunca el modelo. */
+export interface KairosWeeklyFigure {
+  label: string
+  words: string
+}
+
+/**
+ * El resumen de la semana que escribe Kairós para Reportes (solo
+ * Administración): uno por semana, la del lunes `week_start` (día de Lima).
+ * `figures` guarda las cifras que citó, tal como las dio el cálculo; el texto
+ * solo las cita. Una semana escrita no se reescribe.
+ */
+export const kairosWeekly = adminSchema.table(
+  "kairos_weekly",
+  {
+    weekStart: date("week_start", { mode: "string" }).primaryKey(),
+    text: text("text").notNull(),
+    figures: jsonb("figures").$type<KairosWeeklyFigure[]>().notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check("kairos_weekly_monday_check", sql`extract(isodow from ${table.weekStart}) = 1`),
+    check("kairos_weekly_text_check", sql`char_length(btrim(${table.text})) BETWEEN 1 AND 4000`),
+  ],
+)

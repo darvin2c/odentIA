@@ -1,0 +1,302 @@
+process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
+
+import { createOwnerDb, type Db } from "@odentia/db"
+import {
+  saasClient,
+  saasClientContact,
+  saasClientFile,
+  saasInboundEmail,
+} from "@odentia/db/schema/admin-arm"
+import { saasFollowUp } from "@odentia/db/schema/saas-billing"
+import type { Storage } from "@odentia/services"
+import { eq } from "drizzle-orm"
+import { migrate } from "drizzle-orm/postgres-js/migrator"
+import { Hono } from "hono"
+import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import {
+  allowedInboundAttachment,
+  createInboundEmailRoute,
+  signInboundEmail,
+} from "./inbound-email.js"
+
+/**
+ * El correo entrante firmado contra Postgres real: sin secreto 503; firma
+ * mala, vieja o de otro cuerpo 401; el mismo Message-ID entra una sola vez;
+ * solo se guardan los adjuntos permitidos, como documentos solo de
+ * Administración que se borran a los 30 días.
+ */
+
+const IMAGE = "dentalagent-postgres:18.6"
+const SECRET = "s".repeat(48)
+
+let container: StartedTestContainer
+let ownerDb: Db
+let app: Hono
+let disabled: Hono
+let clientId: string
+
+const objects = new Map<string, Uint8Array>()
+const storage: Pick<Storage, "putAttachmentAt" | "deleteAttachment"> = {
+  putAttachmentAt: async (key, bytes) => {
+    objects.set(key, bytes)
+  },
+  deleteAttachment: async (key) => {
+    objects.delete(key)
+  },
+}
+
+const PDF = Buffer.from("%PDF-1.4\n%%EOF\n").toString("base64")
+const EXE = Buffer.from("MZ\x90\x00ejecutable").toString("base64")
+const CSV = Buffer.from("nombre;teléfono\nRosa;999\n", "latin1").toString("base64")
+
+function email(messageId: string, extra: Record<string, unknown> = {}) {
+  return {
+    mailbox: "soporte",
+    product: "dental",
+    messageId,
+    from: "Dra.Ana@Clinica-Correo.test",
+    fromName: "Dra. Ana",
+    to: "soporte@odentia32.com",
+    subject: "Les mando los pacientes",
+    text: "Adjunto el archivo.",
+    receivedAt: new Date().toISOString(),
+    attachments: [],
+    ...extra,
+  }
+}
+
+function send(body: unknown, opts: { timestamp?: number; signature?: string; target?: Hono } = {}) {
+  const raw = JSON.stringify(body)
+  const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000)
+  return (opts.target ?? app).request("/api/inbound/email", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-sallca-timestamp": String(timestamp),
+      "x-sallca-signature": opts.signature ?? signInboundEmail(SECRET, raw, timestamp),
+    },
+    body: raw,
+  })
+}
+
+async function code(response: Response): Promise<string> {
+  return ((await response.json()) as { error: { code: string } }).error.code
+}
+
+beforeAll(async () => {
+  container = await new GenericContainer(IMAGE)
+    .withExposedPorts(5432)
+    .withEnvironment({
+      POSTGRES_DB: "dentalagent",
+      POSTGRES_USER: "dentalagent",
+      POSTGRES_PASSWORD: "dentalagent",
+      POSTGRES_APP_PASSWORD: "dentalagent_app",
+    })
+    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
+    .withCommand([
+      "postgres",
+      "-c",
+      "shared_preload_libraries=pg_cron",
+      "-c",
+      "cron.database_name=dentalagent",
+    ])
+    .start()
+  const url = `${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`
+  ownerDb = createOwnerDb(`postgres://dentalagent:dentalagent@${url}`)
+  await migrate(ownerDb, { migrationsFolder: "../../packages/db/drizzle" })
+  app = new Hono().route(
+    "/api/inbound",
+    createInboundEmailRoute({ ownerDb, storage, secret: SECRET }),
+  )
+  disabled = new Hono().route(
+    "/api/inbound",
+    createInboundEmailRoute({ ownerDb, storage, secret: "" }),
+  )
+  const [client] = await ownerDb
+    .insert(saasClient)
+    .values({ name: "Clínica Correo (ficticia)", product: "dental" })
+    .returning({ id: saasClient.id })
+  clientId = client!.id
+  await ownerDb
+    .insert(saasClientContact)
+    .values({ clientId, name: "Dra. Ana", email: "dra.ana@clinica-correo.test", isPrimary: true })
+}, 180_000)
+
+afterAll(async () => {
+  await container?.stop()
+})
+
+describe("la firma", () => {
+  it("sin secreto configurado la ruta no está: 503", async () => {
+    const response = await send(email("<sin-secreto@test>"), { target: disabled })
+    expect(response.status).toBe(503)
+    expect(await code(response)).toBe("INBOUND_EMAIL_DISABLED")
+  })
+
+  it("firma mala, de otro cuerpo o sin cabeceras: 401 y no se registra", async () => {
+    const body = email("<firma-mala@test>")
+    expect((await send(body, { signature: `sha256=${"0".repeat(64)}` })).status).toBe(401)
+    const other = signInboundEmail(
+      SECRET,
+      JSON.stringify(email("<otro@test>")),
+      Math.floor(Date.now() / 1000),
+    )
+    expect((await send(body, { signature: other })).status).toBe(401)
+    const wrongSecret = signInboundEmail(
+      "x".repeat(48),
+      JSON.stringify(body),
+      Math.floor(Date.now() / 1000),
+    )
+    expect((await send(body, { signature: wrongSecret })).status).toBe(401)
+    const bare = await app.request("/api/inbound/email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    expect(bare.status).toBe(401)
+    expect(await code(bare)).toBe("INBOUND_SIGNATURE_INVALID")
+    const rows = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<firma-mala@test>"))
+    expect(rows).toHaveLength(0)
+  })
+
+  it("una firma vieja (más de 5 minutos) o del futuro no vale, aunque sea correcta", async () => {
+    const now = Math.floor(Date.now() / 1000)
+    expect((await send(email("<vieja@test>"), { timestamp: now - 301 })).status).toBe(401)
+    expect((await send(email("<futura@test>"), { timestamp: now + 301 })).status).toBe(401)
+    expect(
+      (
+        await send(email("<justa@test>", { from: "otra@desconocida.test" }), {
+          timestamp: now - 290,
+        })
+      ).status,
+    ).toBe(201)
+  })
+
+  it("cambiar el instante de una firma válida no la rejuvenece", async () => {
+    const body = email("<rejuvenecida@test>")
+    const old = Math.floor(Date.now() / 1000) - 600
+    const signature = signInboundEmail(SECRET, JSON.stringify(body), old)
+    expect((await send(body, { signature })).status).toBe(401)
+  })
+})
+
+describe("el correo", () => {
+  it("entra con su cliente, sus adjuntos permitidos y su actividad; lo demás se descarta", async () => {
+    const response = await send(
+      email("<con-adjuntos@test>", {
+        attachments: [
+          { filename: "pacientes.pdf", contentType: "application/pdf", base64: PDF },
+          { filename: "pacientes.csv", contentType: "application/octet-stream", base64: CSV },
+          { filename: "factura.pdf.exe", contentType: "application/pdf", base64: EXE },
+        ],
+      }),
+    )
+    expect(response.status).toBe(201)
+    const { data } = (await response.json()) as {
+      data: { id: string; duplicate: boolean; stored: number; skipped: number }
+    }
+    expect(data).toMatchObject({ duplicate: false, stored: 2, skipped: 1 })
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.id, data.id))
+    expect(row).toMatchObject({
+      clientId,
+      matchedBy: "contacto",
+      fromAddress: "dra.ana@clinica-correo.test",
+    })
+    const files = await ownerDb
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.clientId, clientId))
+    expect(files).toHaveLength(2)
+    for (const file of files) {
+      expect(file).toMatchObject({ kind: "correo", adminOnly: true, source: "correo" })
+      expect(file.deleteAfter).not.toBeNull()
+      expect(objects.has(file.objectKey)).toBe(true)
+    }
+    expect(files.map((file) => file.contentType).sort()).toEqual(["application/pdf", "text/csv"])
+    const activity = await ownerDb
+      .select()
+      .from(saasFollowUp)
+      .where(eq(saasFollowUp.clientId, clientId))
+    expect(activity).toHaveLength(1)
+    expect(activity[0]).toMatchObject({ kind: "correo", direction: "entro" })
+  })
+
+  it("el mismo Message-ID dos veces (la misma entrega repetida) entra una sola vez", async () => {
+    const body = email("<repetido@test>", {
+      attachments: [{ filename: "a.pdf", contentType: "application/pdf", base64: PDF }],
+    })
+    const timestamp = Math.floor(Date.now() / 1000)
+    const signature = signInboundEmail(SECRET, JSON.stringify(body), timestamp)
+    const first = await send(body, { timestamp, signature })
+    expect(first.status).toBe(201)
+    const objectsAfterFirst = objects.size
+    const again = await send(body, { timestamp, signature })
+    expect(again.status).toBe(200)
+    const { data } = (await again.json()) as { data: { duplicate: boolean; stored: number } }
+    expect(data).toMatchObject({ duplicate: true, stored: 0 })
+    expect(objects.size).toBe(objectsAfterFirst)
+    const rows = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<repetido@test>"))
+    expect(rows).toHaveLength(1)
+    // Otra entrega del mismo correo, firmada de nuevo, tampoco lo duplica.
+    expect((await send(body)).status).toBe(200)
+    const activity = await ownerDb
+      .select()
+      .from(saasFollowUp)
+      .where(eq(saasFollowUp.clientId, clientId))
+    expect(activity).toHaveLength(2)
+  })
+
+  it("sin cliente queda sin cliente, y sus adjuntos se guardan igual", async () => {
+    const response = await send(
+      email("<sin-cliente@test>", {
+        from: "nadie@desconocida.test",
+        attachments: [{ filename: "a.pdf", contentType: "application/pdf", base64: PDF }],
+      }),
+    )
+    expect(response.status).toBe(201)
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<sin-cliente@test>"))
+    expect(row?.clientId).toBeNull()
+    expect(row?.attachments).toHaveLength(1)
+  })
+
+  it("un cuerpo que no cumple se rechaza con su campo, ya firmado", async () => {
+    const response = await send(email("<malo@test>", { mailbox: "ventas" }))
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: { fields: Record<string, string> } }
+    expect(body.error.fields).toHaveProperty("mailbox")
+  })
+})
+
+describe("adjuntos permitidos", () => {
+  const bytes = (text: string) => new Uint8Array(Buffer.from(text, "latin1"))
+  it("decide por los bytes, no por lo que declara", () => {
+    expect(
+      allowedInboundAttachment(bytes("%PDF-1.7"), "x.bin", "application/octet-stream")?.ext,
+    ).toBe("pdf")
+    expect(allowedInboundAttachment(bytes("\xff\xd8\xff\xe0"), "foto", "")?.ext).toBe("jpg")
+    expect(allowedInboundAttachment(bytes("PK\x03\x04..."), "datos.xlsx", "")?.ext).toBe("xlsx")
+    expect(allowedInboundAttachment(bytes("PK\x03\x04..."), "carta.docx", "")?.ext).toBe("docx")
+    expect(
+      allowedInboundAttachment(bytes("PK\x03\x04..."), "todo.zip", "application/zip"),
+    ).toBeNull()
+    expect(
+      allowedInboundAttachment(bytes("<svg onload=x>"), "logo.svg", "image/svg+xml"),
+    ).toBeNull()
+    expect(allowedInboundAttachment(bytes("<html>"), "pdf.pdf", "application/pdf")).toBeNull()
+    expect(allowedInboundAttachment(bytes("a\x00b"), "datos.csv", "text/csv")).toBeNull()
+    expect(allowedInboundAttachment(bytes("a;b\r\n1;2"), "datos.csv", "")?.ext).toBe("csv")
+  })
+})

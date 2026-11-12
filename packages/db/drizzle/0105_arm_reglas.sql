@@ -95,8 +95,9 @@ WHERE f.client_id IS NULL;--> statement-breakpoint
 
 -- 5. La fecha vigente de cada solicitud no descartada pasa a ser una tarea «Volver a contactar»
 -- para quien la puso. Vigente es la de la última entrada, como la lee hoy la lista de espera
--- (`isLastEntry` de saas-founders): si la última no tiene fecha, no hay que volver. Solo la de
--- hoy o después (día de Lima).
+-- (`isLastEntry` de saas-founders): si la última no tiene fecha, no hay que volver. También la
+-- que ya pasó: hoy sale en Inicio como vencida y seguirá saliendo en Hoy como tarea vencida
+-- (abierta con su día ya pasado), en vez de desaparecer con el traslado.
 INSERT INTO saas_task (client_id, kind, title, due_on, assignee_user_id, created_by, created_at, updated_at)
 SELECT r.client_id, 'llamar', 'Volver a contactar', f.follow_up_on, f.author_user_id, f.author_user_id,
   f.created_at, f.created_at
@@ -110,7 +111,7 @@ JOIN LATERAL (
 ) f ON true
 WHERE r.status <> 'descartada'
   AND r.client_id IS NOT NULL
-  AND f.follow_up_on >= (now() AT TIME ZONE 'America/Lima')::date
+  AND f.follow_up_on IS NOT NULL
   AND NOT EXISTS (
     SELECT 1 FROM saas_task t
     WHERE t.client_id = r.client_id AND t.kind = 'llamar' AND t.due_on = f.follow_up_on AND t.title = 'Volver a contactar'

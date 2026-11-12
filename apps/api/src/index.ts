@@ -1,12 +1,12 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
-import { decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import { type Auth, createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -71,6 +71,13 @@ if (env.NODE_ENV === "production" && !env.FOUNDERS_EMAIL) {
   console.warn("FOUNDERS_EMAIL vacío: el equipo no recibe las solicitudes nuevas (docs/deployment.md).")
 }
 
+// El modelo de la plataforma (el mismo `LLM_*`), y su gasto, como gasto de Sallca: Kairós prepara, nunca envía.
+const llm = platformLlmFromEnv(env)
+const kairos = createKairosWriter({ platform: llm, onUse: kairosAiUseRecorder(ownerDb) })
+if (env.NODE_ENV === "production" && !env.INBOUND_EMAIL_SECRET) {
+  console.warn("INBOUND_EMAIL_SECRET vacío: el correo entrante de soporte@ y contacto@ no llega al ARM (docs/deployment.md).")
+}
+
 const app = createApp({
   auth,
   db,
@@ -102,7 +109,9 @@ const app = createApp({
   ...(env.CLIENT_IP_HEADER
     ? { registrationRemoteAddress: (c: Context) => c.req.header(env.CLIENT_IP_HEADER as string)?.split(",")[0]?.trim() || undefined }
     : {}),
-  llm: platformLlmFromEnv(env),
+  llm,
+  kairos,
+  inboundEmailSecret: env.INBOUND_EMAIL_SECRET || undefined,
   decisions: {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
     timeoutMs: env.DECISIONS_TIMEOUT_MS,

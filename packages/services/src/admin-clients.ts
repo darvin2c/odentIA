@@ -482,12 +482,27 @@ export async function closeClientSaleAsEntered(
 
 /* ---------- Lista ---------- */
 
-/** Otra ficha viva tiene una persona con el mismo correo: puede ser la misma clínica. */
-const duplicateSql = sql<boolean>`exists (
-  select 1 from ${saasClientContact} k
+/**
+ * Los pares de fichas que pueden ser la misma clínica y que una persona puede
+ * fusionar (`mergeClients`): las dos vivas, del mismo producto, que no tengan
+ * cuenta las dos y con una persona con el mismo correo (`a_id`, `b_id`,
+ * `email`; cada par sale en los dos sentidos). La única regla de «puede estar
+ * repetida» en la lista y de la propuesta `duplicado` de Kairós: nunca se
+ * propone una fusión que `mergeClients` rechazaría.
+ */
+export const clientDuplicatePairsSql: SQL = sql`select k.client_id as a_id, k2.client_id as b_id, k.email
+  from ${saasClientContact} k
   join ${saasClientContact} k2 on k2.email = k.email and k2.client_id <> k.client_id
-  join ${saasClient} c2 on c2.id = k2.client_id and c2.archived_at is null
-  where k.client_id = ${saasClient.id} and k.email is not null)`
+  join ${saasClient} c1 on c1.id = k.client_id
+  join ${saasClient} c2 on c2.id = k2.client_id
+  where k.email is not null
+    and c1.archived_at is null and c2.archived_at is null
+    and c1.product = c2.product
+    and (c1.organization_id is null or c2.organization_id is null)`
+
+/** Otra ficha viva tiene una persona con el mismo correo y se puede fusionar con esta. */
+const duplicateSql = sql<boolean>`exists (
+  select 1 from (${clientDuplicatePairsSql}) p where p.a_id = ${saasClient.id})`
 
 const lastContactSql =
   sql`(select max(f.happened_at) from ${saasFollowUp} f where f.client_id = ${saasClient.id} and not f.from_note)`.mapWith(

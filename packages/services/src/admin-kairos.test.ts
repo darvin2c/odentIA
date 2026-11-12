@@ -385,6 +385,31 @@ beforeAll(async () => {
     createdAt: ago(3),
   })
   await client("dup2", "Dental Repetida Dos (ficticia)", { email: "dup@kairos.test" })
+  // Las que `mergeClients` no fusionaría no se proponen: las dos con cuenta, o de otro producto.
+  await insertOrg(ownerDb, "kz-dup-cuenta-1", "kz-dup-cuenta-1")
+  await insertOrg(ownerDb, "kz-dup-cuenta-2", "kz-dup-cuenta-2")
+  await client("dupCuenta1", "Dental Con Cuenta (ficticia)", {
+    email: "dup-cuentas@kairos.test",
+    organizationId: "kz-dup-cuenta-1",
+    open: false,
+    createdAt: ago(3),
+  })
+  await client("dupCuenta2", "Dental Con Cuenta Dos (ficticia)", {
+    email: "dup-cuentas@kairos.test",
+    organizationId: "kz-dup-cuenta-2",
+    open: false,
+  })
+  await client("dupProducto1", "Dental De Otro Producto (ficticia)", {
+    email: "dup-producto@kairos.test",
+    createdAt: ago(3),
+  })
+  await client("dupProducto2", "Consultorio De Otro Producto (ficticio)", {
+    email: "dup-producto@kairos.test",
+  })
+  await ownerDb
+    .update(saasClient)
+    .set({ product: "medical" })
+    .where(eq(saasClient.id, ids.dupProducto2 as string))
 
   // (10) Un correo sin cliente y otro de un cliente, sin su actividad.
   const [orphan] = await ownerDb
@@ -567,6 +592,9 @@ describe("la pasada de Kairós", () => {
     const [dup] = await itemsOf(ids.dup2 as string, "duplicado")
     expect(dup).toMatchObject({ adminOnly: true })
     expect(dup?.payload).toMatchObject({ keepId: ids.dup1, dropId: ids.dup2 })
+    // La misma regla que «puede estar repetida»: nada que `mergeClients` rechazaría.
+    for (const key of ["dupCuenta1", "dupCuenta2", "dupProducto1", "dupProducto2"])
+      expect(await itemsOf(ids[key] as string, "duplicado")).toHaveLength(0)
   })
 
   it("devuelve lo que necesita redacción del modelo, sin lo que es solo de administración en lo de Soporte", () => {

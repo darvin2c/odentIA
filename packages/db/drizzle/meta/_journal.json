@@ -743,6 +743,13 @@
       "when": 1794512579647,
       "tag": "0105_arm_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1794515909649,
+      "tag": "0106_kairos_semana",
+      "breakpoints": true
     }
   ]
 }

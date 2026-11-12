@@ -378,7 +378,7 @@ describe("al desplegar", () => {
     expect(entries.find((entry) => entry.organization_id === ORG_DEMO_SUB)?.client_id).toBeNull()
   })
 
-  it("la fecha vigente de hoy o después pasa a ser una tarea; ni la vencida, ni la que la última entrada quitó, ni la de una descartada", async () => {
+  it("la fecha vigente pasa a ser una tarea, también la vencida (para que no desaparezca de Hoy); ni la que la última entrada quitó, ni la de una descartada", async () => {
     const tasks = rows<{
       client_id: string
       kind: string
@@ -390,9 +390,19 @@ describe("al desplegar", () => {
     }>(
       await ownerDb.execute(sql`
         select "client_id", "kind", "title", to_char("due_on", 'YYYY-MM-DD') as "due_on", "assignee_user_id", "status", "by_kairos"
-        from "saas_task"`),
+        from "saas_task" order by "due_on"`),
     )
     expect(tasks).toEqual([
+      // Venció antes del traslado: queda abierta con su día, y Hoy la muestra como vencida.
+      {
+        client_id: await clientOf(PAST_DATE),
+        kind: "llamar",
+        title: "Volver a contactar",
+        due_on: "2026-01-05",
+        assignee_user_id: ADA,
+        status: "abierta",
+        by_kairos: false,
+      },
       {
         client_id: await clientOf(OPEN),
         kind: "llamar",

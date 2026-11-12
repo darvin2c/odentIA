@@ -2,6 +2,7 @@ import {
   type AgentRuntime,
   consumeAgentRun,
   createAlreadyTold,
+  createKairosWriter,
   decisionKeyStartProblem,
   embedderFromEnv,
   platformLlmFromEnv,
@@ -18,6 +19,7 @@ import {
   configurePublicLinks,
   createStorage,
   ensureSuggestedConsentsEverywhere,
+  kairosAiUseRecorder,
   mailBrandDomains,
   type Storage,
   secretsKeyFromEnv,
@@ -27,6 +29,7 @@ import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runAutomationTick } from "./automation.js"
 import { runBackupWatchTick } from "./backup-watch.js"
 import { runHelpVideosTick } from "./help-videos.js"
+import { kairosQueue } from "./kairos.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runDemosTick } from "./demos.js"
 import { env } from "./env.js"
@@ -472,6 +475,17 @@ if (env.NODE_ENV === "production") {
   })
 }
 
+// Kairós, el agente del ARM de la administración (ADR 0183): cada 5 minutos sus reglas, los borradores que esperan
+// y, una vez al día desde las 07:00 de Lima, los resúmenes de los clientes y el de la semana. Solo prepara: nada
+// sale a una clínica sin el sí de una persona. Con el mismo modelo de la plataforma; su gasto es de Sallca.
+queues.push(
+  kairosQueue({
+    ownerDb,
+    writer: createKairosWriter({ platform: platformLlmFromEnv(env), onUse: kairosAiUseRecorder(ownerDb) }),
+    storage,
+  }),
+)
+
 /** Un ciclo recorre sus colas y toma una tarea de cada una por vuelta. */
 async function consume(own: QueueDef[]): Promise<void> {
   while (!stopping) {
@@ -510,10 +524,13 @@ const isAgentRun = (queue: QueueDef) => queue.name === "agent_runs"
 // Los avisos en el equipo también: esperan a servicios de push de afuera, y uno lento
 // no puede atrasar los mensajes de WhatsApp.
 const isPush = (queue: QueueDef) => queue.name === "push_notices"
+// Kairós también: su pasada espera al modelo (hasta 20 borradores y 30 resúmenes) y no puede atrasar la ingesta.
+const isKairos = (queue: QueueDef) => queue.name === "kairos"
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 await Promise.all([
-  consume(queues.filter((queue) => !isAgentRun(queue) && !isPush(queue))),
+  consume(queues.filter((queue) => !isAgentRun(queue) && !isPush(queue) && !isKairos(queue))),
   consume(queues.filter(isAgentRun)),
   consume(queues.filter(isPush)),
+  consume(queues.filter(isKairos)),
 ])
 process.exit(0)
