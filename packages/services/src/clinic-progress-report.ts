@@ -386,7 +386,7 @@ export async function reserveProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { number: number; to: string; subject: string },
+  input: { number: number; to: string; subject: string; stage: string; pdfKey: string },
 ): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('informe:' || ${orgId} || ':' || ${input.number}))`)
   const before = await progressReportSent(tx, orgId, input.number)
@@ -402,7 +402,7 @@ export async function reserveProgressReport(
     action: PROGRESS_REPORT_ACTIONS.enviando,
     organizationId: orgId,
     entityId: `informe-${input.number}`,
-    metadata: { to: input.to, subject: input.subject },
+    metadata: { to: input.to, subject: input.subject, stage: input.stage, pdfKey: input.pdfKey },
   })
 }
 
@@ -411,12 +411,54 @@ export async function finishProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { number: number; to: string; subject: string; state: "enviado" | "desconocido" },
+  input: { number: number; to: string; subject: string; stage: string; pdfKey: string; state: "enviado" | "desconocido" },
 ): Promise<void> {
   await writeAdminAudit(tx, actor, {
     action: PROGRESS_REPORT_ACTIONS[input.state],
     organizationId: orgId,
     entityId: `informe-${input.number}`,
-    metadata: { to: input.to, subject: input.subject },
+    metadata: { to: input.to, subject: input.subject, stage: input.stage, pdfKey: input.pdfKey },
   })
+}
+
+/** Dónde queda el PDF de un informe enviado: en el almacenamiento privado, en la carpeta de la clínica. */
+export function progressReportPdfKey(orgId: string, number: number): string {
+  return `clinics/${orgId}/informes/informe-${number}-${crypto.randomUUID()}.pdf`
+}
+
+export interface ProgressReportRecord {
+  number: number
+  state: ProgressReportState
+  at: string
+  to: string | null
+  subject: string | null
+  stage: string | null
+  /** La clave del PDF tal como salió; sin ella, el informe se envió antes de guardarlos. */
+  pdfKey: string | null
+}
+
+/** Los informes de esa clínica, el último estado de cada número, del más nuevo al más viejo. */
+export async function listProgressReports(tx: Db, orgId: string): Promise<ProgressReportRecord[]> {
+  const rows = await tx
+    .select({ at: adminAudit.createdAt, action: adminAudit.action, entityId: adminAudit.entityId, metadata: adminAudit.metadata })
+    .from(adminAudit)
+    .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), eq(adminAudit.organizationId, orgId)))
+    .orderBy(desc(adminAudit.createdAt))
+  const seen = new Map<number, ProgressReportRecord>()
+  for (const row of rows) {
+    const number = Number(row.entityId?.replace("informe-", ""))
+    if (!Number.isInteger(number) || seen.has(number)) continue
+    const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
+    const meta = row.metadata ?? {}
+    seen.set(number, {
+      number,
+      state,
+      at: row.at.toISOString(),
+      to: (meta.to as string | undefined) ?? null,
+      subject: (meta.subject as string | undefined) ?? null,
+      stage: (meta.stage as string | undefined) ?? null,
+      pdfKey: (meta.pdfKey as string | undefined) ?? null,
+    })
+  }
+  return [...seen.values()].sort((a, b) => b.number - a.number)
 }

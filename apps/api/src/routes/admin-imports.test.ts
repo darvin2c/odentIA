@@ -25,6 +25,9 @@ const ORG = "org-carga"
 /** Lo que salió por correo en estas pruebas. */
 const sent: Array<{ to: string; subject: string; attachments?: ReadonlyArray<{ filename: string }> }> = []
 
+/** Lo que se guardó en el almacenamiento privado en estas pruebas. */
+const stored = new Map<string, Uint8Array>()
+
 let container: StartedTestContainer
 let ownerDb: Db
 let app: Hono
@@ -101,7 +104,15 @@ beforeAll(async () => {
     db: createAppDb(`postgres://dentalagent_app:dentalagent_app@${url}`),
     ownerDb,
     secretsKey: KEY,
-    storage: {} as unknown as Storage,
+    storage: {
+      putAttachmentAt: async (key: string, bytes: Uint8Array) => {
+        stored.set(key, bytes)
+      },
+      attachmentUrl: async (key: string) => `https://almacen.example/${key}`,
+      deleteAttachment: async (key: string) => {
+        stored.delete(key)
+      },
+    } as unknown as Storage,
     validateExternal: false,
     webhookBaseUrl: "https://api.example.com",
     trustedOrigins: [ADMIN],
@@ -235,6 +246,18 @@ it("el informe se ve antes, sale con su PDF por el correo de producción y no se
   expect(sent).toHaveLength(1)
   const after = ((await (await call("/report/preview", "u-admin", report)).json()) as { data: { sent: { to: string; state: string } } }).data
   expect(after.sent).toMatchObject({ to: "recepcion.carga@example.com", state: "enviado" })
+
+  // El PDF tal como salió queda guardado y se abre desde la lista de enviados.
+  expect([...stored.keys()]).toEqual([expect.stringMatching(/^clinics\/org-carga\/informes\/informe-1-/)])
+  const headers = new Headers({ "x-test-user": "u-admin", origin: ADMIN })
+  const list = await app.request(`/api/admin/imports/${ORG}/reports`, { headers })
+  expect(((await list.json()) as { data: unknown }).data).toEqual([
+    expect.objectContaining({ number: 1, state: "enviado", to: "recepcion.carga@example.com", stage: "Alta de su cuenta", hasPdf: true }),
+  ])
+  const pdf = await app.request(`/api/admin/imports/${ORG}/reports/1/pdf`, { headers })
+  expect(((await pdf.json()) as { data: { url: string } }).data.url).toMatch(/^https:\/\/almacen\.example\/clinics\/org-carga\/informes\//)
+  const soporte = await app.request(`/api/admin/imports/${ORG}/reports`, { headers: new Headers({ "x-test-user": "u-soporte", origin: ADMIN }) })
+  expect(soporte.status).toBe(403)
 })
 
 it("el plan de otra clínica no se carga aquí y el informe no va a alguien de fuera", async () => {

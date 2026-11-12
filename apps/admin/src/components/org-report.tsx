@@ -1,5 +1,6 @@
 import { Button, Skeleton } from "@odentia/ui"
 import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
@@ -28,6 +29,19 @@ type Stage =
   | { kind: "sending"; fileName: string; report: unknown; preview: Preview }
   | { kind: "sent"; fileName: string; to: string }
 
+const sentSchema = z.array(
+  z.object({
+    number: z.number(),
+    state: z.enum(["enviando", "enviado", "desconocido"]),
+    at: z.string(),
+    to: z.string().nullable(),
+    subject: z.string().nullable(),
+    stage: z.string().nullable(),
+    hasPdf: z.boolean(),
+  }),
+)
+const STATE_WORDS = { enviando: "Enviándose", enviado: "Enviado", desconocido: "No se sabe si salió" } as const
+
 const when = new Intl.DateTimeFormat("es-PE", { dateStyle: "long", timeStyle: "short", timeZone: "America/Lima" })
 
 export function OrgReport({ organizationId }: { organizationId: string }) {
@@ -36,6 +50,22 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const sentKey = ["admin", "org-reports", organizationId]
+  const sent = useQuery({
+    queryKey: sentKey,
+    queryFn: async () => sentSchema.parse(await api<unknown>(`/api/admin/imports/${organizationId}/reports`)),
+  })
+
+  async function open(number: number) {
+    setError(null)
+    try {
+      const { url } = z.object({ url: z.string() }).parse(await api<unknown>(`/api/admin/imports/${organizationId}/reports/${number}/pdf`))
+      window.open(url, "_blank", "noopener,noreferrer")
+    } catch (failure) {
+      setError(submitErrorMessage(failure))
+    }
+  }
 
   // El PDF se abre desde la memoria de la pestaña; se suelta al cambiar de informe.
   useEffect(() => () => (pdfUrl ? URL.revokeObjectURL(pdfUrl) : undefined), [pdfUrl])
@@ -70,6 +100,7 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
     try {
       await api<unknown>(`/api/admin/imports/${organizationId}/report/send`, { method: "POST", body: JSON.stringify(current.report) })
       setStage({ kind: "sent", fileName: current.fileName, to: current.preview.to })
+      void queryClient.invalidateQueries({ queryKey: sentKey })
     } catch (failure) {
       setError(submitErrorMessage(failure))
       setStage(current)
@@ -154,6 +185,34 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
         <p className="text-sm" aria-live="polite">
           Enviado a {stage.to}. Quedó registrado y no se puede enviar otra vez.
         </p>
+      ) : null}
+      {sent.data?.length ? (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium">Enviados</h3>
+          <ul className="flex flex-col divide-y text-sm">
+            {sent.data.map((report) => (
+              <li key={report.number} className="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+                <span className="min-w-0">
+                  <span className="font-medium">
+                    N.º {report.number}
+                    {report.stage ? ` · ${report.stage}` : ""}
+                  </span>
+                  <span className="block text-muted-foreground">
+                    {STATE_WORDS[report.state]} el {when.format(new Date(report.at))}
+                    {report.to ? ` a ${report.to}` : ""}
+                  </span>
+                </span>
+                {report.hasPdf ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => void open(report.number)}>
+                    Ver el PDF
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Sin PDF guardado</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       <ConfirmDialog
         open={confirming}

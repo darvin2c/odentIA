@@ -24,6 +24,8 @@ import {
   progressReportPdf,
   progressReportSchema,
   finishProgressReport,
+  listProgressReports,
+  progressReportPdfKey,
   progressReportSent,
   PROGRESS_REPORT_MAX_PAGES,
   reserveProgressReport,
@@ -270,9 +272,21 @@ export function createAdminImportsRoute(deps: ImportDeps) {
       await checkReportPeople(orgId, report)
       const { bytes, content } = await progressReportPdf(report)
       const mail = progressReportEmail(content)
-      const sending = { number: report.number, to: content.email, subject: mail.subject }
-      // Primero se reserva: otra pestaña o un doble clic ya no pasan.
-      await withOrgContext(deps.ownerDb, orgId, (tx) => reserveProgressReport(tx, actor, orgId, sending))
+      // Uno ya enviado ni se guarda otra vez: se dice antes de tocar el almacenamiento.
+      if (await withOrgContext(deps.ownerDb, orgId, (tx) => progressReportSent(tx, orgId, report.number)))
+        throw new ServiceError("CONFLICT", 409, `El informe N.º ${report.number} ya se envió o se intentó: no se envía dos veces`)
+      // El PDF tal como sale queda en el almacenamiento privado de la clínica, para verlo después.
+      if (!deps.storage.putAttachmentAt) throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo guardar el informe. Inténtalo de nuevo.")
+      const pdfKey = progressReportPdfKey(orgId, report.number)
+      await deps.storage.putAttachmentAt(pdfKey, bytes, "application/pdf")
+      const sending = { number: report.number, to: content.email, subject: mail.subject, stage: report.stage, pdfKey }
+      // Se reserva con su bloqueo: otra pestaña o un doble clic ya no pasan. Si no se reserva, el PDF guardado se borra.
+      try {
+        await withOrgContext(deps.ownerDb, orgId, (tx) => reserveProgressReport(tx, actor, orgId, sending))
+      } catch (error) {
+        await deps.storage.deleteAttachment(pdfKey).catch(() => undefined)
+        throw error
+      }
       try {
         await deps.mailer.send({
           to: content.email,
@@ -286,6 +300,31 @@ export function createAdminImportsRoute(deps: ImportDeps) {
       }
       await withOrgContext(deps.ownerDb, orgId, (tx) => finishProgressReport(tx, actor, orgId, { ...sending, state: "enviado" }))
       return { sent: true, to: content.email, subject: mail.subject }
+    })
+  })
+
+  /** Los informes enviados a esa clínica, con su PDF tal como salió. */
+  app.get("/:orgId/reports", async (c) => {
+    const actor = adminContextOf(c)
+    const orgId = c.req.param("orgId")
+    return runService(c, 200, async () => {
+      requireReportAdmin(actor)
+      const reports = await withOrgContext(deps.ownerDb, orgId, (tx) => listProgressReports(tx, orgId))
+      return reports.map(({ pdfKey, ...report }) => ({ ...report, hasPdf: !!pdfKey }))
+    })
+  })
+
+  /** Un enlace firmado y corto para abrir el PDF de un informe enviado. */
+  app.get("/:orgId/reports/:number/pdf", async (c) => {
+    const actor = adminContextOf(c)
+    const orgId = c.req.param("orgId")
+    const number = Number(c.req.param("number"))
+    return runService(c, 200, async () => {
+      requireReportAdmin(actor)
+      const reports = await withOrgContext(deps.ownerDb, orgId, (tx) => listProgressReports(tx, orgId))
+      const found = reports.find((report) => report.number === number)
+      if (!found?.pdfKey) throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
+      return { url: await deps.storage.attachmentUrl(found.pdfKey, 300) }
     })
   })
 
