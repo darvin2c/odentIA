@@ -729,6 +729,20 @@
       "when": 1794452841916,
       "tag": "0103_hoja_membretada_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1794512564025,
+      "tag": "0104_arm",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1794512579647,
+      "tag": "0105_arm_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { clientReadyForAccount, linkClientToOrganization } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, isUniqueViolation, issueFields, ServiceError } from "./errors.js"
@@ -219,8 +220,10 @@ export interface AssistedOrganizationInput {
   planCode?: string
   sellerId?: string
   isDemo?: boolean
-  /** odentIA o latidIA; sin decirlo, odentIA. */
+  /** odentIA o latidIA; sin decirlo, odentIA (o el del cliente, si viene `clientId`). */
   product?: ClinicalProduct
+  /** El cliente del ARM al que se le da de alta («Dar de alta»; solo Administración). */
+  clientId?: string
 }
 
 export interface AssistedOrganizationResult {
@@ -230,6 +233,8 @@ export interface AssistedOrganizationResult {
   /** Cuenta existente con ese correo, si la hay (solo informativo). */
   userId: string | null
   invitationId: string
+  /** El cliente del ARM de la cuenta; null en una demo, que nunca es cliente. */
+  clientId: string | null
 }
 
 export interface AdminUserItem {
@@ -759,6 +764,8 @@ const assistedInputSchema = z.object({
   isDemo: z.boolean().optional(),
   /** odentIA o latidIA (entrega 3 del issue 229); sin decirlo, odentIA. No cambia después. */
   product: z.enum(CLINICAL_PRODUCTS).optional(),
+  /** El cliente del ARM: la cuenta se liga a él y su venta se cierra como «entró». */
+  clientId: z.uuid("Elige el cliente").optional(),
 })
 
 /**
@@ -767,6 +774,10 @@ const assistedInputSchema = z.object({
  * Entrar exige aceptación; quien ya tiene cuenta acepta sin crear contraseña
  * nueva y el panel reanuda el alta con `?continue=` en vez de crear otra.
  * Inicia el periodo de prueba vía Billing dentro de la misma transacción.
+ * La cuenta queda con su cliente del ARM en la misma transacción: el de
+ * `clientId` («Dar de alta» desde la ficha, solo Administración) o uno nuevo
+ * con los datos de la cuenta; su venta se cierra como «entró». Una demo no
+ * es cliente.
  */
 export async function createAssistedOrganization(
   tx: Db,
@@ -802,6 +813,10 @@ export async function createAssistedOrganization(
   ) {
     throw forbidden("Solo administración decide plan, cobro, vendedora o demo")
   }
+  // Dar de alta a un cliente es una decisión de la venta: solo Administración.
+  if (input.clientId && staff.role !== "admin") throw forbidden("Solo administración da de alta a un cliente")
+  if (input.clientId && input.isDemo) throw invalidField("clientId", "Una demo no es un cliente")
+  const product = input.clientId ? await clientReadyForAccount(tx, input.clientId, input.product) : (input.product ?? "dental")
   // Región validada sin inventar: el perfil mínimo nace real (razón social =
   // nombre dado, sin fiscales ficticios) para no repetirlo al reanudar.
   const region = initialOrgRegion({
@@ -825,7 +840,7 @@ export async function createAssistedOrganization(
     })
   await tx.insert(orgProfile).values({
     organizationId,
-    product: input.product ?? "dental",
+    product,
     legalName: input.orgName,
     countryCode: region.countryCode,
     currency: region.currency,
@@ -876,6 +891,9 @@ export async function createAssistedOrganization(
       existingAccount: Boolean(existing),
     }),
   )
+  const clientId = input.isDemo
+    ? null
+    : await linkClientToOrganization(tx, staff, { clientId: input.clientId ?? null, organizationId, now })
   // El correo lo envía la ruta tras el commit (nunca dentro de la tx).
   return {
     organizationId,
@@ -883,6 +901,7 @@ export async function createAssistedOrganization(
     status: "invitada",
     userId: existing?.id ?? null,
     invitationId,
+    clientId,
   }
 }
 

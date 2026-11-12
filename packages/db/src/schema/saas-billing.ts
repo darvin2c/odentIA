@@ -15,6 +15,8 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
+import { saasClient, saasClientContact, saasProposal } from "./admin-arm.js"
+import { saasDemo } from "./admin-demos.js"
 import { supportCase } from "./admin-support.js"
 import { organization, user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
@@ -949,10 +951,16 @@ export const saasWaitlistRequest = adminSchema.table(
     enteredAt: timestamp("entered_at", { withTimezone: true }),
     confirmationSentAt: timestamp("confirmation_sent_at", { withTimezone: true }),
     invitationSentAt: timestamp("invitation_sent_at", { withTimezone: true }),
+    /** El cliente del ARM al que pertenece (ADR 0183): la solicitud es su primer contacto. */
+    clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "set null" }),
+    /** `web` (la pidió la clínica) o `administracion` (la creó el equipo al invitar a un cliente). */
+    source: text("source").notNull().default("web"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("saas_waitlist_request_token_uidx").on(table.tokenHash),
+    index("saas_waitlist_request_client_idx").on(table.clientId),
+    check("saas_waitlist_request_source_check", sql`${table.source} IN ('web','administracion')`),
     uniqueIndex("saas_waitlist_request_org_uidx").on(table.organizationId),
     index("saas_waitlist_request_status_idx").on(table.status, table.createdAt),
     index("saas_waitlist_request_email_idx").on(table.email),
@@ -986,11 +994,14 @@ export const saasWaitlistRequest = adminSchema.table(
 )
 
 /**
- * Bitácora del seguimiento de un prospecto: cada contacto con la clínica es
- * una entrada, de una solicitud de la lista de espera o (en la entrega
- * siguiente) de una clínica, nunca de las dos. Las entradas solo se agregan
+ * Bitácora del seguimiento de un cliente del ARM (las actividades): cada
+ * contacto con la clínica es una entrada de su cliente (`client_id`); las de
+ * antes del ARM son de una solicitud de la lista de espera o de una clínica,
+ * nunca de las dos. Las entradas solo se agregan
  * (`saas_follow_up_append_only`): lo único que cambia después es
- * `admin_only`, de no a sí, y el autor a nulo cuando se borra a esa persona.
+ * `admin_only`, de no a sí, el autor, el contacto, la demo y la propuesta a
+ * nulo cuando se borran (su clave foránea), y el cliente, que solo se llena o
+ * pasa a otro cliente al fusionar dos.
  * La próxima acción es la fecha de la última entrada: `follow_up_on` es el
  * día de Lima en que hay que volver a contactar; nula, no hay que volver.
  * Autor nulo es «Nota anterior, sin autor registrado». Global y solo de
@@ -1014,11 +1025,41 @@ export const saasFollowUp = adminSchema.table(
      */
     fromNote: boolean("from_note").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * El cliente del ARM: toda actividad nueva lo lleva (y, si el cliente tiene
+     * solicitud, también `request_id`, para que la lista vieja la siga viendo).
+     * La migración 0105 lo llenó en las entradas de antes.
+     */
+    clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "cascade" }),
+    /** Qué fue: llamada, WhatsApp, correo, reunión, presentación, propuesta o nota. */
+    kind: text("kind").notNull().default("nota"),
+    /** `salio` (lo hicimos) o `entro` (nos buscó la clínica); nulo en una nota. */
+    direction: text("direction"),
+    /** En qué quedó. */
+    outcome: text("outcome"),
+    contactId: uuid("contact_id").references(() => saasClientContact.id, { onDelete: "set null" }),
+    demoId: uuid("demo_id").references(() => saasDemo.id, { onDelete: "set null" }),
+    proposalId: uuid("proposal_id").references(() => saasProposal.id, { onDelete: "set null" }),
+    /** Cuándo pasó (puede ser antes de anotarlo); `created_at` es cuándo se anotó. */
+    happenedAt: timestamp("happened_at", { withTimezone: true }).notNull().defaultNow(),
+    /** La dejó Kairós, no una persona. */
+    byKairos: boolean("by_kairos").notNull().default(false),
   },
   (table) => [
     index("saas_follow_up_request_idx").on(table.requestId, table.createdAt),
     index("saas_follow_up_org_idx").on(table.organizationId, table.createdAt),
-    check("saas_follow_up_subject_check", sql`num_nonnulls(${table.requestId}, ${table.organizationId}) = 1`),
+    index("saas_follow_up_client_idx").on(table.clientId, table.happenedAt),
+    // El check de sujeto lo reemplaza 0105: con cliente, o una solicitud o una clínica.
+    check(
+      "saas_follow_up_subject_check",
+      sql`${table.clientId} IS NOT NULL OR num_nonnulls(${table.requestId}, ${table.organizationId}) = 1`,
+    ),
     check("saas_follow_up_body_check", sql`length(trim(${table.body})) BETWEEN 1 AND 2000`),
+    check(
+      "saas_follow_up_kind_check",
+      sql`${table.kind} IN ('llamada','whatsapp','correo','reunion','presentacion','propuesta','nota')`,
+    ),
+    check("saas_follow_up_direction_check", sql`${table.direction} IS NULL OR ${table.direction} IN ('salio','entro')`),
+    check("saas_follow_up_outcome_check", sql`${table.outcome} IS NULL OR length(${table.outcome}) <= 500`),
   ],
 )
