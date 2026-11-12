@@ -2083,7 +2083,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "aparece-proveedor-contrate",
         q: "¿Por qué aparece un proveedor que no contraté?",
-        a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes.",
+        a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes. Los de la carga de datos van aparte: solo intervienen si la clínica envía sus datos para cargarlos, y esos archivos se eliminan al terminar o a los 30 días.",
       },
     ],
   },

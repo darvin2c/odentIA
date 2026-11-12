@@ -74,6 +74,8 @@ export interface DataProtectionView {
     inUse: DataProtectionProcessor[]
     /** Siempre, porque odentIA funciona así. */
     always: DataProtectionProcessor[]
+    /** Solo si la clínica pide cargar sus datos, y hasta que se eliminan (cláusula 3 del contrato de encargo). */
+    forImport: DataProtectionProcessor[]
     /** Los canales que no conectó: «Instagram, Telegram». */
     notUsed: string[]
   }
@@ -229,6 +231,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
   const dictating = agent.clinicalAssistantEnabled && (await productDictation(tx, orgId)) !== null
   const inUse: DataProtectionProcessor[] = []
   const always: DataProtectionProcessor[] = []
+  const forImport: DataProtectionProcessor[] = []
   const usedProviders = new Set<string>()
   for (const p of DATA_PROCESSORS) {
     switch (p.use.kind) {
@@ -249,6 +252,12 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         break
       case "dictado":
         if (dictating) inUse.push(processorRow(p, "dictado encendido"))
+        break
+      // La carga la pide la clínica fuera de la app (la carta de bienvenida) y su
+      // rastro es de la administración (`admin.clinic_import_row`, sin GRANT al rol
+      // app): se lista con su condición, sin decir si ya ocurrió.
+      case "carga":
+        forImport.push(processorRow(p, null))
         break
       case "canal": {
         const mine = p.use.providers.filter((provider) => connected.has(provider))
@@ -303,7 +312,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         }
       : null,
     activities,
-    processors: { inUse, always, notUsed },
+    processors: { inUse, always, forImport, notUsed },
     requests: {
       year,
       received: stats?.received ?? 0,
@@ -354,9 +363,11 @@ export async function renderDataProtectionPdf(
   )
   section("3. Encargados y transferencias internacionales")
   kit.bullets(
-    [...view.processors.inUse, ...view.processors.always].map(
-      (p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`,
-    ),
+    [
+      ...view.processors.inUse,
+      ...view.processors.always,
+      ...view.processors.forImport.map((p) => ({ ...p, detail: "solo si la clínica pidió cargar sus datos" })),
+    ].map((p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`),
     { size: SIZE.dense },
   )
   kit.text(

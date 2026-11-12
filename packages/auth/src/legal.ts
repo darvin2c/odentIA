@@ -24,10 +24,11 @@ export const LEGAL = {
     ] as string[],
   },
   agreement: {
-    version: "2026-11-06",
-    effectiveAt: "2026-11-06",
+    version: "2026-11-12",
+    effectiveAt: "2026-11-12",
     changes: [
-      "La Ayuda usa Jev siempre: recibe solo la pregunta y el nombre de la pantalla, sin datos de pacientes.",
+      "Los archivos que la clínica envía para cargar sus datos se eliminan al terminar la carga o, a más tardar, a los 30 días.",
+      "Se suman los proveedores de esa carga (el correo de soporte y Claude), que solo intervienen si la clínica la pide.",
     ] as string[],
   },
 } as const

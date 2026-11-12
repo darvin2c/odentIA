@@ -1,6 +1,6 @@
 // Contrato de encargo de tratamiento entre la clínica (titular del banco de datos y responsable) y
 // odentIA (encargado). Marco: Ley 29733 y su Reglamento (D.S. 016-2024-JUS).
-import { contactEmail } from "../site"
+import { contactEmail, supportEmail } from "../site"
 import { type LegalDoc, TITULAR } from "./types"
 
 export const ENCARGO: LegalDoc = {
@@ -44,7 +44,7 @@ export const ENCARGO: LegalDoc = {
               ],
               [
                 "Operaciones",
-                "Registro, almacenamiento, consulta, organización, transcripción, análisis por modelos de inteligencia artificial, comunicación por los canales que la Clínica conecta y eliminación.",
+                "Registro, almacenamiento, consulta, organización, transcripción, análisis por modelos de inteligencia artificial, comunicación por los canales que la Clínica conecta, carga de los datos que la Clínica entrega al empezar y eliminación.",
               ],
               [
                 "Duración",
@@ -60,7 +60,8 @@ export const ENCARGO: LegalDoc = {
       title: "Instrucciones de la Clínica",
       blocks: [
         "odentIA trata los datos únicamente según las instrucciones documentadas de la Clínica. Se consideran instrucciones estos términos, la configuración que la Clínica hace en la plataforma (qué canales conecta, qué puede hacer cada agente, qué roles asigna) y las solicitudes que envíe por escrito.",
-        "odentIA no usará los datos para fines propios ni distintos de los indicados. En particular, no usa los datos de la Clínica ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso.",
+        `Si la Clínica envía a odentIA archivos para cargar sus datos al empezar, como su lista de pacientes, a [${supportEmail}](mailto:${supportEmail}), odentIA los usa solo para esa carga. Los elimina, junto con el correo en que llegaron y sus copias de trabajo, al terminar la carga y, a más tardar, a los 30 días de recibirlos. Si la carga no termina en ese plazo, los elimina igual y se los vuelve a pedir. Lo que ya se cargó queda en la plataforma, como el resto de los datos de la Clínica.`,
+        "odentIA no usará los datos para fines propios ni distintos de los indicados. En particular, no usa los datos de la Clínica ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso. Con Anthropic (Claude) solo se prepara la carga de datos: ve cómo es el archivo (columnas, formatos y cifras) y lo que se corrige a mano en alguna fila, nunca la lista de pacientes.",
         "Si odentIA considera que una instrucción infringe la ley, lo comunicará a la Clínica y podrá abstenerse de cumplirla.",
         "La Clínica garantiza que los datos se han obtenido lícitamente, que ha informado a los titulares y que cuenta con los consentimientos necesarios, incluido el consentimiento para tratar datos de salud cuando la ley lo exija y para enviar comunicaciones promocionales.",
       ],
@@ -94,7 +95,7 @@ export const ENCARGO: LegalDoc = {
       id: "subencargados",
       title: "Subencargados",
       blocks: [
-        "La Clínica autoriza a odentIA a recurrir a los subencargados indicados en la página de [subencargados](/subencargados). Los proveedores de canales y de modelos de inteligencia artificial solo intervienen si la Clínica conecta el canal o usa los agentes, salvo el modelo de decisión con el que la Ayuda de la plataforma elige su respuesta (TypeSafe, Jev): interviene siempre y recibe solo la pregunta que escribe el equipo y el nombre de la pantalla. La Ayuda pide no escribir datos de pacientes y no le envía números, documentos ni correos.",
+        "La Clínica autoriza a odentIA a recurrir a los subencargados indicados en la página de [subencargados](/subencargados). Los proveedores de canales y de modelos de inteligencia artificial solo intervienen si la Clínica conecta el canal o usa los agentes, salvo el modelo de decisión con el que la Ayuda de la plataforma elige su respuesta (TypeSafe, Jev): interviene siempre y recibe solo la pregunta que escribe el equipo y el nombre de la pantalla. La Ayuda pide no escribir datos de pacientes y no le envía números, documentos ni correos. Los proveedores de la carga de datos solo intervienen si la Clínica envía sus datos para cargarlos, y solo hasta que se eliminan.",
         "odentIA impone a cada subencargado obligaciones de protección de datos equivalentes a las de este contrato y responde ante la Clínica por su cumplimiento.",
         "odentIA avisará a la Clínica de cualquier alta o sustitución de subencargados con al menos 15 días de anticipación, por correo electrónico y dentro de la aplicación. La Clínica puede oponerse por motivos razonables relacionados con la protección de datos dentro de ese plazo. Si no se llega a una solución, la Clínica puede cancelar el servicio sin penalización.",
       ],
