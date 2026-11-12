@@ -476,7 +476,7 @@ if (env.NODE_ENV === "production") {
   })
 }
 
-// Kairós, el agente del ARM de la administración (ADR 0183): cada 5 minutos sus reglas, los borradores que esperan
+// Kairós, el agente del ARM de la administración (ADR 0184): cada 5 minutos sus reglas, los borradores que esperan
 // y, una vez al día desde las 07:00 de Lima, los resúmenes de los clientes y el de la semana. Solo prepara: nada
 // sale a una clínica sin el sí de una persona. Con el mismo modelo de la plataforma; su gasto es de Sallca.
 // Sin la clave del modelo, Kairós redacta con plantillas y lo dice en cada borrador; en producción se avisa una vez.

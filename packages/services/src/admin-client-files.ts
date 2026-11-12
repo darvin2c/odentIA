@@ -1,7 +1,7 @@
 /**
  * Documentos de un cliente del ARM (ficha › Documentos): lo que le mandamos
- * (carta de bienvenida, propuestas, presentaciones, planes e informes de la
- * carga) y lo que nos mandó la clínica. Viven en el bucket privado con la
+ * (carta de bienvenida, propuestas, presentaciones) y lo que nos mandó la
+ * clínica. Viven en el bucket privado con la
  * clave `clients/<clientId>/<uuid>.<ext>` (los adjuntos de un correo entrante,
  * en `inbound/<uuid>.<ext>`, porque llegan antes de saber de qué cliente son).
  *
@@ -44,13 +44,8 @@ export const CLINIC_SENT_FILE_KINDS: ReadonlySet<SaasClientFileKind> = new Set([
   "correo",
 ])
 
-/** Tipos que solo maneja Administración (la carga y lo que trae datos de la clínica). */
-const ADMIN_FILE_KINDS: ReadonlySet<SaasClientFileKind> = new Set([
-  "archivo_clinica",
-  "correo",
-  "plan_carga",
-  "informe",
-])
+/** Tipos que solo maneja Administración (lo que trae datos de la clínica). */
+const ADMIN_FILE_KINDS: ReadonlySet<SaasClientFileKind> = new Set(["archivo_clinica", "correo"])
 
 /** Tope de un documento subido a mano (el de los adjuntos de Soporte es 10 MB). */
 export const CLIENT_FILE_MAX_BYTES = 20 * 1024 * 1024
@@ -226,7 +221,7 @@ export async function registerClientFile(
   }
   if (!row) throw new ServiceError("INTERNAL", 500, "No se registró el archivo")
   await writeAdminAudit(tx, actor, {
-    // Lo que guarda Kairós solo queda en «Lo que hizo» (`kairos.`); el correo y la skill, no.
+    // Lo que guarda Kairós solo queda en «Lo que hizo» (`kairos.`); el correo, no.
     action: source === "kairos" ? "kairos.client_file_registered" : "client_file.registered",
     entityId: row.id,
     metadata: {

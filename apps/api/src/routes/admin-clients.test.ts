@@ -6,7 +6,6 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
-  saasImportDraft,
   saasOutreach,
   saasProposal,
   saasTask,
@@ -251,13 +250,6 @@ describe("roles", () => {
       ["POST", `/${clientId}/assisted`, { slug: "roles", email: "x@andes.test" }],
       ["POST", `/${clientId}/merge`, { dropId: someId }],
       ["POST", `/${clientId}/archive`],
-      ["GET", "/skill-keys"],
-      ["POST", "/skill-keys", { label: "Mi equipo" }],
-      ["POST", `/skill-keys/${someId}/revoke`],
-      ["GET", `/${clientId}/import-drafts`],
-      ["GET", `/import-drafts/${someId}/payload`],
-      ["POST", `/import-drafts/${someId}/approve`],
-      ["POST", `/import-drafts/${someId}/used`],
       ["DELETE", `/files/${someId}`],
       ["POST", `/contacts/${someId}/link`, { userId: ADMIN }],
     ]
@@ -749,66 +741,5 @@ describe("documentos", () => {
     )
     await expectStatus(orphan, 404)
     expect(objects.size).toBe(count)
-  })
-})
-
-describe("llaves de la skill", () => {
-  it("Administración crea una llave que se ve una vez, la lista sin el secreto y la revoca", async () => {
-    const created = await call("POST", "/skill-keys", ADMIN, { label: "Laptop de carga" })
-    await expectStatus(created, 201)
-    const key = (await json(created)).data
-    expect(key.token).toMatch(/^sk_/)
-    const list = (await json(await call("GET", "/skill-keys", ADMIN))).data
-    expect(list.some((row: { id: string }) => row.id === key.id)).toBe(true)
-    expect(JSON.stringify(list)).not.toContain(key.token)
-    expect((await call("POST", `/skill-keys/${key.id}/revoke`, ADMIN)).status).toBe(200)
-  })
-
-  it("los borradores de un cliente se listan para Administración", async () => {
-    const clientId = await newClient("Clínica Borradores (ficticia)", "borradores@andes.test")
-    const response = await call("GET", `/${clientId}/import-drafts`, ADMIN)
-    await expectStatus(response, 200)
-    expect((await json(response)).data).toEqual([])
-  })
-
-  it("usar un borrador lo pasa a usada y borra su JSON del bucket; después ya no se abre", async () => {
-    const orgId = "org-usada-ficticia"
-    await ownerDb.insert(organization).values({
-      id: orgId,
-      name: "Clínica Usada (ficticia)",
-      slug: "usada-ficticia",
-      createdAt: new Date(),
-    })
-    const [row] = await ownerDb
-      .insert(saasClient)
-      .values({ name: "Clínica Usada (ficticia)", product: "dental", organizationId: orgId })
-      .returning({ id: saasClient.id })
-    const clientId = row?.id ?? ""
-    expect(clientId).not.toBe("")
-    const payloadKey = `clients/${clientId}/pacientes-1.json`
-    objects.set(payloadKey, new TextEncoder().encode("{}"))
-    const [draft] = await ownerDb
-      .insert(saasImportDraft)
-      .values({
-        clientId,
-        organizationId: orgId,
-        kind: "plan_pacientes",
-        number: 1,
-        payloadKey,
-        uploadedBy: ADMIN,
-      })
-      .returning({ id: saasImportDraft.id })
-    if (!draft) throw new Error("sin borrador")
-    const response = await call("POST", `/import-drafts/${draft.id}/used`, ADMIN)
-    await expectStatus(response, 200)
-    expect((await json(response)).data).toMatchObject({
-      id: draft.id,
-      status: "usada",
-      payloadDeletedAt: expect.any(String),
-    })
-    expect(objects.has(payloadKey)).toBe(false)
-    const gone = await call("GET", `/import-drafts/${draft.id}/payload`, ADMIN)
-    expect(gone.status).toBe(409)
-    expect((await json(gone)).error.code).toBe("IMPORT_DRAFT_PAYLOAD_GONE")
   })
 })

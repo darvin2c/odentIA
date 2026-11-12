@@ -4,12 +4,14 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../lib/api"
+import { UnknownReportActions } from "./unknown-report-actions"
 
 /**
  * «Carga» de una clínica (ADR 0104): el registro de lo que el equipo cargó con la skill de
  * carga y de los informes que se le enviaron, con su PDF tal como salió. Aquí no se carga
  * nada: la carga corre en el servidor (`apps/api/src/cli/carga.ts`). Solo administración,
- * y el servidor lo exige.
+ * y el servidor lo exige. De un informe que no se sabe si salió ofrece sus dos salidas
+ * (`UnknownReportActions`): «Revisé en Zoho: salió» y «No salió: reenviar».
  */
 
 const recordSchema = z.object({
@@ -31,6 +33,7 @@ const recordSchema = z.object({
       by: z.string().nullable(),
       registeredLater: z.boolean(),
       hasPdf: z.boolean(),
+      canResend: z.boolean(),
     }),
   ),
 })
@@ -138,18 +141,28 @@ export function OrgLoadRecord({ organizationId }: { organizationId: string }) {
                     {reportLine(report)}
                   </span>
                 </div>
-                {report.hasPdf ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="min-h-11 w-full sm:min-h-9 sm:w-auto"
-                    onClick={() => void openPdf(report.number)}
-                  >
-                    Ver el PDF
-                  </Button>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Sin PDF guardado</span>
-                )}
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  {report.state === "desconocido" ? (
+                    <UnknownReportActions
+                      organizationId={organizationId}
+                      number={report.number}
+                      to={report.to}
+                      canResend={report.canResend}
+                    />
+                  ) : null}
+                  {report.hasPdf ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11 w-full sm:min-h-9 sm:w-auto"
+                      onClick={() => void openPdf(report.number)}
+                    >
+                      Ver el PDF
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Sin PDF guardado</span>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

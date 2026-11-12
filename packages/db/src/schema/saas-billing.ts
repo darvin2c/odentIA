@@ -951,7 +951,7 @@ export const saasWaitlistRequest = adminSchema.table(
     enteredAt: timestamp("entered_at", { withTimezone: true }),
     confirmationSentAt: timestamp("confirmation_sent_at", { withTimezone: true }),
     invitationSentAt: timestamp("invitation_sent_at", { withTimezone: true }),
-    /** El cliente del ARM al que pertenece (ADR 0183): la solicitud es su primer contacto. */
+    /** El cliente del ARM al que pertenece (ADR 0184): la solicitud es su primer contacto. */
     clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "set null" }),
     /** `web` (la pidió la clínica) o `administracion` (la creó el equipo al invitar a un cliente). */
     source: text("source").notNull().default("web"),

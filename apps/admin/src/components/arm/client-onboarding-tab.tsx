@@ -1,14 +1,14 @@
 /**
- * Ficha del cliente › Alta (ARM, tablero 6 del lienzo; ADR 0104 y 0183): de
- * los archivos que manda la clínica al informe que le llega. Arriba, lo que
- * dejó la skill de carga, con Aprobar y Devolver (Administración). A la
- * izquierda, los pasos: nadie los marca, el servidor los calcula de lo que ya
- * pasó. Al centro, las tres tarjetas de «Cargar datos» (#598) tal como son,
- * que además pueden tomar el plan o el informe aprobado que dejó la skill. A
- * la derecha, lo que Kairós propone para este cliente: solo prepara, nunca
- * abre los archivos, aprueba, carga ni envía.
+ * Ficha del cliente › Alta (ARM; ADR 0104, 0183 y 0184): de los archivos que
+ * manda la clínica al informe que le llega. A la izquierda, los pasos: nadie
+ * los marca, el servidor los calcula de lo que ya pasó. Al centro, el registro
+ * de la carga (`OrgLoadRecord`): la carga y el informe los hace la skill en el
+ * servidor, y aquí solo se ve lo que hizo, sin botones de cargar ni de enviar
+ * (de un informe que no se sabe si salió, sus dos salidas). A la derecha, lo
+ * que Kairós propone para este cliente: solo prepara, nunca abre los archivos,
+ * carga ni envía.
  */
-import { Badge, Button, toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import {
   AgentMark,
   AgentSurface,
@@ -17,11 +17,7 @@ import {
   LoadingState,
   SkeletonRegion,
   submitErrorMessage,
-  submitForm,
-  useAppForm,
-  useFormSubmitError,
 } from "@odentia/ui-patterns"
-import { useStore } from "@tanstack/react-form"
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CheckCircle2, Circle } from "lucide-react"
@@ -30,22 +26,11 @@ import { z } from "zod"
 import { api } from "../../lib/api"
 import { invitationDueWords } from "../../lib/invitation-words"
 import { supportDay } from "../../lib/support-words"
-import { OrgImport } from "../org-import"
-import { OrgReport } from "../org-report"
-import { OrgSetup } from "../org-setup"
+import { OrgLoadRecord } from "../org-load-record"
 import { ClientOnboardingSkeleton, ONBOARDING_GRID } from "../skeletons/client-account"
 import type { ClientTabProps } from "./account-tabs"
-import { type ClientFileKind, ClientFileUploadDrawer, clientFileHref } from "./client-files-tab"
+import { type ClientFileKind, ClientFileUploadDrawer } from "./client-files-tab"
 import { invalidateClient } from "./client-model"
-import {
-  approvedDraftOf,
-  DRAFT_GONE_WORDS,
-  DRAFT_KIND_WORDS,
-  draftSourceOf,
-  draftSummaryWords,
-  type ImportDraft,
-  useImportDrafts,
-} from "./import-drafts"
 import { KairosItemCard, kairosItemsSchema } from "./kairos-items"
 import { organizationAccountKey, useOrganizationAccount } from "./organization"
 
@@ -67,29 +52,8 @@ const onboardingSchema = z.object({
   next: z.string().nullable(),
 })
 
-/** Dónde vive cada tarjeta: las acciones de un paso llevan el foco ahí. */
-const SECTION = {
-  skill: "alta-skill",
-  configuracion: "alta-configuracion",
-  pacientes: "alta-pacientes",
-  informe: "alta-informe",
-} as const
-
-const CARD_OF_DRAFT: Record<ImportDraft["kind"], string> = {
-  plan_configuracion: SECTION.configuracion,
-  plan_pacientes: SECTION.pacientes,
-  informe: SECTION.informe,
-}
-
-const STATUS_WORDS: Record<
-  ImportDraft["status"],
-  { text: string; tone: "warning" | "success" | "outline" | "secondary" }
-> = {
-  lista: { text: "Espera tu sí", tone: "warning" },
-  aprobada: { text: "Aprobado", tone: "success" },
-  devuelta: { text: "Devuelto", tone: "outline" },
-  usada: { text: "Ya se usó", tone: "secondary" },
-}
+/** Dónde vive el registro de la carga: «Revisar el informe» lleva el foco ahí. */
+const RECORD_SECTION = "alta-registro"
 
 /** Lleva el foco (y la vista) a una sección de la pestaña. */
 function focusSection(id: string) {
@@ -99,12 +63,7 @@ function focusSection(id: string) {
   target.scrollIntoView?.({ block: "start" })
 }
 
-export function ClientOnboardingTab({
-  clientId,
-  organizationId,
-  organizationName,
-  isAdmin,
-}: ClientTabProps) {
+export function ClientOnboardingTab({ clientId, organizationId, isAdmin }: ClientTabProps) {
   const queryClient = useQueryClient()
   const [upload, setUpload] = useState<ClientFileKind | null>(null)
   const [resending, setResending] = useState(false)
@@ -113,8 +72,6 @@ export function ClientOnboardingTab({
     queryFn: async () =>
       onboardingSchema.parse(await api<unknown>(`/api/admin/clients/${clientId}/onboarding`)),
   })
-  // Lo de la skill y la carga son de Administración: a Soporte ni se le pide (la API se lo niega).
-  const drafts = useImportDrafts(clientId, isAdmin)
   const kairos = useQuery({
     queryKey: ["admin", "kairos", "items", "alta", clientId],
     queryFn: async () =>
@@ -162,18 +119,8 @@ export function ClientOnboardingTab({
       case "subir_archivos":
         setUpload("archivo_clinica")
         return
-      case "revisar_plan":
-        focusSection(SECTION.skill)
-        return
-      case "cargar_configuracion":
-        focusSection(SECTION.configuracion)
-        return
-      case "cargar_pacientes":
-        focusSection(SECTION.pacientes)
-        return
-      case "enviar_informe":
       case "revisar_informe":
-        focusSection(SECTION.informe)
+        focusSection(RECORD_SECTION)
         return
     }
   }
@@ -194,13 +141,9 @@ export function ClientOnboardingTab({
     )
 
   const data = onboarding.data
-  const setupDraft = approvedDraftOf(drafts.data, "plan_configuracion")
-  const patientsDraft = approvedDraftOf(drafts.data, "plan_pacientes")
-  const reportDraft = approvedDraftOf(drafts.data, "informe")
 
   return (
     <div className="flex flex-col gap-4">
-      {isAdmin ? <SkillDrafts clientId={clientId} drafts={drafts} onChanged={refresh} /> : null}
       <div className={ONBOARDING_GRID}>
         <section
           aria-labelledby="alta-pasos"
@@ -232,44 +175,17 @@ export function ClientOnboardingTab({
               Venta. Lo que mande antes (la carta, sus archivos) se guarda en Documentos.
             </section>
           ) : isAdmin ? (
-            <>
-              <div
-                id={SECTION.configuracion}
-                tabIndex={-1}
-                className="scroll-mt-4 rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
-              >
-                <OrgSetup
-                  organizationId={organizationId}
-                  organizationName={organizationName}
-                  draft={draftSourceOf(setupDraft, refresh)}
-                />
-              </div>
-              <div
-                id={SECTION.pacientes}
-                tabIndex={-1}
-                className="scroll-mt-4 rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
-              >
-                <OrgImport
-                  organizationId={organizationId}
-                  organizationName={organizationName}
-                  draft={draftSourceOf(patientsDraft, refresh)}
-                />
-              </div>
-              <div
-                id={SECTION.informe}
-                tabIndex={-1}
-                className="scroll-mt-4 rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
-              >
-                <OrgReport
-                  organizationId={organizationId}
-                  draft={draftSourceOf(reportDraft, refresh)}
-                />
-              </div>
-            </>
+            <div
+              id={RECORD_SECTION}
+              tabIndex={-1}
+              className="scroll-mt-4 rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+            >
+              <OrgLoadRecord organizationId={organizationId} />
+            </div>
           ) : (
             <section className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-              Aprobar el plan, cargar y enviar el informe es de Administración. Aquí ves cómo va
-              cada paso.
+              El registro de la carga y de los informes es de Administración. Aquí ves cómo va cada
+              paso.
             </section>
           )}
         </div>
@@ -361,223 +277,6 @@ function StepRow({
   )
 }
 
-/* ---------- La skill dejó ---------- */
-
-function SkillDrafts({
-  clientId,
-  drafts,
-  onChanged,
-}: {
-  clientId: string
-  drafts: UseQueryResult<ImportDraft[]>
-  onChanged: () => void
-}) {
-  const [returning, setReturning] = useState<ImportDraft | null>(null)
-  const approve = useMutation({
-    mutationFn: (draft: ImportDraft) =>
-      api(`/api/admin/clients/import-drafts/${draft.id}/approve`, { method: "POST" }),
-    onSuccess: (_, draft) => {
-      toast.success(
-        `${DRAFT_KIND_WORDS[draft.kind]} N.º ${draft.number} aprobado: ya se puede ensayar en su tarjeta`,
-      )
-      onChanged()
-    },
-    onError: (error) => {
-      toast.error(submitErrorMessage(error))
-      onChanged()
-    },
-  })
-  // Lo ya usado no espera nada: queda en el historial y en Documentos.
-  const shown = (drafts.data ?? []).filter((draft) => draft.status !== "usada")
-  return (
-    <section
-      id={SECTION.skill}
-      tabIndex={-1}
-      aria-labelledby="alta-skill-title"
-      className="flex scroll-mt-4 flex-col gap-3 rounded-xl border bg-card p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
-    >
-      <h2 id="alta-skill-title" className="text-base font-medium">
-        La skill dejó
-      </h2>
-      {drafts.isPending ? (
-        <LoadingState message="Cargando lo que dejó la skill…" />
-      ) : drafts.isError ? (
-        <ErrorState
-          title="No se pudo cargar lo que dejó la skill"
-          message={submitErrorMessage(drafts.error)}
-          onRetry={() => void drafts.refetch()}
-        />
-      ) : shown.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Nada por revisar. Cuando quien acompaña el alta termine el plan o el informe con la skill
-          de carga, aparece aquí para que lo apruebes. La skill entra con su llave (Equipo › Llaves
-          de la skill) y solo deja borradores.
-        </p>
-      ) : (
-        <ul className="flex flex-col divide-y">
-          {shown.map((draft) => {
-            const status = STATUS_WORDS[draft.status]
-            const summary = draftSummaryWords(draft.summary)
-            const gone = Boolean(draft.payloadDeletedAt)
-            return (
-              <li key={draft.id} className="flex flex-wrap items-start gap-x-4 gap-y-2 py-3">
-                <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    {DRAFT_KIND_WORDS[draft.kind]} N.º {draft.number}
-                    <Badge variant={status.tone}>{status.text}</Badge>
-                  </p>
-                  {summary ? <p className="text-sm">{summary}</p> : null}
-                  <p className="text-xs text-muted-foreground">
-                    {draft.viaSkill ? "Lo dejó la skill" : "Lo subió"} de {draft.uploadedBy.name} el{" "}
-                    {supportDay(draft.createdAt)}
-                    {draft.approvedBy && draft.approvedAt
-                      ? ` · aprobado por ${draft.approvedBy.name} el ${supportDay(draft.approvedAt)}`
-                      : ""}
-                    {draft.pdfFileId ? (
-                      <>
-                        {" · "}
-                        <a
-                          href={clientFileHref(draft.pdfFileId)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline underline-offset-4"
-                        >
-                          Ver el PDF
-                        </a>
-                      </>
-                    ) : null}
-                  </p>
-                  {draft.status === "devuelta" && draft.returnedNote ? (
-                    <p className="text-sm [overflow-wrap:anywhere]">
-                      <span className="text-muted-foreground">Se devolvió: </span>
-                      {draft.returnedNote}. Espera el que lo corrige, con el mismo número.
-                    </p>
-                  ) : null}
-                  {gone && draft.status !== "devuelta" ? (
-                    <p className="text-sm text-muted-foreground">
-                      {DRAFT_GONE_WORDS}: pide a la skill que deje otro con el mismo número.
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {draft.status === "lista" && !gone ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={approve.isPending}
-                      onClick={() => approve.mutate(draft)}
-                    >
-                      Aprobar
-                    </Button>
-                  ) : null}
-                  {draft.status === "aprobada" && !gone ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => focusSection(CARD_OF_DRAFT[draft.kind])}
-                    >
-                      {draft.kind === "informe" ? "Verlo y enviarlo" : "Ensayarlo y cargarlo"}
-                    </Button>
-                  ) : null}
-                  {draft.status === "lista" || draft.status === "aprobada" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setReturning(draft)}
-                    >
-                      Devolver
-                    </Button>
-                  ) : null}
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      <ReturnDraftDialog
-        clientId={clientId}
-        draft={returning}
-        onDone={() => {
-          setReturning(null)
-          onChanged()
-        }}
-        onClose={() => setReturning(null)}
-      />
-    </section>
-  )
-}
-
-const returnSchema = z.object({
-  note: z
-    .string()
-    .trim()
-    .min(1, "Di qué hay que corregir")
-    .max(1000, "La nota, 1000 caracteres como mucho"),
-})
-
-/** «Devolver con nota»: la skill lo lee y deja otro con el mismo número. No se borra nada. */
-function ReturnDraftDialog({
-  clientId,
-  draft,
-  onDone,
-  onClose,
-}: {
-  clientId: string
-  draft: ImportDraft | null
-  onDone: () => void
-  onClose: () => void
-}) {
-  const form = useAppForm({
-    defaultValues: { note: "" },
-    validators: { onSubmit: returnSchema },
-    onSubmit: async ({ value, formApi }) => {
-      if (!draft) return
-      await api(`/api/admin/clients/import-drafts/${draft.id}/return`, {
-        method: "POST",
-        body: JSON.stringify({ note: value.note.trim() }),
-      })
-      toast.success(`${DRAFT_KIND_WORDS[draft.kind]} N.º ${draft.number} devuelto a la skill`)
-      formApi.reset()
-      onDone()
-    },
-  })
-  const error = useFormSubmitError(form)
-  const pending = useStore(form.store, (state) => state.isSubmitting)
-  return (
-    <ConfirmDialog
-      open={draft !== null}
-      title={
-        draft
-          ? `Devolver el ${DRAFT_KIND_WORDS[draft.kind].toLowerCase()} N.º ${draft.number}`
-          : "Devolver"
-      }
-      description="Queda devuelto con tu nota y no se carga. Quien corre la skill lo corrige y deja otro con el mismo número."
-      confirmLabel="Devolver"
-      variant="default"
-      pending={pending}
-      error={error}
-      onConfirm={() => void submitForm(form)}
-      onClose={() => {
-        form.reset()
-        onClose()
-      }}
-    >
-      <form.AppField name="note">
-        {(field) => (
-          <field.TextareaField
-            id={`devolver-${clientId}`}
-            label="Qué hay que corregir"
-            placeholder="Por ejemplo: faltan los precios de ortodoncia"
-            maxLength={1000}
-          />
-        )}
-      </form.AppField>
-    </ConfirmDialog>
-  )
-}
-
 /* ---------- Kairós propone ---------- */
 
 function KairosProposes({
@@ -620,8 +319,8 @@ function KairosProposes({
         </Link>
       ) : null}
       <p className="text-xs text-muted-foreground">
-        Lo que no hace: no abre los archivos, no aprueba el plan ni el informe, no carga y no envía
-        sin tu sí.
+        Lo que no hace: no abre los archivos, no carga y no envía nada sin tu sí. Avisa lo que hizo
+        la skill y lo que falta.
       </p>
     </AgentSurface>
   )

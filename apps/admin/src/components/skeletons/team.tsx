@@ -24,16 +24,6 @@ function TeamRow({ actions, badge = true }: { actions: string[]; badge?: boolean
   )
 }
 
-/** Las llaves de la skill (`components/arm/skill-keys.tsx`): nombre, de quién y su estado. */
-export function SkillKeysSkeleton() {
-  return (
-    <ul className="flex flex-col gap-2">
-      <TeamRow actions={["w-20"]} />
-      <TeamRow actions={[]} />
-    </ul>
-  )
-}
-
 /** Los botones de cada fila son de quien gestiona el equipo: la administración. */
 export function TeamSkeleton() {
   const isAdmin = useIsAdmin()
@@ -53,16 +43,6 @@ export function TeamSkeleton() {
           <TeamRow badge={false} actions={isAdmin ? ["w-24", "w-20"] : []} />
         </ul>
       </section>
-      {isAdmin ? (
-        <section className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">Llaves de la skill</h2>
-            <Skeleton className="h-9 w-32 rounded-3xl" />
-          </div>
-          <TextXs className="w-full max-w-prose" />
-          <SkillKeysSkeleton />
-        </section>
-      ) : null}
     </div>
   )
 }

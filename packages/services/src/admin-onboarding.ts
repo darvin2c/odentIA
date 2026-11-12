@@ -2,23 +2,19 @@
  * El alta de una clínica que entró (ficha del cliente › Alta): los pasos para
  * que empiece a trabajar, cada uno con su fecha o con lo que falta. Nadie los
  * marca a mano: se calculan al leer de lo que ya pasó (la cuenta, el contrato
- * de encargo, los documentos, los borradores de la skill, la auditoría de la
- * carga y del informe, el equipo, el canal, las sesiones y los pagos). Solo
- * lee y no deja auditoría.
+ * de encargo, los documentos, el registro de la carga, el equipo, el canal, las
+ * sesiones y los pagos). Solo lee y no deja auditoría.
  *
- * Soporte ve los pasos (sin importes: ningún paso los dice), pero no las
- * acciones que son de Administración (cargar, aprobar el plan).
+ * La carga y el informe los hace la skill en el servidor (ADR 0183): sus pasos
+ * salen del mismo registro que muestra Alta (`listClinicLoads` y
+ * `listProgressReports`), nunca de una copia, y ningún paso ofrece cargar ni
+ * enviar. Soporte ve los pasos (sin importes: ningún paso los dice), pero no
+ * las acciones que son de Administración.
  */
 
 import { AGREEMENT_VERSION } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
-import {
-  saasClient,
-  saasClientFile,
-  saasImportDraft,
-  saasInboundEmail,
-} from "@odentia/db/schema/admin-arm"
-import { adminAudit } from "@odentia/db/schema/admin-core"
+import { saasClient, saasClientFile, saasInboundEmail } from "@odentia/db/schema/admin-arm"
 import { clinicImportRow } from "@odentia/db/schema/admin-imports"
 import { invitation, member, organization, session } from "@odentia/db/schema/auth"
 import { channelConnection } from "@odentia/db/schema/crm"
@@ -26,7 +22,7 @@ import { saasPayment } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, count, desc, eq, gte, inArray, min, ne, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
-import { PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
+import { listClinicLoads, listProgressReports } from "./clinic-progress-report.js"
 import { notFound, ServiceError } from "./errors.js"
 
 export const ONBOARDING_STEP_KEYS = [
@@ -34,7 +30,6 @@ export const ONBOARDING_STEP_KEYS = [
   "contrato",
   "carta",
   "archivos",
-  "plan",
   "configuracion",
   "pacientes",
   "informe",
@@ -47,17 +42,9 @@ export type OnboardingStepKey = (typeof ONBOARDING_STEP_KEYS)[number]
 
 /** Lo que se puede hacer para avanzar un paso; la pantalla lo lleva a su lugar. */
 export interface OnboardingAction {
-  code:
-    | "reenviar_invitacion"
-    | "subir_carta"
-    | "subir_archivos"
-    | "revisar_plan"
-    | "cargar_configuracion"
-    | "cargar_pacientes"
-    | "enviar_informe"
-    | "revisar_informe"
+  code: "reenviar_invitacion" | "subir_carta" | "subir_archivos" | "revisar_informe"
   label: string
-  /** Solo Administración (la carga y lo que la prepara). */
+  /** Solo Administración (los archivos de la clínica y el registro de la carga). */
   adminOnly: boolean
 }
 
@@ -86,7 +73,6 @@ const LABELS: Record<OnboardingStepKey, string> = {
   contrato: "Contrato de encargo aceptado",
   carta: "Carta de bienvenida enviada",
   archivos: "Datos recibidos",
-  plan: "Plan de carga aprobado",
   configuracion: "Configuración cargada",
   pacientes: "Pacientes cargados",
   informe: "Informe enviado",
@@ -238,7 +224,6 @@ async function stepsWithoutAccount(tx: Db, clientId: string): Promise<Onboarding
     step("contrato", null, missing),
     letterStep(byKind.get("carta")),
     receivedStep(byKind, mail),
-    step("plan", null, missing),
     step("configuracion", null, missing),
     step("pacientes", null, missing),
     step("informe", null, missing),
@@ -322,109 +307,63 @@ async function stepsOf(
   // 3 y 4. Carta y datos recibidos.
   const { byKind, mail } = await filesAndMail(tx, clientId)
 
-  // 5. Plan de carga: el borrador de configuración aprobado (o ya cargado).
-  const drafts = await tx
-    .select({
-      kind: saasImportDraft.kind,
-      number: saasImportDraft.number,
-      status: saasImportDraft.status,
-      approvedAt: saasImportDraft.approvedAt,
-      createdAt: saasImportDraft.createdAt,
-    })
-    .from(saasImportDraft)
-    .where(eq(saasImportDraft.organizationId, orgId))
-    .orderBy(desc(saasImportDraft.createdAt))
-  const setupDrafts = drafts.filter((row) => row.kind === "plan_configuracion")
-  const approved = setupDrafts
-    .filter((row) => (row.status === "aprobada" || row.status === "usada") && row.approvedAt)
-    .sort((a, b) => (a.approvedAt?.getTime() ?? 0) - (b.approvedAt?.getTime() ?? 0))[0]
-  const waiting = setupDrafts.find((row) => row.status === "lista")
-  const returned = setupDrafts.find((row) => row.status === "devuelta")
-  const plan = approved?.approvedAt
-    ? step(
-        "plan",
-        approved.approvedAt,
-        `Plan N.º ${approved.number}, aprobado el ${day(approved.approvedAt)}`,
-      )
-    : waiting
-      ? step("plan", null, `La skill dejó el plan N.º ${waiting.number}: espera tu sí`, {
-          code: "revisar_plan",
-          label: "Revisar el plan",
-          adminOnly: true,
-        })
-      : returned
-        ? step("plan", null, `Devolviste el plan N.º ${returned.number}: espera el que lo corrige`)
-        : step("plan", null, "Falta: la skill aún no dejó el plan de carga")
-
-  // 6, 7 y 8. La carga y el informe, desde la auditoría de la administración.
-  const audits = await tx
-    .select({ action: adminAudit.action, at: adminAudit.createdAt, entityId: adminAudit.entityId })
-    .from(adminAudit)
-    .where(
-      and(
-        eq(adminAudit.organizationId, orgId),
-        inArray(adminAudit.action, [
-          "org.setup_import",
-          "org.data_import",
-          PROGRESS_REPORT_ACTIONS.enviado,
-          PROGRESS_REPORT_ACTIONS.desconocido,
-        ]),
-      ),
-    )
-    .orderBy(asc(adminAudit.createdAt))
-  const firstOf = (action: string) => audits.find((row) => row.action === action)
-  const setupLoaded = firstOf("org.setup_import")
+  // 5, 6 y 7. La carga y el informe: del registro que muestra Alta (lo que hizo la skill).
+  const loads = await listClinicLoads(tx, orgId)
+  const firstLoad = (kind: "configuracion" | "pacientes") =>
+    loads.filter((load) => load.kind === kind).at(-1)
+  const setupLoaded = firstLoad("configuracion")
   const configuration = setupLoaded
-    ? step("configuracion", setupLoaded.at, `Cargada el ${day(setupLoaded.at)}`)
-    : step("configuracion", null, "Falta: carga el plan de configuración", {
-        code: "cargar_configuracion",
-        label: "Cargar la configuración",
-        adminOnly: true,
-      })
+    ? step(
+        "configuracion",
+        new Date(setupLoaded.at),
+        `Cargada el ${day(new Date(setupLoaded.at))}: ${setupLoaded.summary}`,
+      )
+    : step("configuracion", null, "Falta: la carga la hace la skill de carga en el servidor")
 
   const [people] = await tx
     .select({ n: count(), first: min(clinicImportRow.createdAt) })
     .from(clinicImportRow)
     .where(eq(clinicImportRow.organizationId, orgId))
-  const peopleFirst = earliest(asDate(people?.first), firstOf("org.data_import")?.at)
+  const patientsLoaded = firstLoad("pacientes")
+  const peopleFirst = earliest(
+    asDate(people?.first),
+    patientsLoaded ? new Date(patientsLoaded.at) : null,
+  )
   const patients = peopleFirst
     ? step(
         "pacientes",
         peopleFirst,
         `Desde el ${day(peopleFirst)}: ${plural(people?.n ?? 0, "persona en la carga", "personas en la carga")}`,
       )
-    : step("pacientes", null, "Falta: carga el plan de pacientes", {
-        code: "cargar_pacientes",
-        label: "Cargar pacientes",
-        adminOnly: true,
-      })
+    : step("pacientes", null, "Falta: la carga la hace la skill de carga en el servidor")
 
-  const sent = audits.filter((row) => row.action === PROGRESS_REPORT_ACTIONS.enviado)
-  const unknown = audits.filter((row) => row.action === PROGRESS_REPORT_ACTIONS.desconocido)
+  const reports = await listProgressReports(tx, orgId)
+  const sent = reports
+    .filter((report) => report.state === "enviado")
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+  const firstSentAt = sent[0] ? new Date(sent[0].at) : null
+  const pending = reports.find((report) => report.state !== "enviado")
   const lastSent = sent.at(-1)
-  const sentNumbers = new Set(sent.map((row) => row.entityId))
-  const doubtful = unknown.filter((row) => !sentNumbers.has(row.entityId)).at(-1)
-  const numberOf = (entityId: string | null) => entityId?.replace(/^informe-/, "") ?? "?"
-  const report = doubtful
+  const report = pending
     ? step(
         "informe",
-        sent[0]?.at ?? null,
-        `No se sabe si salió el informe N.º ${numberOf(doubtful.entityId)}: revísalo antes de enviar otro`,
+        firstSentAt,
+        pending.state === "desconocido"
+          ? `No se sabe si salió el informe N.º ${pending.number}: revisa en Zoho si salió`
+          : `El informe N.º ${pending.number} quedó enviándose: revisa en Zoho si salió`,
         { code: "revisar_informe", label: "Revisar el informe", adminOnly: true },
       )
     : lastSent
       ? step(
           "informe",
-          sent[0]?.at ?? lastSent.at,
-          `${plural(sent.length, "informe enviado", "informes enviados")}; el último, N.º ${numberOf(lastSent.entityId)}, el ${day(lastSent.at)}`,
+          firstSentAt,
+          lastSent.registeredLater
+            ? `${plural(sent.length, "informe", "informes")}; el último, N.º ${lastSent.number}, salió el ${day(new Date(lastSent.at))} por correo aparte y se registró después`
+            : `${plural(sent.length, "informe", "informes")}; el último, N.º ${lastSent.number}, salió el ${day(new Date(lastSent.at))}`,
         )
-      : step("informe", null, "Falta: envía el informe de la carga", {
-          code: "enviar_informe",
-          label: "Enviar el informe",
-          adminOnly: true,
-        })
+      : step("informe", null, "Falta: la skill lo envía con tu aprobación")
 
-  // 9. Equipo: las invitaciones (que no son de propietaria) y quiénes ya entraron.
+  // 8. Equipo: las invitaciones (que no son de propietaria) y quiénes ya entraron.
   const invites = await tx
     .select({ status: invitation.status, expiresAt: invitation.expiresAt })
     .from(invitation)
@@ -466,7 +405,7 @@ async function stepsOf(
               .join(" · "),
           )
 
-  // 10. WhatsApp: un canal activo de la clínica.
+  // 9. WhatsApp: un canal activo de la clínica.
   const [whatsapp] = await tx
     .select({ at: channelConnection.createdAt })
     .from(channelConnection)
@@ -483,7 +422,7 @@ async function stepsOf(
     ? step("whatsapp", whatsapp.at, `Conectado el ${day(whatsapp.at)}`)
     : step("whatsapp", null, "Falta: la clínica aún no conectó su WhatsApp")
 
-  // 11. Primer uso: la primera sesión de alguien de la clínica activa desde que es parte de ella
+  // 10. Primer uso: la primera sesión de alguien de la clínica activa desde que es parte de ella
   // (la de registrarse empieza antes de la clínica; cuenta desde que entró). Una sesión cerrada se
   // borra: si ya no queda la primera, la fecha es la de la más antigua que queda.
   const [firstSession] = await tx
@@ -500,7 +439,7 @@ async function stepsOf(
     ? step("primer_uso", usedAt, `Entró por primera vez el ${day(usedAt)}`)
     : step("primer_uso", null, "Falta: nadie de la clínica entró todavía")
 
-  // 12. Primer pago confirmado (sin importes: Soporte también lo lee).
+  // 11. Primer pago confirmado (sin importes: Soporte también lo lee).
   const [paid] = await tx
     .select({ at: min(saasPayment.confirmedAt) })
     .from(saasPayment)
@@ -515,7 +454,6 @@ async function stepsOf(
     agreement,
     letterStep(byKind.get("carta")),
     receivedStep(byKind, mail),
-    plan,
     configuration,
     patients,
     report,

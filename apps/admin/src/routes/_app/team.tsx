@@ -20,7 +20,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
-import { SkillKeysSection } from "../../components/arm/skill-keys"
 import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
 import { ApiError, api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
@@ -418,8 +417,6 @@ function TeamPage() {
               </ul>
             )}
           </section>
-          {/* Solo Administración: la API también se las niega a Soporte. */}
-          {isManager ? <SkillKeysSection /> : null}
         </div>
       )}
       <FormDrawer

@@ -1,5 +1,5 @@
 /**
- * Una clínica con cuenta es un cliente (ADR 0183): esta dirección abre la ficha
+ * Una clínica con cuenta es un cliente (ADR 0184): esta dirección abre la ficha
  * de su cliente, en la pestaña equivalente (`clientTabFromOrganization`). Lo
  * que sigue aquí es para las cuentas sin cliente, que son las demos (una demo
  * nunca es cliente) y alguna que Kairós aún no ligó.

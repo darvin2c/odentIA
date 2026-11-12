@@ -1,5 +1,5 @@
 /**
- * Clientes (tablero 2 del lienzo del ARM, ADR 0183): todas las clínicas de
+ * Clientes (tablero 2 del lienzo del ARM, ADR 0184): todas las clínicas de
  * odentIA, latidIA y vistIA en una sola lista, desde el primer contacto hasta
  * las que pagan. Reemplaza a Lista de espera y Organizaciones: cada clínica es
  * una fila, con su etapa (la calcula el servidor; nadie la mueve), su próximo

@@ -4,7 +4,6 @@ import type { KairosItemStatus } from "@odentia/db/schema/admin-arm"
 import type { MailBrand, Mailer } from "@odentia/mail"
 import {
   type AdminActor,
-  approveImportDraft,
   assignInboundEmail,
   createSaasProposal,
   decideKairosItem,
@@ -37,11 +36,11 @@ import { adminContextOf } from "../lib/admin-context.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
- * Kairós en la administración (`/api/admin/kairos`, el ARM; ADR 0183): lo
+ * Kairós en la administración (`/api/admin/kairos`, el ARM; ADR 0184): lo
  * que espera un sí, aprobar o descartar, «Lo que hizo», Hoy y el número del
  * menú. Kairós nunca envía ni decide solo: aprobar ejecuta la misma operación
  * de la pantalla (`KairosExecutors` con las funciones reales de venta,
- * clientes, correos y la skill) y, si es un correo, la ruta lo envía después
+ * clientes y correos) y, si es un correo, la ruta lo envía después
  * del commit como cualquier envío: queda `enviado` o `incierto`, nunca se
  * reintenta. Un WhatsApp aprobado devuelve su enlace y queda pendiente hasta
  * que la persona dice «Salió» o «No salió».
@@ -129,7 +128,6 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
       createSaasProposal(tx, actor, clientId, input, now),
-    approveImportDraft: (tx, actor, draftId) => approveImportDraft(tx, actor, draftId, now),
   }
 }
 

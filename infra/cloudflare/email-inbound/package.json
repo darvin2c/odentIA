@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Email Worker de Cloudflare: reenvía soporte@ y contacto@ y los manda firmados a la administración (ADR 0183). No es parte del monorepo ni se despliega desde el CI.",
+  "description": "Email Worker de Cloudflare: reenvía soporte@ y contacto@ y los manda firmados a la administración (ADR 0184). No es parte del monorepo ni se despliega desde el CI.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "deploy": "wrangler deploy"

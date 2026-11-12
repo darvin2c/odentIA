@@ -25,7 +25,13 @@ import { clientDuplicatePairsSql, linkClientToOrganization } from "./admin-clien
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
 import { type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
 import { type SupportHomeRow, supportHomeRows } from "./admin-support.js"
-import { PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
+import {
+  type ClinicLoadRecord,
+  listClinicLoads,
+  listProgressReports,
+  PROGRESS_REPORT_ACTIONS,
+  type ProgressReportRecord,
+} from "./clinic-progress-report.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 import { businessDaysWords, currentSaasTerms } from "./saas-commercial-terms.js"
@@ -86,11 +92,9 @@ const READY_ON_TODAY = 5
  */
 const KAIROS_READER: AdminActor = { userId: "kairos", role: "admin" }
 
-/** Lo que solo aprueba Administración (precios, la carga, ligar personas, fusionar). */
+/** Lo que solo aprueba Administración (precios, ligar personas, fusionar). */
 const ADMIN_KINDS: ReadonlySet<KairosItemKind> = new Set<KairosItemKind>([
   "propuesta",
-  "plan_carga",
-  "informe",
   "vinculo",
   "duplicado",
 ])
@@ -106,8 +110,6 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   vinculo: "un vínculo",
   duplicado: "un posible duplicado",
   demo: "una demo",
-  plan_carga: "un plan de carga",
-  informe: "un informe",
   presentacion_hecha: "la pregunta de una presentación",
   correo_sin_cliente: "un correo sin cliente",
 }
@@ -484,7 +486,7 @@ export async function kairosRiskRows(
  * Lo que tiene que seguir igual para que lo preparado valga: lo lee igual al
  * prepararlo y al aprobarlo (una sola función, así no se desfasan). Un
  * mensaje vale mientras no haya un contacto posterior; lo demás, mientras su
- * solicitud, propuesta, tarea, borrador, correo, oportunidad, invitaciones o
+ * solicitud, propuesta, tarea, correo, oportunidad, invitaciones o
  * datos sigan como estaban.
  */
 async function captureState(
@@ -524,14 +526,6 @@ async function captureState(
       sql`select status, due_on::text as due_on, ${iso(sql`due_at`)} as due_at from saas_task where id = ${taskId}::uuid`,
     )
     state.task = row ? { status: row.status, dueOn: row.due_on, dueAt: row.due_at } : null
-  }
-  const draftId = str(payload.draftId)
-  if (draftId) {
-    const [row] = await rows<{ status: string }>(
-      tx,
-      sql`select status from saas_import_draft where id = ${draftId}::uuid`,
-    )
-    state.draft = row?.status ?? null
   }
   const emailId = str(payload.emailId)
   if (emailId) {
@@ -818,8 +812,8 @@ export interface KairosProposalInput {
 /**
  * Las operaciones de la pantalla que ejecuta un sí. Viven en los otros
  * módulos del ARM (envíos y presentaciones en `admin-sales.ts`, datos y
- * contactos en `admin-clients.ts`, correos en `admin-inbound-email.ts`,
- * borradores de la skill en `admin-skill.ts`) y las pasa la ruta: aprobar lo
+ * contactos en `admin-clients.ts`, correos en `admin-inbound-email.ts`) y
+ * las pasa la ruta: aprobar lo
  * de Kairós es la misma operación que hace la persona, con sus reglas y su
  * auditoría, nunca una copia.
  */
@@ -850,7 +844,6 @@ export interface KairosExecutors<O extends KairosOutreachPrepared = KairosOutrea
     clientId: string,
     input: KairosProposalInput,
   ): Promise<{ id: string }>
-  approveImportDraft(tx: Db, actor: AdminActor, draftId: string): Promise<unknown>
 }
 
 export interface KairosDecideInput {
@@ -886,8 +879,6 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   vinculo: [],
   duplicado: [],
   demo: [],
-  plan_carga: [],
-  informe: [],
   presentacion_hecha: ["outcome", "body", "nextDueOn"],
   correo_sin_cliente: ["clientId"],
 }
@@ -1022,13 +1013,6 @@ async function executeItem<O extends KairosOutreachPrepared>(
         ...(nextDueOn ? { nextDueOn } : {}),
       })
       return { status: "ejecutada", result: { taskId, outcome } }
-    }
-    case "plan_carga":
-    case "informe": {
-      const draftId = optText(payload.draftId)
-      if (!draftId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el borrador")
-      await executors.approveImportDraft(tx, actor, draftId)
-      return { status: "ejecutada", result: { draftId } }
     }
     case "propuesta": {
       const planId = optText(payload.planId)
@@ -1566,6 +1550,47 @@ class Pass {
     })
   }
 
+  /** ¿Hay una tarea de Kairós abierta con esa clave? */
+  async openTask(prefix: string): Promise<boolean> {
+    const [found] = await this.tx
+      .select({ id: saasTask.id })
+      .from(saasTask)
+      .where(
+        and(
+          eq(saasTask.status, "abierta"),
+          sql`left(${saasTask.kairosKey}, ${prefix.length}) = ${prefix}`,
+        ),
+      )
+      .limit(1)
+    return Boolean(found)
+  }
+
+  /**
+   * Deja un aviso en «Lo que hizo» una sola vez por clave (`entity_id`): lo que pasó fuera
+   * de Kairós y él cuenta (una carga, un informe que salió). Solo de Administración.
+   */
+  async notice(plan: {
+    action: "kairos.load_noticed" | "kairos.report_noticed"
+    key: string
+    clientId: string
+    metadata: Record<string, unknown>
+  }): Promise<boolean> {
+    const [found] = await rows<{ id: string }>(
+      this.tx,
+      sql`select id from admin_audit where action = ${plan.action} and entity_id = ${plan.key} limit 1`,
+    )
+    if (found) return false
+    const client = await this.client(plan.clientId)
+    if (!client) return false
+    await writeAdminAudit(this.tx, null, {
+      action: plan.action,
+      entityId: plan.key,
+      organizationId: client.organizationId,
+      metadata: { ...plan.metadata, clientId: plan.clientId, adminOnly: true },
+    })
+    return true
+  }
+
   /** Una señal que pide una tarea: la tarea una vez por hecho y la señal en «Lo que hizo». */
   async signalTask(
     clientId: string,
@@ -1963,7 +1988,7 @@ async function rulePresentations(pass: Pass): Promise<void> {
   }
 }
 
-/** (8) El alta: los archivos que no llegan, lo que dejó la skill, el informe que falta o no se sabe si salió, el equipo que no entra. */
+/** (8) El alta: los archivos que no llegan, lo que cargó la skill, el informe que falta o no se sabe si salió, el equipo que no entra. */
 async function ruleOnboarding(pass: Pass): Promise<void> {
   const { tx } = pass
   const letters = await rows<{ client_id: string; file_id: string; sent_at: string }>(
@@ -1977,7 +2002,8 @@ async function ruleOnboarding(pass: Pass): Promise<void> {
     where c.archived_at is null and c.organization_id is not null and f.created_at <= ${pass.ago(LETTER_WAIT_DAYS)}
       and not exists (select 1 from saas_client_file g where g.client_id = c.id and g.kind = 'archivo_clinica' and g.created_at >= f.created_at)
       and not exists (select 1 from saas_inbound_email e where e.client_id = c.id and jsonb_array_length(e.attachments) > 0 and e.received_at >= f.created_at)
-      and not exists (select 1 from saas_import_draft d where d.client_id = c.id)`,
+      and not exists (select 1 from admin_audit l where l.organization_id = c.organization_id
+        and l.action in ('org.setup_import', 'org.data_import'))`,
   )
   for (const letter of letters) {
     const sent = dayText(limaDate(new Date(letter.sent_at)))
@@ -2003,73 +2029,7 @@ async function ruleOnboarding(pass: Pass): Promise<void> {
       adminOnly: false,
     })
   }
-  const drafts = await rows<{ id: string; client_id: string; kind: string; number: number }>(
-    tx,
-    sql`select d.id, d.client_id, d.kind, d.number from saas_import_draft d join saas_client c on c.id = d.client_id
-    where d.status = 'lista' and c.archived_at is null order by d.created_at asc`,
-  )
-  const DRAFT_WORDS: Record<string, string> = {
-    plan_configuracion: "el plan de configuración",
-    plan_pacientes: "el plan de pacientes",
-    informe: "el informe",
-  }
-  for (const draft of drafts) {
-    const what = `${DRAFT_WORDS[draft.kind] ?? "un borrador"}${draft.kind === "informe" ? ` ${draft.number}` : ""}`
-    await pass.item({
-      rule: "borrador_skill",
-      clientId: draft.client_id,
-      fact: draft.id,
-      kind: draft.kind === "informe" ? "informe" : "plan_carga",
-      title: `La skill dejó ${what}`,
-      reason: `La skill de la carga dejó ${what}: revísalo y apruébalo o devuélvelo`,
-      adminOnly: true,
-      payload: { draftId: draft.id, draftKind: draft.kind, number: draft.number },
-    })
-  }
-  const actions = Object.values(PROGRESS_REPORT_ACTIONS)
-  const actionList = sql.join(
-    actions.map((action) => sql`${action}`),
-    sql`, `,
-  )
-  const loaded = await rows<{ client_id: string; audit_id: string }>(
-    tx,
-    sql`select c.id as client_id, a.id as audit_id from saas_client c
-    join lateral (
-      select id, created_at from admin_audit a where a.action = 'org.setup_import' and a.organization_id = c.organization_id
-      order by created_at desc limit 1
-    ) a on true
-    where c.archived_at is null
-      and not exists (select 1 from admin_audit r where r.organization_id = c.organization_id and r.action in (${actionList}) and r.created_at >= a.created_at)`,
-  )
-  for (const row of loaded) {
-    await pass.task({
-      rule: "carga_sin_informe",
-      clientId: row.client_id,
-      fact: row.audit_id,
-      repeat: "once",
-      kind: "alta",
-      title: "Enviar el informe de la carga",
-    })
-  }
-  const unknown = await rows<{ client_id: string; audit_id: string; entity_id: string | null }>(
-    tx,
-    sql`select c.id as client_id, a.id as audit_id, a.entity_id from saas_client c
-    join admin_audit a on a.organization_id = c.organization_id and a.action = ${PROGRESS_REPORT_ACTIONS.desconocido}
-    where c.archived_at is null
-      and not exists (select 1 from admin_audit b where b.organization_id = a.organization_id and b.entity_id = a.entity_id
-        and b.action in (${actionList}) and b.created_at > a.created_at)`,
-  )
-  for (const row of unknown) {
-    const number = row.entity_id?.match(/^informe-(\d+)$/)?.[1]
-    await pass.task({
-      rule: "informe_desconocido",
-      clientId: row.client_id,
-      fact: row.audit_id,
-      repeat: "once",
-      kind: "alta",
-      title: `Urgente: no se sabe si salió el informe${number ? ` ${number}` : ""}`,
-    })
-  }
+  await ruleLoadsAndReports(pass)
   const teams = await rows<{ client_id: string; ids: string[]; n: number }>(
     tx,
     sql`select c.id as client_id, array_agg(i.id order by i.id) as ids, count(*)::int as n
@@ -2096,6 +2056,183 @@ async function ruleOnboarding(pass: Pass): Promise<void> {
       extra: { invitationIds: team.ids },
     })
   }
+}
+
+/** Cuánto espera Kairós a que una carga termine antes de contarla: las tandas de pacientes siguen llegando. */
+const LOAD_SETTLE_MS = 10 * 60_000
+
+const LOAD_WORDS: Record<ClinicLoadRecord["kind"], string> = {
+  configuracion: "Se cargó la configuración",
+  pacientes: "Se cargaron los pacientes",
+}
+
+/** El prefijo de la clave de las tareas de Kairós de un informe que no se sabe si salió. */
+const unknownReportPrefix = (clientId: string, number: number) =>
+  `informe_desconocido:${clientId}:informe-${number}-`
+
+/** El número del informe de una tarea «Revisar en Zoho…», leído de su clave; null si no es una. */
+export function unknownReportNumberOf(kairosKey: string | null): number | null {
+  const match = kairosKey?.match(/^informe_desconocido:[^:]+:informe-(\d+)-/)
+  return match ? Number(match[1]) : null
+}
+
+/**
+ * Lo que hizo la skill de carga en el servidor (ADR 0183), leído del mismo registro que
+ * muestra la ficha › Alta (`listClinicLoads` y `listProgressReports`, nunca una copia):
+ * cada carga, una vez, en «Lo que hizo» con sus cifras y a nombre de quien la hizo (una
+ * carga de pacientes cuenta cuando sus tandas llevan 10 minutos quietas); cada informe
+ * que salió, una vez; «Enviar el informe» si lo último cargado no tiene informe después;
+ * y la tarea urgente «Revisar en Zoho si salió el informe N.º n» por cada vez que un
+ * informe queda «no se sabe si salió» (si un reenvío vuelve a cortarse, vuelve la tarea).
+ * Lo que ya se resolvió se cierra solo (`settleReportTasks`).
+ */
+async function ruleLoadsAndReports(pass: Pass): Promise<void> {
+  const { tx } = pass
+  const actions = sql.join(
+    ["org.setup_import", "org.data_import", ...Object.values(PROGRESS_REPORT_ACTIONS)].map(
+      (action) => sql`${action}`,
+    ),
+    sql`, `,
+  )
+  const accounts = await rows<{ client_id: string; organization_id: string }>(
+    tx,
+    sql`select c.id as client_id, c.organization_id from saas_client c
+    where c.archived_at is null and c.organization_id is not null
+      and exists (select 1 from admin_audit a where a.organization_id = c.organization_id and a.action in (${actions}))
+    order by c.created_at asc, c.id asc`,
+  )
+  for (const account of accounts) {
+    const clientId = account.client_id
+    const orgId = account.organization_id
+    const loads = await listClinicLoads(tx, orgId)
+    const reports = await listProgressReports(tx, orgId)
+    const quiet = pass.now.getTime() - LOAD_SETTLE_MS
+    for (const load of loads) {
+      if (Date.parse(load.at) > quiet) continue
+      await pass.notice({
+        action: "kairos.load_noticed",
+        key: `carga:${load.id}`,
+        clientId,
+        metadata: { loadKind: load.kind, summary: load.summary, by: load.by, at: load.at },
+      })
+    }
+    for (const report of reports) {
+      if (report.state !== "enviado") continue
+      await pass.notice({
+        action: "kairos.report_noticed",
+        key: `informe:${orgId}:${report.number}`,
+        clientId,
+        metadata: {
+          number: report.number,
+          to: report.to,
+          registered: report.registeredLater,
+          resent: report.resent,
+        },
+      })
+    }
+    const lastLoad = loads[0]
+    const reportedAfter = lastLoad
+      ? reports.some((report) => Date.parse(report.at) >= Date.parse(lastLoad.at))
+      : true
+    if (lastLoad && !reportedAfter && !(await pass.openTask(`carga_sin_informe:${clientId}:`)))
+      await pass.task({
+        rule: "carga_sin_informe",
+        clientId,
+        fact: lastLoad.id,
+        repeat: "once",
+        kind: "alta",
+        title: "Enviar el informe",
+        adminOnly: true,
+      })
+    for (const report of reports) {
+      // Una por vez: si la de antes sigue abierta (un reenvío que volvió a cortarse), basta esa.
+      if (report.state !== "desconocido") continue
+      if (await pass.openTask(unknownReportPrefix(clientId, report.number))) continue
+      await pass.task({
+        rule: "informe_desconocido",
+        clientId,
+        fact: `informe-${report.number}-${Date.parse(report.at)}`,
+        repeat: "once",
+        kind: "alta",
+        title: `Revisar en Zoho si salió el informe N.º ${report.number}`,
+        // Urgente: arriba en Hoy desde ya.
+        dueAt: pass.now,
+        adminOnly: true,
+      })
+    }
+    await settleReportTasks(tx, orgId, pass.now, { loads, reports, clientId })
+  }
+}
+
+/**
+ * Cierra las tareas de Kairós de un informe que ya salió: «Revisar en Zoho si salió el
+ * informe N.º n» cuando ese número quedó enviado, y «Enviar el informe» cuando el último
+ * informe, después de la última carga, salió. Deja en «Lo que hizo» que la cerró. La usa
+ * la pasada y la ruta del registro después de «Revisé en Zoho: salió» o de un reenvío.
+ */
+export async function settleReportTasks(
+  tx: Db,
+  orgId: string,
+  now: Date,
+  known?: { loads: ClinicLoadRecord[]; reports: ProgressReportRecord[]; clientId: string },
+): Promise<number> {
+  let clientId = known?.clientId
+  if (!clientId) {
+    const [client] = await tx
+      .select({ id: saasClient.id })
+      .from(saasClient)
+      .where(eq(saasClient.organizationId, orgId))
+      .limit(1)
+    if (!client) return 0
+    clientId = client.id
+  }
+  const loads = known?.loads ?? (await listClinicLoads(tx, orgId))
+  const reports = known?.reports ?? (await listProgressReports(tx, orgId))
+  const close: Array<{ prefix: string; why: string }> = []
+  for (const report of reports)
+    if (report.state === "enviado")
+      close.push({
+        prefix: unknownReportPrefix(clientId, report.number),
+        why: `salió el informe N.º ${report.number}`,
+      })
+  const lastLoad = loads[0]
+  const lastSent = reports
+    .filter((report) => report.state === "enviado")
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0]
+  if (lastSent && (!lastLoad || Date.parse(lastSent.at) >= Date.parse(lastLoad.at)))
+    close.push({
+      prefix: `carga_sin_informe:${clientId}:`,
+      why: `salió el informe N.º ${lastSent.number}`,
+    })
+  let closed = 0
+  for (const { prefix, why } of close) {
+    const done = await tx
+      .update(saasTask)
+      .set({
+        status: "hecha",
+        doneAt: now,
+        doneNote: `Kairós la cerró: ${why}`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(saasTask.status, "abierta"),
+          eq(saasTask.byKairos, true),
+          sql`left(${saasTask.kairosKey}, ${prefix.length}) = ${prefix}`,
+        ),
+      )
+      .returning({ id: saasTask.id, title: saasTask.title })
+    for (const task of done) {
+      await writeAdminAudit(tx, null, {
+        action: "kairos.task_closed",
+        entityId: task.id,
+        organizationId: orgId,
+        metadata: { clientId, taskId: task.id, title: task.title, why, adminOnly: true },
+      })
+      closed += 1
+    }
+  }
+  return closed
 }
 
 /** (9) Riesgo de las que tienen cuenta: cada señal con su tarea, una vez por hecho. */
@@ -2455,6 +2592,33 @@ export async function kairosDone(
       case "kairos.summary_written":
         words = client ? `Resumió la ficha de ${client.name}` : null
         break
+      case "kairos.load_noticed": {
+        const kind = meta(a.metadata, "loadKind") as ClinicLoadRecord["kind"] | null
+        const summary = meta(a.metadata, "summary")
+        const by = meta(a.metadata, "by")
+        if (!kind || !LOAD_WORDS[kind] || !summary || !client) break
+        words = `${LOAD_WORDS[kind]} de ${client.name}: ${summary}${by ? ` (lo cargó ${by})` : ""}`
+        break
+      }
+      case "kairos.report_noticed": {
+        const number = a.metadata?.number
+        if (typeof number !== "number" || !client) break
+        const to = meta(a.metadata, "to")
+        const how =
+          a.metadata?.registered === true
+            ? ", por correo aparte; se registró después"
+            : a.metadata?.resent === true
+              ? ", reenviado"
+              : ""
+        words = `Salió el informe N.º ${number} de ${client.name}${to ? ` a ${to}` : ""}${how}`
+        break
+      }
+      case "kairos.task_closed": {
+        const title = meta(a.metadata, "title")
+        const why = meta(a.metadata, "why")
+        words = title && why ? `Cerró la tarea «${title}»: ${why}` : null
+        break
+      }
     }
     if (!words) continue
     out.push({
@@ -2497,6 +2661,11 @@ export interface TodayTaskRow {
   byKairos: boolean
   overdue: boolean
   why: string
+  /**
+   * «Revisar en Zoho si salió el informe N.º n»: con qué resolverla ahí mismo («Revisé en
+   * Zoho: salió» o «No salió: reenviar»). Solo Administración.
+   */
+  report?: { organizationId: string; number: number; to: string | null; canResend: boolean }
 }
 
 type WithWhy<T> = T & { clientId: string | null; why: string }
@@ -2591,6 +2760,7 @@ export async function todayForStaff(
       task: saasTask,
       clientName: saasClient.name,
       product: saasClient.product,
+      organizationId: saasClient.organizationId,
       assigneeName: assignee.name,
     })
     .from(saasTask)
@@ -2606,33 +2776,66 @@ export async function todayForStaff(
       ),
     )
     .orderBy(asc(saasTask.dueOn), sql`${saasTask.dueAt} asc nulls last`, asc(saasTask.createdAt))
-  const tasks: TodayTaskRow[] = taskRows.map(({ task, clientName, product, assigneeName }) => {
-    const overdue = task.dueOn < today || (task.dueAt !== null && task.dueAt < now)
-    const when =
-      task.dueOn < today
-        ? `Vencida desde el ${dayText(task.dueOn)}`
-        : task.dueAt
-          ? `${task.dueAt < now ? "Era hoy" : "Hoy"} a las ${timeText(task.dueAt)}`
-          : "Para hoy"
-    return {
-      id: task.id,
-      clientId: task.clientId,
-      clientName,
-      product: productOf(product),
-      kind: task.kind as SaasTaskKind,
-      title: task.title,
-      dueOn: task.dueOn,
-      dueAt: task.dueAt,
-      assignee: task.assigneeUserId
-        ? { userId: task.assigneeUserId, name: assigneeName ?? "Sin nombre" }
-        : null,
-      byKairos: task.byKairos,
-      overdue,
-      why: task.byKairos ? `${when} · La puso Kairós` : when,
-    }
-  })
-  // Lo vencido arriba.
-  tasks.sort((a, b) => Number(b.overdue) - Number(a.overdue))
+  // Los informes de las tareas «Revisar en Zoho…», leídos del registro (solo Administración).
+  const reportsOf = new Map<string, ProgressReportRecord[]>()
+  if (admin)
+    for (const { task, organizationId } of taskRows)
+      if (
+        organizationId &&
+        task.byKairos &&
+        unknownReportNumberOf(task.kairosKey) !== null &&
+        !reportsOf.has(organizationId)
+      )
+        reportsOf.set(organizationId, await listProgressReports(tx, organizationId))
+  const tasks: TodayTaskRow[] = taskRows.map(
+    ({ task, clientName, product, organizationId, assigneeName }) => {
+      const overdue = task.dueOn < today || (task.dueAt !== null && task.dueAt < now)
+      const when =
+        task.dueOn < today
+          ? `Vencida desde el ${dayText(task.dueOn)}`
+          : task.dueAt
+            ? `${task.dueAt < now ? "Era hoy" : "Hoy"} a las ${timeText(task.dueAt)}`
+            : "Para hoy"
+      const reportNumber = task.byKairos ? unknownReportNumberOf(task.kairosKey) : null
+      const found =
+        admin && reportNumber !== null && organizationId
+          ? reportsOf.get(organizationId)?.find((item) => item.number === reportNumber)
+          : undefined
+      // Solo mientras siga sin saberse: si ya salió, la tarea se cierra en la próxima pasada.
+      const report =
+        found && organizationId && found.state === "desconocido"
+          ? {
+              organizationId,
+              number: found.number,
+              to: found.to,
+              canResend: Boolean(found.pdfKey && found.mail && found.to),
+            }
+          : null
+      return {
+        id: task.id,
+        clientId: task.clientId,
+        clientName,
+        product: productOf(product),
+        kind: task.kind as SaasTaskKind,
+        title: task.title,
+        dueOn: task.dueOn,
+        dueAt: task.dueAt,
+        assignee: task.assigneeUserId
+          ? { userId: task.assigneeUserId, name: assigneeName ?? "Sin nombre" }
+          : null,
+        byKairos: task.byKairos,
+        overdue,
+        why: task.byKairos ? `${when} · La puso Kairós` : when,
+        ...(report ? { report } : {}),
+      }
+    },
+  )
+  // Lo urgente (un informe que no se sabe si salió) y lo vencido, arriba.
+  tasks.sort(
+    (a, b) =>
+      Number(Boolean(b.report)) - Number(Boolean(a.report)) ||
+      Number(b.overdue) - Number(a.overdue),
+  )
 
   const cooling = await kairosCoolingRows(tx, actor, now)
   const atRisk = await kairosRiskRows(tx, actor, now)

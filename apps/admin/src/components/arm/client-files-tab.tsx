@@ -1,7 +1,6 @@
 /**
- * Ficha del cliente › Documentos (ARM, ADR 0183): lo que le mandamos (carta,
- * propuestas, presentaciones, planes e informes de la carga) y lo que nos
- * mandó la clínica, con su tipo, quién lo dejó, cuándo y, si lo hay, el día en
+ * Ficha del cliente › Documentos (ARM, ADR 0184): lo que le mandamos (carta,
+ * propuestas, presentaciones) y lo que nos mandó la clínica, con su tipo, quién lo dejó, cuándo y, si lo hay, el día en
  * que se borra. Lo que manda la clínica es solo de Administración y se borra a
  * los 30 días (lo promete el contrato de encargo); Soporte no ve lo que es
  * solo de Administración y la API tampoco se lo da. Borrar es de
@@ -25,18 +24,16 @@ import { useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { limaDayWords } from "../../lib/invitation-words"
 import { supportDay } from "../../lib/support-words"
 import { ClientFilesSkeleton } from "../skeletons/client-account"
 import type { ClientTabProps } from "./account-tabs"
 import { invalidateClient } from "./client-model"
-import { deleteOnWords } from "./import-drafts"
 
 export const CLIENT_FILE_KINDS = [
   "carta",
   "propuesta",
   "presentacion",
-  "plan_carga",
-  "informe",
   "archivo_clinica",
   "correo",
   "otro",
@@ -47,20 +44,13 @@ export const FILE_KIND_WORDS: Record<ClientFileKind, string> = {
   carta: "Carta de bienvenida",
   propuesta: "Propuesta",
   presentacion: "Presentación",
-  plan_carga: "Plan de carga",
-  informe: "Informe a la clínica",
   archivo_clinica: "Lo que mandó la clínica",
   correo: "Adjunto de un correo",
   otro: "Otro",
 }
 
-/** Lo que solo maneja Administración (la carga y lo que trae datos de la clínica); el servidor lo exige. */
-const ADMIN_KINDS: ReadonlySet<ClientFileKind> = new Set([
-  "plan_carga",
-  "informe",
-  "archivo_clinica",
-  "correo",
-])
+/** Lo que solo maneja Administración (lo que trae datos de la clínica); el servidor lo exige. */
+const ADMIN_KINDS: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica", "correo"])
 /** Lo que manda la clínica: siempre solo de Administración y se borra a los 30 días. */
 const CLINIC_SENT: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica", "correo"])
 
@@ -73,7 +63,7 @@ const fileSchema = z.object({
   sizeBytes: z.number(),
   adminOnly: z.boolean(),
   deleteAfter: z.string().nullable(),
-  source: z.enum(["persona", "kairos", "skill", "correo"]).nullable(),
+  source: z.enum(["persona", "kairos", "correo"]).nullable(),
   createdAt: z.string(),
   createdBy: z.object({ userId: z.string(), name: z.string() }).nullable(),
 })
@@ -100,10 +90,12 @@ const sizeWords = (bytes: number) =>
 function whoWords(file: ClientFile): string {
   const name = file.createdBy?.name.split(" ")[0]
   if (file.source === "kairos") return "lo dejó Kairós"
-  if (file.source === "skill") return name ? `lo dejó la skill de ${name}` : "lo dejó la skill"
   if (file.source === "correo") return "llegó por correo"
   return name ? `lo subió ${name}` : "lo subió el equipo"
 }
+
+/** «se borra el jue 12 dic» de un día de Lima. */
+const deleteOnWords = (day: string): string => `se borra el ${limaDayWords(day)}`
 
 export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
   const queryClient = useQueryClient()
@@ -161,7 +153,7 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
           {files.data.items.length === 0 ? (
             <EmptyState
               title="Sin documentos"
-              description="Aquí quedan la carta de bienvenida, las propuestas, los planes e informes de la carga y lo que mande la clínica."
+              description="Aquí quedan la carta de bienvenida, las propuestas, las presentaciones y lo que mande la clínica."
               actionLabel="Subir un documento"
               onAction={() => setUploading(true)}
             />

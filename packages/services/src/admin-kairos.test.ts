@@ -3,7 +3,6 @@ import {
   kairosItem,
   saasClient,
   saasClientContact,
-  saasImportDraft,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
@@ -28,8 +27,10 @@ import {
   recordKairosAiUse,
   saveKairosDraft,
   settleKairosOutreach,
+  settleReportTasks,
   todayForStaff,
 } from "./admin-kairos.js"
+import { PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 import { createSaasPlan } from "./saas-billing.js"
@@ -43,6 +44,7 @@ const OWNER = "kz-owner"
 const RISK_ORG = "kz-riesgo"
 const DEMO_ORG = "kz-demo-org"
 const LOAD_ORG = "kz-carga"
+const LOADED_ORG = "kz-cargada"
 const DAY = 86_400_000
 const NOW = new Date()
 const TODAY = limaDate(NOW)
@@ -148,9 +150,6 @@ const executors: KairosExecutors = {
   async createProposal(_tx, actor, clientId, input) {
     calls.push({ op: "createProposal", args: [actor.userId, clientId, input] })
     return { id: "00000000-0000-4000-8000-000000000000" }
-  },
-  async approveImportDraft(_tx, actor, draftId) {
-    calls.push({ op: "approveImportDraft", args: [actor.userId, draftId] })
   },
 }
 const lastCall = (op: string) => [...calls].reverse().find((call) => call.op === op)
@@ -357,7 +356,8 @@ beforeAll(async () => {
     .returning({ id: saasTask.id })
   ids.presentationTask = todayTask?.id ?? ""
 
-  // (8) La skill dejó el plan de configuración de una clínica con cuenta.
+  // (8) La skill cargó en el servidor: una clínica con su configuración y un informe que no
+  // se sabe si salió, y otra con la configuración cargada y sin informe.
   await insertOrg(ownerDb, LOAD_ORG, "kz-carga")
   const load = await client("carga", "Clínica Carga (ficticia)", {
     open: false,
@@ -366,18 +366,62 @@ beforeAll(async () => {
   await ownerDb
     .insert(saasOpportunity)
     .values({ clientId: load, decision: "entro", decidedAt: NOW })
-  const [draft] = await ownerDb
-    .insert(saasImportDraft)
-    .values({
-      clientId: load,
+  await insertOrg(ownerDb, LOADED_ORG, "kz-cargada")
+  const loaded = await client("cargada", "Clínica Cargada (ficticia)", {
+    open: false,
+    organizationId: LOADED_ORG,
+    owner: support.userId,
+  })
+  await ownerDb
+    .insert(saasOpportunity)
+    .values({ clientId: loaded, decision: "entro", decidedAt: NOW })
+  const setup = { nueva: 20, cambia: 2, igual: 7, planSha256: "c".repeat(64) }
+  await ownerDb.insert(adminAudit).values([
+    {
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: "org.setup_import",
       organizationId: LOAD_ORG,
-      kind: "plan_configuracion",
-      number: 1,
-      payloadKey: "clients/kz/plan.json",
-      uploadedBy: admin.userId,
-    })
-    .returning({ id: saasImportDraft.id })
-  ids.draft = draft?.id ?? ""
+      metadata: setup,
+      createdAt: ago(2),
+    },
+    {
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: PROGRESS_REPORT_ACTIONS.enviando,
+      organizationId: LOAD_ORG,
+      entityId: "informe-1",
+      metadata: { to: "duena@carga.test" },
+      createdAt: ago(1),
+    },
+    {
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: PROGRESS_REPORT_ACTIONS.desconocido,
+      organizationId: LOAD_ORG,
+      entityId: "informe-1",
+      metadata: { to: "duena@carga.test" },
+      // El correo se cortó un momento después de reservarlo.
+      createdAt: new Date(ago(1).getTime() + 1000),
+    },
+    {
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: LOADED_ORG,
+      metadata: setup,
+      createdAt: ago(1),
+    },
+    // Una pasada de pacientes que sigue llegando: no cuenta hasta que se queda quieta.
+    {
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: "org.data_import",
+      organizationId: LOADED_ORG,
+      metadata: { planSha256: "d".repeat(64), from: 0, creadas: 3 },
+      createdAt: new Date(NOW.getTime() - 60_000),
+    },
+  ])
 
   // (12) Dos fichas con la misma persona.
   await client("dup1", "Dental Repetida (ficticia)", {
@@ -547,11 +591,40 @@ describe("la pasada de Kairós", () => {
     ids.presentedItem = done?.id ?? ""
   })
 
-  it("lo que dejó la skill espera el sí de Administración", async () => {
-    const [plan] = await itemsOf(ids.carga as string, "plan_carga")
-    expect(plan).toMatchObject({ adminOnly: true })
-    expect(plan?.payload).toMatchObject({ draftId: ids.draft, draftKind: "plan_configuracion" })
-    ids.planItem = plan?.id ?? ""
+  it("lo que cargó la skill: cada carga quieta en «Lo que hizo» con sus cifras y quién; la que sigue llegando, todavía no", async () => {
+    const noticed = await ownerDb
+      .select({ organizationId: adminAudit.organizationId, metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(eq(adminAudit.action, "kairos.load_noticed"))
+    expect(noticed.map((row) => row.organizationId).sort()).toEqual([LOADED_ORG, LOAD_ORG].sort())
+    expect(noticed[0]?.metadata).toMatchObject({
+      loadKind: "configuracion",
+      summary: "20 nuevos · 2 cambiaron · 7 ya estaban",
+      by: "Ada Administración",
+      adminOnly: true,
+    })
+  })
+
+  it("se cargó y no hay informe: «Enviar el informe» al responsable; si se intentó, no", async () => {
+    const pending = await tasksOf(ids.cargada as string)
+    expect(pending.map((task) => [task.title, task.assigneeUserId])).toEqual([
+      ["Enviar el informe", support.userId],
+    ])
+    const urgent = await tasksOf(ids.carga as string)
+    expect(urgent.map((task) => task.title)).toEqual(["Revisar en Zoho si salió el informe N.º 1"])
+    expect(urgent[0]?.dueAt?.getTime()).toBe(NOW.getTime())
+    // En Hoy va arriba y lleva con qué resolverla, solo para Administración.
+    const forAdmin = await ownerDb.transaction((tx) =>
+      todayForStaff(tx, admin, { who: "todas" }, NOW),
+    )
+    expect(forAdmin.tasks[0]).toMatchObject({
+      clientId: ids.carga,
+      report: { organizationId: LOAD_ORG, number: 1, to: "duena@carga.test", canResend: false },
+    })
+    const forSupport = await ownerDb.transaction((tx) =>
+      todayForStaff(tx, support, { who: "todas" }, NOW),
+    )
+    expect(forSupport.tasks.every((task) => task.report === undefined)).toBe(true)
   })
 
   it("riesgo: cada señal con su tarea, una vez por hecho; el comprobante, como tarea de cobro", async () => {
@@ -592,6 +665,7 @@ describe("la pasada de Kairós", () => {
     const [dup] = await itemsOf(ids.dup2 as string, "duplicado")
     expect(dup).toMatchObject({ adminOnly: true })
     expect(dup?.payload).toMatchObject({ keepId: ids.dup1, dropId: ids.dup2 })
+    ids.dupItem = dup?.id ?? ""
     // La misma regla que «puede estar repetida»: nada que `mergeClients` rechazaría.
     for (const key of ["dupCuenta1", "dupCuenta2", "dupProducto1", "dupProducto2"])
       expect(await itemsOf(ids[key] as string, "duplicado")).toHaveLength(0)
@@ -649,11 +723,11 @@ describe("lo que espera un sí", () => {
     const forSupport = await listKairosItems(ownerDb, support, { status: "espera" }, NOW)
     const forAdmin = await listKairosItems(ownerDb, admin, { status: "espera" }, NOW)
     expect(forSupport.items.every((item) => !item.adminOnly)).toBe(true)
-    expect(forSupport.items.map((item) => item.id)).not.toContain(ids.planItem)
-    expect(forAdmin.items.map((item) => item.id)).toContain(ids.planItem)
+    expect(forSupport.items.map((item) => item.id)).not.toContain(ids.dupItem)
+    expect(forAdmin.items.map((item) => item.id)).toContain(ids.dupItem)
     expect(forAdmin.total).toBeGreaterThan(forSupport.total)
     await expect(
-      decide(support, ids.planItem as string, { action: "aprobar" }),
+      decide(support, ids.dupItem as string, { action: "aprobar" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 
@@ -801,16 +875,29 @@ describe("lo que espera un sí", () => {
   it("si la operación dice que ya no se puede, queda fallida con su motivo y lo que hizo se deshace", async () => {
     const failing: KairosExecutors = {
       ...executors,
-      async approveImportDraft(tx) {
+      async updateClient(tx) {
         await tx
           .update(saasClient)
           .set({ city: "Deshecha" })
           .where(eq(saasClient.id, ids.carga as string))
-        throw new ServiceError("IMPORT_DRAFT_USED", 409, "Ese borrador ya se usó")
+        throw new ServiceError("CLIENT_ARCHIVED", 409, "Ese cliente está archivado")
       },
     }
-    const decision = await decide(admin, ids.planItem as string, { action: "aprobar" }, failing)
-    expect(decision).toMatchObject({ status: "fallida", error: "Ese borrador ya se usó" })
+    const [data] = await ownerDb
+      .insert(kairosItem)
+      .values({
+        clientId: ids.carga,
+        kind: "dato",
+        title: "Completar la ciudad",
+        reason: "Lo dijo en la llamada",
+        payload: { fields: { city: "Arequipa" } },
+        expectedState: { data: { city: null, professionals: null, current_tool: null } },
+        idempotencyKey: "kz:dato-falla",
+        expiresAt: new Date(NOW.getTime() + 3_600_000),
+      })
+      .returning({ id: kairosItem.id })
+    const decision = await decide(admin, data?.id as string, { action: "aprobar" }, failing)
+    expect(decision).toMatchObject({ status: "fallida", error: "Ese cliente está archivado" })
     const [loaded] = await ownerDb
       .select({ city: saasClient.city })
       .from(saasClient)
@@ -886,8 +973,45 @@ describe("lo que hizo", () => {
     expect(
       forSupport.some((entry) => entry.words.includes("Hablar del comprobante rechazado")),
     ).toBe(false)
-    expect(forSupport.some((entry) => entry.words.includes("plan de carga"))).toBe(false)
+    expect(
+      forAdmin.some(
+        (entry) =>
+          entry.words ===
+          "Se cargó la configuración de Clínica Carga (ficticia): 20 nuevos · 2 cambiaron · 7 ya estaban (lo cargó Ada Administración)",
+      ),
+    ).toBe(true)
+    expect(forSupport.some((entry) => entry.words.startsWith("Se cargó"))).toBe(false)
     expect(forAdmin.every((entry) => !entry.words.includes("kairos."))).toBe(true)
+  })
+})
+
+describe("el informe que no se sabe si salió", () => {
+  it("cuando queda enviado, la tarea urgente se cierra sola, Kairós lo cuenta y no la vuelve a poner", async () => {
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: PROGRESS_REPORT_ACTIONS.enviado,
+      organizationId: LOAD_ORG,
+      entityId: "informe-1",
+      metadata: { to: "duena@carga.test", sentAt: ago(1).toISOString() },
+      createdAt: NOW,
+    })
+    const later = new Date(NOW.getTime() + 60_000)
+    expect(await ownerDb.transaction((tx) => settleReportTasks(tx, LOAD_ORG, later))).toBe(1)
+    const [task] = await tasksOf(ids.carga as string)
+    expect(task).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: salió el informe N.º 1",
+    })
+    await ownerDb.transaction((tx) => kairosRulesPass(tx, later))
+    expect((await tasksOf(ids.carga as string)).map((row) => row.status)).toEqual(["hecha"])
+    const done = await kairosDone(ownerDb, admin, { limit: 200 })
+    expect(done.map((entry) => entry.words)).toEqual(
+      expect.arrayContaining([
+        "Salió el informe N.º 1 de Clínica Carga (ficticia) a duena@carga.test",
+        "Cerró la tarea «Revisar en Zoho si salió el informe N.º 1»: salió el informe N.º 1",
+      ]),
+    )
   })
 })
 

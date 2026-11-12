@@ -31,7 +31,7 @@ CREATE TABLE "admin"."kairos_item" (
 	"admin_only" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "kairos_item_kind_check" CHECK ("admin"."kairos_item"."kind" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','plan_carga','informe','presentacion_hecha','correo_sin_cliente')),
+	CONSTRAINT "kairos_item_kind_check" CHECK ("admin"."kairos_item"."kind" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','presentacion_hecha','correo_sin_cliente')),
 	CONSTRAINT "kairos_item_status_check" CHECK ("admin"."kairos_item"."status" IN ('espera','ejecutada','fallida','incierta','descartada','vencida')),
 	CONSTRAINT "kairos_item_text_check" CHECK (length(trim("admin"."kairos_item"."title")) BETWEEN 1 AND 200 AND length(trim("admin"."kairos_item"."reason")) BETWEEN 1 AND 1000)
 );
@@ -113,35 +113,9 @@ CREATE TABLE "admin"."saas_client_file" (
 	"created_by" text,
 	"source" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "saas_client_file_kind_check" CHECK ("admin"."saas_client_file"."kind" IN ('carta','propuesta','presentacion','plan_carga','informe','archivo_clinica','correo','otro')),
-	CONSTRAINT "saas_client_file_source_check" CHECK ("admin"."saas_client_file"."source" IS NULL OR "admin"."saas_client_file"."source" IN ('persona','kairos','skill','correo')),
+	CONSTRAINT "saas_client_file_kind_check" CHECK ("admin"."saas_client_file"."kind" IN ('carta','propuesta','presentacion','archivo_clinica','correo','otro')),
+	CONSTRAINT "saas_client_file_source_check" CHECK ("admin"."saas_client_file"."source" IS NULL OR "admin"."saas_client_file"."source" IN ('persona','kairos','correo')),
 	CONSTRAINT "saas_client_file_text_check" CHECK (length(trim("admin"."saas_client_file"."filename")) BETWEEN 1 AND 255 AND "admin"."saas_client_file"."size_bytes" >= 0)
-);
---> statement-breakpoint
-CREATE TABLE "admin"."saas_import_draft" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"client_id" uuid NOT NULL,
-	"organization_id" text NOT NULL,
-	"kind" text NOT NULL,
-	"number" integer NOT NULL,
-	"payload_key" text NOT NULL,
-	"pdf_file_id" uuid,
-	"summary" jsonb,
-	"status" text DEFAULT 'lista' NOT NULL,
-	"uploaded_by" text NOT NULL,
-	"via_skill" boolean DEFAULT true NOT NULL,
-	"approved_by" text,
-	"approved_at" timestamp with time zone,
-	"returned_note" text,
-	"payload_uploaded_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"payload_deleted_at" timestamp with time zone,
-	"stale_payload_keys" text[] DEFAULT '{}'::text[] NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "saas_import_draft_kind_check" CHECK ("admin"."saas_import_draft"."kind" IN ('plan_configuracion','plan_pacientes','informe')),
-	CONSTRAINT "saas_import_draft_status_check" CHECK ("admin"."saas_import_draft"."status" IN ('lista','aprobada','devuelta','usada')),
-	CONSTRAINT "saas_import_draft_number_check" CHECK ("admin"."saas_import_draft"."number" >= 1),
-	CONSTRAINT "saas_import_draft_note_check" CHECK ("admin"."saas_import_draft"."returned_note" IS NULL OR length("admin"."saas_import_draft"."returned_note") <= 1000)
 );
 --> statement-breakpoint
 CREATE TABLE "admin"."saas_inbound_email" (
@@ -249,22 +223,6 @@ CREATE TABLE "admin"."saas_proposal" (
 	CONSTRAINT "saas_proposal_note_check" CHECK ("admin"."saas_proposal"."accepted_note" IS NULL OR length("admin"."saas_proposal"."accepted_note") <= 1000)
 );
 --> statement-breakpoint
-CREATE TABLE "admin"."saas_skill_key" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" text NOT NULL,
-	"label" text NOT NULL,
-	"token_hash" text NOT NULL,
-	"scope" text DEFAULT 'carga' NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	"revoked_at" timestamp with time zone,
-	"revoked_by" text,
-	"last_used_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "saas_skill_key_hash_check" CHECK ("admin"."saas_skill_key"."token_hash" ~ '^[0-9a-f]{64}$'),
-	CONSTRAINT "saas_skill_key_scope_check" CHECK ("admin"."saas_skill_key"."scope" IN ('carga')),
-	CONSTRAINT "saas_skill_key_label_check" CHECK (length(trim("admin"."saas_skill_key"."label")) BETWEEN 1 AND 80)
-);
---> statement-breakpoint
 CREATE TABLE "admin"."saas_task" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"client_id" uuid NOT NULL,
@@ -314,11 +272,6 @@ ALTER TABLE "admin"."saas_client_contact" ADD CONSTRAINT "saas_client_contact_cl
 ALTER TABLE "admin"."saas_client_contact" ADD CONSTRAINT "saas_client_contact_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "auth"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_client_file" ADD CONSTRAINT "saas_client_file_client_id_saas_client_id_fk" FOREIGN KEY ("client_id") REFERENCES "admin"."saas_client"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_client_file" ADD CONSTRAINT "saas_client_file_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "auth"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_import_draft" ADD CONSTRAINT "saas_import_draft_client_id_saas_client_id_fk" FOREIGN KEY ("client_id") REFERENCES "admin"."saas_client"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_import_draft" ADD CONSTRAINT "saas_import_draft_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_import_draft" ADD CONSTRAINT "saas_import_draft_pdf_file_id_saas_client_file_id_fk" FOREIGN KEY ("pdf_file_id") REFERENCES "admin"."saas_client_file"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_import_draft" ADD CONSTRAINT "saas_import_draft_uploaded_by_user_id_fk" FOREIGN KEY ("uploaded_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_import_draft" ADD CONSTRAINT "saas_import_draft_approved_by_user_id_fk" FOREIGN KEY ("approved_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_inbound_email" ADD CONSTRAINT "saas_inbound_email_client_id_saas_client_id_fk" FOREIGN KEY ("client_id") REFERENCES "admin"."saas_client"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_inbound_email" ADD CONSTRAINT "saas_inbound_email_matched_by_user_user_id_fk" FOREIGN KEY ("matched_by_user") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_opportunity" ADD CONSTRAINT "saas_opportunity_client_id_saas_client_id_fk" FOREIGN KEY ("client_id") REFERENCES "admin"."saas_client"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -337,8 +290,6 @@ ALTER TABLE "admin"."saas_proposal" ADD CONSTRAINT "saas_proposal_plan_id_saas_p
 ALTER TABLE "admin"."saas_proposal" ADD CONSTRAINT "saas_proposal_decided_by_user_id_fk" FOREIGN KEY ("decided_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_proposal" ADD CONSTRAINT "saas_proposal_approved_by_user_id_fk" FOREIGN KEY ("approved_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_proposal" ADD CONSTRAINT "saas_proposal_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "auth"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_skill_key" ADD CONSTRAINT "saas_skill_key_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "auth"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."saas_skill_key" ADD CONSTRAINT "saas_skill_key_revoked_by_user_id_fk" FOREIGN KEY ("revoked_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_task" ADD CONSTRAINT "saas_task_client_id_saas_client_id_fk" FOREIGN KEY ("client_id") REFERENCES "admin"."saas_client"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_task" ADD CONSTRAINT "saas_task_assignee_user_id_user_id_fk" FOREIGN KEY ("assignee_user_id") REFERENCES "auth"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_task" ADD CONSTRAINT "saas_task_contact_id_saas_client_contact_id_fk" FOREIGN KEY ("contact_id") REFERENCES "admin"."saas_client_contact"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -359,8 +310,6 @@ CREATE INDEX "saas_client_contact_email_idx" ON "admin"."saas_client_contact" US
 CREATE UNIQUE INDEX "saas_client_file_object_uidx" ON "admin"."saas_client_file" USING btree ("object_key");--> statement-breakpoint
 CREATE INDEX "saas_client_file_client_idx" ON "admin"."saas_client_file" USING btree ("client_id","created_at");--> statement-breakpoint
 CREATE INDEX "saas_client_file_delete_idx" ON "admin"."saas_client_file" USING btree ("delete_after");--> statement-breakpoint
-CREATE UNIQUE INDEX "saas_import_draft_number_uidx" ON "admin"."saas_import_draft" USING btree ("organization_id","kind","number");--> statement-breakpoint
-CREATE INDEX "saas_import_draft_client_idx" ON "admin"."saas_import_draft" USING btree ("client_id","status");--> statement-breakpoint
 CREATE UNIQUE INDEX "saas_inbound_email_message_uidx" ON "admin"."saas_inbound_email" USING btree ("message_id");--> statement-breakpoint
 CREATE INDEX "saas_inbound_email_client_idx" ON "admin"."saas_inbound_email" USING btree ("client_id","received_at");--> statement-breakpoint
 CREATE INDEX "saas_inbound_email_from_idx" ON "admin"."saas_inbound_email" USING btree ("from_address");--> statement-breakpoint
@@ -370,8 +319,6 @@ CREATE INDEX "saas_outreach_client_idx" ON "admin"."saas_outreach" USING btree (
 CREATE INDEX "saas_outreach_status_idx" ON "admin"."saas_outreach" USING btree ("status");--> statement-breakpoint
 CREATE UNIQUE INDEX "saas_proposal_version_uidx" ON "admin"."saas_proposal" USING btree ("client_id","version");--> statement-breakpoint
 CREATE INDEX "saas_proposal_status_idx" ON "admin"."saas_proposal" USING btree ("status","valid_until");--> statement-breakpoint
-CREATE UNIQUE INDEX "saas_skill_key_hash_uidx" ON "admin"."saas_skill_key" USING btree ("token_hash");--> statement-breakpoint
-CREATE INDEX "saas_skill_key_user_idx" ON "admin"."saas_skill_key" USING btree ("user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "saas_task_kairos_key_uidx" ON "admin"."saas_task" USING btree ("kairos_key");--> statement-breakpoint
 CREATE INDEX "saas_task_status_due_idx" ON "admin"."saas_task" USING btree ("status","due_on");--> statement-breakpoint
 CREATE INDEX "saas_task_client_status_idx" ON "admin"."saas_task" USING btree ("client_id","status");--> statement-breakpoint

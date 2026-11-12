@@ -117,8 +117,6 @@ export const KAIROS_ITEM_KINDS = [
   "vinculo",
   "duplicado",
   "demo",
-  "plan_carga",
-  "informe",
   "presentacion_hecha",
   "correo_sin_cliente",
 ] as const
@@ -136,24 +134,17 @@ export const SAAS_CLIENT_FILE_KINDS = [
   "carta",
   "propuesta",
   "presentacion",
-  "plan_carga",
-  "informe",
   "archivo_clinica",
   "correo",
   "otro",
 ] as const
 export type SaasClientFileKind = (typeof SAAS_CLIENT_FILE_KINDS)[number]
-export const SAAS_CLIENT_FILE_SOURCES = ["persona", "kairos", "skill", "correo"] as const
+export const SAAS_CLIENT_FILE_SOURCES = ["persona", "kairos", "correo"] as const
 export type SaasClientFileSource = (typeof SAAS_CLIENT_FILE_SOURCES)[number]
-export const SAAS_IMPORT_DRAFT_KINDS = ["plan_configuracion", "plan_pacientes", "informe"] as const
-export type SaasImportDraftKind = (typeof SAAS_IMPORT_DRAFT_KINDS)[number]
-export const SAAS_IMPORT_DRAFT_STATUSES = ["lista", "aprobada", "devuelta", "usada"] as const
-export type SaasImportDraftStatus = (typeof SAAS_IMPORT_DRAFT_STATUSES)[number]
 export const SAAS_INBOUND_MAILBOXES = ["soporte", "contacto"] as const
 export type SaasInboundMailbox = (typeof SAAS_INBOUND_MAILBOXES)[number]
 export const SAAS_INBOUND_MATCHES = ["contacto", "solicitud", "miembro", "persona"] as const
 export type SaasInboundMatch = (typeof SAAS_INBOUND_MATCHES)[number]
-export const SAAS_SKILL_KEY_SCOPES = ["carga"] as const
 export const KAIROS_AI_PURPOSES = [
   "borrador",
   "resumen",
@@ -559,8 +550,7 @@ export const saasOutreach = adminSchema.table(
 
 /**
  * Los archivos de un cliente en el bucket privado (`clients/<clientId>/…`):
- * carta, propuesta, presentación, plan y informe de la carga, lo que mandó la
- * clínica. Lo de la clínica y lo que llega por correo se borra a los 30 días
+ * carta, propuesta, presentación, lo que mandó la clínica. Lo de la clínica y lo que llega por correo se borra a los 30 días
  * (`delete_after`). Soporte no ve lo `admin_only`.
  */
 export const saasClientFile = adminSchema.table(
@@ -642,96 +632,6 @@ export const saasInboundEmail = adminSchema.table(
       sql`length(trim(${table.messageId})) BETWEEN 1 AND 998
         AND (${table.textBody} IS NULL OR length(${table.textBody}) <= 20000)
         AND (${table.subject} IS NULL OR length(${table.subject}) <= 998)`,
-    ),
-  ],
-)
-
-/**
- * La llave con que la skill de la carga deja borradores en la administración.
- * Solo deposita: no aprueba, no carga, no envía ni lee. Se guarda su huella
- * (sha256 en hexadecimal), nunca la llave; vence a los 90 días.
- */
-export const saasSkillKey = adminSchema.table(
-  "saas_skill_key",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    label: text("label").notNull(),
-    tokenHash: text("token_hash").notNull(),
-    scope: text("scope").notNull().default("carga"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    revokedBy: text("revoked_by").references(() => user.id),
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    uniqueIndex("saas_skill_key_hash_uidx").on(table.tokenHash),
-    index("saas_skill_key_user_idx").on(table.userId),
-    check("saas_skill_key_hash_check", sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`),
-    check("saas_skill_key_scope_check", oneOf(table.scope, SAAS_SKILL_KEY_SCOPES)),
-    check("saas_skill_key_label_check", sql`length(trim(${table.label})) BETWEEN 1 AND 80`),
-  ],
-)
-
-/**
- * Lo que dejó la skill de la carga para una clínica (plan de configuración,
- * plan de pacientes o informe), guardado en el bucket privado
- * (`payload_key`). `summary` lleva solo números para el aviso, nunca datos de
- * pacientes. Espera el sí de Administración: `lista` → `aprobada` o
- * `devuelta`; `usada` cuando se cargó.
- *
- * El JSON (el plan de pacientes trae datos de personas) se borra del bucket
- * al pasar a `usada` y, en todo caso, a los 30 días de subido
- * (`payload_uploaded_at`), la promesa del contrato de encargo; queda la fila
- * con `payload_deleted_at`. Lo reemplazado de uno devuelto espera su borrado
- * en `stale_payload_keys` hasta que el almacenamiento confirma.
- */
-export const saasImportDraft = adminSchema.table(
-  "saas_import_draft",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    clientId: uuid("client_id")
-      .notNull()
-      .references(() => saasClient.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull(),
-    number: integer("number").notNull(),
-    payloadKey: text("payload_key").notNull(),
-    pdfFileId: uuid("pdf_file_id").references(() => saasClientFile.id, { onDelete: "set null" }),
-    summary: jsonb("summary").$type<Record<string, number | string | null>>(),
-    status: text("status").notNull().default("lista"),
-    uploadedBy: text("uploaded_by")
-      .notNull()
-      .references(() => user.id),
-    viaSkill: boolean("via_skill").notNull().default(true),
-    approvedBy: text("approved_by").references(() => user.id),
-    approvedAt: timestamp("approved_at", { withTimezone: true }),
-    returnedNote: text("returned_note"),
-    /** Cuándo se subió el JSON vigente: de ahí cuentan los 30 días. */
-    payloadUploadedAt: timestamp("payload_uploaded_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    /** Cuándo se borró el JSON del bucket (al usarse o a los 30 días); nulo mientras existe. */
-    payloadDeletedAt: timestamp("payload_deleted_at", { withTimezone: true }),
-    /** JSON reemplazados que todavía no se confirmaron borrados. */
-    stalePayloadKeys: text("stale_payload_keys").array().notNull().default(sql`'{}'::text[]`),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    uniqueIndex("saas_import_draft_number_uidx").on(table.organizationId, table.kind, table.number),
-    index("saas_import_draft_client_idx").on(table.clientId, table.status),
-    check("saas_import_draft_kind_check", oneOf(table.kind, SAAS_IMPORT_DRAFT_KINDS)),
-    check("saas_import_draft_status_check", oneOf(table.status, SAAS_IMPORT_DRAFT_STATUSES)),
-    check("saas_import_draft_number_check", sql`${table.number} >= 1`),
-    check(
-      "saas_import_draft_note_check",
-      sql`${table.returnedNote} IS NULL OR length(${table.returnedNote}) <= 1000`,
     ),
   ],
 )

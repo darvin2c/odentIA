@@ -17,7 +17,7 @@ import { errorBody } from "../lib/error.js"
 import { serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
- * Correo que llega a soporte@ y contacto@ de los tres productos (ADR 0183). Lo
+ * Correo que llega a soporte@ y contacto@ de los tres productos (ADR 0184). Lo
  * recibe el worker de Cloudflare Email Routing (`infra/cloudflare/email-inbound`),
  * que lo reenvía como hoy y además lo manda aquí firmado. Montaje público, sin
  * cookie ni `Origin`: vale solo con la firma.

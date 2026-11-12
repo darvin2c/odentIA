@@ -75,7 +75,6 @@ import { createAdminImportsRoute } from "./routes/admin-imports.js"
 import { createAdminKairosRoute } from "./routes/admin-kairos.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAdminReportsRoute } from "./routes/admin-reports.js"
-import { createAdminSkillRoute } from "./routes/admin-skill.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
@@ -478,8 +477,7 @@ export function createApp(deps: AppDeps) {
       replyTo: deps.foundersEmail,
     }),
   )
-  // El ARM (ADR 0183): clientes desde el primer contacto, Kairós y sus reportes. Las llaves de la skill viven en
-  // `/api/admin/clients/skill-keys`.
+  // El ARM (ADR 0184): clientes desde el primer contacto, Kairós y sus reportes.
   app.route(
     "/api/admin/clients",
     createAdminClientsRoute({
@@ -711,8 +709,7 @@ export function createApp(deps: AppDeps) {
   )
 
   // Lo que llega de una máquina, fuera de `/api/admin/*` (sin cookie ni Origin) y antes de `userScoped`, cuyo
-  // use("*") respondería 401: la skill de carga con su llave (Bearer) y el correo entrante firmado (HMAC).
-  app.route("/api/admin-skill", createAdminSkillRoute({ ownerDb: deps.ownerDb, storage: deps.storage }))
+  // use("*") respondería 401: el correo entrante firmado (HMAC).
   app.route(
     "/api/inbound",
     createInboundEmailRoute({

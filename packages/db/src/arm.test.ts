@@ -460,16 +460,15 @@ describe("al desplegar", () => {
     const tables = [
       "admin.kairos_ai_usage",
       "admin.kairos_item",
+      "admin.kairos_weekly",
       "admin.saas_client",
       "admin.saas_client_contact",
       "admin.saas_client_file",
       "admin.saas_follow_up",
-      "admin.saas_import_draft",
       "admin.saas_inbound_email",
       "admin.saas_opportunity",
       "admin.saas_outreach",
       "admin.saas_proposal",
-      "admin.saas_skill_key",
       "admin.saas_task",
       "admin.saas_waitlist_request",
     ]
@@ -479,23 +478,6 @@ describe("al desplegar", () => {
         from unnest(${sql.raw(`array[${tables.map((table) => `'${table}'`).join(",")}]`)}) as t order by 1`),
     )
     expect(reach).toEqual(tables.map((tabla) => ({ tabla, alcanza: false })))
-  })
-
-  it("las columnas del borrado del JSON de la skill (0106) tampoco se abren a la aplicación", async () => {
-    const columns = ["payload_deleted_at", "payload_uploaded_at", "stale_payload_keys"]
-    const reach = rows<{ columna: string; alcanza: boolean }>(
-      await ownerDb.execute(sql`
-        select c as "columna", has_column_privilege(${APP_ROLE}, 'admin.saas_import_draft', c, 'select, insert, update, references') as "alcanza"
-        from unnest(${sql.raw(`array[${columns.map((column) => `'${column}'`).join(",")}]`)}) as c order by 1`),
-    )
-    expect(reach).toEqual(columns.map((columna) => ({ columna, alcanza: false })))
-    expect(
-      rows<{ alcanza: boolean }>(
-        await ownerDb.execute(
-          sql`select has_table_privilege(${APP_ROLE}, 'admin.kairos_weekly', 'select, insert, update, delete') as "alcanza"`,
-        ),
-      ),
-    ).toEqual([{ alcanza: false }])
   })
 })
 

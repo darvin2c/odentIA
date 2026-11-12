@@ -1,5 +1,5 @@
 /**
- * Lo que la ficha y la lista de Clientes (el ARM de Sallca, ADR 0183) leen de
+ * Lo que la ficha y la lista de Clientes (el ARM de Sallca, ADR 0184) leen de
  * `/api/admin/clients`: los esquemas con que se valida cada respuesta, las
  * palabras de cada código y cómo se dicen sus fechas (en Lima, como el resto de
  * la administración). Los códigos que llegan se leen como texto: uno nuevo del

@@ -35,10 +35,13 @@ import {
   previewClinicImport,
   productMailDomain,
   progressReportEmail,
+  progressReportMailOf,
   progressReportPdf,
   progressReportPdfKey,
+  progressReportResendProblem,
   progressReportSent,
   reserveProgressReport,
+  reserveProgressReportResend,
   runClinicSetup,
   ServiceError,
   type Storage,
@@ -333,7 +336,15 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
     const mail = progressReportEmail(content)
     const pdfKey = progressReportPdfKey(orgId, report.number)
     await deps.storage.putAttachmentAt(pdfKey, bytes, "application/pdf")
-    const sending = { number: report.number, to, subject, stage: report.stage, pdfKey }
+    // El correo va con la reserva: si no se sabe si salió, se reenvía igual (`resendReport`).
+    const sending = {
+      number: report.number,
+      to,
+      subject,
+      stage: report.stage,
+      pdfKey,
+      mail: progressReportMailOf(content),
+    }
     try {
       await withOrgContext(deps.ownerDb, orgId, (tx) =>
         reserveProgressReport(tx, actor, orgId, sending),
@@ -399,12 +410,77 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
         subject: found.subject ?? "",
         stage: found.stage ?? "",
         pdfKey: found.pdfKey ?? "",
+        ...(found.mail ? { mail: found.mail } : {}),
+        ...(found.resent ? { resent: true } : {}),
         state: "enviado",
         // La hora en que se intentó, no la de hoy: es cuando salió.
         sentAt: found.at,
       }),
     )
     return { confirmed: true, number }
+  }
+
+  /**
+   * «No salió: reenviar»: el mismo informe que no se sabe si salió (mismo número, mismo
+   * destinatario, mismo PDF guardado y mismo correo), una vez por pulsación. Se reserva
+   * como el primer envío; si vuelve a cortarse, queda otra vez «no se sabe» y no se repite
+   * solo. Lo hace una persona después de ver en Zoho que no está en Enviados.
+   */
+  const resendReport = async (orgId: string, actor: AdminActor, number: number) => {
+    requireLoadAdmin(actor)
+    const reports = await withOrgContext(deps.ownerDb, orgId, (tx) =>
+      listProgressReports(tx, orgId),
+    )
+    // Lo que impide reenviar se dice antes de leer el PDF; la reserva lo vuelve a mirar.
+    const problem = progressReportResendProblem(
+      number,
+      reports.find((report) => report.number === number),
+    )
+    if (problem) throw problem
+    const pdfKey = reports.find((report) => report.number === number)?.pdfKey ?? ""
+    if (!deps.storage.getAttachment)
+      throw new ServiceError(
+        "STORAGE_UNAVAILABLE",
+        503,
+        "No se pudo leer el PDF guardado. Inténtalo de nuevo.",
+      )
+    const bytes = await deps.storage.getAttachment(pdfKey)
+    const sending = await withOrgContext(deps.ownerDb, orgId, (tx) =>
+      reserveProgressReportResend(tx, actor, orgId, number),
+    )
+    if (sending.pdfKey !== pdfKey)
+      throw new ServiceError("CONFLICT", 409, `El informe N.º ${number} cambió: vuelve a mirarlo`)
+    const mail = progressReportEmail(sending.mail)
+    try {
+      await deps.mailer.send({
+        to: sending.to,
+        ...mail,
+        attachments: [
+          { filename: `informe-${number}.pdf`, content: bytes, contentType: "application/pdf" },
+        ],
+      })
+    } catch {
+      await withOrgContext(deps.ownerDb, orgId, (tx) =>
+        finishProgressReport(tx, actor, orgId, { ...sending, state: "desconocido", resent: true }),
+      )
+      throw new ServiceError(
+        "SEND_UNKNOWN",
+        502,
+        "Tampoco se sabe si salió esta vez: revisa otra vez en Zoho antes de hacer nada",
+      )
+    }
+    try {
+      await withOrgContext(deps.ownerDb, orgId, (tx) =>
+        finishProgressReport(tx, actor, orgId, { ...sending, state: "enviado", resent: true }),
+      )
+    } catch {
+      throw new ServiceError(
+        "SENT_UNRECORDED",
+        500,
+        `El correo salió, pero el registro quedó en «enviándose»: ciérralo con «Revisé en Zoho: salió», sin reenviarlo`,
+      )
+    }
+    return { sent: true, number, to: sending.to }
   }
 
   /**
@@ -458,7 +534,12 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
     const reports = await withOrgContext(deps.ownerDb, orgId, (tx) =>
       listProgressReports(tx, orgId),
     )
-    return reports.map(({ pdfKey, ...report }) => ({ ...report, hasPdf: !!pdfKey }))
+    // Ni la clave del PDF ni el correo salen de aquí: solo si hay PDF y si se puede reenviar.
+    return reports.map(({ pdfKey, mail, ...report }) => ({
+      ...report,
+      hasPdf: !!pdfKey,
+      canResend: report.state === "desconocido" && !!pdfKey && !!mail,
+    }))
   }
 
   /** Un enlace firmado y corto para abrir el PDF de un informe enviado. */
@@ -482,6 +563,7 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
     sendReport,
     registerReport,
     confirmReportSent,
+    resendReport,
     listReports,
     reportPdfUrl,
   }

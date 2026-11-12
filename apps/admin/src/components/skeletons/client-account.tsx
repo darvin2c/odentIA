@@ -10,7 +10,7 @@ import { BillingHistorySkeleton } from "./billing"
 import { OrgBillingSkeleton, OrgSummarySkeleton } from "./organization-detail"
 import { RowSkeleton, TextSm, TextXs } from "./page-loading"
 
-/** La rejilla de Alta: arriba lo de la skill, después pasos · carga · Kairós. */
+/** La rejilla de Alta: pasos · registro de la carga · Kairós. */
 export const ONBOARDING_GRID = "grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)_17rem]"
 
 function Lines({ count, className }: { count: number; className?: string }) {
@@ -34,12 +34,6 @@ export function ClientOnboardingSkeleton({ hasAccount = true }: { hasAccount?: b
   const isAdmin = useIsAdmin()
   return (
     <div className="flex flex-col gap-4">
-      {isAdmin ? (
-        <section className="flex flex-col gap-2 rounded-xl border bg-card p-4">
-          <h2 className="text-base font-medium">La skill dejó</h2>
-          <TextSm className="w-72" />
-        </section>
-      ) : null}
       <div className={ONBOARDING_GRID}>
         <section className="flex flex-col gap-2 rounded-xl border bg-card p-4">
           <h2 className="text-base font-medium">Pasos del alta</h2>
@@ -47,11 +41,12 @@ export function ClientOnboardingSkeleton({ hasAccount = true }: { hasAccount?: b
         </section>
         <div className="flex min-w-0 flex-col gap-4">
           {isAdmin && hasAccount ? (
-            ["Configuración de la clínica", "Pacientes", "Informe a la clínica"].map((title) => (
-              <section key={title} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+            // Las dos secciones del registro de la carga (`OrgLoadRecord`), sin otra región.
+            ["Informes enviados", "Cargas"].map((title) => (
+              <section key={title} className="flex flex-col gap-2 rounded-xl border bg-card p-4">
                 <h2 className="text-base font-medium">{title}</h2>
-                <TextSm className="w-full max-w-prose" />
-                <Skeleton className="h-9 w-36 rounded-3xl" />
+                <TextSm className="w-3/4" />
+                <TextSm className="w-1/2" />
               </section>
             ))
           ) : (

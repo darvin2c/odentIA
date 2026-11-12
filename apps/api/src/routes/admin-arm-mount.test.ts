@@ -14,10 +14,10 @@ import { type AppDeps, createApp } from "../app.js"
 import { signInboundEmail } from "./inbound-email.js"
 
 /**
- * El ARM montado en la app real (ADR 0183): las rutas de la administración
- * detrás de su sesión, su segundo factor y su origen; la skill y el correo
- * entrante fuera de ellas, cada uno con su propia llave; y el Kairós que
- * recibe la app es el que usan las rutas.
+ * El ARM montado en la app real (ADR 0184): las rutas de la administración
+ * detrás de su sesión, su segundo factor y su origen; el correo entrante fuera
+ * de ellas, con su propia firma; y el Kairós que recibe la app es el que usan
+ * las rutas.
  */
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -167,16 +167,14 @@ afterAll(async () => {
 
 it("clientes, Kairós y reportes responden detrás de la guarda de la administración", async () => {
   expect((await admin("GET", "/clients?view=todos", "u-admin")).status).toBe(200)
-  expect((await admin("GET", "/clients/skill-keys", "u-admin")).status).toBe(200)
   const count = await admin("GET", "/kairos/count", "u-soporte")
   expect(count.status).toBe(200)
   expect(((await count.json()) as { data: { waiting: number } }).data.waiting).toBeTypeOf("number")
   expect((await admin("GET", "/reports/funnel", "u-admin")).status).toBe(200)
-  // Montada, no 404: Soporte no ve Reportes ni las llaves de la skill.
+  // Montada, no 404: Soporte no ve Reportes.
   const denied = await admin("GET", "/reports/funnel", "u-soporte")
   expect(denied.status).toBe(403)
   expect(await code(denied)).toBe("FORBIDDEN")
-  expect((await admin("GET", "/clients/skill-keys", "u-soporte")).status).toBe(403)
   // Sin sesión, la guarda de siempre; sin el origen de la administración, nada se escribe.
   expect((await app.request("/api/admin/clients")).status).toBe(401)
   const noOrigin = await admin("POST", "/clients", "u-admin", { name: "X" }, null)
@@ -199,20 +197,6 @@ it("Anotar usa el Kairós que recibe la app", async () => {
   })
   expect(preview.status).toBe(200)
   expect(annotated).toEqual(["Llamé a Luis, quiere una presentación el jueves"])
-})
-
-it("la skill entra con su llave, sin sesión ni origen de la administración", async () => {
-  const none = await app.request("/api/admin-skill/whoami")
-  expect(none.status).toBe(401)
-  expect(await code(none)).toBe("SKILL_KEY_REQUIRED")
-  const bad = await app.request("/api/admin-skill/drafts", {
-    method: "POST",
-    headers: { authorization: "Bearer sk_no-es-una-llave", "content-type": "application/json" },
-    body: "{}",
-  })
-  expect(bad.status).toBe(401)
-  expect(await code(bad)).toBe("SKILL_KEY_INVALID")
-  expect((await app.request("/api/admin-skill/otra-cosa")).status).toBe(404)
 })
 
 it("el correo entrante pasa con su firma y sin secreto no se recibe", async () => {

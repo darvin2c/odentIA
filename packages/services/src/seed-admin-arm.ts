@@ -1,15 +1,17 @@
 /**
- * Semilla manual del ARM de la administración (ADR 0183): clientes en cada
+ * Semilla manual del ARM de la administración (ADR 0184): clientes en cada
  * etapa, sus personas, tareas, propuestas, envíos, correos que llegan, un
- * documento, un borrador de la skill y lo que prepara Kairós, para recorrer
- * Hoy, Clientes, Embudo, Kairós y Reportes en local.
+ * documento, lo que cargó la skill (con un informe que no se sabe si salió) y
+ * lo que prepara Kairós, para recorrer Hoy, Clientes, Embudo, Kairós y
+ * Reportes en local.
  *
  * Solo manual (seed-dev la llama al final, cuando ya existen las cuentas de la
  * semilla y las demos para presentar); NUNCA en CI ni importada por tests.
  * Todo se hace con las operaciones de los servicios (las mismas de la
- * pantalla, la ruta firmada del correo, la skill y la pasada de Kairós); los
- * únicos cambios directos mueven fechas (para que la historia tenga días
- * distintos), marcan la propuesta «por aprobar» (hoy solo Administración arma
+ * pantalla, la ruta firmada del correo y la pasada de Kairós); los únicos
+ * cambios directos mueven fechas (para que la historia tenga días distintos),
+ * anotan la carga de la configuración como la deja la skill en el servidor
+ * (sin correr la carga entera), marcan la propuesta «por aprobar» (hoy solo Administración arma
  * propuestas, así que no se llega a ese estado por la operación) y escriben
  * «Lo que hay que saber» como lo guarda el worker de Kairós.
  *
@@ -28,11 +30,11 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
-  saasImportDraft,
   saasOpportunity,
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasPlan } from "@odentia/db/schema/saas-billing"
@@ -76,13 +78,12 @@ import {
   schedulePresentation,
 } from "./admin-sales.js"
 import {
-  approveImportDraft,
-  createSkillKey,
-  depositImportDraft,
-  resolveSkillKey,
-  revokeSkillKey,
-} from "./admin-skill.js"
-import { productMailDomain } from "./clinic-progress-report.js"
+  finishProgressReport,
+  listProgressReports,
+  productMailDomain,
+  progressReportPdfKey,
+  reserveProgressReport,
+} from "./clinic-progress-report.js"
 import { limaDate } from "./peru-business-days.js"
 import { addDays as addCivilDays, dayStart } from "./report-periods.js"
 import { markDemoOpened } from "./saas-demos.js"
@@ -375,7 +376,6 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
       createSaasProposal(tx, actor, clientId, input, now),
-    approveImportDraft: (tx, actor, draftId) => approveImportDraft(tx, actor, draftId, now),
   }
 }
 
@@ -400,7 +400,7 @@ export interface SeedAdminArmResult {
  * El ARM de la administración con datos para recorrerlo. Requiere el
  * personal de la semilla (`seedAdminCore`) y los planes y clínicas de cobro
  * (`seedSaasBillingDemo`); sin ellos no hace nada. `storage` sube la carta y
- * el borrador de la skill; sin `putAttachmentAt`, se omiten.
+ * el PDF del informe; sin `putAttachmentAt`, se omiten.
  */
 export async function seedAdminArm(
   tx: Db,
@@ -772,7 +772,7 @@ export async function seedAdminArm(
         clock.ago(1),
       )
       // Hoy solo Administración arma propuestas, así que la operación nunca la deja
-      // «por aprobar»; la semilla la muestra como la armaría un vendedor (ADR 0183).
+      // «por aprobar»; la semilla la muestra como la armaría un vendedor (ADR 0184).
       await tx
         .update(saasProposal)
         .set({ status: "por_aprobar", updatedAt: now })
@@ -1050,7 +1050,7 @@ export async function seedAdminArm(
     now,
   )
 
-  /* --- Documentos y lo que deja la skill --- */
+  /* --- Documentos y lo que cargó la skill --- */
   await seedOnboardingFiles(tx, clock, storage, { prueba, deuda })
 
   /* --- Kairós: su pasada, sus borradores, lo que ya se decidió, sus resúmenes y la semana --- */
@@ -1236,9 +1236,11 @@ async function seedAccountPeople(
 
 /**
  * La carta de bienvenida de Demo Prueba (salió hace 8 días y no llegaron
- * archivos: Kairós lo ve) y un plan de configuración de Demo Deuda que dejó
- * la skill con su llave (`depositImportDraft`), en espera del sí. La llave se
- * revoca al terminar: la semilla no deja una llave viva.
+ * archivos: Kairós lo ve) y, en Demo Deuda, lo que hizo la skill en el
+ * servidor: la configuración cargada por Ada hace 3 días y el informe N.º 1,
+ * que se intentó ayer y no se sabe si salió (con su PDF y su correo
+ * guardados, para «Revisé en Zoho: salió» o «No salió: reenviar»). Kairós
+ * pone la tarea urgente de revisarlo en Hoy.
  */
 async function seedOnboardingFiles(
   tx: Db,
@@ -1276,40 +1278,68 @@ async function seedOnboardingFiles(
       .set({ createdAt: clock.ago(8) })
       .where(eq(saasClientFile.id, file.id))
   }
-  const [draft] = await tx
-    .select({ id: saasImportDraft.id })
-    .from(saasImportDraft)
-    .where(
-      and(eq(saasImportDraft.clientId, ids.deuda), eq(saasImportDraft.kind, "plan_configuracion")),
-    )
+  await seedClinicLoad(tx, clock, put, ids.deuda)
+}
+
+/** Lo que dejó la skill en Demo Deuda: la carga de su configuración y un informe a medias. */
+async function seedClinicLoad(
+  tx: Db,
+  clock: Clock,
+  put: NonNullable<Storage["putAttachmentAt"]>,
+  clientId: string,
+): Promise<void> {
+  const orgId = "seed-saas-deuda"
+  const [loaded] = await tx
+    .select({ id: adminAudit.id })
+    .from(adminAudit)
+    .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.action, "org.setup_import")))
     .limit(1)
-  if (draft) return
-  const [org] = await tx
-    .select({ slug: organization.slug })
-    .from(organization)
-    .where(eq(organization.id, "seed-saas-deuda"))
-    .limit(1)
-  if (!org) return
-  const payload = {
-    kind: "clinica",
-    version: 1,
-    product: "dental",
-    countryCode: "PE",
-    clinic: "Demo Deuda (ficticia)",
-    slug: org.slug,
-    branches: [{ key: "principal", name: "Sede Principal" }],
+  if (!loaded) {
+    // Como la deja `runClinicSetup` al cargar (sus cifras, sin correr la carga entera).
+    await writeAdminAudit(tx, ADA, {
+      action: "org.setup_import",
+      organizationId: orgId,
+      metadata: { planSha256: "0".repeat(64), nueva: 20, cambia: 2, igual: 7, invitations: 0 },
+    })
+    await tx
+      .update(adminAudit)
+      .set({ createdAt: clock.ago(3) })
+      .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.action, "org.setup_import")))
   }
-  const payloadKey = clientFileKey(ids.deuda, "json")
-  await put(payloadKey, new TextEncoder().encode(JSON.stringify(payload)), "application/json")
-  const key = await createSkillKey(tx, ADA, { label: "Semilla del ARM (ficticia)" }, clock.now)
-  const skill = await resolveSkillKey(tx, key.token, clock.now)
-  await depositImportDraft(
-    tx,
-    skill,
-    { organizationSlug: org.slug, kind: "plan_configuracion", number: 1, payload, payloadKey },
-    clock.now,
-  )
-  await revokeSkillKey(tx, ADA, key.id, clock.now)
+  if ((await listProgressReports(tx, orgId)).some((report) => report.number === 1)) return
+  const [client] = await tx
+    .select({ name: saasClient.name })
+    .from(saasClient)
+    .where(eq(saasClient.id, clientId))
+    .limit(1)
+  const clinic = client?.name ?? "Demo Deuda (ficticia)"
+  const bytes = await onePagePdf(`Informe N.º 1 (ficticio) - ${clinic}`)
+  const pdfKey = progressReportPdfKey(orgId, 1)
+  await put(pdfKey, bytes, "application/pdf")
+  const title = "Informe de avance del alta"
+  const sending = {
+    number: 1,
+    to: "duena.deuda@example.test",
+    subject: `${title} — ${clinic}`,
+    stage: "Configuración cargada",
+    pdfKey,
+    mail: {
+      brand: "odentia" as const,
+      brandName: "odentIA",
+      title,
+      clinic,
+      to: "Dra. Deuda (ficticia)",
+      closing: "Lo que sigue lo puede hacer usted misma o escribirnos.",
+      replyTo: `ada@${productMailDomain("dental")}`,
+      signature: { name: "Ada (ficticia)" },
+    },
+  }
+  await reserveProgressReport(tx, ADA, orgId, sending)
+  await finishProgressReport(tx, ADA, orgId, { ...sending, state: "desconocido" })
+  await tx
+    .update(adminAudit)
+    .set({ createdAt: clock.ago(1) })
+    .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.entityId, "informe-1")))
 }
 
 /**

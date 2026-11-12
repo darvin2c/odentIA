@@ -43,6 +43,7 @@ import {
   HomeSkeleton,
 } from "../../components/skeletons/home"
 import { TodayBilling } from "../../components/today-billing"
+import { UnknownReportActions } from "../../components/unknown-report-actions"
 import { api } from "../../lib/api"
 import { invitationDueWords, limaDayWords } from "../../lib/invitation-words"
 import { rememberedWaitlistFilters } from "../../lib/list-search"
@@ -91,6 +92,15 @@ const todaySchema = z.object({
       byKairos: z.boolean(),
       overdue: z.boolean(),
       why: z.string(),
+      // «Revisar en Zoho si salió el informe N.º n»: con qué resolverla aquí (solo Administración).
+      report: z
+        .object({
+          organizationId: z.string(),
+          number: z.number(),
+          to: z.string().nullable(),
+          canResend: z.boolean(),
+        })
+        .optional(),
     }),
   ),
   cooling: z.array(
@@ -825,7 +835,16 @@ function TaskItem({
       product={row.product}
       action={
         <>
-          {presentation ? (
+          {row.report && isAdmin ? (
+            // La tarea se cierra sola cuando el informe queda enviado.
+            <UnknownReportActions
+              organizationId={row.report.organizationId}
+              number={row.report.number}
+              to={row.report.to}
+              canResend={row.report.canResend}
+              size="sm"
+            />
+          ) : presentation ? (
             <OpenClientButton
               clientId={row.clientId}
               tab="venta"

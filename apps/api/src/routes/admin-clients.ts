@@ -33,7 +33,6 @@ import {
   addActivity,
   addClientContact,
   applyProposalTerms,
-  approveImportDraft,
   approveSaasProposal,
   archiveClient,
   assignInboundEmail,
@@ -53,7 +52,6 @@ import {
   createClient,
   createClientTask,
   createSaasProposal,
-  createSkillKey,
   decide,
   decideSaasProposal,
   deleteClientFile,
@@ -61,7 +59,6 @@ import {
   founderOffer,
   getClient,
   getSaasProposal,
-  importDraftPayload,
   inviteClient,
   issueFields,
   limaDate,
@@ -70,10 +67,7 @@ import {
   listClientFiles,
   listClients,
   listClientTasks,
-  listImportDrafts,
   listSaasProposals,
-  listSkillKeys,
-  markImportDraftUsed,
   markInvitationSent,
   markOutreachSent,
   mergeClients,
@@ -87,13 +81,10 @@ import {
   prepareOutreach,
   productMailDomain,
   proposalPdf,
-  purgeImportDraftPayloads,
   recordPresentation,
   registerClientFile,
   reopenClientOpportunity,
   resolveOutreach,
-  returnImportDraft,
-  revokeSkillKey,
   ServiceError,
   type Storage,
   schedulePresentation,
@@ -118,8 +109,7 @@ import { runService, serviceErrorResponse } from "./helpers.js"
  * El ARM de la administración (`/api/admin/clients`, tras el guard de admin):
  * el cliente desde el primer contacto, sus personas, su historial, la venta
  * (tareas, presentaciones, propuestas, envíos, decidir, invitar, dar de alta),
- * el alta, sus documentos, los borradores que deja la skill de carga, los
- * correos entrantes y las llaves de la skill. Cada acción revisa el rol en el
+ * el alta, sus documentos y los correos entrantes. Cada acción revisa el rol en el
  * servidor: Soporte ve y anota; lo que es solo de Administración responde 403
  * aunque la pantalla lo esconda. Kairós solo ordena lo que se le dicta: nunca
  * envía ni guarda solo.
@@ -143,7 +133,7 @@ export interface AdminClientsDeps {
 /** Un documento subido a mano: como los adjuntos de Soporte. */
 export const CLIENT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 
-/** Los ids son uuid: así `/tasks`, `/pipeline` o `/skill-keys` nunca caen en `/:id`. */
+/** Los ids son uuid: así `/tasks`, `/pipeline` o `/inbound` nunca caen en `/:id`. */
 const ID = ":id{[0-9a-fA-F-]+}"
 
 /* ---------- Esquemas (mensajes en español; el servicio vuelve a validar) ---------- */
@@ -359,9 +349,7 @@ const outreachBody = z.strictObject({
 const resolveBody = z.strictObject({
   outcome: z.enum(["salio", "no_salio"], "Elige si salió o no"),
 })
-const returnBody = z.strictObject({ note: text(1000, "qué hay que corregir") })
 const assignBody = z.strictObject({ clientId: z.uuid("Elige el cliente") })
-const skillKeyBody = z.strictObject({ label: text(80, "para qué es la llave") })
 
 const annotatePreviewBody = z.strictObject({ text: text(4000, "qué pasó") })
 
@@ -468,24 +456,6 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     runService(c, status, () => fn(staffOf(c)))
   const adminRun = <T>(c: Context, status: 200 | 201, fn: (actor: AdminActor) => Promise<T>) =>
     runService(c, status, () => fn(adminOf(c)))
-
-  /* ----- Llaves de la skill (Equipo › Llaves de la skill): solo Administración, para sí misma ----- */
-
-  app.get("/skill-keys", (c) =>
-    adminRun(c, 200, (actor) => owner((tx) => listSkillKeys(tx, actor))),
-  )
-
-  /** La llave se muestra una sola vez: solo se guarda su huella. */
-  app.post("/skill-keys", async (c) => {
-    const raw = await bodyOf(c)
-    return adminRun(c, 201, (actor) =>
-      owner((tx) => createSkillKey(tx, actor, parse(skillKeyBody, raw))),
-    )
-  })
-
-  app.post("/skill-keys/:kid/revoke", (c) =>
-    adminRun(c, 200, (actor) => owner((tx) => revokeSkillKey(tx, actor, c.req.param("kid")))),
-  )
 
   /* ----- Tareas y embudo ----- */
 
@@ -680,46 +650,6 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
       })
       return { ok: true }
     }),
-  )
-
-  /* ----- Borradores de la skill de carga (solo Administración) ----- */
-
-  app.post("/import-drafts/:did/approve", (c) =>
-    adminRun(c, 200, (actor) => owner((tx) => approveImportDraft(tx, actor, c.req.param("did")))),
-  )
-
-  app.post("/import-drafts/:did/return", async (c) => {
-    const raw = await bodyOf(c)
-    return adminRun(c, 200, (actor) => {
-      const body = parse(returnBody, raw)
-      return owner((tx) => returnImportDraft(tx, actor, c.req.param("did"), body.note))
-    })
-  })
-
-  /**
-   * Ya se cargó (o se envió, el informe) desde este borrador: pasa a `usada` y
-   * su JSON se borra del bucket después del commit (si falla, lo borra la
-   * pasada del worker).
-   */
-  app.post("/import-drafts/:did/used", (c) =>
-    adminRun(c, 200, async (actor) => {
-      const draft = await owner((tx) => markImportDraftUsed(tx, actor, c.req.param("did")))
-      await purgeImportDraftPayloads(deps.ownerDb, deps.storage, new Date(), {
-        draftId: draft.id,
-      }).catch((error) => {
-        console.error("ARM: no se borró el JSON del borrador usado; lo borra la pasada", error)
-      })
-      return owner((tx) => listImportDrafts(tx, actor, draft.clientId)).then(
-        (rows) => rows.find((row) => row.id === draft.id) ?? draft,
-      )
-    }),
-  )
-
-  /** El JSON que dejó la skill, para que la tarjeta de carga lo use en vez de un archivo. */
-  app.get("/import-drafts/:did/payload", (c) =>
-    adminRun(c, 200, (actor) =>
-      owner((tx) => importDraftPayload(tx, actor, deps.storage, c.req.param("did"))),
-    ),
   )
 
   /* ----- Correos entrantes ----- */
@@ -1332,10 +1262,6 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
   })
-
-  app.get(`/${ID}/import-drafts`, (c) =>
-    adminRun(c, 200, (actor) => owner((tx) => listImportDrafts(tx, actor, c.req.param("id")))),
-  )
 
   return app
 }

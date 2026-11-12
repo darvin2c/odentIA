@@ -20,7 +20,6 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
-  saasImportDraft,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
@@ -62,6 +61,7 @@ import {
   kairosCoolingRows,
   kairosRiskRows,
 } from "./admin-kairos.js"
+import { listClinicLoads } from "./clinic-progress-report.js"
 import {
   invalidField,
   issueFields,
@@ -75,7 +75,7 @@ import { moneyText } from "./saas-emails.js"
 import { type WaitlistStage, waitlistStage } from "./saas-founders.js"
 
 /**
- * Los clientes del ARM de la administración (ADR 0183): la clínica es el eje,
+ * Los clientes del ARM de la administración (ADR 0184): la clínica es el eje,
  * desde el primer contacto (a mano, con la solicitud de la web o cuando abre
  * su cuenta) y para siempre. La solicitud y la cuenta son cosas que le pasan
  * al cliente, no el cliente.
@@ -1855,14 +1855,6 @@ export async function mergeClients(
       .returning({ id: saasClientFile.id }),
   )
   count(
-    "importDrafts",
-    await tx
-      .update(saasImportDraft)
-      .set({ clientId: keepId })
-      .where(eq(saasImportDraft.clientId, dropId))
-      .returning({ id: saasImportDraft.id }),
-  )
-  count(
     "inboundEmails",
     await tx
       .update(saasInboundEmail)
@@ -2226,15 +2218,7 @@ export interface TimelineEntry {
   detail?: string
   adminOnly: boolean
   link?: {
-    kind:
-      | "solicitud"
-      | "propuesta"
-      | "envio"
-      | "soporte"
-      | "archivo"
-      | "tarea"
-      | "borrador"
-      | "correo"
+    kind: "solicitud" | "propuesta" | "envio" | "soporte" | "archivo" | "tarea" | "correo"
     id: string
   }
 }
@@ -2245,15 +2229,33 @@ export interface ClientTimeline {
   nextBefore: Date | null
 }
 
+/** El número de un informe de la carga en la auditoría (`informe-<n>`). */
+const reportNumberWords = (entityId: string | null) => {
+  const number = entityId?.match(/^informe-(\d+)$/)?.[1]
+  return number ? ` N.º ${number}` : ""
+}
+
 /**
  * Una frase por código de la auditoría de la administración (de la cuenta o
  * del cliente). Lo que no está aquí no se muestra: nunca el código. Lo de
  * pagos sale de `saas_payment` y lo de la solicitud y la bitácora de sus
- * tablas, para no contarlo dos veces.
+ * tablas, para no contarlo dos veces. Las cargas de la skill (`org.setup_import`
+ * y `org.data_import`, una fila por tanda) salen agrupadas de `listClinicLoads`,
+ * con sus cifras; `org.progress_report_sending` es el paso de en medio de cada
+ * envío y no se dice: lo dice cómo terminó (y Alta, si quedó a medias).
  */
 export const TIMELINE_AUDIT_PHRASES: Record<
   string,
-  { title: string; category: TimelineCategory; adminOnly?: boolean }
+  {
+    title: string
+    category: TimelineCategory
+    adminOnly?: boolean
+    /** La frase con lo de esa fila (el número del informe), si lo hay. */
+    titleOf?: (audit: {
+      entityId: string | null
+      metadata: Record<string, unknown> | null
+    }) => string
+  }
 > = {
   "org.assisted_create_invited": {
     title: "Se creó su cuenta con el alta asistida y se invitó a la propietaria",
@@ -2261,21 +2263,20 @@ export const TIMELINE_AUDIT_PHRASES: Record<
   },
   "org.invitation_resend": { title: "Se reenvió una invitación a su equipo", category: "cuenta" },
   "org.invitation_cancel": { title: "Se anuló una invitación a su equipo", category: "cuenta" },
-  "org.setup_import": {
-    title: "Se cargó la configuración de la clínica",
-    category: "cuenta",
-    adminOnly: true,
-  },
-  "org.data_import": { title: "Se cargaron sus pacientes", category: "cuenta", adminOnly: true },
   "org.progress_report_sent": {
-    title: "Se le envió el informe de la carga",
+    title: "Salió el informe de la carga",
     category: "cuenta",
     adminOnly: true,
+    titleOf: ({ entityId, metadata }) =>
+      metadata?.registered === true
+        ? `Se registró el informe${reportNumberWords(entityId)}, que salió por correo aparte`
+        : `Salió el informe${reportNumberWords(entityId)}${metadata?.resent === true ? ", reenviado" : ""}`,
   },
   "org.progress_report_unknown": {
-    title: "No se sabe si le llegó el informe de la carga",
+    title: "No se sabe si salió el informe de la carga",
     category: "cuenta",
     adminOnly: true,
+    titleOf: ({ entityId }) => `No se sabe si salió el informe${reportNumberWords(entityId)}`,
   },
   "saas.activated": { title: "Se activó su plan", category: "cuenta" },
   "saas.paused": { title: "Se pausó su plan", category: "cuenta" },
@@ -2350,17 +2351,9 @@ const FILE_TITLES: Record<string, string> = {
   carta: "Carta de bienvenida",
   propuesta: "Propuesta",
   presentacion: "Presentación",
-  plan_carga: "Plan de la carga",
-  informe: "Informe de la carga",
   archivo_clinica: "Archivo de la clínica",
   correo: "Adjunto de un correo",
   otro: "Documento",
-}
-
-const DRAFT_TITLES: Record<string, string> = {
-  plan_configuracion: "el plan de configuración",
-  plan_pacientes: "el plan de pacientes",
-  informe: "el informe",
 }
 
 const day = (date: Date) =>
@@ -2389,7 +2382,7 @@ const timelineSchema = z.strictObject({
  * venció, entró, descartada), la bitácora, las tareas hechas, las decisiones
  * de venta, las propuestas, los envíos sin confirmar (los que salieron ya
  * dejaron su actividad), la auditoría de la cuenta y del cliente (una frase
- * por código), los pagos, los casos de soporte, lo que dejó la skill, los
+ * por código), los pagos, los casos de soporte, los
  * correos que llegaron (sin la actividad que los registró) y los archivos.
  * Soporte no ve lo «solo administración» ni importes ni casos de cobro.
  */
@@ -2764,8 +2757,23 @@ export async function clientTimeline(
             ? { kind: "sistema", name: "Sistema" }
             : byUser(a.actorUserId),
         category: phrase.category,
-        title: phrase.title,
+        title: phrase.titleOf ? phrase.titleOf(a) : phrase.title,
         adminOnly: phrase.adminOnly === true,
+      })
+    }
+  }
+
+  if (orgId && admin && wants("cuenta")) {
+    // Lo que cargó la skill en el servidor (ADR 0183): el mismo registro de Alta, con sus cifras.
+    const loads = await listClinicLoads(tx, orgId)
+    for (const load of loads) {
+      push({
+        id: `carga:${load.id}`,
+        at: new Date(load.at),
+        who: load.by ? { kind: "persona", name: load.by } : { kind: "sistema", name: "Sistema" },
+        category: "cuenta",
+        title: `${load.kind === "configuracion" ? "Se cargó la configuración" : "Se cargaron los pacientes"}: ${load.summary}`,
+        adminOnly: true,
       })
     }
   }
@@ -2868,50 +2876,6 @@ export async function clientTimeline(
     }
   }
 
-  if (admin && wants("cuenta")) {
-    // Lo que dejó la skill de la carga (solo Administración).
-    const rows = await tx
-      .select()
-      .from(saasImportDraft)
-      .where(and(eq(saasImportDraft.clientId, clientId), beforeOf(saasImportDraft.createdAt)))
-      .orderBy(desc(saasImportDraft.createdAt))
-      .limit(many)
-    for (const d of rows) {
-      const what = DRAFT_TITLES[d.kind] ?? "un borrador"
-      const link = { kind: "borrador" as const, id: d.id }
-      push({
-        id: `borrador:${d.id}:lista`,
-        at: d.createdAt,
-        who: byUser(d.uploadedBy),
-        category: "cuenta",
-        title: `La skill dejó ${what} ${d.number}`,
-        adminOnly: true,
-        link,
-      })
-      if (d.approvedAt)
-        push({
-          id: `borrador:${d.id}:aprobada`,
-          at: d.approvedAt,
-          who: byUser(d.approvedBy),
-          category: "cuenta",
-          title: `Se aprobó ${what} ${d.number}`,
-          adminOnly: true,
-          link,
-        })
-      if (d.status === "devuelta")
-        push({
-          id: `borrador:${d.id}:devuelta`,
-          at: d.updatedAt,
-          who: { kind: "persona", name: "Administración" },
-          category: "cuenta",
-          title: `Se devolvió ${what} ${d.number}`,
-          detail: clip(d.returnedNote),
-          adminOnly: true,
-          link,
-        })
-    }
-  }
-
   if (wants("contactos")) {
     // Correos que llegaron y no dejaron su actividad (la actividad de un correo que entró lleva su misma hora).
     const rows = await tx
@@ -2964,11 +2928,7 @@ export async function clientTimeline(
       const category: TimelineCategory =
         f.kind === "propuesta" || f.kind === "presentacion" ? "venta" : "cuenta"
       const who: Pending["who"] =
-        f.source === "kairos"
-          ? { kind: "kairos", name: "Kairós" }
-          : f.source === "skill"
-            ? byUser(f.createdBy, { kind: "sistema", name: "Skill de la carga" })
-            : byUser(f.createdBy)
+        f.source === "kairos" ? { kind: "kairos", name: "Kairós" } : byUser(f.createdBy)
       const link = { kind: "archivo" as const, id: f.id }
       push({
         id: `archivo:${f.id}:subido`,

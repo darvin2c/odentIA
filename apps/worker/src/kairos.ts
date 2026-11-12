@@ -17,7 +17,6 @@ import {
   kairosRulesPass,
   LOST_REASON_WORDS,
   purgeDueClientFiles,
-  purgeImportDraftPayloads,
   type Storage,
   writeAdminAudit,
   writeKairosWeekly,
@@ -28,8 +27,7 @@ import { sql } from "drizzle-orm"
  * La pasada de Kairós en el worker (ARM de la administración): cada 5
  * minutos corre las reglas sin modelo (`kairosRulesPass`), pide al modelo los
  * borradores que esperan (hasta 20) y borra los archivos de las clínicas que
- * vencieron y los JSON de la skill que ya no deben estar (usados, reemplazados
- * o subidos hace 30 días). Una vez al día, desde las 07:00 de Lima, renueva «Lo que hay que
+ * vencieron. Una vez al día, desde las 07:00 de Lima, renueva «Lo que hay que
  * saber» de hasta 30 clientes con algo nuevo y, si la semana aún no lo tiene,
  * escribe el resumen de la semana de Reportes. Nunca envía nada a una
  * clínica: lo que prepara queda en espera del sí de una persona. La hora la
@@ -73,9 +71,6 @@ export interface KairosTickResult {
   weekly: string | null
   filesDeleted: number
   filesFailed: number
-  /** JSON de borradores de la skill borrados del bucket (usados, reemplazados o de 30 días). */
-  draftPayloadsDeleted: number
-  draftPayloadsFailed: number
   /** Lo que falló, en palabras para el registro; nunca corta las demás partes. */
   errors: string[]
 }
@@ -342,8 +337,7 @@ export async function renewClientSummaries(
 
 /**
  * Una vuelta de Kairós. Cada parte corre aunque otra falle: las reglas, los
- * borradores, lo del día, el borrado de archivos vencidos y el de los JSON de
- * la skill.
+ * borradores, lo del día y el borrado de archivos vencidos.
  */
 export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickResult> {
   const now = deps.now ?? (await dbNow(deps.ownerDb))
@@ -358,8 +352,6 @@ export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickRes
     weekly: null,
     filesDeleted: 0,
     filesFailed: 0,
-    draftPayloadsDeleted: 0,
-    draftPayloadsFailed: 0,
     errors: [],
   }
   try {
@@ -412,17 +404,6 @@ export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickRes
     result.filesFailed = purged.failed
   } catch (error) {
     result.errors.push(`archivos: ${message(error)}`)
-  }
-  try {
-    const purged = await purgeImportDraftPayloads(deps.ownerDb, deps.storage, now)
-    result.draftPayloadsDeleted = purged.deleted
-    result.draftPayloadsFailed = purged.failed
-    if (purged.failed > 0)
-      result.errors.push(
-        `borradores de la skill: ${purged.failed} JSON sin borrar, vuelve a intentarlo la próxima pasada`,
-      )
-  } catch (error) {
-    result.errors.push(`borradores de la skill: ${message(error)}`)
   }
   return result
 }

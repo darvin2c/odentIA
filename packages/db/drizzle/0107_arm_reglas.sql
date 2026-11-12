@@ -1,8 +1,8 @@
--- El ARM de la administración (12 nov, ADR 0183): lo que TS no declara y el traslado de lo que
+-- El ARM de la administración (12 nov, ADR 0184): lo que TS no declara y el traslado de lo que
 -- ya había. Las tablas nuevas (`saas_client`, `saas_client_contact`, `saas_task`,
 -- `saas_opportunity`, `saas_proposal`, `saas_outreach`, `kairos_item`, `saas_client_file`,
--- `saas_inbound_email`, `saas_skill_key`, `saas_import_draft`, `kairos_ai_usage` y `kairos_weekly`) son de odentIA
--- y viven en `admin` (ADR 0064): nacen cerradas al rol de la aplicación (ADR 0063) y no reciben
+-- `saas_inbound_email`, `kairos_ai_usage` y `kairos_weekly`) son de odentIA y viven en `admin`
+-- (ADR 0064): nacen cerradas al rol de la aplicación (ADR 0063) y no reciben
 -- ningún GRANT; solo la administración las usa con la conexión propietaria.
 --
 -- El check de sujeto de `saas_follow_up` (con cliente, o una solicitud o una clínica) ya lo

@@ -1,10 +1,5 @@
 import { AGREEMENT_VERSION } from "@odentia/auth/legal"
-import {
-  saasClient,
-  saasClientFile,
-  saasImportDraft,
-  saasInboundEmail,
-} from "@odentia/db/schema/admin-arm"
+import { saasClient, saasClientFile, saasInboundEmail } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
 import { clinicImportRow } from "@odentia/db/schema/admin-imports"
 import { invitation, member, session, user } from "@odentia/db/schema/auth"
@@ -17,7 +12,10 @@ import { ONBOARDING_STEP_KEYS, type OnboardingSteps, onboardingSteps } from "./a
 import { PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Ficha › Alta: los pasos se calculan de lo que ya pasó; nadie los marca a mano. */
+/**
+ * Ficha › Alta: los pasos se calculan de lo que ya pasó; nadie los marca a mano. La carga
+ * y el informe salen del registro de lo que hizo la skill en el servidor (ADR 0183).
+ */
 setupTestDb()
 const admin: AdminActor = { userId: "on-admin", role: "admin" }
 const support: AdminActor = { userId: "on-support", role: "support" }
@@ -102,23 +100,14 @@ beforeAll(async () => {
       deletedAt: ago(1),
     },
   ])
-  await ownerDb.insert(saasImportDraft).values({
-    clientId: fullClient,
-    organizationId: ORG,
-    kind: "plan_configuracion",
-    number: 1,
-    payloadKey: "clients/x/plan.json",
-    status: "usada",
-    uploadedBy: admin.userId,
-    approvedBy: admin.userId,
-    approvedAt: ago(7),
-  })
+  // Lo que deja la skill al cargar y al registrar un informe que salió por correo aparte.
   await ownerDb.insert(adminAudit).values([
     {
       actorUserId: admin.userId,
       actorRole: "admin",
       action: "org.setup_import",
       organizationId: ORG,
+      metadata: { planSha256: "b".repeat(64), nueva: 20, cambia: 2, igual: 7 },
       createdAt: ago(6),
     },
     {
@@ -127,7 +116,8 @@ beforeAll(async () => {
       action: PROGRESS_REPORT_ACTIONS.enviado,
       organizationId: ORG,
       entityId: "informe-1",
-      createdAt: ago(4),
+      metadata: { to: "norte@onboarding.test", sentAt: ago(4).toISOString(), registered: true },
+      createdAt: ago(3),
     },
   ])
   await ownerDb.insert(clinicImportRow).values([
@@ -188,15 +178,6 @@ beforeAll(async () => {
     receivedAt: ago(1),
     attachments: [{ filename: "datos.xlsx", contentType: "text/csv", size: 1, fileId: null }],
   })
-  await ownerDb.insert(saasImportDraft).values({
-    clientId: freshClient,
-    organizationId: FRESH,
-    kind: "plan_configuracion",
-    number: 1,
-    payloadKey: "clients/y/plan.json",
-    status: "lista",
-    uploadedBy: admin.userId,
-  })
   await ownerDb.insert(adminAudit).values({
     actorUserId: admin.userId,
     actorRole: "admin",
@@ -219,7 +200,6 @@ describe("onboardingSteps", () => {
       contrato: ago(10).getTime(),
       carta: ago(9).getTime(),
       archivos: ago(8).getTime(),
-      plan: ago(7).getTime(),
       configuracion: ago(6).getTime(),
       pacientes: ago(6).getTime(),
       informe: ago(4).getTime(),
@@ -228,12 +208,17 @@ describe("onboardingSteps", () => {
       primer_uso: ago(9).getTime(),
       primer_pago: ago(2).getTime(),
     })
+    expect(stepOf(result, "configuracion").detail).toContain(
+      "20 nuevos · 2 cambiaron · 7 ya estaban",
+    )
     expect(stepOf(result, "pacientes").detail).toContain("2 personas en la carga")
+    // El informe que salió por correo aparte cuenta desde el día en que salió, no el del registro.
+    expect(stepOf(result, "informe").detail).toContain("por correo aparte")
     expect(stepOf(result, "primer_pago").detail).not.toMatch(/\d{3,}|USD|29/)
-    expect(result).toMatchObject({ done: 11, total: 12, next: "whatsapp" })
+    expect(result).toMatchObject({ done: 10, total: 11, next: "whatsapp" })
   })
 
-  it("lo que falta dice qué hacer; las acciones de la carga no le llegan a Soporte", async () => {
+  it("lo que falta dice qué pasa, sin botones de cargar ni enviar; Soporte no ve lo de Administración", async () => {
     const forAdmin = await onboardingSteps(ownerDb, admin, freshClient, NOW)
     expect(stepOf(forAdmin, "entro")).toMatchObject({
       doneAt: null,
@@ -242,10 +227,10 @@ describe("onboardingSteps", () => {
     expect(stepOf(forAdmin, "entro").detail).toContain("no aceptó")
     expect(stepOf(forAdmin, "archivos").doneAt?.getTime()).toBe(ago(1).getTime())
     expect(stepOf(forAdmin, "archivos").detail).toContain("1 correo con adjuntos")
-    expect(stepOf(forAdmin, "plan")).toMatchObject({
-      doneAt: null,
-      action: { code: "revisar_plan", adminOnly: true },
-    })
+    // La carga la hace la skill: lo que falta lo dice, sin un botón para cargar.
+    expect(stepOf(forAdmin, "configuracion")).toMatchObject({ doneAt: null })
+    expect(stepOf(forAdmin, "configuracion")).not.toHaveProperty("action")
+    expect(stepOf(forAdmin, "configuracion").detail).toContain("skill")
     expect(stepOf(forAdmin, "informe")).toMatchObject({
       doneAt: null,
       action: { code: "revisar_informe" },
@@ -256,7 +241,7 @@ describe("onboardingSteps", () => {
 
     const forSupport = await onboardingSteps(ownerDb, support, freshClient, NOW)
     expect(forSupport.steps.every((item) => !item.action?.adminOnly)).toBe(true)
-    expect(stepOf(forSupport, "plan")).not.toHaveProperty("action")
+    expect(stepOf(forSupport, "informe")).not.toHaveProperty("action")
     expect(stepOf(forSupport, "entro").action?.code).toBe("reenviar_invitacion")
   })
 
@@ -284,6 +269,6 @@ describe("onboardingSteps", () => {
     })
     const result = await onboardingSteps(ownerDb, admin, fullClient, NOW)
     expect(stepOf(result, "whatsapp").doneAt?.getTime()).toBe(ago(1).getTime())
-    expect(result).toMatchObject({ done: 12, next: null })
+    expect(result).toMatchObject({ done: 11, next: null })
   })
 })

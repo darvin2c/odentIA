@@ -3,7 +3,6 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
-  saasImportDraft,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
@@ -44,7 +43,7 @@ import {
 } from "./saas-founders.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Los clientes del ARM (ADR 0183): etapa calculada, duplicados, fusión, personas, historial y enganches. */
+/** Los clientes del ARM (ADR 0184): etapa calculada, duplicados, fusión, personas, historial y enganches. */
 setupTestDb()
 const admin: AdminActor = { userId: "arm-admin", role: "admin" }
 const support: AdminActor = { userId: "arm-support", role: "support" }
@@ -810,6 +809,7 @@ describe("el historial", () => {
         actorRole: "admin",
         action: "org.setup_import",
         organizationId: orgId,
+        metadata: { planSha256: "e".repeat(64), nueva: 20, cambia: 2, igual: 7 },
         createdAt: at(45),
       },
       {
@@ -870,15 +870,33 @@ describe("el historial", () => {
         createdAt: at(39),
       },
     ])
-    await ownerDb.insert(saasImportDraft).values({
-      clientId: id,
-      organizationId: orgId,
-      kind: "plan_configuracion",
-      number: 1,
-      payloadKey: `drafts/${id}.json`,
-      uploadedBy: admin.userId,
-      createdAt: at(38),
-    })
+    // Lo que deja la skill al enviar el informe: N.º 1 salió; del N.º 2 no se sabe.
+    await ownerDb.insert(adminAudit).values([
+      {
+        actorUserId: admin.userId,
+        actorRole: "admin",
+        action: "org.progress_report_sending",
+        organizationId: orgId,
+        entityId: "informe-1",
+        createdAt: at(38),
+      },
+      {
+        actorUserId: admin.userId,
+        actorRole: "admin",
+        action: "org.progress_report_sent",
+        organizationId: orgId,
+        entityId: "informe-1",
+        createdAt: at(38),
+      },
+      {
+        actorUserId: admin.userId,
+        actorRole: "admin",
+        action: "org.progress_report_unknown",
+        organizationId: orgId,
+        entityId: "informe-2",
+        createdAt: at(38),
+      },
+    ])
     const received = at(37)
     const registered = at(36)
     await ownerDb.insert(saasInboundEmail).values([
@@ -936,19 +954,22 @@ describe("el historial", () => {
         "Se preparó la propuesta 1",
         "Se envió la propuesta 1",
         "Mensaje por WhatsApp: falta decir si salió",
-        "Se cargó la configuración de la clínica",
+        "Se cargó la configuración: 20 nuevos · 2 cambiaron · 7 ya estaban",
         "Se pausó su plan",
         "Se confirmó su pago",
         "Se rechazó su comprobante",
         "Abrió un caso de soporte",
         "Abrió un caso de cobro",
-        "La skill dejó el plan de configuración 1",
+        "Salió el informe N.º 1",
+        "No se sabe si salió el informe N.º 2",
         "Nos escribió a contacto@",
         "Nos escribió un correo",
         "Carta de bienvenida: carta.pdf",
       ]),
     )
     expect(titles).not.toContain("Nos escribió a soporte@")
+    // El paso de en medio de cada envío no se dice: lo dice cómo terminó.
+    expect(titles.filter((title) => title.includes("informe N.º 1"))).toHaveLength(1)
     expect(JSON.stringify(forAdmin.items)).not.toContain("algo.desconocido")
     expect(forAdmin.items.find((i) => i.title === "Se confirmó su pago")?.detail).toBe("USD 29")
     expect(forAdmin.items.find((i) => i.title === "Se preparó la propuesta 1")?.detail).toContain(
@@ -970,8 +991,8 @@ describe("el historial", () => {
     const seen = forSupport.items.map((i) => i.title)
     expect(seen).not.toContain("Nota")
     expect(seen).not.toContain("Abrió un caso de cobro")
-    expect(seen).not.toContain("Se cargó la configuración de la clínica")
-    expect(seen).not.toContain("La skill dejó el plan de configuración 1")
+    expect(seen.some((title) => title.startsWith("Se cargó la configuración"))).toBe(false)
+    expect(seen.some((title) => title.includes("informe"))).toBe(false)
     expect(forSupport.items.every((i) => !i.adminOnly)).toBe(true)
     expect(forSupport.items.find((i) => i.title === "Se confirmó su pago")?.detail).toBeUndefined()
     expect(

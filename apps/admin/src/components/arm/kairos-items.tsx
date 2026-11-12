@@ -78,8 +78,8 @@ const decisionSchema = z.object({
 })
 type Decision = z.infer<typeof decisionSchema>
 
-/** Lo que solo aprueba Administración (precios, la carga, ligar personas, fusionar): el servidor también lo exige. */
-const ADMIN_KINDS = new Set(["propuesta", "plan_carga", "informe", "vinculo", "duplicado"])
+/** Lo que solo aprueba Administración (precios, ligar personas, fusionar): el servidor también lo exige. */
+const ADMIN_KINDS = new Set(["propuesta", "vinculo", "duplicado"])
 
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null
@@ -95,9 +95,6 @@ export function kairosItemTab(kind: string): ClientTab {
     case "guion":
     case "presentacion_hecha":
       return "venta"
-    case "plan_carga":
-    case "informe":
-      return "alta"
     case "vinculo":
       return "contactos"
     case "mensaje":
