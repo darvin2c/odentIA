@@ -108,7 +108,7 @@ import {
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead, traceClinicalReadOrFail } from "../lib/clinical-trace.js"
-import { isSupportRequest } from "../lib/support-session.js"
+import { auditDenied, isSupportRequest, supportSessionOf } from "../lib/support-session.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { canonicalUuid, personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
@@ -739,8 +739,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // Soporte mirando la clínica: lo que abre queda anotado ANTES de mostrarse, y si
     // no se puede anotar no se muestra (el contrato promete que cada acceso queda).
     // Descargar la historia completa no es mirar: soporte no se la lleva (y no se anota lo que no pasa).
-    if (isSupportRequest(c) && remainder.startsWith("/record"))
+    if (isSupportRequest(c) && remainder.startsWith("/record")) {
+      const session = supportSessionOf(c)
+      // El intento queda en la auditoría del permiso (el rol de la app la escribe en la clínica).
+      if (session) await auditDenied(deps.db, session, session.organizationId)
       return c.json(errorBody(c, "SUPPORT_NO_DOWNLOAD", "Soporte solo mira: no descarga ni imprime"), 403)
+    }
     if (isSupportRequest(c) && domain === "clinical" && !write && patientId && resource) {
       const { orgId, userId } = orgContextOf(c)
       const traced = await traceClinicalReadOrFail(deps.db, { orgId, userId, patientId, resource })

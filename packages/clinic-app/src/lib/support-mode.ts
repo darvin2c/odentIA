@@ -74,7 +74,12 @@ export async function loadSupportSession(
       },
     }
   } catch (error) {
-    if (error instanceof ApiError) return null
+    // Tenía cookie de soporte y el acceso terminó: «El acceso terminó», no la sesión normal
+    // de ese navegador (la de la administración llevaría a otra pantalla).
+    if (isSupportEnded(error) && typeof window !== "undefined") {
+      window.location.replace("/soporte?terminado=1")
+      return await new Promise<never>(() => undefined)
+    }
     return null
   }
 }

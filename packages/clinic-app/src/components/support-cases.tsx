@@ -154,6 +154,7 @@ const supportGrantItem = z.object({
   revokedAt: z.string().nullable(),
   endReason: z.string().nullable(),
   revokedBy: z.string().nullable(),
+  revokedByName: z.string().nullable().optional(),
   active: z.boolean(),
   createdAt: z.string(),
   reads: z.array(z.object({ patientName: z.string(), resource: z.string(), at: z.string() })),

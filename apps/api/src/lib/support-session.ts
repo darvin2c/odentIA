@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { roleLabel } from "@odentia/auth/permissions"
 import { isClinicalProduct } from "@odentia/clinical"
-import { type Db, runOutsideReadOnly, runReadOnly } from "@odentia/db"
+import { type Db, runOutsideReadOnly, runReadOnly, withOrgContext } from "@odentia/db"
 import { supportAccessAudit } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
@@ -77,16 +77,25 @@ export async function supportSessionGate(
  * Un intento frenado (escribir, otra clínica, descargar, una pantalla vedada): queda en la
  * auditoría del permiso, como promete el contrato. Lo anota el sistema, fuera del solo lectura.
  */
-export async function auditDenied(ownerDb: Db, session: SupportSessionContext): Promise<void> {
+export async function auditDenied(db: Db, session: SupportSessionContext, orgScope?: string): Promise<void> {
+  const row = {
+    grantId: session.grantId,
+    caseId: session.caseId,
+    organizationId: session.organizationId,
+    staffUserId: session.staffUserId,
+    action: "denegado_solo_lectura",
+  }
+  // Con el rol de la app, dentro del contexto de la clínica (RLS); con el dueño, directo.
   await runOutsideReadOnly(() =>
-    ownerDb.insert(supportAccessAudit).values({
+    orgScope
+      ? withOrgContext(db, orgScope, (tx) => tx.insert(supportAccessAudit).values(row))
+      : db.insert(supportAccessAudit).values(row),
+  ).catch((error: unknown) => {
+    console.error("No se pudo anotar un intento frenado de soporte", {
       grantId: session.grantId,
-      caseId: session.caseId,
-      organizationId: session.organizationId,
-      staffUserId: session.staffUserId,
-      action: "denegado_solo_lectura",
-    }),
-  ).catch(() => undefined)
+      error: error instanceof Error ? error.message : String(error),
+    })
+  })
 }
 
 /** El contexto de organización de soporte: la clínica del permiso, con el rol de lectura elegido. */

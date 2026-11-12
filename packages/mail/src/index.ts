@@ -485,7 +485,7 @@ export function supportReplyNoticeTemplate({
       title: "Soporte pide tu autorización",
       paragraphs: [
         `Hola. ${first} Lo autorizas desde ${name}, en el caso: ahí está con qué rol pide mirar y por cuánto tiempo; puedes cambiarlo y quitarlo cuando quieras.`,
-        "Soporte solo mira: no puede cambiar nada, descargar ni imprimir, y cada ficha que abra queda anotada para tu clínica.",
+        "Soporte solo mira: no puede cambiar nada, descargar ni imprimir, y cada parte de la historia clínica que abra queda anotada para tu clínica.",
       ],
       action: { label: "Ver el pedido", url },
       reason: `Te escribimos porque eres propietario o administrador de ${clinic} en ${name}, quienes autorizan el acceso de soporte, y nadie lo autorizó todavía.`,

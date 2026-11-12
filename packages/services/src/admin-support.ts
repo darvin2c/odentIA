@@ -129,6 +129,8 @@ export interface SupportGrantItem {
   /** Por qué terminó antes de tiempo: lo quitaron, lo reemplazó otro, se resolvió el caso… */
   endReason: string | null
   revokedBy: string | null
+  /** El nombre de quien lo quitó cuando no es del equipo (soporte, desde la administración). */
+  revokedByName?: string | null
   active: boolean
   createdAt: string
   /** Las fichas que soporte abrió con este permiso: persona, parte y hora (solo en la clínica). */
@@ -247,6 +249,10 @@ async function grantsSeenByClinic(tx: Db, orgId: string, rows: (typeof supportAc
     if (row.staffUserId) {
       const [staff] = await tx.select({ name: user.name }).from(user).where(eq(user.id, row.staffUserId)).limit(1)
       item.staffName = staff?.name ?? null
+      if (row.revokedBy && row.revokedBy !== row.grantedBy) {
+        const [by] = await tx.select({ name: user.name }).from(user).where(eq(user.id, row.revokedBy)).limit(1)
+        item.revokedByName = by?.name ?? null
+      }
       const until = row.revokedAt ?? row.expiresAt
       const reads = await tx.execute<{ name: string; resource: string; at: Date | string }>(sql`
         select c.display_name as name,
@@ -2070,6 +2076,16 @@ export async function revokeSupportGrantAsStaff(
     staffUserId: actor.userId,
     action: "revocado",
   })
+  // También en «Actividad del equipo» de la clínica: quitar el acceso es un hecho suyo.
+  if (!expired)
+    await db.insert(auditEvent).values({
+      organizationId: grant.organizationId,
+      actorUserId: actor.userId,
+      action: "support.access_revoked",
+      entity: "support_access",
+      entityId: grant.id,
+      metadata: { caso: grant.caseId, por: "soporte" },
+    })
   await writeAdminAudit(db, actor, {
     action: "support.grant.revoke",
     organizationId: grant.organizationId,

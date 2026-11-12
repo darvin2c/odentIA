@@ -73,7 +73,7 @@ import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHos
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
-import { endSupportSession, loadSupportSession, type SupportMode } from "../lib/support-mode"
+import { endSupportSession, isSupportEnded, loadSupportSession, type SupportMode } from "../lib/support-mode"
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
@@ -362,6 +362,22 @@ function OrgSwitcher() {
  * color que los avisos de la clínica, con hasta cuándo y «Salir».
  */
 function SupportStrip({ support }: { support: SupportMode }) {
+  // Cada medio minuto se pregunta si el acceso sigue: lo que estaba en pantalla no queda a la
+  // vista después de quitarlo o de que venza.
+  useEffect(() => {
+    const check = () => {
+      void apiFetch("/api/support-session/me").catch((error) => {
+        if (isSupportEnded(error)) window.location.replace("/soporte?terminado=1")
+      })
+    }
+    const timer = window.setInterval(check, 30_000)
+    const untilEnd = new Date(support.expiresAt).getTime() - Date.now()
+    const atEnd = untilEnd > 0 ? window.setTimeout(check, untilEnd + 1_000) : undefined
+    return () => {
+      window.clearInterval(timer)
+      if (atEnd) window.clearTimeout(atEnd)
+    }
+  }, [support.expiresAt])
   const untilFull = new Date(support.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
   const until = untilFull.replace(/\.$/, "")
   return (

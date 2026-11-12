@@ -160,7 +160,7 @@ function AccountGrantBox({
         <>
           <p>
             Soporte puede ver el diagnóstico de {organizationName ?? "tu clínica"} hasta el{" "}
-            {new Date(activeGrant.expiresAt).toLocaleString()}.
+            {new Date(activeGrant.expiresAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}.
           </p>
           <Button
             type="button"

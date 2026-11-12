@@ -140,14 +140,14 @@ export function SupportAccessForm({
         )}
       </form.AppField>
       <p className="text-sm text-muted-foreground">
-        {VIEW_WORDS[view] ?? "Verá lo mismo que ese rol de tu clínica."} Sin poder cambiar nada; cada ficha que abra queda anotada.
+        {VIEW_WORDS[view] ?? "Verá lo mismo que ese rol de tu clínica."} Sin poder cambiar nada; cada parte de la historia clínica que abra queda anotada.
       </p>
       {askReason ? (
         <form.AppField name="reason">
           {(field) => (
             <field.TextField
               id={`${id}-para-que`}
-              label="¿Qué quieres que revisen? (opcional)"
+              label="¿Qué quieres que revisen? (opcional, sin nombres de pacientes)"
               maxLength={500}
             />
           )}
@@ -347,6 +347,7 @@ export interface ClinicGrant {
   revokedAt: string | null
   endReason: string | null
   revokedBy: string | null
+  revokedByName?: string | null
   active: boolean
   createdAt: string
   reads: { patientName: string; resource: string; at: string }[]
@@ -399,7 +400,7 @@ export function SupportGrantHistory({ grants }: { grants: ClinicGrant[] }) {
               <span>
                 {untilWords(ended)} · El acceso terminó:{" "}
                 {grant.endReason === "quitado" && grant.revokedBy
-                  ? `lo quitó ${nameOf(grant.revokedBy)}`
+                  ? `lo quitó ${grant.revokedByName ?? nameOf(grant.revokedBy)}`
                   : (END_WORDS[grant.endReason ?? "vencido"] ?? "terminó")}
                 .
               </span>
@@ -421,7 +422,7 @@ export function SupportGrantHistory({ grants }: { grants: ClinicGrant[] }) {
                 </ul>
               </details>
             ) : grant.scope === "rol" && ended ? (
-              <span className="text-muted-foreground">Soporte no abrió ninguna ficha.</span>
+              <span className="text-muted-foreground">Soporte no abrió ninguna historia clínica.</span>
             ) : null}
           </li>
         )

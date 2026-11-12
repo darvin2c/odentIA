@@ -110,7 +110,7 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       },
       {
         id: "inicio-soporte-acceso",
-        q: "¿Cómo le doy acceso a soporte para que revise mi clínica?",
+        q: "¿Cómo le doy acceso a soporte?",
         a: "En Ayuda, abajo, «Dar acceso a soporte» (lo ven el propietario y los administradores). Eliges con qué rol mira soporte: «Solo la configuración» (sedes, canales, agente y equipo; ningún paciente) o un rol de tu equipo, como Recepción, Caja, el del profesional o Administrador (toda la clínica). Soporte ve lo mismo que vería ese rol, solo para mirar: no puede cambiar nada, descargar ni imprimir. Escribes, si quieres, qué revisar, eliges el tiempo (15 minutos, 30 minutos o 1 hora) y pulsas «Dar acceso». Mientras dura, todo el equipo ve una franja arriba; para cortarlo antes, el propietario o un administrador pulsa «Quitar acceso» en esa franja o en el caso.",
         forms: [
           "autorizar a soporte a ver mi clinica",
@@ -126,14 +126,14 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "inicio-soporte-quitar-acceso",
         q: "¿Cómo le quito el acceso a soporte?",
-        a: "Con «Quitar acceso» (en el celular, «Quitar»): en la franja de arriba, o en Ayuda › «Tus casos con soporte», en el caso del acceso. Soporte deja de ver en ese momento, también lo que tenía abierto. Lo pueden quitar el propietario, los administradores o quien lo dio; el resto del equipo ve la franja sin ese botón. Si no lo quitas, termina solo a la hora elegida o cuando se resuelve el caso.",
+        a: "Con «Quitar acceso» (en el celular, «Quitar»): en la franja de arriba, o en Ayuda › «Tus casos con soporte», en el caso del acceso. Soporte deja de ver en ese momento: lo que tenía abierto se cierra en cuanto vuelve a tocar algo, o en medio minuto. Lo pueden quitar el propietario, los administradores o quien lo dio; el resto del equipo ve la franja sin ese botón. Si no lo quitas, termina solo a la hora elegida o cuando se resuelve el caso.",
         forms: ["quitarle el acceso a soporte", "como corto el acceso de soporte", "revocar el acceso de soporte", "que soporte deje de ver mi clinica"],
         general: true,
       },
       {
         id: "inicio-soporte-que-ve",
         q: "¿Soporte puede ver a mis pacientes?",
-        a: "Solo si se lo das, y por un tiempo. Con «Solo la configuración» no ve ningún paciente. Con un rol de tu equipo ve lo que vería ese rol: con el del profesional o Administrador, los pacientes, su historia y sus documentos; nunca puede cambiar nada, descargar ni imprimir, y una historia bloqueada no la abre. Cada ficha que abre queda anotada: lo ves en Ayuda › «Tus casos con soporte», en el caso del acceso (qué miró y a qué hora), y en la ficha del paciente › Datos › «Consultas a la historia» (la ven el propietario y los administradores).",
+        a: "Solo si se lo das, y por un tiempo. Con «Solo la configuración» no ve ningún paciente. Con un rol de tu equipo ve lo que vería ese rol: con el del profesional o Administrador, los pacientes, su historia y sus documentos; nunca puede cambiar nada, descargar ni imprimir, y una historia bloqueada no la abre. Cada parte de la historia clínica que abre queda anotada: lo ves en Ayuda › «Tus casos con soporte», en el caso del acceso (qué miró y a qué hora), y en la ficha del paciente › Datos › «Consultas a la historia» (la ven el propietario y los administradores).",
         forms: [
           "soporte puede ver a mis pacientes",
           "que ve soporte de mi clinica",
