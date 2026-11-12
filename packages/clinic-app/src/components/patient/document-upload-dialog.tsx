@@ -735,6 +735,7 @@ export function DocumentUploadDialog({
                   <legend className="px-1 text-sm font-medium">Para todos</legend>
                   <p className="text-xs text-muted-foreground">
                     Se copia a los archivos que no tienen una propia; después puedes cambiar la de cualquiera.
+                    La fecha de un papel es la que tiene escrita; si abarca varios años, la de su última anotación.
                   </p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <form.AppField
@@ -792,6 +793,7 @@ export function DocumentUploadDialog({
                         onToggle={(expanded) => patchFile(row.key, { expanded })}
                         onRemove={() => removeRow(index)}
                         onRetry={() => retryRow(row.key)}
+                        several={pendingKeys.length > 1}
                       />
                     ) : null
                   })}
@@ -872,6 +874,8 @@ interface QueuedRowProps {
   onToggle: (expanded: boolean) => void
   onRemove: () => void
   onRetry: () => void
+  /** Varios archivos: la ayuda de la fecha va una vez, en «Para todos», no en cada fila. */
+  several: boolean
 }
 
 const QueuedRow = withForm({
@@ -889,9 +893,12 @@ const QueuedRow = withForm({
     onToggle,
     onRemove,
     onRetry,
+    several,
   }) {
     const id = useId()
     const row = useStore(form.store, (state) => state.values.rows[index])
+    // El calendario de una fila abre en la fecha de «Para todos», no en el mes de hoy.
+    const commonDate = useStore(form.store, (state) => state.values.allCapturedAt)
     if (!row) return null
     const name = meta.file.name
     const forFile = <span className="sr-only"> de {name}</span>
@@ -994,7 +1001,7 @@ const QueuedRow = withForm({
                       </>
                     }
                     description={
-                      types.length > 0
+                      types.length > 0 || several
                         ? "Si queda vacía se usa la fecha de subida."
                         : "La que tiene el papel; si abarca varios años, la de su última anotación. Vacía, vale la de subida."
                     }
@@ -1005,6 +1012,7 @@ const QueuedRow = withForm({
                         className="w-full"
                         value={field.state.value}
                         disabled={busy}
+                        openAt={commonDate || undefined}
                         min="1900-01-01"
                         max={regionToday()}
                         emptyLabel="La de subida"

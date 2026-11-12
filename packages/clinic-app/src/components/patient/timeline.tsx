@@ -285,7 +285,8 @@ function DocumentCard({
       </AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle>{item.title}</AttachmentTitle>
-        <AttachmentDescription>
+        {/* Cuándo se subió y el motivo del retiro se leen enteros, también a 390 px. */}
+        <AttachmentDescription className="whitespace-normal">
           {item.category ? docCategoryLabel(item.category) : "Documento"}
           {teeth.length > 0 ? ` · P${teeth.join(", ")}` : ""}
           {tags.length > 0 ? ` · ${tags.join(", ")}` : ""}
