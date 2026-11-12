@@ -1,6 +1,6 @@
 ---
 name: odentia-qa
-description: Recorrer odentIA, latidIA y vistIA como QA, en un navegador real y con cinco voces (novato, clínica, desarrollo, auditor y diseño UX), para encontrar errores y mejoras que las pruebas no ven, supervisar cada proceso clínico contra su catálogo, proponer cómo simplificar lo que cuesta, confirmarlos y dejarlos listos para corregir. Usar para una ronda periódica o cuando pidan «haz QA», «revisa esta pantalla buscando problemas», «revisa la atención como un odontólogo», «revisa el examen de la vista», «¿esto sirve para atender?», «navega por la app a ver qué falla» o «lanza la mesa sobre…» un área, aunque no haya un cambio nuevo. También la llama odentia-entrega antes de pedir el sí, y sus voces son la mesa de odentia-entrega. No usar sola para probar un cambio propio (eso lo hace odentia-entrega, que la llama) ni para medir la calidad de Sofi, Clío o Argos.
+description: Recorrer odentIA, latidIA y vistIA como QA, en un navegador real y con cinco voces (novato, clínica, desarrollo, auditor y diseño UX), para encontrar errores y mejoras que las pruebas no ven, supervisar cada proceso clínico contra su catálogo, proponer cómo simplificar lo que cuesta, confirmarlos y dejarlos listos para corregir. Usar para una ronda periódica o cuando pidan «haz QA», «revisa esta pantalla buscando problemas», «revisa la atención como un odontólogo», «revisa el examen de la vista», «¿esto sirve para atender?», «navega por la app a ver qué falla» o «lanza la mesa sobre…» un área, aunque no haya un cambio nuevo. También la llama odentia-entrega antes de pedir el sí, y sus voces son la mesa de odentia-entrega. No usar sola para probar un cambio propio (eso lo hace odentia-entrega, que la llama), ni para medir la calidad de Sofi, Clío o Argos, ni para la administración (apps/admin), que no lleva voces.
 ---
 
 # QA de odentIA, latidIA y vistIA
@@ -33,7 +33,7 @@ Las voces y su método están en `references/voces.md`. Cómo se las convoca y s
 
 Una ronda, un área: una pantalla o un recorrido que cruza varias, como «de la primera cita al cobro». Ir a fondo en poco encuentra más que pasar por todo.
 
-Si pidieron un área, esa. Si no, la que hace más tiempo no se recorre, según `~/odentia-qa/recorrido.md`. El mapa de pantallas son los temas de `packages/services/src/help-guide.ts` y `packages/services/src/medical/help.ts`, que una prueba compara con las rutas reales. No hace falta otro inventario.
+El área es de lo que usan la clínica o sus pacientes; la administración no se recorre con voces (`references/voces.md`). Si pidieron un área, esa. Si no, la que hace más tiempo no se recorre, según `~/odentia-qa/recorrido.md`. El mapa de pantallas son los temas de `packages/services/src/help-guide.ts` y `packages/services/src/medical/help.ts`, que una prueba compara con las rutas reales. No hace falta otro inventario.
 
 Los archivos de la ronda van fuera del repositorio, porque es público, en `~/odentia-qa/<fecha>/`: `comun.md` con lo que todas las voces necesitan (direcciones, cuentas, reglas de datos y formato de hallazgo), un informe por voz y `capturas/`.
 

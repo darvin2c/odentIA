@@ -42,7 +42,7 @@ export interface DocumentLogo {
 }
 
 /**
- * La hoja membretada de la clínica (ADR 0180): un PDF de una página, ya normalizado al
+ * La hoja membretada de la clínica (ADR 0181): un PDF de una página, ya normalizado al
  * subirlo (sin recorte ni giro), y dónde va el texto, en milímetros desde cada borde
  * de su hoja. Con `hasContact` su hoja ya dice la dirección y el teléfono.
  */
@@ -86,7 +86,7 @@ export interface DocumentClinic {
    */
   brandInk?: string | null
   /**
-   * La hoja membretada de la clínica (ADR 0180): va de fondo en cada hoja y reemplaza
+   * La hoja membretada de la clínica (ADR 0181): va de fondo en cada hoja y reemplaza
    * nuestro membrete. El texto va donde ella dice; lo de en medio (una marca de agua)
    * queda debajo. La térmica no la lleva.
    */

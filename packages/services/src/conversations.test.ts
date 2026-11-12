@@ -490,6 +490,43 @@ it("applyStatus guarda el motivo de un envío fallido tal como lo dice el adapta
   expect(item).not.toHaveProperty("error")
 })
 
+it("applyStatus no retrocede: un entregado tardío no baja un leído ni deshace un no salió", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const { conversationId } = await ingest(
+    "org_a",
+    connId,
+    textEvent({ externalEventId: "evt-ord", externalMessageId: "ext-ord", externalThreadId: "tg:997" }),
+  )
+  const send = (text: string) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text } }),
+    )
+  const read = await send("uno")
+  const failed = await send("dos")
+  await ownerDb.execute(sql`update "message" set "external_id" = 'wamid.ord1', "status" = 'sent' where "id" = ${read.id}::uuid`)
+  await ownerDb.execute(sql`update "message" set "external_id" = 'wamid.ord2', "status" = 'sent' where "id" = ${failed.id}::uuid`)
+  const apply = (statuses: Parameters<typeof applyStatus>[2]) =>
+    withOrgContext(appDb, "org_a", (tx) => applyStatus(tx, "org_a", statuses))
+  expect(
+    await apply([
+      { externalMessageId: "wamid.ord1", status: "read" },
+      { externalMessageId: "wamid.ord2", status: "failed", error: "no" },
+    ]),
+  ).toBe(2)
+  // Llegan tarde y repetidos: no cambian nada.
+  expect(
+    await apply([
+      { externalMessageId: "wamid.ord1", status: "delivered" },
+      { externalMessageId: "wamid.ord1", status: "read" },
+      { externalMessageId: "wamid.ord2", status: "delivered" },
+      { externalMessageId: "wamid.ord2", status: "read" },
+    ]),
+  ).toBe(0)
+  const messages = await withOrgContext(appDb, "org_a", (tx) => listMessages(tx, "org_a", conversationId, {}))
+  expect(messages.items.find((m) => m.id === read.id)?.status).toBe("read")
+  expect(messages.items.find((m) => m.id === failed.id)?.status).toBe("failed")
+})
+
 it("ingesta con conexión inexistente falla", async () => {
   await expect(
     ingest(

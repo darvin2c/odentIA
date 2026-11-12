@@ -60,5 +60,45 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
       <slot />
     </main>
     <Footer legalOnly={footer === "legal"} />
+    <script is:inline>
+      // Cada bloque de una sección aparece con un fundido la primera vez que asoma. Solo se prepara lo
+      // que al cargar está más abajo de la pantalla: nada de lo que ya se ve se esconde, y sin
+      // JavaScript o con menos movimiento todo está a la vista desde el principio. Es solo opacidad: no
+      // cambia el alto ni la posición de nada.
+      ;(() => {
+        if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) return
+        const blocks = []
+        for (const wrap of document.querySelectorAll("main section:not(.hero) > .wrap")) {
+          let n = 0
+          for (const el of wrap.children) {
+            // Las escenas (islas) traen su propio movimiento y las arma React: no se tocan.
+            if (el.tagName === "ASTRO-ISLAND" || el.getBoundingClientRect().top < innerHeight) continue
+            el.style.setProperty("--rv-d", Math.min(n++, 3) * 60 + "ms")
+            el.setAttribute("data-rv", "")
+            blocks.push(el)
+          }
+        }
+        if (!blocks.length) return
+        const seen = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue
+              entry.target.setAttribute("data-rv", "in")
+              seen.unobserve(entry.target)
+            }
+          },
+          { rootMargin: "0px 0px 8% 0px" },
+        )
+        for (const el of blocks) seen.observe(el)
+        // Con el teclado, lo que recibe el foco se ve al instante, aunque aún no haya asomado.
+        document.addEventListener("focusin", (event) => {
+          const block = event.target instanceof Element ? event.target.closest('[data-rv=""]') : null
+          if (block) {
+            block.setAttribute("data-rv", "in")
+            seen.unobserve(block)
+          }
+        })
+      })()
+    </script>
   </body>
 </html>

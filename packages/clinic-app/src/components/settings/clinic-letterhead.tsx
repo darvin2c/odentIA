@@ -46,7 +46,7 @@ const SIDES = [
 ] as const
 
 /**
- * La hoja membretada de la clínica (ADR 0180): se sube, se ve sobre una receta de
+ * La hoja membretada de la clínica (ADR 0181): se sube, se ve sobre una receta de
  * ejemplo y se guarda aparte, como el logo. Desde ahí los papeles en hoja salen sobre
  * ella; la casilla evita repetir la dirección y el teléfono, y el recuadro dice dónde
  * va el texto. Quitarla no pregunta: el aviso trae «Deshacer».

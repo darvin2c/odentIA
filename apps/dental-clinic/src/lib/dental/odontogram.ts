@@ -154,7 +154,7 @@ export interface PrintEstablishment {
   /** La línea del membrete y las iniciales; sin color (o firmada antes de tenerlo), gris. */
   brandInk?: string | null
   /**
-   * La hoja membretada (ADR 0180): su parte de arriba y la de abajo, sin la marca de agua
+   * La hoja membretada (ADR 0181): su parte de arriba y la de abajo, sin la marca de agua
    * bajo el gráfico. La firmada lleva la que tenía al firmarse.
    */
   sheet?: { topBand: string; bottomBand: string; hasContact: boolean } | null

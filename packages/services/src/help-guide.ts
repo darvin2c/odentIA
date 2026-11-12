@@ -252,7 +252,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar o no se sabe si salió), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona sin salir de la conversación (sus citas, su plan y presupuesto, sus alergias, sus cobros, sus oportunidades y tareas, sus datos y las notas del equipo, según lo que tu rol ve) y te deja reservarle una cita. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -291,9 +291,17 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       "facebook",
       "correos de pacientes",
       "sin responder",
+      "no sabemos si llegó",
+      "no se sabe si llegó",
+      "no se sabe si salió",
     ],
     writePermission: "conversations.write",
     faqs: [
+      {
+        id: "no-se-sabe-si-salio",
+        q: "Un mensaje dice «No se sabe si salió», ¿qué hago?",
+        a: "El canal no confirmó si aceptó el mensaje, y no se reenvía solo para que la persona no lo reciba dos veces. La conversación queda en «Por atender». Compruébalo por otra vía (en el celular de la clínica o preguntándole a la persona) y, debajo del mensaje, pulsa «Salió» o «No salió». Si no salió, escríbele de nuevo si hace falta; si era la respuesta de un tema, el tema vuelve a quedar pendiente.",
+      },
       {
         id: "escribo-alguien-nunca-escribio",
         q: "¿Cómo le escribo a alguien que nunca me escribió?",
@@ -416,7 +424,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "mover-cita-confirmada",
         q: "Moví una cita que ya estaba confirmada, ¿sigue confirmada?",
-        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha, y se le recuerda de nuevo para la fecha nueva. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
+        forms: [
+          "¿Cómo confirma la persona la nueva fecha?",
+          "el paciente confirma la fecha nueva",
+          "el aviso de cambio trae confirmar",
+          "toca confirmar en un mensaje viejo",
+        ],
+        a: "Depende del día. Si la mueves dentro del mismo día, sigue «Confirmada» y a la persona le llega el aviso con la hora nueva. Si la llevas a otro día, vuelve a «por confirmar», porque la persona dijo que sí a otra fecha: el aviso del cambio le pide confirmar la fecha nueva con un botón «Confirmar», y los recordatorios vuelven a pedírselo si no lo hace (mientras WhatsApp no aprueba ese aviso, a quien no escribió en el último día le llega el de siempre, y confirma respondiendo «sí» o con el recordatorio). Si toca «Confirmar» en un mensaje de una fecha que después cambió, no se confirma: Sofi le dice la fecha nueva y le pregunta. Si ya lo hablaste con ella, al mover la cita desde «Reprogramar» marca «Ya confirmó conmigo el día nuevo» y queda confirmada; si la arrastraste, confírmala después desde la cita. Cuando es la persona quien cambia su cita, desde su enlace o pidiéndoselo a Sofi, sigue confirmada: elegir la hora nueva ya es confirmarla. «Deshacer» el movimiento la devuelve como estaba.",
       },
       {
         id: "aparece-profesional-agenda",
@@ -441,7 +455,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quien-avisa-persona-cita",
         q: "¿Quién le avisa a la persona su cita?",
-        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si al moverla queda por confirmar, el aviso del cambio ya trae «Confirmar»; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
       },
       {
         id: "marco-llego",

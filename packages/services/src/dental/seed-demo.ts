@@ -634,7 +634,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, orgs))
   await db.delete(member).where(inArray(member.organizationId, orgs))
   await db.delete(invitation).where(inArray(invitation.organizationId, orgs))
-  // La hoja membretada (ADR 0180): sus versiones nombran a la clínica y a quien la subió.
+  // La hoja membretada (ADR 0181): sus versiones nombran a la clínica y a quien la subió.
   const previousLetterheads = await db
     .select({ key: clinicLetterhead.pdfKey })
     .from(clinicLetterhead)
@@ -948,7 +948,7 @@ const [miraflores] = await db
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
 await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", country: "PE" }])
-// Su hoja membretada (ADR 0180): la demo muestra la tarjeta con una hoja puesta y sus papeles sobre ella.
+// Su hoja membretada (ADR 0181): la demo muestra la tarjeta con una hoja puesta y sus papeles sobre ella.
 await seedDemoLetterhead(db, storage, {
   orgId: ORG_B,
   userId: CORA_ID,
@@ -1765,8 +1765,8 @@ const convAndres = await seedConversation({
   thread: "seed-thread-andres",
   unreadCount: 1,
   lastInboundAt: hoursAgo(1),
-  lastOutboundAt: new Date(hoursAgo(1).getTime() + 60_000),
-  lastMessageAt: new Date(hoursAgo(1).getTime() + 60_000),
+  lastOutboundAt: new Date(hoursAgo(1).getTime() + 120_000),
+  lastMessageAt: new Date(hoursAgo(1).getTime() + 120_000),
 })
 const andresAsked = await seedMessage({
   orgId: ORG_A,
@@ -1796,6 +1796,18 @@ await seedMessage({
   externalId: "seed-msg-andres-2",
   status: "read",
   createdAt: new Date(hoursAgo(1).getTime() + 60_000),
+})
+// El canal no confirmó si salió el aviso siguiente: no se reenvía solo y
+// recepción lo resuelve con «Salió» o «No salió» (auditoría de estados del 11 nov).
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convAndres.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Apenas caja lo confirme, te escribo por aquí.",
+  externalId: "seed-msg-andres-3",
+  status: "unknown",
+  createdAt: new Date(hoursAgo(1).getTime() + 120_000),
 })
 
 // R1: Ana respondió a Patricia pasadas las 24 horas. La respuesta queda «Por

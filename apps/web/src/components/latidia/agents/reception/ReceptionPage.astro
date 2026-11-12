@@ -2,7 +2,8 @@
 // /agentes/recepcion de latidIA (tablero «Sofi» del lienzo): «Sofi.» en grande con su frase y el h1 para
 // los buscadores; el WhatsApp del Consultorio San Martín con las escenas «Agenda» y «Urgencia»; lo que
 // hace hoy, con la señal de alarma al frente; cuánto cobra (cifras de Astro.locals.pricing); lo que
-// decides tú; las preguntas de los médicos y el cierre. Sofi no da consejos médicos: el principio
+// decides tú y cómo le enseñas (Conocimiento, las lecciones de Agente › Aprender y «Probar»); las
+// preguntas de los médicos y el cierre. Sofi no da consejos médicos: el principio
 // «No diagnostica, no receta y no decide por el profesional» está en el agente (packages/agent).
 import Base from "../../../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../../../lib/faq"
@@ -74,6 +75,22 @@ const night =
       }
     : null
 
+// Cómo aprende: Agente › Conocimiento, la corrección desde «En qué se basó» y «Probar».
+const teach = [
+  {
+    title: "Lee tus datos al momento",
+    text: "Horarios, sedes, servicios, precios y medios de pago: los toma de donde ya los tienes. En Conocimiento agregas lo que solo tú sabes, como el estacionamiento o los seguros.",
+  },
+  {
+    title: "La corriges y aprende",
+    text: "Debajo de su respuesta, «En qué se basó» › «Corregir». Queda como una lección, y Sofi la usa recién cuando quien dirige el consultorio la aprueba.",
+  },
+  {
+    title: "La pruebas antes",
+    text: "«Probar» abre una conversación real con una persona de prueba, también con Sofi apagada. Lo que hace ahí se borra con la prueba.",
+  },
+]
+
 const faq: AgentQuestion[] = [
   {
     q: "¿Sofi da consejos médicos?",
@@ -87,6 +104,10 @@ const faq: AgentQuestion[] = [
   {
     q: "¿Agenda sin preguntarme?",
     a: "Agenda en los horarios libres que tú dejas en la agenda y solo con el sí del paciente. Si prefieres, lo apagas y Sofi envía su enlace para que elija.",
+  },
+  {
+    q: "¿Cómo le enseño lo que mi consultorio hace distinto?",
+    a: "Tus horarios, servicios y precios los lee al momento. Lo demás lo escribes en Conocimiento o como una regla en «Lo que Sofi debe saber». Y si respondió mal, la corriges: tu corrección queda como una lección y Sofi la usa cuando quien dirige el consultorio la aprueba.",
   },
   { q: "¿Se hace pasar por una persona?", a: "No. Se presenta como asistente virtual del consultorio, con el nombre que le pongas." },
   {
@@ -166,18 +187,29 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
         </div>
         <ul class="rp-decide" aria-label="Así se ve en tu consultorio">
           <li>
-            <span><b>Agendar citas</b><span>Apagado: le envía su enlace para que la persona elija la hora.</span></span>
+            <span><b>Agendar, mover y cancelar citas</b><span>Prendido: reserva con el sí de la persona. Apagado: le envía su enlace para que elija la hora.</span></span>
             <span class="rp-switch" aria-hidden="true"><span></span></span>
           </li>
           <li>
             <span><b>Horario de recontacto</b><span>Lunes a viernes de 8:00 a 20:00 y sábado de 8:00 a 14:00, como viene.</span></span>
-            <span class="rp-change" aria-hidden="true">Cambiar</span>
+            <span class="rp-change">Lo eliges tú</span>
           </li>
           <li>
             <span><b>Nombre y tono</b><span>Cercano, neutro o formal; de tú o de usted; con pocos emojis o ninguno.</span></span>
-            <span class="rp-change" aria-hidden="true">Cambiar</span>
+            <span class="rp-change">Lo eliges tú</span>
           </li>
         </ul>
+      </div>
+      <div class="wrap la-in rp-teach">
+        <h3 class="rp-teach-h">Y le enseñas, como a alguien nuevo en tu recepción.</h3>
+        <div class="rp-teach-grid">
+          {teach.map((item) => (
+            <div class="la-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
 
@@ -201,7 +233,12 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
   .rp-decide li > span:first-child > span { font-size: 15px; line-height: 1.45; color: var(--muted); }
   .rp-switch { flex: none; width: 48px; height: 28px; border-radius: 999px; background: #0e7490; display: flex; justify-content: flex-end; padding: 3px; }
   .rp-switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; }
-  .rp-change { flex: none; font-weight: 700; color: #0e7490; }
+  /* Un rótulo, no un enlace: en la web no se cambia nada, se cuenta que lo elige la clínica. */
+  .rp-change { flex: none; font-size: 13px; color: var(--soft); }
+  /* Cómo aprende: debajo de «Tú decides», tres tarjetas. */
+  .rp-teach { margin-top: 56px; gap: 20px; }
+  .rp-teach-h { font-size: clamp(24px, 2.6vw, 30px); line-height: 1.15; letter-spacing: -.02em; text-wrap: balance; }
+  .rp-teach-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
   @media (max-width: 1020px) {
     .rp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .rp-alarm { grid-row: auto; }
@@ -211,6 +248,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
     .rp-alarm { grid-column: auto; padding: 20px; }
     .rp-alarm h3 { font-size: 22px; }
     .rp-decide li { padding: 16px; }
+    .rp-teach { margin-top: 40px; }
     .rp-decide li > span:first-child > span { font-size: 14px; }
   }
 </style>

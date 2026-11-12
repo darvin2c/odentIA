@@ -808,7 +808,7 @@ export function createApp(deps: AppDeps) {
     )
   })
 
-  // La hoja membretada de la clínica (ADR 0180): se sube, se ajusta y se quita aparte.
+  // La hoja membretada de la clínica (ADR 0181): se sube, se ajusta y se quita aparte.
   guarded.route("/org-profile/letterhead", createLetterheadRoute({ db, storage: deps.storage }))
 
   // «De tu logo»: los colores del logo ya subido, para elegir sin saber el código.

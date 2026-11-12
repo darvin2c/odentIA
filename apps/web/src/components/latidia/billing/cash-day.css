@@ -36,7 +36,8 @@
 .lt-cash-state[data-state="open"] i { background: #16a34a; animation: lt-cash-pulse 1.6s ease-in-out infinite; }
 .lt-cash-state[data-state="ready"] { color: var(--teal-hover); background: var(--teal-soft); }
 .lt-cash-state[data-state="ready"] i { background: var(--teal); }
-.lt-cash-rows { display: flex; flex-direction: column; min-height: 360px; }
+/* Los cobros se quedan con el espacio que sobra: el total no baja con cada uno. */
+.lt-cash-rows { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 360px; }
 .lt-cash-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; padding: 11px 8px; border-top: 1px solid var(--lt-cash-line); border-radius: 12px; transition: background-color .4s ease; animation: lt-cash-in .45s ease both; }
 .lt-cash-row[data-now] { background: var(--lt-cash-tint); }
 .lt-cash-time { font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding-top: 2px; }

@@ -2,8 +2,8 @@
 // /reportes de odentIA (lienzo del paso 3, tablero Reportes), con la misma estructura que la de latidIA:
 // Argos de protagonista en la portada, respondiendo con las cifras de Clínica Sonrisa Norte; las cinco
 // pestañas de Reportes con su réplica (el embudo con el presupuesto, lo cobrado por tratamiento, la
-// agenda ocupada) y la captura real de Finanzas; por qué confiar en su respuesta, las preguntas y el
-// cierre. Los dos componentes de la demostración son los de latidIA con `variant="dental"`
+// agenda ocupada) y la captura real de Finanzas; por qué confiar en su respuesta, las metas del mes y
+// el resumen del lunes, las preguntas y el cierre. Los dos componentes de la demostración son los de latidIA con `variant="dental"`
 // (components/latidia/reports). Título, descripción, migas y las preguntas de siempre salen de
 // PAGES.reportes (lib/pages-data.ts). Ningún precio en el código: lo que se pagó por los agentes y las
 // preguntas de Argos salen del plan que se muestra (Astro.locals.pricing).
@@ -31,7 +31,7 @@ const trail: [string, string][] = [
   [page.crumb, page.path],
 ]
 // El ámbar de Argos sobre claro no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
-const argosTag = "#9a6a12"
+const argosTag = "#8f6210"
 
 // Lo que se pagó por los agentes en el mes de ejemplo de la pestaña Agente, con los precios publicados:
 // Sofi atendió 377 conversaciones (214 informan, 92 gestionan y 71 agendan), Clío ordenó 164 consultas
@@ -70,6 +70,10 @@ const faq: FaqItem[] = [
     a: `No. Usa las mismas cuentas de Reportes y debajo de cada respuesta dice cómo lo calculó: qué contó, de qué periodo y de qué sedes. Si ${WORDS.name} no registra ese dato, te lo dice y te ofrece lo más cercano.`,
   },
   { q: "¿Cuántas preguntas le puedo hacer a Argos?", a: argosAnswer },
+  {
+    q: "¿Puedo ponerle una meta al mes?",
+    a: "Sí. En el Resumen tocas «Poner meta» en Cobrado o en Pacientes nuevos. Es de toda la clínica y vale desde ese mes; si la cambias, los meses pasados conservan la que tenían.",
+  },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
@@ -124,6 +128,21 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   >
     <p class="more"><a href="/agentes/administrador">Lo que hace Argos →</a></p>
   </FeatureGrid>
+
+  <FeatureGrid
+    tag="Metas y resumen"
+    tagColor={argosTag}
+    title="Pones la meta del mes. El lunes, las cifras te llegan solas."
+    min={240}
+    small
+    white
+    items={[
+      { title: "«Poner meta»", text: "En Cobrado o en Pacientes nuevos. Una raya marca cuánto del mes ya pasó: si la barra va por delante, vas bien." },
+      { title: "El resumen del lunes", text: "Un correo cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior y, si hay, lo que cambió y lo que Argos recomienda. Le llega a quien creó la clínica desde el primer lunes; los demás que ven Reportes lo prenden para sí. Si la semana no tuvo movimientos, no se envía." },
+      { title: "«Fijar en Resumen»", text: "La respuesta de Argos que quieres seguir queda en el Resumen, para todos los que ven Reportes." },
+      { title: "«Descargar»", text: "Cada lista baja en un archivo que abre en Excel o Google Sheets; también las tablas Por profesional y Comisiones y las respuestas de Argos que traen filas." },
+    ]}
+  />
 
   <div class="faqwrap">
     <Faq items={faq} title="Sobre los reportes y Argos." />

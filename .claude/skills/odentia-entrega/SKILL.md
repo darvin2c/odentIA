@@ -36,6 +36,9 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 | Función pequeña dentro de un patrón que ya existe, o mover algo de lugar | Corta: quien hace la tarea (el novato en su rol) y desarrollo | No | Novato, desarrollo y diseño UX |
 | Error | Corta, solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No | Desarrollo y las voces a las que afecte |
 | Cambio interno, sin efecto visible | Sin mesa | No | Desarrollo |
+| Cambio de la administración (`apps/admin`) | Sin mesa | Si cambia una pantalla y hay más de una forma razonable | Sin voces: la recorre quien implementa |
+
+La administración no lleva voces: la usa el equipo de odentIA, y las voces imitan a la clínica y a sus pacientes. Cómo debe ser lo decide el usuario, en el lienzo o en el pedido. Quien implementa recorre en la pantalla real lo que cambió («Implementar y comprobar» de `odentia-ux`), y la etapa 6 lleva siempre `security-review`, porque la administración ve todas las clínicas. Si el mismo cambio también toca lo que ve la clínica, las voces entran solo para esa parte.
 
 Los tamaños de la mesa están en `.claude/skills/odentia-qa/references/mesa.md`. Cualquier cambio sube de tamaño si toca dinero, firmas, datos clínicos o permisos, o si lo va a ver otro rol.
 
@@ -123,7 +126,7 @@ Corregir lo real y repetir las pruebas de lo que cambió. Lo que se decide no co
 
 ### 7. La QA antes de entregar
 
-Siempre, también en un cambio chico o interno: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 8 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado, recorre cada caso del acta y marca su criterio; el PR los lista con su resultado. Después el moderador anota cómo rindió la mesa («La mesa aprende», en `mesa.md`).
+Siempre, también en un cambio chico o interno, salvo en la administración, que no lleva voces (ver «Por dónde entra cada cambio»): en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Con el cambio ya probado y revisado, se llama a `odentia-qa` en su manera «antes de entregar» (apartado 8 de esa skill), sobre la rama, en local y en los dos productos si el cambio es común. Las voces son las de la tabla «Por dónde entra cada cambio». La QA recibe el acta de la mesa y la lista de lo cambiado, recorre cada caso del acta y marca su criterio; el PR los lista con su resultado. Después el moderador anota cómo rindió la mesa («La mesa aprende», en `mesa.md`).
 
 Quien implementa también sigue «Implementar y comprobar» de `odentia-ux` (entrada, acción, respuesta y recuperación; escritorio y 390 px; teclado; rechazo del servidor si toca permisos), pero eso no reemplaza a las voces: quien escribió el cambio no ve lo que dio por hecho.
 
@@ -176,7 +179,7 @@ Con todo verde, enviar este resumen y esperar:
 - **Para quien lo usa:** <qué notará recepción, el clínico, caja o el paciente>
 - **Se quitó:** <lo que la mesa o la simplificación sacaron>
 - **Se comprobó:** <pruebas, CI>
-- **La QA:** <voces que entraron, qué encontró, qué se corrigió y qué verificó en pantalla; estado de los procesos clínicos que toca>
+- **La QA:** <voces que entraron, qué encontró, qué se corrigió y qué verificó en pantalla; estado de los procesos clínicos que toca. En la administración, lo que se recorrió en pantalla>
 - **La Ayuda:** <qué se le preguntó y si contestó bien, o por qué no aplica>
 - **No se comprobó:** <lo que falta, sin suavizar>
 - **Agentes:** <resultado frente a la versión anterior, o por qué no aplica>

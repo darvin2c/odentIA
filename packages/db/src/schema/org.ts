@@ -202,7 +202,7 @@ export const branch = pgTable(
 )
 
 /**
- * La hoja membretada de la clínica (ADR 0180): cada vez que se sube, se cambia o se
+ * La hoja membretada de la clínica (ADR 0181): cada vez que se sube, se cambia o se
  * corrige es una versión nueva; la anterior queda con `removed_at`. Nunca se borra:
  * cada papel usa la hoja vigente cuando se emitió o se firmó (la de `created_at <= t`
  * y sin quitar a esa hora), y el odontograma firmado guarda cuál tenía. La vigente es

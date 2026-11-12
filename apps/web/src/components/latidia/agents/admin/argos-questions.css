@@ -1,5 +1,5 @@
 /* Preguntas a Argos en latidIA (ArgosQuestions.tsx, tablero «Argos»). Todo bajo .laq. El ámbar es el de
-   Argos: #c98a1c en el dibujo y #9a6a12 en las cifras y textos chicos sobre claro (contraste). */
+   Argos: #c98a1c en el dibujo y #8f6210 en las cifras y textos chicos sobre claro (contraste). */
 /* La tarjeta (fondo, borde y sombra) es la común de los agentes: .af-card. */
 .laq {
   padding: 18px;
@@ -51,6 +51,13 @@
   font-size: 15px;
   min-height: 22px;
 }
+.laq-ask > .fit {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.laq-stage > .laq-answer {
+  align-self: stretch;
+}
 .laq-caret {
   color: #6d3fc0;
   margin-left: 1px;
@@ -83,7 +90,7 @@
   transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 .laq-chip:hover {
-  border-color: #9a6a12;
+  border-color: #8f6210;
 }
 .laq-chip[aria-pressed="true"] {
   background: #1e0b3d;
@@ -134,7 +141,7 @@
   font-size: 28px;
   line-height: 1;
   letter-spacing: -0.03em;
-  color: #9a6a12;
+  color: #8f6210;
 }
 .laq-figures > span > span {
   font-size: 13px;
@@ -234,7 +241,7 @@
   font-size: 13px;
   font-weight: 600;
   padding: 8px 4px;
-  color: #9a6a12;
+  color: #8f6210;
 }
 .laq-note {
   font-size: 12px;

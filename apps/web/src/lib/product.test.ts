@@ -55,6 +55,7 @@ describe("las páginas de cada web", () => {
       "/whatsapp-para-clinicas-dentales",
       "/varias-sedes",
       "/agenda-para-opticas",
+      "/pedidos-de-lentes",
       "/portal-del-cliente",
     ]) {
       expect(servesPage(path), path).toBe(false)
@@ -76,6 +77,7 @@ describe("las páginas de cada web", () => {
       "/agenda-medica",
       "/radiografias-y-ecografias",
       "/agenda-para-opticas",
+      "/pedidos-de-lentes",
       "/portal-del-cliente",
     ])
       expect(servesPage(path), path).toBe(false)
@@ -99,6 +101,7 @@ describe("las páginas de cada web", () => {
       "/agentes/administrador",
       "/agenda-para-opticas",
       "/historia-clinica-electronica",
+      "/pedidos-de-lentes",
       "/omnicanal",
       "/caja-y-cobros",
       "/portal-del-cliente",

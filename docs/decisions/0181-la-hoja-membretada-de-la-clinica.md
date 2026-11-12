@@ -1,4 +1,4 @@
-# 0180 · La hoja membretada de la clínica
+# 0181 · La hoja membretada de la clínica
 
 Fecha: 2026-11-11 · Estado: aceptada · Retoma la alternativa que la [0162](0162-el-color-de-la-marca-de-la-clinica.md) descartó y precisa la [0115](0115-documentos-del-paciente-con-un-solo-kit.md), la [0132](0132-lo-emitido-no-cambia.md) y la [0148](0148-la-hoja-que-se-firma-es-la-del-papel.md)
 

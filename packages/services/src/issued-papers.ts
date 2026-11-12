@@ -81,7 +81,7 @@ export async function issuedPaperBytes(
     documentId: string
     /** La palabra y el motivo, si está anulado. */
     voided: { word: string; reason: string | null } | null
-    /** Cuándo se emitió: lleva la hoja membretada que la clínica tenía entonces (ADR 0180). */
+    /** Cuándo se emitió: lleva la hoja membretada que la clínica tenía entonces (ADR 0181). */
     issuedAt: Date | string
     draw: (context: PaperContext) => Promise<Uint8Array>
   },

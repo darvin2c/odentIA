@@ -1,6 +1,12 @@
 /* El teléfono de Rosa (tablero «Enlace»): marco oscuro, la pantalla clara y una tarjeta blanca por
    cosa, como la página real de Su enlace, con el botón lila en píldora y los grises de la app.
    Apretado para que el teléfono entero, con sus interruptores de abajo, quepa en una pantalla de 768 px. */
+/* Arriba del teléfono, qué pantalla muestra: Su enlace o su portal (dos páginas distintas en la app). */
+.pp-wrap { width: 380px; max-width: 100%; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.pp-tabs { display: flex; gap: 4px; margin: 0; min-width: 0; border: 0; padding: 4px; border-radius: 999px; background: rgba(255, 255, 255, .08); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
+.pp-tabs button { min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; color: var(--on-night, #f1f5f9); font: 700 14px var(--font); cursor: pointer; }
+.pp-tabs button[aria-pressed="true"] { background: #fff; color: var(--ink); }
+.pp-tabs button:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
 .pp { width: 380px; max-width: 100%; margin: 0 auto; background: #0b0518; border-radius: 44px; padding: 12px; box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .7), inset 0 0 0 1px rgba(255, 255, 255, .08); }
 .pp-screen { background: #f6f4fa; color: var(--ink); border-radius: 34px; overflow: hidden; display: flex; flex-direction: column; }
 .pp-status { display: flex; justify-content: space-between; align-items: center; padding: 8px 22px 4px; font-size: 12px; font-weight: 700; }
@@ -25,8 +31,8 @@
 .pp-btn.main:disabled { background: #e4dcf3; color: #6f6290; cursor: default; }
 .pp-btn.danger { background: #b42318; color: #fff; font-weight: 700; }
 .pp-btn:not(:disabled):hover { filter: brightness(.96); }
-.pp-fake { cursor: default; }
-.pp-pulse { animation: pp-pulse 1.6s ease-out infinite; }
+/* Invita a tocar «Cambiar» tres veces y se queda quieto (nada late sin fin). */
+.pp-pulse { animation: pp-pulse 1.6s ease-out 3; }
 @keyframes pp-pulse { 0% { box-shadow: 0 0 0 0 rgba(109, 63, 192, .45); } 100% { box-shadow: 0 0 0 12px rgba(109, 63, 192, 0); } }
 .pp-slots { display: flex; flex-direction: column; gap: 6px; }
 .pp-slots legend { padding: 0; margin-bottom: 2px; }

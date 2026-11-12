@@ -7,7 +7,10 @@
   color: var(--on-night); padding: 56px 48px 40px;
 }
 .wl-aside-copy { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 14px; max-width: 520px; }
-.wl-logo { display: flex; width: 150px; margin-bottom: 18px; }
+.wl-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.wl-logo { display: flex; width: 150px; }
+.wl-login { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; color: #e7f5f8; text-decoration: none; font-weight: 700; font-size: 15px; box-shadow: inset 0 0 0 1.5px rgba(231, 245, 248, .38); }
+.wl-login:hover { color: #fff; box-shadow: inset 0 0 0 1.5px rgba(231, 245, 248, .9); }
 .wl-logo svg { width: 100%; height: auto; }
 .wl-tag { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--sky); }
 .wl-title { margin: 0; font-size: clamp(34px, 3.4vw, 46px); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; text-wrap: balance; }
@@ -55,7 +58,8 @@
   /* En el teléfono el formulario entra en la primera pantalla: lo oscuro queda corto, sin la escena ni
      la acción del agente, y las ventajas en una línea. */
   .wl-aside { padding: 20px 20px 24px; min-height: 0; }
-  .wl-logo { width: 110px; margin-bottom: 4px; }
+  .wl-top { margin-bottom: 4px; }
+  .wl-logo { width: 110px; }
   .wl-aside-copy { gap: 10px; }
   .wl-tag { font-size: 11px; }
   .wl-title { font-size: 26px; line-height: 1.12; }

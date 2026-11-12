@@ -774,11 +774,12 @@ interface JobView extends Record<string, unknown> {
 }
 
 /**
- * El recordatorio de la cita logró que la confirmara: se confirmó después de enviarlo. La que ya
+ * El recordatorio de la cita, o el aviso de su cambio con «Confirmar» (ADR 0180), logró que la
+ * confirmara: se confirmó después de enviarlo. La que ya
  * estaba confirmada (desde el ADR 0109, la que elige la propia persona nace así) no cuenta. Toda
  * confirmación pasa por `setAppointmentStatus`, que la deja en la auditoría.
  */
-const CONFIRMED_AFTER_REMINDER = sql`(j.kind = 'recordatorio_cita' and a.status = 'confirmada' and exists (
+const CONFIRMED_AFTER_REMINDER = sql`((j.kind = 'recordatorio_cita' or (j.kind = 'aviso_cita_movida' and j.payload->>'asksToConfirm' = 'true')) and a.status = 'confirmada' and exists (
   select 1 from audit_event e
   where e.organization_id = j.organization_id and e.entity = 'appointment' and e.entity_id = a.id::text
     and e.action = 'appointment.status_confirmada' and e.created_at >= coalesce(m.created_at, j.scheduled_for)))`
@@ -819,6 +820,8 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
     // Un aviso de cita no busca que reserve otra: solo se dice si llegó.
     if (row.kind !== "recordatorio_cita" && !isAppointmentNotice(row.kind) && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
     if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Sofi.`, fix: null, cause: null }
+    // El canal no confirmó si lo aceptó: no se reenvía solo y lo resuelve una persona en la Bandeja.
+    if (row.message_status === "unknown") return { outcome: "enviando", text: `No se sabe si salió ${via}: el canal no lo confirmó. Revísalo en la Bandeja.`, fix: null, cause: null }
     const delivery: JobDelivery | null = deliveryOf(row.message_status)
     if (delivery === "entregado" || delivery === "leido") return { outcome: "entregado", text: `Entregado ${via}${delivery === "leido" ? "; lo leyó" : ""}. Sin respuesta todavía.`, fix: null, cause: null }
     return { outcome: "enviando", text: `Enviado ${via}; todavía sin confirmación de entrega.`, fix: null, cause: null }

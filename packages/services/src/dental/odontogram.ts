@@ -790,7 +790,7 @@ async function establishmentOf(tx: Db, orgId: string) {
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .limit(2)
   const only = branches.length === 1 ? branches[0]! : null
-  // La hoja membretada (ADR 0180): su parte de arriba y la de abajo, sin la marca de agua
+  // La hoja membretada (ADR 0181): su parte de arriba y la de abajo, sin la marca de agua
   // bajo el gráfico de la norma. Va en el encabezado que se congela al firmar.
   const letterhead = await getCurrentLetterhead(tx, orgId)
   const hideContact = letterhead?.hasContact ?? false
@@ -858,7 +858,7 @@ export async function getSignedOdontogramPrint(
     assessment,
     patient: header ? { ...today, ...header.patient } : today,
     // Sin encabezado guardado, los datos de hoy pero sin el color ni la hoja: no estaban al
-    // firmarla. Firmada antes de la hoja membretada, su encabezado no la trae (ADR 0180).
+    // firmarla. Firmada antes de la hoja membretada, su encabezado no la trae (ADR 0181).
     establishment: header
       ? { ...header.establishment, sheet: header.establishment.sheet ?? null, logo: letterhead?.logo ?? null }
       : letterhead && { ...letterhead, brandInk: null, sheet: null },

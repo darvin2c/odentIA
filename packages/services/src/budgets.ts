@@ -4048,7 +4048,7 @@ export async function getBudgetPrintPayload(
     }
   }
   const isDraft = budget.status === "borrador"
-  // Entregado, con la hoja membretada de cuando se entregó; el borrador, con la de hoy (ADR 0180).
+  // Entregado, con la hoja membretada de cuando se entregó; el borrador, con la de hoy (ADR 0181).
   const documentClinic = await loadDocumentClinic(tx, orgId, {
     at: isDraft ? null : (budget.presentedAt ?? budget.createdAt),
   })

@@ -46,11 +46,12 @@ const jsonLd = breadcrumbJsonLd(Astro.site, trail)
 <style>
   /* Migas, entrada y hoja comparten la misma columna. */
   .crumbs { max-width: 880px; }
-  .crumbs ol { list-style: none; margin: 0; padding: 18px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--soft); }
+  .crumbs ol { list-style: none; margin: 0; padding: 12px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13.5px; color: var(--soft); }
   .crumbs li + li::before { content: "/"; margin-right: 6px; color: #cbd5e1; }
-  .crumbs a { color: var(--soft); text-decoration: none; display: inline-block; padding: 6px 0; }
+  /* La miga se toca entera: 44 px de alto (y un poco a los lados) sin correr el texto. */
+  .crumbs a { color: var(--soft); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; margin: 0 -6px; }
   .crumbs a:hover { color: var(--teal); }
-  .crumbs span { display: inline-block; padding: 6px 0; color: var(--ink-2); }
+  .crumbs span { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink-2); }
 
   .libro { max-width: 880px; padding-top: 40px; padding-bottom: 112px; display: flex; flex-direction: column; gap: 32px; }
   .intro { display: flex; flex-direction: column; gap: 16px; }

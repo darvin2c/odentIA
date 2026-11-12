@@ -1,7 +1,8 @@
 ---
 // Sofi, el agente de recepción (lienzo del paso 3, tablero Sofi; decisión 3): el nombre enorme con su
 // frase, el h1 para los buscadores en chico y la conversación que se escribe sola; lo que hace hoy,
-// cuánto cobra con los precios del plan, lo que decides tú, preguntas y el cierre.
+// cuánto cobra con los precios del plan, lo que decides tú, lo que le enseñas (Conocimiento, las
+// lecciones que apruebas, «Probar» y la promoción vigente), preguntas y el cierre.
 // Título, descripción, migas y las preguntas de siempre salen de PAGES.recepcion (lib/pages-data.ts).
 import AgentCharges from "../../components/agents/AgentCharges.astro"
 import FeatureGrid from "../../components/agents/FeatureGrid.astro"
@@ -51,6 +52,14 @@ const faq: FaqItem[] = [
   {
     q: "¿Qué pasa si alguien de mi equipo escribe en la conversación?",
     a: "Sofi espera 15 minutos antes de volver a escribir, para no pisarle la respuesta.",
+  },
+  {
+    q: "¿Cómo le enseño algo a Sofi?",
+    a: "Sofi lee al momento los datos de tu clínica: horarios, sedes, servicios y precios, promociones y medios de pago. Lo que solo tú sabes lo agregas en Conocimiento, y cómo quieres que atienda, en «Lo que Sofi debe saber». Si responde mal, la corriges debajo de su mensaje: queda como una lección y la usa cuando quien dirige la clínica la aprueba.",
+  },
+  {
+    q: "¿Sofi ofrece mis promociones?",
+    a: "Sí. Ofrece la promoción vigente que aplica, con su precio, el ahorro y la fecha de fin. Las novedades y promociones que la clínica envía por su cuenta solo van a quien aceptó recibirlas.",
   },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -110,20 +119,36 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       </div>
       <ul class="decide-list" aria-label="Así se ve en tu clínica">
         <li>
-          <span><b>Agendar citas</b><span>Apagado: envía su enlace para que la persona elija la hora.</span></span>
+          <span><b>Agendar, mover y cancelar citas</b><span>Prendido: reserva con el sí de la persona. Apagado: le envía su enlace para que elija la hora.</span></span>
           <span class="switch" aria-hidden="true"><span></span></span>
         </li>
         <li>
           <span><b>Horario de recontacto</b><span>Lunes a viernes de 8:00 a 20:00 y sábado hasta las 14:00.</span></span>
-          <span class="change" aria-hidden="true">Cambiar</span>
+          <span class="change">Lo eliges tú</span>
         </li>
         <li>
           <span><b>Nombre y tono</b><span>Cercano, neutro o formal; de tú o de usted; con pocos emojis o ninguno.</span></span>
-          <span class="change" aria-hidden="true">Cambiar</span>
+          <span class="change">Lo eliges tú</span>
         </li>
       </ul>
     </div>
   </section>
+
+  <FeatureGrid
+    tag="Tú le enseñas"
+    tagColor={color.light}
+    title="Sabe lo de tu clínica. Y aprende cuando la corriges."
+    lead="No hay que escribirle un manual. Lee tus datos al momento, y lo que aprende lo aprueba quien dirige la clínica."
+    min={250}
+    small
+    white
+    items={[
+      { title: "Lee tus datos al momento", text: "Horarios, sedes, servicios y precios, promociones y medios de pago. Lo que solo tú sabes, como el estacionamiento o las cuotas, lo agregas en Conocimiento." },
+      { title: "Ofrece tu promoción vigente", text: "La creas en Servicios y precios y Sofi ofrece la que aplica, con su precio, el ahorro y la fecha de fin." },
+      { title: "La corriges y aprende", text: "Debajo de su mensaje abres «En qué se basó» y tocas «Corregir». Queda como una lección y Sofi la usa cuando quien dirige la clínica la aprueba." },
+      { title: "«Probar» antes de encender", text: "Una conversación real con una persona de prueba, también con Sofi apagada. Se borra con la prueba." },
+    ]}
+  />
 
   <div class="faqwrap">
     <Faq items={faq} />
@@ -147,7 +172,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .decide-list li > span:first-child > span { font-size: 15px; line-height: 1.45; color: var(--muted); }
   .switch { flex: none; width: 48px; height: 28px; border-radius: 999px; background: var(--teal); display: flex; justify-content: flex-end; padding: 3px; box-sizing: border-box; }
   .switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; }
-  .change { flex: none; font-weight: 700; color: var(--teal); }
+  /* Un rótulo, no un enlace: en la web no se cambia nada, se cuenta que lo elige la clínica. */
+  .change { flex: none; font-size: 13px; color: var(--soft); }
   .faqwrap { background: var(--paper); }
   @media (max-width: 720px) {
     .decide { padding: 64px 0; }

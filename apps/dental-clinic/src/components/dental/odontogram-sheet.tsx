@@ -36,7 +36,7 @@ const PAPER =
   "odontogram-sheet mx-auto w-full max-w-[210mm] rounded-lg border bg-white text-sm text-black"
 
 /**
- * El papel del odontograma. Con la hoja membretada (ADR 0180), su parte de arriba y la de
+ * El papel del odontograma. Con la hoja membretada (ADR 0181), su parte de arriba y la de
  * abajo van de borde a borde, como en los PDF: en pantalla, al principio y al final del
  * papel; al imprimir, en cada página. Ahí van fijas y la tabla les guarda su lugar en cada
  * página, porque el navegador repite su cabecera y su pie (con margen de página, Chrome

@@ -18,7 +18,7 @@ import {
 } from "../../lib/form"
 import { businessDays } from "../../lib/pricing"
 import { ofProduct, WORDS } from "../../lib/product"
-import { waitlistApiUrl } from "../../lib/site"
+import { loginUrl, waitlistApiUrl } from "../../lib/site"
 import "./waitlist.css"
 
 type Props = {
@@ -242,8 +242,14 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
     <div className="wl">
       <aside className="wl-aside">
         <div className="wl-aside-copy">
-          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: el logotipo es un SVG propio del repositorio. */}
-          <a className="wl-logo" href="/" aria-label={`${WORDS.name}, inicio`} dangerouslySetInnerHTML={{ __html: logo }} />
+          {/* El logo y, al lado, «Ingresar»: quien ya es cliente y llegó aquí entra en un toque. */}
+          <div className="wl-top">
+            {/* biome-ignore lint/security/noDangerouslySetInnerHtml: el logotipo es un SVG propio del repositorio. */}
+            <a className="wl-logo" href="/" aria-label={`${WORDS.name}, inicio`} dangerouslySetInnerHTML={{ __html: logo }} />
+            <a className="wl-login" href={loginUrl}>
+              Ingresar
+            </a>
+          </div>
           {sent ? (
             <>
               <span className="mono wl-tag">[ Solicitud recibida ]</span>

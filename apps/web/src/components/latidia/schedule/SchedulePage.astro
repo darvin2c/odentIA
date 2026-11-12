@@ -1,7 +1,8 @@
 ---
 // /agenda-medica de latidIA (lienzo de la web de latidIA, tablero «Agenda»): la portada con la
 // agenda del día por sala, los controles que se repiten con la captura real de la pestaña Plan,
-// Argos invitando a volver, los recordatorios, las preguntas y el cierre.
+// Argos invitando a volver, los recordatorios (con «¿Vienes en camino?» y «Mi calendario» de quien
+// atiende), las preguntas y el cierre.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { giftOf } from "../../../lib/pricing"
@@ -24,6 +25,8 @@ const reminders = [
   { title: "Cambia o cancela sola", text: "Respondiendo el mensaje o desde Su enlace, y el horario se libera para otro.", link: true },
   { title: "Por sala y por médico", text: "Vista de día, de semana o en lista; un médico o todos; una sede o varias." },
   { title: "Cada servicio con quien lo atiende", text: "La agenda ofrece pediatría a quien atiende pediatría, en sus horarios libres." },
+  { title: "«¿Vienes en camino?»", text: "Si a los 15 minutos de la hora nadie marcó su llegada, Sofi le pregunta si viene en camino, en las sedes que marcan las llegadas." },
+  { title: "Tus citas, en tu calendario", text: "Con «Mi calendario», cada médico ve sus citas en Google Calendar, Apple u Outlook. Solo con iniciales: nunca el nombre ni el motivo." },
 ]
 
 const faq: FaqItem[] = [
@@ -42,6 +45,10 @@ const faq: FaqItem[] = [
   {
     q: "¿Qué pasa si un paciente no viene?",
     a: "Argos le escribe para ofrecerle otro horario. Si no hay cómo escribirle, deja una tarea de llamada para recepción.",
+  },
+  {
+    q: "¿Puedo ver mis citas en el calendario de mi celular?",
+    a: "Sí. En la Agenda, «Mi calendario» las añade a Google Calendar, Apple u Outlook, junto a lo demás de tu día. De cada cita muestra «Paciente» con sus iniciales, nunca el nombre, el servicio ni el motivo. Es solo para quien atiende.",
   },
   {
     q: "¿Necesito un presupuesto para agendar?",
@@ -178,10 +185,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .sp-argos { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
   .sp-argos-copy { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
   .sp-argos-demo { flex: 1 1 440px; min-width: 0; }
-  .sp-tag.argos { color: #9a6a12; }
+  .sp-tag.argos { color: #8f6210; }
   .sp-link { font-weight: 700; align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; }
 
-  .sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+  .sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
   .sp-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
   .sp-card h3 { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
   .sp-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }

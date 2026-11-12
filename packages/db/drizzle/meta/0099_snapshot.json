@@ -1,6 +1,6 @@
 {
-  "id": "50d3affc-8888-48e5-8966-ba5d66687e4d",
-  "prevId": "38fbe72f-f0cf-438e-be14-25f851139567",
+  "id": "a4235020-218d-47d1-8835-5cf1101240f8",
+  "prevId": "026b6951-1f28-4709-bb23-db2f7bec47ab",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -26716,6 +26716,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "send_attempted_at": {
+          "name": "send_attempted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "template_name": {
           "name": "template_name",
           "type": "text",
@@ -32509,223 +32515,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.clinic_letterhead": {
-      "name": "clinic_letterhead",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pdf_key": {
-          "name": "pdf_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "top_band_url": {
-          "name": "top_band_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bottom_band_url": {
-          "name": "bottom_band_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "thumbnail_url": {
-          "name": "thumbnail_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "page_width_pt": {
-          "name": "page_width_pt",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "page_height_pt": {
-          "name": "page_height_pt",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "top_mm": {
-          "name": "top_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bottom_mm": {
-          "name": "bottom_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "left_mm": {
-          "name": "left_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "right_mm": {
-          "name": "right_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "has_contact": {
-          "name": "has_contact",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "file_name": {
-          "name": "file_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by": {
-          "name": "removed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "clinic_letterhead_current_uidx": {
-          "name": "clinic_letterhead_current_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "where": "\"clinic_letterhead\".\"removed_at\" is null",
-          "concurrently": false
-        },
-        "clinic_letterhead_org_created_idx": {
-          "name": "clinic_letterhead_org_created_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "clinic_letterhead_organization_id_organization_id_fk": {
-          "name": "clinic_letterhead_organization_id_organization_id_fk",
-          "tableFrom": "clinic_letterhead",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "tableTo": "organization",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "clinic_letterhead_created_by_user_id_fk": {
-          "name": "clinic_letterhead_created_by_user_id_fk",
-          "tableFrom": "clinic_letterhead",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "clinic_letterhead_removed_by_user_id_fk": {
-          "name": "clinic_letterhead_removed_by_user_id_fk",
-          "tableFrom": "clinic_letterhead",
-          "columnsFrom": [
-            "removed_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "clinic_letterhead_page_check": {
-          "name": "clinic_letterhead_page_check",
-          "value": "\"clinic_letterhead\".\"page_width_pt\" > 0 and \"clinic_letterhead\".\"page_height_pt\" > 0"
-        },
-        "clinic_letterhead_margins_check": {
-          "name": "clinic_letterhead_margins_check",
-          "value": "\"clinic_letterhead\".\"top_mm\" >= 0 and \"clinic_letterhead\".\"bottom_mm\" >= 0 and \"clinic_letterhead\".\"left_mm\" >= 0 and \"clinic_letterhead\".\"right_mm\" >= 0"
-        },
-        "clinic_letterhead_removed_check": {
-          "name": "clinic_letterhead_removed_check",
-          "value": "(\"clinic_letterhead\".\"removed_at\" is null) = (\"clinic_letterhead\".\"removed_by\" is null)"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.org_profile": {

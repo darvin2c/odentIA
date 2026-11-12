@@ -1,6 +1,6 @@
 // El presupuesto de Carlos (portada de Presupuestos): Clío lo arma del dictado, Argos lo retoma y
-// Carlos acepta la opción A desde su enlace; después vuelve a empezar. Con «reducir movimiento», y en
-// el servidor, se ve el estado final.
+// Carlos acepta la opción A desde su enlace; después vuelve a empezar, dos veces, y se queda con lo
+// aceptado (WCAG 2.2.2). Con «reducir movimiento», y en el servidor, se ve el estado final.
 // Los montos en soles y el IGV son del ejemplo (una clínica de Perú), no precios de odentIA.
 import { useEffect, useState } from "react"
 import "./budget-demo.css"
@@ -9,6 +9,8 @@ import "./budget-demo.css"
 const STEP_MS = 1800
 const STEPS = 5
 const FINAL = 3
+/** Vueltas antes de quedarse con lo aceptado. */
+const ROUNDS = 2
 
 type Line = [string, string]
 const OPTIONS: Array<{ name: string; lines: Line[]; total: string; tax: string; recommended: boolean }> = [
@@ -41,7 +43,17 @@ export default function BudgetDemo() {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
     if (mq.matches) return
     setStep(0)
-    const timer = setInterval(() => setStep((s) => (s + 1) % STEPS), STEP_MS)
+    // Pasos que dio solo; al completar sus vueltas se queda en lo aceptado.
+    let moves = 0
+    const timer = setInterval(() => {
+      moves += 1
+      if (moves >= ROUNDS * STEPS - 1) {
+        clearInterval(timer)
+        setStep(FINAL)
+        return
+      }
+      setStep(moves % STEPS)
+    }, STEP_MS)
     const onChange = () => {
       if (mq.matches) {
         clearInterval(timer)

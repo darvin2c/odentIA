@@ -20,8 +20,9 @@
 .ad-chip:hover { border-color: var(--night); }
 .ad-chip[aria-pressed="true"] { background: var(--night); color: #fff; border-color: var(--night); }
 .ad-chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-.ad-stage { position: relative; }
-.ad-think { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 6px; font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding: 6px 4px; }
+.ad-q-fit { flex: 1 1 auto; min-width: 0; }
+.ad-stage > .ad-answer { align-self: stretch; }
+.ad-think { display: flex; flex-direction: column; gap: 6px; font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding: 6px 4px; }
 .ad-think span { animation: ad-in .4s ease both; }
 .ad-think span + span { animation-delay: .45s; }
 .ad-answer { border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; opacity: 0; transition: opacity .4s ease; }

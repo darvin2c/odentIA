@@ -1494,10 +1494,12 @@ it("al confirmar la cita del agente, a quien le faltan datos se le da su enlace;
       f.run((tx) => bookedDataLink(tx, ORG, { contactId: tomas.personId, patientId: tomas.patientId, appointmentId: null }, { secretsKey: KEY }))
     const data = await ask()
     expect(data?.missing).toContain("fecha de nacimiento")
-    // Es su mismo enlace, con el token escrito: el que ya tiene, no otro.
+    // Es su mismo enlace, el que ya tiene y no otro, con la referencia: el token lo pone el worker al enviarlo.
     const again = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tomas.personId, patientId: tomas.patientId }, { secretsKey: KEY }))
     expect(again.reused).toBe(true)
-    expect(data?.url).toContain(again.token)
+    expect(data?.url).toContain(personalLinkRef(again.linkId))
+    expect(data?.url).not.toContain(again.token)
+    expect(resolvePersonalLinkRefs(data!.url, KEY)).toContain(again.token)
 
     await f.run((tx) => submitPersonalLinkData(tx, ORG, again.token, { data: { birthDate: "1990-03-03" } }))
     expect((await ask())?.missing ?? []).not.toContain("fecha de nacimiento")

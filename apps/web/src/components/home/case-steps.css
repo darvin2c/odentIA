@@ -1,0 +1,67 @@
+/* 03 · Un caso (CaseSteps.tsx): cada paso es un botón que lo detiene ahí, con el mismo dibujo de la
+   tarjeta (home.css), y el control es secundario: un contorno, no el botón principal de la sección. */
+.home .case > li {
+  display: flex;
+  min-width: 0;
+}
+.home button.cstep {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* Ahora que el paso se toca, el que está en curso no se levanta: lo marca su borde, en su lugar. */
+.home button.cstep.last {
+  transform: none;
+}
+@media (hover: hover) {
+  .home button.cstep:hover {
+    opacity: 1;
+  }
+}
+.home button.cstep:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 3px;
+}
+
+.home .case-ctl {
+  flex: none;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0b5568;
+  font: 700 14px var(--font);
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.home .case-ctl .fit > span {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.home .case-ctl-g {
+  display: inline-block;
+  min-width: 1.1em;
+  text-align: center;
+  font-size: 12px;
+}
+@media (hover: hover) {
+  .home .case-ctl:hover {
+    border-color: var(--teal);
+  }
+}
+.home .case-ctl:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 2px;
+}

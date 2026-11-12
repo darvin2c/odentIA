@@ -129,10 +129,15 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         title: row.contactName ?? "Persona sin nombre",
         ask: row.quote,
         detail: joined([
-          row.undelivered ? `No le llegó lo último que se le escribió (${ago(row.since)})` : `Escribió ${ago(row.since)}`,
+          row.undelivered
+            ? row.uncertain
+              ? `No se sabe si salió lo último que se le escribió (${ago(row.since)})`
+              : `No le llegó lo último que se le escribió (${ago(row.since)})`
+            : `Escribió ${ago(row.since)}`,
           row.channel ? channelLabel(row.channel) : null,
         ]),
-        action: row.windowClosed ? "Escribirle" : "Responder",
+        // Antes de volver a escribirle, se comprueba si salió: «Revisar» lleva a la Bandeja.
+        action: row.undelivered && row.uncertain ? "Revisar" : row.windowClosed ? "Escribirle" : "Responder",
       }
     case "unconfirmed":
       // Quien no recibe recordatorios se llama el día antes (ADR 0040).

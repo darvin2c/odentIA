@@ -389,7 +389,7 @@ export async function renderMedicalLeavePdf(
 }
 
 /**
- * La vista previa de la hoja membretada (ADR 0180): una receta de ejemplo, con el mismo
+ * La vista previa de la hoja membretada (ADR 0181): una receta de ejemplo, con el mismo
  * kit que las de verdad, firmada por otro profesional del equipo (su nombre y su
  * colegiatura, sin su firma dibujada) y sin QR ni ningún paciente real.
  */

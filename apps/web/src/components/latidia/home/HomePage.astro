@@ -24,7 +24,7 @@ const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders
-const faq = homeFaq(gift)
+const faq = homeFaq(gift, pricing)
 
 // Un jueves de cobros: lo que hizo cada agente con los precios del plan que se muestra. Rosa vino a
 // su consulta, así que la conversación en que Sofi la agendó cuenta como «Agenda» (ADR 0085).
@@ -121,7 +121,7 @@ const trust = [
         <span class="tag tag-d lh-tag">[ Para consultorios médicos ]</span>
         <h1 class="lh-h1">Tú atiendes.<br /><span>Tus agentes</span> hacen el resto.</h1>
         <p class="lh-lead">
-          WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo en una sola ficha por persona. Y tres agentes de IA:
+          WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo en una sola ficha por persona. Y tres agentes de IA:{" "}
           <b class="c-sofi">Sofi</b> agenda, <b class="c-clio">Clío</b> ordena la consulta que dictas y <b class="c-argos">Argos</b> trae de vuelta a tus pacientes.
         </p>
         <div class="lh-ctas">
@@ -278,6 +278,29 @@ const trust = [
           </div>
           <span class="links"><a class="lk" href="/caja-y-cobros">Caja y cobros →</a><a class="lk" href="/reportes">Reportes →</a></span>
         </div>
+
+        <div class="lsys-card wide3">
+          <span class="lsys-title"><h3>Y el día entero, sin perseguir a nadie</h3><span>Inicio te dice qué te toca. Lo demás se cuenta solo, también desde tu celular.</span></span>
+          <div class="lsys-three even">
+            <div class="mini">
+              <span class="mini-k">Inicio · «Te espera»</span>
+              <span class="slot lila"><b>Rosa</b> · te lo pasó Sofi · Responder</span>
+              <span class="slot amber"><b>Luis</b> · no confirmó su cita · Llamar</span>
+              <span class="small">Sala de espera: Julia llegó a las 09:52 · Atender</span>
+            </div>
+            <div class="mini">
+              <span class="mini-k">Inventario y gastos</span>
+              <span>Los insumos se descuentan solos al firmar la atención.</span>
+              <span class="small">Facturas por pagar, lo que se repite cada mes y la lista para tu contador.</span>
+            </div>
+            <div class="mini">
+              <span class="mini-k">En tu celular</span>
+              <span>La instalas como una app, sin pasar por una tienda.</span>
+              <span class="small">Te avisa cuando alguien escribe, sin decir su nombre.</span>
+            </div>
+          </div>
+          <span class="links"><a class="lk" href="/caja-y-cobros">Gastos, inventario y honorarios →</a><a class="lk" href="/portal-del-paciente">Portal del paciente →</a></span>
+        </div>
       </div>
     </div>
   </section>
@@ -369,7 +392,7 @@ const trust = [
 
 <style>
   .lh-page { overflow-x: clip; background: var(--paper); }
-  .lk { color: var(--teal); font-weight: 700; text-decoration: none; font-size: 16px; }
+  .lk { color: var(--teal); font-weight: 700; text-decoration: none; font-size: 16px; min-height: 44px; display: inline-flex; align-items: center; }
   .lk:hover { color: var(--teal-hover); text-decoration: underline; }
   .c-sofi { color: #4fc3d7; }
   .c-clio { color: #a6f0d8; }
@@ -413,7 +436,7 @@ const trust = [
   .la-card { background: var(--paper); border: 1px solid #e9e2f7; border-top: 4px solid var(--ac-line); border-radius: 26px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
   .la-card.sofi { --ac: #0e7490; --ac-line: #0e7490; }
   .la-card.clio { --ac: #1f7f63; --ac-line: #1f9d7a; }
-  .la-card.argos { --ac: #9a6a12; --ac-line: #c98a1c; }
+  .la-card.argos { --ac: #8f6210; --ac-line: #c98a1c; }
   .la-role { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ac); }
   .la-name { font-size: 60px; line-height: .9; letter-spacing: -.055em; font-weight: 800; color: var(--ac); }
   .la-text { font-size: 17px; line-height: 1.5; color: var(--ink-2); }
@@ -430,6 +453,8 @@ const trust = [
   .vitals { grid-column: span 2; gap: 14px; }
   .exam { grid-row: span 2; }
   .wide2 { grid-column: span 2; gap: 14px; }
+  .wide3 { grid-column: 1 / -1; gap: 14px; }
+  .lsys-three.even { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lsys-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
   .lsys-title { display: flex; flex-direction: column; gap: 4px; }
   .lsys-title > span { font-size: 15px; color: var(--muted); }
@@ -533,7 +558,7 @@ const trust = [
     .lsys-legend { display: none; }
     .lsys-exam li { padding: 8px 0; }
     .lsys-sum { font-size: 11px; padding: 9px 10px; }
-    .lsys-three { grid-template-columns: 1fr; }
+    .lsys-three, .lsys-three.even { grid-template-columns: 1fr; }
     .ld-in, .lc-in { gap: 22px; }
     .ld-switches { flex-basis: 100%; }
     .lt { margin-top: 4px; gap: 12px; padding-top: 22px; }

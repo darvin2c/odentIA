@@ -878,7 +878,7 @@ const OPTICAL_ONLY_TOPICS: readonly HelpTopic[] = [
       {
         id: "anulo-pedido",
         q: "¿Cómo anulo un pedido?",
-        a: "En el pedido, «…» › «Anular», con el motivo, mientras no se haya entregado. Lo que no se cobró se anula con él y la montura vuelve al inventario; lo ya cobrado queda en su cuenta, para devolverlo o usarlo desde Cobros.",
+        a: "En el pedido, «…» › «Anular», con el motivo, mientras no se haya entregado. Cada cosa del pedido sin nada cobrado se anula con él y, si es la montura, vuelve al inventario. Lo que ya tiene algo cobrado (por ejemplo, la montura que cubrió el adelanto) queda en su cuenta, con lo que falta: tú decides desde Cobros si lo devuelves, lo cobras o lo anulas.",
         forms: ["cancelar un pedido", "anular la venta de lentes", "se arrepintio de los lentes"],
       },
       ...MORE_ORDER_FAQS,

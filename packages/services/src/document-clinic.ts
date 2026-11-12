@@ -7,7 +7,7 @@
  * clínica subió a su carpeta del bucket público. Una dirección guardada a mano
  * que apunte a otro lado no se sigue (SSRF). Falla en silencio: sale con iniciales.
  *
- * La hoja membretada (ADR 0180) se lee del bucket privado: la que la clínica tenía
+ * La hoja membretada (ADR 0181) se lee del bucket privado: la que la clínica tenía
  * cuando el papel se emitió o se firmó (`at`), o la de hoy. Si no se puede leer, el
  * papel sale con nuestro membrete y lo dice (`sheetUnavailable`) para no guardarse así.
  */
@@ -318,7 +318,7 @@ export interface DocumentLetterhead {
   /** La línea del membrete y las iniciales, como el papel (`DocumentClinic.brandInk`); sin color, tinta. */
   brandInk: string | null
   /**
-   * La hoja membretada (ADR 0180): su parte de arriba y la de abajo, de borde a borde del
+   * La hoja membretada (ADR 0181): su parte de arriba y la de abajo, de borde a borde del
    * papel en pantalla. Con `hasContact` la hoja ya dice la dirección y el teléfono.
    */
   sheet: { topBand: string; bottomBand: string; hasContact: boolean } | null

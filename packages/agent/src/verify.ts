@@ -478,8 +478,22 @@ const INTERNAL_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
  * 97 % de los enlaces; igual el token del registro, el mapa de una sede o el
  * dominio. Termina en las comillas porque lo que una herramienta devuelve como
  * objeto llega en JSON sin espacios: el importe que sigue al enlace se lee.
+ * En un mensaje, «Su enlace» termina en la referencia que el worker cambia por
+ * el token (`{{su-enlace:<id>}}`, ADR 0037): es parte de la dirección, porque
+ * las llaves cortaban ahí y las cifras del id quedaban por leer («7cad» como
+ * CAD 7), y con otra referencia el enlace no abre.
  */
-const WEB_ADDRESS = /\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi
+const WEB_ADDRESS = /\bhttps?:\/\/[^\s"<>\\^`{|}«»]+(?:\{\{su-enlace:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}\})?/gi
+
+/** Las direcciones web de un texto, como las lee la comprobación: el enlace de una herramienta la sustenta tal cual. */
+export function webAddressesIn(text: string): string[] {
+  return text.match(WEB_ADDRESS) ?? []
+}
+
+/** «Su enlace» como lo muestra el historial, con «…» en lugar de su token: así no abre. */
+export function isHiddenPersonalLink(url: string): boolean {
+  return /[?&]token=…/.test(url)
+}
 /** La versión de una cita en `ver_resumen_paciente` («versión 3»): un contador para reprogramarla, no un importe. */
 const APPOINTMENT_VERSION = /\bversión \d+/g
 /**
@@ -722,9 +736,11 @@ export function verifyReply(
   // Un enlace sale solo si lo trajo una fuente del turno (una herramienta, los
   // datos de la clínica): uno armado por el modelo lleva a una página que no
   // existe (auditoría del 27-oct: «…/cita» en vez de «…/reserva?token=…»).
+  // Tampoco sale «Su enlace» tapado (`token=…`, como lo muestra la Bandeja): así no
+  // abre, aunque figure en lo consultado.
   for (const match of normalize(reply).matchAll(WEB_ADDRESS)) {
     const url = match[0].replace(/[.,;:!?)]+$/, "")
-    const found = evidence.find((item) => normalize(item.text).includes(url))
+    const found = isHiddenPersonalLink(url) ? undefined : evidence.find((item) => normalize(item.text).includes(url))
     checks.push({ kind: "enlace", value: url, ok: Boolean(found), source: found?.source ?? null })
   }
 

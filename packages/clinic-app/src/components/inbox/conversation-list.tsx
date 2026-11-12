@@ -76,14 +76,18 @@ function rowLine(item: ConversationListItem, myUserId: string, receptionName: st
     const who = !topic.assigneeUserId || topic.assigneeUserId === myUserId ? "Te toca" : `Lo tiene ${topic.assigneeName ?? "otra persona"}`
     const mine = !topic.assigneeUserId || topic.assigneeUserId === myUserId
     return {
-      text: `${topic.urgent ? "Ahora" : who} · «${topicQuote(topic)}»`,
+      // Un tema va primero, pero lo último que no salió (o no se sabe) no se calla: va antes
+      // de la cita, que se corta con «…» en una fila angosta.
+      text: `${topic.urgent ? "Ahora" : who}${item.attention?.sendFailed ? (item.attention.sendUncertain ? " · no se sabe si salió lo último" : " · no salió lo último") : ""} · «${topicQuote(topic)}»`,
       tone: topic.urgent ? "urgent" : mine ? "team" : "patient",
     }
   }
   const words = conversationWords({ ...item, myUserId, receptionName })
   if (words?.tone === "closed") return words
   // Lo que no salió va antes que lo último que hizo el agente: es lo que hay que resolver.
-  if (item.attention?.sendFailed) return { text: `No se pudo enviar · «${previewWords(item.preview)}»`, tone: "team" }
+  if (item.attention?.sendFailed) {
+    return { text: `${item.attention.sendUncertain ? "No se sabe si salió" : "No se pudo enviar"} · «${previewWords(item.preview)}»`, tone: "team" }
+  }
   const action = item.lastAction
   if (action) {
     const what = action.what ? ` · ${action.what}` : ""
@@ -164,7 +168,7 @@ export function ConversationList({
     >
       {/* Con más páginas por cargar, puede haber más de las que se cuentan aquí. */}
       <span>
-        No salieron · {failed.length}
+        Envíos por revisar · {failed.length}
         {hasNextPage ? "+" : ""}
       </span>
       <span aria-hidden className="text-xs font-normal">
@@ -332,7 +336,7 @@ export function ConversationList({
             </Button>
           </div>
         ) : null}
-        {/* Con el grupo «No salieron», «Cargar más» va justo después de lo que espera respuesta. */}
+        {/* Con el grupo «Envíos por revisar», «Cargar más» va justo después de lo que espera respuesta. */}
         {failed.length === 0 ? loadMore : null}
       </div>
     </ScrollArea>

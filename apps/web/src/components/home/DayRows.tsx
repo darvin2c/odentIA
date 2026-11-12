@@ -46,7 +46,7 @@ const DAY = [
     agent: "Argos",
     what: "Rosa faltó ayer a su cita. Le ofreció otro horario y Rosa reservó el viernes con Sofi.",
     // ADR 0085: reservar es «Gestiona»; si Rosa viene, esa conversación se devuelve y se cobra solo la cita recuperada.
-    why: "La conversación que gestionó su cita. Si Rosa asiste, se devuelve y se cobra la cita recuperada.",
+    why: "La conversación que gestionó su cita. Si Rosa viene, esta conversación no se cobra: se cobra solo la cita recuperada.",
     price: "gestiona" as const,
   },
   {
@@ -77,7 +77,7 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
   const play = () => setDay(prefersReducedMotion() ? 7 : 0)
   const totalTxt = usd(total)
 
-  // El total va junto al botón que reproduce el día; en teléfono, en una barra pegada abajo
+  // El total va junto al botón que repite el día; en teléfono, en una barra pegada abajo
   // mientras se ven las filas. Solo una de las dos se ve a la vez, y esa es la que se anuncia.
   return (
     <div className="dayblk">
@@ -97,7 +97,7 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
             </strong>
           </span>
           <button type="button" className="btn btn-p" onClick={play}>
-            Reproducir el día
+            Repetir el día
           </button>
         </div>
       </div>
@@ -119,7 +119,7 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
           <span>Ejemplo de un jueves en una clínica de 4 odontólogos.</span>
           <span className="mono dpend">
             {day >= 6
-              ? `Si Rosa asiste el viernes: + ${usd(prices.recovered)} y se devuelven ${usd(prices.tiers.gestiona)}`
+              ? `Si Rosa viene el viernes: + ${usd(prices.recovered)} por la cita recuperada y te devolvemos los ${usd(prices.tiers.gestiona)} de su conversación`
               : ""}
           </span>
         </div>
@@ -132,7 +132,7 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
           </strong>
         </span>
         <button type="button" className="btn btn-p btn-sm daydock-b" onClick={play}>
-          Reproducir el día
+          Repetir el día
         </button>
       </div>
     </div>
