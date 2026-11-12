@@ -130,6 +130,10 @@ export async function seedAdminSupport(
               createdAt: new Date(now - 5 * 3_600_000),
               lastPublicMessageAt: accessAskedAt,
               accessRequestedAt: accessAskedAt,
+              // Pide mirar como recepción, 30 minutos: la clínica lo confirma o lo cambia.
+              accessRequestedRole: "reception",
+              accessRequestedMinutes: 30,
+              accessRequestedBy: staffUserId,
             },
           ]
         : []),
@@ -181,7 +185,7 @@ export async function seedAdminSupport(
               organizationId,
               authorKind: "staff",
               authorUserId: staffUserId,
-              body: "Para ver qué le pasa al WhatsApp necesitamos revisar la configuración de Sofi y del canal. Lo autoriza la propietaria o un administrador de la clínica desde Ayuda › Tus casos con soporte.",
+              body: "Para ver qué le pasa al WhatsApp necesitamos mirar tu clínica como Recepción, 30 minutos, sin cambiar nada. Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda, en «Tus casos con soporte». Pueden cambiar el rol o el tiempo, y quitarlo cuando quieran.",
               createdAt: accessAskedAt,
             },
           ]
@@ -201,6 +205,8 @@ export async function seedAdminSupport(
       createdAt: new Date("2026-01-09T12:00:00Z"),
       expiresAt: new Date("2026-01-09T12:30:00Z"),
       revokedAt: new Date("2026-01-09T12:10:00Z"),
+      revokedBy: userId,
+      endReason: "quitado",
     })
     .onConflictDoNothing({ target: supportAccessGrant.id })
 
