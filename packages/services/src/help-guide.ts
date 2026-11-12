@@ -244,6 +244,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         forms: ["puedo usar el sistema desde mi celular", "funciona en el celular", "tienen aplicacion", "hay una app", "hay aplicacion", "tienen aplicacion para iphone"],
         general: true,
       },
+      {
+        id: "ensanchar-panel-derecha",
+        q: "¿Puedo hacer más ancho el formulario que se abre a la derecha?",
+        a: "Sí, en la computadora: arrastra hacia la izquierda el borde del panel, donde está la rayita del medio. Crece mientras la página de al lado conserve lo mínimo para usarse; con el menú de la izquierda en íconos cabe más. El ancho queda guardado en esa computadora y doble clic en el borde lo devuelve al de siempre. Con el teclado: Tab hasta el borde y las flechas izquierda y derecha.",
+        forms: ["hacer mas ancho el formulario", "agrandar el panel de la derecha", "el formulario es muy angosto", "cambiar el ancho del panel", "ensanchar el formulario"],
+        general: true,
+      },
     ],
   },
   {
