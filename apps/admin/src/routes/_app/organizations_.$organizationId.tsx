@@ -31,6 +31,7 @@ import { api } from "../../lib/api"
 import { plural } from "../../lib/cost-format"
 import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../../components/demos"
 import { domainOf, platformUrl } from "../../lib/host"
+import { invitationDueWords } from "../../lib/invitation-words"
 import {
   ORGANIZATION_TAB_NAMES,
   ORGANIZATION_TABS,
@@ -69,12 +70,14 @@ const detailSchema = z.object({
     hasBranch: z.boolean(),
     complete: z.boolean(),
   }),
+  // El rol llega dicho por el servidor (`roleLabel`, con la palabra del producto): la pantalla no traduce roles.
   members: z.array(
     z.object({
       userId: z.string(),
       name: z.string(),
       email: z.string(),
       role: z.string(),
+      roleLabel: z.string().optional(),
       blocked: z.boolean(),
     }),
   ),
@@ -84,6 +87,7 @@ const detailSchema = z.object({
       organizationId: z.string(),
       email: z.string(),
       role: z.string().nullable(),
+      roleLabel: z.string().optional(),
       status: z.string(),
       expiresAt: z.string(),
     }),
@@ -125,14 +129,6 @@ const statusVariant = (status: string | null) =>
       : status === "restringida"
         ? "destructive"
         : "secondary"
-const ROLE_WORDS: Record<string, string> = {
-  owner: "Propietario",
-  admin: "Administrador",
-  reception: "Recepción",
-  clinician: "Profesional",
-  cashier: "Caja",
-  member: "Miembro",
-}
 const INVITATION_WORDS: Record<string, string> = {
   pending: "Pendiente",
   accepted: "Aceptada",
@@ -173,12 +169,16 @@ function OrganizationPage() {
 
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["admin-organization", organizationId] })
+  // Reenviar manda el mismo enlace, que vuelve a valer 7 días desde hoy (el correo dice hasta cuándo).
   const resend = useMutation({
-    mutationFn: (id: string) =>
-      api<unknown>(`/api/admin/organizations/invitations/${id}/resend`, { method: "POST" }),
-    onSuccess: () => {
-      toast.success("Invitación reenviada")
+    mutationFn: (item: { id: string; email: string; expiresAt: string }) =>
+      api<{ expiresAt: string }>(`/api/admin/organizations/invitations/${item.id}/resend`, { method: "POST" }),
+    onSuccess: (resent, item) => {
+      const due = invitationDueWords(resent.expiresAt).text
+      toast.success(`Reenviada a ${item.email} con el mismo enlace · ${due}`)
       invalidate()
+      // Con 7 días por delante sale de «Clínicas con la propietaria sin aceptar».
+      void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
@@ -366,9 +366,7 @@ function OrganizationPage() {
                 >
                   <span className="font-medium">{item.name}</span>
                   <span className="text-muted-foreground">{item.email}</span>
-                  <span className="text-muted-foreground">
-                    {ROLE_WORDS[item.role] ?? item.role}
-                  </span>
+                  <span className="text-muted-foreground">{item.roleLabel ?? item.role}</span>
                   {item.blocked ? <Badge variant="destructive">Bloqueado</Badge> : null}
                 </li>
               ))}
@@ -383,38 +381,43 @@ function OrganizationPage() {
             </h2>
             {org.invitations.length ? (
               <ul className="flex flex-col divide-y text-sm">
-                {org.invitations.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-                    <span className="min-w-0 truncate font-medium">{item.email}</span>
-                    <span className="text-muted-foreground">
-                      {item.role ? (ROLE_WORDS[item.role] ?? item.role) : "—"}
-                    </span>
-                    <Badge variant={item.status === "pending" ? "warning" : "outline"}>
-                      {INVITATION_WORDS[item.status] ?? item.status}
-                    </Badge>
-                    {item.status === "pending" ? (
-                      <span className="ml-auto flex gap-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={resend.isPending}
-                          onClick={() => resend.mutate(item.id)}
-                        >
-                          Reenviar
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setCancelTarget({ id: item.id, email: item.email })}
-                        >
-                          Cancelar
-                        </Button>
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
+                {org.invitations.map((item) => {
+                  // Una pendiente dice cuándo vence o venció: la misma frase que Inicio.
+                  const due = item.status === "pending" ? invitationDueWords(item.expiresAt) : null
+                  return (
+                    <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                      <span className="min-w-0 truncate font-medium">{item.email}</span>
+                      <span className="text-muted-foreground">{item.roleLabel ?? item.role ?? "—"}</span>
+                      <Badge variant={item.status === "pending" ? "warning" : "outline"}>
+                        {INVITATION_WORDS[item.status] ?? item.status}
+                      </Badge>
+                      {due ? (
+                        <span className={due.urgent ? "font-medium text-destructive" : "text-muted-foreground"}>{due.text}</span>
+                      ) : null}
+                      {item.status === "pending" ? (
+                        <span className="ml-auto flex gap-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={resend.isPending}
+                            onClick={() => resend.mutate(item)}
+                          >
+                            Reenviar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setCancelTarget({ id: item.id, email: item.email })}
+                          >
+                            Cancelar
+                          </Button>
+                        </span>
+                      ) : null}
+                    </li>
+                  )
+                })}
               </ul>
             ) : (
               <p className="text-sm text-muted-foreground">Sin invitaciones.</p>

@@ -6,7 +6,8 @@
  */
 import { Button } from "@odentia/ui"
 import { ErrorState, SkeletonRegion } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { skipToken, useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { api } from "../lib/api"
 import { cost, money, plural } from "../lib/cost-format"
 import type { ClinicCostMargin } from "./cost-margin"
@@ -213,6 +214,13 @@ export function OrgSummary({
     enabled: isAdmin,
     queryFn: () => api<BillingSummary | null>(`/api/admin/organizations/${organizationId}/billing`),
   })
+  // Si es una demo lo dice la ficha de la organización, que también recibe
+  // soporte; el margen solo lo recibe la administración. Lee la que ya cargó
+  // la página, sin pedirla otra vez.
+  const organization = useQuery<{ billing: { isDemo: boolean } | null }>({
+    queryKey: ["admin-organization", organizationId],
+    queryFn: skipToken,
+  })
 
   if (counts.isPending || (isAdmin && (margin.isPending || billing.isPending)))
     return (
@@ -226,6 +234,7 @@ export function OrgSummary({
     return <ErrorState title="No se pudo cargar el costo" onRetry={() => void margin.refetch()} />
   const c = counts.data
   const m = isAdmin ? margin.data : undefined
+  const isDemo = organization.data?.billing?.isDemo ?? m?.demo ?? false
   const b = isAdmin ? (billing.data ?? null) : null
   const currency = m?.currency ?? "USD"
   const sum = (group: string, field: "chargedCents" | "costMicros") =>
@@ -264,7 +273,7 @@ export function OrgSummary({
             <p className="text-xs text-muted-foreground">
               Del {longDay(c.period.start, c.timezone)} al {lastDay(c.period.end, c.timezone)} · van{" "}
               {plural(days, "día", "días")}
-              {trial ? "" : m?.demo ? " · demo: no se factura" : ` · se factura el ${longDay(c.period.end, c.timezone)}`}
+              {trial ? "" : isDemo ? " · demo: no se factura" : ` · se factura el ${longDay(c.period.end, c.timezone)}`}
             </p>
           </div>
           {isAdmin ? (
@@ -369,7 +378,7 @@ export function OrgSummary({
 
       <section
         className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-4 text-sm"
-        aria-label="Equipo y avisos"
+        aria-label="Equipo, soporte y avisos"
       >
         <p>
           <b>Equipo:</b> {plural(members, "miembro", "miembros")},{" "}
@@ -379,6 +388,17 @@ export function OrgSummary({
           .{" "}
           <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={onTeam}>
             Ver equipo
+          </Button>
+        </p>
+        <p>
+          <b>Soporte:</b>{" "}
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            render={<Link to="/support" search={{ clinica: organizationId }} />}
+          >
+            Ver sus casos
           </Button>
         </p>
         {isAdmin ? (

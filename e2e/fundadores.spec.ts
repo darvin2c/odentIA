@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { session } from "@odentia/db/schema/auth"
-import { saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import { saasFollowUp, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import type { Db } from "@odentia/db"
 import { desc, eq } from "drizzle-orm"
 import { hostUrl, PANEL, tenant, tenantPattern } from "./env"
@@ -90,16 +90,24 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
   const panel = page.getByRole("region", { name: `Clínica Sonrisa ${tag}` })
   await expect(panel).toBeVisible()
   await expect(panel.getByText(email).first()).toBeVisible()
-  await panel.getByLabel("Nota del equipo").fill("Llamada el lunes: usan WhatsApp Business.")
-  await panel.getByRole("button", { name: "Guardar nota" }).click()
-  await expect(page.getByText("Nota guardada")).toBeVisible()
+  // El seguimiento: cada contacto es una entrada con quién la anotó; sin fecha elegida, el botón solo dice «Anotar».
+  await panel.getByLabel("¿Qué pasó?").fill("Llamada el lunes: usan WhatsApp Business.")
+  await panel.getByRole("button", { name: "Anotar", exact: true }).click()
+  await expect(page.getByText("Anotado", { exact: true })).toBeVisible()
+  const entries = panel.getByRole("list", { name: "Entradas del seguimiento" })
+  await expect(entries.getByRole("listitem").filter({ hasText: "Llamada el lunes: usan WhatsApp Business." })).toContainText(user.name)
+  await expect(panel.getByLabel("¿Qué pasó?")).toHaveValue("")
   await shot(page, "solicitud-abierta")
   await panel.getByRole("button", { name: "Enviar invitación…" }).click()
   const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog")).filter({ hasText: "¿Enviar la invitación" })
   await dialog.getByRole("button", { name: "Enviar invitación" }).click()
   await expect(page.getByText(`Invitación enviada a ${email}`)).toBeVisible()
   const [invited] = await fixtureDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, request!.id))
-  expect(invited).toMatchObject({ status: "invitada", planId, note: "Llamada el lunes: usan WhatsApp Business." })
+  expect(invited).toMatchObject({ status: "invitada", planId, note: null })
+  const followUps = await fixtureDb.select().from(saasFollowUp).where(eq(saasFollowUp.requestId, request!.id))
+  expect(followUps).toEqual([
+    expect.objectContaining({ authorUserId: user.id, body: "Llamada el lunes: usan WhatsApp Business.", followUpOn: null, adminOnly: false }),
+  ])
 
   // El correo lleva a «Crea tu cuenta» con la invitación: el regalo, el correo fijo y sin cuota.
   const link = await latestLinkFor(email, "Tu lugar en odentIA Fundadores está listo")
@@ -144,7 +152,7 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
   expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / DAY)).toBe(90)
   expect(sub?.guaranteedUntil).not.toBeNull()
 
-  await gotoHydrated(page, hostUrl("admin", `/waitlist?estado=entro&q=${tag}`))
+  await gotoHydrated(page, hostUrl("admin", `/waitlist?etapa=entro&q=${tag}`))
   await expect(page.getByRole("row").filter({ hasText: `Clínica Sonrisa ${tag}` })).toBeVisible()
   await shot(page, "lista-entraron")
 })

@@ -51,6 +51,8 @@ interface Payment {
   methodCode: string
   status: string
   receiptFilename: string | null
+  /** El motivo con que la administración rechazó el comprobante (solo en `rechazado`). */
+  rejectReason: string | null
   createdAt: string
 }
 
@@ -59,6 +61,22 @@ const PAYMENT_STATUS: Record<string, string> = {
   confirmado: "Confirmado",
   reversado: "Reversado",
   devuelto: "Devuelto",
+  rechazado: "Rechazado",
+}
+
+/** «Rechazado: No se ve el número de operación»; los demás, su estado en palabras. */
+function paymentStatusText(payment: Payment): string {
+  const label = PAYMENT_STATUS[payment.status] ?? payment.status
+  return payment.status === "rechazado" && payment.rejectReason ? `${label}: ${payment.rejectReason}` : label
+}
+
+/**
+ * «No pudimos confirmar tu comprobante «demo.png»: motivo.», la misma frase de la franja
+ * (`getClinicNotices`). No promete correo: no lo hay.
+ */
+function rejectedProofText(payment: Payment): string {
+  const why = (payment.rejectReason ?? "").trim().replace(/[.\s]+$/, "")
+  return `No pudimos confirmar tu comprobante${payment.receiptFilename ? ` «${payment.receiptFilename}»` : ""}${why ? `: ${why}` : ""}.`
 }
 
 /** «vie 30 oct», con el formato y la zona de la clínica. */
@@ -96,7 +114,9 @@ function PlanContent() {
   const terms = useSaasTerms().data
   const subscription = useQuery({
     queryKey: ["billing", organizationId, "subscription"],
-    queryFn: () => apiFetch<{ data: BillingSummary }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
+    // `readOnlyAt`: en gracia, el día en que pasa a solo lectura, el mismo de la franja y del correo.
+    queryFn: () =>
+      apiFetch<{ data: BillingSummary }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
     retry: false,
   })
   const consumption = useQuery({
@@ -189,6 +209,10 @@ function PlanContent() {
   const openCharges = (charges.data ?? []).filter((charge) => charge.status === "pendiente" || charge.status === "parcial")
   const next = [...openCharges].sort((a, b) => (a.dueAt ?? "").localeCompare(b.dueAt ?? ""))[0]
   const inReview = (payments.data ?? []).some((payment) => payment.status === "pendiente")
+  // El último comprobante del cargo, si se rechazó: llegan del más nuevo al más viejo.
+  const lastProof = next ? (payments.data ?? []).find((payment) => payment.chargeId === next.id) : undefined
+  const rejectedProof = lastProof?.status === "rechazado" ? lastProof : null
+  const methodName = (code: string) => methods.data?.find((method) => method.code === code)?.name ?? code
 
   return (
     <div className="flex flex-col gap-6">
@@ -215,11 +239,22 @@ function PlanContent() {
             </div>
           </dl>
           {inReview ? (
-            <p className="text-sm text-muted-foreground">{appWords().name} está revisando tu pago. Mientras tanto la clínica sigue igual.</p>
+            <p className="text-sm text-muted-foreground">
+              {appWords().name} está revisando tu pago.{" "}
+              {/* En gracia, un comprobante en revisión no aplaza la solo lectura: se dice el día. */}
+              {summary.status === "gracia" && summary.readOnlyAt
+                ? new Date(summary.readOnlyAt).getTime() > Date.now()
+                  ? `Si no se confirma antes, la clínica pasa a solo lectura el ${shortDay(summary.readOnlyAt)}.`
+                  : "Si no se confirma, hoy la clínica pasa a solo lectura."
+                : "Mientras tanto la clínica sigue igual."}
+            </p>
           ) : (
-            <Button className="self-start" render={<a href="#comprobante" />}>
-              Registrar comprobante
-            </Button>
+            <>
+              {rejectedProof ? <p className="text-sm [overflow-wrap:anywhere]">{rejectedProofText(rejectedProof)}</p> : null}
+              <Button className="self-start" render={<a href="#comprobante" />}>
+                Registrar comprobante
+              </Button>
+            </>
           )}
         </section>
       ) : null}
@@ -356,8 +391,8 @@ function PlanContent() {
               <li key={payment.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border p-4">
                 <div className="min-w-0 flex-1 basis-56">
                   <p className="text-sm font-medium [overflow-wrap:anywhere]">{payment.receiptFilename ?? "Comprobante"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {PAYMENT_STATUS[payment.status] ?? payment.status} · {payment.methodCode}
+                  <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                    {paymentStatusText(payment)} · {methodName(payment.methodCode)}
                   </p>
                 </div>
                 <p className="text-sm font-semibold tabular-nums">{formatPlanMoney(payment.amountCents, payment.currency)}</p>

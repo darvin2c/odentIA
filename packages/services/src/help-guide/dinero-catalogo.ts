@@ -323,8 +323,26 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
       {
         id: "plan-y-pagos-registrar-comprobante",
         q: "¿Cómo registro el comprobante de mi pago?",
-        a: "En Configuración › Plan y pagos, «Próximo cobro» dice el monto, cuándo vence y cómo pagar. Después de pagar, «Registrar comprobante»: eliges el cargo y el medio usado, escribes el importe y subes el archivo (PNG, JPG, WebP o PDF, hasta 10 MB). Queda «Pendiente de confirmación» hasta que se confirme, y lo sigues en «Historial de pagos». Solo propietario y administrador.",
+        a: "En Configuración › Plan y pagos, «Próximo cobro» dice el monto, cuándo vence y cómo pagar. Después de pagar, «Registrar comprobante»: eliges el cargo y el medio usado, escribes el importe y subes el archivo (PNG, JPG, WebP o PDF, hasta 10 MB). Queda «Pendiente de confirmación» hasta que se confirme, y lo sigues en «Historial de pagos». Si no se pudo confirmar, el historial dice «Rechazado» con el motivo, «Próximo cobro» lo repite y puedes registrar otro en el mismo cargo. Un comprobante en revisión no frena la solo lectura: la frena que confirmemos el pago. Si el cargo ya venció y la clínica está en sus días de gracia, el comprobante que cubre todo lo que debes da unos días más (las veces que permiten las condiciones comerciales) y el aviso de arriba de la pantalla dice el día; en solo lectura ya no da días. Solo propietario y administrador.",
         forms: ["subir el comprobante del pago", "registrar comprobante", "ya pague y sigue pendiente de confirmacion"],
+      },
+      {
+        id: "plan-y-pagos-solo-lectura",
+        q: "Mi clínica está en solo lectura, ¿qué hago para volver a usarla?",
+        a: "Pasa cuando un cargo vence y no se paga en sus días de gracia; el aviso de arriba de la pantalla dice cuánto falta pagar. Quien es propietario o administrador entra a Configuración › Plan y pagos, que sigue abierto, paga lo que se debe y lo registra con «Registrar comprobante». La clínica vuelve a la normalidad sola cuando confirmamos el pago y ya no queda nada por pagar: el comprobante en revisión todavía no la saca. Antes, mientras el cargo vencido está en sus días de gracia, el mismo aviso dice el día en que la clínica pasaría a solo lectura. Plan y pagos y Ayuda siguen disponibles en solo lectura.",
+        forms: ["como salgo de solo lectura", "la clinica esta en solo lectura", "volver a usar la clinica despues de pagar"],
+      },
+      {
+        id: "plan-y-pagos-comprobante-en-revision",
+        q: "Subí mi comprobante y sigue en revisión, ¿igual pasa a solo lectura?",
+        a: "Puede pasar: un comprobante en revisión no frena la solo lectura; la frena que confirmemos el pago. Si el cargo ya venció y la clínica está en sus días de gracia, el comprobante que cubre todo lo que debes da unos días más (las veces que permiten las condiciones comerciales) y el aviso de arriba de la pantalla dice el día nuevo. Registrado antes de que venza el cargo, no da días extra. Si llega ese día y aún no lo confirmamos, la clínica pasa a solo lectura y vuelve sola en cuanto lo confirmamos. Si crees que tarda, escríbenos desde Ayuda › «Escribir a soporte». Solo propietario y administrador.",
+        forms: ["el comprobante sigue en revision", "subi el comprobante antes de que venza", "me pasan a solo lectura aunque ya pague"],
+      },
+      {
+        id: "plan-y-pagos-comprobante-rechazado",
+        q: "Mi comprobante dice Rechazado, ¿qué hago?",
+        a: "Es que no pudimos confirmar ese pago. En Configuración › Plan y pagos, «Historial de pagos» dice «Rechazado» con el motivo, y «Próximo cobro» lo repite. Corrige lo que dice el motivo y registra otro con «Registrar comprobante», en el mismo cargo; si ya tuviste la prórroga de un comprobante, el nuevo no la repite. El rechazo no llega por correo: se lee ahí y en el aviso de arriba de la pantalla, que también dice el día en que la clínica pasa a solo lectura si el cargo ya venció. Si estás seguro de que el pago entró, escríbenos desde Ayuda › «Escribir a soporte». Solo propietario y administrador.",
+        forms: ["me rechazaron el comprobante", "no pudimos confirmar tu comprobante", "por que rechazaron mi pago"],
       },
       {
         id: "plan-y-pagos-presupuesto-del-mes",

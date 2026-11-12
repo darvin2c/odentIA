@@ -1,6 +1,6 @@
 import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { organization, user } from "@odentia/db/schema/auth"
+import { invitation, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { invitationTemplate } from "@odentia/mail"
 import {
@@ -163,11 +163,19 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     product: ClinicalProduct
   }): Promise<void> {
     const panel = deps.panelUrlOf?.(args.product) ?? deps.webURL
+    // El correo dice hasta cuándo vale el enlace, en la zona de la clínica (Lima si aún no la tiene).
+    const [sent] = await deps.ownerDb
+      .select({ expiresAt: invitation.expiresAt, timeZone: orgProfile.timezone })
+      .from(invitation)
+      .leftJoin(orgProfile, eq(orgProfile.organizationId, invitation.organizationId))
+      .where(eq(invitation.id, args.invitationId))
+      .limit(1)
     const template = invitationTemplate({
       organizationName: args.organizationName,
       inviterName: args.inviterName,
       url: `${panel}/accept-invitation/${args.invitationId}`,
       brand: productWords(args.product).brand,
+      expires: sent ? { at: sent.expiresAt, timeZone: sent.timeZone ?? "America/Lima" } : undefined,
     })
     await deps.mailer.send({ to: args.email, ...template })
   }

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto"
+import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
 import { adminStaff } from "@odentia/db/schema/admin-core"
@@ -7,6 +9,7 @@ import {
   supportAccessGrant,
   supportAttachment,
   supportCase,
+  supportGuideGap,
   supportMessage,
 } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
@@ -16,12 +19,16 @@ import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasActionReview } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { helpTopic, helpTopicForScreen } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
-import { enqueueSupportInboxNotice } from "./support-notices.js"
+import { helpTopicsFor } from "./products.js"
+import { addBusinessDays, saasTermsAt } from "./saas-commercial-terms.js"
+import { accessRequestPendingSql, clinicActsSinceSql } from "./support-case-rules.js"
+import { enqueueSupportInboxNotice, SUPPORT_ANSWER_BUSINESS_DAYS } from "./support-notices.js"
 
 /* ---------- Tipos ---------- */
 
@@ -71,6 +78,10 @@ export interface SupportCaseListItem {
 }
 
 export interface SupportCaseDetail extends SupportCaseListItem {
+  /** Cuándo pidió soporte el acceso de diagnóstico (el último pedido). */
+  accessRequestedAt: string | null
+  /** Hay un pedido de acceso y la clínica todavía no hizo nada después. */
+  accessRequestPending: boolean
   detail: string | null
   screen: string
   role: string
@@ -81,6 +92,12 @@ export interface SupportCaseDetail extends SupportCaseListItem {
   messages: SupportMessageItem[]
   attachments: SupportAttachmentItem[]
   grants: SupportGrantItem[]
+  /**
+   * En la clínica, a quien lee un caso que no abrió (la propietaria que lo ve
+   * por el pedido de acceso): quién lo abrió y con qué rol. Nulo para quien lo
+   * abrió y en la administración, que tiene `opener`.
+   */
+  openedByOther?: { name: string; roleLabel: string } | null
 }
 
 export interface SupportAttachmentItem {
@@ -125,7 +142,8 @@ export interface SupportDiagnostic {
   } | null
   channels: { channel: string; provider: string; displayName: string; status: string }[]
   services: { total: number }
-  membersByRole: { role: string; total: number }[]
+  /** Cuántos hay de cada rol; `label`, el nombre del rol en el producto de la clínica («Recepción», «Odontólogo»). */
+  membersByRole: { role: string; label: string; total: number }[]
 }
 
 export interface SupportMetrics {
@@ -302,6 +320,9 @@ export async function openSupportCaseFromHelp(
   return { ...toListItem(row, 0), reused: false }
 }
 
+const kindOf = (kind: string): SupportKind =>
+  (["pregunta", "problema", "acceso", "cobro"] as string[]).includes(kind) ? (kind as SupportKind) : "pregunta"
+
 function toListItem(
   row: typeof supportCase.$inferSelect,
   messageCount: number,
@@ -312,9 +333,7 @@ function toListItem(
     id: row.id,
     organizationId: row.organizationId,
     organizationName: null,
-    kind: (["pregunta", "problema", "acceso", "cobro"] as string[]).includes(row.kind)
-      ? (row.kind as SupportKind)
-      : "pregunta",
+    kind: kindOf(row.kind),
     question: row.question,
     status: caseStatusOf(row),
     assigneeStaffId: row.assigneeStaffId,
@@ -327,7 +346,9 @@ function toListItem(
 
 /**
  * Quién sigue un caso de la clínica: quien lo abrió. Si esa persona ya no está
- * en la clínica, lo siguen su propietario y su administrador; nadie más.
+ * en la clínica, lo siguen su propietario y su administrador. Desde que
+ * soporte pide el acceso de diagnóstico, también lo leen la propietaria y los
+ * administradores: son quienes pueden autorizarlo (ADR 0181). Nadie más.
  */
 async function requireCaseReader(
   tx: Db,
@@ -339,17 +360,41 @@ async function requireCaseReader(
   // Un caso sin autor es automático de odentIA: no es de ninguna clínica.
   if (kase.openedBy === null) throw notFound("Caso")
   if (!(await isOrgOwnerOrAdmin(tx, userId, orgId))) throw notFound("Caso")
+  if (kase.accessRequestedAt !== null) return
+  if (await openerStillMember(tx, kase.openedBy, orgId)) throw notFound("Caso")
+}
+
+async function openerStillMember(tx: Db, openedBy: string, orgId: string): Promise<boolean> {
   const [opener] = await tx
     .select({ id: member.id })
     .from(member)
-    .where(and(eq(member.userId, kase.openedBy), eq(member.organizationId, orgId)))
+    .where(and(eq(member.userId, openedBy), eq(member.organizationId, orgId)))
     .limit(1)
-  if (opener) throw notFound("Caso")
+  return opener !== undefined
+}
+
+/**
+ * ¿Lo que ve esta persona cuenta como visto del caso? El visto
+ * (`clientSeenAt`) es uno por caso y es de quien lo abrió: lo marca esa
+ * persona o, si ya no está en la clínica, quien lo sigue por ella. Quien solo
+ * lo lee porque soporte pidió el acceso no lo marca por quien preguntó: si no,
+ * quien preguntó perdería su no leído y su correo.
+ */
+async function seesForOpener(
+  tx: Db,
+  kase: typeof supportCase.$inferSelect,
+  orgId: string,
+  userId: string,
+): Promise<boolean> {
+  if (kase.openedBy === userId) return true
+  if (kase.openedBy === null) return false
+  return !(await openerStillMember(tx, kase.openedBy, orgId))
 }
 
 /**
  * Casos que sigue la persona en su clínica, del más reciente al más viejo: los
- * suyos y, si es propietaria o administradora, los de quien ya no está.
+ * suyos y, si es propietaria o administradora, los de quien ya no está y
+ * aquellos en que soporte pidió el acceso de diagnóstico.
  */
 export async function listMySupportCases(
   tx: Db,
@@ -364,8 +409,10 @@ export async function listMySupportCases(
       and(
         eq(supportCase.organizationId, orgId),
         manager
-          ? sql`(${supportCase.openedBy} = ${userId} or not exists (select 1 from ${member} m
-              where m.user_id = ${supportCase.openedBy} and m.organization_id = ${orgId}))`
+          ? sql`(${supportCase.openedBy} = ${userId}
+              or (${supportCase.openedBy} is not null and ${supportCase.accessRequestedAt} is not null)
+              or not exists (select 1 from ${member} m
+                where m.user_id = ${supportCase.openedBy} and m.organization_id = ${orgId}))`
           : eq(supportCase.openedBy, userId),
       ),
     )
@@ -396,7 +443,15 @@ export async function getMySupportCase(
     .where(eq(supportAccessGrant.caseId, kase.id))
     .orderBy(desc(supportAccessGrant.createdAt))
     .limit(10)
-  return toDetail(kase, messages.map(toMessage), attachments, grants.map(toGrant), null)
+  // La propietaria que lo lee por el pedido de acceso ve quién lo abrió: el correo se lo nombra.
+  const [opener] =
+    kase.openedBy && kase.openedBy !== userId
+      ? await tx.select({ name: user.name }).from(user).where(eq(user.id, kase.openedBy)).limit(1)
+      : []
+  return {
+    ...toDetail(kase, messages.map(toMessage), attachments, grants.map(toGrant), null, await accessRequestPendingOf(tx, kase)),
+    openedByOther: opener ? { name: opener.name, roleLabel: kase.role } : null,
+  }
 }
 
 /**
@@ -420,10 +475,13 @@ function toDetail(
   attachments: SupportAttachmentItem[],
   grants: SupportGrantItem[],
   organizationName: string | null,
+  accessRequestPending: boolean,
 ): SupportCaseDetail {
   return {
     ...toListItem(row, messages.length),
     organizationName,
+    accessRequestedAt: row.accessRequestedAt?.toISOString() ?? null,
+    accessRequestPending,
     detail: row.detail,
     screen: row.screen,
     role: row.role,
@@ -442,6 +500,39 @@ function requireWritableByClient(row: typeof supportCase.$inferSelect): void {
     throw validation("El caso está resuelto: reábrelo para agregar adjuntos")
 }
 
+/**
+ * La clínica hizo algo en su caso (escribió, adjuntó o autorizó el acceso) y
+ * el caso vuelve a nosotros: si esperaba a la clínica o estaba resuelto, pasa
+ * a «En atención» (desde resuelto cuenta la reapertura) y avisa al buzón de
+ * soporte. `sourceId` identifica el hecho para no avisar dos veces. `seen`:
+ * quien actuó vio el caso por quien lo abrió (`seesForOpener`).
+ */
+async function clinicActed(
+  tx: Db,
+  kase: typeof supportCase.$inferSelect,
+  sourceId: string,
+  seen: boolean,
+): Promise<void> {
+  const reopening = kase.status === "resuelto"
+  const now = new Date()
+  await tx
+    .update(supportCase)
+    .set({
+      status: reopening || kase.status === "esperando_clinica" ? "en_atencion" : kase.status,
+      resolvedAt: reopening ? null : kase.resolvedAt,
+      reopenedCount: reopening ? kase.reopenedCount + 1 : kase.reopenedCount,
+      ...(seen ? { clientSeenAt: now } : {}),
+      updatedAt: now,
+    })
+    .where(eq(supportCase.id, kase.id))
+  await enqueueSupportInboxNotice(tx, {
+    caseId: kase.id,
+    organizationId: kase.organizationId,
+    kind: "clinica_respondio",
+    sourceId,
+  })
+}
+
 /** La clínica responde en su caso; si estaba resuelto, se reabre. */
 export async function replyToMySupportCase(
   tx: Db,
@@ -456,7 +547,6 @@ export async function replyToMySupportCase(
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
   await requireCaseReader(tx, kase, orgId, userId)
-  const reopening = kase.status === "resuelto"
   const [message] = await tx
     .insert(supportMessage)
     .values({
@@ -468,18 +558,7 @@ export async function replyToMySupportCase(
     })
     .returning()
   if (!message) throw new Error("No se pudo enviar la respuesta")
-  await enqueueSupportInboxNotice(tx, { caseId: kase.id, organizationId: orgId, kind: "clinica_respondio", sourceId: message.id })
-  const now = new Date()
-  await tx
-    .update(supportCase)
-    .set({
-      status: reopening ? "en_atencion" : kase.status,
-      resolvedAt: reopening ? null : kase.resolvedAt,
-      reopenedCount: reopening ? kase.reopenedCount + 1 : kase.reopenedCount,
-      clientSeenAt: now,
-      updatedAt: now,
-    })
-    .where(eq(supportCase.id, kase.id))
+  await clinicActed(tx, kase, message.id, await seesForOpener(tx, kase, orgId, userId))
   return toMessage(message)
 }
 
@@ -494,21 +573,24 @@ export async function reopenMySupportCase(
   const kase = requireCaseInOrg(row, orgId)
   await requireCaseReader(tx, kase, orgId, userId)
   if (kase.status !== "resuelto") throw validation("El caso ya está abierto")
+  const now = new Date()
   await tx
     .update(supportCase)
     .set({
       status: "en_atencion",
       resolvedAt: null,
       reopenedCount: kase.reopenedCount + 1,
-      clientSeenAt: new Date(),
-      updatedAt: new Date(),
+      ...((await seesForOpener(tx, kase, orgId, userId)) ? { clientSeenAt: now } : {}),
+      updatedAt: now,
     })
     .where(eq(supportCase.id, kase.id))
 }
 
 /**
  * «Ver»: la clínica abrió la conversación; lo ya respondido deja de contar
- * como no leído. Solo el autor del caso marca su propio visto.
+ * como no leído. Solo el autor del caso marca su propio visto (o quien lo
+ * sigue si el autor ya no está): la propietaria que lo lee por el pedido de
+ * acceso no lo marca por él.
  */
 export async function markSupportCaseSeen(
   tx: Db,
@@ -519,6 +601,7 @@ export async function markSupportCaseSeen(
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
   await requireCaseReader(tx, kase, orgId, userId)
+  if (!(await seesForOpener(tx, kase, orgId, userId))) return
   await tx.update(supportCase).set({ clientSeenAt: new Date() }).where(eq(supportCase.id, kase.id))
 }
 
@@ -576,6 +659,8 @@ export async function attachToMySupportCase(
     })
     .returning()
   if (!attachment) throw new Error("No se pudo registrar el adjunto")
+  // Con un mensaje, el mensaje ya avisó; suelto, el adjunto es la respuesta.
+  if (!input.messageId) await clinicActed(tx, kase, attachment.id, await seesForOpener(tx, kase, orgId, userId))
   return toAttachment(attachment)
 }
 
@@ -630,6 +715,8 @@ export async function grantSupportAccess(
     })
     .returning()
   if (!grant) throw new Error("No se pudo autorizar el acceso")
+  // Autorizar es la respuesta de la clínica: el caso vuelve a nosotros.
+  await clinicActed(tx, kase, grant.id, await seesForOpener(tx, kase, orgId, userId))
   return toGrant(grant)
 }
 
@@ -734,7 +821,8 @@ export async function getAccountSupportCase(
         .orderBy(desc(supportAccessGrant.createdAt))
         .limit(10)
     : []
-  return toDetail(row.kase, messages.map(toMessage), attachments, grants.map(toGrant), row.orgName)
+  // Un caso de la cuenta no es de una clínica: no hay acceso de diagnóstico que pedir.
+  return toDetail(row.kase, messages.map(toMessage), attachments, grants.map(toGrant), row.orgName, false)
 }
 
 export async function replyToAccountSupportCase(
@@ -748,7 +836,6 @@ export async function replyToAccountSupportCase(
   if (text.length > 4000) throw invalidField("body", "Escribe como mucho 4000 caracteres.")
   const [kase] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   if (!kase || kase.openedBy !== userId) throw notFound("Caso")
-  const reopening = kase.status === "resuelto"
   const [message] = await db
     .insert(supportMessage)
     .values({
@@ -760,23 +847,8 @@ export async function replyToAccountSupportCase(
     })
     .returning()
   if (!message) throw new Error("No se pudo enviar la respuesta")
-  await enqueueSupportInboxNotice(db, {
-    caseId: kase.id,
-    organizationId: kase.organizationId,
-    kind: "clinica_respondio",
-    sourceId: message.id,
-  })
-  const now = new Date()
-  await db
-    .update(supportCase)
-    .set({
-      status: reopening ? "en_atencion" : kase.status,
-      resolvedAt: reopening ? null : kase.resolvedAt,
-      reopenedCount: reopening ? kase.reopenedCount + 1 : kase.reopenedCount,
-      clientSeenAt: now,
-      updatedAt: now,
-    })
-    .where(eq(supportCase.id, kase.id))
+  // En la cuenta solo escribe quien abrió el caso.
+  await clinicActed(db, kase, message.id, true)
   return toMessage(message)
 }
 
@@ -792,56 +864,288 @@ export async function isOrgOwnerOrAdmin(db: Db, userId: string, orgId: string): 
 
 /* ---------- Lado staff (ownerDb; cada acción audita al actor real) ---------- */
 
+/*
+ * «Nos espera»: una sola regla para la cola, Inicio y el número del menú.
+ * Un caso nos espera si no está resuelto ni esperando a la clínica y, además,
+ * nunca le respondimos en público o la clínica hizo algo después de nuestra
+ * última respuesta: escribió, adjuntó o autorizó el acceso. Son fragmentos
+ * sobre `support_case` sin alias: se usan dentro de un `from support_case`.
+ */
+
+/** El primer hecho de la clínica posterior a nuestra última respuesta pública. */
+const clinicActAfterReplySql = sql`(select min(act.at) from (${clinicActsSinceSql(supportCase.lastPublicMessageAt)}) act)`
+
+const waitingOnUsSql = sql<boolean>`(${supportCase.status} not in ('resuelto', 'esperando_clinica')
+  and (${supportCase.lastPublicMessageAt} is null or ${clinicActAfterReplySql} is not null))`
+
+/** Desde cuándo nos espera: desde que se abrió si nunca respondimos; si no, desde lo primero que hizo la clínica. */
+const waitingSinceSql = sql`(case when not ${waitingOnUsSql} then null
+  when ${supportCase.lastPublicMessageAt} is null then ${supportCase.createdAt}
+  else ${clinicActAfterReplySql} end)`
+
+/** El acceso de diagnóstico vigente del caso, si lo hay. */
+const accessUntilSql = (now: Date) => sql`(select max(g.expires_at) from ${supportAccessGrant} g
+  where g.case_id = ${supportCase.id} and g.revoked_at is null and g.expires_at > ${now.toISOString()}::timestamptz)`
+
+/**
+ * El orden de la cola, el mismo de Inicio: primero lo que nos espera, de la
+ * espera más larga a la más corta; después lo que espera a la clínica y lo ya
+ * respondido, por nuestra última respuesta; al final lo resuelto.
+ */
+const queueOrderSql = [
+  sql`(case when ${waitingOnUsSql} then 0 when ${supportCase.status} <> 'resuelto' then 1 else 2 end)`,
+  sql`${waitingSinceSql} asc nulls last`,
+  sql`(case when ${supportCase.status} <> 'resuelto' then ${supportCase.lastPublicMessageAt} end) asc nulls last`,
+  sql`${supportCase.resolvedAt} desc nulls last`,
+  sql`${supportCase.createdAt} asc`,
+  sql`${supportCase.id} asc`,
+]
+
+/** Soporte no ve los casos «Revisión de cobro»: son de la administración (ADR 0094 y 0181). */
+const visibleKindsFor = (actor: AdminActor | undefined) =>
+  actor?.role === "admin" ? undefined : ne(supportCase.kind, "cobro")
+
+function dateOrNull(value: unknown): Date | null {
+  if (value === null || value === undefined) return null
+  const date = value instanceof Date ? value : new Date(String(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/**
+ * «Responder hasta el…»: un caso que nadie respondió, a los días hábiles del
+ * objetivo del equipo; un caso de cobro, el plazo de su revisión pendiente, y
+ * solo para la administración. Un caso automático de odentIA no tiene plazo.
+ */
+async function answerByOf(
+  db: Db,
+  actor: AdminActor | undefined,
+  rows: Array<Pick<typeof supportCase.$inferSelect, "id" | "kind" | "status" | "openedBy" | "lastPublicMessageAt" | "createdAt">>,
+): Promise<Map<string, Date | null>> {
+  const out = new Map<string, Date | null>()
+  const billing = rows.filter((row) => row.kind === "cobro" && row.status !== "resuelto")
+  const reviews =
+    actor?.role === "admin" && billing.length > 0
+      ? await db
+          .select({ caseId: saasActionReview.supportCaseId, requestedAt: saasActionReview.requestedAt })
+          .from(saasActionReview)
+          .where(
+            and(
+              inArray(
+                saasActionReview.supportCaseId,
+                billing.map((row) => row.id),
+              ),
+              eq(saasActionReview.status, "pendiente"),
+            ),
+          )
+      : []
+  for (const row of rows) {
+    if (row.status === "resuelto") {
+      out.set(row.id, null)
+      continue
+    }
+    if (row.kind === "cobro") {
+      const review = reviews.find((item) => item.caseId === row.id)
+      out.set(
+        row.id,
+        review ? addBusinessDays(review.requestedAt, (await saasTermsAt(db, review.requestedAt)).reviewAnswerDays) : null,
+      )
+      continue
+    }
+    out.set(
+      row.id,
+      row.lastPublicMessageAt === null && row.openedBy !== null
+        ? addBusinessDays(row.createdAt, SUPPORT_ANSWER_BUSINESS_DAYS)
+        : null,
+    )
+  }
+  return out
+}
+
+/** Una fila de «Casos de soporte por atender» en Inicio: solo metadatos, nunca la pregunta. */
+export interface SupportHomeRow {
+  id: string
+  organizationId: string | null
+  /** La clínica, «Cuenta sin clínica» o «odentIA · automático». */
+  organizationName: string
+  /** El producto de la clínica; nulo si el caso no es de una clínica. */
+  product: ClinicalProduct | null
+  kind: SupportKind
+  assigneeName: string | null
+  waitingSince: string
+  answerBy: string | null
+  accessUntil: string | null
+}
+
+/**
+ * Lo que nos espera, en el orden de la cola. Sin auditoría: son metadatos,
+ * como los conteos (ni la pregunta ni la conversación). Sin tope, como las
+ * filas de la lista de espera: son las mismas que cuenta el número de
+ * «Soporte» en el menú (`getAdminSupportAttention`), y un tope haría que
+ * Inicio dijera menos que el menú sin avisarlo.
+ */
+export async function supportHomeRows(db: Db, actor: AdminActor, now: Date = new Date()): Promise<SupportHomeRow[]> {
+  const assignee = alias(user, "assignee")
+  const rows = await db
+    .select({
+      id: supportCase.id,
+      organizationId: supportCase.organizationId,
+      orgName: organization.name,
+      product: orgProfile.product,
+      kind: supportCase.kind,
+      status: supportCase.status,
+      openedBy: supportCase.openedBy,
+      lastPublicMessageAt: supportCase.lastPublicMessageAt,
+      createdAt: supportCase.createdAt,
+      assigneeName: assignee.name,
+      waitingSince: waitingSinceSql,
+      accessUntil: accessUntilSql(now),
+    })
+    .from(supportCase)
+    .leftJoin(organization, eq(organization.id, supportCase.organizationId))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, supportCase.organizationId))
+    .leftJoin(assignee, eq(assignee.id, supportCase.assigneeStaffId))
+    .where(and(waitingOnUsSql, visibleKindsFor(actor)))
+    .orderBy(...queueOrderSql)
+  const answerBy = await answerByOf(db, actor, rows)
+  return rows.map((row) => ({
+    id: row.id,
+    organizationId: row.organizationId,
+    organizationName: row.orgName ?? (row.openedBy === null ? "odentIA · automático" : "Cuenta sin clínica"),
+    product: isClinicalProduct(row.product) ? row.product : null,
+    kind: kindOf(row.kind),
+    assigneeName: row.assigneeName,
+    waitingSince: (dateOrNull(row.waitingSince) ?? row.createdAt).toISOString(),
+    answerBy: answerBy.get(row.id)?.toISOString() ?? null,
+    accessUntil: dateOrNull(row.accessUntil)?.toISOString() ?? null,
+  }))
+}
+
 export interface StaffCaseFilters {
-  status?: SupportStatus
-  assigneeStaffId?: string
+  organizationId?: string
+  /** «me»: los míos; «none»: sin responsable; o el id de alguien del equipo. */
+  assignee?: "me" | "none" | (string & {})
   kind?: SupportKind
+  /** Por omisión, los que no están resueltos («sin_resolver»). */
+  status?: SupportStatus | "sin_resolver"
   limit?: number
   offset?: number
 }
 
-function staffListItem(
-  row: typeof supportCase.$inferSelect,
-  orgName: string | null,
-  messageCount: number,
-): SupportCaseListItem {
-  return { ...toListItem(row, messageCount), organizationName: orgName }
+/** Una fila de la cola: el caso y dónde está su espera. */
+export interface StaffSupportCaseListItem extends SupportCaseListItem {
+  /** Nos espera (la misma regla de Inicio y del menú). */
+  waitingOnUs: boolean
+  /** Desde cuándo nos espera; nulo si no nos espera. */
+  waitingSince: string | null
+  /** «Responder hasta el…»: solo mientras nadie respondió (o la revisión de cobro, para la administración). */
+  answerBy: string | null
+  /** Nuestra última respuesta pública (o el pedido a la clínica). */
+  lastStaffReplyAt: string | null
+  /** Hasta cuándo rige el acceso de diagnóstico autorizado. */
+  accessUntil: string | null
 }
 
-/** Cola de casos para el equipo: sin cuerpos de mensajes, solo triaje. */
+export interface StaffSupportCaseList {
+  items: StaffSupportCaseListItem[]
+  total: number
+  /** Con «sin_resolver»: cuántos resueltos quedan fuera con los mismos filtros. */
+  resolvedCount: number
+}
+
+/**
+ * Cola de casos para el equipo: sin cuerpos de mensajes, solo triaje. Ordena
+ * con la regla de «nos espera» y pagina por desplazamiento. Soporte no recibe
+ * los casos de cobro.
+ */
 export async function listSupportCasesForStaff(
   db: Db,
   actor: AdminActor,
-  filters: StaffCaseFilters,
-): Promise<{ items: SupportCaseListItem[]; total: number }> {
+  filters: StaffCaseFilters = {},
+  now: Date = new Date(),
+): Promise<StaffSupportCaseList> {
   const limit = Math.min(Math.max(filters.limit ?? 30, 1), 100)
   const offset = Math.max(filters.offset ?? 0, 0)
-  const conditions = [
-    filters.status ? eq(supportCase.status, filters.status) : undefined,
-    filters.assigneeStaffId ? eq(supportCase.assigneeStaffId, filters.assigneeStaffId) : undefined,
+  const status = filters.status ?? "sin_resolver"
+  const assignee =
+    filters.assignee === "none"
+      ? isNull(supportCase.assigneeStaffId)
+      : filters.assignee
+        ? eq(supportCase.assigneeStaffId, filters.assignee === "me" ? actor.userId : filters.assignee)
+        : undefined
+  const scope = [
+    visibleKindsFor(actor),
+    filters.organizationId ? eq(supportCase.organizationId, filters.organizationId) : undefined,
+    assignee,
     filters.kind ? eq(supportCase.kind, filters.kind) : undefined,
   ]
+  const conditions = [
+    ...scope,
+    status === "sin_resolver" ? ne(supportCase.status, "resuelto") : eq(supportCase.status, status),
+  ]
   const rows = await db
-    .select({ kase: supportCase, orgName: organization.name })
+    .select({
+      kase: supportCase,
+      orgName: organization.name,
+      waitingOnUs: waitingOnUsSql,
+      waitingSince: waitingSinceSql,
+      accessUntil: accessUntilSql(now),
+    })
     .from(supportCase)
     .leftJoin(organization, eq(supportCase.organizationId, organization.id))
     .where(and(...conditions))
-    .orderBy(desc(supportCase.updatedAt))
+    .orderBy(...queueOrderSql)
     .limit(limit)
     .offset(offset)
-  const [{ total }] = await db
-    .select({ total: count() })
+  const [totals] = await db
+    .select({
+      total: sql<number>`count(*) filter (where ${and(...conditions)})::int`,
+      resolved: sql<number>`count(*) filter (where ${supportCase.status} = 'resuelto')::int`,
+    })
     .from(supportCase)
-    .where(and(...conditions))
-    .then((result) => (result.length > 0 ? result : [{ total: 0 }]))
+    .where(and(...scope))
+  const answerBy = await answerByOf(
+    db,
+    actor,
+    rows.map((row) => row.kase),
+  )
   await writeAdminAudit(db, actor, {
     action: "support.cases.list",
-    metadata: { status: filters.status ?? null },
+    metadata: {
+      status,
+      kind: filters.kind ?? null,
+      assignee: filters.assignee ?? null,
+      organizationId: filters.organizationId ?? null,
+    },
   })
   return {
-    items: rows.map(({ kase, orgName }) => staffListItem(kase, orgName, 0)),
-    total: Number(total),
+    items: rows.map((row) => ({
+      ...toListItem(row.kase, 0),
+      organizationName: row.orgName,
+      waitingOnUs: row.waitingOnUs === true,
+      waitingSince: dateOrNull(row.waitingSince)?.toISOString() ?? null,
+      answerBy: answerBy.get(row.kase.id)?.toISOString() ?? null,
+      lastStaffReplyAt: row.kase.lastPublicMessageAt?.toISOString() ?? null,
+      accessUntil: dateOrNull(row.accessUntil)?.toISOString() ?? null,
+    })),
+    total: Number(totals?.total ?? 0),
+    resolvedCount: status === "sin_resolver" ? Number(totals?.resolved ?? 0) : 0,
   }
+}
+
+/** La ficha para el equipo: además, quién abrió, quién puede autorizar el acceso y la marca de la guía. */
+export interface StaffSupportCaseDetail extends SupportCaseDetail {
+  /** Quien abrió el caso y su rol de hoy; nulo en los automáticos de odentIA. */
+  opener: { name: string; roleLabel: string } | null
+  /** ¿Puede autorizar el acceso quien abrió? Con su membresía de hoy, no con el rol de cuando abrió. */
+  openerCanGrant: boolean
+  /** La propietaria y los administradores de hoy: quienes pueden autorizar el acceso. */
+  granters: { name: string; roleLabel: string }[]
+  /** El mensaje que deja «Pedir acceso de diagnóstico…», tal cual; nulo si no se puede pedir. */
+  accessRequestText: string | null
+  /** Por qué no se puede pedir el acceso en este caso, si no se puede. */
+  accessRequestBlocked: string | null
+  /** «Falta en la guía»: cuándo se marcó, o nulo. */
+  guideGapMarkedAt: string | null
 }
 
 /** Ficha completa del caso: conversación privada, notas internas, adjuntos y permisos. */
@@ -849,14 +1153,14 @@ export async function getSupportCaseForStaff(
   db: Db,
   actor: AdminActor,
   caseId: string,
-): Promise<SupportCaseDetail> {
+): Promise<StaffSupportCaseDetail> {
   const [row] = await db
     .select({ kase: supportCase, orgName: organization.name })
     .from(supportCase)
     .leftJoin(organization, eq(supportCase.organizationId, organization.id))
     .where(eq(supportCase.id, caseId))
     .limit(1)
-  if (!row) throw notFound("Caso")
+  if (!row || !staffSees(actor, row.kase)) throw notFound("Caso")
   const messages = await db
     .select()
     .from(supportMessage)
@@ -878,13 +1182,221 @@ export async function getSupportCaseForStaff(
     organizationId: row.kase.organizationId,
     entityId: row.kase.id,
   })
-  return toDetail(
-    row.kase,
-    messages.map(toMessage),
-    attachments.map(toAttachment),
-    grants.map(toGrant),
-    row.orgName,
+  const access = await accessPeopleOf(db, row.kase)
+  const [gap] = await db
+    .select({ markedAt: supportGuideGap.markedAt })
+    .from(supportGuideGap)
+    .where(eq(supportGuideGap.caseId, row.kase.id))
+    .limit(1)
+  const blocked = await accessRequestBlockedReason(db, row.kase)
+  const pending = await accessRequestPendingOf(db, row.kase)
+  return {
+    ...toDetail(
+      row.kase,
+      messages.map(toMessage),
+      attachments.map(toAttachment),
+      grants.map(toGrant),
+      row.orgName,
+      pending,
+    ),
+    ...access,
+    accessRequestText: blocked || pending ? null : accessRequestText(access.openerCanGrant),
+    accessRequestBlocked: blocked,
+    guideGapMarkedAt: gap?.markedAt.toISOString() ?? null,
+  }
+}
+
+/* ---------- «Pedir acceso de diagnóstico…» (ADR 0181) ---------- */
+
+/** El mensaje fijo del pedido: cambia si quien abrió el caso puede autorizarlo. */
+function accessRequestText(openerCanGrant: boolean): string {
+  return openerCanGrant
+    ? "Para revisarlo necesitamos ver la configuración de tu clínica. En este caso, abre «Acceso diagnóstico de soporte» y pulsa «Autorizar acceso». Tú eliges por cuánto tiempo, máximo 1 hora, y puedes revocarlo cuando quieras. Nunca vemos tus pacientes."
+    : "Para revisarlo necesitamos ver la configuración de tu clínica. Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda, en «Tus casos con soporte», con «Autorizar acceso». Eligen por cuánto tiempo, máximo 1 hora, y pueden revocarlo cuando quieran. Nunca vemos tus pacientes."
+}
+
+/** Quién abrió, si puede autorizar (con su membresía de hoy) y quiénes pueden. */
+async function accessPeopleOf(
+  db: Db,
+  kase: typeof supportCase.$inferSelect,
+): Promise<Pick<StaffSupportCaseDetail, "opener" | "openerCanGrant" | "granters">> {
+  const [profile] = kase.organizationId
+    ? await db
+        .select({ product: orgProfile.product })
+        .from(orgProfile)
+        .where(eq(orgProfile.organizationId, kase.organizationId))
+        .limit(1)
+    : []
+  const product: ClinicalProduct = isClinicalProduct(profile?.product) ? profile.product : "dental"
+  const labelOf = (role: string) =>
+    (ORG_ROLES as readonly string[]).includes(role) ? roleLabel(role as OrgRole, product) : role
+  const people = kase.organizationId
+    ? await db
+        .select({ userId: member.userId, role: member.role, name: user.name })
+        .from(member)
+        .innerJoin(user, eq(user.id, member.userId))
+        .where(eq(member.organizationId, kase.organizationId))
+    : []
+  const [openerUser] = kase.openedBy
+    ? await db.select({ name: user.name }).from(user).where(eq(user.id, kase.openedBy)).limit(1)
+    : []
+  const openerMembership = people.find((person) => person.userId === kase.openedBy)
+  const granters = people
+    .filter((person) => person.role === "owner" || person.role === "admin")
+    .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, "es") : a.role === "owner" ? -1 : 1))
+  return {
+    opener: openerUser
+      ? {
+          name: openerUser.name,
+          // Quien ya no está en la clínica conserva el rol con que abrió.
+          roleLabel: openerMembership ? labelOf(openerMembership.role) : kase.role || "Cuenta",
+        }
+      : null,
+    openerCanGrant: openerMembership?.role === "owner" || openerMembership?.role === "admin",
+    granters: granters.map((person) => ({ name: person.name, roleLabel: labelOf(person.role) })),
+  }
+}
+
+/** Por qué no se pide el acceso en este caso; nulo si se puede pedir. */
+async function accessRequestBlockedReason(db: Db, kase: typeof supportCase.$inferSelect): Promise<string | null> {
+  if (!kase.organizationId) return "Este caso no es de una clínica: no hay configuración que ver"
+  if (kase.status === "resuelto") return "El caso está resuelto: reábrelo para pedir el acceso"
+  if (kase.kind === "cobro") return "Un caso de cobro se revisa sin el acceso de diagnóstico"
+  if (kase.kind === "acceso") return "Es un caso para entrar a su cuenta: no hay configuración que ver"
+  const grant = await activeGrantFor(db, kase.id)
+  if (grant) return `Ya hay un acceso vigente hasta las ${limaTime(grant.expiresAt)}`
+  return null
+}
+
+const limaTimeFormat = new Intl.DateTimeFormat("es-PE", {
+  timeZone: "America/Lima",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+/** «15:30», en la hora de Lima, como la administración. */
+const limaTime = (at: Date): string => limaTimeFormat.format(at)
+
+/** ¿Hay un pedido de acceso sin nada de la clínica después? Entonces no se pide otro. */
+async function accessRequestPendingOf(db: Db, kase: typeof supportCase.$inferSelect): Promise<boolean> {
+  if (!kase.accessRequestedAt) return false
+  const [row] = await db
+    .select({ pending: accessRequestPendingSql })
+    .from(supportCase)
+    .where(eq(supportCase.id, kase.id))
+    .limit(1)
+  return row?.pending === true
+}
+
+/**
+ * Soporte pide el acceso de diagnóstico: deja el mensaje fijo (según si quien
+ * abrió puede autorizarlo), pasa el caso a «Esperando a la clínica» y, desde
+ * ahí, la propietaria y los administradores lo leen y reciben el aviso. Pedirlo
+ * otra vez sin que la clínica haya hecho nada no escribe otro mensaje. El caso
+ * se lee bloqueado: dos pedidos a la vez (un doble clic, dos pestañas, dos
+ * personas) se ordenan y el segundo ve el pedido del primero. Corre dentro de
+ * la transacción que abre la ruta.
+ */
+export async function requestSupportAccess(
+  db: Db,
+  actor: AdminActor,
+  caseId: string,
+  now: Date = new Date(),
+): Promise<{ requestedAt: string; repeated: boolean }> {
+  const kase = await requireStaffCaseFor(db, actor, caseId, { lock: true })
+  const blocked = await accessRequestBlockedReason(db, kase)
+  if (blocked) {
+    const active = blocked.startsWith("Ya hay un acceso vigente")
+    throw new ServiceError(active ? "ACCESS_ACTIVE" : "VALIDATION", active ? 409 : 400, blocked)
+  }
+  if (kase.accessRequestedAt && (await accessRequestPendingOf(db, kase)))
+    return { requestedAt: kase.accessRequestedAt.toISOString(), repeated: true }
+  const { openerCanGrant } = await accessPeopleOf(db, kase)
+  await db.insert(supportMessage).values({
+    caseId: kase.id,
+    organizationId: kase.organizationId,
+    authorKind: "staff",
+    authorUserId: actor.userId,
+    body: accessRequestText(openerCanGrant),
+    createdAt: now,
+  })
+  await staffWrite(
+    db,
+    actor,
+    kase,
+    { status: "esperando_clinica", resolvedAt: null, lastPublicMessageAt: now, accessRequestedAt: now },
+    "support.case.access_requested",
+    { de: kase.status, quienAbrioAutoriza: openerCanGrant },
   )
+  return { requestedAt: now.toISOString(), repeated: false }
+}
+
+/* ---------- «Falta en la guía» (marca del equipo en admin, ADR 0181) ---------- */
+
+export interface SupportGuideGapItem {
+  caseId: string
+  question: string
+  kind: SupportKind
+  /** El tema de la guía según la pantalla desde donde se preguntó, en la guía del producto de la clínica. */
+  topic: string | null
+  markedAt: string
+}
+
+/** Marca que la respuesta de este caso falta en la guía. Marcar dos veces deja una marca. */
+export async function markGuideGap(db: Db, actor: AdminActor, caseId: string): Promise<void> {
+  const kase = await requireStaffCaseFor(db, actor, caseId)
+  await db.insert(supportGuideGap).values({ caseId: kase.id, markedBy: actor.userId }).onConflictDoNothing()
+  await writeAdminAudit(db, actor, {
+    action: "support.case.guide_gap",
+    organizationId: kase.organizationId,
+    entityId: kase.id,
+    metadata: { on: true },
+  })
+}
+
+/** «Ya está en la guía»: quita la marca. */
+export async function unmarkGuideGap(db: Db, actor: AdminActor, caseId: string): Promise<void> {
+  const kase = await requireStaffCaseFor(db, actor, caseId)
+  await db.delete(supportGuideGap).where(eq(supportGuideGap.caseId, kase.id))
+  await writeAdminAudit(db, actor, {
+    action: "support.case.guide_gap",
+    organizationId: kase.organizationId,
+    entityId: kase.id,
+    metadata: { on: false },
+  })
+}
+
+/**
+ * «Para llevar a la guía»: lo marcado, del más viejo al más nuevo. Como el
+ * resto de Conocimiento, sin clínica ni conversación: la pregunta, el tema y la
+ * fecha. Soporte no ve los casos de cobro.
+ */
+export async function listGuideGaps(db: Db, actor: AdminActor): Promise<SupportGuideGapItem[]> {
+  const rows = await db
+    .select({
+      caseId: supportCase.id,
+      question: supportCase.question,
+      kind: supportCase.kind,
+      screen: supportCase.screen,
+      product: orgProfile.product,
+      markedAt: supportGuideGap.markedAt,
+    })
+    .from(supportGuideGap)
+    .innerJoin(supportCase, eq(supportCase.id, supportGuideGap.caseId))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, supportCase.organizationId))
+    .where(visibleKindsFor(actor))
+    .orderBy(asc(supportGuideGap.markedAt))
+    .limit(200)
+  await writeAdminAudit(db, actor, { action: "support.knowledge.list", metadata: { lista: "para_la_guia" } })
+  return rows.map((row) => ({
+    caseId: row.caseId,
+    question: row.question,
+    kind: kindOf(row.kind),
+    topic:
+      helpTopicForScreen(row.screen, helpTopicsFor(isClinicalProduct(row.product) ? row.product : "dental"))?.title ??
+      null,
+    markedAt: row.markedAt.toISOString(),
+  }))
 }
 
 async function staffWrite(
@@ -893,6 +1405,7 @@ async function staffWrite(
   kase: typeof supportCase.$inferSelect,
   values: Partial<typeof supportCase.$inferSelect>,
   auditAction: string,
+  metadata?: Record<string, unknown>,
 ): Promise<void> {
   await db
     .update(supportCase)
@@ -902,12 +1415,26 @@ async function staffWrite(
     action: auditAction,
     organizationId: kase.organizationId,
     entityId: kase.id,
+    ...(metadata ? { metadata } : {}),
   })
 }
 
-async function requireStaffCase(db: Db, caseId: string): Promise<typeof supportCase.$inferSelect> {
-  const [row] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
-  if (!row) throw notFound("Caso")
+/** ¿Ve este actor este caso? Un caso de cobro es solo de la administración (ADR 0094 y 0181). */
+const staffSees = (actor: AdminActor, kase: { kind: string }): boolean => kase.kind !== "cobro" || actor.role === "admin"
+
+/**
+ * El caso para el equipo. Para el rol Soporte, un caso de cobro no existe: el
+ * mismo 404 que un caso que no está, en la ficha y en cada acción.
+ */
+async function requireStaffCaseFor(
+  db: Db,
+  actor: AdminActor,
+  caseId: string,
+  options: { lock?: boolean } = {},
+): Promise<typeof supportCase.$inferSelect> {
+  const query = db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
+  const [row] = options.lock ? await query.for("update") : await query
+  if (!row || !staffSees(actor, row)) throw notFound("Caso")
   return row
 }
 
@@ -929,7 +1456,7 @@ export async function replyToSupportCase(
   body: unknown,
 ): Promise<SupportMessageItem> {
   const text = staffBodyOf(body)
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [message] = await db
     .insert(supportMessage)
     .values({
@@ -962,7 +1489,7 @@ export async function addSupportInternalNote(
   body: unknown,
 ): Promise<SupportMessageItem> {
   const text = staffBodyOf(body)
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [message] = await db
     .insert(supportMessage)
     .values({
@@ -986,7 +1513,7 @@ export async function assignSupportCase(
   caseId: string,
   staffUserId: string | null,
 ): Promise<void> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   await staffWrite(
     db,
     actor,
@@ -1006,7 +1533,7 @@ export async function setSupportCaseStatus(
   caseId: string,
   status: SupportStatus,
 ): Promise<void> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   // Una «Revisión de cobro» se resuelve al decidirla, con su respuesta (ADR 0054).
   if (kase.kind === "cobro" && status === "resuelto") {
     const [pending] = await db
@@ -1031,6 +1558,7 @@ export async function setSupportCaseStatus(
       ...(asksClinic ? { lastPublicMessageAt: new Date() } : {}),
     },
     "support.case.status",
+    { de: kase.status, a: status },
   )
 }
 
@@ -1052,7 +1580,7 @@ export async function replyToSupportCasesMany(
   if (uniqueIds.length === 0) throw validation("Elige al menos un caso")
   if (uniqueIds.length > 50) throw validation("No más de 50 casos por respuesta")
   const rows = await db.select().from(supportCase).where(inArray(supportCase.id, uniqueIds))
-  if (rows.length !== uniqueIds.length) throw notFound("Caso")
+  if (rows.length !== uniqueIds.length || rows.some((row) => !staffSees(actor, row))) throw notFound("Caso")
   const actual = uniqueStrings(rows.map((row) => String(row.organizationId))).sort()
   const confirmed = uniqueStrings(input.confirmOrganizationIds.map((org) => String(org))).sort()
   if (actual.length !== confirmed.length || actual.some((org, index) => org !== confirmed[index])) {
@@ -1111,6 +1639,7 @@ export async function supportKnowledgeGroups(
            count(distinct organization_id)::int as organizations,
            array_agg(distinct screen) as screens, min(created_at) as first_at
     from support_case where status <> 'resuelto'
+      and (kind <> 'cobro' or ${actor.role === "admin"})
     group by dedupe_key order by count(*) desc, min(created_at) asc limit 200`)
   await writeAdminAudit(db, actor, { action: "support.knowledge.list" })
   return rows.map((row) => ({
@@ -1137,7 +1666,7 @@ export async function readSupportDiagnostic(
   actor: AdminActor,
   caseId: string,
 ): Promise<SupportDiagnostic> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   if (!kase.organizationId)
     throw new ServiceError("FORBIDDEN", 403, "Este caso no tiene clínica asociada")
   const orgId = kase.organizationId
@@ -1168,16 +1697,21 @@ export async function readSupportDiagnostic(
       .where(eq(organization.id, orgId))
       .limit(1)
     if (!org) throw notFound("Organización")
-    const [profile] = await tx
+    const [profileRow] = await tx
       .select({
         countryCode: orgProfile.countryCode,
         currency: orgProfile.currency,
         timezone: orgProfile.timezone,
         locale: orgProfile.locale,
+        product: orgProfile.product,
       })
       .from(orgProfile)
       .where(eq(orgProfile.organizationId, orgId))
       .limit(1)
+    const product: ClinicalProduct = isClinicalProduct(profileRow?.product) ? profileRow.product : "dental"
+    const profile = profileRow
+      ? { countryCode: profileRow.countryCode, currency: profileRow.currency, timezone: profileRow.timezone, locale: profileRow.locale }
+      : undefined
     const branches = await tx
       .select({
         id: branch.id,
@@ -1225,7 +1759,11 @@ export async function readSupportDiagnostic(
       agent: agent ?? null,
       channels,
       services: { total: Number(services?.total ?? 0) },
-      membersByRole: membersByRole.map((row) => ({ role: row.role, total: Number(row.total) })),
+      membersByRole: membersByRole.map((row) => ({
+        role: row.role,
+        label: (ORG_ROLES as readonly string[]).includes(row.role) ? roleLabel(row.role as OrgRole, product) : row.role,
+        total: Number(row.total),
+      })),
     }
   })
   await db.insert(supportAccessAudit).values({
@@ -1267,6 +1805,9 @@ export async function revokeSupportGrantAsStaff(
     .where(eq(supportAccessGrant.id, grantId))
     .limit(1)
   if (!grant) throw notFound("Permiso")
+  await requireStaffCaseFor(db, actor, grant.caseId).catch(() => {
+    throw notFound("Permiso")
+  })
   if (grant.revokedAt !== null) return
   await db
     .update(supportAccessGrant)
@@ -1292,7 +1833,7 @@ export async function listSupportAccessAudit(
   actor: AdminActor,
   caseId: string,
 ): Promise<{ id: string; staffUserId: string; action: string; createdAt: string }[]> {
-  await requireStaffCase(db, caseId)
+  await requireStaffCaseFor(db, actor, caseId)
   const rows = await db
     .select()
     .from(supportAccessAudit)
@@ -1310,18 +1851,22 @@ export async function listSupportAccessAudit(
 /* ---------- Métricas: conteos y tiempos, nunca preguntas sin enviar ---------- */
 
 export async function supportMetrics(db: Db, actor: AdminActor): Promise<SupportMetrics> {
+  // Soporte tampoco cuenta los casos de cobro: no existen para su rol.
+  const visible = visibleKindsFor(actor)
   const byStatus = await db
     .select({ status: supportCase.status, total: count() })
     .from(supportCase)
+    .where(visible)
     .groupBy(supportCase.status)
   const byKind = await db
     .select({ kind: supportCase.kind, total: count() })
     .from(supportCase)
+    .where(visible)
     .groupBy(supportCase.kind)
   const [withoutAssignee] = await db
     .select({ total: count() })
     .from(supportCase)
-    .where(and(isNull(supportCase.assigneeStaffId), ne(supportCase.status, "resuelto")))
+    .where(and(isNull(supportCase.assigneeStaffId), ne(supportCase.status, "resuelto"), visible))
   const [grants] = await db
     .select({ total: count() })
     .from(supportAccessGrant)
@@ -1331,6 +1876,7 @@ export async function supportMetrics(db: Db, actor: AdminActor): Promise<Support
       select c.id, c.created_at as opened, min(m.created_at) as first_reply
       from support_case c join support_message m on m.case_id = c.id
       where m.author_kind = 'staff' and m.is_internal = false
+        and (c.kind <> 'cobro' or ${actor.role === "admin"})
       group by c.id
     ) replied`)
   await writeAdminAudit(db, actor, { action: "support.metrics.read" })
@@ -1453,7 +1999,7 @@ export async function staffSupportAttachmentUrl(
   attachmentId: string,
   storage: SupportStorage,
 ): Promise<string> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [attachment] = await db
     .select()
     .from(supportAttachment)
@@ -1529,10 +2075,11 @@ export async function markAccountSupportCaseSeen(
  */
 export async function assertStaffAttachmentTarget(
   db: Db,
+  actor: AdminActor,
   caseId: string,
   messageId?: string,
 ): Promise<void> {
-  const kase = await requireStaffCase(db, caseId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   if (messageId) {
     const [message] = await db
       .select()
@@ -1555,8 +2102,8 @@ export async function staffAttachToSupportCase(
     size: number
   },
 ): Promise<SupportAttachmentItem> {
-  await assertStaffAttachmentTarget(db, caseId, input.messageId)
-  const kase = await requireStaffCase(db, caseId)
+  await assertStaffAttachmentTarget(db, actor, caseId, input.messageId)
+  const kase = await requireStaffCaseFor(db, actor, caseId)
   const [attachment] = await db
     .insert(supportAttachment)
     .values({
@@ -1579,27 +2126,33 @@ export async function staffAttachToSupportCase(
   return toAttachment(attachment)
 }
 
+export interface AdminSupportAttention {
+  /** Los casos que nos esperan: el número de «Soporte» en el menú y las filas de Inicio. */
+  openCount: number
+  waitingClinicCount: number
+  /** Desde cuándo espera el que más espera. */
+  oldestWaitingSince: string | null
+}
+
 /**
- * Atención pendiente de soporte para el Inicio admin: solo agregados
- * (conteos y fecha del más antiguo sin resolver), sin textos de clientes.
- * Sin auditoría: es un conteo, no una lectura de datos de clínicas.
+ * Atención pendiente de soporte para el Inicio admin: solo agregados, sin
+ * textos de clientes. Cuenta con la misma regla de la cola («nos espera»).
+ * Sin `actor`, o con el rol Soporte, no cuenta los casos de cobro. Sin
+ * auditoría: es un conteo, no una lectura de datos de clínicas.
  */
-export async function getAdminSupportAttention(
-  ownerTx: Db,
-): Promise<{ openCount: number; waitingClinicCount: number; oldestOpenAt: string | null }> {
-  const [row] = await ownerTx.execute<{
-    open_count: number
-    waiting_clinic_count: number
-    oldest_open_at: Date | string | null
-  }>(sql`
-    select count(*) filter (where status in ('abierto', 'en_atencion'))::int as open_count,
-           count(*) filter (where status = 'esperando_clinica')::int as waiting_clinic_count,
-           min(created_at) filter (where status <> 'resuelto') as oldest_open_at
-    from support_case`)
+export async function getAdminSupportAttention(ownerTx: Db, actor?: AdminActor): Promise<AdminSupportAttention> {
+  const [row] = await ownerTx
+    .select({
+      openCount: sql<number>`count(*) filter (where ${waitingOnUsSql})::int`,
+      waitingClinicCount: sql<number>`count(*) filter (where ${supportCase.status} = 'esperando_clinica')::int`,
+      oldestWaitingSince: sql`min(${waitingSinceSql})`,
+    })
+    .from(supportCase)
+    .where(visibleKindsFor(actor))
   return {
-    openCount: Number(row?.open_count ?? 0),
-    waitingClinicCount: Number(row?.waiting_clinic_count ?? 0),
-    oldestOpenAt: row?.oldest_open_at ? new Date(row.oldest_open_at).toISOString() : null,
+    openCount: Number(row?.openCount ?? 0),
+    waitingClinicCount: Number(row?.waitingClinicCount ?? 0),
+    oldestWaitingSince: dateOrNull(row?.oldestWaitingSince)?.toISOString() ?? null,
   }
 }
 
@@ -1696,6 +2249,8 @@ export async function attachToAccountSupportCase(
     })
     .returning()
   if (!attachment) throw new Error("No se pudo registrar el adjunto")
+  // El adjunto de la cuenta va siempre suelto: es su respuesta, como en la clínica.
+  await clinicActed(db, kase, attachment.id, true)
   return toAttachment(attachment)
 }
 

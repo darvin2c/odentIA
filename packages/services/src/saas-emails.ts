@@ -1,6 +1,7 @@
 // Correos de Plan y pagos con el molde común de `@odentia/mail` (issue 163):
 // la variante «Plazo» lleva banda ámbar mientras corre un plazo y roja cuando
 // ya pasó; cada aviso tiene su botón a Plan y pagos del panel.
+import { type ClinicalProduct, countryDisplayName, productWords } from "@odentia/clinical"
 import { type EmailFact, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "@odentia/mail"
 import type { SaasAlert, SaasAlertFamily } from "./saas-terms.js"
 
@@ -151,13 +152,36 @@ export function saasChargeIssuedEmail(input: {
   })
 }
 
-/** Mañana termina la gracia (ADR 0065): el último aviso antes de pasar a solo lectura. */
+/**
+ * Mañana termina la gracia (ADR 0065): el último aviso antes de pasar a solo
+ * lectura. Con un comprobante en revisión (`inReview`) no pide registrar otro
+ * (el cargo no lo acepta mientras ese espera) y dice lo mismo que la franja:
+ * se está revisando y, si no se confirma antes, mañana pasa a solo lectura.
+ */
 export function saasRestrictionSoonEmail(input: {
   clinic: string
   amounts: readonly string[]
   url: string | null
   brand?: MailBrand
+  inReview?: boolean
 }): MailTemplate {
+  if (input.inReview) {
+    const who = mailBrandName(input.brand)
+    return renderEmail({
+      brand: input.brand,
+      subject: "Mañana tu clínica pasa a solo lectura",
+      preview: `${who} está revisando tu comprobante: si no se confirma hoy, mañana la clínica pasa a solo lectura.`,
+      title: "Mañana tu clínica pasa a solo lectura",
+      band: { tone: "vencido", text: "Comprobante en revisión" },
+      paragraphs: [
+        `${who} está revisando el comprobante de ${input.clinic}. Si no se confirma antes, mañana el equipo podrá ver todo, pero no guardar, y Sofi no responderá.`,
+      ],
+      facts: input.amounts.map((value) => ({ label: "Monto pendiente", value })),
+      ...action("Ver Plan y pagos", input.url),
+      note: "No tienes que registrar otro comprobante. No se pierde ningún dato.",
+      reason: reason(input.clinic, input.brand),
+    })
+  }
   return renderEmail({
     brand: input.brand,
     subject: "Mañana tu clínica pasa a solo lectura",
@@ -244,6 +268,42 @@ export function waitlistReceivedEmail(input: {
     note: input.replyTo ? "Si te equivocaste en un dato, responde este correo." : "Si te equivocaste en un dato, te lo preguntamos cuando te escribamos.",
     reason: `Te escribimos porque pediste una invitación en la web de ${name}.`,
     ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),
+  })
+}
+
+/**
+ * Aviso al buzón de Fundadores (FOUNDERS_EMAIL) de cada solicitud nueva: qué
+ * clínica, de qué producto y de dónde, con el botón a esa solicitud en la
+ * administración. Es interno, así que va con la marca de odentIA aunque la
+ * solicitud sea de otro producto. Nunca lleva el correo ni el celular de quien
+ * pidió: se leen en la solicitud, detrás del segundo factor de la administración.
+ */
+export function waitlistTeamNoticeEmail(input: {
+  clinicName: string
+  product: ClinicalProduct
+  city: string
+  /** ISO 3166-1 alfa-2. */
+  countryCode: string
+  /** `<ADMIN_URL>/waitlist?solicitud=<id>`; sin la dirección de la administración, sin botón. */
+  reviewUrl: string | null
+}): MailTemplate {
+  const brand = mailBrandName(productWords(input.product).brand)
+  return renderEmail({
+    subject: `Solicitud nueva en la lista de espera: ${input.clinicName} (${brand})`,
+    preview: `${input.clinicName}, de ${input.city}, pidió entrar a ${brand}.`,
+    internal: "Lista de espera",
+    title: `${input.clinicName} pidió entrar a ${brand}`,
+    paragraphs: [
+      `Llegó una solicitud nueva a la lista de espera de ${brand}. Quién la pidió y cómo escribirle están en la solicitud, no en este correo.`,
+    ],
+    facts: [
+      { label: "Producto", value: brand },
+      { label: "Clínica", value: input.clinicName },
+      { label: "Ciudad", value: input.city },
+      { label: "País", value: countryDisplayName(input.countryCode) },
+    ],
+    ...(input.reviewUrl ? action("Abrir la solicitud", input.reviewUrl) : { note: "La encuentras en la administración, en Lista de espera." }),
+    reason: "Aviso interno de la administración: cada solicitud nueva de la lista de espera llega a este buzón.",
   })
 }
 

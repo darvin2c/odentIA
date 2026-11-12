@@ -24,6 +24,8 @@ import {
   useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
+import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
+import type { ClinicalProduct } from "@odentia/clinical"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
@@ -31,6 +33,7 @@ import { ShieldAlert, UserSearch } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
+import { useOrgProducts } from "../../components/product"
 import { UserDetailSkeleton, UsersPageSkeleton, UsersSkeleton } from "../../components/skeletons/users"
 import { useIsAdmin } from "../../lib/session"
 
@@ -106,6 +109,25 @@ const reasonSchema = z.object({
 /** Cómo entra cada cuenta, en palabras: Better Auth llama «credential» a la contraseña. */
 const PROVIDER_LABEL: Record<string, string> = { credential: "contraseña", google: "Google", microsoft: "Microsoft" }
 
+/** Lo que pide un caso de recuperación: el mismo nombre en el formulario y en la ficha. */
+const RECOVERY_KINDS = [
+  { value: "acceso", label: "Recuperar acceso" },
+  { value: "propiedad", label: "Disputa de propiedad" },
+] as const
+
+/** En qué va un caso de recuperación: ejecutarlo exige dos aprobaciones, una de admin. */
+const RECOVERY_STATUS: Record<string, string> = {
+  pendiente: "Por aprobar",
+  aprobada: "Aprobado, por ejecutar",
+  rechazada: "Rechazado",
+  ejecutada: "Ejecutado",
+}
+
+/** El rol en la clínica, en palabras y con su producto («Propietario», «Médico»); uno desconocido, tal cual. */
+function memberRoleLabel(role: string, product: ClinicalProduct | undefined): string {
+  return (ORG_ROLES as readonly string[]).includes(role) ? roleLabel(role as OrgRole, product) : role
+}
+
 const STATUS_OPTIONS = [
   { value: "todos", label: "Todos" },
   { value: "activos", label: "Activos" },
@@ -126,6 +148,8 @@ function UsersPage() {
   const [recoveryOpen, setRecoveryOpen] = useState(false)
 
   const isAdmin = useIsAdmin()
+  // El producto de cada clínica dice quién atiende: «Odontólogo» en odentIA, «Médico» en latidIA.
+  const products = useOrgProducts().data
 
   const listQuery = useQuery({
     queryKey: ["admin-users", activeSearch, status],
@@ -440,7 +464,7 @@ function UsersPage() {
                   <ul className="mt-1 flex flex-col gap-1 text-muted-foreground">
                     {detail.memberships.map((m) => (
                       <li key={m.organizationId}>
-                        {m.organizationName} · {m.role}
+                        {m.organizationName} · {memberRoleLabel(m.role, products?.[m.organizationId])}
                       </li>
                     ))}
                     {detail.memberships.length === 0 ? <li>Sin clínicas.</li> : null}
@@ -464,7 +488,8 @@ function UsersPage() {
                     <ul className="mt-1 flex flex-col gap-1 text-muted-foreground">
                       {detail.recoveryCases.map((r) => (
                         <li key={r.id}>
-                          {r.kind} · {r.status}
+                          {RECOVERY_KINDS.find((kind) => kind.value === r.kind)?.label ?? r.kind} ·{" "}
+                          {RECOVERY_STATUS[r.status] ?? r.status}
                         </li>
                       ))}
                     </ul>
@@ -536,10 +561,7 @@ function UsersPage() {
               <field.SelectField
                 id="rec-kind"
                 label="Tipo"
-                options={[
-                  { value: "acceso", label: "Recuperar acceso" },
-                  { value: "propiedad", label: "Disputa de propiedad" },
-                ]}
+                options={[...RECOVERY_KINDS]}
               />
             )}
           </recoveryForm.AppField>

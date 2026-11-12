@@ -155,6 +155,12 @@ const supportCaseDetail = supportCaseItem.extend({
   messages: z.array(supportMessageItem),
   attachments: z.array(supportAttachmentItem),
   grants: z.array(supportGrantItem),
+  /** Cuándo pidió soporte el acceso de diagnóstico (desde ahí lo ven también quienes lo autorizan). */
+  accessRequestedAt: z.string().nullable().optional(),
+  /** El pedido sigue en pie: nadie de la clínica hizo nada después. */
+  accessRequestPending: z.boolean().optional(),
+  /** A quien lee un caso que no abrió (la propietaria, por el pedido de acceso): quién lo abrió. */
+  openedByOther: z.object({ name: z.string(), roleLabel: z.string() }).nullable().optional(),
 })
 export const casesEnvelope = z.object({ data: z.array(supportCaseItem) })
 export type { SupportCaseItem }
@@ -364,6 +370,12 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
             label="Consulta inicial del caso"
             className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
           />
+          {kase.openedByOther ? (
+            <p className="text-sm text-muted-foreground">
+              Lo abrió {kase.openedByOther.name}
+              {kase.openedByOther.roleLabel ? ` (${kase.openedByOther.roleLabel})` : ""}.
+            </p>
+          ) : null}
 
           {detail.isPending ? (
             <p className="text-sm text-muted-foreground">Cargando la conversación…</p>
@@ -478,7 +490,11 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
               ) : null}
 
               {!canGrant ? (
-                <p className="text-sm text-muted-foreground">Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte.</p>
+                <p className="text-sm text-muted-foreground">
+                  {kase.accessRequestPending && kase.status === "esperando_clinica" && !activeGrant
+                    ? "Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda."
+                    : "Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte."}
+                </p>
               ) : resolved && !activeGrant ? (
                 <p className="text-sm text-muted-foreground">
                   El caso está resuelto: si soporte necesita ver el diagnóstico de tu clínica, reábrelo y autoriza el acceso.

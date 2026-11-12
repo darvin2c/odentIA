@@ -49,7 +49,8 @@ interface CostActionList {
   professionals: Array<{ id: string; name: string; count: number }>
   channels: Array<{ channel: string; count: number }>
   askers: Array<{ name: string; count: number }>
-  days: Array<{ day: string; costMicros: number; ahead: boolean }>
+  /** `ahead`: aún no llega (sin valor); `today`: el único que va «hasta hoy». */
+  days: Array<{ day: string; costMicros: number; ahead: boolean; today: boolean }>
   questions: { counted: number; included: number; free: number }
 }
 
@@ -1011,7 +1012,8 @@ export function OrgSpending({
                 key: day.day,
                 label: dayLabel(day.day, true),
                 short: dayLabel(day.day),
-                partial: day.ahead,
+                // Solo hoy sigue sumando; los días que vienen no tienen valor.
+                partial: day.today,
               }))}
               bars={[
                 {

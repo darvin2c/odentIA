@@ -3,18 +3,21 @@ import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
+  addWaitlistFollowUp,
   discardWaitlistRequest,
   FOUNDER_INVITATION_DAYS,
   founderInvitationEmail,
   founderOffer,
   getSignupModes,
+  getWaitlistRequest,
+  hideWaitlistFollowUp,
   inviteFromWaitlist,
   listWaitlist,
   markInvitationSent,
-  SAAS_WAITLIST_STATUSES,
   ServiceError,
   setSignupMode,
   setWaitlistNote,
+  WAITLIST_STAGES,
 } from "@odentia/services"
 import { saasPlan } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
@@ -47,9 +50,19 @@ function adminOf(c: Context): AdminActor {
   return actor
 }
 
+const stageFilter = z.enum([...WAITLIST_STAGES, "todas"])
 const listQuery = z.object({
-  status: z.enum([...SAAS_WAITLIST_STATUSES, "todas"]).optional(),
+  stage: stageFilter.optional(),
+  /** El nombre de antes, que aún manda una pestaña abierta antes del despliegue: sus cuatro valores son etapas. */
+  status: stageFilter.optional(),
   q: z.string().trim().max(120).optional(),
+})
+
+/** Lo que se anota en el seguimiento: la regla de cada dato la dice el servicio (`addWaitlistFollowUp`). */
+const followUpBody = z.strictObject({
+  body: z.string({ error: "Escribe qué pasó" }).max(2000, "Usa como máximo 2000 caracteres"),
+  followUpOn: z.string().nullable().optional(),
+  adminOnly: z.boolean().optional(),
 })
 
 /** «domingo 1 de noviembre», en UTC: el instante exacto lo dice el enlace. */
@@ -73,7 +86,7 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     staffOf(c)
     return runService(c, 200, () =>
-      deps.ownerDb.transaction((tx) => listWaitlist(tx, { status: parsed.data.status, search: parsed.data.q })),
+      deps.ownerDb.transaction((tx) => listWaitlist(tx, { stage: parsed.data.stage ?? parsed.data.status, search: parsed.data.q })),
     )
   })
 
@@ -96,6 +109,35 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
     }))
   })
 
+  // Una solicitud con su seguimiento, para su cajón: no depende del filtro de la lista.
+  app.get("/:id", (c) => {
+    const actor = staffOf(c)
+    return runService(c, 200, () => deps.ownerDb.transaction((tx) => getWaitlistRequest(tx, actor, c.req.param("id"))))
+  })
+
+  /** Anota un contacto (soporte también) y, si hay que volver, el día. */
+  app.post("/:id/follow-ups", async (c) => {
+    const parsed = followUpBody.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const actor = staffOf(c)
+    return runService(c, 201, () => deps.ownerDb.transaction((tx) => addWaitlistFollowUp(tx, actor, c.req.param("id"), parsed.data)))
+  })
+
+  /**
+   * Ocultar una entrada a soporte es de la administración, y no se deshace. El
+   * rol lo revisa el servicio, con su propio motivo («Solo el rol
+   * Administración oculta una entrada a soporte»), no el de invitar o descartar.
+   */
+  app.post("/follow-ups/:entryId/hide", (c) => {
+    const actor = staffOf(c)
+    return runService(c, 200, async () => {
+      await deps.ownerDb.transaction((tx) => hideWaitlistFollowUp(tx, actor, c.req.param("entryId")))
+      return { ok: true }
+    })
+  })
+
+  // La ruta vieja de la nota: la usa una pestaña abierta antes de este despliegue y ahora agrega una entrada.
+  // Se borra en la entrega siguiente.
   app.put("/:id/note", async (c) => {
     const parsed = z
       .strictObject({ note: z.string().max(2000, "La nota puede tener como máximo 2000 caracteres").nullable() })

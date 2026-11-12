@@ -10,6 +10,7 @@ import {
   submitWaitlistRequest,
   waitlistInputSchemaFor,
   waitlistReceivedEmail,
+  waitlistTeamNoticeEmail,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -23,6 +24,13 @@ const MAX_POSTS = 5
 const MAX_BUCKETS = 10000
 /** Lo que la web vuelve a pedir: un cambio de precio en la administración se ve en menos de un minuto (decisión 14). */
 const PRICING_MAX_AGE_S = 30
+/**
+ * Avisos al equipo por hora en este proceso: de sobra para la lista de espera,
+ * poco para llenar el buzón si alguien abusa del formulario. Pasado el tope la
+ * solicitud se guarda igual y sale en Inicio de la administración.
+ */
+const TEAM_NOTICES_PER_HOUR = 20
+const HOUR_MS = 60 * 60 * 1000
 
 /**
  * Lo público de Fundadores (issue 165), terminal: nunca sigue hacia
@@ -31,7 +39,8 @@ const PRICING_MAX_AGE_S = 30
  * - `GET /pricing`: los planes con «Mostrar en la web»; lo lee la web de
  *   marketing al servir cada página. Nunca los lugares que quedan.
  * - `POST /waitlist`: la solicitud de la web. Guarda con `ownerDb` y después
- *   envía la copia; si el correo falla, la solicitud queda igual.
+ *   envía la copia a quien pidió y el aviso al buzón del equipo, cada uno por
+ *   su lado: si un correo falla, el otro sale y la solicitud queda igual.
  * - `GET /invitation/:token`: lo que muestra «Crea tu cuenta» con una
  *   invitación. Sin invitación vigente responde 404 sin decir por qué.
  */
@@ -43,9 +52,15 @@ export function createPublicFoundersRoute(deps: {
   replyTo?: string | undefined
   /** El producto del dominio de la petición: la solicitud lo guarda (decisión 17 del issue 229). */
   productOf?: (c: Context) => ClinicalProduct
+  /** La administración (ADMIN_URL): el aviso al equipo enlaza a la solicitud. */
+  adminURL?: string | undefined
+  /** Buzón del equipo que recibe el aviso de cada solicitud nueva (FOUNDERS_EMAIL); sin él, no sale. */
+  teamEmail?: string | undefined
 }) {
   const app = new Hono()
   const buckets = new Map<string, { expiresAt: number; posts: number }>()
+  /** Cuándo salió cada aviso al equipo de la última hora, del más viejo al más nuevo. */
+  const noticesSent: number[] = []
   const address: RegistrationRemoteAddress =
     deps.remoteAddress ??
     ((c) => {
@@ -109,6 +124,35 @@ export function createPublicFoundersRoute(deps: {
     return null
   }
 
+  /**
+   * Una sola vez por solicitud nueva y sin reintentos: si no sale, solo su id
+   * va al registro (nunca los datos de quien pidió) y la solicitud sigue en
+   * Inicio de la administración.
+   */
+  const noticeTeam = async (to: string, id: string, product: ClinicalProduct, data: { clinicName: string; city: string; countryCode: string }) => {
+    const now = Date.now()
+    while ((noticesSent[0] ?? now) <= now - HOUR_MS) noticesSent.shift()
+    if (noticesSent.length >= TEAM_NOTICES_PER_HOUR) {
+      console.error(`Fundadores: pasó el tope de ${TEAM_NOTICES_PER_HOUR} avisos por hora; la solicitud ${id} queda sin aviso y sale en Inicio`)
+      return
+    }
+    noticesSent.push(now)
+    try {
+      await deps.mailer.send({
+        to,
+        ...waitlistTeamNoticeEmail({
+          clinicName: data.clinicName,
+          product,
+          city: data.city,
+          countryCode: data.countryCode,
+          reviewUrl: deps.adminURL ? `${deps.adminURL.replace(/\/+$/, "")}/waitlist?solicitud=${id}` : null,
+        }),
+      })
+    } catch {
+      console.error(`Fundadores: no salió el aviso al equipo de la solicitud ${id}`)
+    }
+  }
+
   app.post("/waitlist", async (c) => {
     c.header("Cache-Control", "no-store")
     const blocked = limited(c)
@@ -135,6 +179,8 @@ export function createPublicFoundersRoute(deps: {
       } catch {
         console.error(`Fundadores: no salió la copia de la solicitud ${result.id}`)
       }
+      // Aparte de la copia: que la de quien pidió rebote no deja al equipo sin saberlo.
+      if (deps.teamEmail) await noticeTeam(deps.teamEmail, result.id, product, parsed.data)
     }
     return c.json({ ok: true, answerDays: result.answerDays }, 201)
   })

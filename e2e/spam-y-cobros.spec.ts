@@ -212,7 +212,8 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
   const [review] = await fixtureDb.select({ caseId: saasActionReview.supportCaseId }).from(saasActionReview).where(eq(saasActionReview.actionId, carmen!.id))
 
   await gotoHydrated(page, hostUrl("admin", `/support?caso=${review!.caseId}`))
-  const panel = page.getByRole("region", { name: "Revisión de cobro" })
+  // La ficha del caso se nombra con la consulta («Revisión de cobro · …»): la revisión es la región de nombre exacto.
+  const panel = page.getByRole("region", { name: "Revisión de cobro", exact: true })
   await expect(panel.getByText("El agente respondió mal o no ayudó")).toBeVisible()
   await expect(panel.getByText("«Le dio un horario del domingo que no tenemos.»")).toBeVisible()
   await panel.getByRole("button", { name: "Leer la conversación" }).click()
