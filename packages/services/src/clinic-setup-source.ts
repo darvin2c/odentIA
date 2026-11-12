@@ -11,13 +11,14 @@
  */
 import { readFileSync } from "node:fs"
 import { extname, resolve } from "node:path"
-import { type ClinicalProduct, clinicalProfileFor } from "@odentia/clinical"
+import { type ClinicalProduct, clinicalProfileFor, postalAddressErrors } from "@odentia/clinical"
 import { brandPaper, type MailBrand } from "@odentia/mail"
 import { z } from "zod"
 import { type ClinicSetupPlan, clinicSetupPlanSchema } from "./clinic-setup-plan.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
 import { KNOWLEDGE_BASICS } from "./knowledge.js"
+import { COUNTRY_CURRENCY } from "./organization-profile.js"
 
 const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }
 
@@ -126,8 +127,34 @@ export function buildClinicSetupPlan(
     letterhead: letterhead ? { ...letterhead, file: embed(letterhead.file) } : undefined,
   })
   const library = loadLibrary(seedsDir, plan.product, plan.countryCode)
-  const required = clinicalProfileFor(plan.countryCode).services?.required ?? false
+  const profile = clinicalProfileFor(plan.countryCode)
+  const required = profile.services?.required ?? false
   const problems: string[] = []
+  // Lo que la administración rechazaría, dicho aquí: la dirección de cada sede según el país.
+  for (const branch of plan.branches) {
+    const errors = postalAddressErrors(profile, {
+      line: branch.addressLine1,
+      city: branch.city,
+      district: branch.district,
+      region: branch.region,
+      postalCode: branch.postalCode,
+      country: plan.countryCode,
+    })
+    for (const message of Object.values(errors)) problems.push(`Sede «${branch.name}»: ${message}`)
+  }
+  // Y las monedas: la del país y, si cobra en otra, esa con su cambio de hoy.
+  const base = COUNTRY_CURRENCY[plan.countryCode]
+  const second = plan.identity?.secondCurrency ?? null
+  if (second && !plan.identity?.exchangeRate) problems.push(`Para cobrar en ${second} hace falta el cambio de hoy (identity.exchangeRate)`)
+  const charges = (currency: string) => currency === base || currency === second
+  const currencies = [base, second].filter(Boolean).join(" y ")
+  plan.services.forEach((service, index) => {
+    if (!charges(service.currency))
+      problems.push(`Servicio ${index + 1} («${service.name ?? service.template}»): cobra en ${service.currency} y la clínica cobra en ${currencies}: agrega identity.secondCurrency`)
+  })
+  for (const expense of plan.recurringExpenses)
+    if (expense.currency && !charges(expense.currency))
+      problems.push(`Gasto «${expense.concept}»: va en ${expense.currency} y la clínica cobra en ${currencies}`)
   plan.services.forEach((service, index) => {
     if (!service.template) {
       if (required && !service.officialCode) problems.push(`Servicio ${index + 1} («${service.name}»): uno propio lleva su código oficial`)
