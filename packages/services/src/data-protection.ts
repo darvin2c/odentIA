@@ -363,13 +363,18 @@ export async function renderDataProtectionPdf(
   )
   section("3. Encargados y transferencias internacionales")
   kit.bullets(
-    [
-      ...view.processors.inUse,
-      ...view.processors.always,
-      ...view.processors.forImport.map((p) => ({ ...p, detail: "solo si la clínica pidió cargar sus datos" })),
-    ].map((p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`),
+    [...view.processors.inUse, ...view.processors.always].map(
+      (p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`,
+    ),
     { size: SIZE.dense },
   )
+  if (view.processors.forImport.length)
+    kit.text(
+      `Solo si la clínica envió sus datos para cargarlos al empezar, y hasta eliminar esos archivos (al terminar la carga o, a más tardar, a los 30 días): ${view.processors.forImport
+        .map((p) => `${p.name} (${p.country})`)
+        .join(", ")}.`,
+      { size: SIZE.dense },
+    )
   kit.text(
     "Los que están fuera del país son una transferencia internacional autorizada en el contrato de encargo.",
     {

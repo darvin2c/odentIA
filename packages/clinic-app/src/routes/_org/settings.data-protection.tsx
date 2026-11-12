@@ -196,6 +196,11 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
         </div>
         {view.processors.inUse.length ? <ProcessorList title="Porque la clínica los usa" items={view.processors.inUse} /> : null}
         <ProcessorList title={`Siempre, porque ${appWords().name} funciona así`} items={view.processors.always} />
+        {view.processors.notUsed.length ? (
+          <p className="text-sm text-muted-foreground">
+            No usa: {missingWords(view.processors.notUsed)}. Si los conecta, aparecen aquí solos.
+          </p>
+        ) : null}
         {view.processors.forImport.length ? (
           <div className="flex flex-col gap-2">
             <ProcessorList title="Solo si la clínica pide cargar sus datos" items={view.processors.forImport} />
@@ -203,11 +208,6 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
               Los archivos que envía para la carga se eliminan al terminar o, a más tardar, a los 30 días de recibidos.
             </p>
           </div>
-        ) : null}
-        {view.processors.notUsed.length ? (
-          <p className="text-sm text-muted-foreground">
-            No usa: {missingWords(view.processors.notUsed)}. Si los conecta, aparecen aquí solos.
-          </p>
         ) : null}
       </section>
 

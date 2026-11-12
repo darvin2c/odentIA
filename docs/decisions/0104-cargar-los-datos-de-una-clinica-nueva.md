@@ -38,7 +38,7 @@ Lo que no se negocia: la persona es única (0001), nunca se une a dos personas p
 - **Beneficio:** una clínica empieza con sus pacientes y sus vínculos, sin duplicados y con cada fila explicada: entró, ya estaba, no entró y por qué, o quedó fuera al preparar.
 - **Sacrificio:** depende del equipo de odentIA (no es autoservicio). No lee el Excel antiguo (`.xls`: se guarda como `.xlsx`), PDF ni fotos. Un teléfono fijo sin código no se puede llevar a E.164 y se carga sin él solo si el mapa lo pide. El nombre en una sola columna no se separa: queda en «Faltan datos».
 - **Orden de los datos:** primero la clínica (sedes, equipo, servicios) y los pacientes; las citas y los saldos el día de corte; la historia anterior, después. Las etapas y lo que hoy se carga están en la skill.
-- **Pendiente legal**, antes de la primera clínica real: el contrato de encargo aceptado por la clínica, y Anthropic y el proveedor del buzón de soporte entre los subencargados.
+- **Lo legal:** la clínica acepta el contrato de encargo antes de que se abra su lista. Desde la versión 2026-11-12 el contrato promete eliminar los archivos de la carga al terminar o, a más tardar, a los 30 días, y nombra como subencargados de la carga a Cloudflare (Email Routing), Gmail (buzón de soporte) y Anthropic (Claude), que solo ve cómo es el archivo (`data-processors.ts`, uso `carga`).
 - **Revisar** cuando se repitan los formatos (pasar a «Pegar mi lista» en la clínica) o cuando haga falta traer citas, saldos o historia.
 
 ## Referencias

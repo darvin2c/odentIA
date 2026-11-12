@@ -64,7 +64,7 @@ export const SUBENCARGADOS: LegalDoc = {
       title: "Uso de los datos para entrenar modelos",
       blocks: [
         "odentIA no usa los datos de las clínicas ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso.",
-        "Con Anthropic (Claude) solo se prepara la carga de datos: ve cómo es el archivo (columnas, formatos y cifras) y lo que se corrige a mano en alguna fila, nunca la lista de pacientes.",
+        "Anthropic (Claude) solo interviene para ayudar al equipo de odentIA a preparar la carga de datos.",
       ],
     },
     {

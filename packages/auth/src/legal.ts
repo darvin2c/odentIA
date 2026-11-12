@@ -28,7 +28,7 @@ export const LEGAL = {
     effectiveAt: "2026-11-12",
     changes: [
       "Los archivos que la clínica envía para cargar sus datos se eliminan al terminar la carga o, a más tardar, a los 30 días.",
-      "Se suman los proveedores de esa carga (el correo de soporte y Claude), que solo intervienen si la clínica la pide.",
+      "Se suman los proveedores de esa carga: Cloudflare y Google (Gmail), por el correo de soporte, y Anthropic (Claude), que solo intervienen si la clínica la pide.",
     ] as string[],
   },
 } as const

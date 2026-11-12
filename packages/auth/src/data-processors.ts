@@ -189,14 +189,15 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
   },
   // La carga de los datos de una clínica nueva (ADR 0104): la clínica envía su
   // lista al correo de soporte, que entra por Cloudflare y se lee en Gmail, y la
-  // carga se prepara con Claude, que corre los comandos de la skill y solo ve
-  // cómo es el archivo (`clinic-import-cli.ts` no muestra nombres ni números).
+  // carga se prepara con Claude, que corre los comandos de la skill y ve cómo es
+  // el archivo: `clinic-import-cli.ts` tapa lo que va entre «» y, sin fila de
+  // encabezados, `profileColumns` muestra la forma de la primera fila, no su texto.
   {
     id: "carga-correo",
     name: "Cloudflare, Inc. (Cloudflare Email Routing)",
     short: "Cloudflare (correo de soporte)",
     purpose:
-      "Recibir en el correo de soporte los archivos que la clínica envía para cargar sus datos y pasarlos al buzón, si la clínica lo pide.",
+      "Recibir en el correo de soporte los archivos que la clínica envía para cargar sus datos y pasarlos al buzón.",
     data: "El correo y sus archivos adjuntos, solo de paso.",
     receives: "El correo con los archivos de la carga, de paso",
     country: "Estados Unidos",
@@ -217,9 +218,9 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
     id: "carga-claude",
     name: "Anthropic, PBC (Claude)",
     short: "Claude (Anthropic)",
-    purpose: "Preparar la carga: ver cómo es el archivo de la clínica y armar el plan con que se cargan sus datos.",
-    data: "Cómo es el archivo (columnas, formatos y cifras) y lo que se corrige a mano en alguna fila. No recibe la lista.",
-    receives: "Cómo es el archivo de la carga, sin la lista",
+    purpose: "Ayudar al equipo de odentIA a preparar la carga de los datos que la clínica envía.",
+    data: "Lo necesario para preparar la carga.",
+    receives: "Lo necesario para preparar la carga",
     country: "Estados Unidos",
     use: { kind: "carga" },
   },
