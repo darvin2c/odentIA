@@ -224,6 +224,8 @@ export interface ChatMessage {
   location?: { latitude: number; longitude: number; name?: string; address?: string } | null
   /** Se borró: era spam y pasaron 90 días. */
   redactedAt?: string | null
+  /** Los botones de respuesta con que salió, por su título: los recibe la persona; aquí solo se leen. */
+  buttons?: string[]
   createdAt: string
 }
 

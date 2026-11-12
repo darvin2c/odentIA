@@ -31,7 +31,7 @@ const PAGE_MIN_WIDTH = 848
 const PAGE_WITH_CONTEXT_WIDTH = 1248
 const COLUMN_ID = "columna-de-avisos"
 /** Ancho de la columna en px: ajustable con el tirador y recordado en este navegador. */
-const DOCK_WIDTH = { initial: 384, min: 320, max: 640 }
+const DOCK_WIDTH = { initial: 384, min: 320 }
 const DOCK_WIDTH_KEY = "odentia.notices-column.width"
 
 interface NoticesColumnState {

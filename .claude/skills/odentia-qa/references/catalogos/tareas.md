@@ -15,8 +15,9 @@ En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (
 - [ ] La Ayuda contesta cómo se hace esta tarea, preguntada con mis palabras, y con esa respuesta sola la termino.
 - [ ] La Ayuda nombra los botones y las pantallas como los veo.
 - [ ] La Ayuda no me dice que no se puede algo que sí puedo hacer.
+- [ ] En la computadora, si ensancho el formulario de la derecha, sigo pudiendo usar la lista de atrás: sus botones de cada fila (como «Hecha») se ven, y lo que queda debajo se nota y se alcanza.
 
-**Ya falló:** la Ayuda contestó sobre otra pantalla.
+**Ya falló:** la Ayuda contestó sobre otra pantalla; con el formulario de la derecha ensanchado, la lista de Tareas se leía letra por letra y «Hecha» quedaba fuera de la vista sin aviso.
 
 ## Recepción
 

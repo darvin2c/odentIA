@@ -1,6 +1,7 @@
 import { cn, useSidebarOptional } from "@odentia/ui"
 import * as React from "react"
 import { createPortal } from "react-dom"
+import { common } from "./common.js"
 import type { KeptInPage } from "./draft-blocker.js"
 
 /**
@@ -179,38 +180,51 @@ export function SideDockPortal({
   return decision === "column" ? createPortal(children, dock.slot) : null
 }
 
+/**
+ * Ancho de una columna lateral. No tiene tope propio: crece hasta donde la
+ * página conserva su ancho mínimo (`pageMinWidth` de `SideColumn`), así que en
+ * una pantalla grande o con el menú en iconos el formulario puede ir más ancho.
+ */
 export interface SideColumnWidth {
   /** Ancho con el que se abre la primera vez, en px. */
   initial: number
   min: number
-  max: number
 }
 
 const STEP = 16
 
-const clamp = (value: number, bounds: SideColumnWidth) =>
-  Math.min(bounds.max, Math.max(bounds.min, Math.round(value)))
+/**
+ * Dónde se recuerda el ancho de un formulario o detalle de la columna: por el
+ * ancho con que abre. Lo que abre igual (un detalle `lg` de una lista, un
+ * formulario de 32rem) recuerda lo mismo; uno compacto no hereda el ancho que
+ * se le dio a uno grande.
+ */
+export const sidePanelWidthKey = (bounds: SideColumnWidth) => `odentia.side-panel.${bounds.initial}`
+
+// En el servidor cae a `useEffect` para no emitir el aviso de `useLayoutEffect`.
+const useEffectBeforePaint: typeof React.useEffect =
+  typeof window === "undefined" ? React.useEffect : React.useLayoutEffect
 
 /** Ancho de una columna lateral, recordado en este navegador bajo `storageKey`. */
 export function useSideColumnWidth(
   storageKey: string,
   bounds: SideColumnWidth,
 ): [number, (next: number) => void] {
-  const { initial, min, max } = bounds
+  const { initial, min } = bounds
   const [width, setWidth] = React.useState(initial)
-  React.useEffect(() => {
+  // Antes de pintar: sin tope, el salto del ancho inicial al guardado podía ser
+  // de cientos de píxeles en el primer cuadro.
+  useEffectBeforePaint(() => {
     try {
       const stored = Number(window.localStorage.getItem(storageKey))
-      setWidth(
-        Number.isFinite(stored) && stored > 0 ? clamp(stored, { initial, min, max }) : initial,
-      )
+      setWidth(Number.isFinite(stored) && stored > 0 ? Math.max(min, Math.round(stored)) : initial)
     } catch {
       // Sin almacenamiento (modo privado): queda el ancho por defecto.
     }
-  }, [storageKey, initial, min, max])
+  }, [storageKey, initial, min])
   const resize = React.useCallback(
     (next: number) => {
-      const clamped = clamp(next, { initial, min, max })
+      const clamped = Math.max(min, Math.round(next))
       setWidth(clamped)
       try {
         window.localStorage.setItem(storageKey, String(clamped))
@@ -218,9 +232,53 @@ export function useSideColumnWidth(
         // El ancho vale para esta sesión aunque no se pueda recordar.
       }
     },
-    [storageKey, initial, min, max],
+    [storageKey, min],
   )
   return [width, resize]
+}
+
+// Mientras hay una columna suscrita, el ancho se lee al cambiar la ventana y no
+// en cada render: leerlo mientras se arrastra obligaría al navegador a
+// recalcular la página en cada movimiento. Sin nadie suscrito se lee al pedirlo,
+// porque la ventana pudo cambiar mientras no había columna.
+let viewportWidth = 0
+let subscribers = 0
+const readViewport = () => {
+  viewportWidth = document.documentElement.clientWidth
+}
+
+const subscribeToViewport = (onChange: () => void) => {
+  const update = () => {
+    readViewport()
+    onChange()
+  }
+  subscribers += 1
+  // El observador también ve la barra de desplazamiento, que aparece y se va sin `resize`.
+  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null
+  if (observer) observer.observe(document.documentElement)
+  else window.addEventListener("resize", update)
+  return () => {
+    subscribers -= 1
+    if (observer) observer.disconnect()
+    else window.removeEventListener("resize", update)
+  }
+}
+
+const viewportSnapshot = () => {
+  if (subscribers === 0) readViewport()
+  return viewportWidth
+}
+
+/**
+ * Ancho útil de la ventana (sin la barra de desplazamiento), al día al
+ * cambiarla. Es la misma medida para el tope, lo que oye el lector de pantalla,
+ * las flechas y el ancho que se pinta: con `100vw` (que incluye la barra) el
+ * CSS y el cálculo diferían 15 px y una flecha para ensanchar achicaba la
+ * columna. La columna solo se monta en el navegador (portal o al abrirse), así
+ * que el valor del servidor no llega a pintarse.
+ */
+function useViewportWidth(): number {
+  return React.useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => 0)
 }
 
 /** Ancho real del sidebar de la app: abierto, reducido a iconos o ausente. */
@@ -243,10 +301,11 @@ export interface SideColumnProps extends Omit<React.ComponentProps<"aside">, "ch
 
 /**
  * Columna a todo el alto, pegada al borde derecho de la ventana. No es modal:
- * la página sigue usable al lado. El tirador se arrastra, se mueve con flechas
- * (Inicio/Fin a los extremos) y vuelve al ancho inicial con doble clic. El
- * tope depende del espacio real (ventana menos sidebar), así que reducir el
- * sidebar deja más ancho a la columna.
+ * la página sigue usable al lado. El tirador lleva un asa a la vista (la del
+ * `ResizableHandle` de shadcn), se arrastra, se mueve con flechas (Inicio/Fin
+ * a los extremos) y vuelve al ancho inicial con doble clic. El único tope es
+ * el espacio real (ventana menos sidebar menos `pageMinWidth`), así que una
+ * pantalla más grande o el sidebar reducido dejan más ancho a la columna.
  */
 export function SideColumn({
   children,
@@ -260,12 +319,21 @@ export function SideColumn({
   ...props
 }: SideColumnProps) {
   const sidebar = useSidebarWidth()
-  const floor = Math.min(bounds.min, 320)
+  const viewport = useViewportWidth()
+  // Lo que cabe ahora: el único tope.
+  const max = Math.max(Math.min(bounds.min, 320), viewport - sidebar - pageMinWidth)
+  // Lo que se ve, se anuncia y de donde parten las flechas: lo guardado puede
+  // ser de una ventana más grande.
+  const shown = Math.min(width, max)
   // Lo que se guarda nunca supera lo que cabe ahora: si no, el tirador tendría
   // un tramo muerto hasta volver por debajo del tope.
-  const fits = () =>
-    Math.max(floor, document.documentElement.clientWidth - sidebar - pageMinWidth)
-  const apply = (next: number) => onResize(Math.min(next, fits()))
+  const apply = (next: number) => onResize(Math.min(next, max))
+  const keyTargets: Partial<Record<string, number>> = {
+    ArrowLeft: shown + STEP,
+    ArrowRight: shown - STEP,
+    Home: bounds.min,
+    End: max,
+  }
   return (
     <aside
       {...props}
@@ -275,21 +343,19 @@ export function SideColumn({
       )}
       // Un solo `width`: con `min-width` aparte, el mínimo ganaría al tope y la
       // columna desbordaría en ventanas justas.
-      style={{
-        ...style,
-        width: `min(${width}px, max(${floor}px, calc(100vw - ${sidebar + pageMinWidth}px)))`,
-      }}
+      style={{ ...style, width: `${shown}px` }}
     >
       {/* biome-ignore lint/a11y/useSemanticElements: separador interactivo (patrón «window splitter» de ARIA); <hr> no admite foco ni valor. */}
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label={resizeLabel}
-        aria-valuenow={width}
-        aria-valuemin={bounds.min}
-        aria-valuemax={bounds.max}
+        aria-valuenow={shown}
+        aria-valuetext={common.sidePanel.width(shown)}
+        aria-valuemin={Math.min(bounds.min, max)}
+        aria-valuemax={max}
         tabIndex={0}
-        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-transparent hover:after:bg-border focus-visible:after:bg-ring active:after:bg-ring"
+        className="group absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-transparent hover:after:bg-border focus-visible:after:bg-ring active:after:bg-ring"
         onPointerDown={(event) => {
           event.preventDefault()
           event.currentTarget.setPointerCapture(event.pointerId)
@@ -297,29 +363,43 @@ export function SideColumn({
         onPointerMove={(event) => {
           if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
           // La columna termina en el borde derecho de la ventana.
-          apply(document.documentElement.clientWidth - event.clientX)
+          apply(viewport - event.clientX)
         }}
-        onDoubleClick={() => apply(bounds.initial)}
+        // Guarda el de siempre tal cual: si hoy no cabe, lo recorta lo que se
+        // ve, y en una ventana más grande vuelve entero.
+        onDoubleClick={() => onResize(bounds.initial)}
         onKeyDown={(event) => {
-          // Desde el ancho que se ve, que puede ser menor que el guardado. Se
-          // calcula y no se mide: la transición de ancho lo cambia en el cuadro
-          // siguiente, y dos flechas seguidas partían ambas del ancho anterior.
-          const shown = Math.min(width, fits())
-          const next =
-            event.key === "ArrowLeft"
-              ? shown + STEP
-              : event.key === "ArrowRight"
-                ? shown - STEP
-                : event.key === "Home"
-                  ? bounds.min
-                  : event.key === "End"
-                    ? bounds.max
-                    : null
-          if (next === null) return
+          // Enter es el doble clic del teclado: el ancho de siempre.
+          if (event.key === "Enter") {
+            event.preventDefault()
+            onResize(bounds.initial)
+            return
+          }
+          // Desde el ancho que se ve, calculado y no medido: dos flechas
+          // seguidas no parten ambas del ancho anterior.
+          const next = keyTargets[event.key]
+          if (next === undefined) return
           event.preventDefault()
           apply(next)
         }}
-      />
+      >
+        {/* El asa: dice a la vista que el borde se arrastra, como el `withHandle`
+              de `ResizableHandle` (`packages/ui`), con el borde de los campos para
+              el contraste 3:1 de un control (WCAG 1.4.11). */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 left-1/2 h-8 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-input-border transition-colors group-hover:bg-ring group-focus-visible:bg-ring group-active:bg-ring motion-reduce:transition-none"
+        />
+        {/* La pista, al pasar y al enfocar el borde: un `title` no sale con el
+              teclado, y un `Tooltip` se quedaba con el Esc que cierra el panel.
+              Se esconde al apretar para arrastrar. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 right-full mr-2 w-max max-w-64 -translate-y-1/2 rounded-xl bg-foreground px-3 py-1.5 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 group-hover:delay-500 group-focus-visible:opacity-100 group-active:opacity-0 group-active:delay-0 motion-reduce:transition-none"
+        >
+          {common.sidePanel.resizeHint}
+        </span>
+      </div>
       <SideDockScopeProvider value="column">{children}</SideDockScopeProvider>
     </aside>
   )

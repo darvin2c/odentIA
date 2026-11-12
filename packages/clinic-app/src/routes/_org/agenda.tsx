@@ -93,7 +93,8 @@ import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival, useAppointmentVisitStatus } from "../../components/agenda/arrival"
-import { dayShort, shortName } from "../../components/agenda/shared"
+import { undoUnsentNotice, warnUnsentNotice } from "../../components/agenda/notice-warning"
+import { dayShort, shortName, whenSaid } from "../../components/agenda/shared"
 import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
@@ -933,6 +934,9 @@ function AgendaPage() {
       const text = input.undoOf ? `Cita de ${result.data.patientName} de vuelta en su sitio` : `Cita de ${result.data.patientName} reprogramada`
       const back = input.back
       const note = input.was ? movedNote(input.was, result.data) : undefined
+      // Antes del aviso de siempre, para que su «Deshacer» quede encima; deshacer lo quita.
+      if (input.undoOf) undoUnsentNotice(result.data.id)
+      else warnUnsentNotice(result.data, { change: "movida", when: whenSaid(result.data.startsAt, TZ, today) })
       toast.success(text, {
         description: note,
         // Arrastrar se hace rápido: volver atrás es un toque, sin buscar la hora de antes.

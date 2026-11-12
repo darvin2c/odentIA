@@ -15,6 +15,7 @@ import {
   type SideColumnWidth,
   SideDockPortal,
   SideDockScopeProvider,
+  sidePanelWidthKey,
   useSideColumnWidth,
   useSideDock,
   useSideDockScope,
@@ -61,11 +62,14 @@ const PANEL_SIZES: Record<DetailPanelSize, { default: string; min: string; max: 
   xl: { default: "40rem", min: "32rem", max: "52rem" },
 }
 
-/** Los mismos anchos, en px, cuando el detalle va en la columna del layout. */
+/**
+ * Los mismos anchos, en px, cuando el detalle va en la columna del layout. Ahí
+ * no hay máximo: se ensancha hasta donde la lista conserva `MASTER_MIN_WIDTH`.
+ */
 export const DOCK_SIZES: Record<DetailPanelSize, SideColumnWidth> = {
-  md: { initial: 384, min: 320, max: 512 },
-  lg: { initial: 512, min: 416, max: 640 },
-  xl: { initial: 640, min: 512, max: 832 },
+  md: { initial: 384, min: 320 },
+  lg: { initial: 512, min: 416 },
+  xl: { initial: 640, min: 512 },
 }
 /** Ancho que el detalle deja a la lista: el mínimo de la columna maestra. */
 export const MASTER_MIN_WIDTH = 512
@@ -215,10 +219,6 @@ export function MasterDetail({
 }: MasterDetailProps) {
   const mode = useDetailMode()
   const dock = useSideDock()
-  const [dockWidth, resizeDock] = useSideColumnWidth(
-    `odentia.side-panel.${panelSize}`,
-    DOCK_SIZES[panelSize],
-  )
   const open = panel != null
   const pageScroll = listScroll === "page"
   const size = PANEL_SIZES[panelSize]
@@ -308,18 +308,11 @@ export function MasterDetail({
               </Drawer>
             }
           >
-            <SideColumn
-              aria-label={common.sidePanel.label}
-              width={dockWidth}
-              onResize={resizeDock}
-              bounds={DOCK_SIZES[panelSize]}
-              pageMinWidth={MASTER_MIN_WIDTH}
-              resizeLabel={common.sidePanel.resize}
-            >
+            <DetailColumn bounds={DOCK_SIZES[panelSize]}>
               <div ref={detailContentRef} className="flex h-full min-h-0 flex-col">
                 {panel}
               </div>
-            </SideColumn>
+            </DetailColumn>
           </SideDockPortal>
         ) : null}
       </>
@@ -419,5 +412,26 @@ export function MasterDetail({
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
+  )
+}
+
+/**
+ * El detalle en la columna del layout. Lee el ancho recordado al abrirse, no al
+ * montar la página: lo comparte con los formularios que abren igual de anchos
+ * (`sidePanelWidthKey`), y uno de ellos pudo cambiarlo mientras tanto.
+ */
+function DetailColumn({ bounds, children }: { bounds: SideColumnWidth; children: React.ReactNode }) {
+  const [width, resize] = useSideColumnWidth(sidePanelWidthKey(bounds), bounds)
+  return (
+    <SideColumn
+      aria-label={common.sidePanel.label}
+      width={width}
+      onResize={resize}
+      bounds={bounds}
+      pageMinWidth={MASTER_MIN_WIDTH}
+      resizeLabel={common.sidePanel.resize}
+    >
+      {children}
+    </SideColumn>
   )
 }
