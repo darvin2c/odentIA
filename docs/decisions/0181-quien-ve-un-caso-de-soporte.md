@@ -1,4 +1,4 @@
-# 0180 · Quién ve un caso de soporte
+# 0181 · Quién ve un caso de soporte
 
 Fecha: 2026-11-11 · Estado: aceptada · Precisa la [0094](0094-la-ficha-de-la-clinica-con-sus-gastos-accion-por-accion.md) en lo que ve el rol Soporte
 

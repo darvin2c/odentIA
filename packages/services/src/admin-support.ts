@@ -348,7 +348,7 @@ function toListItem(
  * Quién sigue un caso de la clínica: quien lo abrió. Si esa persona ya no está
  * en la clínica, lo siguen su propietario y su administrador. Desde que
  * soporte pide el acceso de diagnóstico, también lo leen la propietaria y los
- * administradores: son quienes pueden autorizarlo (ADR 0180). Nadie más.
+ * administradores: son quienes pueden autorizarlo (ADR 0181). Nadie más.
  */
 async function requireCaseReader(
   tx: Db,
@@ -901,7 +901,7 @@ const queueOrderSql = [
   sql`${supportCase.id} asc`,
 ]
 
-/** Soporte no ve los casos «Revisión de cobro»: son de la administración (ADR 0094 y 0180). */
+/** Soporte no ve los casos «Revisión de cobro»: son de la administración (ADR 0094 y 0181). */
 const visibleKindsFor = (actor: AdminActor | undefined) =>
   actor?.role === "admin" ? undefined : ne(supportCase.kind, "cobro")
 
@@ -1206,7 +1206,7 @@ export async function getSupportCaseForStaff(
   }
 }
 
-/* ---------- «Pedir acceso de diagnóstico…» (ADR 0180) ---------- */
+/* ---------- «Pedir acceso de diagnóstico…» (ADR 0181) ---------- */
 
 /** El mensaje fijo del pedido: cambia si quien abrió el caso puede autorizarlo. */
 function accessRequestText(openerCanGrant: boolean): string {
@@ -1331,7 +1331,7 @@ export async function requestSupportAccess(
   return { requestedAt: now.toISOString(), repeated: false }
 }
 
-/* ---------- «Falta en la guía» (marca del equipo en admin, ADR 0180) ---------- */
+/* ---------- «Falta en la guía» (marca del equipo en admin, ADR 0181) ---------- */
 
 export interface SupportGuideGapItem {
   caseId: string
@@ -1419,7 +1419,7 @@ async function staffWrite(
   })
 }
 
-/** ¿Ve este actor este caso? Un caso de cobro es solo de la administración (ADR 0094 y 0180). */
+/** ¿Ve este actor este caso? Un caso de cobro es solo de la administración (ADR 0094 y 0181). */
 const staffSees = (actor: AdminActor, kase: { kind: string }): boolean => kase.kind !== "cobro" || actor.role === "admin"
 
 /**

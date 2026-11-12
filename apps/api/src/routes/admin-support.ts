@@ -222,7 +222,7 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
   /**
    * «Pedir acceso de diagnóstico…»: deja el mensaje fijo, pasa el caso a
    * «Esperando a la clínica» y desde ahí lo leen la propietaria y los
-   * administradores (ADR 0180). Pedirlo dos veces deja un solo pedido.
+   * administradores (ADR 0181). Pedirlo dos veces deja un solo pedido.
    */
   app.post("/cases/:id/request-access", (c) =>
     runService(c, 200, () =>

@@ -463,7 +463,7 @@ export function supportReplyNoticeTemplate({
   /**
    * El correo va a quien autoriza el acceso de diagnóstico (la propietaria o
    * un administrador) y no a quien abrió el caso: pide su autorización y dice
-   * quién lo abrió (ADR 0180).
+   * quién lo abrió (ADR 0181).
    */
   granter?: { clinic: string | null; openerName: string; openerRole: string } | null
 } & Branded): MailTemplate {

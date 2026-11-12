@@ -48,7 +48,7 @@ export const supportCase = pgTable(
     clientSeenAt: timestamp("client_seen_at", { withTimezone: true }),
     /**
      * Cuándo pidió soporte el acceso de diagnóstico. Puesto: la propietaria y
-     * los administradores leen el caso aunque no lo hayan abierto (ADR 0180).
+     * los administradores leen el caso aunque no lo hayan abierto (ADR 0181).
      */
     accessRequestedAt: timestamp("access_requested_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

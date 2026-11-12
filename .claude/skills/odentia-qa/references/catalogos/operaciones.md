@@ -322,7 +322,7 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 ## O-ADM-02 Pedir el acceso de diagnóstico de soporte
 
-**Dónde:** `S/admin-support.ts` (el pedido, quién lee el caso, «nos espera» y `clinicActed`), `S/support-notices.ts` (los avisos), `API/admin-support.ts`; motivos en `docs/decisions/0180-quien-ve-un-caso-de-soporte.md`.
+**Dónde:** `S/admin-support.ts` (el pedido, quién lee el caso, «nos espera» y `clinicActed`), `S/support-notices.ts` (los avisos), `API/admin-support.ts`; motivos en `docs/decisions/0181-quien-ve-un-caso-de-soporte.md`.
 
 - [ ] Se pide solo en un caso con clínica, sin resolver, que no sea de cobro ni de entrar a su cuenta y sin un acceso vigente; si no, el error dice por qué.
 - [ ] Pedirlo otra vez sin que la clínica haya hecho nada no escribe otro mensaje ni otro aviso.
