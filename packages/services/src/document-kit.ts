@@ -243,12 +243,21 @@ function fontData(face: Face): { bytes: Uint8Array; font: Font } {
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
 /**
+ * Lo que la letra no tiene pero se escribe igual con otro carácter que sí tiene. El
+ * signo menos (U+2212) de una graduación («−2,00») o de un descuento sale como raya
+ * corta, del ancho de una cifra: como `?` cambiaba lo que dice el papel.
+ */
+const STAND_INS: Record<string, string> = { "−": "–" }
+
+/**
  * El texto que esta letra puede escribir: cada carácter que no cubre (un emoji con
- * todas sus partes cuenta como uno) sale como `?`, sin error. Los blancos
- * heredados pasan a espacios y los caracteres de control se quitan.
+ * todas sus partes cuenta como uno) sale con su equivalente (`STAND_INS`) o, si no
+ * lo tiene, como `?`, sin error. Los blancos heredados pasan a espacios y los
+ * caracteres de control se quitan.
  */
 export function printable(value: string, face: Face = "sans"): string {
   const { font } = fontData(face)
+  const covered = (text: string) => [...text].every((char) => font.hasGlyphForCodePoint(char.codePointAt(0) ?? 0))
   const clean = value.normalize("NFC").replace(/\r\n?/g, "\n").replace(/\t/g, " ")
   let out = ""
   for (const { segment } of GRAPHEMES.segment(clean)) {
@@ -258,7 +267,12 @@ export function printable(value: string, face: Face = "sans"): string {
     }
     const points = [...segment].map((char) => char.codePointAt(0) ?? 0)
     if (points.every((code) => code < 0x20 || code === 0x7f)) continue
-    out += points.every((code) => font.hasGlyphForCodePoint(code)) ? segment : "?"
+    if (covered(segment)) {
+      out += segment
+      continue
+    }
+    const standIn = STAND_INS[segment]
+    out += standIn && covered(standIn) ? standIn : "?"
   }
   return out
 }

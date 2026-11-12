@@ -49,6 +49,11 @@ it("una fila más larga que una página sigue en la siguiente, sin cortar ni fal
   expect(pages).toBeGreaterThan(1)
 })
 
+it("el signo menos sale como raya, nunca como ?: «−2,00» no puede imprimirse «?2,00»", () => {
+  for (const face of ["sans", "sansSemi", "sansBold", "serif", "serifMedium"] as const)
+    expect(printable("−2,00 · − S/ 50", face)).toBe("–2,00 · – S/ 50")
+})
+
 it("un carácter sin glifo sale como ? y no falla", async () => {
   expect(printable("Hola 👍🏽 Ñandú")).toBe("Hola ? Ñandú")
   expect(printable("日本")).toBe("??")
