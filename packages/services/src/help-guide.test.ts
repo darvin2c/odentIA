@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { canAccess, ORG_ROLES, type Permission } from "@odentia/auth/permissions"
 import { describe, expect, it } from "vitest"
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
-import { HELP_TOPICS, helpSmallTalk, helpTopicForScreen, helpWritePermissions, PRODUCT_ONLY_SCREENS } from "./help-guide.js"
+import { HELP_TOPICS, helpSmallTalk, helpTopicForScreen, helpWritePermissions, matchHelpTopics, PRODUCT_ONLY_SCREENS } from "./help-guide.js"
 import { helpTopicsFor } from "./products.js"
 import { describeHelpSearch, helpBanks, measureHelpBank } from "./help-guide-suite.js"
 
@@ -88,6 +88,26 @@ describe("la guía coincide con el código", () => {
 })
 
 describeHelpSearch("odentIA", HELP_TOPICS)
+
+describe("la solo lectura por falta de pago", () => {
+  const faqsOf = (topicId: string) => HELP_TOPICS.find((topic) => topic.id === topicId)?.faqs ?? []
+  const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null
+
+  it("cómo salir y qué pasa con un comprobante en revisión tienen su respuesta (QA del 11 nov)", () => {
+    expect(firstFaq("Mi clínica está en solo lectura, ¿qué hago para volver a usarla?")).toBe("plan-y-pagos-solo-lectura")
+    expect(
+      firstFaq("Subí mi comprobante antes de que venza el cargo y todavía dice en revisión. ¿Igual me pueden pasar a solo lectura?"),
+    ).toBe("plan-y-pagos-comprobante-en-revision")
+  })
+
+  it("no promete una prórroga en solo lectura: solo la da un comprobante en los días de gracia (`registerSaasReceipt`)", () => {
+    // Lo que dice que un comprobante da más días: solo vale en los días de gracia.
+    const answers = faqsOf("plan-y-pagos").filter((faq) => /da (una prórroga|unos días más)/.test(faq.a))
+    expect(answers.length).toBeGreaterThan(0)
+    for (const faq of answers) expect(faq.a, faq.id).toMatch(/días de gracia/)
+    expect(faqsOf("plan-y-pagos").find((faq) => faq.id === "plan-y-pagos-registrar-comprobante")?.a).toContain("en solo lectura ya no da días")
+  })
+})
 
 describe("saludar y agradecer", () => {
   it("se responden sin buscar", () => {
