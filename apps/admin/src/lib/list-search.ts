@@ -73,3 +73,31 @@ export function waitlistSearchOf(search: Record<string, unknown>): WaitlistSearc
     estado: undefined,
   }
 }
+
+/**
+ * La etapa y el producto que miraba la lista de espera, recordados en esta
+ * pestaña: «Abrir solicitud» de Inicio abre el cajón con la lista de detrás
+ * como estaba. Es solo una comodidad de quien mira: sin almacenamiento, la
+ * lista abre en «Por revisar» y «Todos».
+ */
+export type WaitlistFilters = Pick<WaitlistSearch, "etapa" | "producto">
+
+const WAITLIST_KEY = "admin.waitlist.filters"
+
+export function rememberWaitlistFilters(filters: WaitlistFilters): void {
+  try {
+    sessionStorage.setItem(WAITLIST_KEY, JSON.stringify({ etapa: filters.etapa, producto: filters.producto }))
+  } catch {
+    // Sin almacenamiento (ventana privada, bloqueado): la lista abre limpia.
+  }
+}
+
+export function rememberedWaitlistFilters(): WaitlistFilters {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(WAITLIST_KEY) ?? "{}") as Record<string, unknown>
+    const { etapa, producto } = waitlistSearchOf({ etapa: raw.etapa, producto: raw.producto })
+    return { ...(etapa ? { etapa } : {}), ...(producto ? { producto } : {}) }
+  } catch {
+    return {}
+  }
+}

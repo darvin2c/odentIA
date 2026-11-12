@@ -8,6 +8,7 @@ import { type ReactNode, useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
 import { invitationDueWords, limaDayWords } from "../../lib/invitation-words"
+import { rememberedWaitlistFilters } from "../../lib/list-search"
 import { SUPPORT_KIND_LABEL, supportDay, supportWaitWords } from "../../lib/support-words"
 import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import { HomeCountersSkeleton, HomePageSkeleton, HomeSkeleton } from "../../components/skeletons/home"
@@ -487,10 +488,17 @@ function prospectsNote(answerWithin: string, isAdmin: boolean): string {
     : `Se responde en ${answerWithin}. Una sin responder se va al anotar un contacto; una invitación sigue hasta que Administración la reenvíe o entre la clínica.`
 }
 
-/** «Abrir solicitud»: el cajón de esa solicitud en la lista de espera, no la lista. */
+/**
+ * «Abrir solicitud»: el cajón de esa solicitud en la lista de espera, no la
+ * lista. La lista de detrás abre con la etapa y el producto que se miraban.
+ */
 function OpenRequest({ id, urgent }: { id: string; urgent: boolean }) {
   return (
-    <Button size="sm" variant={urgent ? "default" : "outline"} render={<Link to="/waitlist" search={{ solicitud: id }} />}>
+    <Button
+      size="sm"
+      variant={urgent ? "default" : "outline"}
+      render={<Link to="/waitlist" search={() => ({ ...rememberedWaitlistFilters(), solicitud: id })} />}
+    >
       Abrir solicitud
     </Button>
   )

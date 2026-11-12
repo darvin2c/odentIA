@@ -47,6 +47,7 @@ import { FOLLOW_UP_CHOICES, type FollowUpChoice, followUpHint, openingFollowUpCh
 import { invitationDueWords } from "../../lib/invitation-words"
 import {
   isWaitlistStageFilter,
+  rememberWaitlistFilters,
   WAITLIST_STAGE_FILTERS,
   WAITLIST_STAGES,
   type WaitlistSearch,
@@ -252,6 +253,8 @@ function WaitlistPage() {
   const isAdmin = adminSession.actor.role === "admin"
   const stage: StageFilter = search.etapa ?? "por_revisar"
   const product: ProductChoice = search.producto ?? "todos"
+  // «Abrir solicitud» de Inicio vuelve con la etapa y el producto que se miraban (`rememberedWaitlistFilters`).
+  React.useEffect(() => rememberWaitlistFilters({ etapa: search.etapa, producto: search.producto }), [search.etapa, search.producto])
   const list = useQuery({
     queryKey: ["admin", "waitlist", stage, search.q ?? ""],
     queryFn: async () => {
