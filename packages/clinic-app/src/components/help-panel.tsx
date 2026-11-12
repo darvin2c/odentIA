@@ -22,7 +22,7 @@ import { openArgos } from "../lib/argos"
 import { ASK_HELP_EVENT } from "../lib/global-search"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
 import { GiveSupportAccess } from "./support-access"
-import { useMyRole } from "../lib/crm"
+import { useMyRole, useSupportMode } from "../lib/crm"
 import { appWords } from "../lib/product-words"
 
 const helpAnswer = z.object({
@@ -388,7 +388,8 @@ export function HelpButton({ className }: { className?: string } = {}) {
   // «Dar acceso a soporte»: el cuadro en el mismo panel, solo para quien puede darlo.
   const [giving, setGiving] = useState(false)
   const myRole = useMyRole()
-  const canGiveAccess = myRole === "owner" || myRole === "admin"
+  // Soporte mirando la clínica no da acceso a soporte (la API lo rechaza igual).
+  const canGiveAccess = (myRole === "owner" || myRole === "admin") && !useSupportMode()
   /** Lo que recibe el foco cuando aparece, porque el control que se tocó desaparece (WCAG 2.4.3). */
   const [focusId, setFocusId] = useState<string | null>(null)
   useEffect(() => {

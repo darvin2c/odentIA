@@ -1438,7 +1438,17 @@ function SupportPage() {
                       </select>
                     </label>
                     <p className="font-semibold">Este mensaje queda en el caso (con lo que elijas):</p>
-                    <blockquote className="rounded-xl bg-primary-soft px-3 py-2 whitespace-pre-wrap">{kase.accessRequestText}</blockquote>
+                    <blockquote className="rounded-xl bg-primary-soft px-3 py-2 whitespace-pre-wrap">
+                      {/* El servidor arma el texto con lo de siempre; aquí se ve con lo elegido. */}
+                      {kase.accessRequestText
+                        .replace(
+                          "la configuración de tu clínica",
+                          askedRole === "configuracion"
+                            ? "la configuración de tu clínica"
+                            : `tu clínica como ${kase.accessViewRoles?.find((role) => role.value === askedRole)?.label ?? askedRole}`,
+                        )
+                        .replace("30 minutos", `${askedMinutes} minutos`)}
+                    </blockquote>
                     <p className="text-muted-foreground">
                       El caso pasa a «Esperando a la clínica». Si no lo ven en 15 minutos, les llega el correo de que soporte necesita algo.
                     </p>

@@ -1,16 +1,19 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { roleLabel } from "@odentia/auth/permissions"
 import { isClinicalProduct } from "@odentia/clinical"
-import { type Db, runReadOnly } from "@odentia/db"
+import { type Db, runOutsideReadOnly, runReadOnly } from "@odentia/db"
+import { supportAccessAudit } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import {
   endSupportSession,
   redeemSupportPass,
   resolveSupportSession,
+  resolveSupportSessionById,
   runWithFileProxy,
   type Storage,
   type SupportSessionContext,
+  supportPassStaff,
   supportSessionEnding,
 } from "@odentia/services"
 import { eq } from "drizzle-orm"
@@ -70,11 +73,28 @@ export async function supportSessionGate(
   return null
 }
 
+/**
+ * Un intento frenado (escribir, otra clínica, descargar, una pantalla vedada): queda en la
+ * auditoría del permiso, como promete el contrato. Lo anota el sistema, fuera del solo lectura.
+ */
+export async function auditDenied(ownerDb: Db, session: SupportSessionContext): Promise<void> {
+  await runOutsideReadOnly(() =>
+    ownerDb.insert(supportAccessAudit).values({
+      grantId: session.grantId,
+      caseId: session.caseId,
+      organizationId: session.organizationId,
+      staffUserId: session.staffUserId,
+      action: "denegado_solo_lectura",
+    }),
+  ).catch(() => undefined)
+}
+
 /** El contexto de organización de soporte: la clínica del permiso, con el rol de lectura elegido. */
 export async function supportOrgContext(
   c: Context,
   db: Db,
   session: SupportSessionContext,
+  ownerDb: Db = db,
 ): Promise<Response | null> {
   const slug = c.req.header("x-odentia-org") ?? c.req.query("org") ?? null
   if (slug) {
@@ -83,8 +103,10 @@ export async function supportOrgContext(
       .from(organization)
       .where(eq(organization.slug, slug))
       .limit(1)
-    if (!org || org.id !== session.organizationId)
+    if (!org || org.id !== session.organizationId) {
+      await auditDenied(ownerDb, session)
       return c.json(errorBody(c, "FORBIDDEN", "Este acceso de soporte es de otra clínica"), 403)
+    }
   }
   c.set("orgId", session.organizationId)
   c.set("memberRole", session.viewRole)
@@ -117,7 +139,11 @@ function apiOriginOf(c: Context): string {
   return `${proto}://${host}`
 }
 
-/** Firma de la dirección de un archivo para una sesión: vence con un minuto. */
+/**
+ * Firma de la dirección de un archivo para una sesión. Vale diez minutos (una imagen se
+ * vuelve a pintar desde lo ya cargado), y en cada pedido se revisa que la sesión siga.
+ */
+const FILE_TOKEN_MS = 10 * 60_000
 function signFile(secret: Buffer, sessionId: string, objectKey: string, expires: number): string {
   const payload = Buffer.from(JSON.stringify({ s: sessionId, k: objectKey, e: expires })).toString(
     "base64url",
@@ -155,20 +181,30 @@ function readFileToken(secret: Buffer, token: string): { s: string; k: string; e
  * transacciones en solo lectura y los archivos por la API; una respuesta que
  * sería una descarga se cambia por un rechazo.
  */
-export function supportGuard(secret: Buffer) {
+/** Lecturas que muestran un secreto de la configuración: no son para soporte aunque su rol las vea. */
+const SUPPORT_DENIED_GET = [/\/api\/connections\/[^/]+\/setup$/]
+
+export function supportGuard(secret: Buffer, ownerDb: Db) {
   return async (c: Context, next: Next) => {
     const session = supportSessionOf(c)
     if (!session) return next()
-    if (c.req.method !== "GET" && c.req.method !== "HEAD")
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+      await auditDenied(ownerDb, session)
       return c.json(
         errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"),
         403,
       )
+    }
+    if (SUPPORT_DENIED_GET.some((pattern) => pattern.test(c.req.path))) {
+      await auditDenied(ownerDb, session)
+      return c.json(errorBody(c, "FORBIDDEN", "Soporte no ve las claves de la clínica"), 403)
+    }
     const origin = apiOriginOf(c)
     const proxy = (objectKey: string) =>
-      `${origin}/api/support-session/file?t=${encodeURIComponent(signFile(secret, session.sessionId, objectKey, Date.now() + 60_000))}`
+      `${origin}/api/support-session/file?t=${encodeURIComponent(signFile(secret, session.sessionId, objectKey, Date.now() + FILE_TOKEN_MS))}`
     await runReadOnly(() => runWithFileProxy(proxy, () => next()))
     if (isDownload(c.res)) {
+      await auditDenied(ownerDb, session)
       c.res = c.json(
         errorBody(c, "SUPPORT_NO_DOWNLOAD", "Soporte solo mira: no descarga ni imprime"),
         403,
@@ -195,6 +231,8 @@ export function createSupportSessionRoute(deps: {
   cookieDomainOf: (c: Context) => string
   /** ¿Este origen es una app de clínica de confianza? (para el canje, que pone la cookie). */
   isClinicOrigin: (origin: string) => boolean
+  /** La persona con sesión normal en este navegador, si hay. */
+  sessionUserOf: (c: Context) => Promise<string | null>
 }) {
   const app = new Hono()
 
@@ -212,11 +250,18 @@ export function createSupportSessionRoute(deps: {
     if (!deps.isClinicOrigin(origin))
       return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
     const body = (await c.req.json().catch(() => null)) as { pass?: unknown } | null
-    try {
-      const redeemed = await redeemSupportPass(
-        deps.ownerDb,
-        typeof body?.pass === "string" ? body.pass : "",
+    const pass = typeof body?.pass === "string" ? body.pass : ""
+    // Un pase no se canjea en el navegador de otra persona (alguien del equipo de la clínica
+    // a quien le llegó el enlace): su navegador quedaría en modo soporte.
+    const owner = await supportPassStaff(deps.ownerDb, pass)
+    const current = await deps.sessionUserOf(c).catch(() => null)
+    if (owner && current && current !== owner)
+      return c.json(
+        errorBody(c, "SUPPORT_PASS_INVALID", "Este pase es de otra persona: ábrelo en tu navegador"),
+        403,
       )
+    try {
+      const redeemed = await redeemSupportPass(deps.ownerDb, pass)
       setCookie(c, redeemed.sessionToken, (redeemed.expiresAt.getTime() - Date.now()) / 1000)
       return c.json({ data: { expiresAt: redeemed.expiresAt.toISOString() } })
     } catch {
@@ -286,7 +331,7 @@ export function createSupportSessionRoute(deps: {
       return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
     const token = cookieOf(c)
     if (token) await endSupportSession(deps.ownerDb, token)
-    setCookie(c, "", 0)
+    // La cookie se queda (ya no sirve): «El acceso terminó» la lee para decir «saliste».
     return c.json({ data: { ok: true } })
   })
 
@@ -296,31 +341,38 @@ export function createSupportSessionRoute(deps: {
     return c.json({ data: ending })
   })
 
+  // La firma liga el archivo a la sesión: sirve aunque el visor lo pida sin la cookie
+  // (las tomografías lo piden con `fetch`), y la sesión se revisa en cada pedido.
   app.get("/file", async (c) => {
-    const token = cookieOf(c)
-    const session = token ? await resolveSupportSession(deps.ownerDb, token) : null
     const file = readFileToken(deps.secret, c.req.query("t") ?? "")
-    if (!session || !file || file.s !== session.sessionId || file.e < Date.now())
+    const session =
+      file && file.e >= Date.now() ? await resolveSupportSessionById(deps.ownerDb, file.s) : null
+    if (!session || !file)
       return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
     // El archivo tiene que ser de esta clínica: su carpeta la nombra.
     if (!file.k.split("/").includes(session.organizationId))
       return c.json(errorBody(c, "FORBIDDEN", "Archivo de otra clínica"), 403)
     if (!deps.storage.streamAttachment)
       return c.json(errorBody(c, "UNAVAILABLE", "No disponible"), 503)
-    const stream = await deps.storage.streamAttachment(file.k)
+    // Solo lo que se mira: imágenes, PDF y los cortes de una tomografía, que el visor arma en
+    // la pantalla. Lo demás (audio, adjuntos sueltos) se descargaría: no se sirve.
     const ext = file.k.split(".").at(-1)?.toLowerCase() ?? ""
-    const type =
-      ext === "pdf"
-        ? "application/pdf"
-        : ext === "png"
-          ? "image/png"
-          : ext === "webp"
-            ? "image/webp"
-            : ext === "gif"
-              ? "image/gif"
-              : ext === "jpg" || ext === "jpeg"
-                ? "image/jpeg"
-                : "application/octet-stream"
+    const VIEWABLE: Record<string, string> = {
+      pdf: "application/pdf",
+      png: "image/png",
+      webp: "image/webp",
+      gif: "image/gif",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      dcm: "application/dicom",
+    }
+    const type = VIEWABLE[ext] ?? (file.k.includes("/imaging/") ? "application/dicom" : undefined)
+    if (!type)
+      return c.json(
+        errorBody(c, "SUPPORT_NO_DOWNLOAD", "Soporte solo mira: este archivo no se abre aquí"),
+        403,
+      )
+    const stream = await deps.storage.streamAttachment(file.k)
     return new Response(stream, {
       headers: {
         "content-type": type,

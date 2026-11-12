@@ -134,16 +134,25 @@ async function checkOrgAccess(
     return cached
   }
   const fetchOptions = ssrFetchOptions()
-  // Soporte de odentIA con el permiso de la clínica: entra sin sesión de la clínica, en solo lectura.
-  const support = slug ? await loadSupportSession(slug, fetchOptions) : null
-  if (support) {
-    if (typeof window !== "undefined") orgChecks.access = { slug: support.org.slug, at: Date.now(), ...support }
-    return support
-  }
+  // Soporte de odentIA con el permiso de la clínica: entra sin sesión de la clínica, en solo
+  // lectura. En el servidor solo se pregunta si llega su cookie; en el navegador (la cookie no
+  // se lee) se pregunta a la vez que lo demás, sin sumar un viaje.
+  const ssrCookie = (fetchOptions as { headers?: { cookie?: string } }).headers?.cookie
+  const mayBeSupport = typeof window !== "undefined" || (ssrCookie?.includes("odentia_soporte=") ?? false)
+  const supportCheck = slug && mayBeSupport ? loadSupportSession(slug, fetchOptions) : Promise.resolve(null)
   // Las tres a la vez; se revisan en el orden de siempre: sesión, términos y clínica.
   const sessionCheck = requireVerifiedSession(location)
   const termsCheck = requireTermsAccepted(location)
   const orgRead = slug ? readOrganization(slug, fetchOptions) : null
+  const support = await supportCheck
+  if (support) {
+    // Lo de la sesión de la clínica no aplica: sus rechazos no quedan sin atender.
+    sessionCheck.catch(() => undefined)
+    termsCheck.catch(() => undefined)
+    orgRead?.catch(() => undefined)
+    if (typeof window !== "undefined") orgChecks.access = { slug: support.org.slug, at: Date.now(), ...support }
+    return support
+  }
   // Si falla una antes, las otras no quedan como rechazo sin atender.
   termsCheck.catch(() => undefined)
   orgRead?.catch(() => undefined)

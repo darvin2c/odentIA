@@ -74,6 +74,7 @@ import { createAdminImportsRoute } from "./routes/admin-imports.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
 import {
+  auditDenied,
   createSupportSessionRoute,
   supportFileSecret,
   supportGuard,
@@ -626,8 +627,11 @@ export function createApp(deps: AppDeps) {
     const support = await supportSessionGate(c, deps.ownerDb)
     if (support) return support
     if (support === null) {
-      if (c.req.method !== "GET" && c.req.method !== "HEAD")
+      if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+        const session = supportSessionOf(c)
+        if (session) await auditDenied(deps.ownerDb, session)
         return c.json(errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"), 403)
+      }
       return next()
     }
     return requireSession(deps)(c, next)
@@ -716,6 +720,7 @@ export function createApp(deps: AppDeps) {
       cookieDomainOf: (c) => domains[productOfRequest(c)] ?? deps.cookieDomain,
       // Los mismos orígenes que CORS deja llamar con credenciales.
       isClinicOrigin: (origin) => trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)),
+      sessionUserOf: async (c) => (await authOf(c).api.getSession({ headers: c.req.raw.headers }))?.user.id ?? null,
     }),
   )
 
@@ -738,11 +743,11 @@ export function createApp(deps: AppDeps) {
   guarded.use("*", async (c, next) => {
     if (isWebhook(c)) return next()
     const support = supportSessionOf(c)
-    if (support) return (await supportOrgContext(c, db, support)) ?? next()
+    if (support) return (await supportOrgContext(c, db, support, deps.ownerDb)) ?? next()
     return requireOrgContext(deps)(c, next)
   })
   // Soporte solo mira: nada que no sea leer, la base en solo lectura y sin descargas.
-  guarded.use("*", supportGuard(supportSecret))
+  guarded.use("*", supportGuard(supportSecret, deps.ownerDb))
   // La historia bloqueada (ADR 0080) en toda ruta que nombra a la ficha o a la
   // persona en la consulta o en el cuerpo, no solo en su dirección.
   const lockGuard = lockedRecordGuard(db)
@@ -1040,6 +1045,8 @@ export function createApp(deps: AppDeps) {
   })
 
   guarded.get("/notifications/stream", async (c) => {
+    // Soporte no es del equipo: sin flujo de avisos (204 detiene la reconexión del navegador).
+    if (supportSessionOf(c)) return c.body(null, 204)
     const { orgId } = orgContextOf(c)
     const lastEventId = c.req.header("last-event-id")
 

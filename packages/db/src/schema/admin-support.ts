@@ -277,7 +277,7 @@ export const supportAccessAudit = pgTable(
     index("support_access_audit_case_idx").on(table.caseId, table.createdAt),
     check(
       "support_access_audit_action_check",
-      sql`${table.action} in ('vista_diagnostica','denegado_sin_permiso','revocado','autorizado','pase','entrada','denegado_pase')`,
+      sql`${table.action} in ('vista_diagnostica','denegado_sin_permiso','revocado','autorizado','pase','entrada','denegado_pase','denegado_solo_lectura')`,
     ),
     foreignKey({ name: "support_access_audit_case_id_case_id_fk", columns: [table.caseId], foreignColumns: [supportCase.id] })
       .onDelete("cascade"),

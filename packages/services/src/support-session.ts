@@ -10,9 +10,11 @@ import {
 } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
-import { and, desc, eq, gt, isNull } from "drizzle-orm"
+import { adminStaff } from "@odentia/db/schema/admin-core"
+import { and, desc, eq, gt, inArray, isNull, type SQL } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { requireStaffCaseFor } from "./admin-support.js"
 import { notFound, ServiceError } from "./errors.js"
 
 /**
@@ -120,9 +122,22 @@ export async function createSupportPass(
   caseId: string,
   now: Date = new Date(),
 ): Promise<{ token: string; slug: string; product: ClinicalProduct; expiresAt: string }> {
-  const [kase] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
-  if (!kase?.organizationId) throw notFound("Caso")
-  const grant = await claimSupportGrant(db, actor, caseId, now)
+  // La misma regla de qué casos ve cada rol del personal (Soporte no ve los de cobro).
+  const kase = await requireStaffCaseFor(db, actor, caseId)
+  if (!kase.organizationId) throw notFound("Caso")
+  // El alcance se mira antes de reclamar: un permiso de solo configuración no pasa a ser de nadie.
+  const [open] = await db
+    .select({ scope: supportAccessGrant.scope })
+    .from(supportAccessGrant)
+    .where(
+      and(
+        eq(supportAccessGrant.caseId, caseId),
+        isNull(supportAccessGrant.revokedAt),
+        gt(supportAccessGrant.expiresAt, now),
+      ),
+    )
+    .limit(1)
+  const grant = open?.scope === "rol" ? await claimSupportGrant(db, actor, caseId, now) : null
   if (!grant || grant.scope !== "rol") {
     await db.insert(supportAccessAudit).values({
       grantId: grant?.id ?? null,
@@ -217,6 +232,17 @@ export async function redeemSupportPass(
   return { sessionToken, expiresAt: grant.expiresAt, organizationId: grant.organizationId }
 }
 
+/** La persona de soporte de un pase sin canjear, para no canjearlo en el navegador de otra. */
+export async function supportPassStaff(db: Db, pass: string): Promise<string | null> {
+  if (typeof pass !== "string" || pass.length < 20 || pass.length > 200) return null
+  const [row] = await db
+    .select({ staffUserId: supportAccessSession.staffUserId })
+    .from(supportAccessSession)
+    .where(and(eq(supportAccessSession.passHash, hashOf(pass)), isNull(supportAccessSession.redeemedAt)))
+    .limit(1)
+  return row?.staffUserId ?? null
+}
+
 /** Una sesión de soporte vigente, lo que la API necesita para atenderla. */
 export interface SupportSessionContext {
   sessionId: string
@@ -237,14 +263,36 @@ export async function resolveSupportSession(
 ): Promise<SupportSessionContext | null> {
   if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200)
     return null
+  return sessionWhere(db, eq(supportAccessSession.sessionHash, hashOf(sessionToken)), now)
+}
+
+/** La sesión por su id (lo que firma la dirección de un archivo), si sigue valiendo. */
+export async function resolveSupportSessionById(
+  db: Db,
+  sessionId: string,
+  now: Date = new Date(),
+): Promise<SupportSessionContext | null> {
+  if (typeof sessionId !== "string" || !/^[0-9a-f-]{36}$/i.test(sessionId)) return null
+  return sessionWhere(db, eq(supportAccessSession.id, sessionId), now)
+}
+
+/** La sesión que dice `match`: sin terminar, de alguien del personal activo, con su permiso vigente. */
+async function sessionWhere(
+  db: Db,
+  match: SQL,
+  now: Date,
+): Promise<SupportSessionContext | null> {
   const [row] = await db
     .select({ session: supportAccessSession, staffName: user.name })
     .from(supportAccessSession)
     .innerJoin(user, eq(user.id, supportAccessSession.staffUserId))
+    .innerJoin(adminStaff, eq(adminStaff.userId, supportAccessSession.staffUserId))
     .where(
       and(
-        eq(supportAccessSession.sessionHash, hashOf(sessionToken)),
+        match,
         isNull(supportAccessSession.endedAt),
+        eq(adminStaff.active, true),
+        inArray(adminStaff.role, ["admin", "support"]),
       ),
     )
     .limit(1)

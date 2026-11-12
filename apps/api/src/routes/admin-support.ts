@@ -246,7 +246,8 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
    */
   app.post("/cases/:id/pass", (c) =>
     runService(c, 201, async () => {
-      const pass = await deps.ownerDb.transaction((tx) => createSupportPass(tx as Db, staffOf(c), c.req.param("id")))
+      // Sin transacción: si se rechaza, el intento queda anotado (el contrato pide «cada intento»).
+      const pass = await createSupportPass(deps.ownerDb, staffOf(c), c.req.param("id"))
       return {
         url: deps.clinicUrlOf(pass.slug, pass.product, `/soporte#pase=${encodeURIComponent(pass.token)}`),
         expiresAt: pass.expiresAt,

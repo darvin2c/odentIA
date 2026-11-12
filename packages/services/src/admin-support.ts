@@ -255,7 +255,7 @@ async function grantsSeenByClinic(tx: Db, orgId: string, rows: (typeof supportAc
         join patient p on p.organization_id = l.organization_id and p.id = l.patient_id
         join contact c on c.organization_id = p.organization_id and c.id = p.person_id
         where l.organization_id = ${orgId} and l.user_id = ${row.staffUserId}
-          and l.first_at >= ${row.createdAt.toISOString()}::timestamptz and l.first_at <= ${until.toISOString()}::timestamptz
+          and l.last_at >= ${row.createdAt.toISOString()}::timestamptz and l.first_at <= ${until.toISOString()}::timestamptz
         order by l.first_at asc
         limit 200
       `)
@@ -1665,7 +1665,7 @@ const staffSees = (actor: AdminActor, kase: { kind: string }): boolean => kase.k
  * El caso para el equipo. Para el rol Soporte, un caso de cobro no existe: el
  * mismo 404 que un caso que no está, en la ficha y en cada acción.
  */
-async function requireStaffCaseFor(
+export async function requireStaffCaseFor(
   db: Db,
   actor: AdminActor,
   caseId: string,
@@ -2057,9 +2057,11 @@ export async function revokeSupportGrantAsStaff(
     throw notFound("Permiso")
   })
   if (grant.revokedAt !== null) return
+  const now = new Date()
+  const expired = grant.expiresAt.getTime() <= now.getTime()
   await db
     .update(supportAccessGrant)
-    .set({ revokedAt: new Date() })
+    .set(expired ? { revokedAt: grant.expiresAt, endReason: "vencido" } : { revokedAt: now, endReason: "quitado", revokedBy: actor.userId })
     .where(eq(supportAccessGrant.id, grant.id))
   await db.insert(supportAccessAudit).values({
     grantId: grant.id,

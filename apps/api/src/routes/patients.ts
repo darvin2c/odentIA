@@ -733,10 +733,14 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       const blocked = await lockRefusal(c, write)
       if (blocked) return blocked
     }
-    const patientId = c.req.path.match(/\/patients\/([0-9a-f-]{36})\//i)?.[1]
+    // Un id escrito sin guiones o con mayúsculas también es la ficha (PostgreSQL lo lee igual).
+    const patientId = canonicalUuid(c.req.path.match(/\/patients\/([^/]+)\//)?.[1]) ?? undefined
     const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
     // Soporte mirando la clínica: lo que abre queda anotado ANTES de mostrarse, y si
     // no se puede anotar no se muestra (el contrato promete que cada acceso queda).
+    // Descargar la historia completa no es mirar: soporte no se la lleva (y no se anota lo que no pasa).
+    if (isSupportRequest(c) && remainder.startsWith("/record"))
+      return c.json(errorBody(c, "SUPPORT_NO_DOWNLOAD", "Soporte solo mira: no descarga ni imprime"), 403)
     if (isSupportRequest(c) && domain === "clinical" && !write && patientId && resource) {
       const { orgId, userId } = orgContextOf(c)
       const traced = await traceClinicalReadOrFail(deps.db, { orgId, userId, patientId, resource })

@@ -1,5 +1,6 @@
 import { type Db, runReadOnly, withOrgContext } from "@odentia/db"
 import { supportAccessAudit, supportAccessGrant } from "@odentia/db/schema/admin-support"
+import { adminStaff } from "@odentia/db/schema/admin-core"
 import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, isNull } from "drizzle-orm"
@@ -12,6 +13,7 @@ import {
   readSupportDiagnostic,
   requestSupportAccess,
   revokeSupportAccess,
+  revokeSupportGrantAsStaff,
   setSupportCaseStatus,
 } from "./admin-support.js"
 import { recordClinicalAccess } from "./clinical-access.js"
@@ -66,6 +68,11 @@ beforeAll(async () => {
     { id: RECEPTION, name: "Lucía", email: "lucia@sr.test", emailVerified: true },
     { id: STAFF, name: "Sofía Soporte", email: "sofia@sr.test", emailVerified: true },
     { id: STAFF_2, name: "Otro Soporte", email: "otro@sr.test", emailVerified: true },
+  ])
+  // Personal de odentIA activo: solo así una sesión de soporte vale.
+  await ownerDb.insert(adminStaff).values([
+    { userId: STAFF, role: "support" },
+    { userId: STAFF_2, role: "support" },
   ])
   await ownerDb.insert(member).values([
     { id: "m-sr-owner", userId: OWNER, organizationId: ORG, role: "owner", createdAt: new Date() },
@@ -212,7 +219,7 @@ describe("la sesión de solo mirar", () => {
   it("el pase sirve una vez, para quien tiene el permiso, y la sesión termina al quitarlo", async () => {
     const { caseId, grant } = await give(30, "clinician")
     // Sin pedido, el permiso pasa a ser de la primera persona de soporte que lo usa.
-    const pass = await ownerDb.transaction((tx) => createSupportPass(tx as Db, staff, caseId))
+    const pass = await createSupportPass(ownerDb, staff, caseId)
     await expect(
       ownerDb.transaction((tx) => createSupportPass(tx as Db, otherStaff, caseId)),
     ).rejects.toThrow(/dado a ti/)
@@ -236,7 +243,7 @@ describe("la sesión de solo mirar", () => {
 
   it("si quien lo dio deja de administrar la clínica, el acceso termina", async () => {
     const { caseId, grant } = await give(30, "reception", ADMIN)
-    const pass = await ownerDb.transaction((tx) => createSupportPass(tx as Db, staff, caseId))
+    const pass = await createSupportPass(ownerDb, staff, caseId)
     const session = await redeemSupportPass(ownerDb, pass.token)
     await ownerDb.update(member).set({ role: "reception" }).where(eq(member.id, "m-sr-admin"))
     try {
@@ -253,7 +260,7 @@ describe("la sesión de solo mirar", () => {
 
   it("«Salir» termina la sesión aunque el permiso siga", async () => {
     const { caseId } = await give(30, "reception")
-    const pass = await ownerDb.transaction((tx) => createSupportPass(tx as Db, staff, caseId))
+    const pass = await createSupportPass(ownerDb, staff, caseId)
     const session = await redeemSupportPass(ownerDb, pass.token)
     await endSupportSession(ownerDb, session.sessionToken)
     expect(await resolveSupportSession(ownerDb, session.sessionToken)).toBeNull()
@@ -279,6 +286,39 @@ describe("la sesión de solo mirar", () => {
   })
 })
 
+describe("lo que corrigió la revisión", () => {
+  it("soporte quita el acceso desde la administración y queda quién y por qué", async () => {
+    const { grant } = await give(30, "reception")
+    await revokeSupportGrantAsStaff(ownerDb, staff, grant.id)
+    const [row] = await ownerDb.select().from(supportAccessGrant).where(eq(supportAccessGrant.id, grant.id))
+    expect(row).toMatchObject({ endReason: "quitado", revokedBy: STAFF })
+  })
+
+  it("si la persona deja el personal de odentIA, su sesión deja de valer", async () => {
+    const { caseId } = await give(30, "reception")
+    const pass = await createSupportPass(ownerDb, staff, caseId)
+    const session = await redeemSupportPass(ownerDb, pass.token)
+    await ownerDb.update(adminStaff).set({ active: false }).where(eq(adminStaff.userId, STAFF))
+    try {
+      expect(await resolveSupportSession(ownerDb, session.sessionToken)).toBeNull()
+    } finally {
+      await ownerDb.update(adminStaff).set({ active: true }).where(eq(adminStaff.userId, STAFF))
+    }
+  })
+
+  it("un pase rechazado queda en la auditoría, y un permiso de configuración no pasa a ser de nadie", async () => {
+    const { caseId, grant } = await give(30, null)
+    await expect(createSupportPass(ownerDb, staff, caseId)).rejects.toThrow(/dado a ti/)
+    const [row] = await ownerDb.select().from(supportAccessGrant).where(eq(supportAccessGrant.id, grant.id))
+    expect(row?.staffUserId).toBeNull()
+    const denied = await ownerDb
+      .select()
+      .from(supportAccessAudit)
+      .where(and(eq(supportAccessAudit.caseId, caseId), eq(supportAccessAudit.action, "denegado_pase")))
+    expect(denied).toHaveLength(1)
+  })
+})
+
 describe("solo lectura en la base", () => {
   it("una transacción de la clínica dentro de runReadOnly no escribe", async () => {
     const error = await runReadOnly(() =>
@@ -297,7 +337,7 @@ describe("solo lectura en la base", () => {
 
   it("lo que soporte abre queda en el caso de la clínica, con el nombre de la persona", async () => {
     const { caseId } = await give(30, "clinician")
-    const pass = await ownerDb.transaction((tx) => createSupportPass(tx as Db, staff, caseId))
+    const pass = await createSupportPass(ownerDb, staff, caseId)
     await redeemSupportPass(ownerDb, pass.token)
     const [patient] = await insertTestPatients(ownerDb, {
       organizationId: ORG,

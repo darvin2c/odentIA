@@ -91,6 +91,7 @@ beforeAll(async () => {
     insert into "user" ("id", "name", "email") values
       ('u-sop-owner', 'Ana Propietaria', 'ana@sop.test'),
       ('u-sop-staff', 'Sofía Soporte', 'sofia@sop.test')`)
+  await ownerDb.execute(sql`insert into "admin"."admin_staff" ("user_id", "role") values ('u-sop-staff', 'support')`)
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-sop-owner', ${ORG}, 'u-sop-owner', 'owner', now())`)
@@ -126,6 +127,9 @@ it("soporte lee con el rol elegido, no escribe y no sale de su clínica", async 
   const write = await call(cookie, "POST", "/help/support-access", { minutes: 30, viewRole: null })
   expect(write.status).toBe(403)
   expect(await code(write)).toBe("SUPPORT_READ_ONLY")
+  // El intento queda en la auditoría del permiso (el contrato pide «cada intento»).
+  const denied = await ownerDb.execute(sql`select count(*)::int as n from support_access_audit where action = 'denegado_solo_lectura'`)
+  expect((denied[0] as { n: number }).n).toBeGreaterThanOrEqual(1)
   // Lo que no es de recepción, tampoco.
   expect((await call(cookie, "GET", "/team/two-factor")).status).toBe(403)
   // Otra clínica, no.

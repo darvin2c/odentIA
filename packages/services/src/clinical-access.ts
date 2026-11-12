@@ -93,7 +93,7 @@ export async function listClinicalAccess(
     .select({
       userId: clinicalAccessLog.userId,
       userName: user.name,
-      outsideClinic: sql<boolean>`not exists (select 1 from member m where m.user_id = ${clinicalAccessLog.userId} and m.organization_id = ${clinicalAccessLog.organizationId})`,
+      outsideClinic: sql<boolean>`exists (select 1 from support_access_grant g where g.staff_user_id = ${clinicalAccessLog.userId} and g.organization_id = ${clinicalAccessLog.organizationId} and g.created_at <= ${clinicalAccessLog.lastAt})`,
       resource: clinicalAccessLog.resource,
       firstAt: clinicalAccessLog.firstAt,
       lastAt: clinicalAccessLog.lastAt,
