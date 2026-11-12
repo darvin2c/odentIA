@@ -16,7 +16,7 @@ export function openingFollowUpChoice(pending: string | null, today: string | nu
 
 /**
  * Qué pasa en Inicio con lo que se va a anotar (`waitlistHomeRows`), dicho a
- * quien anota. Con fecha, ese día vuelve a salir; si es solo de
+ * quien anota. Con fecha, ese día sale; si es solo de
  * administración, a soporte no. Sin fecha no vuelve por el seguimiento. Una
  * invitación por vencer o vencida (`invitationSoon`) la tiene en «Prospectos
  * por responder» igual, con fecha o sin ella, hasta reenviarla, que entre o
@@ -26,8 +26,8 @@ export function openingFollowUpChoice(pending: string | null, today: string | nu
 export function followUpHint(input: { nextDay: string | null; invitationSoon: boolean; adminOnly: boolean }): string {
   const day = input.nextDay
     ? input.adminOnly
-      ? "Ese día vuelve a salir en Inicio, solo para Administración."
-      : "Ese día vuelve a salir en Inicio."
+      ? "Ese día sale en Inicio, solo para Administración."
+      : "Ese día sale en Inicio."
     : input.invitationSoon
       ? "Sin fecha, no sale en Inicio por el seguimiento."
       : "Sin fecha, no vuelve a salir en Inicio."

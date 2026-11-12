@@ -18,10 +18,10 @@ describe("lo que viene elegido al abrir una solicitud", () => {
 })
 
 describe("lo que dice el cajón que pasa en Inicio", () => {
-  it("con fecha vuelve a salir; si es solo de administración, solo para ella", () => {
-    expect(followUpHint({ nextDay: "2026-11-18", invitationSoon: false, adminOnly: false })).toBe("Ese día vuelve a salir en Inicio.")
+  it("con fecha sale ese día; si es solo de administración, solo para ella", () => {
+    expect(followUpHint({ nextDay: "2026-11-18", invitationSoon: false, adminOnly: false })).toBe("Ese día sale en Inicio.")
     expect(followUpHint({ nextDay: "2026-11-18", invitationSoon: false, adminOnly: true })).toBe(
-      "Ese día vuelve a salir en Inicio, solo para Administración.",
+      "Ese día sale en Inicio, solo para Administración.",
     )
   })
 
