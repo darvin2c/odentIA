@@ -304,7 +304,7 @@ describe("redactar lo que espera", () => {
   it("otra pasada solo vuelve a pedir lo que falló", async () => {
     const { writer, seen } = recordingWriter()
     const outcome = await draftPendingKairosItems(ownerDb, writer, {}, NOW)
-    expect(outcome).toEqual({ drafted: [ids.falla], skipped: [], failed: [] })
+    expect(outcome).toEqual({ drafted: [ids.falla], skipped: [], failed: [], drafter: "modelo" })
     expect(seen).toHaveLength(1)
   })
 

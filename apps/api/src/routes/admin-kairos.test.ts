@@ -1,8 +1,11 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
+import { createKairosWriter } from "@odentia/agent"
 import { createOwnerDb, type Db } from "@odentia/db"
 import {
+  kairosAiUsage,
   kairosItem,
+  kairosWeekly,
   saasClient,
   saasClientContact,
   saasOpportunity,
@@ -11,7 +14,12 @@ import {
 import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import type { MailMessage } from "@odentia/mail"
-import { type KairosDraftWriter, type KairosWeeklyWriter, ServiceError } from "@odentia/services"
+import {
+  KAIROS_TEMPLATE_NOTE,
+  type KairosDraftWriter,
+  type KairosWeeklyWriter,
+  ServiceError,
+} from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { type Context, Hono, type Next } from "hono"
@@ -406,6 +414,76 @@ describe("Hoy, lo que hizo y la pasada", () => {
       .where(eq(kairosItem.id, idOf("borrador")))
     expect(drafted?.payload).toMatchObject({ draft: { body: "Hola Persona borrador" } })
     expect(sent.length).toBe(before)
+  })
+
+  it("sin la clave del modelo la pasada no falla: redacta con plantillas y lo dice, sin gasto", async () => {
+    // La misma ruta con el escritor de producción, sin LLM_OPENAI_API_KEY ni LLM_MODEL=fake.
+    const bare = new Hono()
+    bare.use("*", async (c: Context, next: Next) => {
+      c.set("adminActor", { userId: ADMIN, role: "admin" })
+      await next()
+    })
+    bare.onError((err, c) => {
+      if (err instanceof ServiceError)
+        return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
+      return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
+    })
+    bare.route(
+      "/api/admin/kairos",
+      createAdminKairosRoute({
+        ownerDb,
+        kairos: createKairosWriter({ platform: {}, onUse: () => {} }),
+        mailer: { async send() {} },
+      }),
+    )
+    const target = await client("sinmodelo", { email: "olga@kairos-ruta.test" })
+    await message(
+      "sinmodelo",
+      target,
+      { channel: "correo", to: "olga@kairos-ruta.test" },
+      { draft: false },
+    )
+    // La semana se vuelve a escribir: también sin modelo.
+    await ownerDb.delete(kairosWeekly)
+    const usage = (await ownerDb.select().from(kairosAiUsage)).length
+
+    const res = await bare.request("/api/admin/kairos/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ weekly: true }),
+    })
+    expect(res.status).toBe(200)
+    const body = await read(res)
+    expect(body.data).toMatchObject({
+      drafter: "plantilla",
+      draftsFailed: 0,
+      weekly: { written: true },
+    })
+    expect(body.data.drafted).toBeGreaterThanOrEqual(1)
+    const [drafted] = await ownerDb
+      .select()
+      .from(kairosItem)
+      .where(eq(kairosItem.id, idOf("sinmodelo")))
+    expect(drafted?.payload).toMatchObject({
+      draft: { drafter: "plantilla", subject: expect.any(String) },
+      draftNote: KAIROS_TEMPLATE_NOTE,
+    })
+    expect(String((drafted?.payload.draft as { body?: string } | undefined)?.body)).toContain(
+      "Persona",
+    )
+    const listed = await read(
+      await bare.request(`/api/admin/kairos/items?clientId=${idOf("sinmodeloClient")}`),
+    )
+    expect(listed.data.items).toEqual([
+      expect.objectContaining({
+        id: idOf("sinmodelo"),
+        ready: true,
+        drafter: "plantilla",
+        draftNote: KAIROS_TEMPLATE_NOTE,
+      }),
+    ])
+    // Sin modelo no hay gasto que anotar.
+    expect((await ownerDb.select().from(kairosAiUsage)).length).toBe(usage)
   })
 
   it("lo que hizo Kairós sale en frases", async () => {

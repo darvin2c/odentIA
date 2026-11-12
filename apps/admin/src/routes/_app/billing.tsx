@@ -3,13 +3,12 @@
  * de confirmación, cargos manuales, los planes y el alta de cada producto
  * (ADR 0093) y medios por moneda.
  */
-import { CLINICAL_PRODUCTS, type ClinicalProduct, formatMoney, productWords } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import {
   Button,
   FieldLabel,
   FieldLegend,
   FieldSet,
-  Input,
   RadioGroup,
   RadioGroupItem,
   Select,
@@ -40,16 +39,21 @@ import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { requireAdminRole } from "../../lib/session"
 import { useState } from "react"
-import { currencyDigits, majorToCents } from "../../components/billing-fields"
 import { api } from "../../lib/api"
 import { domainOf } from "../../lib/host"
 import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { NegotiationsSection } from "../../components/billing-terms"
-import { ReasonDialog } from "../../components/reason-dialog"
+import {
+  ManualPaymentDrawer,
+  money,
+  type PaymentActions,
+  PaymentHistoryList,
+  usePaymentActions,
+  usePaymentMethods,
+} from "../../components/billing-payments"
 import { CommercialTermsSection } from "../../components/commercial-terms"
 import {
-  BillingHistorySkeleton,
   BillingMethodsSkeleton,
   BillingPageSkeleton,
   BillingPendingSkeleton,
@@ -67,14 +71,6 @@ export const Route = createFileRoute("/_app/billing")({
 const LOCALE = "es-PE"
 
 type Plan = AdminPlan
-
-interface PaymentMethod {
-  id: string
-  code: string
-  name: string
-  instructions: string | null
-  isActive: boolean
-}
 
 interface OverviewRow {
   organizationId: string
@@ -107,64 +103,6 @@ interface PendingPayment {
   createdAt: string
 }
 
-interface HistoryPayment {
-  id: string
-  organizationId: string
-  amountCents: number
-  currency: string
-  methodCode: string
-  status: string
-  receiptFilename: string | null
-  rejectedAt: string | null
-  rejectReason: string | null
-  rejectedByName: string | null
-  createdAt: string
-}
-
-/** El estado de un pago en palabras, el mismo que lee la clínica en Plan y pagos. */
-const PAYMENT_STATUS: Record<string, string> = {
-  pendiente: "Pendiente de confirmación",
-  confirmado: "Confirmado",
-  reversado: "Reversado",
-  devuelto: "Devuelto",
-  rechazado: "Rechazado",
-}
-
-/** «mié 11 nov, 15:30», en la hora de Lima, donde trabaja la administración. */
-function dayTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ""
-  const parts = new Intl.DateTimeFormat(LOCALE, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone: "America/Lima",
-  }).formatToParts(date)
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value.replace(/\./g, "") ?? ""
-  return `${part("weekday")} ${part("day")} ${part("month")}, ${part("hour")}:${part("minute")}`
-}
-
-/** «Rechazado: No se ve el número de operación · por Ada el mié 11 nov, 15:30». */
-function paymentStatusLine(payment: HistoryPayment): string {
-  const label = PAYMENT_STATUS[payment.status] ?? payment.status
-  if (payment.status !== "rechazado") return label
-  const who = payment.rejectedByName ? ` · por ${payment.rejectedByName.split(" ")[0]}` : ""
-  const when = payment.rejectedAt ? ` el ${dayTime(payment.rejectedAt)}` : ""
-  return `${label}${payment.rejectReason ? `: ${payment.rejectReason}` : ""}${who || when ? `${who || " ·"}${when}` : ""}`
-}
-
-interface ChargeOption {
-  id: string
-  planName: string
-  amountCents: number
-  currency: string
-  paidCents: number
-  status: string
-}
-
 const STATUS_LABEL: Record<string, string> = {
   prueba: "En prueba",
   activa: "Activa",
@@ -172,14 +110,6 @@ const STATUS_LABEL: Record<string, string> = {
   restringida: "Restringida",
   pausada: "En pausa",
   cancelada: "Cancelada",
-}
-
-function money(cents: number, currency: string): string {
-  try {
-    return formatMoney(cents, currency, LOCALE)
-  } catch {
-    return `${cents} ${currency}`
-  }
 }
 
 /** Precio por acción en millonésimas, hasta tres decimales. */
@@ -210,9 +140,6 @@ function BillingPage() {
   const [planDrawer, setPlanDrawer] = useState<null | { plan?: Plan; product?: ClinicalProduct }>(null)
   const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string }>(null)
   const [methodDrawer, setMethodDrawer] = useState(false)
-  // «Reversar» es solo de lo confirmado (Historial); lo pendiente se «Rechaza», con su propio diálogo.
-  const [reverseTarget, setReverseTarget] = useState<{ id: string; organizationId: string } | null>(null)
-  const [rejectTarget, setRejectTarget] = useState<PendingPayment | null>(null)
 
   const overview = useQuery({
     queryKey: ["admin", "billing", "overview", statusFilter],
@@ -229,10 +156,7 @@ function BillingPage() {
     queryKey: ["admin", "billing", "plans"],
     queryFn: () => api<Plan[]>("/api/admin/billing/plans?includeInactive=1"),
   })
-  const methods = useQuery({
-    queryKey: ["admin", "billing", "methods"],
-    queryFn: () => api<PaymentMethod[]>("/api/admin/billing/methods?includeInactive=1"),
-  })
+  const methods = usePaymentMethods()
   const unassigned = useQuery({
     queryKey: ["admin", "billing", "unassigned"],
     queryFn: () => api<UnassignedOrg[]>("/api/admin/billing/unassigned?limit=100"),
@@ -251,59 +175,11 @@ function BillingPage() {
 
   const [manualOpen, setManualOpen] = useState(false)
   const [historyOrgId, setHistoryOrgId] = useState("")
-  const [refundTarget, setRefundTarget] = useState<{ id: string; organizationId: string } | null>(
-    null,
-  )
-  const [receiptBusy, setReceiptBusy] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const refundPayment = useMutation({
-    mutationFn: ({ target, reason }: { target: { id: string; organizationId: string }; reason: string }) =>
-      api(`/api/admin/billing/payments/${target.id}/refund`, {
-        method: "POST",
-        body: JSON.stringify({ organizationId: target.organizationId, reason }),
-      }),
-    onSuccess: refresh,
+  // Confirmar o rechazar un comprobante cambia también lo que cuenta Inicio; reversar y devolver, solo Cobros.
+  const payments = usePaymentActions({
+    onChanged: (change) => (change === "confirm" || change === "reject" ? refreshPending() : refresh()),
   })
-  async function openReceipt(organizationId: string, paymentId: string) {
-    setActionError(null)
-    setReceiptBusy(paymentId)
-    try {
-      const res = await api<{ url: string }>(
-        `/api/admin/billing/payments/receipt?organizationId=${encodeURIComponent(organizationId)}&paymentId=${encodeURIComponent(paymentId)}`,
-      )
-      window.open(res.url, "_blank", "noopener")
-    } catch (e) {
-      setActionError(submitErrorMessage(e))
-    } finally {
-      setReceiptBusy(null)
-    }
-  }
-  const confirmPayment = useMutation({
-    mutationFn: (payment: PendingPayment) =>
-      api(`/api/admin/billing/payments/${payment.id}/confirm`, {
-        method: "POST",
-        body: JSON.stringify({ organizationId: payment.organizationId }),
-      }),
-    onSuccess: refreshPending,
-  })
-  const reversePayment = useMutation({
-    mutationFn: ({ target, reason }: { target: { id: string; organizationId: string }; reason: string }) =>
-      api(`/api/admin/billing/payments/${target.id}/reverse`, {
-        method: "POST",
-        body: JSON.stringify({ organizationId: target.organizationId, reason }),
-      }),
-    onSuccess: refresh,
-  })
-  // Si otra persona ya lo confirmó o lo rechazó, el 409 lo dice en el diálogo y la lista se pone al día.
-  const rejectPayment = useMutation({
-    mutationFn: ({ target, reason }: { target: PendingPayment; reason: string }) =>
-      api(`/api/admin/billing/payments/${target.id}/reject`, {
-        method: "POST",
-        body: JSON.stringify({ organizationId: target.organizationId, reason }),
-      }),
-    onSettled: refreshPending,
-  })
-  const rejectClinic = rejectTarget ? (rejectTarget.organizationName ?? "la clínica") : ""
+  const confirmPayment = payments.confirm
 
   return (
     <PageShell className="flex flex-col gap-6">
@@ -362,8 +238,8 @@ function BillingPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={receiptBusy === payment.id}
-                    onClick={() => void openReceipt(payment.organizationId, payment.id)}
+                    disabled={payments.receiptBusy === payment.id}
+                    onClick={() => payments.openReceipt(payment.organizationId, payment.id)}
                   >
                     Ver
                   </Button>
@@ -375,7 +251,7 @@ function BillingPage() {
                   >
                     Confirmar
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setRejectTarget(payment)}>
+                  <Button size="sm" variant="ghost" onClick={() => payments.requestReject(payment)}>
                     Rechazar
                   </Button>
                 </div>
@@ -618,53 +494,14 @@ function BillingPage() {
       {methodDrawer ? (
         <MethodDrawer onClose={() => setMethodDrawer(false)} onSaved={refresh} />
       ) : null}
-      <ReasonDialog
-        open={rejectTarget !== null}
-        id="reject-reason"
-        title={
-          rejectTarget
-            ? `Rechazar ${rejectTarget.receiptFilename ?? "el comprobante"} · ${money(rejectTarget.amountCents, rejectTarget.currency)} de ${rejectClinic}`
-            : "Rechazar comprobante"
-        }
-        description={`El comprobante se cierra y no suma al cargo; ${rejectClinic} podrá registrar otro. Verá este motivo en Plan y pagos y en el aviso de su pantalla. No le llega correo. Si fue un error, registra el pago en el cargo.`}
-        confirmLabel="Rechazar"
-        placeholder="Por qué no se puede confirmar, como lo leerá la clínica"
-        onConfirm={(reason) =>
-          rejectTarget ? rejectPayment.mutateAsync({ target: rejectTarget, reason }) : Promise.resolve()
-        }
-        onClose={() => setRejectTarget(null)}
-      />
-      <ReasonDialog
-        open={reverseTarget !== null}
-        id="reverse-reason"
-        title="Reversar pago"
-        description="El pago dejará de sumar al cargo. Si su comisión ya se liquidó, se descuenta como ajuste en la próxima liquidación (la liquidación original no se modifica)."
-        confirmLabel="Reversar"
-        placeholder="Por qué se reversa"
-        onConfirm={(reason) =>
-          reverseTarget ? reversePayment.mutateAsync({ target: reverseTarget, reason }) : Promise.resolve()
-        }
-        onClose={() => setReverseTarget(null)}
-      />
-      {actionError ? (
+      {payments.dialogs}
+      {payments.actionError ? (
         <p role="alert" className="text-sm text-destructive">
-          {actionError}
+          {payments.actionError}
         </p>
       ) : null}
-      <ReasonDialog
-        open={refundTarget !== null}
-        id="refund-reason"
-        title="Devolver pago"
-        description="El dinero vuelve a la clínica y el cargo deja de sumarlo. Si su comisión ya se liquidó, se descuenta como ajuste en la próxima liquidación."
-        confirmLabel="Devolver"
-        placeholder="Por qué se devuelve"
-        onConfirm={(reason) =>
-          refundTarget ? refundPayment.mutateAsync({ target: refundTarget, reason }) : Promise.resolve()
-        }
-        onClose={() => setRefundTarget(null)}
-      />
       {manualOpen ? (
-        <ManualDrawer
+        <ManualPaymentDrawer
           orgs={overview.data ?? []}
           methods={methods.data ?? []}
           onClose={() => setManualOpen(false)}
@@ -675,11 +512,8 @@ function BillingPage() {
         orgs={overview.data ?? []}
         selectedOrgId={historyOrgId}
         onSelectOrg={setHistoryOrgId}
-        onOpenReceipt={(organizationId, paymentId) => void openReceipt(organizationId, paymentId)}
-        receiptBusy={receiptBusy}
         methodName={methodName}
-        onReverseRequest={setReverseTarget}
-        onRefundRequest={setRefundTarget}
+        actions={payments}
       />
     </PageShell>
   )
@@ -940,221 +774,20 @@ function AssignPlanForm({
   )
 }
 
-/** Lo que falla en el importe según los decimales de la moneda del cargo; vacío lo dice el esquema. */
-function amountProblem(text: string, currency: string | undefined): string | undefined {
-  const value = text.trim()
-  if (!value || !currency) return undefined
-  const digits = currencyDigits(currency)
-  const pattern = digits > 0 ? new RegExp(`^\\d+([.,]\\d{1,${digits}})?$`) : /^\d+$/
-  if (!pattern.test(value))
-    return digits > 0 ? `Escribe el importe con hasta ${digits} decimales, como 150.00` : "Escribe el importe sin decimales"
-  const cents = majorToCents(value, currency)
-  if (cents === null || cents <= 0) return "El importe debe ser mayor que cero"
-  return undefined
-}
-
-const manualSchema = z.object({
-  organizationId: z.string().min(1, "Elige la clínica"),
-  chargeId: z.string().min(1, "Elige el cargo"),
-  methodCode: z.string().min(1, "Elige el medio usado"),
-  amount: z.string().trim().min(1, "Escribe el importe"),
-  paidAt: z.string().min(1, "Elige la fecha de pago"),
-  notes: z.string().max(2000, "Escribe las notas en 2000 caracteres como mucho"),
-  file: z.custom<File | null>((value) => value instanceof File, "Adjunta el comprobante recibido"),
-})
-
-/** Staff registra un pago recibido (D1): org y cargo por nombre, fecha de pago, medio, importe y comprobante real. */
-function ManualDrawer({
-  orgs,
-  methods,
-  onClose,
-  onSaved,
-}: {
-  orgs: OverviewRow[]
-  methods: PaymentMethod[]
-  onClose: () => void
-  onSaved: () => void
-}) {
-  // El servidor solo acepta medios activos.
-  const activeMethods = methods.filter((method) => method.isActive)
-  const save = useMutation({
-    mutationFn: (body: FormData) => api("/api/admin/billing/payments/manual", { method: "POST", body }),
-  })
-  const form = useAppForm({
-    defaultValues: {
-      organizationId: orgs[0]?.organizationId ?? "",
-      chargeId: "",
-      methodCode: activeMethods[0]?.code ?? "",
-      amount: "",
-      paidAt: new Date().toISOString().slice(0, 10),
-      notes: "",
-      file: null as File | null,
-    },
-    validators: { onSubmit: manualSchema },
-    onSubmit: async ({ value }) => {
-      const charge = charges.data?.find((item) => item.id === value.chargeId)
-      const amountCents = charge ? majorToCents(value.amount, charge.currency) : null
-      // Los validadores de cargo, importe y comprobante ya lo garantizan; si el cargo
-      // dejó de estar en la lista mientras se escribía, se dice junto a los botones.
-      if (!charge || amountCents === null || !value.file) {
-        throw new Error("El cargo elegido ya no está en la lista. Vuelve a elegirlo antes de registrar el pago.")
-      }
-      const body = new FormData()
-      body.append("organizationId", value.organizationId)
-      body.append("chargeId", charge.id)
-      body.append("methodCode", value.methodCode)
-      body.append("amountCents", String(amountCents))
-      body.append("idempotencyKey", crypto.randomUUID())
-      if (value.notes.trim()) body.append("notes", value.notes.trim())
-      body.append("paidAt", new Date(`${value.paidAt}T12:00:00Z`).toISOString())
-      body.append("file", value.file, value.file.name)
-      await save.mutateAsync(body)
-      onSaved()
-      onClose()
-    },
-  })
-  const surface = useFormSurface(form, { fieldMap: { amountCents: "amount" } })
-  const orgId = useStore(form.store, (state) => state.values.organizationId)
-  const chargeId = useStore(form.store, (state) => state.values.chargeId)
-  const charges = useQuery({
-    queryKey: ["admin", "billing", "charges", orgId],
-    queryFn: () =>
-      api<ChargeOption[]>(`/api/admin/billing/charges?organizationId=${encodeURIComponent(orgId)}`),
-    enabled: orgId !== "",
-  })
-  const charge = charges.data?.find((item) => item.id === chargeId) ?? null
-  return (
-    <FormDrawer
-      {...surface}
-      open
-      title="Registrar pago recibido"
-      submitLabel="Registrar y confirmar"
-      onClose={onClose}
-    >
-      <form.AppField name="organizationId" listeners={{ onChange: () => form.setFieldValue("chargeId", "") }}>
-        {(field) => (
-          <field.SelectField
-            id="manual-org"
-            label="Clínica"
-            placeholder="Elige la clínica"
-            options={orgs.map((org) => ({ value: org.organizationId, label: org.organizationName ?? org.organizationId }))}
-          />
-        )}
-      </form.AppField>
-      <form.AppField
-        name="chargeId"
-        validators={{
-          onSubmit: ({ value }) =>
-            value && charges.data && !charges.data.some((item) => item.id === value)
-              ? "Ese cargo ya no está: elige otro."
-              : undefined,
-        }}
-      >
-        {(field) => (
-          <field.SelectField
-            id="manual-charge"
-            label="Cargo"
-            placeholder="Elige el cargo"
-            options={(charges.data ?? []).map((item) => ({
-              value: item.id,
-              label: `${item.planName} · saldo ${money(item.amountCents - item.paidCents, item.currency)}`,
-            }))}
-          />
-        )}
-      </form.AppField>
-      <div className="grid grid-cols-2 gap-3">
-        <form.AppField name="methodCode">
-          {(field) => (
-            <field.SelectField
-              id="manual-method"
-              label="Medio usado"
-              placeholder="Elige el medio"
-              options={activeMethods.map((method) => ({ value: method.code, label: method.name }))}
-            />
-          )}
-        </form.AppField>
-        <form.AppField
-          name="amount"
-          validators={{ onSubmit: ({ value }) => amountProblem(value, charge?.currency) }}
-        >
-          {(field) => (
-            <field.TextField
-              id="manual-amount"
-              label={`Importe${charge ? ` (${charge.currency})` : ""}`}
-              inputMode="decimal"
-              placeholder="150.00"
-            />
-          )}
-        </form.AppField>
-      </div>
-      <form.AppField name="paidAt">
-        {(field) => (
-          <field.Control id="manual-paid" label="Fecha de pago">
-            {(control) => (
-              <DatePickerButton
-                {...control.props}
-                value={field.state.value}
-                onChange={(next) => {
-                  field.handleChange(next)
-                  field.handleBlur()
-                }}
-              />
-            )}
-          </field.Control>
-        )}
-      </form.AppField>
-      <form.AppField name="notes">
-        {(field) => <field.TextareaField id="manual-notes" label="Notas (opcional)" maxLength={2000} />}
-      </form.AppField>
-      <form.AppField name="file">
-        {(field) => (
-          <field.Control id="manual-file" label="Comprobante (PNG, JPG, WebP o PDF, máx. 10 MB)">
-            {(control) => (
-              <Input
-                {...control.props}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,application/pdf"
-                onChange={(event) => {
-                  field.handleChange(event.target.files?.[0] ?? null)
-                  field.handleBlur()
-                }}
-              />
-            )}
-          </field.Control>
-        )}
-      </form.AppField>
-    </FormDrawer>
-  )
-}
-
 /** Historial de pagos de una clínica con anular/devolver y comprobante. */
 function HistorySection({
   orgs,
   selectedOrgId,
   onSelectOrg,
-  onOpenReceipt,
-  receiptBusy,
   methodName,
-  onReverseRequest,
-  onRefundRequest,
+  actions,
 }: {
   orgs: OverviewRow[]
   selectedOrgId: string
   onSelectOrg: (orgId: string) => void
-  onOpenReceipt: (organizationId: string, paymentId: string) => void
-  receiptBusy: string | null
   methodName: (code: string) => string
-  onReverseRequest: (payment: { id: string; organizationId: string }) => void
-  onRefundRequest: (payment: { id: string; organizationId: string }) => void
+  actions: PaymentActions
 }) {
-  const payments = useQuery({
-    queryKey: ["admin", "billing", "history", selectedOrgId],
-    queryFn: () =>
-      api<HistoryPayment[]>(
-        `/api/admin/billing/payments?organizationId=${encodeURIComponent(selectedOrgId)}`,
-      ),
-    enabled: selectedOrgId !== "",
-  })
   return (
     <section aria-labelledby="historial" className="flex flex-col gap-2">
       <h2 id="historial" className="text-base font-semibold">
@@ -1184,57 +817,13 @@ function HistorySection({
         <p className="text-sm text-muted-foreground">
           Elige una clínica para ver sus comprobantes y pagos: pendientes, confirmados, rechazados, reversos y devoluciones.
         </p>
-      ) : payments.isPending ? (
-        <SkeletonRegion message="Cargando pagos…">
-          <BillingHistorySkeleton />
-        </SkeletonRegion>
-      ) : payments.isError ? (
-        <ErrorState
-          title="No se pudieron cargar los pagos"
-          message={submitErrorMessage(payments.error)}
-          onRetry={() => void payments.refetch()}
-        />
-      ) : payments.data.length === 0 ? (
-        <EmptyState title="Sin pagos" description="Esta clínica aún no registra pagos." />
       ) : (
-        <ul className="flex flex-col gap-2">
-          {payments.data.map((payment) => (
-            <li
-              key={payment.id}
-              className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
-            >
-              <div className="min-w-0 flex-1 basis-56">
-                <p className="text-sm font-medium [overflow-wrap:anywhere]">{payment.receiptFilename ?? "Comprobante"}</p>
-                <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                  {paymentStatusLine(payment)} · {methodName(payment.methodCode)}
-                </p>
-              </div>
-              <p className="text-sm font-semibold tabular-nums">
-                {money(payment.amountCents, payment.currency)}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={receiptBusy === payment.id}
-                  onClick={() => onOpenReceipt(payment.organizationId, payment.id)}
-                >
-                  Ver
-                </Button>
-                {payment.status === "confirmado" ? (
-                  <>
-                    <Button size="sm" variant="ghost" onClick={() => onReverseRequest(payment)}>
-                      Reversar
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => onRefundRequest(payment)}>
-                      Devolver
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <PaymentHistoryList
+          organizationId={selectedOrgId}
+          organizationName={orgs.find((org) => org.organizationId === selectedOrgId)?.organizationName ?? null}
+          methodName={methodName}
+          actions={actions}
+        />
       )}
     </section>
   )

@@ -1,12 +1,13 @@
 import type { ServerResponse } from "node:http"
 import { describe, expect, it } from "vitest"
+import { AI_PRICES } from "./ai-usage.js"
 import {
   createKairosWriter,
   fakeKairosWriter,
   type KairosClientFacts,
   type KairosUse,
+  kairosModelNotice,
 } from "./kairos.js"
-import { LlmConfigError } from "./llm.js"
 import { cacheMarked, fakeProvider, json, systemBlock, toolCallReply } from "./test-provider.js"
 
 const client: KairosClientFacts = {
@@ -166,9 +167,99 @@ describe("fakeKairosWriter", () => {
 })
 
 describe("createKairosWriter con el proveedor", () => {
-  it("sin la clave del proveedor no escribe nada", async () => {
-    const writer = createKairosWriter({ platform: {}, onUse: () => {} })
-    await expect(writer.weeklySummary({ figures: [] })).rejects.toBeInstanceOf(LlmConfigError)
+  it("sin la clave del proveedor redacta con plantillas y lo dice, sin gasto ni error", async () => {
+    const uses: KairosUse[] = []
+    const writer = createKairosWriter({ platform: {}, onUse: (use) => void uses.push(use) })
+    expect(writer.drafter).toBe("plantilla")
+    expect(await writer.weeklySummary({ figures: [] })).toEqual({
+      text: "Resumen de la semana: sin cifras.",
+    })
+    const draft = await writer.draftMessage({
+      client,
+      contact: { name: "Rosa Quispe" },
+      channel: "correo",
+      goal: "primera_respuesta",
+      facts: [],
+      senderName: "Ana Torres",
+    })
+    expect(draft.body).toContain("Hola, Rosa:")
+    const read = await writer.parseAnnotation({
+      text: "Llamé a Rosa",
+      today,
+      client,
+      contacts,
+      demos,
+    })
+    expect(read.activity).toMatchObject({ kind: "llamada", contactId: "c-rosa" })
+    expect(uses).toEqual([])
+    // El aviso de la consola: solo cuando falta la clave, no en el modo de demostración ni con ella.
+    expect(kairosModelNotice({})).toContain("el modelo no está configurado")
+    expect(kairosModelNotice({ fake: true })).toBeNull()
+    expect(kairosModelNotice({ openai: { apiKey: "clave-sintetica" } })).toBeNull()
+  })
+
+  it("con la clave, el escritor dice que redacta el modelo", () => {
+    const writer = createKairosWriter({
+      platform: { openai: { apiKey: "clave-sintetica" } },
+      onUse: () => {},
+    })
+    expect(writer.drafter).toBe("modelo")
+    expect(fakeKairosWriter.drafter).toBe("plantilla")
+  })
+
+  it("el costo sale del precio de AI_PRICES; sin precio o sin uso informado queda null, nunca 0", async () => {
+    const draftAsk = {
+      client,
+      channel: "whatsapp" as const,
+      goal: "primera_respuesta",
+      facts: [],
+      senderName: "Ana Torres",
+    }
+    const priced = await withProvider((_n, response) => chat(response, { content: "Hola, Rosa." }))
+    try {
+      await priced.writer.draftMessage(draftAsk)
+      // 1000 de entrada a USD 0,1 y 200 de salida a USD 0,5 por millón: 100 + 100 millonésimas.
+      const price = AI_PRICES["gpt-6-luna"]
+      expect(price).toBeDefined()
+      expect(priced.uses[0]?.costMicros).toBe(
+        Math.round(1_000 * (price?.input ?? 0) + 200 * (price?.output ?? 0)),
+      )
+    } finally {
+      await priced.provider.close()
+    }
+    const saved = AI_PRICES["gpt-6-luna"]
+    delete AI_PRICES["gpt-6-luna"]
+    const unpriced = await withProvider((_n, response) =>
+      chat(response, { content: "Hola, Rosa." }),
+    )
+    try {
+      await unpriced.writer.draftMessage(draftAsk)
+      expect(unpriced.uses).toEqual([
+        expect.objectContaining({ model: "gpt-6-luna", inputTokens: 1_000, costMicros: null }),
+      ])
+    } finally {
+      if (saved) AI_PRICES["gpt-6-luna"] = saved
+      await unpriced.provider.close()
+    }
+    const silent = await withProvider((_n, response) =>
+      json(response, 200, {
+        id: "chatcmpl-2",
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-6-luna",
+        choices: [
+          { index: 0, message: { role: "assistant", content: "Hola." }, finish_reason: "stop" },
+        ],
+      }),
+    )
+    try {
+      await silent.writer.draftMessage(draftAsk)
+      expect(silent.uses).toEqual([
+        expect.objectContaining({ inputTokens: 0, outputTokens: 0, costMicros: null }),
+      ])
+    } finally {
+      await silent.provider.close()
+    }
   })
 
   it("ordena la anotación con la herramienta, toma solo los ids que conoce y anota el gasto", async () => {

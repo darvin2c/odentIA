@@ -17,7 +17,7 @@ import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, not, sql } from "drizzle-orm"
 import { CLIENT_STAGE_WORDS, type ClientStage, clientStageSql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { saveKairosDraft } from "./admin-kairos.js"
+import { type KairosDrafter, saveKairosDraft } from "./admin-kairos.js"
 import { forecastReport, funnelReport, revenueReport } from "./admin-reports.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
@@ -51,6 +51,8 @@ export interface KairosDraftClientFacts {
  * que los servicios no dependan del agente.
  */
 export interface KairosDraftWriter {
+  /** «plantilla» si redacta sin modelo (no configurado); sin el campo, el modelo. */
+  readonly drafter?: KairosDrafter
   draftMessage(input: {
     client: KairosDraftClientFacts
     contact?: { name: string; title?: string | null }
@@ -67,6 +69,7 @@ export interface KairosDraftWriter {
 }
 
 export interface KairosWeeklyWriter {
+  readonly drafter?: KairosDrafter
   weeklySummary(input: { figures: KairosWeeklyFigure[] }): Promise<{ text: string }>
 }
 
@@ -298,6 +301,8 @@ export interface KairosDraftsOutcome {
   skipped: string[]
   /** Los que el modelo no pudo redactar: la pasada siguiente los vuelve a pedir. */
   failed: Array<{ itemId: string; error: string }>
+  /** Quién redactó: el modelo, o la plantilla si el modelo no está configurado. */
+  drafter: KairosDrafter
 }
 
 /**
@@ -314,9 +319,10 @@ export async function draftPendingKairosItems(
   now = new Date(),
 ): Promise<KairosDraftsOutcome> {
   const jobs = await ownerDb.transaction((tx) => pendingKairosDraftJobs(tx, options, now))
-  const outcome: KairosDraftsOutcome = { drafted: [], skipped: [], failed: [] }
+  const drafter: KairosDrafter = writer.drafter ?? "modelo"
+  const outcome: KairosDraftsOutcome = { drafted: [], skipped: [], failed: [], drafter }
   for (const job of jobs) {
-    let draft: { subject?: string | null; body: string }
+    let draft: { subject?: string | null; body: string; drafter: KairosDrafter }
     try {
       if (job.kind === "guion") {
         const { script } = await writer.presentationScript({
@@ -324,7 +330,7 @@ export async function draftPendingKairosItems(
           facts: job.facts,
           demo: job.demo,
         })
-        draft = { body: script }
+        draft = { body: script, drafter }
       } else {
         if (!job.channel) {
           outcome.skipped.push(job.itemId)
@@ -341,6 +347,7 @@ export async function draftPendingKairosItems(
         draft = {
           subject: job.channel === "correo" ? (written.subject ?? null) : null,
           body: written.body,
+          drafter,
         }
       }
     } catch (error) {

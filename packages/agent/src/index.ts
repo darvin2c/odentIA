@@ -41,6 +41,7 @@ export {
   createKairosWriter,
   fakeKairosWriter,
   KAIROS_GOALS,
+  kairosModelNotice,
   type KairosAnnotation,
   type KairosChatModel,
   type KairosClientFacts,

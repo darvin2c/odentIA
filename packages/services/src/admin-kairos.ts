@@ -637,6 +637,16 @@ async function markStale(tx: Db, id: string, now: Date, error: string): Promise<
     .where(eq(kairosItem.id, id))
 }
 
+/**
+ * Quién redactó un mensaje o un guion de Kairós: el modelo, o las plantillas
+ * deterministas cuando el modelo no está configurado (sin la clave del
+ * proveedor, o `LLM_MODEL=fake`). La pantalla lo dice con `KAIROS_TEMPLATE_NOTE`.
+ */
+export type KairosDrafter = "modelo" | "plantilla"
+
+/** Lo que dice un borrador hecho sin modelo, para que nadie lo tome por uno del modelo. */
+export const KAIROS_TEMPLATE_NOTE = "Borrador hecho con plantilla: el modelo no está configurado"
+
 export interface KairosItemView {
   id: string
   clientId: string | null
@@ -650,6 +660,10 @@ export interface KairosItemView {
   payload: Record<string, unknown>
   /** Un mensaje o un guion están listos cuando el modelo los redactó; lo demás, siempre. */
   ready: boolean
+  /** Quién redactó el mensaje o el guion; null si no es un borrador o aún no tiene. */
+  drafter: KairosDrafter | null
+  /** `KAIROS_TEMPLATE_NOTE` si lo redactó una plantilla; null si no. */
+  draftNote: string | null
   adminOnly: boolean
   expiresAt: Date
   createdAt: Date
@@ -665,6 +679,19 @@ type ItemRow = typeof kairosItem.$inferSelect
 const isReady = (kind: string, payload: Record<string, unknown>) =>
   !(DRAFT_KINDS as readonly string[]).includes(kind) ||
   Boolean(payload.draft && typeof payload.draft === "object")
+
+/** Quién redactó el borrador del ítem; los anteriores a esta marca son del modelo. */
+function draftAuthorOf(
+  kind: string,
+  payload: Record<string, unknown>,
+): { drafter: KairosDrafter | null; draftNote: string | null } {
+  if (!(DRAFT_KINDS as readonly string[]).includes(kind)) return { drafter: null, draftNote: null }
+  const draft = payload.draft
+  if (!draft || typeof draft !== "object") return { drafter: null, draftNote: null }
+  const drafter: KairosDrafter =
+    (draft as { drafter?: unknown }).drafter === "plantilla" ? "plantilla" : "modelo"
+  return { drafter, draftNote: drafter === "plantilla" ? KAIROS_TEMPLATE_NOTE : null }
+}
 
 function toItemView(row: {
   item: ItemRow
@@ -684,6 +711,7 @@ function toItemView(row: {
     status: item.status as KairosItemStatus,
     payload: item.payload,
     ready: isReady(item.kind, item.payload),
+    ...draftAuthorOf(item.kind, item.payload),
     adminOnly: item.adminOnly,
     expiresAt: item.expiresAt,
     createdAt: item.createdAt,
@@ -1190,14 +1218,15 @@ export async function settleKairosOutreach(
 }
 
 /**
- * Guarda lo que redactó el modelo para un mensaje o un guion en espera: desde
- * ahí está listo. La redacción original queda en `payload.draft`; lo que la
+ * Guarda lo que redactó el modelo (o la plantilla, sin modelo configurado)
+ * para un mensaje o un guion en espera: desde ahí está listo. La redacción
+ * original queda en `payload.draft` con quién la hizo (`drafter`); lo que la
  * persona cambie va en `edited` al aprobar. Devuelve false si ya no espera.
  */
 export async function saveKairosDraft(
   tx: Db,
   itemId: string,
-  draft: { subject?: string | null; body: string },
+  draft: { subject?: string | null; body: string; drafter?: KairosDrafter },
 ): Promise<boolean> {
   const body = draft.body?.trim() ?? ""
   if (!body) throw invalidField("body", "El borrador está vacío")
@@ -1205,7 +1234,13 @@ export async function saveKairosDraft(
   const subject = draft.subject?.trim() || null
   if (subject && subject.length > 200)
     throw invalidField("subject", "Usa como máximo 200 caracteres")
-  const patch = { draft: { subject, body }, subject, body }
+  const drafter: KairosDrafter = draft.drafter === "plantilla" ? "plantilla" : "modelo"
+  const patch = {
+    draft: { subject, body, drafter },
+    subject,
+    body,
+    draftNote: drafter === "plantilla" ? KAIROS_TEMPLATE_NOTE : null,
+  }
   const done = await tx
     .update(kairosItem)
     .set({
@@ -1230,7 +1265,7 @@ export async function saveKairosDraft(
   await writeAdminAudit(tx, null, {
     action: "kairos.draft_written",
     entityId: row.id,
-    metadata: { kind: row.kind, clientId: row.clientId, adminOnly: row.adminOnly },
+    metadata: { kind: row.kind, clientId: row.clientId, adminOnly: row.adminOnly, drafter },
   })
   return true
 }

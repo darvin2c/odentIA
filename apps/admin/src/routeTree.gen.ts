@@ -14,13 +14,19 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppBillingRouteImport } from './routes/_app/billing'
+import { Route as AppClientsRouteImport } from './routes/_app/clients'
 import { Route as AppCommissionsRouteImport } from './routes/_app/commissions'
 import { Route as AppComplaintsRouteImport } from './routes/_app/complaints'
+import { Route as AppDemosRouteImport } from './routes/_app/demos'
+import { Route as AppKairosRouteImport } from './routes/_app/kairos'
 import { Route as AppOrganizationsRouteImport } from './routes/_app/organizations'
+import { Route as AppPipelineRouteImport } from './routes/_app/pipeline'
+import { Route as AppReportsRouteImport } from './routes/_app/reports'
 import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AppTeamRouteImport } from './routes/_app/team'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppWaitlistRouteImport } from './routes/_app/waitlist'
+import { Route as AppClientsClientIdRouteImport } from './routes/_app/clients_.$clientId'
 import { Route as AppOrganizationsOrganizationIdRouteImport } from './routes/_app/organizations_.$organizationId'
 
 const AppRoute = AppRouteImport.update({
@@ -47,6 +53,11 @@ const AppBillingRoute = AppBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => AppRoute,
 } as any)
+const AppClientsRoute = AppClientsRouteImport.update({
+  id: '/clients',
+  path: '/clients',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCommissionsRoute = AppCommissionsRouteImport.update({
   id: '/commissions',
   path: '/commissions',
@@ -57,9 +68,29 @@ const AppComplaintsRoute = AppComplaintsRouteImport.update({
   path: '/complaints',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDemosRoute = AppDemosRouteImport.update({
+  id: '/demos',
+  path: '/demos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppKairosRoute = AppKairosRouteImport.update({
+  id: '/kairos',
+  path: '/kairos',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOrganizationsRoute = AppOrganizationsRouteImport.update({
   id: '/organizations',
   path: '/organizations',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPipelineRoute = AppPipelineRouteImport.update({
+  id: '/pipeline',
+  path: '/pipeline',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsRoute = AppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSupportRoute = AppSupportRouteImport.update({
@@ -82,6 +113,11 @@ const AppWaitlistRoute = AppWaitlistRouteImport.update({
   path: '/waitlist',
   getParentRoute: () => AppRoute,
 } as any)
+const AppClientsClientIdRoute = AppClientsClientIdRouteImport.update({
+  id: '/clients_/$clientId',
+  path: '/clients/$clientId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOrganizationsOrganizationIdRoute =
   AppOrganizationsOrganizationIdRouteImport.update({
     id: '/organizations_/$organizationId',
@@ -94,27 +130,39 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/security': typeof SecurityRoute
   '/billing': typeof AppBillingRoute
+  '/clients': typeof AppClientsRoute
   '/commissions': typeof AppCommissionsRoute
   '/complaints': typeof AppComplaintsRoute
+  '/demos': typeof AppDemosRoute
+  '/kairos': typeof AppKairosRoute
   '/organizations': typeof AppOrganizationsRoute
+  '/pipeline': typeof AppPipelineRoute
+  '/reports': typeof AppReportsRoute
   '/support': typeof AppSupportRoute
   '/team': typeof AppTeamRoute
   '/users': typeof AppUsersRoute
   '/waitlist': typeof AppWaitlistRoute
+  '/clients/$clientId': typeof AppClientsClientIdRoute
   '/organizations/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/security': typeof SecurityRoute
   '/billing': typeof AppBillingRoute
+  '/clients': typeof AppClientsRoute
   '/commissions': typeof AppCommissionsRoute
   '/complaints': typeof AppComplaintsRoute
+  '/demos': typeof AppDemosRoute
+  '/kairos': typeof AppKairosRoute
   '/organizations': typeof AppOrganizationsRoute
+  '/pipeline': typeof AppPipelineRoute
+  '/reports': typeof AppReportsRoute
   '/support': typeof AppSupportRoute
   '/team': typeof AppTeamRoute
   '/users': typeof AppUsersRoute
   '/waitlist': typeof AppWaitlistRoute
   '/': typeof AppIndexRoute
+  '/clients/$clientId': typeof AppClientsClientIdRoute
   '/organizations/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
 export interface FileRoutesById {
@@ -123,14 +171,20 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/security': typeof SecurityRoute
   '/_app/billing': typeof AppBillingRoute
+  '/_app/clients': typeof AppClientsRoute
   '/_app/commissions': typeof AppCommissionsRoute
   '/_app/complaints': typeof AppComplaintsRoute
+  '/_app/demos': typeof AppDemosRoute
+  '/_app/kairos': typeof AppKairosRoute
   '/_app/organizations': typeof AppOrganizationsRoute
+  '/_app/pipeline': typeof AppPipelineRoute
+  '/_app/reports': typeof AppReportsRoute
   '/_app/support': typeof AppSupportRoute
   '/_app/team': typeof AppTeamRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/waitlist': typeof AppWaitlistRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/clients_/$clientId': typeof AppClientsClientIdRoute
   '/_app/organizations_/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
 export interface FileRouteTypes {
@@ -140,27 +194,39 @@ export interface FileRouteTypes {
     | '/login'
     | '/security'
     | '/billing'
+    | '/clients'
     | '/commissions'
     | '/complaints'
+    | '/demos'
+    | '/kairos'
     | '/organizations'
+    | '/pipeline'
+    | '/reports'
     | '/support'
     | '/team'
     | '/users'
     | '/waitlist'
+    | '/clients/$clientId'
     | '/organizations/$organizationId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/security'
     | '/billing'
+    | '/clients'
     | '/commissions'
     | '/complaints'
+    | '/demos'
+    | '/kairos'
     | '/organizations'
+    | '/pipeline'
+    | '/reports'
     | '/support'
     | '/team'
     | '/users'
     | '/waitlist'
     | '/'
+    | '/clients/$clientId'
     | '/organizations/$organizationId'
   id:
     | '__root__'
@@ -168,14 +234,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/security'
     | '/_app/billing'
+    | '/_app/clients'
     | '/_app/commissions'
     | '/_app/complaints'
+    | '/_app/demos'
+    | '/_app/kairos'
     | '/_app/organizations'
+    | '/_app/pipeline'
+    | '/_app/reports'
     | '/_app/support'
     | '/_app/team'
     | '/_app/users'
     | '/_app/waitlist'
     | '/_app/'
+    | '/_app/clients_/$clientId'
     | '/_app/organizations_/$organizationId'
   fileRoutesById: FileRoutesById
 }
@@ -222,6 +294,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/clients': {
+      id: '/_app/clients'
+      path: '/clients'
+      fullPath: '/clients'
+      preLoaderRoute: typeof AppClientsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/commissions': {
       id: '/_app/commissions'
       path: '/commissions'
@@ -236,11 +315,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppComplaintsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/demos': {
+      id: '/_app/demos'
+      path: '/demos'
+      fullPath: '/demos'
+      preLoaderRoute: typeof AppDemosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/kairos': {
+      id: '/_app/kairos'
+      path: '/kairos'
+      fullPath: '/kairos'
+      preLoaderRoute: typeof AppKairosRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/organizations': {
       id: '/_app/organizations'
       path: '/organizations'
       fullPath: '/organizations'
       preLoaderRoute: typeof AppOrganizationsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pipeline': {
+      id: '/_app/pipeline'
+      path: '/pipeline'
+      fullPath: '/pipeline'
+      preLoaderRoute: typeof AppPipelineRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reports': {
+      id: '/_app/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AppReportsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/support': {
@@ -271,6 +378,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWaitlistRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/clients_/$clientId': {
+      id: '/_app/clients_/$clientId'
+      path: '/clients/$clientId'
+      fullPath: '/clients/$clientId'
+      preLoaderRoute: typeof AppClientsClientIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/organizations_/$organizationId': {
       id: '/_app/organizations_/$organizationId'
       path: '/organizations/$organizationId'
@@ -283,27 +397,39 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
+  AppClientsRoute: typeof AppClientsRoute
   AppCommissionsRoute: typeof AppCommissionsRoute
   AppComplaintsRoute: typeof AppComplaintsRoute
+  AppDemosRoute: typeof AppDemosRoute
+  AppKairosRoute: typeof AppKairosRoute
   AppOrganizationsRoute: typeof AppOrganizationsRoute
+  AppPipelineRoute: typeof AppPipelineRoute
+  AppReportsRoute: typeof AppReportsRoute
   AppSupportRoute: typeof AppSupportRoute
   AppTeamRoute: typeof AppTeamRoute
   AppUsersRoute: typeof AppUsersRoute
   AppWaitlistRoute: typeof AppWaitlistRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppClientsClientIdRoute: typeof AppClientsClientIdRoute
   AppOrganizationsOrganizationIdRoute: typeof AppOrganizationsOrganizationIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppBillingRoute: AppBillingRoute,
+  AppClientsRoute: AppClientsRoute,
   AppCommissionsRoute: AppCommissionsRoute,
   AppComplaintsRoute: AppComplaintsRoute,
+  AppDemosRoute: AppDemosRoute,
+  AppKairosRoute: AppKairosRoute,
   AppOrganizationsRoute: AppOrganizationsRoute,
+  AppPipelineRoute: AppPipelineRoute,
+  AppReportsRoute: AppReportsRoute,
   AppSupportRoute: AppSupportRoute,
   AppTeamRoute: AppTeamRoute,
   AppUsersRoute: AppUsersRoute,
   AppWaitlistRoute: AppWaitlistRoute,
   AppIndexRoute: AppIndexRoute,
+  AppClientsClientIdRoute: AppClientsClientIdRoute,
   AppOrganizationsOrganizationIdRoute: AppOrganizationsOrganizationIdRoute,
 }
 

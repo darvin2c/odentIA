@@ -6,8 +6,11 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasImportDraft,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
+import { aiUsage } from "@odentia/db/schema/agent"
+import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -228,6 +231,14 @@ it("el gasto de Kairós se anota como gasto de Sallca, sin clínica", async () =
     cachedTokens: 0,
     costMicros: null,
   })
+  await kairosUseRecorder(ownerDb)({
+    purpose: "resumen",
+    model: "gpt-6-luna",
+    inputTokens: 1_000,
+    outputTokens: 200,
+    cachedTokens: 0,
+    costMicros: 200,
+  })
   const rows = await ownerDb.select().from(kairosAiUsage)
   expect(rows).toEqual([
     expect.objectContaining({
@@ -237,5 +248,82 @@ it("el gasto de Kairós se anota como gasto de Sallca, sin clínica", async () =
       costMicros: null,
       clientId: null,
     }),
+    expect.objectContaining({ purpose: "resumen", costMicros: 200, clientId: null }),
   ])
+  // Nunca en el libro de gasto de una clínica.
+  expect(await ownerDb.select().from(aiUsage)).toEqual([])
+})
+
+it("la pasada borra los JSON de la skill usados, reemplazados o subidos hace 30 días, y deja constancia sin datos", async () => {
+  const org = "kairos-org-carga"
+  await ownerDb.insert(user).values({ id: "kairos-ada", name: "Ada", email: "ada@kairos.test" })
+  await ownerDb
+    .insert(organization)
+    .values({ id: org, name: "Clínica Carga", slug: "kairos-carga", createdAt: new Date() })
+  // Miércoles 18, 06:00 de Lima: sin lo del día.
+  const now = new Date("2026-11-18T11:00:00Z")
+  const key = (name: string) => `clients/${clientId}/${name}.json`
+  const base = {
+    clientId,
+    organizationId: org,
+    uploadedBy: "kairos-ada",
+    summary: { personas: 2 },
+  }
+  const drafts = await ownerDb
+    .insert(saasImportDraft)
+    .values([
+      {
+        ...base,
+        kind: "plan_pacientes",
+        number: 1,
+        payloadKey: key("usado"),
+        status: "usada",
+        payloadUploadedAt: now,
+      },
+      {
+        ...base,
+        kind: "plan_pacientes",
+        number: 2,
+        payloadKey: key("viejo"),
+        payloadUploadedAt: new Date(now.getTime() - 30 * 86_400_000),
+      },
+      {
+        ...base,
+        kind: "plan_pacientes",
+        number: 3,
+        payloadKey: key("vigente"),
+        payloadUploadedAt: new Date(now.getTime() - 29 * 86_400_000),
+        stalePayloadKeys: [key("reemplazado")],
+      },
+    ])
+    .returning({ id: saasImportDraft.id, number: saasImportDraft.number })
+  const gone: string[] = []
+  const result = await runKairosTick({
+    ownerDb,
+    writer: countingWriter().writer,
+    storage: { deleteAttachment: async (k: string) => void gone.push(k) },
+    now,
+  })
+  expect(result.errors).toEqual([])
+  expect(result.draftPayloadsDeleted).toBe(3)
+  expect(gone.filter((k) => k.endsWith(".json")).sort()).toEqual(
+    [key("usado"), key("viejo"), key("reemplazado")].sort(),
+  )
+  const rows = await ownerDb.select().from(saasImportDraft)
+  const byNumber = new Map(rows.map((row) => [row.number, row]))
+  expect(byNumber.get(1)?.payloadDeletedAt?.toISOString()).toBe(now.toISOString())
+  expect(byNumber.get(2)?.payloadDeletedAt?.toISOString()).toBe(now.toISOString())
+  expect(byNumber.get(3)).toMatchObject({ payloadDeletedAt: null, stalePayloadKeys: [] })
+  const audits = await ownerDb
+    .select({ actor: adminAudit.actorUserId, metadata: adminAudit.metadata })
+    .from(adminAudit)
+    .where(eq(adminAudit.action, "skill.draft_payload_deleted"))
+  expect(audits.map((audit) => audit.metadata?.reason).sort()).toEqual([
+    "30_dias",
+    "reemplazado",
+    "usada",
+  ])
+  expect(audits.every((audit) => audit.actor === null)).toBe(true)
+  expect(JSON.stringify(audits)).not.toContain(".json")
+  expect(drafts).toHaveLength(3)
 })

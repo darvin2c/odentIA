@@ -480,6 +480,23 @@ describe("al desplegar", () => {
     )
     expect(reach).toEqual(tables.map((tabla) => ({ tabla, alcanza: false })))
   })
+
+  it("las columnas del borrado del JSON de la skill (0107) tampoco se abren a la aplicación", async () => {
+    const columns = ["payload_deleted_at", "payload_uploaded_at", "stale_payload_keys"]
+    const reach = rows<{ columna: string; alcanza: boolean }>(
+      await ownerDb.execute(sql`
+        select c as "columna", has_column_privilege(${APP_ROLE}, 'admin.saas_import_draft', c, 'select, insert, update, references') as "alcanza"
+        from unnest(${sql.raw(`array[${columns.map((column) => `'${column}'`).join(",")}]`)}) as c order by 1`),
+    )
+    expect(reach).toEqual(columns.map((columna) => ({ columna, alcanza: false })))
+    expect(
+      rows<{ alcanza: boolean }>(
+        await ownerDb.execute(
+          sql`select has_table_privilege(${APP_ROLE}, 'admin.kairos_weekly', 'select, insert, update, delete') as "alcanza"`,
+        ),
+      ),
+    ).toEqual([{ alcanza: false }])
+  })
 })
 
 describe("bitácora del cliente", () => {

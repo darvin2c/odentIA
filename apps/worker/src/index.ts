@@ -5,6 +5,7 @@ import {
   createKairosWriter,
   decisionKeyStartProblem,
   embedderFromEnv,
+  kairosModelNotice,
   platformLlmFromEnv,
 } from "@odentia/agent"
 import { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
@@ -478,10 +479,14 @@ if (env.NODE_ENV === "production") {
 // Kairós, el agente del ARM de la administración (ADR 0183): cada 5 minutos sus reglas, los borradores que esperan
 // y, una vez al día desde las 07:00 de Lima, los resúmenes de los clientes y el de la semana. Solo prepara: nada
 // sale a una clínica sin el sí de una persona. Con el mismo modelo de la plataforma; su gasto es de Sallca.
+// Sin la clave del modelo, Kairós redacta con plantillas y lo dice en cada borrador; en producción se avisa una vez.
+const kairosPlatform = platformLlmFromEnv(env)
+const kairosNotice = kairosModelNotice(kairosPlatform)
+if (kairosNotice && env.NODE_ENV === "production") console.warn(`worker: ${kairosNotice}`)
 queues.push(
   kairosQueue({
     ownerDb,
-    writer: createKairosWriter({ platform: platformLlmFromEnv(env), onUse: kairosAiUseRecorder(ownerDb) }),
+    writer: createKairosWriter({ platform: kairosPlatform, onUse: kairosAiUseRecorder(ownerDb) }),
     storage,
   }),
 )

@@ -16,6 +16,7 @@ import {
   listImportDrafts,
   listSkillKeys,
   markImportDraftUsed,
+  purgeImportDraftPayloads,
   resolveSkillKey,
   returnImportDraft,
   revokeSkillKey,
@@ -392,7 +393,14 @@ describe("aprobar, devolver y cargar", () => {
       .select()
       .from(saasImportDraft)
       .where(eq(saasImportDraft.id, draft.id))
-    expect(row).toMatchObject({ status: "lista", returnedNote: null, approvedBy: null })
+    expect(row).toMatchObject({
+      status: "lista",
+      returnedNote: null,
+      approvedBy: null,
+      // El JSON anterior espera su borrado hasta que el almacenamiento lo confirme.
+      stalePayloadKeys: [`clients/${clientId}/plan-1.json`],
+      payloadDeletedAt: null,
+    })
   })
 
   it("el JSON se lee del bucket, se vuelve a validar y deja rastro; usada no vuelve a lista", async () => {
@@ -430,6 +438,178 @@ describe("aprobar, devolver y cargar", () => {
     await expect(returnImportDraft(ownerDb, admin, draft.id, "tarde")).rejects.toMatchObject({
       code: "IMPORT_DRAFT_STATE",
     })
+  })
+})
+
+/** Un almacenamiento que anota lo que borra y puede fallar con una clave. */
+function deletingStorage(failOn: string[] = []) {
+  const deleted: string[] = []
+  return {
+    deleted,
+    async deleteAttachment(key: string) {
+      if (failOn.includes(key)) throw new Error("el bucket no respondió")
+      deleted.push(key)
+    },
+  }
+}
+
+async function draftOf(id: string) {
+  const [row] = await ownerDb.select().from(saasImportDraft).where(eq(saasImportDraft.id, id))
+  if (!row) throw new Error("sin borrador")
+  return row
+}
+
+describe("borrar el JSON del borrador", () => {
+  it("el de uno usado y el reemplazado se borran del bucket, con constancia sin datos", async () => {
+    const [draft] = await listImportDrafts(ownerDb, admin, clientId)
+    if (!draft) throw new Error("sin borrador")
+    expect(draft.status).toBe("usada")
+    const storage = deletingStorage()
+    const now = new Date()
+    expect(await purgeImportDraftPayloads(ownerDb, storage, now)).toEqual({ deleted: 2, failed: 0 })
+    expect(storage.deleted.sort()).toEqual(
+      [`clients/${clientId}/plan-1-corregido.json`, `clients/${clientId}/plan-1.json`].sort(),
+    )
+    expect(await draftOf(draft.id)).toMatchObject({ stalePayloadKeys: [], payloadDeletedAt: now })
+    const audits = await ownerDb
+      .select({ actor: adminAudit.actorUserId, metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(
+        and(
+          eq(adminAudit.action, "skill.draft_payload_deleted"),
+          eq(adminAudit.entityId, draft.id),
+        ),
+      )
+    expect(
+      audits
+        .map((audit) => audit.metadata)
+        .sort((a, b) => String(a?.reason).localeCompare(String(b?.reason))),
+    ).toEqual([
+      { clientId, kind: "plan_configuracion", number: 1, reason: "reemplazado", files: 1 },
+      { clientId, kind: "plan_configuracion", number: 1, reason: "usada", files: 1 },
+    ])
+    expect(audits.every((audit) => audit.actor === null)).toBe(true)
+    expect(JSON.stringify(audits)).not.toContain(".json")
+    // Ya no se abre, y otra pasada no vuelve a borrar nada.
+    await expect(
+      importDraftPayload(ownerDb, admin, { getAttachment: async () => new Uint8Array() }, draft.id),
+    ).rejects.toMatchObject({ code: "IMPORT_DRAFT_PAYLOAD_GONE" })
+    expect(await purgeImportDraftPayloads(ownerDb, deletingStorage(), now)).toEqual({
+      deleted: 0,
+      failed: 0,
+    })
+    expect((await listImportDrafts(ownerDb, admin, clientId))[0]?.payloadDeletedAt).toEqual(now)
+  })
+
+  it("a los 30 días de subido se borra aunque nadie lo haya usado; después la skill puede dejar otro", async () => {
+    const actor = await fakeKeyActor()
+    const now = new Date()
+    const patients = await depositImportDraft(
+      ownerDb,
+      actor,
+      {
+        organizationSlug: SLUG,
+        kind: "plan_pacientes",
+        number: 1,
+        payload: patientsPlan(),
+        payloadKey: `clients/${clientId}/pacientes-1.json`,
+      },
+      new Date(now.getTime() - 30 * DAY),
+    )
+    const recent = await depositImportDraft(
+      ownerDb,
+      actor,
+      {
+        organizationSlug: SLUG,
+        kind: "informe",
+        number: 1,
+        payload: report(1),
+        payloadKey: `clients/${clientId}/informe-1.json`,
+      },
+      new Date(now.getTime() - 29 * DAY),
+    )
+    // El almacenamiento falla una vez: queda para la próxima pasada.
+    const failing = deletingStorage([`clients/${clientId}/pacientes-1.json`])
+    expect(await purgeImportDraftPayloads(ownerDb, failing, now)).toEqual({ deleted: 0, failed: 1 })
+    expect((await draftOf(patients.id)).payloadDeletedAt).toBeNull()
+
+    const storage = deletingStorage()
+    expect(await purgeImportDraftPayloads(ownerDb, storage, now)).toEqual({ deleted: 1, failed: 0 })
+    expect(storage.deleted).toEqual([`clients/${clientId}/pacientes-1.json`])
+    expect(await draftOf(patients.id)).toMatchObject({ status: "lista", payloadDeletedAt: now })
+    expect((await draftOf(recent.id)).payloadDeletedAt).toBeNull()
+    const [audit] = await ownerDb
+      .select({ metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(
+        and(
+          eq(adminAudit.action, "skill.draft_payload_deleted"),
+          eq(adminAudit.entityId, patients.id),
+        ),
+      )
+    expect(audit?.metadata).toEqual({
+      clientId,
+      kind: "plan_pacientes",
+      number: 1,
+      reason: "30_dias",
+      files: 1,
+    })
+    expect(JSON.stringify(audit)).not.toContain("Rosa")
+    await expect(
+      importDraftPayload(
+        ownerDb,
+        admin,
+        { getAttachment: async () => new Uint8Array() },
+        patients.id,
+      ),
+    ).rejects.toMatchObject({ code: "IMPORT_DRAFT_PAYLOAD_GONE" })
+
+    // Sin su JSON no hay qué cargar: la skill deja otro con el mismo número y vuelve a contar.
+    const again = await depositImportDraft(
+      ownerDb,
+      actor,
+      {
+        organizationSlug: SLUG,
+        kind: "plan_pacientes",
+        number: 1,
+        payload: patientsPlan(),
+        payloadKey: `clients/${clientId}/pacientes-1b.json`,
+      },
+      now,
+    )
+    expect(again).toMatchObject({ id: patients.id, replacedPayloadKey: null })
+    expect(await draftOf(patients.id)).toMatchObject({
+      status: "lista",
+      payloadKey: `clients/${clientId}/pacientes-1b.json`,
+      payloadUploadedAt: now,
+      payloadDeletedAt: null,
+      stalePayloadKeys: [],
+    })
+    // El que sigue vigente no se reemplaza.
+    await expect(
+      depositImportDraft(ownerDb, actor, {
+        organizationSlug: SLUG,
+        kind: "informe",
+        number: 1,
+        payload: report(1),
+        payloadKey: `clients/${clientId}/informe-1b.json`,
+      }),
+    ).rejects.toMatchObject({ code: "IMPORT_DRAFT_EXISTS" })
+  })
+
+  it("con un borrador, solo toca ese", async () => {
+    const now = new Date(Date.now() + 31 * DAY)
+    const drafts = await listImportDrafts(ownerDb, admin, clientId)
+    const report1 = drafts.find((draft) => draft.kind === "informe")
+    if (!report1) throw new Error("sin informe")
+    const storage = deletingStorage()
+    expect(await purgeImportDraftPayloads(ownerDb, storage, now, { draftId: report1.id })).toEqual({
+      deleted: 1,
+      failed: 0,
+    })
+    expect(storage.deleted).toEqual([`clients/${clientId}/informe-1.json`])
+    const patients = drafts.find((draft) => draft.kind === "plan_pacientes")
+    expect(patients && (await draftOf(patients.id)).payloadDeletedAt).toBeNull()
   })
 })
 

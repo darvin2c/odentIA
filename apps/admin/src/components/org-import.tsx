@@ -4,12 +4,15 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
+import type { DraftSource } from "./arm/import-drafts"
 
 /**
  * «Cargar datos» de una clínica (ADR 0104): se elige el plan que preparó la
  * skill de carga, se ve el ensayo y se carga por tandas. El plan vive solo en
  * esta pestaña (nunca se guarda en el navegador); lo que dice cada fila sale
- * del servidor. Solo administración, y el servidor lo exige.
+ * del servidor. Con `draft` (la ficha del cliente › Alta) también se puede
+ * tomar el plan aprobado que dejó la skill, sin elegir un archivo. Solo
+ * administración, y el servidor lo exige.
  */
 
 const messageSchema = z.object({ level: z.enum(["error", "aviso"]), message: z.string() })
@@ -57,7 +60,15 @@ const count = new Intl.NumberFormat("es-PE")
 /** Cuántas filas de cada lista se muestran: el resto está en el informe de la skill. */
 const SHOWN = 50
 
-export function OrgImport({ organizationId, organizationName }: { organizationId: string; organizationName: string }) {
+export function OrgImport({
+  organizationId,
+  organizationName,
+  draft,
+}: {
+  organizationId: string
+  organizationName: string
+  draft?: DraftSource
+}) {
   const queryClient = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
   const stop = useRef(false)
@@ -91,6 +102,20 @@ export function OrgImport({ organizationId, organizationName }: { organizationId
     await check(file.name, plan)
   }
 
+  async function takeDraft(source: DraftSource) {
+    setError(null)
+    setStage({ kind: "checking", fileName: source.fileName })
+    let plan: unknown
+    try {
+      plan = await source.load()
+    } catch (failure) {
+      setError(submitErrorMessage(failure))
+      setStage({ kind: "idle" })
+      return
+    }
+    await check(source.fileName, plan)
+  }
+
   async function load(from: Extract<Stage, { plan: unknown }>, start: number, previous: Loaded) {
     stop.current = false
     let next = start
@@ -118,6 +143,7 @@ export function OrgImport({ organizationId, organizationName }: { organizationId
       setStage({ ...from, kind: "loading", next, total, loaded: { ...loaded } })
     }
     setStage({ ...from, kind: "done", next, total, loaded })
+    if (draft && from.fileName === draft.fileName) draft.onUsed?.()
     void queryClient.invalidateQueries({ queryKey: ["admin-organization", organizationId] })
   }
 
@@ -150,10 +176,20 @@ export function OrgImport({ organizationId, organizationName }: { organizationId
           event.target.value = ""
         }}
       />
+      {draft && stage.kind === "idle" ? <p className="text-sm">{draft.label}</p> : null}
       {stage.kind === "idle" || stage.kind === "checked" || stage.kind === "done" ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant={stage.kind === "idle" ? "default" : "outline"} onClick={() => input.current?.click()}>
-            {stage.kind === "idle" ? "Elegir el plan" : "Elegir otro plan"}
+          {draft && stage.kind === "idle" ? (
+            <Button type="button" onClick={() => void takeDraft(draft)}>
+              Ensayar este plan
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant={stage.kind === "idle" && !draft ? "default" : "outline"}
+            onClick={() => input.current?.click()}
+          >
+            {stage.kind === "idle" ? (draft ? "Elegir un archivo" : "Elegir el plan") : "Elegir otro plan"}
           </Button>
           {"fileName" in stage ? <span className="text-sm text-muted-foreground">{stage.fileName}</span> : null}
         </div>

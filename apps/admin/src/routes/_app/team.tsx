@@ -23,6 +23,7 @@ import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
+import { SkillKeysSection } from "../../components/arm/skill-keys"
 
 export const Route = createFileRoute("/_app/team")({
   pendingComponent: TeamPageSkeleton,
@@ -417,6 +418,8 @@ function TeamPage() {
               </ul>
             )}
           </section>
+          {/* Solo Administración: la API también se las niega a Soporte. */}
+          {isManager ? <SkillKeysSection /> : null}
         </div>
       )}
       <FormDrawer

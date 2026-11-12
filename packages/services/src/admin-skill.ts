@@ -27,7 +27,7 @@ import { adminStaff } from "@odentia/db/schema/admin-core"
 import { userGlobalBlock } from "@odentia/db/schema/admin-organizations"
 import { organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
-import { and, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import type { AdminActor } from "./admin-core.js"
@@ -379,6 +379,18 @@ function summaryOf(kind: SaasImportDraftKind, payload: unknown): Record<string, 
  * país, el informe con su producto y su número) y que ese número esté libre.
  * Los errores dicen dónde, nunca los datos. La ruta lo llama antes de subir.
  */
+/**
+ * Otro con el mismo número lo reemplaza si se devolvió, o si su JSON ya se
+ * borró a los 30 días sin cargarse (sin él no hay qué cargar). Uno `usada`
+ * nunca: ya se cargó.
+ */
+function replaceable(draft: { status: string; payloadDeletedAt: Date | null }): boolean {
+  return (
+    draft.status === "devuelta" ||
+    (draft.payloadDeletedAt !== null && (draft.status === "lista" || draft.status === "aprobada"))
+  )
+}
+
 export async function checkImportDraft(
   tx: Db,
   actor: SkillActor,
@@ -446,7 +458,7 @@ export async function checkImportDraft(
     if (data.number !== input.number) throw invalidField("number", "El número no es el del informe")
   }
   const [taken] = await tx
-    .select({ status: saasImportDraft.status })
+    .select({ status: saasImportDraft.status, payloadDeletedAt: saasImportDraft.payloadDeletedAt })
     .from(saasImportDraft)
     .where(
       and(
@@ -456,7 +468,7 @@ export async function checkImportDraft(
       ),
     )
     .limit(1)
-  if (taken && taken.status !== "devuelta")
+  if (taken && !replaceable(taken))
     throw new ServiceError(
       "IMPORT_DRAFT_EXISTS",
       409,
@@ -483,8 +495,11 @@ export interface DepositImportDraftInput extends ImportDraftCheckInput {
 
 /**
  * Deja el borrador `lista` para que Administración lo apruebe o lo devuelva.
- * Uno devuelto con el mismo número se reemplaza (vuelve a `lista`) y su JSON
- * anterior vuelve en `replacedPayloadKey` para que la ruta lo borre.
+ * Uno devuelto con el mismo número (o uno cuyo JSON ya se borró a los 30
+ * días) se reemplaza y vuelve a `lista`. Su JSON anterior queda en
+ * `stale_payload_keys` y vuelve en `replacedPayloadKey`: la ruta lo borra
+ * después del commit con `purgeImportDraftPayloads` y, si falla, lo borra la
+ * pasada del worker.
  */
 export async function depositImportDraft(
   tx: Db,
@@ -533,6 +548,8 @@ export async function depositImportDraft(
     approvedBy: null,
     approvedAt: null,
     returnedNote: null,
+    payloadUploadedAt: now,
+    payloadDeletedAt: null,
     updatedAt: now,
   }
   const [previous] = await tx
@@ -540,6 +557,7 @@ export async function depositImportDraft(
       id: saasImportDraft.id,
       status: saasImportDraft.status,
       payloadKey: saasImportDraft.payloadKey,
+      payloadDeletedAt: saasImportDraft.payloadDeletedAt,
     })
     .from(saasImportDraft)
     .where(
@@ -554,7 +572,7 @@ export async function depositImportDraft(
   let id: string
   let replacedPayloadKey: string | null = null
   if (previous) {
-    if (previous.status !== "devuelta")
+    if (!replaceable(previous))
       throw new ServiceError(
         "IMPORT_DRAFT_EXISTS",
         409,
@@ -563,9 +581,23 @@ export async function depositImportDraft(
           number: "Ese número ya se usó",
         },
       )
-    await tx.update(saasImportDraft).set(values).where(eq(saasImportDraft.id, previous.id))
+    replacedPayloadKey =
+      previous.payloadKey === input.payloadKey || previous.payloadDeletedAt
+        ? null
+        : previous.payloadKey
+    await tx
+      .update(saasImportDraft)
+      .set({
+        ...values,
+        // El JSON anterior espera su borrado hasta que el almacenamiento lo confirme.
+        ...(replacedPayloadKey
+          ? {
+              stalePayloadKeys: sql`array_append(${saasImportDraft.stalePayloadKeys}, ${replacedPayloadKey}::text)`,
+            }
+          : {}),
+      })
+      .where(eq(saasImportDraft.id, previous.id))
     id = previous.id
-    replacedPayloadKey = previous.payloadKey === input.payloadKey ? null : previous.payloadKey
   } else {
     try {
       const [row] = await tx
@@ -628,6 +660,10 @@ export interface ImportDraftRow {
   approvedBy: { userId: string; name: string } | null
   approvedAt: Date | null
   returnedNote: string | null
+  /** Cuándo se subió el JSON vigente (de ahí cuentan los 30 días). */
+  payloadUploadedAt: Date
+  /** Cuándo se borró el JSON (al cargarse o a los 30 días): ya no se puede abrir. */
+  payloadDeletedAt: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -665,6 +701,8 @@ function toDraftRow(row: {
       : null,
     approvedAt: draft.approvedAt,
     returnedNote: draft.returnedNote,
+    payloadUploadedAt: draft.payloadUploadedAt,
+    payloadDeletedAt: draft.payloadDeletedAt,
     createdAt: draft.createdAt,
     updatedAt: draft.updatedAt,
   }
@@ -778,7 +816,11 @@ export async function returnImportDraft(
   return draftRow(tx, draft.id)
 }
 
-/** Ya se cargó (o se envió, el informe) desde este borrador: `lista` o `aprobada` → `usada`. */
+/**
+ * Ya se cargó (o se envió, el informe) desde este borrador: `lista` o
+ * `aprobada` → `usada`. Su JSON ya no hace falta: quien llama lo borra
+ * después del commit con `purgeImportDraftPayloads` (y si no, la pasada).
+ */
 export async function markImportDraftUsed(
   tx: Db,
   actor: AdminActor | null,
@@ -843,6 +885,14 @@ export async function importDraftPayload(
       409,
       "Ese borrador se devolvió: espera el que lo corrige",
     )
+  if (draft.payloadDeletedAt)
+    throw new ServiceError(
+      "IMPORT_DRAFT_PAYLOAD_GONE",
+      409,
+      draft.status === "usada"
+        ? "Ese borrador ya se cargó y su archivo se borró"
+        : "El archivo de ese borrador se borró a los 30 días: pide a la skill que deje otro con el mismo número",
+    )
   const bytes = await storage.getAttachment(draft.payloadKey)
   let payload: unknown
   try {
@@ -874,4 +924,121 @@ export async function importDraftPayload(
     metadata: { clientId: draft.clientId, kind, number: draft.number },
   })
   return { id: draft.id, kind, number: draft.number, organizationId: draft.organizationId, payload }
+}
+
+/* ---------- Borrado del JSON ---------- */
+
+/** Días que se guarda el JSON de un borrador desde que se subió (contrato de encargo). */
+export const IMPORT_DRAFT_PAYLOAD_DAYS = 30
+
+/** Por qué se borra un JSON: se cargó, pasaron los 30 días o lo reemplazó otro. */
+export type ImportDraftPayloadDeletionReason = "usada" | "30_dias" | "reemplazado"
+
+/**
+ * Borra del bucket los JSON de los borradores que ya no deben estar: el de
+ * uno `usada`, el de uno subido hace 30 días o más (aunque nadie lo use) y los
+ * reemplazados que esperan. Cada objeto se borra fuera de toda transacción y
+ * después se anota (`payload_deleted_at`, o se quita de `stale_payload_keys`)
+ * con su auditoría `skill.draft_payload_deleted`, sin la clave ni los datos.
+ * Lo que el almacenamiento no pudo borrar queda para la próxima pasada. Con
+ * `draftId`, solo ese (la ruta, justo después de usarlo o reemplazarlo).
+ */
+export async function purgeImportDraftPayloads(
+  db: Db,
+  storage: Pick<Storage, "deleteAttachment">,
+  now: Date,
+  options: { draftId?: string; limit?: number } = {},
+): Promise<{ deleted: number; failed: number }> {
+  const cutoff = new Date(now.getTime() - IMPORT_DRAFT_PAYLOAD_DAYS * DAY_MS)
+  const currentDue = sql<boolean>`(${saasImportDraft.payloadDeletedAt} is null and (${saasImportDraft.status} = 'usada' or ${saasImportDraft.payloadUploadedAt} <= ${cutoff.toISOString()}::timestamptz))`
+  const due = await db
+    .select({
+      id: saasImportDraft.id,
+      clientId: saasImportDraft.clientId,
+      organizationId: saasImportDraft.organizationId,
+      kind: saasImportDraft.kind,
+      number: saasImportDraft.number,
+      status: saasImportDraft.status,
+      payloadKey: saasImportDraft.payloadKey,
+      currentDue,
+      stale: saasImportDraft.stalePayloadKeys,
+    })
+    .from(saasImportDraft)
+    .where(
+      and(
+        options.draftId ? eq(saasImportDraft.id, options.draftId) : undefined,
+        or(currentDue, sql`cardinality(${saasImportDraft.stalePayloadKeys}) > 0`),
+      ),
+    )
+    .orderBy(asc(saasImportDraft.payloadUploadedAt), asc(saasImportDraft.id))
+    .limit(options.limit ?? 100)
+  let deleted = 0
+  let failed = 0
+  const gone = async (key: string) => {
+    try {
+      await storage.deleteAttachment(key)
+      return true
+    } catch {
+      failed++
+      return false
+    }
+  }
+  for (const draft of due) {
+    const current: ImportDraftPayloadDeletionReason | null = draft.currentDue
+      ? draft.status === "usada"
+        ? "usada"
+        : "30_dias"
+      : null
+    const staleDone: string[] = []
+    for (const key of draft.stale ?? []) if (await gone(key)) staleDone.push(key)
+    const currentDone = current !== null && (await gone(draft.payloadKey))
+    if (staleDone.length === 0 && !currentDone) continue
+    await db.transaction(async (tx) => {
+      if (staleDone.length > 0)
+        await tx
+          .update(saasImportDraft)
+          .set({
+            stalePayloadKeys: sql`array(select k from unnest(${saasImportDraft.stalePayloadKeys}) as k where k <> all(array[${sql.join(
+              staleDone.map((key) => sql`${key}`),
+              sql`, `,
+            )}]::text[]))`,
+          })
+          .where(eq(saasImportDraft.id, draft.id))
+      // Solo si sigue siendo el mismo JSON: uno que llegó mientras tanto no se marca como borrado.
+      const marked = currentDone
+        ? await tx
+            .update(saasImportDraft)
+            .set({ payloadDeletedAt: now })
+            .where(
+              and(
+                eq(saasImportDraft.id, draft.id),
+                eq(saasImportDraft.payloadKey, draft.payloadKey),
+                isNull(saasImportDraft.payloadDeletedAt),
+              ),
+            )
+            .returning({ id: saasImportDraft.id })
+        : []
+      const reasons: Array<{ reason: ImportDraftPayloadDeletionReason; count: number }> = [
+        ...(marked.length > 0 && current ? [{ reason: current, count: 1 }] : []),
+        ...(staleDone.length > 0
+          ? [{ reason: "reemplazado" as const, count: staleDone.length }]
+          : []),
+      ]
+      for (const { reason, count: files } of reasons)
+        await writeAdminAudit(tx, null, {
+          action: "skill.draft_payload_deleted",
+          organizationId: draft.organizationId,
+          entityId: draft.id,
+          metadata: {
+            clientId: draft.clientId,
+            kind: draft.kind,
+            number: draft.number,
+            reason,
+            files,
+          },
+        })
+    })
+    deleted += staleDone.length + (currentDone ? 1 : 0)
+  }
+  return { deleted, failed }
 }

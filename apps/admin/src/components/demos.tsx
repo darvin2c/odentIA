@@ -668,7 +668,7 @@ export function DemoProgressDrawer({
             })}
           </ol>
           <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
-            Puedes cerrar esto y seguir. La demo aparece en Clínicas con su avance y se abre cuando
+            Puedes cerrar esto y seguir. La demo aparece en Demos con su avance y se abre cuando
             está lista.
           </p>
         </div>

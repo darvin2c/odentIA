@@ -682,6 +682,12 @@ export const saasSkillKey = adminSchema.table(
  * (`payload_key`). `summary` lleva solo números para el aviso, nunca datos de
  * pacientes. Espera el sí de Administración: `lista` → `aprobada` o
  * `devuelta`; `usada` cuando se cargó.
+ *
+ * El JSON (el plan de pacientes trae datos de personas) se borra del bucket
+ * al pasar a `usada` y, en todo caso, a los 30 días de subido
+ * (`payload_uploaded_at`), la promesa del contrato de encargo; queda la fila
+ * con `payload_deleted_at`. Lo reemplazado de uno devuelto espera su borrado
+ * en `stale_payload_keys` hasta que el almacenamiento confirma.
  */
 export const saasImportDraft = adminSchema.table(
   "saas_import_draft",
@@ -706,6 +712,14 @@ export const saasImportDraft = adminSchema.table(
     approvedBy: text("approved_by").references(() => user.id),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     returnedNote: text("returned_note"),
+    /** Cuándo se subió el JSON vigente: de ahí cuentan los 30 días. */
+    payloadUploadedAt: timestamp("payload_uploaded_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Cuándo se borró el JSON del bucket (al usarse o a los 30 días); nulo mientras existe. */
+    payloadDeletedAt: timestamp("payload_deleted_at", { withTimezone: true }),
+    /** JSON reemplazados que todavía no se confirmaron borrados. */
+    stalePayloadKeys: text("stale_payload_keys").array().notNull().default(sql`'{}'::text[]`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

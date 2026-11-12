@@ -314,6 +314,8 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
         needsDraft: needsDraft.length,
         drafted: drafts.drafted.length,
         draftsFailed: drafts.failed.length,
+        // «plantilla» si el modelo no está configurado: lo redactado lo dice en su ítem.
+        drafter: drafts.drafter,
         weekly: weekly ? { weekStart: weekly.row.weekStart, written: weekly.written } : null,
       }
     })

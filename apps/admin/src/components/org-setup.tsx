@@ -4,13 +4,16 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
+import type { DraftSource } from "./arm/import-drafts"
 
 /**
  * «Cargar datos» › la configuración de la clínica (ADR 0104): se elige el plan
  * (`clinica.json`) que preparó la skill de carga con lo que la clínica envió, se ve
  * el ensayo área por área y se carga. Cada cosa se escribe con la operación de su
  * pantalla en la clínica; volver a cargar no duplica. El plan vive solo en esta
- * pestaña. Solo administración, y el servidor lo exige.
+ * pestaña. Con `draft` (la ficha del cliente › Alta) también se puede tomar el
+ * plan aprobado que dejó la skill, sin elegir un archivo. Solo administración,
+ * y el servidor lo exige.
  */
 
 const statusSchema = z.enum(["nueva", "cambia", "igual", "espera", "error"])
@@ -40,7 +43,15 @@ const WORDS: Record<Status, { before: string; after: string; tone: "default" | "
   error: { before: "No se carga", after: "No se cargó", tone: "destructive" },
 }
 
-export function OrgSetup({ organizationId, organizationName }: { organizationId: string; organizationName: string }) {
+export function OrgSetup({
+  organizationId,
+  organizationName,
+  draft,
+}: {
+  organizationId: string
+  organizationName: string
+  draft?: DraftSource
+}) {
   const queryClient = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
   const [stage, setStage] = useState<Stage>({ kind: "idle" })
@@ -73,6 +84,20 @@ export function OrgSetup({ organizationId, organizationName }: { organizationId:
     await check(file.name, plan)
   }
 
+  async function takeDraft(source: DraftSource) {
+    setError(null)
+    setStage({ kind: "checking", fileName: source.fileName })
+    let plan: unknown
+    try {
+      plan = await source.load()
+    } catch (failure) {
+      setError(submitErrorMessage(failure))
+      setStage({ kind: "idle" })
+      return
+    }
+    await check(source.fileName, plan)
+  }
+
   async function load(current: Extract<Stage, { kind: "checked" }>) {
     setError(null)
     setStage({ ...current, kind: "loading" })
@@ -81,6 +106,7 @@ export function OrgSetup({ organizationId, organizationName }: { organizationId:
         await api<unknown>(`/api/admin/imports/${organizationId}/setup/apply`, { method: "POST", body: JSON.stringify(current.plan) }),
       )
       setStage({ kind: "done", fileName: current.fileName, plan: current.plan, result })
+      if (draft && current.fileName === draft.fileName) draft.onUsed?.()
       void queryClient.invalidateQueries()
     } catch (failure) {
       // Un corte a mitad no deja nada a medias que se repita: volver a ensayar dice qué entró.
@@ -118,10 +144,20 @@ export function OrgSetup({ organizationId, organizationName }: { organizationId:
           event.target.value = ""
         }}
       />
+      {draft && stage.kind === "idle" ? <p className="text-sm">{draft.label}</p> : null}
       {stage.kind === "idle" || stage.kind === "checked" || stage.kind === "done" ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant={stage.kind === "idle" ? "default" : "outline"} onClick={() => input.current?.click()}>
-            {stage.kind === "idle" ? "Elegir el plan" : "Elegir otro plan"}
+          {draft && stage.kind === "idle" ? (
+            <Button type="button" onClick={() => void takeDraft(draft)}>
+              Ensayar este plan
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant={stage.kind === "idle" && !draft ? "default" : "outline"}
+            onClick={() => input.current?.click()}
+          >
+            {stage.kind === "idle" ? (draft ? "Elegir un archivo" : "Elegir el plan") : "Elegir otro plan"}
           </Button>
           {"fileName" in stage ? <span className="text-sm text-muted-foreground">{stage.fileName}</span> : null}
           {stage.kind === "done" ? (

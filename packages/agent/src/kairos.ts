@@ -15,7 +15,7 @@ import {
   type SaasContactRole,
   type SaasTaskKind,
 } from "@odentia/db/schema/admin-arm"
-import { ServiceError } from "@odentia/services"
+import { type KairosDrafter, ServiceError } from "@odentia/services"
 import { z } from "zod"
 import { reportReplyUse, withAiMeter } from "./ai-usage.js"
 import {
@@ -74,6 +74,11 @@ export interface KairosAnnotation {
 }
 
 export interface KairosWriter {
+  /**
+   * Quién redacta: «modelo», o «plantilla» (el doble determinista) cuando el
+   * modelo no está configurado. Sin el campo, el modelo.
+   */
+  readonly drafter?: KairosDrafter
   draftMessage(i: {
     client: KairosClientFacts
     contact?: { name: string; title?: string | null }
@@ -497,15 +502,26 @@ function factLines(facts: string[]): string {
 }
 
 /**
+ * Si Kairós redacta con plantillas porque el modelo no está configurado (sin
+ * `LLM_MODEL=fake` ni la clave del proveedor), el aviso para la consola al
+ * arrancar; null si tiene modelo o si es el modo de demostración a propósito.
+ */
+export function kairosModelNotice(platform: PlatformLlm): string | null {
+  if (platform.fake || platform.openai?.apiKey) return null
+  return "Kairós: el modelo no está configurado (falta LLM_OPENAI_API_KEY); sus borradores, resúmenes y anotaciones salen de plantillas y lo dicen"
+}
+
+/**
  * Kairós con el modelo de la plataforma (`AGENT_MODEL`, ADR 0052). Con
- * `LLM_MODEL=fake` y sin modelo inyectado, el doble determinista. Sin la
- * clave del proveedor, cada llamada lanza `LlmConfigError`: quien llama
- * deja el ítem sin borrador o pide escribirlo a mano. Cada llamada se mide
- * y se entrega a `onUse` con su propósito (`borrador`, `resumen`, `anotar`,
- * `guion`, `semana`).
+ * `LLM_MODEL=fake`, o sin la clave del proveedor, y sin modelo inyectado, el
+ * doble determinista (`drafter: "plantilla"`): la pantalla y la pasada siguen
+ * y dicen que el borrador es de plantilla, nunca un error. Cada llamada al
+ * modelo se mide y se entrega a `onUse` con su propósito (`borrador`,
+ * `resumen`, `anotar`, `guion`, `semana`).
  */
 export function createKairosWriter(deps: KairosWriterDeps): KairosWriter {
-  if (deps.platform.fake && !deps.createModel) return fakeKairosWriter
+  if (!deps.createModel && (deps.platform.fake || !deps.platform.openai?.apiKey))
+    return fakeKairosWriter
 
   const spec = (): LlmSpec => {
     const resolved = resolveLlmSpec(deps.platform)
@@ -547,6 +563,7 @@ export function createKairosWriter(deps: KairosWriterDeps): KairosWriter {
     })
 
   return {
+    drafter: "modelo",
     async draftMessage(input) {
       const goal = KAIROS_GOALS[input.goal]?.instruction ?? input.goal
       const human = [
@@ -825,6 +842,7 @@ function fakeAnnotation(input: Parameters<KairosWriter["parseAnnotation"]>[0]): 
  * acredita cómo escribe ningún modelo.
  */
 export const fakeKairosWriter: KairosWriter = {
+  drafter: "plantilla",
   async draftMessage(input) {
     const goal = KAIROS_GOALS[input.goal]
     const product = PRODUCT_LINE[input.client.product].name

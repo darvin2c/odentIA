@@ -73,6 +73,7 @@ import {
   listImportDrafts,
   listSaasProposals,
   listSkillKeys,
+  markImportDraftUsed,
   markInvitationSent,
   markOutreachSent,
   mergeClients,
@@ -86,6 +87,7 @@ import {
   prepareOutreach,
   productMailDomain,
   proposalPdf,
+  purgeImportDraftPayloads,
   recordPresentation,
   registerClientFile,
   reopenClientOpportunity,
@@ -183,6 +185,17 @@ const tasksQuery = z.strictObject({
   clientId: z.uuid("Elige un cliente").optional(),
   dueBy: day("hasta qué día").optional(),
 })
+
+/** Una sola de las dos: la solicitud de la web o la cuenta de la clínica. */
+const lookupQuery = z
+  .strictObject({
+    request: z.uuid("Elige la solicitud").optional(),
+    organization: z.string().trim().min(1).max(120, "Elige la cuenta").optional(),
+  })
+  .refine((query) => Boolean(query.request) !== Boolean(query.organization), {
+    message: "Pide por la solicitud o por la cuenta, una de las dos",
+    path: ["request"],
+  })
 
 const mergeBody = z.strictObject({ dropId: z.uuid("Elige la ficha que se une a esta") })
 const linkBody = z.strictObject({
@@ -520,6 +533,42 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     }),
   )
 
+  /**
+   * El cliente de una solicitud o de una cuenta, para que los enlaces de antes
+   * (`/waitlist?solicitud=`, `/organizations/<id>`) abran su ficha. Solo lee:
+   * una cuenta sin cliente (una demo) responde 404 y nunca se crea uno aquí.
+   */
+  app.get("/lookup", (c) =>
+    staffRun(c, 200, () => {
+      const query = parse(lookupQuery, c.req.query())
+      return owner(async (tx) => {
+        let organizationId = query.organization ?? null
+        if (query.request) {
+          const [request] = await tx
+            .select({
+              clientId: saasWaitlistRequest.clientId,
+              organizationId: saasWaitlistRequest.organizationId,
+            })
+            .from(saasWaitlistRequest)
+            .where(eq(saasWaitlistRequest.id, query.request))
+            .limit(1)
+          if (!request) throw new ServiceError("NOT_FOUND", 404, "Esa solicitud no existe")
+          if (request.clientId) return { clientId: request.clientId }
+          organizationId = request.organizationId
+        }
+        if (organizationId) {
+          const [client] = await tx
+            .select({ id: saasClient.id })
+            .from(saasClient)
+            .where(eq(saasClient.organizationId, organizationId))
+            .limit(1)
+          if (client) return { clientId: client.id }
+        }
+        throw new ServiceError("NOT_FOUND", 404, "No hay un cliente para eso")
+      })
+    }),
+  )
+
   /* ----- Personas ----- */
 
   app.patch("/contacts/:contactId", async (c) => {
@@ -646,6 +695,25 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
       return owner((tx) => returnImportDraft(tx, actor, c.req.param("did"), body.note))
     })
   })
+
+  /**
+   * Ya se cargó (o se envió, el informe) desde este borrador: pasa a `usada` y
+   * su JSON se borra del bucket después del commit (si falla, lo borra la
+   * pasada del worker).
+   */
+  app.post("/import-drafts/:did/used", (c) =>
+    adminRun(c, 200, async (actor) => {
+      const draft = await owner((tx) => markImportDraftUsed(tx, actor, c.req.param("did")))
+      await purgeImportDraftPayloads(deps.ownerDb, deps.storage, new Date(), {
+        draftId: draft.id,
+      }).catch((error) => {
+        console.error("ARM: no se borró el JSON del borrador usado; lo borra la pasada", error)
+      })
+      return owner((tx) => listImportDrafts(tx, actor, draft.clientId)).then(
+        (rows) => rows.find((row) => row.id === draft.id) ?? draft,
+      )
+    }),
+  )
 
   /** El JSON que dejó la skill, para que la tarjeta de carga lo use en vez de un archivo. */
   app.get("/import-drafts/:did/payload", (c) =>
@@ -818,6 +886,8 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
         },
         contacts: facts.contacts,
         demos: facts.demos,
+        // «plantilla» si el modelo no está configurado: la pantalla lo dice junto a lo ordenado.
+        drafter: kairos.drafter ?? "modelo",
       }
     })
   })

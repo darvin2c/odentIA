@@ -245,7 +245,9 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
       } catch (error) {
         console.error("inbound-email: no se pudo guardar un adjunto", error)
         await removeUploaded()
-        // El worker reintenta: el Message-ID evita que entre dos veces.
+        // El worker de Cloudflare no reintenta: lo anota en su registro y el correo igual llega
+        // al buzón de siempre por el reenvío. Si alguien lo vuelve a mandar, el Message-ID
+        // evita que entre dos veces.
         return c.json(
           errorBody(c, "STORAGE_UNAVAILABLE", "No se pudieron guardar los adjuntos"),
           503,

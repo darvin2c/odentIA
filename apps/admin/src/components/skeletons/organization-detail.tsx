@@ -379,12 +379,13 @@ export function OrganizationDetailSkeleton({
 
 const detailRoute = getRouteApi("/_app/organizations_/$organizationId")
 
-/** Para la ruta: el «← Organizaciones» aún sin enlace; la pantalla real lo pone al llegar. */
+/** Para la ruta: la vuelta aún sin nombre; la pantalla real la pone al llegar. */
 export function OrganizationDetailPageSkeleton(): JSX.Element {
   const search = detailRoute.useSearch()
   return (
     <PageShell className="flex flex-col gap-4">
-      <span className="self-start text-sm text-muted-foreground">← Organizaciones</span>
+      {/* «← Demos» o «← Clientes»: depende de la cuenta, que aún no llega. */}
+      <TextSm className="w-24 self-start" />
       <OrganizationDetailSkeleton wanted={search.tab} overview={(search.agente ?? "todo") === "todo"} />
     </PageShell>
   )

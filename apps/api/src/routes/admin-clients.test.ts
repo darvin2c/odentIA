@@ -6,13 +6,14 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasImportDraft,
   saasOutreach,
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
-import { user } from "@odentia/db/schema/auth"
-import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { organization, user } from "@odentia/db/schema/auth"
+import { saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import type { MailMessage } from "@odentia/mail"
 import {
   type AdminActor,
@@ -256,6 +257,7 @@ describe("roles", () => {
       ["GET", `/${clientId}/import-drafts`],
       ["GET", `/import-drafts/${someId}/payload`],
       ["POST", `/import-drafts/${someId}/approve`],
+      ["POST", `/import-drafts/${someId}/used`],
       ["DELETE", `/files/${someId}`],
       ["POST", `/contacts/${someId}/link`, { userId: ADMIN }],
     ]
@@ -345,6 +347,90 @@ describe("clientes", () => {
     expect((await call("GET", "/pipeline?product=dental", SUPPORT)).status).toBe(200)
     expect((await call("GET", "/tasks?who=nadie", SUPPORT)).status).toBe(400)
   })
+
+  it("los enlaces de antes encuentran su cliente por la solicitud o por la cuenta, sin crear ninguno", async () => {
+    const clientId = await newClient("Huancayo Puentes Sonrientes", "enlaces@andes.test")
+    const orgId = "org-enlaces-ficticia"
+    const demoOrgId = "org-enlaces-demo"
+    await ownerDb.insert(organization).values([
+      {
+        id: orgId,
+        name: "Clínica Enlaces (ficticia)",
+        slug: "enlaces-ficticia",
+        createdAt: new Date(),
+      },
+      {
+        id: demoOrgId,
+        name: "Demo Enlaces (ficticia)",
+        slug: "enlaces-demo",
+        createdAt: new Date(),
+      },
+    ])
+    await ownerDb
+      .update(saasClient)
+      .set({ organizationId: orgId })
+      .where(eq(saasClient.id, clientId))
+    const [request] = await ownerDb
+      .insert(saasWaitlistRequest)
+      .values({
+        firstName: "Luis",
+        lastName: "Mamani",
+        email: "enlaces@andes.test",
+        phone: "+51987654321",
+        clinicName: "Clínica Enlaces (ficticia)",
+        countryCode: "PE",
+        city: "Cusco",
+        professionals: "4-9",
+        currentTool: "otro_software",
+        clientId,
+      })
+      .returning({ id: saasWaitlistRequest.id })
+    // Una solicitud vieja sin cliente, pero con su cuenta: también llega.
+    const [orphan] = await ownerDb
+      .insert(saasWaitlistRequest)
+      .values({
+        firstName: "Rosa",
+        lastName: "Díaz",
+        email: "huerfana@andes.test",
+        phone: "+51987654322",
+        clinicName: "Clínica Enlaces (ficticia)",
+        countryCode: "PE",
+        city: "Cusco",
+        professionals: "1",
+        currentTool: "nada",
+        status: "entro",
+        planId,
+        enteredAt: new Date(),
+        organizationId: orgId,
+      })
+      .returning({ id: saasWaitlistRequest.id })
+
+    const byRequest = await call("GET", `/lookup?request=${request?.id}`, SUPPORT)
+    await expectStatus(byRequest, 200)
+    expect((await json(byRequest)).data).toEqual({ clientId })
+    expect((await json(await call("GET", `/lookup?request=${orphan?.id}`, ADMIN))).data).toEqual({
+      clientId,
+    })
+    expect((await json(await call("GET", `/lookup?organization=${orgId}`, SUPPORT))).data).toEqual({
+      clientId,
+    })
+
+    // Una cuenta sin cliente (una demo) no crea uno: 404.
+    const before = (await ownerDb.select({ id: saasClient.id }).from(saasClient)).length
+    const demo = await call("GET", `/lookup?organization=${demoOrgId}`, ADMIN)
+    await expectStatus(demo, 404)
+    expect((await ownerDb.select({ id: saasClient.id }).from(saasClient)).length).toBe(before)
+    await expectStatus(
+      await call("GET", "/lookup?request=5e1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f", ADMIN),
+      404,
+    )
+    // Una de las dos, nunca ninguna ni las dos.
+    await expectStatus(await call("GET", "/lookup", ADMIN), 400)
+    await expectStatus(
+      await call("GET", `/lookup?request=${request?.id}&organization=${orgId}`, ADMIN),
+      400,
+    )
+  })
 })
 
 describe("anotar con Kairós", () => {
@@ -414,9 +500,11 @@ describe("anotar con Kairós", () => {
       body: JSON.stringify({ text: "Llamé a Luis, quedamos en volver a llamar el lunes" }),
     })
     await expectStatus(response, 200)
-    const { annotation } = (await json(response)).data
+    const { annotation, drafter } = (await json(response)).data
     expect(annotation.activity.body).toBeTruthy()
     expect(annotation.activity.kind).toBeTruthy()
+    // La pantalla dice que lo ordenó una plantilla, no el modelo.
+    expect(drafter).toBe("plantilla")
   })
 
   it("si una pieza no se puede guardar, no queda nada a medias", async () => {
@@ -681,5 +769,46 @@ describe("llaves de la skill", () => {
     const response = await call("GET", `/${clientId}/import-drafts`, ADMIN)
     await expectStatus(response, 200)
     expect((await json(response)).data).toEqual([])
+  })
+
+  it("usar un borrador lo pasa a usada y borra su JSON del bucket; después ya no se abre", async () => {
+    const orgId = "org-usada-ficticia"
+    await ownerDb.insert(organization).values({
+      id: orgId,
+      name: "Clínica Usada (ficticia)",
+      slug: "usada-ficticia",
+      createdAt: new Date(),
+    })
+    const [row] = await ownerDb
+      .insert(saasClient)
+      .values({ name: "Clínica Usada (ficticia)", product: "dental", organizationId: orgId })
+      .returning({ id: saasClient.id })
+    const clientId = row?.id ?? ""
+    expect(clientId).not.toBe("")
+    const payloadKey = `clients/${clientId}/pacientes-1.json`
+    objects.set(payloadKey, new TextEncoder().encode("{}"))
+    const [draft] = await ownerDb
+      .insert(saasImportDraft)
+      .values({
+        clientId,
+        organizationId: orgId,
+        kind: "plan_pacientes",
+        number: 1,
+        payloadKey,
+        uploadedBy: ADMIN,
+      })
+      .returning({ id: saasImportDraft.id })
+    if (!draft) throw new Error("sin borrador")
+    const response = await call("POST", `/import-drafts/${draft.id}/used`, ADMIN)
+    await expectStatus(response, 200)
+    expect((await json(response)).data).toMatchObject({
+      id: draft.id,
+      status: "usada",
+      payloadDeletedAt: expect.any(String),
+    })
+    expect(objects.has(payloadKey)).toBe(false)
+    const gone = await call("GET", `/import-drafts/${draft.id}/payload`, ADMIN)
+    expect(gone.status).toBe(409)
+    expect((await json(gone)).error.code).toBe("IMPORT_DRAFT_PAYLOAD_GONE")
   })
 })

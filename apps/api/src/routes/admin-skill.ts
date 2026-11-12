@@ -6,6 +6,7 @@ import {
   clientFileDeleteAfter,
   clientFileKey,
   depositImportDraft,
+  purgeImportDraftPayloads,
   registerClientFile,
   resolveSkillKey,
   ServiceError,
@@ -302,8 +303,11 @@ export function createAdminSkillRoute(deps: AdminSkillDeps) {
         if (response) return response
         throw error
       }
+      // El JSON reemplazado se borra ya; si el almacenamiento falla, queda anotado y lo borra la pasada.
       if (result.replacedPayloadKey)
-        await deps.storage.deleteAttachment(result.replacedPayloadKey).catch((error) => {
+        await purgeImportDraftPayloads(deps.ownerDb, deps.storage, new Date(), {
+          draftId: result.id,
+        }).catch((error) => {
           console.error("admin-skill: no se borró el JSON del borrador reemplazado", error)
         })
       return c.json(

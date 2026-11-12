@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
-import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, kairosModelNotice, platformLlmFromEnv } from "@odentia/agent"
 import { type Auth, createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
@@ -74,6 +74,9 @@ if (env.NODE_ENV === "production" && !env.FOUNDERS_EMAIL) {
 // El modelo de la plataforma (el mismo `LLM_*`), y su gasto, como gasto de Sallca: Kairós prepara, nunca envía.
 const llm = platformLlmFromEnv(env)
 const kairos = createKairosWriter({ platform: llm, onUse: kairosAiUseRecorder(ownerDb) })
+// Sin la clave, Kairós redacta con plantillas y lo dice en la pantalla: nunca un error.
+const kairosNotice = kairosModelNotice(llm)
+if (env.NODE_ENV === "production" && kairosNotice) console.warn(kairosNotice)
 if (env.NODE_ENV === "production" && !env.INBOUND_EMAIL_SECRET) {
   console.warn("INBOUND_EMAIL_SECRET vacío: el correo entrante de soporte@ y contacto@ no llega al ARM (docs/deployment.md).")
 }

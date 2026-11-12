@@ -1,4 +1,9 @@
 /**
+ * Una clínica con cuenta es un cliente (ADR 0183): esta dirección abre la ficha
+ * de su cliente, en la pestaña equivalente (`clientTabFromOrganization`). Lo
+ * que sigue aquí es para las cuentas sin cliente, que son las demos (una demo
+ * nunca es cliente) y alguna que Kairós aún no ligó.
+ *
  * La ficha de una clínica en su propia página (lienzo «Gastos por
  * organización», decisión D3): Resumen, Gastos, Precio y prueba, Equipo,
  * Actividad y Cargar datos (ADR 0104). La pestaña y los filtros de Gastos
@@ -19,7 +24,7 @@ import {
 } from "@odentia/ui"
 import { ConfirmDialog, ErrorState, PageShell, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 import { OrgBillingSection } from "../../components/org-billing"
@@ -41,8 +46,9 @@ import {
   openOrganizationTab,
   organizationTabsFor,
 } from "../../lib/organization-tabs"
-import { rememberedOrganizationsSearch } from "../../lib/organizations-search"
 import { useIsAdmin } from "../../lib/session"
+import { lookupClient } from "../../components/arm/client-lookup"
+import { clientTabFromOrganization, rememberedClientsSearch } from "../../lib/list-search"
 import { OrganizationDetailPageSkeleton, OrganizationDetailSkeleton } from "../../components/skeletons/organization-detail"
 
 /** Todo es opcional en la dirección: lo que falta es lo de siempre (Resumen, este mes, todo). */
@@ -60,6 +66,12 @@ export const Route = createFileRoute("/_app/organizations_/$organizationId")({
   pendingComponent: OrganizationDetailPageSkeleton,
   component: OrganizationPage,
   validateSearch: (search: Record<string, unknown>): DetailSearch => searchSchema.parse(search),
+  // Con cliente, su ficha (Inicio, Soporte y Cobros siguen enlazando aquí con su `tab`).
+  beforeLoad: async ({ params, search }) => {
+    const clientId = await lookupClient({ organization: params.organizationId })
+    if (clientId)
+      throw redirect({ to: "/clients/$clientId", params: { clientId }, search: { tab: clientTabFromOrganization(search.tab) }, replace: true })
+  },
 })
 
 const detailSchema = z.object({
@@ -218,13 +230,14 @@ function OrganizationPage() {
   // Soporte no abre lo que tiene importes, aunque llegue con el enlace (la API tampoco se lo da).
   const tabs = organizationTabsFor(isAdmin)
   const tab = openOrganizationTab(search.tab, isAdmin)
-  const back = (
-    <Link
-      to="/organizations"
-      search={rememberedOrganizationsSearch()}
-      className="self-start text-sm text-muted-foreground hover:text-foreground"
-    >
-      ← Organizaciones
+  // Aquí llegan las demos (y alguna cuenta aún sin cliente): se vuelve a Demos o a Clientes.
+  const back = demo.data ? (
+    <Link to="/demos" className="self-start text-sm text-muted-foreground hover:text-foreground">
+      ← Demos
+    </Link>
+  ) : (
+    <Link to="/clients" search={rememberedClientsSearch()} className="self-start text-sm text-muted-foreground hover:text-foreground">
+      ← Clientes
     </Link>
   )
 
@@ -301,7 +314,7 @@ function OrganizationPage() {
         <DemoBand
           demo={demo.data}
           isAdmin={isAdmin}
-          onDeleted={() => void navigate({ to: "/organizations", search: rememberedOrganizationsSearch() })}
+          onDeleted={() => void navigate({ to: "/demos" })}
         />
       ) : null}
 

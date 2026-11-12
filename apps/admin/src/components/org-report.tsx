@@ -3,12 +3,14 @@ import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
+import type { DraftSource } from "./arm/import-drafts"
 
 /**
  * «Cargar datos» › el informe a la clínica: se elige el informe.json que armó la skill
  * de carga con lo que se hizo en una etapa, se ve el PDF tal como saldrá y se envía
  * por el correo de producción, una sola vez. Es informativo: no pide respuesta.
- * Solo administración, y el servidor lo exige.
+ * Con `draft` (la ficha del cliente › Alta) también se puede tomar el informe
+ * aprobado que dejó la skill. Solo administración, y el servidor lo exige.
  */
 
 const previewSchema = z.object({
@@ -30,7 +32,7 @@ type Stage =
 
 const when = new Intl.DateTimeFormat("es-PE", { dateStyle: "long", timeStyle: "short", timeZone: "America/Lima" })
 
-export function OrgReport({ organizationId }: { organizationId: string }) {
+export function OrgReport({ organizationId, draft }: { organizationId: string; draft?: DraftSource }) {
   const input = useRef<HTMLInputElement>(null)
   const [stage, setStage] = useState<Stage>({ kind: "idle" })
   const [error, setError] = useState<string | null>(null)
@@ -50,14 +52,32 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
       setError("El archivo no es un informe: elige el informe.json que dejó la skill")
       return
     }
-    setStage({ kind: "checking", fileName: file.name })
+    await showReport(file.name, report)
+  }
+
+  async function takeDraft(source: DraftSource) {
+    setError(null)
+    setStage({ kind: "checking", fileName: source.fileName })
+    let report: unknown
+    try {
+      report = await source.load()
+    } catch (failure) {
+      setError(submitErrorMessage(failure))
+      setStage({ kind: "idle" })
+      return
+    }
+    await showReport(source.fileName, report)
+  }
+
+  async function showReport(fileName: string, report: unknown) {
+    setStage({ kind: "checking", fileName })
     try {
       const preview = previewSchema.parse(
         await api<unknown>(`/api/admin/imports/${organizationId}/report/preview`, { method: "POST", body: JSON.stringify(report) }),
       )
       const bytes = Uint8Array.from(atob(preview.pdf), (char) => char.charCodeAt(0))
       setPdfUrl(URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })))
-      setStage({ kind: "ready", fileName: file.name, report, preview })
+      setStage({ kind: "ready", fileName, report, preview })
     } catch (failure) {
       setError(submitErrorMessage(failure))
       setStage({ kind: "idle" })
@@ -70,6 +90,7 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
     try {
       await api<unknown>(`/api/admin/imports/${organizationId}/report/send`, { method: "POST", body: JSON.stringify(current.report) })
       setStage({ kind: "sent", fileName: current.fileName, to: current.preview.to })
+      if (draft && current.fileName === draft.fileName) draft.onUsed?.()
     } catch (failure) {
       setError(submitErrorMessage(failure))
       setStage(current)
@@ -99,10 +120,20 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
           event.target.value = ""
         }}
       />
+      {draft && stage.kind === "idle" ? <p className="text-sm">{draft.label}</p> : null}
       {stage.kind !== "checking" && stage.kind !== "sending" ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant={stage.kind === "idle" ? "default" : "outline"} onClick={() => input.current?.click()}>
-            {stage.kind === "idle" ? "Elegir el informe" : "Elegir otro informe"}
+          {draft && stage.kind === "idle" ? (
+            <Button type="button" onClick={() => void takeDraft(draft)}>
+              Ver este informe
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant={stage.kind === "idle" && !draft ? "default" : "outline"}
+            onClick={() => input.current?.click()}
+          >
+            {stage.kind === "idle" ? (draft ? "Elegir un archivo" : "Elegir el informe") : "Elegir otro informe"}
           </Button>
           {"fileName" in stage ? <span className="text-sm text-muted-foreground">{stage.fileName}</span> : null}
         </div>
