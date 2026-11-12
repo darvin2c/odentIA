@@ -886,10 +886,14 @@ export async function createAssistedOrganization(
   }
 }
 
+/** Lo que dura el enlace de una invitación de la administración desde que se envía. */
+const ORG_INVITATION_DAYS = 7
+
 /**
- * Reenvío idempotente: si la invitación sigue pendiente y vigente, se
- * devuelve la misma fila (la ruta reenvía el correo con el mismo enlace);
- * si venció, se renueva el vencimiento sobre la misma fila para no duplicar.
+ * Reenvío sobre la misma fila (el mismo enlace, sin duplicar invitaciones):
+ * el enlace vuelve a valer 7 días desde hoy, como al invitar. Reenviar uno
+ * que vence esta noche o que ya venció sirve para algo; uno con más días no
+ * se acorta. La ruta reenvía el correo, que dice hasta cuándo vale.
  */
 export async function resendOrganizationInvitation(
   tx: Db,
@@ -901,13 +905,10 @@ export async function resendOrganizationInvitation(
   if (!row) throw gone("Invitación no encontrada")
   if (row.status !== "pending") throw conflict("La invitación ya fue resuelta")
   const now = new Date()
-  const needsRenewal = row.expiresAt.getTime() <= now.getTime()
+  const renewedUntil = new Date(now.getTime() + ORG_INVITATION_DAYS * 24 * 60 * 60 * 1000)
+  const needsRenewal = row.expiresAt.getTime() < renewedUntil.getTime()
   const [updated] = needsRenewal
-    ? await tx
-        .update(invitation)
-        .set({ expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) })
-        .where(eq(invitation.id, invitationId))
-        .returning()
+    ? await tx.update(invitation).set({ expiresAt: renewedUntil }).where(eq(invitation.id, invitationId)).returning()
     : [row]
   await writeAdminAudit(
     tx,

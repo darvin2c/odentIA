@@ -503,4 +503,17 @@ describe("Inicio: altas por completar y propietarias sin aceptar", () => {
     expect(Math.round((resent.expiresAt.getTime() - Date.now()) / DAY)).toBe(7)
     expect(await pendingIds()).not.toContain(created.organizationId)
   })
+
+  it("reenviar una que vence hoy le da otros 7 días con el mismo enlace, y la fila se va", async () => {
+    const created = await assisted()
+    await expiresIn(created.invitationId, 3 * 3_600_000)
+    expect(await pendingIds()).toContain(created.organizationId)
+    const resent = await ownerDb.transaction((tx) => resendOrganizationInvitation(tx, admin, created.invitationId))
+    expect(resent.id).toBe(created.invitationId)
+    expect(Math.round((resent.expiresAt.getTime() - Date.now()) / DAY)).toBe(7)
+    expect(await pendingIds()).not.toContain(created.organizationId)
+    // Reenviarla otra vez no le acorta el plazo.
+    const again = await ownerDb.transaction((tx) => resendOrganizationInvitation(tx, admin, created.invitationId))
+    expect(again.expiresAt.getTime()).toBeGreaterThanOrEqual(resent.expiresAt.getTime())
+  })
 })

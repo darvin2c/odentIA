@@ -169,16 +169,15 @@ function OrganizationPage() {
 
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["admin-organization", organizationId] })
-  // Una vigente se reenvía con el mismo enlace y la misma fecha; una vencida se renueva por 7 días.
+  // Reenviar manda el mismo enlace, que vuelve a valer 7 días desde hoy (el correo dice hasta cuándo).
   const resend = useMutation({
     mutationFn: (item: { id: string; email: string; expiresAt: string }) =>
       api<{ expiresAt: string }>(`/api/admin/organizations/invitations/${item.id}/resend`, { method: "POST" }),
     onSuccess: (resent, item) => {
-      const wasValid = new Date(item.expiresAt).getTime() > Date.now()
       const due = invitationDueWords(resent.expiresAt).text
-      toast.success(wasValid ? `Reenviada a ${item.email} con el mismo enlace · ${due}` : `Reenviada a ${item.email} · ${due}`)
+      toast.success(`Reenviada a ${item.email} con el mismo enlace · ${due}`)
       invalidate()
-      // Una vencida renovada sale de «Clínicas con la propietaria sin aceptar».
+      // Con 7 días por delante sale de «Clínicas con la propietaria sin aceptar».
       void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
     },
     onError: (error) => toast.error(submitErrorMessage(error)),

@@ -360,7 +360,7 @@ function AdminHome() {
                   id="propietarias"
                   title="Clínicas con la propietaria sin aceptar"
                   count={owners.length}
-                  note="La clínica se abre en Equipo, donde está «Reenviar». Nada se reenvía solo."
+                  note="La clínica se abre en Equipo, donde está «Reenviar»: el mismo enlace vuelve a valer 7 días y la fila se va. Nada se reenvía solo."
                 >
                   <ul className="divide-y rounded-xl border bg-card">
                     {owners.map((row) => {

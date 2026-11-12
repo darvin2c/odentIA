@@ -239,12 +239,15 @@ export function invitationTemplate({
   url,
   brand,
   accent,
+  expires,
 }: {
   organizationName: string
   inviterName: string
   url: string
   /** El color de la clínica que invita, si eligió uno: el botón lo lleva. */
   accent?: MailAccent | undefined
+  /** Hasta cuándo vale el enlace, en la zona de la clínica: el correo lo dice. */
+  expires?: { at: Date; timeZone: string } | undefined
 } & Branded): MailTemplate {
   const name = mailBrandName(brand)
   return renderEmail({
@@ -255,9 +258,24 @@ export function invitationTemplate({
     title: `Te invitaron a ${organizationName}`,
     paragraphs: [`Hola. ${inviterName} te invitó a unirte al equipo de ${organizationName} en ${name}.`],
     action: { label: "Aceptar invitación", url },
-    note: "Entras con tu correo y eliges tu contraseña. Si no conoces a esta clínica, ignora este correo.",
+    note: `${expires ? `El enlace vale hasta el ${expiresWords(expires.at, expires.timeZone)}. ` : ""}Entras con tu correo y eliges tu contraseña. Si no conoces a esta clínica, ignora este correo.`,
     reason: `Te escribimos porque ${inviterName} te invitó desde ${name}.`,
   })
+}
+
+/** «jueves 18 de noviembre a las 22:32», en la zona dada (la de la clínica). */
+function expiresWords(at: Date, timeZone: string): string {
+  const zone = (() => {
+    try {
+      new Intl.DateTimeFormat("es", { timeZone })
+      return timeZone
+    } catch {
+      return "America/Lima"
+    }
+  })()
+  const day = new Intl.DateTimeFormat("es", { timeZone: zone, weekday: "long", day: "numeric", month: "long" }).format(at)
+  const time = new Intl.DateTimeFormat("es", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at)
+  return `${day.replace(",", "")} a las ${time}`
 }
 
 /**

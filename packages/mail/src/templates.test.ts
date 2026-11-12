@@ -195,6 +195,18 @@ describe("pie", () => {
   })
 })
 
+describe("invitación", () => {
+  it("dice hasta cuándo vale el enlace, en la zona de la clínica", () => {
+    const mail = invitationTemplate({
+      organizationName: "Demo Prueba",
+      inviterName: "Ada",
+      url: URL,
+      expires: { at: new Date("2026-11-19T03:32:00Z"), timeZone: "America/Lima" },
+    })
+    expect(mail.text).toContain("El enlace vale hasta el miércoles 18 de noviembre a las 22:32.")
+  })
+})
+
 describe("avisos de soporte", () => {
   it("«La clínica respondió» nombra a quien actuó y lo que hizo, no a quien abrió el caso", () => {
     const granted = supportInboxNoticeTemplate({
