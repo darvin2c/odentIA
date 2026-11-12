@@ -22,7 +22,8 @@
     "import:prepare": "tsx src/clinic-import-cli.ts prepare",
     "import:carta": "tsx src/clinic-import-cli.ts letter",
     "import:clinica": "tsx src/clinic-import-cli.ts setup",
-    "import:informe": "tsx src/clinic-import-cli.ts report"
+    "import:informe": "tsx src/clinic-import-cli.ts report",
+    "import:produccion": "tsx src/clinic-import-remote.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1131.0",
