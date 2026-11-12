@@ -291,6 +291,38 @@ async function ensureDemoOrg(db: Db, id: string, name: string, slug: string): Pr
 }
 
 /**
+ * Una clínica de la semilla que ya terminó su alta: con su perfil y sus sedes,
+ * así no cuenta en «Altas por completar» (sin perfil o sin sede). Pone solo lo
+ * que falta: una base sembrada antes, con la clínica sin perfil ni sede, los
+ * recibe en la corrida siguiente, y lo que alguien editó no se toca.
+ */
+async function ensureFinishedSignupOrg(
+  db: Db,
+  clinic: { id: string; name: string; slug: string; branches: readonly string[] },
+): Promise<void> {
+  await ensureDemoOrg(db, clinic.id, clinic.name, clinic.slug)
+  await db
+    .insert(orgProfile)
+    .values({
+      organizationId: clinic.id,
+      legalName: `${clinic.name} S.A.C.`,
+      tradeName: clinic.name,
+      countryCode: "PE",
+      currency: "PEN",
+      locale: "es-PE",
+      timezone: "America/Lima",
+      diagnosisSystem: "ICD-10",
+    })
+    .onConflictDoNothing({ target: orgProfile.organizationId })
+  const [anyBranch] = await db
+    .select({ id: branch.id })
+    .from(branch)
+    .where(eq(branch.organizationId, clinic.id))
+    .limit(1)
+  if (!anyBranch) await db.insert(branch).values(clinic.branches.map((name) => ({ organizationId: clinic.id, name })))
+}
+
+/**
  * Clínicas ficticias con estados representativos para probar la UI admin
  * (tablero, pendientes, comisiones, liquidaciones): una en prueba, una con
  * comprobante pendiente y una con cobro confirmado, comisión y liquidación.
@@ -325,7 +357,9 @@ export async function seedSaasBillingDemo(
   await ensureDemoOrg(db, "seed-saas-prueba", "Demo Prueba (ficticia)", "saas-demo-prueba")
   await startSaasTrial(db, "seed-saas-prueba", { planCode: ACTION_PLAN.code }, now)
 
-  await ensureDemoOrg(db, "seed-saas-deuda", "Demo Deuda (ficticia)", "saas-demo-deuda")
+  // Las dos que pagan ya terminaron su alta: la que sigue incompleta es «Demo Prueba», con la
+  // propietaria sin aceptar (`seed-admin-organizations.ts`).
+  await ensureFinishedSignupOrg(db, { id: "seed-saas-deuda", name: "Demo Deuda (ficticia)", slug: "saas-demo-deuda", branches: ["Sede Principal"] })
   await startSaasTrial(
     db,
     "seed-saas-deuda",
@@ -388,7 +422,7 @@ export async function seedSaasBillingDemo(
     )
   }
 
-  await ensureDemoOrg(db, "seed-saas-cobrada", "Demo Cobrada (ficticia)", "saas-demo-cobrada")
+  await ensureFinishedSignupOrg(db, { id: "seed-saas-cobrada", name: "Demo Cobrada (ficticia)", slug: "saas-demo-cobrada", branches: ["Sede Principal"] })
   await startSaasTrial(
     db,
     "seed-saas-cobrada",
@@ -690,18 +724,7 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
   for (const clinic of clinics) {
     const [exists] = await db.select({ id: organization.id }).from(organization).where(eq(organization.id, clinic.id)).limit(1)
     if (!exists) {
-      await ensureDemoOrg(db, clinic.id, clinic.name, clinic.slug)
-      await db.insert(orgProfile).values({
-        organizationId: clinic.id,
-        legalName: `${clinic.name} S.A.C.`,
-        tradeName: clinic.name,
-        countryCode: "PE",
-        currency: "PEN",
-        locale: "es-PE",
-        timezone: "America/Lima",
-        diagnosisSystem: "ICD-10",
-      })
-      await db.insert(branch).values(clinic.branches.map((name) => ({ organizationId: clinic.id, name })))
+      await ensureFinishedSignupOrg(db, clinic)
       await startSaasTrial(db, clinic.id, { planCode: "odentia-ficticio", billingStart: "now" }, now)
     }
     // También en una clínica que ya existía: Ana y Luis se recrean en cada corrida.
