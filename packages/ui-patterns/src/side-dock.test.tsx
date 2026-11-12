@@ -66,6 +66,15 @@ describe("SideColumn", () => {
     expect(onResize).toHaveBeenLastCalledWith(512)
   })
 
+  it("Esc en el borde no se queda en él: sigue hasta quien cierra el panel", () => {
+    setViewport(1440)
+    const { handle } = column(512)
+    handle.focus()
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    handle.dispatchEvent(escape)
+    expect(escape.defaultPrevented).toBe(false)
+  })
+
   it("el borde lleva un asa a la vista", () => {
     setViewport(1440)
     const { handle } = column(512)
