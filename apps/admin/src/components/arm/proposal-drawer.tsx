@@ -402,10 +402,14 @@ function proposalMessage(client: ClientSale, proposal: SaleProposal, channel: Wr
   const brand = productWords(client.product).name
   const person = client.contacts.find((contact) => contact.isPrimary) ?? client.contacts[0]
   const hello = person ? `Hola ${person.name.split(/\s+/)[0]},` : "Hola,"
+  // «el plan Plan odentIA» cuando el nombre ya empieza con «Plan».
+  const plan = /^plan\s/i.test(proposal.plan.name)
+    ? proposal.plan.name
+    : `plan ${proposal.plan.name}`
   const body =
     channel === "correo"
-      ? `${hello}\n\nLe envío la propuesta de ${brand} para ${client.name}, con el plan ${proposal.plan.name}. Vale hasta el ${dayWords(proposal.validUntil)}.\n\nVa en el PDF adjunto. Cualquier duda, respondo aquí mismo.`
-      : `${hello} le escribo de ${brand}. Le preparé la propuesta para ${client.name} con el plan ${proposal.plan.name}; vale hasta el ${dayWords(proposal.validUntil)}. ¿Se la envío por correo con el detalle?`
+      ? `${hello}\n\nLe envío la propuesta de ${brand} para ${client.name}, con el ${plan}. Vale hasta el ${dayWords(proposal.validUntil)}.\n\nVa en el PDF adjunto. Cualquier duda, respondo aquí mismo.`
+      : `${hello} le escribo de ${brand}. Le preparé la propuesta para ${client.name} con el ${plan}; vale hasta el ${dayWords(proposal.validUntil)}. ¿Se la envío por correo con el detalle?`
   return { subject: `Propuesta de ${brand} para ${client.name}`, body }
 }
 

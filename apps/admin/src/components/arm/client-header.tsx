@@ -38,6 +38,8 @@ export interface ClientHeaderActions {
   reopenPending?: boolean
 }
 
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
+
 /** Lo que sigue debajo del título: producto, etapa y la línea de datos. */
 export function ClientHeaderFacts({ client }: { client: ClientDetail }) {
   const invited =
@@ -49,7 +51,8 @@ export function ClientHeaderFacts({ client }: { client: ClientDetail }) {
   const facts = [
     [client.city, countryWords(client.countryCode)].filter(Boolean).join(", "),
     client.professionals ? wordOf(PROFESSIONALS_WORDS, client.professionals) : null,
-    client.currentTool ? wordOf(TOOL_WORDS, client.currentTool).toLowerCase() : null,
+    // Solo la inicial: «cuaderno o Excel», no «cuaderno o excel».
+    client.currentTool ? lowerFirst(wordOf(TOOL_WORDS, client.currentTool)) : null,
     `Responsable: ${client.owner?.name || "sin responsable"}`,
     `Origen: ${wordOf(ORIGIN_WORDS, client.origin, "Otro")}${client.referredBy ? ` (la refirió ${client.referredBy.name})` : ""}`,
     `primer contacto el ${dayWords(limaDayOf(new Date(client.createdAt)))}`,
@@ -110,12 +113,15 @@ export function ClientNextStep({
   const selling = !client.organization && client.opportunity !== null
   const decided = !client.organization && client.opportunity === null
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+    // Se acomodan por el ancho que tienen, no por el de la ventana: con el
+    // panel lateral abierto el texto del próximo paso quedaba de una letra por
+    // línea (QA del ARM, 12 nov). Lo que no cabe baja a la línea siguiente.
+    <div className="flex flex-wrap items-stretch gap-3">
       <section
         aria-labelledby="ficha-proximo"
-        className="flex min-w-0 flex-1 flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center"
+        className="flex min-w-0 flex-[999_1_28rem] flex-wrap items-center gap-3 rounded-xl border bg-card p-4"
       >
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-[1_1_15rem] flex-col gap-0.5">
           <h2 id="ficha-proximo" className="text-xs font-medium text-muted-foreground">
             Próximo paso
           </h2>
@@ -173,7 +179,7 @@ export function ClientNextStep({
       {isAdmin && (selling || decided) ? (
         <section
           aria-labelledby="ficha-decide"
-          className="flex flex-col gap-2 rounded-xl border bg-card p-4"
+          className="flex min-w-0 flex-[1_1_auto] flex-col gap-2 rounded-xl border bg-card p-4"
         >
           <h2 id="ficha-decide" className="text-xs font-medium text-muted-foreground">
             Decides tú

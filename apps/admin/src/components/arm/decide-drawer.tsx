@@ -165,6 +165,27 @@ type Invited = z.infer<typeof invitedSchema> & { send: boolean; email: string }
 
 const UNKNOWN = "__sin"
 
+/**
+ * Sin solicitud de la web, la invitación lleva los datos de quien entra y el
+ * servidor los exige (`inviteClient`): se piden aquí, antes de enviar, con
+ * las mismas palabras. Antes se ofrecía «Por saber» y volvía un 400.
+ */
+function inviteSchemaFor(live: boolean, clinicians: string) {
+  if (live) return inviteSchema
+  return inviteSchema.superRefine((value, ctx) => {
+    const missing = (path: string, message: string) =>
+      ctx.addIssue({ code: "custom", path: [path], message })
+    if (!value.firstName.trim()) missing("firstName", "Escribe el nombre de quien entra")
+    if (!value.lastName.trim()) missing("lastName", "Escribe sus apellidos")
+    if (!/^\+[1-9][0-9]{6,14}$/.test(value.phone.replace(/[ ()-]/g, "")))
+      missing("phone", "Escribe su celular con el código del país, como +51987654321")
+    if (!value.city.trim()) missing("city", "Escribe la ciudad")
+    if (value.professionals === UNKNOWN)
+      missing("professionals", `Elige cuántos ${clinicians} atienden`)
+    if (value.currentTool === UNKNOWN) missing("currentTool", "Elige qué usan hoy")
+  })
+}
+
 function InviteForm({
   clientId,
   client,
@@ -196,7 +217,9 @@ function InviteForm({
       professionals: client.professionals ?? UNKNOWN,
       currentTool: client.currentTool ?? UNKNOWN,
     },
-    validators: { onSubmit: inviteSchema },
+    validators: {
+      onSubmit: inviteSchemaFor(live !== null, productWords(client.product).clinician.many),
+    },
     onSubmit: async ({ value }) => {
       const text = (raw: string) => raw.trim() || null
       const body = {
@@ -310,7 +333,7 @@ function InviteForm({
                     id="invitar-profesionales"
                     label={professionalsLabel.charAt(0).toUpperCase() + professionalsLabel.slice(1)}
                     options={[
-                      { value: UNKNOWN, label: "Por saber" },
+                      { value: UNKNOWN, label: "Elige…" },
                       ...CLIENT_PROFESSIONALS.map((value) => ({
                         value,
                         label: PROFESSIONALS_WORDS[value],
@@ -325,7 +348,7 @@ function InviteForm({
                     id="invitar-herramienta"
                     label="Qué usan hoy"
                     options={[
-                      { value: UNKNOWN, label: "Por saber" },
+                      { value: UNKNOWN, label: "Elige…" },
                       ...CLIENT_TOOLS.map((value) => ({ value, label: TOOL_WORDS[value] })),
                     ]}
                   />
@@ -636,7 +659,7 @@ function AssistedForm({
                 id="alta-vendedora"
                 label="Vendedora"
                 options={[
-                  { value: "", label: "Sin vendedora" },
+                  { value: "", label: "Sin vendedor" },
                   ...(sellers.data ?? []).map((seller) => ({
                     value: seller.id,
                     label: seller.displayName,

@@ -162,6 +162,9 @@ describe("runKairosTick", () => {
     expect(client?.summary).toContain("Le interesa la agenda por WhatsApp")
     // Lo solo de administración no entra en lo que también ve Soporte.
     expect(client?.summary).not.toContain("descuento")
+    // Las fechas van en palabras: el resumen con plantilla las copia a la ficha.
+    expect(client?.summary).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(client?.summary).toContain("13 de noviembre de 2026")
     expect(client?.summarySources?.length).toBeGreaterThan(0)
     for (const source of client?.summarySources ?? [])
       expect(source.source).toMatch(

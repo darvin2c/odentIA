@@ -335,7 +335,9 @@ const TEMPLATE_WRITER: KairosDraftWriter & KairosWeeklyWriter = {
     const first = contact?.name.split(" ")[0] ?? ""
     const opening = GOAL_WORDS[goal] ?? "te escribo para seguir conversando."
     const brand = productWords(client.product).name
-    const body = `Hola${first ? `, ${first}` : ""}: ${opening}\n\n${senderName}, ${brand}`
+    // «El equipo de odentIA» ya dice la marca: no repetirla.
+    const signature = senderName.includes(brand) ? senderName : `${senderName}, ${brand}`
+    const body = `Hola${first ? `, ${first}` : ""}: ${opening}\n\n${signature}`
     return channel === "correo"
       ? { subject: `${client.name}: seguimos en contacto`, body }
       : { body }

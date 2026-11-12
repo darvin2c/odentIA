@@ -19,8 +19,11 @@ import { CLIENT_STAGE_WORDS, type ClientStage, clientStageSql } from "./admin-cl
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { type KairosDrafter, saveKairosDraft } from "./admin-kairos.js"
 import { forecastReport, funnelReport, revenueReport } from "./admin-reports.js"
+import { dayWords } from "./document-kit.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
+
+const ZONE = { locale: "es-PE", timezone: "America/Lima" }
 
 /**
  * Lo que redacta el modelo de Kairós para el ARM, fuera de toda transacción:
@@ -253,7 +256,9 @@ export async function pendingKairosDraftJobs(
       .filter((fact): fact is string => fact !== null)
     for (const entry of recent) {
       const label = ACTIVITY_WORDS[entry.kind] ?? "Actividad"
-      const day = limaDate(entry.happenedAt)
+      // En palabras: el borrador con plantilla lo copia tal cual y el modelo
+      // no debe devolver una fecha AAAA-MM-DD a la clínica.
+      const day = dayWords(entry.happenedAt, ZONE)
       if (entry.kind === "correo" && entry.direction === "entro") {
         facts.push(`${label} de la clínica el ${day}`)
         continue

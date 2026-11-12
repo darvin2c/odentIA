@@ -170,6 +170,20 @@ async function summaryCandidates(ownerDb: Db, now: Date, limit: number): Promise
 }
 
 /**
+ * Un día AAAA-MM-DD en palabras («12 de noviembre de 2026»). El resumen con
+ * plantilla copia los hechos tal cual en la ficha, y el modelo no debe
+ * devolver una fecha en formato técnico (QA del ARM, 12 nov).
+ */
+const DAY_WORDS = new Intl.DateTimeFormat("es-PE", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+})
+export const summaryDay = (iso: string): string =>
+  /^\d{4}-\d{2}-\d{2}$/.test(iso) ? DAY_WORDS.format(new Date(`${iso}T00:00:00Z`)) : iso
+
+/**
  * Los hechos de un cliente, cada uno con su fuente (`actividad:<id>`,
  * `contacto:<id>`…). Lo ve también Soporte: sin lo que es solo de
  * administración, sin importes, sin el cuerpo de un correo que llegó y sin
@@ -193,7 +207,7 @@ export async function clientSummaryFacts(
       to_char(created_at at time zone 'America/Lima', 'YYYY-MM-DD') as day
     from saas_waitlist_request where client_id = ${client.id}::uuid order by created_at desc limit 1`)
   for (const request of requests)
-    add(`Dejó su solicitud en la web el ${request.day}`, `solicitud:${request.id}`)
+    add(`Dejó su solicitud en la web el ${summaryDay(request.day)}`, `solicitud:${request.id}`)
   const contacts = await ownerDb.execute<{
     id: string
     name: string
@@ -228,12 +242,12 @@ export async function clientSummaryFacts(
   for (const entry of activities) {
     const label = ACTIVITY_WORDS[entry.kind] ?? "Actividad"
     if (entry.kind === "correo" && entry.direction === "entro") {
-      add(`${label} de la clínica el ${entry.day}`, `actividad:${entry.id}`)
+      add(`${label} de la clínica el ${summaryDay(entry.day)}`, `actividad:${entry.id}`)
       continue
     }
     const by = entry.direction === "entro" ? " de la clínica" : ""
     add(
-      `${label}${by} del ${entry.day}: ${entry.body}${entry.outcome ? ` · quedó en: ${entry.outcome}` : ""}`,
+      `${label}${by} del ${summaryDay(entry.day)}: ${entry.body}${entry.outcome ? ` · quedó en: ${entry.outcome}` : ""}`,
       `actividad:${entry.id}`,
     )
   }
@@ -244,7 +258,7 @@ export async function clientSummaryFacts(
       order by due_on limit 3`,
   )
   for (const task of tasks)
-    add(`Tarea abierta: ${task.title}, para el ${task.due_on}`, `tarea:${task.id}`)
+    add(`Tarea abierta: ${task.title}, para el ${summaryDay(task.due_on)}`, `tarea:${task.id}`)
   const proposals = await ownerDb.execute<{
     id: string
     version: number
@@ -256,7 +270,7 @@ export async function clientSummaryFacts(
   )
   for (const proposal of proposals)
     add(
-      `Propuesta ${proposal.version}: ${PROPOSAL_WORDS[proposal.status] ?? proposal.status}${proposal.status === "enviada" ? `, vale hasta el ${proposal.valid_until}` : ""}`,
+      `Propuesta ${proposal.version}: ${PROPOSAL_WORDS[proposal.status] ?? proposal.status}${proposal.status === "enviada" ? `, vale hasta el ${summaryDay(proposal.valid_until)}` : ""}`,
       `propuesta:${proposal.id}`,
     )
   // La última decisión de la venta, sin su nota libre.
@@ -273,7 +287,7 @@ export async function clientSummaryFacts(
   for (const decided of decisions) {
     const reason = decided.reason ? LOST_REASON_WORDS[decided.reason as SaasLostReason] : null
     add(
-      `Se decidió «${DECISION_WORDS[decided.decision] ?? decided.decision}»${reason ? `, por: ${reason}` : ""}${decided.return_on ? `; volver el ${decided.return_on}` : ""}`,
+      `Se decidió «${DECISION_WORDS[decided.decision] ?? decided.decision}»${reason ? `, por: ${reason}` : ""}${decided.return_on ? `; volver el ${summaryDay(decided.return_on)}` : ""}`,
       `venta:${decided.id}`,
     )
   }

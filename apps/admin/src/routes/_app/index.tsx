@@ -45,6 +45,7 @@ import {
 import { TodayBilling } from "../../components/today-billing"
 import { UnknownReportActions } from "../../components/unknown-report-actions"
 import { api } from "../../lib/api"
+import { useFocusOnLeave } from "../../lib/focus"
 import { invitationDueWords, limaDayWords } from "../../lib/invitation-words"
 import { rememberedWaitlistFilters } from "../../lib/list-search"
 import { SUPPORT_KIND_LABEL, supportDay, supportWaitWords } from "../../lib/support-words"
@@ -801,9 +802,15 @@ function TaskItem({
 }) {
   const queryClient = useQueryClient()
   const tab = taskTab(row.kind, isAdmin)
+  const leave = useFocusOnLeave<HTMLLIElement>()
   const done = useMutation({
-    mutationFn: async () =>
-      api(`/api/admin/clients/tasks/${row.id}/done`, { method: "POST", body: JSON.stringify({}) }),
+    mutationFn: async () => {
+      leave.markLeaving()
+      return api(`/api/admin/clients/tasks/${row.id}/done`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      })
+    },
     onSuccess: () => {
       invalidateArm(queryClient, row.clientId)
       toast.success(`Hecho: ${row.title}`)
@@ -811,11 +818,13 @@ function TaskItem({
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const move = useMutation({
-    mutationFn: async (dueOn: string) =>
-      api(`/api/admin/clients/tasks/${row.id}/move`, {
+    mutationFn: async (dueOn: string) => {
+      leave.markLeaving()
+      return api(`/api/admin/clients/tasks/${row.id}/move`, {
         method: "POST",
         body: JSON.stringify({ dueOn }),
-      }),
+      })
+    },
     onSuccess: (_data, dueOn) => {
       invalidateArm(queryClient, row.clientId)
       toast.success(`Pasó al ${limaDayWords(dueOn)}`)
@@ -827,6 +836,7 @@ function TaskItem({
   const presentation = row.kind === "presentacion"
   return (
     <HomeRow
+      rowRef={leave.ref}
       name={
         <ClientName clientId={row.clientId} tab={tab}>
           {row.clientName}

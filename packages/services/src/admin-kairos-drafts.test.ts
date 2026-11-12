@@ -253,6 +253,9 @@ describe("lo que puede ver el modelo", () => {
     expect(told).toContain("Pidió conocer el precio: [importe] al mes")
     expect(told).toContain("pagaría [importe] al mes")
     expect(told).toContain("Correo de la clínica el")
+    // La fecha va en palabras: la plantilla la copia tal cual a la pantalla.
+    expect(told).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(told).toMatch(/Llamada del \d{1,2} de [a-z]+ de \d{4}/)
     expect(told).not.toMatch(/descuento|historia|DNI|12345678|S\/ 120|USD 29/)
     const correo = jobs.find((job) => job.itemId === ids.correo)
     const toldAdmin = correo?.facts.join("\n") ?? ""

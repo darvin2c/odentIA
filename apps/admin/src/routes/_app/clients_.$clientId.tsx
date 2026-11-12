@@ -44,6 +44,7 @@ import {
   ClientDetailSkeleton,
 } from "../../components/skeletons/client-detail"
 import { ApiError, api } from "../../lib/api"
+import { fichaDecisionArea, focusInsideLater } from "../../lib/focus"
 import {
   type ClientSearch,
   type ClientTab,
@@ -75,7 +76,10 @@ function ClientPage() {
   const isAdmin = useIsAdmin()
   const detail = useClientDetail(clientId)
   const [surface, setSurface] = React.useState<Surface | null>(null)
-  const close = () => setSurface(null)
+  const close = () => {
+    setSurface(null)
+    focusInsideLater(fichaDecisionArea)
+  }
 
   const done = useMutation({
     mutationFn: (step: NextStep) =>

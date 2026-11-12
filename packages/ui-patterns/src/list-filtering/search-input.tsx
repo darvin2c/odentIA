@@ -73,6 +73,9 @@ export function SearchInput({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           aria-busy={isFetching}
+          // Chromium dibuja su propia «×» en un campo de búsqueda: con la de
+          // «Limpiar» de al lado quedaban dos (QA del ARM, 12 nov).
+          className="[&::-webkit-search-cancel-button]:appearance-none"
         />
         <InputGroupAddon align="inline-end">
           {value ? (

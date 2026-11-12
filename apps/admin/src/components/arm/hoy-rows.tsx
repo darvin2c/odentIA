@@ -1,6 +1,6 @@
 import type { ClinicalProduct } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
-import type { ReactNode } from "react"
+import type { ReactNode, Ref } from "react"
 import { ProductMark } from "../product"
 
 /**
@@ -43,14 +43,17 @@ export function HomeRow({
   product,
   children,
   action,
+  rowRef,
 }: {
   name: ReactNode
   product: ClinicalProduct | null
   children: ReactNode
   action: ReactNode
+  /** Para `useFocusOnLeave`: la fila que se va al cerrarla deja el foco en su vecina. */
+  rowRef?: Ref<HTMLLIElement>
 }) {
   return (
-    <li className="flex flex-wrap items-center gap-3 p-4">
+    <li ref={rowRef} className="flex flex-wrap items-center gap-3 p-4">
       <div className="min-w-0 flex-1 basis-60">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-medium [overflow-wrap:anywhere]">
           {name}
@@ -93,7 +96,8 @@ export function HomeSection({
         ) : null}
         {more ? <span className="ml-auto text-sm">{more}</span> : null}
       </div>
-      {lead ? <p className="text-sm text-muted-foreground">{lead}</p> : null}
+      {/* Un div: la entrada puede traer controles (las pestañas Mías | Todas), que no van dentro de un párrafo. */}
+      {lead ? <div className="text-sm text-muted-foreground">{lead}</div> : null}
       {children}
       {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
     </section>

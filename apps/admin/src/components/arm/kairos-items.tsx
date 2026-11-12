@@ -17,6 +17,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
+import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
 import { ClientName, type ClientTab, invalidateArm, OpenClientButton } from "./hoy-links"
@@ -258,6 +259,7 @@ export function KairosItemCard({
 }) {
   const decide = useKairosDecide()
   const [changing, setChanging] = useState(false)
+  const leave = useFocusOnLeave<HTMLLIElement>()
   const due = dueWords(item.expiresAt, now)
   const facts = textList(item.payload.facts)
   const subject = text(item.payload.subject)
@@ -266,6 +268,7 @@ export function KairosItemCard({
   const needsClient = item.kind === "correo_sin_cliente" && !text(item.payload.clientId)
   const run = (action: "aprobar" | "descartar") => {
     const tab = tabForWhatsApp(item, action)
+    leave.markLeaving()
     decide.mutate(
       { item, action, tab },
       { onError: (error) => toast.error(submitErrorMessage(error)) },
@@ -273,7 +276,7 @@ export function KairosItemCard({
   }
   const pending = decide.isPending
   return (
-    <li className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+    <li ref={leave.ref} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-start gap-3">
         <AgentMark size="sm" />
         <div className="min-w-0 flex-1 basis-48">
@@ -378,7 +381,12 @@ export function KairosItemCard({
         </Button>
       </div>
       {CHANGEABLE.has(item.kind) ? (
-        <KairosChangeDrawer item={item} open={changing} onClose={() => setChanging(false)} />
+        <KairosChangeDrawer
+          item={item}
+          open={changing}
+          onClose={() => setChanging(false)}
+          onApproving={leave.markLeaving}
+        />
       ) : null}
     </li>
   )
@@ -495,10 +503,13 @@ function KairosChangeDrawer({
   item,
   open,
   onClose,
+  onApproving,
 }: {
   item: KairosItem
   open: boolean
   onClose: () => void
+  /** Al dar el sí la tarjeta se va: el foco pasa a la vecina (`useFocusOnLeave`). */
+  onApproving: () => void
 }) {
   const decide = useKairosDecide()
   const form = useAppForm({
@@ -506,6 +517,7 @@ function KairosChangeDrawer({
     validators: { onSubmit: changeSchema(item.kind) },
     onSubmit: async ({ value, formApi }) => {
       const tab = tabForWhatsApp(item, "aprobar")
+      onApproving()
       await decide.mutateAsync({ item, action: "aprobar", edited: editedOf(item, value), tab })
       formApi.reset(value)
       onClose()
@@ -802,14 +814,17 @@ export function KairosUnconfirmed({ product }: { product?: ClinicalProduct | und
 
 function UnconfirmedRow({ item }: { item: KairosItem }) {
   const queryClient = useQueryClient()
+  const leave = useFocusOnLeave<HTMLLIElement>()
   const outreachId = text(item.result?.outreachId) ?? ""
   const channel = text(item.result?.channel) ?? channelOf(item)
   const resolve = useMutation({
-    mutationFn: async (outcome: "salio" | "no_salio") =>
-      api(`/api/admin/clients/outreach/${outreachId}/resolve`, {
+    mutationFn: async (outcome: "salio" | "no_salio") => {
+      leave.markLeaving()
+      return api(`/api/admin/clients/outreach/${outreachId}/resolve`, {
         method: "POST",
         body: JSON.stringify({ outcome }),
-      }),
+      })
+    },
     onSuccess: (_data, outcome) => {
       invalidateArm(queryClient, item.clientId)
       toast.success(outcome === "salio" ? "Anotado: salió" : "Anotado: no salió")
@@ -817,7 +832,7 @@ function UnconfirmedRow({ item }: { item: KairosItem }) {
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
   return (
-    <li className="flex flex-wrap items-center gap-3 p-4">
+    <li ref={leave.ref} className="flex flex-wrap items-center gap-3 p-4">
       <div className="min-w-0 flex-1 basis-60">
         <p className="flex flex-wrap items-center gap-x-2 font-medium [overflow-wrap:anywhere]">
           {item.clientId && item.clientName ? (

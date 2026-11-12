@@ -20,6 +20,7 @@ import { CalendarPlus, ExternalLink, FileText } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { z } from "zod"
 import { money } from "../../lib/cost-format"
+import { fichaDecisionArea, focusInsideLater } from "../../lib/focus"
 import { invitationDueWords } from "../../lib/invitation-words"
 import { supportDay, supportDayTime } from "../../lib/support-words"
 import { useDemos, useOpenDemo } from "../demos"
@@ -144,7 +145,10 @@ export function ClientSaleTab({ clientId, organizationId, product, isAdmin }: Cl
           clientId={clientId}
           open
           decision={open.decision}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null)
+            focusInsideLater(fichaDecisionArea)
+          }}
         />
       ) : null}
       {open?.kind === "opportunity" ? (
@@ -256,8 +260,11 @@ function StageCard({
         <Line label="Próximo paso">
           {step ? (
             <span className={step.overdue ? "font-medium text-destructive" : undefined}>
-              {TASK_WORDS[step.kind as TaskKind] ?? "Tarea"} · {step.title} ·{" "}
-              {dueWords(step.dueOn, step.dueAt, today)}
+              {/* «Presentación · Presentación»: el tipo solo cuando el título dice otra cosa. */}
+              {[TASK_WORDS[step.kind as TaskKind] ?? "Tarea", step.title]
+                .filter((part, index, parts) => index === 0 || part !== parts[0])
+                .join(" · ")}{" "}
+              · {dueWords(step.dueOn, step.dueAt, today)}
               {step.overdue ? " · vencido" : ""}
             </span>
           ) : selling ? (
@@ -269,7 +276,7 @@ function StageCard({
         <Line label="Responsable">{client.owner?.name ?? "Sin responsable"}</Line>
         {isAdmin && client.opportunity ? (
           <>
-            <Line label="Quién vende">{client.opportunity.seller?.name ?? "Sin vendedora"}</Line>
+            <Line label="Quién vende">{client.opportunity.seller?.name ?? "Sin vendedor"}</Line>
             <Line label="Fecha esperada">
               {client.opportunity.expectedOn
                 ? dayWords(client.opportunity.expectedOn)
@@ -431,7 +438,7 @@ function OpportunityDrawer({
               label="Quién vende"
               description="Su comisión se cuenta cuando la clínica entra."
               options={[
-                { value: "", label: "Sin vendedora" },
+                { value: "", label: "Sin vendedor" },
                 ...(sellers.data ?? []).map((seller) => ({
                   value: seller.id,
                   label: seller.displayName,
@@ -667,7 +674,9 @@ function ProposalsCard({
           : `Propuesta v${deciding.proposal.version}: no la aceptó`,
       )
       formApi.reset()
+      const decidedId = deciding.proposal.id
       setDeciding(null)
+      focusInsideLater(() => document.querySelector(`[data-proposal-id="${decidedId}"]`))
     },
   })
   const noteError = useFormSubmitError(noteForm)
@@ -711,7 +720,11 @@ function ProposalsCard({
           {proposals.data.map((proposal) => {
             const expired = proposal.displayStatus === "vencida"
             return (
-              <li key={proposal.id} className="flex flex-col gap-2 p-3">
+              <li
+                key={proposal.id}
+                data-proposal-id={proposal.id}
+                className="flex flex-col gap-2 p-3"
+              >
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                   <p className="text-sm font-medium">
                     v{proposal.version} · {proposal.plan.name} ·{" "}
