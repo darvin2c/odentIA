@@ -642,10 +642,16 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
                   })
                 }
               >
-                {openRetired.has(key)
-                  ? "Ocultar lo anulado"
-                  : // Un archivo retirado queda en el día de su fecha, no en el que se retiró.
-                    `${group.retired.every((item) => item.type === "document") ? "Retirado" : "Anulado ese día"}: ${retiredSummary(group.retired)} · Ver`}
+                {
+                  // Un archivo retirado queda en el día de su fecha, no en el que se retiró.
+                  group.retired.every((item) => item.type === "document")
+                    ? openRetired.has(key)
+                      ? "Ocultar lo retirado"
+                      : `Retirado: ${retiredSummary(group.retired)} · Ver`
+                    : openRetired.has(key)
+                      ? "Ocultar lo anulado"
+                      : `Anulado ese día: ${retiredSummary(group.retired)} · Ver`
+                }
               </Button>
               {openRetired.has(key) ? (
                 <div id={`retired-${key}`} className="flex flex-col gap-2">

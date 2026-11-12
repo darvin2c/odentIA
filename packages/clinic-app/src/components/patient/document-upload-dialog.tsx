@@ -425,6 +425,7 @@ export function DocumentUploadDialog({
     for (const meta of Object.values(files)) if (meta.previewUrl) URL.revokeObjectURL(meta.previewUrl)
     setFiles({})
     setRejected([])
+    lastCommon.current = { category: "", capturedAt: "" }
     form.reset()
     tomography.reset()
     setNoStudy(false)
@@ -454,11 +455,19 @@ export function DocumentUploadDialog({
     .map((row) => row.key)
   const unconfirmedCount = rows.filter((row) => statusOf(row.key) === "unconfirmed").length
 
-  /** «Para todos»: copia la categoría o la fecha a cada fila por subir; cada una la puede cambiar después. */
+  /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
+  const lastCommon = useRef({ category: "", capturedAt: "" })
+  /**
+   * «Para todos»: copia la categoría o la fecha a cada fila por subir que no tenga una
+   * propia (vacía o la que se copió antes); la que se cambió a mano se respeta.
+   */
   const applyToAll = (name: "category" | "capturedAt", value: string) => {
+    const previous = lastCommon.current[name]
+    lastCommon.current = { ...lastCommon.current, [name]: value }
     form.getFieldValue("rows").forEach((row, index) => {
       const status = statusOf(row.key)
       if (status !== "pending" && status !== "error") return
+      if (row[name] !== "" && row[name] !== previous) return
       form.setFieldValue(`rows[${index}].${name}`, value)
       // Otro tipo de archivo: el tipo de imagen elegido deja de valer si no es de esa categoría.
       if (name === "category" && row.imageType && !imageTypesFor(value).includes(row.imageType))
@@ -725,7 +734,7 @@ export function DocumentUploadDialog({
                 <fieldset className="flex flex-col gap-2 rounded-lg border border-dashed p-3">
                   <legend className="px-1 text-sm font-medium">Para todos</legend>
                   <p className="text-xs text-muted-foreground">
-                    Se copia a cada archivo; después puedes cambiar el de cualquiera.
+                    Se copia a los archivos que no tienen una propia; después puedes cambiar la de cualquiera.
                   </p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <form.AppField

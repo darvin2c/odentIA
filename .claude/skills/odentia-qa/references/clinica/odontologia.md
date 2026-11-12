@@ -366,6 +366,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 **Dónde:** la Historia (`CA/historia-tab.tsx`, `encounter-history-card.tsx`; `S/patient-history.ts`), la hoja para el seguro (`S/attention-sheet.ts`) y el odontograma impreso.
 
 - [ ] Una tarjeta por atención, con lo que se hizo, los hallazgos bajo el odontograma, el precio acordado y quién firmó.
+- [ ] «Piezas tratadas» cuenta solo lo hecho o hallado hoy, no las piezas de una imagen adjunta.
 - [ ] Se lee sin abrir cada cosa: el diagnóstico con su nombre, la sesión y el estado.
 - [ ] Una atención en curso no queda suelta ni se confunde con una firmada.
 - [ ] El PDF, el odontograma impreso y la hoja del seguro dicen lo mismo que la pantalla.
