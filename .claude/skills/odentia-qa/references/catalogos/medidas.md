@@ -292,6 +292,32 @@ En todas las tareas de Agenda, además de lo propio:
 **Ya falló:** «Hecha» cerraba el tema sin responderle a la persona.
 **Patrones:** `MasterDetail` (`UP/master-detail.tsx`); `DockedSurface` (`UP/docked-surface.tsx`) en vez de cajones apilados.
 
+## Web pública
+
+### M-WEB-01 Entrar a su cuenta desde cualquier página
+**Quién:** quien ya es cliente; a diario (supuesto).
+**Dónde:** `apps/web/src/components/Header.astro` (`.login`, `.login-m`, «Ingresar a tu cuenta» del menú y la cabecera que vuelve al subir), `Footer.astro`, `founders/WaitlistSplit.tsx`.
+**Medida:** 390 px: 1 toque, 3 Tab (antes 2 toques y 21 Tab). 1440 px: 1 clic. **A mantener.**
+- [ ] «Ingresar» se ve sin abrir nada en 320, 390, 820 y 1440, también en la página de la invitación.
+- [ ] A mitad de una página larga, al subir, vuelve a estar a un toque.
+**Ya falló:** «Ingresar» escondido dentro del menú, el último de 21 Tab.
+
+### M-WEB-02 Recorrer el inicio con teclado en el teléfono
+**Quién:** visitante sin ratón.
+**Dónde:** `apps/web/src/layouts/Base.astro` (fundido), `components/home/StickyCta.astro`, `Header.astro` (menú).
+**Medida:** 75 paradas a 390; 7 tapadas por la barra fija antes de `scroll-padding-bottom`. **A mantener.**
+- [ ] Ninguna parada queda tapada por la barra fija.
+- [ ] Al salir del menú con Tab, el menú se cierra; Esc lo cierra y devuelve el foco.
+- [ ] El foco nunca cae en un bloque transparente.
+
+### M-WEB-03 Leer una página del sistema en el teléfono
+**Quién:** dueña o dueño de la clínica que evalúa.
+**Medida:** odentIA inicio 16.228 px; Caja y cobros 13.242 px. **A mejorar** la de Caja.
+- [ ] Ninguna caja de una escena deja más de un tercio vacío al llegar.
+- [ ] Una cuadrícula de solo texto no ocupa más de una pantalla en el teléfono.
+- [ ] Una escena que se repite se detiene sola o tiene su pausa al lado.
+**Ya falló:** la página empujada 250 px por una caja que cambiaba de alto; la respuesta del chat antes que la pregunta.
+
 ## Mostrador de óptica
 
 ### M-OPT-01 Vender en el mostrador y cobrar el adelanto

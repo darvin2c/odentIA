@@ -9,6 +9,7 @@ import ValueSection from "../components/pricing/ValueSection.astro"
 // Precios: no pagas por el software, pagas por el trabajo hecho. Todas las cifras salen de lib/pricing.
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
+import { billingStartText, trialFaq } from "../lib/offer"
 import { businessDays, days, giftOf, money, shownPlan } from "../lib/pricing"
 import { HAS_CLIO, ofProduct, WORDS } from "../lib/product"
 
@@ -95,15 +96,11 @@ const faq: FaqItem[] = [
         },
       ]
     : []),
-  {
-    q: "¿La prueba pide tarjeta?",
-    a: founder
-      ? `No. Pides tu invitación, abres tu ${place} y tus agentes empiezan con los ${m(plan?.trialCredit ?? null)} de regalo. La tarjeta no se pide.`
-      : `No. Te registras, conectas tus canales y tus agentes trabajan ${days(plan?.trialDays ?? terms.trialDays)} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
-  },
+  // La prueba, igual que en el inicio de las tres webs.
+  ...trialFaq(pricing, place),
   {
     q: "¿Cada cuánto me cobran?",
-    a: `Tu mes empieza el día que activas el plan. Lo que pasa del crédito se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
+    a: `${billingStartText(pricing)} ${plan && plan.credit > 0 ? "Lo que pasa del crédito" : "Lo que hacen tus agentes"} se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
   },
   {
     q: `¿Y si mi ${WORDS.clinic} tiene mucho movimiento?`,

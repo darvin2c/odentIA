@@ -37,6 +37,7 @@
 .da-now i { flex: 1; height: 2px; background: #e11d48; opacity: .7; transform: translateY(-50%); }
 
 .da-toast-slot { min-height: 58px; display: flex; }
+.da-toast[data-off] { visibility: hidden; animation: none; }
 .da-toast { flex: 1; display: flex; align-items: center; gap: 12px; text-align: left; border: 1px solid #b6e3ec; background: #e8f7fa; border-radius: 16px; padding: 10px 14px; cursor: pointer; font-family: var(--font); color: var(--ink); min-height: 44px; animation: da-pop .5s ease-out; }
 .da-toast:hover { filter: brightness(.97); }
 .da-sofi { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 50%; background: #0e7490; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }

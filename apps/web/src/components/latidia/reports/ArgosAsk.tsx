@@ -1,11 +1,12 @@
 // Argos responde en la portada de /reportes (latidIA y, con `variant="dental"`, odentIA): la pregunta se escribe letra a letra, Argos dice
 // sus pasos («Leyendo la pregunta», «Consultando…»), responde con las cifras destacadas, el dibujo crece y
-// debajo dice «Así lo calculé», con sus botones. Tres preguntas que pasan solas hasta que la persona
-// elige una; «Preguntar otra vez» va arriba, en la propia ventana de Reportes. Con movimiento reducido se ve la
+// debajo dice «Así lo calculé», con sus botones. Tres preguntas que pasan solas (dos vueltas, y se queda
+// en la última respuesta: WCAG 2.2.2) hasta que la persona elige una; «Preguntar otra vez» va arriba, en la propia ventana de Reportes. Con movimiento reducido se ve la
 // respuesta sin animar. Las cifras son de ejemplo (las mismas de las pestañas de Reportes): en latidIA,
 // las del Consultorio San Martín; en odentIA, las de Clínica Sonrisa Norte. En soles: no son precios.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import "./argos-ask.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 type Question = {
   /** El nombre corto del chip para elegirla. */
@@ -115,6 +116,8 @@ const QUESTION_SETS: Record<Variant, Question[]> = { medical: MEDICAL_QUESTIONS,
 const TYPE_MS = 45
 const THINK_MS = 1400
 const NEXT_MS = 6500
+/** Vueltas por las preguntas antes de quedarse en la última respuesta. */
+const ROUNDS = 2
 
 /** «Te deben **S/ 1.230**…» con lo destacado en negrita. */
 function Rich({ text }: { text: string }) {
@@ -129,12 +132,15 @@ function Rich({ text }: { text: string }) {
 }
 
 export default function ArgosAsk({ variant = "medical" }: { variant?: Variant }) {
+  const steady = useSteadyHeight<HTMLDivElement>()
   const QUESTIONS = QUESTION_SETS[variant]
   // Se arma en el servidor con la primera respuesta completa: sin JavaScript se lee igual.
   const [pick, setPick] = useState(0)
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
   const [phase, setPhase] = useState<0 | 1 | 2>(2)
   const timers = useRef<number[]>([])
+  // Preguntas que respondió sola; al llegar a sus vueltas no pasa a la siguiente.
+  const answered = useRef(0)
 
   const stop = useCallback(() => {
     for (const t of timers.current) {
@@ -166,7 +172,9 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
         timers.current.push(
           window.setTimeout(() => {
             setPhase(2)
-            if (keepGoing) timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
+            if (keepGoing) answered.current += 1
+            if (keepGoing && answered.current < ROUNDS * QUESTIONS.length)
+              timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
           }, THINK_MS),
         )
       }, TYPE_MS)
@@ -181,11 +189,50 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
   }, [play, stop])
 
   const cur = QUESTIONS[pick]
-  const max = Math.max(...cur.bars.map(([, v]) => v))
   const done = phase === 2
 
+  /**
+   * La respuesta a una pregunta. Las de las otras preguntas van en la misma celda sin verse (`ghost`):
+   * la tarjeta mide siempre lo que la respuesta más larga y pasar de una a otra no corre la página.
+   */
+  const answer = (question: Question, visible: boolean, ghost: boolean) => {
+    const top = Math.max(...question.bars.map(([, v]) => v))
+    return (
+      <div
+        key={question.label}
+        className={ghost ? "lt-ask-answer fit-ghost" : "lt-ask-answer"}
+        data-done={visible || undefined}
+        aria-hidden={!ghost && visible ? undefined : true}
+      >
+        <p className="lt-ask-text">
+          <Rich text={question.answer} />
+        </p>
+        <div className="lt-ask-bars">
+          {question.bars.map(([name, v, value]) => (
+            <div key={name} className="lt-ask-bar">
+              <span className="lt-ask-bar-l">{name}</span>
+              <span className="lt-ask-track">
+                <span className="lt-ask-fill" style={{ width: visible ? `${Math.max(3, Math.round((v / top) * 100))}%` : "0%" }} />
+              </span>
+              <b>{value}</b>
+            </div>
+          ))}
+        </div>
+        <p className="lt-ask-how">
+          <b>Así lo calculé:</b> {question.how}
+        </p>
+        <div className="lt-ask-acts" aria-hidden="true">
+          <span className="lt-ask-act" data-primary>
+            {question.action}
+          </span>
+          <span className="lt-ask-act">Descargar</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="lt-ask">
+    <div className="lt-ask" ref={steady}>
       <div className="lt-ask-head">
         <b>Reportes</b>
         <span className="lt-ask-side">
@@ -196,10 +243,18 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
         </span>
       </div>
       <div className="lt-ask-field">
-        <span className="lt-ask-q">
-          {cur.q.slice(0, chars)}
-          <span className="lt-ask-caret" aria-hidden="true" data-on={phase === 0 || undefined}>
-            |
+        {/* La pregunta más larga reserva sus líneas: escribirla letra a letra no corre lo de abajo. */}
+        <span className="fit lt-ask-q-fit">
+          {QUESTIONS.map((question) => (
+            <span key={question.label} className="lt-ask-q fit-ghost" aria-hidden="true">
+              {question.q}|
+            </span>
+          ))}
+          <span className="lt-ask-q">
+            {cur.q.slice(0, chars)}
+            <span className="lt-ask-caret" aria-hidden="true" data-on={phase === 0 || undefined}>
+              |
+            </span>
           </span>
         </span>
         <span className="lt-ask-ask" aria-hidden="true">
@@ -214,7 +269,11 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
           </button>
         ))}
       </fieldset>
-      <div className="lt-ask-stage">
+      {/* Las respuestas de las otras preguntas van en la misma celda sin verse, y mientras piensa sus
+          pasos van encima: la tarjeta no cambia de alto. El anuncio va en la celda, que no cambia. */}
+      <div className="lt-ask-stage fit" aria-live="polite">
+        {QUESTIONS.map((question, i) => (i === pick ? null : answer(question, true, true)))}
+        {answer(cur, done, false)}
         {phase === 1 && (
           <div className="lt-ask-think">
             <span>· Leyendo la pregunta</span>
@@ -223,31 +282,6 @@ export default function ArgosAsk({ variant = "medical" }: { variant?: Variant })
             ))}
           </div>
         )}
-        <div className="lt-ask-answer" data-done={done || undefined} aria-hidden={done ? undefined : true} aria-live="polite">
-          <p className="lt-ask-text">
-            <Rich text={cur.answer} />
-          </p>
-          <div className="lt-ask-bars">
-            {cur.bars.map(([name, v, value]) => (
-              <div key={name} className="lt-ask-bar">
-                <span className="lt-ask-bar-l">{name}</span>
-                <span className="lt-ask-track">
-                  <span className="lt-ask-fill" style={{ width: done ? `${Math.max(3, Math.round((v / max) * 100))}%` : "0%" }} />
-                </span>
-                <b>{value}</b>
-              </div>
-            ))}
-          </div>
-          <p className="lt-ask-how">
-            <b>Así lo calculé:</b> {cur.how}
-          </p>
-          <div className="lt-ask-acts" aria-hidden="true">
-            <span className="lt-ask-act" data-primary>
-              {cur.action}
-            </span>
-            <span className="lt-ask-act">Descargar</span>
-          </div>
-        </div>
       </div>
       <span className="lt-ask-note">Demostración con datos de ejemplo. Toca una pregunta.</span>
     </div>

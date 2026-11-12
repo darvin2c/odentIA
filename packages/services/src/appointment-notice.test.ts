@@ -283,7 +283,8 @@ describe("al cambiar la cita, el agente le avisa", () => {
     await run(c, (tx) => moveAppointment(tx, c.orgId, c.ownerId, current.id, { expectedVersion: current.version, startsAt: later(4 * DAY).toISOString() }))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
     const notice = (await jobsOf(c)).find((job) => job.kind === "aviso_cita_movida")!
-    expect(await bodyOf(notice.sentMessageId)).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió de fecha: ahora es .+\. Si no te queda bien, responde a este mensaje\.$/)
+    // Sigue por confirmar: el aviso le pide confirmar la fecha nueva (ADR 0180).
+    expect(await bodyOf(notice.sentMessageId)).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió: ahora es .+\. Si te queda bien, confírmala\. Si no puedes, avísanos y te buscamos otra fecha\.$/)
   })
 
   it("no avisa lo que se dijo en la conversación ni nada si «Recordar la cita» está apagada", async () => {
@@ -459,6 +460,166 @@ describe("al cambiar la cita, el agente le avisa", () => {
     // La persona la movió y el equipo la devuelve enseguida al día que ella dejó: vuelve a «por confirmar».
     const returned = await move(byPatient.version, new Date(to.getTime() + DAY))
     expect(returned).toMatchObject({ status: "programada" })
+  })
+
+  it("el aviso del cambio pide confirmar la cita que quedó por confirmar, y su «Confirmar» vale para la fecha que dijo", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const at = new Date(Date.now() + 2 * DAY)
+    at.setUTCHours(15, 0, 0, 0)
+    const statusOf = async (id: string) => (await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, id)))[0]?.status
+    const versionOf = async (id: string) => (await ownerDb.select({ version: appointment.version }).from(appointment).where(eq(appointment.id, id)))[0]!.version
+    const lastOut = async (conversationId: string) =>
+      (await ownerDb.select({ body: message.body }).from(message).where(and(eq(message.conversationId, conversationId), eq(message.direction, "out"))).orderBy(desc(message.createdAt)).limit(1))[0]?.body ?? ""
+    const move = (id: string, version: number, startsAt: Date, extra: { stillConfirmed?: boolean } = {}) =>
+      run(c, (tx) => moveAppointment(tx, c.orgId, c.ownerId, id, { expectedVersion: version, startsAt: startsAt.toISOString(), outsideSchedule: true, ...extra }))
+    /** Entrega lo pendiente y devuelve el último aviso de cambio de la cita, con lo que dijo. */
+    const sentNotice = async (appointmentId: string) => {
+      await deliver(c)
+      const [job] = await ownerDb
+        .select()
+        .from(automationJob)
+        .where(and(eq(automationJob.appointmentId, appointmentId), eq(automationJob.kind, "aviso_cita_movida"), eq(automationJob.status, "enviado")))
+        .orderBy(desc(automationJob.updatedAt))
+        .limit(1)
+      const [sent] = await ownerDb.select({ body: message.body, buttons: message.replyButtons }).from(message).where(eq(message.id, job!.sentMessageId!))
+      return { job: job!, body: sent!.body, buttons: (sent!.buttons ?? []).map((button) => button.title) }
+    }
+    const tap = (conversationId: string, jobId: string) =>
+      run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId, replyId: replyId("confirmar", jobId) }))
+
+    // Confirmada y movida dentro del mismo día: sigue confirmada y le llega el aviso de siempre, sin «Confirmar».
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
+    const booked = await book(c, rosa.patientId, at, { notice: false })
+    const confirmed = await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, booked.id, "confirmada"))
+    const sameDay = await move(booked.id, confirmed.version, new Date(at.getTime() + HOUR / 2))
+    const usual = await sentNotice(booked.id)
+    expect(usual.body).toMatch(/Si no te queda bien, responde a este mensaje\.$/)
+    expect(usual.buttons).toEqual(["No podré ir"])
+    // El equipo la lleva a otro día: queda por confirmar y el aviso pide confirmarla, con la fecha que dijo.
+    const newDate = new Date(at.getTime() + 3 * DAY)
+    const otherDay = await move(booked.id, sameDay.version, newDate)
+    expect(otherDay.status).toBe("programada")
+    const asking = await sentNotice(booked.id)
+    expect(asking.body).toMatch(/^Hola, Rosa\. Tu cita en Clínica Sonríe, sede Centro cambió: ahora es .+\. Si te queda bien, confírmala\. Si no puedes, avísanos y te buscamos otra fecha\.$/)
+    expect(asking.buttons).toEqual(["Confirmar", "No podré ir"])
+    expect(asking.job.payload).toMatchObject({ announcedStartsAt: newDate.toISOString(), asksToConfirm: true })
+    // La cita ya dice que se le pidió confirmar, no que se le pedirá.
+    expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, booked.id))).toMatchObject({ askAt: null, askedAt: expect.any(String) })
+    // «Confirmar» la confirma.
+    expect(await tap(rosa.conversationId!, asking.job.id)).toBe(true)
+    expect(await statusOf(booked.id)).toBe("confirmada")
+    // Con «Ya confirmó conmigo el día nuevo» sigue confirmada: el aviso de siempre.
+    const kept = await move(booked.id, await versionOf(booked.id), new Date(at.getTime() + 4 * DAY), { stillConfirmed: true })
+    expect(kept.status).toBe("confirmada")
+    expect((await sentNotice(booked.id)).buttons).toEqual(["No podré ir"])
+
+    // Quien apagó los recordatorios igual recibe el aviso, con «Confirmar», y la cita dice que se le pidió.
+    const marta = await person(c, "Marta Salazar", { refused: ["recordatorio"], openWindow: true })
+    const fourth = await book(c, marta.patientId, new Date(at.getTime() + 6 * HOUR), { notice: false })
+    await move(fourth.id, fourth.version, new Date(at.getTime() + 6 * HOUR + 3 * DAY))
+    expect((await sentNotice(fourth.id)).buttons).toEqual(["Confirmar", "No podré ir"])
+    expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, fourth.id))).toMatchObject({ askAt: null, askedAt: expect.any(String) })
+
+    // Si después de ese aviso la cita pasó a otro día, su «Confirmar» no confirma la nueva: se le dice y se le pregunta.
+    const lucia = await person(c, "Lucía Mendoza", { consent: ["recordatorio"], openWindow: true })
+    const second = await book(c, lucia.patientId, new Date(at.getTime() + 2 * HOUR), { notice: false })
+    const toMonday = await move(second.id, second.version, new Date(at.getTime() + 2 * HOUR + 3 * DAY))
+    const monday = await sentNotice(second.id)
+    expect(monday.buttons).toEqual(["Confirmar", "No podré ir"])
+    await move(second.id, toMonday.version, new Date(at.getTime() + 2 * HOUR + 4 * DAY))
+    // Con el aviso de la fecha nueva por salir, tocarlo no confirma y no se le pregunta dos veces: el aviso se lo dice.
+    expect(await tap(lucia.conversationId!, monday.job.id)).toBe(true)
+    expect(await statusOf(second.id)).toBe("programada")
+    expect(await lastOut(lucia.conversationId!)).toBe(monday.body)
+    // Ya con el aviso de la fecha nueva, el botón del mensaje viejo sigue sin confirmarla: le dice la fecha y pregunta…
+    const tuesday = await sentNotice(second.id)
+    expect(await tap(lucia.conversationId!, monday.job.id)).toBe(true)
+    expect(await statusOf(second.id)).toBe("programada")
+    expect(await lastOut(lucia.conversationId!)).toMatch(/^Ojo: tu cita cambió de fecha\. Ahora es .+, a las .+\. ¿Te queda bien\? Responde «sí» y la confirmo\.$/)
+    expect(await lastOut(lucia.conversationId!)).not.toContain("..")
+    // …y el del aviso nuevo, sí.
+    expect(await tap(lucia.conversationId!, tuesday.job.id)).toBe(true)
+    expect(await statusOf(second.id)).toBe("confirmada")
+
+    // Su «sí» escrito al aviso de una fecha que ya cambió no la confirma: Sofi dice la nueva y pregunta.
+    const luis = await person(c, "Luis Paredes", { consent: ["recordatorio"], openWindow: true })
+    const third = await book(c, luis.patientId, new Date(at.getTime() + 4 * HOUR), { notice: false })
+    const firstMove = await move(third.id, third.version, new Date(at.getTime() + 4 * HOUR + 3 * DAY))
+    await sentNotice(third.id)
+    await move(third.id, firstMove.version, new Date(at.getTime() + 4 * HOUR + 5 * DAY))
+    const yes = () => run(c, (tx) => confirmAppointmentByContact(tx, c.orgId, { contactId: luis.contactId, conversationId: luis.conversationId! }))
+    expect(await yes()).toMatchObject({ outcome: "cambio" })
+    expect(await statusOf(third.id)).toBe("programada")
+    // Ya con el aviso de la fecha nueva, su «sí» la confirma.
+    await sentNotice(third.id)
+    expect(await yes()).toMatchObject({ outcome: "confirmada" })
+    expect(await statusOf(third.id)).toBe("confirmada")
+  })
+
+  it("el «sí» escrito responde al último mensaje que pidió confirmar, y tras «Deshacer» no confirma una fecha que no se le dijo", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const at = new Date(Date.now() + 2 * DAY)
+    at.setUTCHours(15, 0, 0, 0)
+    const statusOf = async (id: string) => (await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, id)))[0]?.status
+    const move = (id: string, version: number, startsAt: Date) =>
+      run(c, (tx) => moveAppointment(tx, c.orgId, c.ownerId, id, { expectedVersion: version, startsAt: startsAt.toISOString(), outsideSchedule: true }))
+
+    // Rosa: X por confirmar, con su recordatorio enviado; Y confirmada, movida dentro del día después.
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
+    const x = await book(c, rosa.patientId, at, { notice: false })
+    const y = await book(c, rosa.patientId, new Date(at.getTime() + DAY), { notice: false })
+    const [sent] = await ownerDb.insert(message).values({
+      organizationId: c.orgId, conversationId: rosa.conversationId!, direction: "out", senderKind: "agent",
+      body: "Te recordamos la cita", status: "sent", externalId: `ext-${randomUUID()}`,
+    }).returning({ id: message.id })
+    await ownerDb.insert(automationJob).values({
+      organizationId: c.orgId, kind: "recordatorio_cita", status: "enviado", dedupeKey: `recordatorio_cita:${x.id}:24`,
+      scheduledFor: new Date(), contactId: rosa.contactId, appointmentId: x.id, sentMessageId: sent!.id,
+    })
+    const yConfirmed = await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, y.id, "confirmada"))
+    await move(y.id, yConfirmed.version, new Date(at.getTime() + DAY + HOUR / 2))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    // El aviso de Y no pedía confirmar: su «sí» responde al recordatorio de X.
+    expect(await run(c, (tx) => confirmAppointmentByContact(tx, c.orgId, { contactId: rosa.contactId, conversationId: rosa.conversationId! }))).toMatchObject({ outcome: "confirmada" })
+    expect(await statusOf(x.id)).toBe("confirmada")
+
+    // Lucía: su cita pasa a otro día, le llega el aviso con «Confirmar» y el equipo lo deshace enseguida.
+    const lucia = await person(c, "Lucía Mendoza", { consent: ["recordatorio"], openWindow: true })
+    const z = await book(c, lucia.patientId, new Date(at.getTime() + 2 * HOUR), { notice: false })
+    const away = await move(z.id, z.version, new Date(at.getTime() + 2 * HOUR + 3 * DAY))
+    await deliver(c)
+    await move(z.id, away.version, new Date(at.getTime() + 2 * HOUR))
+    const yes = () => run(c, (tx) => confirmAppointmentByContact(tx, c.orgId, { contactId: lucia.contactId, conversationId: lucia.conversationId! }))
+    // Lo último que se le dijo fue la otra fecha: su «sí» no confirma la de ahora.
+    expect(await yes()).toMatchObject({ outcome: "cambio" })
+    expect(await statusOf(z.id)).toBe("programada")
+    // Con el aviso de la fecha a la que volvió, sí.
+    await deliver(c)
+    expect(await yes()).toMatchObject({ outcome: "confirmada" })
+    expect(await statusOf(z.id)).toBe("confirmada")
+  })
+
+  it("por WhatsApp fuera de las 24 horas, el aviso con «Confirmar» sale con su plantilla aprobada; sin ella, el de siempre", async () => {
+    const cases: Array<[AutomationMessageKey[], string]> = [
+      [["aviso_cita_movida", "aviso_cita_movida_confirmar"], "odentia_aviso_cita_movida_confirmar_v1"],
+      [["aviso_cita_movida"], "odentia_aviso_cita_movida_v2"],
+    ]
+    for (const [approved, template] of cases) {
+      const c = await clinic({ approved })
+      await lineOn(c)
+      const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"] })
+      const booked = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+      await run(c, (tx) =>
+        moveAppointment(tx, c.orgId, c.ownerId, booked.id, { expectedVersion: booked.version, startsAt: later(5 * DAY).toISOString(), outsideSchedule: true }),
+      )
+      expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+      const notice = (await jobsOf(c)).find((job) => job.kind === "aviso_cita_movida")!
+      expect(notice).toMatchObject({ via: "plantilla" })
+      const [out] = await ownerDb.select({ template: message.templateName }).from(message).where(eq(message.id, notice.sentMessageId!))
+      expect(out?.template).toBe(template)
+    }
   })
 
   it("el sí al recordatorio de la fecha anterior no confirma la cita que cambió de día: se le dice la nueva y se le pregunta", async () => {

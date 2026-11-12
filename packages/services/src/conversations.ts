@@ -183,6 +183,18 @@ export function deliveryNoteOf(status: string, error: string | null): string | n
   return null
 }
 
+/**
+ * Lo que lee el agente de su conversación: en lo enviado, «Su enlace» conserva la
+ * referencia de su token, que el worker cambia por el token al enviarlo (ADR 0037).
+ * Así, si se lo vuelven a pedir, lo escribe tal cual y abre; tapado no abriría. Lo
+ * que escribió el contacto se tapa como en la Bandeja: una referencia que escribe
+ * él no es un enlace que se le dio.
+ */
+function toAgentMessageItem(row: typeof message.$inferSelect): MessageItem {
+  const item = toMessageItem(row)
+  return row.direction === "out" ? { ...item, body: row.body } : item
+}
+
 function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem["automatic"] = null): MessageItem {
   return {
     automatic,
@@ -1496,9 +1508,9 @@ async function listMessagesIn(
 }
 
 /**
- * Mensajes de una conversación por su id: los que citan otros mensajes y
- * quedaron fuera de la página leída (ADR 0050). Los de otra conversación no
- * salen.
+ * Mensajes de una conversación por su id, como los lee el agente: los que citan
+ * otros mensajes y quedaron fuera de la página leída (ADR 0050). Los de otra
+ * conversación no salen.
  */
 export async function listMessagesById(
   tx: Db,
@@ -1513,7 +1525,7 @@ export async function listMessagesById(
     .where(
       and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), inArray(message.id, ids)),
     )
-  return rows.map((row) => toMessageItem(row))
+  return rows.map((row) => toAgentMessageItem(row))
 }
 
 /**
@@ -1568,7 +1580,7 @@ export async function listAttentionMessages(
     .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
     .orderBy(desc(message.createdAt), desc(message.id))
     .limit(Math.min(Math.max(inAttention, input.minTail, 1), input.max))
-  return { items: rows.reverse().map((row) => toMessageItem(row)), startedAt: thread.startedAt.toISOString(), inAttention }
+  return { items: rows.reverse().map((row) => toAgentMessageItem(row)), startedAt: thread.startedAt.toISOString(), inAttention }
 }
 
 export interface CrossThreadMessage {

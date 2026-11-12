@@ -30,8 +30,9 @@
 .lt-ask-chips button { min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 600 13px var(--font); background: var(--paper); color: var(--ink-2); border: 1px solid #cbd5e1; transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
 .lt-ask-chips button:hover { border-color: var(--teal); }
 .lt-ask-chips button[aria-pressed="true"] { background: var(--night); color: #fff; border-color: var(--night); }
-.lt-ask-stage { position: relative; }
-.lt-ask-think { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 6px; font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding: 6px 4px; }
+.lt-ask-q-fit { flex: 1 1 auto; min-width: 0; }
+.lt-ask-stage > .lt-ask-answer { align-self: stretch; }
+.lt-ask-think { display: flex; flex-direction: column; gap: 6px; font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding: 6px 4px; }
 .lt-ask-think span { animation: lt-ask-in .4s ease both; }
 .lt-ask-think span + span { animation-delay: .45s; }
 .lt-ask-answer { border: 1px solid var(--lt-ask-line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; opacity: 0; transition: opacity .4s ease; }

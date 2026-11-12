@@ -100,12 +100,13 @@ const systemMenu: NavMenu = ofProduct<NavMenu>({
     columns: 2,
     items: [
       { href: "/agenda-para-opticas", label: "Agenda y controles", text: "Por sala de examen y optómetra, con recordatorios y el control que se repite." },
-      { href: "/historia-clinica-electronica", label: "Ficha e historia clínica", text: "Cada cliente con su historia, sus pruebas del ojo y sus documentos." },
+      { href: "/historia-clinica-electronica", label: "Examen, receta e historia", text: "El examen de la vista en pantalla, la receta de lentes y las pruebas del ojo." },
+      { href: "/pedidos-de-lentes", label: "Pedidos de lentes", text: "Vendes con adelanto y sigues cada pedido hasta entregarlo, con su aviso." },
       { href: "/caja-y-cobros", label: "Caja, inventario y sedes", text: "Cobra el examen y lo que vendes; lo vendido sale del stock de la sede." },
       { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
-      { href: "/portal-del-cliente", label: "Su enlace", text: "Tu cliente ve su cita, la cambia y ve sus documentos." },
+      { href: "/portal-del-cliente", label: "Su enlace y portal", text: "Tu cliente cambia su cita sin llamar y tiene sus documentos en su portal." },
       { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
-      { href: "/seguridad", label: "Seguridad", text: "Cada rol ve solo lo suyo." },
+      { href: "/seguridad", label: "Seguridad", text: "Recepción, optómetra, caja, ventas y taller: cada rol ve solo lo suyo." },
     ],
   },
 })
@@ -213,10 +214,11 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "El sistema",
       links: [
         { href: "/agenda-para-opticas", label: "Agenda y controles" },
-        { href: "/historia-clinica-electronica", label: "Ficha e historia clínica" },
+        { href: "/historia-clinica-electronica", label: "Examen, receta e historia" },
+        { href: "/pedidos-de-lentes", label: "Pedidos de lentes" },
         { href: "/caja-y-cobros", label: "Caja, inventario y sedes" },
         { href: "/reportes", label: "Reportes" },
-        { href: "/portal-del-cliente", label: "Su enlace" },
+        { href: "/portal-del-cliente", label: "Su enlace y portal" },
         { href: "/buscador", label: "Buscador" },
       ],
     },
@@ -247,8 +249,10 @@ export const legalLinks: NavLink[] = [
 ]
 
 /** Colores de cada agente: sobre fondo oscuro y sobre fondo claro. */
+// `light` es el color del agente como texto sobre claro: pasa 4,5:1 sobre el blanco y el gris de la web
+// (el verde #1f9d7a y el ámbar #c98a1c de los dibujos daban 3,2 y 2,8:1).
 export const AGENT_COLORS = {
   recepcion: { dark: "#4fc3d7", light: "#0e7490" },
-  clinico: { dark: "#a6f0d8", light: "#1f9d7a" },
-  administrador: { dark: "#f5c46b", light: "#c98a1c" },
+  clinico: { dark: "#a6f0d8", light: "#1f7f63" },
+  administrador: { dark: "#f5c46b", light: "#8f6210" },
 } as const

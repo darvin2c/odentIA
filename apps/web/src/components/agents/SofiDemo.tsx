@@ -2,7 +2,10 @@
 // conversación se escribe sola —Andrea pregunta, «Sofi está escribiendo…» dentro de la burbuja, la
 // respuesta, Andrea elige, la confirmación y la cita marcada en la agenda— y se puede cambiar el tono
 // (cercano, neutro o formal de usted) y los emojis. Con movimiento reducido se ve el estado final.
+// Los mensajes van pegados al fondo, como en WhatsApp, y la tarjeta mide lo que la conversación
+// completa (useSteadyHeight): cada mensaje entra abajo y «Volver a ver» no se mueve.
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useSteadyHeight } from "../../lib/steady"
 import { AgentFoot, AgentHead, prefersStill } from "./frame/AgentFrame"
 import "./sofi-demo.css"
 
@@ -40,6 +43,11 @@ export default function SofiDemo() {
   const [step, setStep] = useState(LAST)
 
   const timer = useRef<number | null>(null)
+  // Al girar el teléfono, la conversación se muestra completa y se mide de nuevo.
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    if (timer.current) window.clearInterval(timer.current)
+    setStep(LAST)
+  })
 
   const play = useCallback(() => {
     if (timer.current) window.clearInterval(timer.current)
@@ -63,10 +71,11 @@ export default function SofiDemo() {
   // «Pocos» emojis: uno como mucho, y nunca cuando hablan de dolor, urgencias, pagos o reclamos;
   // por eso solo va en la confirmación.
   const confirmText = emoji ? `${confirm} 🙂` : confirm
-  const shown = (on: boolean) => ({ className: on ? "sd-on" : "sd-off", "aria-hidden": on ? undefined : true })
+  /** Mientras escribe, la burbuja dice «Sofi está escribiendo…»; después, la respuesta. */
+  const said = (text: string, typing: boolean) => (typing ? <span className="sd-typing">{TYPING}</span> : text)
 
   return (
-    <div className="sd">
+    <div className="sd" ref={steady}>
       <AgentHead
         agent="sofi"
         name="Sofi · Clínica Sonrisa Norte"
@@ -91,24 +100,18 @@ export default function SofiDemo() {
         </button>
       </div>
       <div className="sd-chat">
-        <p {...shown(step >= 0)} data-side="in">
-          Hola, buenas noches. ¿Tienen cita para mañana? Me duele una muela.
-        </p>
-        <p {...shown(step >= 1)} data-side="out" data-typing={step === 1 || undefined}>
-          {step === 1 ? TYPING : reply}
-        </p>
-        <p {...shown(step >= 3)} data-side="in">
-          A las 16:30, por favor.
-        </p>
-        <p {...shown(step >= 4)} data-side="out" data-typing={step === 4 || undefined}>
-          {step === 4 ? TYPING : confirmText}
-        </p>
-        <div {...shown(step >= LAST)} data-side="agenda" data-marked={step >= LAST || undefined}>
-          <span>
-            <b>Agenda · jueves 22</b> · 16:30 con el Dr. Ríos
-          </span>
-          <span className="sd-booked">reservada · 23:41</span>
-        </div>
+        <p data-side="in">Hola, buenas noches. ¿Tienen cita para mañana? Me duele una muela.</p>
+        {step >= 1 && <p data-side="out">{said(reply, step === 1)}</p>}
+        {step >= 3 && <p data-side="in">A las 16:30, por favor.</p>}
+        {step >= 4 && <p data-side="out">{said(confirmText, step === 4)}</p>}
+        {step >= LAST && (
+          <div data-side="agenda" data-marked>
+            <span>
+              <b>Agenda · jueves 22</b> · 16:30 con el Dr. Ríos
+            </span>
+            <span className="sd-booked">reservada · 23:41</span>
+          </div>
+        )}
       </div>
       <AgentFoot note="Datos de ejemplo. Cambia el tono y los emojis." replay="Volver a ver" onReplay={play} />
     </div>

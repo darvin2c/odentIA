@@ -349,6 +349,18 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** la nota del equipo era un solo campo que se reemplazaba, sin autor ni fecha; una invitación vencida seguía contando como «Invitada».
 
+## O-WEB-01 Una escena de la web que se mueve sola
+
+**Dónde:** `apps/web/src/lib/steady.ts` (`useSteadyHeight`), `.fit`/`.fit-ghost` en `apps/web/src/styles/web.css`, cada demostración de `apps/web/src/components/**`; se comprueba con `apps/web/scripts/quietud.mjs`.
+
+- [ ] Lo que se toca no se corre mientras nadie toca nada: al cargar, a 390, 820 y 1440 px.
+- [ ] Tampoco al girar el teléfono o cambiar el ancho de la ventana a mitad de la animación.
+- [ ] Tampoco cuando la escena pasa sola a una variante que no es la que se arma en el servidor (otro rol, otra pregunta, otro caso, «escribiendo…»).
+- [ ] En pausa y con movimiento reducido, cada demostración se ve completa; sin JavaScript nada queda oculto ni apartado.
+- [ ] Nada que se pueda tocar desaparece solo mientras la persona está encima.
+
+**Ya falló:** las demostraciones crecían y se encogían y corrían hasta 384 enlaces y botones por web; al girar, el alto se volvía a medir a mitad de camino; la entrada de las secciones bajaba 16 px al cargar; en pausa, el chat de Sofi quedaba en blanco (2026-11-11).
+
 ## Casos
 
 Un caso por operación, dicho como estado del dato. Se recorren en el código y, lo que se pueda, en la pantalla.

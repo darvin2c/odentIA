@@ -564,20 +564,23 @@ export type ContactConfirmOutcome =
   /** La cita cambió de día después del recordatorio al que responde: se le dice la fecha nueva y se le pregunta. */
   | { outcome: "cambio"; options: ContactAppointmentOption[] }
 
-/** Cuánto tiempo un «sí» sin decir cuál responde al último recordatorio. */
+/** Cuánto tiempo un «sí» sin decir cuál responde al último recordatorio o aviso de cambio. */
 const REMINDER_REPLY_HOURS = 72
 
 /**
- * Las citas del último recordatorio que se le envió por esta conversación
- * (todas las de un mismo mensaje: un padre recibe juntas las de sus hijos),
- * si salió en las últimas `REMINDER_REPLY_HOURS` horas.
+ * Las citas del último recordatorio o aviso de cambio que se le envió por esta
+ * conversación (todas las de un mismo mensaje: un padre recibe juntas las de sus
+ * hijos), si salió en las últimas `REMINDER_REPLY_HOURS` horas. El aviso de
+ * cambio que pidió confirmar (ADR 0180) cuenta como el recordatorio; el de
+ * siempre, que no lo pide, no: el «sí» no le responde a él.
  */
 async function lastReminderAppointments(tx: Db, orgId: string, contactId: string, conversationId: string): Promise<string[]> {
   const rows = await tx.execute<{ appointment_id: string }>(sql`
     with last as (
       select j.sent_message_id from automation_job j
       join message m on m.id = j.sent_message_id and m.organization_id = j.organization_id
-      where j.organization_id = ${orgId} and j.contact_id = ${contactId} and j.kind = 'recordatorio_cita'
+      where j.organization_id = ${orgId} and j.contact_id = ${contactId}
+        and (j.kind = 'recordatorio_cita' or (j.kind = 'aviso_cita_movida' and j.payload->>'asksToConfirm' = 'true'))
         and j.status = 'enviado' and m.conversation_id = ${conversationId}
         and m.created_at > now() - make_interval(hours => ${REMINDER_REPLY_HOURS})
       order by m.created_at desc limit 1)

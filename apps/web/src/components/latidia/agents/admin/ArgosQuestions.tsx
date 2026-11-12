@@ -1,11 +1,12 @@
 // Las preguntas a Argos en la portada de /agentes/administrador de latidIA (tablero «Argos»): la pregunta
 // se escribe sola, Argos piensa en dos pasos («Leyendo la pregunta», «Consultando las cifras de
 // Reportes») y responde con las cifras, un dibujo (columnas o barras) y «Así lo calculé». Solo pasa a
-// la siguiente pregunta; tocar una la detiene ahí. Las cifras son del Consultorio San Martín de la demo.
+// la siguiente pregunta, dos vueltas, y se queda en la última (WCAG 2.2.2); tocar una la detiene ahí. Las cifras son del Consultorio San Martín de la demo.
 // Con movimiento reducido, la respuesta aparece entera y no pasa sola.
 import { useEffect, useRef, useState } from "react"
 import { AgentFoot, AgentHead } from "../../../agents/frame/AgentFrame"
 import "./argos-questions.css"
+import { useSteadyHeight } from "../../../../lib/steady"
 
 type Question = {
   label: string
@@ -81,8 +82,11 @@ const QUESTIONS: Question[] = [
 
 const TYPE_MS = 40
 const NEXT_MS = 6500
+/** Vueltas por las preguntas antes de quedarse en la última respuesta. */
+const ROUNDS = 2
 
 export default function ArgosQuestions() {
+  const steady = useSteadyHeight<HTMLDivElement>()
   // En el servidor, la primera respuesta completa: sin JavaScript se lee entera.
   const [pick, setPick] = useState(0)
   const [chars, setChars] = useState(QUESTIONS[0].q.length)
@@ -91,8 +95,10 @@ export default function ArgosQuestions() {
   const [auto, setAuto] = useState(true)
   const timers = useRef<number[]>([])
   const reduce = useRef(false)
-  // Con movimiento reducido no pasa sola: la nota no promete que avanza.
+  // Con movimiento reducido, o terminadas sus vueltas, no pasa sola: la nota no promete que avanza.
   const [still, setStill] = useState(false)
+  // Preguntas que respondió sola; al llegar a sus vueltas se queda en la última.
+  const answered = useRef(0)
 
   const stop = () => {
     for (const id of timers.current) {
@@ -106,6 +112,7 @@ export default function ArgosQuestions() {
     stop()
     setPick(i)
     setAuto(keepGoing)
+    if (!keepGoing) setStill(reduce.current)
     const length = QUESTIONS[i].q.length
     if (reduce.current) {
       setChars(length)
@@ -125,7 +132,14 @@ export default function ArgosQuestions() {
       timers.current.push(
         window.setTimeout(() => {
           setPhase(3)
-          if (keepGoing) timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
+          if (!keepGoing) return
+          answered.current += 1
+          if (answered.current < ROUNDS * QUESTIONS.length)
+            timers.current.push(window.setTimeout(() => play((i + 1) % QUESTIONS.length, true), NEXT_MS))
+          else {
+            setAuto(false)
+            setStill(true)
+          }
         }, 1500),
       )
     }, TYPE_MS)
@@ -143,51 +157,36 @@ export default function ArgosQuestions() {
   const cur = QUESTIONS[pick]
   const shown = phase === 3
   const thinking = phase === 1 || phase === 2
-  const pct = (v: number) => (shown ? Math.max(Math.round((v / cur.max) * 100), v > 0 ? 4 : 0) : 0)
 
-  return (
-    <div className="af-card laq">
-      <AgentHead
-        agent="argos"
-        name="Argos · tus cifras"
-        meta="Consultorio San Martín · octubre, hasta hoy"
-        state={phase === 0 ? "Leyendo…" : thinking ? "Calculando…" : "Respondió"}
-        live={!shown}
-        done={shown}
-      />
-      <div className="laq-ask" aria-hidden="true">
-        <span className="laq-typed">
-          {cur.q.slice(0, chars)}
-          <span className={phase === 0 ? "laq-caret" : "laq-caret off"}>|</span>
-        </span>
-        <span className="laq-send">Preguntar</span>
-      </div>
-      <fieldset className="laq-chips" aria-label="Preguntas de ejemplo">
-        {QUESTIONS.map((question, i) => (
-          <button key={question.label} type="button" className="laq-chip" aria-pressed={i === pick} onClick={() => play(i, false)}>
-            {question.label}
-          </button>
-        ))}
-      </fieldset>
-      {thinking && (
-        <div className="laq-think" role="status">
-          <span>· Leyendo la pregunta</span>
-          <span className={phase >= 2 ? "" : "dim"}>· Consultando las cifras de Reportes</span>
-        </div>
-      )}
-      <div className={shown ? "laq-answer on" : "laq-answer"} aria-live="polite" aria-hidden={shown ? undefined : true}>
+  /**
+   * La respuesta a una pregunta. Las de las otras preguntas van en la misma celda sin verse (`ghost`):
+   * la tarjeta mide siempre lo que la respuesta más larga y pasar de una a otra no mueve la página.
+   */
+  const answer = (question: (typeof QUESTIONS)[number], visible: boolean, ghost: boolean) => {
+    const pct = (v: number) =>
+      visible ? Math.max(Math.round((v / question.max) * 100), v > 0 ? 4 : 0) : 0
+    return (
+      <div
+        key={question.label}
+        className={ghost ? "laq-answer fit-ghost" : visible ? "laq-answer on" : "laq-answer"}
+        aria-hidden={!ghost && visible ? undefined : true}
+      >
         <div className="laq-figures">
-          {cur.figures.map(([n, label]) => (
+          {question.figures.map(([n, label]) => (
             <span key={label}>
               <b>{n}</b>
               <span>{label}</span>
             </span>
           ))}
         </div>
-        <p className="laq-text">{cur.answer}</p>
-        {cur.kind === "columns" ? (
-          <div className="laq-cols" role="img" aria-label={cur.bars.map(([name, v]) => `${name}: ${v}`).join(", ")}>
-            {cur.bars.map(([name, v]) => (
+        <p className="laq-text">{question.answer}</p>
+        {question.kind === "columns" ? (
+          <div
+            className="laq-cols"
+            role="img"
+            aria-label={question.bars.map(([name, v]) => `${name}: ${v}`).join(", ")}
+          >
+            {question.bars.map(([name, v]) => (
               <span key={name} className="laq-col">
                 <b>{v}</b>
                 <span className="laq-col-bar" style={{ height: `${pct(v)}px` }} />
@@ -197,7 +196,7 @@ export default function ArgosQuestions() {
           </div>
         ) : (
           <div className="laq-bars">
-            {cur.bars.map(([name, v, value]) => (
+            {question.bars.map(([name, v, value]) => (
               <div key={name} className="laq-bar">
                 <span className="laq-bar-row">
                   <span>{name}</span>
@@ -211,13 +210,66 @@ export default function ArgosQuestions() {
           </div>
         )}
         <p className="laq-how">
-          <b>Así lo calculé:</b> {cur.how}
+          <b>Así lo calculé:</b> {question.how}
         </p>
         <div className="laq-actions" aria-hidden="true">
-          <span className="laq-pill">{cur.action}</span>
-          <span className="laq-pill">Fijar en Inicio</span>
+          <span className="laq-pill">{question.action}</span>
+          <span className="laq-pill">Fijar en Resumen</span>
           <span className="laq-same">La misma cifra de Reportes</span>
         </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="af-card laq" ref={steady}>
+      <AgentHead
+        agent="argos"
+        name="Argos · tus cifras"
+        meta="Consultorio San Martín · octubre, hasta hoy"
+        state={phase === 0 ? "Leyendo…" : thinking ? "Calculando…" : "Respondió"}
+        live={!shown}
+        done={shown}
+      />
+      <div className="laq-ask" aria-hidden="true">
+        {/* La pregunta más larga reserva sus líneas: escribirla letra a letra no mueve las fichas. */}
+        <span className="fit">
+          {QUESTIONS.map((question) => (
+            <span key={question.label} className="laq-typed fit-ghost">
+              {question.q}|
+            </span>
+          ))}
+          <span className="laq-typed">
+            {cur.q.slice(0, chars)}
+            <span className={phase === 0 ? "laq-caret" : "laq-caret off"}>|</span>
+          </span>
+        </span>
+        <span className="laq-send">Preguntar</span>
+      </div>
+      <fieldset className="laq-chips" aria-label="Preguntas de ejemplo">
+        {QUESTIONS.map((question, i) => (
+          <button
+            key={question.label}
+            type="button"
+            className="laq-chip"
+            aria-pressed={i === pick}
+            onClick={() => play(i, false)}
+          >
+            {question.label}
+          </button>
+        ))}
+      </fieldset>
+      {/* Mientras piensa, sus pasos van encima de la respuesta, en la misma celda: no ocupan alto propio. */}
+      {/* El anuncio va en la celda, que no cambia: la respuesta de adentro sí se rearma en cada pregunta. */}
+      <div className="fit laq-stage" aria-live="polite">
+        {QUESTIONS.map((question, i) => (i === pick ? null : answer(question, true, true)))}
+        {answer(cur, shown, false)}
+        {thinking && (
+          <div className="laq-think" role="status">
+            <span>· Leyendo la pregunta</span>
+            <span className={phase >= 2 ? "" : "dim"}>· Consultando las cifras de Reportes</span>
+          </div>
+        )}
       </div>
       <AgentFoot
         note={

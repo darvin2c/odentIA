@@ -60,6 +60,7 @@ import {
   ORDER_MESSAGE_KEYS,
   ORDER_READY_MESSAGE_KEY,
   NOTICE_PURPOSE,
+  MOVED_TO_CONFIRM_KEY,
   REMINDER_CONFIRMED_KEY,
   REMINDER_PENDING_KEY,
   renderMessage,
@@ -222,6 +223,7 @@ const NOTICE_TITLES: Record<string, string> = {
   recordatorio_cita_confirmada: "Recordar la cita: recordatorio, cita confirmada",
   cita_sin_llegar: "Recordar la cita: ¿vienes en camino?",
   aviso_cita_movida: "Recordar la cita: cambio de fecha",
+  aviso_cita_movida_confirmar: "Recordar la cita: cambio de fecha, por confirmar",
   aviso_cita_cancelada: "Recordar la cita: cita cancelada",
 }
 
@@ -1035,12 +1037,16 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
     "Antes de una cita ya confirmada (la que eligió la persona o la que ya confirmó): en lugar del recordatorio, sin «Confirmar» y con «Cambiar mi cita».",
   cita_sin_llegar: () =>
     "A los 15 minutos de la hora, si la persona no llegó y en su sede ya marcaron llegadas ese día. Solo dentro del horario para escribir.",
-  aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
+  aviso_cita_movida: () =>
+    "Al cambiar la fecha o la hora de una cita que sigue confirmada. A la que queda por confirmar le llega «cambio de fecha, por confirmar», y este solo mientras WhatsApp no aprueba aquel.",
+  aviso_cita_movida_confirmar: () =>
+    "Al cambiar la fecha o la hora de una cita que queda por confirmar, porque la fecha nueva la eligió tu equipo: en lugar del aviso de cambio, con «Confirmar».",
   aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",
 }
 
 function buttonDoes(def: MessageDef, button: MessageButton): string {
-  if (button.action === "confirmar") return "La cita queda confirmada al momento."
+  if (button.action === "confirmar")
+    return "La cita queda confirmada al momento, en la fecha que dice el mensaje; si después cambió de día, se le pregunta por la nueva."
   if (button.action === "baja") {
     const purpose =
       def.catalog && def.origin === "agente"
@@ -1113,6 +1119,8 @@ function meanwhileOf(
   // Sale en lugar del recordatorio: por WhatsApp, mientras no lo aprueban, sale el de siempre.
   if (def.id === REMINDER_CONFIRMED_KEY)
     return "Mientras tanto sale como respuesta a quien escribió en las últimas 24 horas, o por correo; a los demás les llega el recordatorio de siempre, con «Confirmar»."
+  if (def.id === MOVED_TO_CONFIRM_KEY)
+    return "Mientras tanto sale como respuesta a quien escribió en las últimas 24 horas, o por correo; a los demás les llega el aviso de cambio de siempre, sin «Confirmar»."
   const people =
     waiting > 0
       ? ` ${waiting === 1 ? "1 persona lo tiene" : `${waiting} personas lo tienen`} por salir en las próximas 24 horas.`

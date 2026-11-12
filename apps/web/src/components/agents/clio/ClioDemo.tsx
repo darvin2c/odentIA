@@ -9,6 +9,7 @@ import OdontogramArch, { type ExampleFinding } from "../../odontogram/Odontogram
 import { AgentFoot, AgentHead, prefersStill, VoiceBubble } from "../frame/AgentFrame"
 import "../frame/agent-frame.css"
 import "./clio-demo.css"
+import { useSteadyHeight } from "../../../lib/steady"
 
 /** Lo que dicta la Dra. Paredes, frase a frase (datos de ejemplo). */
 const SAID = [
@@ -42,6 +43,11 @@ export default function ClioDemo() {
   // En el servidor y sin movimiento, el estado final: la página se lee entera sin animación.
   const [step, setStep] = useState(LAST)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Al girar el teléfono, el dictado se muestra terminado y se mide de nuevo.
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    if (timer.current) clearTimeout(timer.current)
+    setStep(LAST)
+  })
 
   const stop = useCallback(() => {
     if (timer.current) clearTimeout(timer.current)
@@ -81,7 +87,7 @@ export default function ClioDemo() {
   }
 
   return (
-    <div className="af-card cl">
+    <div className="af-card cl" ref={steady}>
       <AgentHead
         agent="clio"
         name="Clío · en la consulta"
@@ -94,6 +100,7 @@ export default function ClioDemo() {
         initials="DP"
         who="Dra. Paredes"
         text={SAID[Math.min(step, SAID.length - 1)]}
+        reserve={SAID}
         speaking={speaking}
         idle="dictado terminado · 1 min 12 s"
       />

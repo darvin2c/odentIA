@@ -26,16 +26,18 @@
 .af-person { width: 36px; height: 36px; flex: none; border-radius: 50%; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 12.5px var(--font); letter-spacing: .02em; }
 .af-bubble { position: relative; flex: 1; min-width: 0; background: var(--paper); border-radius: 4px 18px 18px 18px; padding: 10px 14px 12px; box-shadow: 0 1px 3px rgba(15, 23, 42, .08), 0 0 0 1px color-mix(in srgb, var(--ink) 6%, transparent); display: flex; flex-direction: column; gap: 6px; transition: box-shadow .3s ease; }
 .af-voice[data-speaking] .af-bubble { box-shadow: 0 0 0 2px #e5484d, 0 6px 18px -8px rgba(229, 72, 77, .55); }
-.af-voice-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.af-voice-head { display: flex; align-items: center; gap: 10px; min-height: 22px; }
+.af-voice-head b { flex: none; }
 .af-voice-head b { font-size: 13.5px; color: var(--ink); }
-.af-mic { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px var(--font); color: var(--muted); }
+.af-mic { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 12.5px var(--font); color: var(--muted); }
+.af-mic svg { flex: none; }
 .af-mic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .af-voice[data-speaking] .af-mic { color: #c0262d; }
 .af-voice[data-speaking] .af-mic svg { animation: af-pulse 1.1s ease-in-out infinite; }
-.af-wave { display: flex; align-items: center; gap: 3px; height: 22px; }
+.af-wave { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; gap: 3px; height: 22px; }
 .af-wave i { width: 3px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--ink) 22%, transparent); transition: height .3s ease; }
-/* La onda solo mientras habla: una frase ya dicha no necesita la línea vacía. */
-.af-voice:not([data-speaking]) .af-wave { display: none; }
+/* La onda solo se ve mientras habla; su lugar queda, para que el globo no cambie de alto al callar. */
+.af-voice:not([data-speaking]) .af-wave { visibility: hidden; }
 .af-voice[data-speaking] .af-wave i { background: #e5484d; animation: af-wave 0.9s ease-in-out infinite; }
 .af-voice[data-speaking] .af-wave i:nth-child(3n) { animation-duration: .7s; }
 .af-voice[data-speaking] .af-wave i:nth-child(4n + 1) { animation-duration: 1.15s; }
@@ -45,9 +47,11 @@
 /* El resto de la frase ocupa su lugar sin verse: el globo no salta de alto mientras se escribe. */
 .af-rest { color: transparent; }
 
-.af-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+/* El pie va pegado al borde de abajo: la tarjeta tiene el alto fijo (useSteadyHeight) y «Repetir» no se
+   mueve mientras el contenido de arriba aparece. */
+.af-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .af-note { font-size: 12px; color: var(--muted); }
-.af-replay { min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); background: var(--paper); color: var(--ink); font: 700 13px var(--font); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
+.af-replay { min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); background: var(--paper); color: var(--ink); font: 700 13px var(--font); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
 .af-replay:hover { border-color: var(--teal); color: var(--teal); }
 .af-replay:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .af-replay svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
@@ -63,4 +67,7 @@
   .af-person { width: 30px; height: 30px; font-size: 11px; }
   .af-said { font-size: 14px; }
   .af-state { padding: 4px 9px; font-size: 12px; }
+  /* En el teléfono, siempre dos filas: el nombre con la onda y, debajo, el micrófono con lo que hace. */
+  .af-voice-head { flex-wrap: wrap; gap: 2px 10px; }
+  .af-mic { flex: 1 1 100%; }
 }

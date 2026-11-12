@@ -348,6 +348,16 @@ Lo que hacen las cuentas de odentIA en la administración: el rol Administració
 
 ---
 
+### T-WEB-01 Visitante: decidir si pide una invitación
+**Dónde:** las tres webs públicas (`apps/web`), en el teléfono primero.
+- [ ] Ya soy cliente: entro a mi cuenta desde cualquier punto de la página, en un toque.
+- [ ] ¿Cuánto me cuesta y cómo empiezo? La oferta (cuota, regalo, prueba, plan) dice lo mismo en la portada, en precios, en las preguntas y en el pie, y cada web nombra solo su marca.
+- [ ] Pauso el movimiento para leer: cada demostración queda completa.
+- [ ] Toco lo que parece un botón en una demostración: o responde o no parece botón, y nada que se pueda tocar desaparece solo.
+- [ ] ¿Puedo traer mis pacientes de mi Excel y llevármelos si me voy? Las tres webs lo responden igual.
+
+**Ya falló:** en pausa el chat de Sofi quedaba en blanco; los horarios de la demostración se elegían solos a los 6 s; «Ingresar» no estaba a mitad de página.
+
 ## Casos
 
 | Caso | Situación | Recorre | Lo que tiene que pasar |

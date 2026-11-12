@@ -38,6 +38,7 @@
 .dag-now i { flex: 1; height: 2px; background: #be123c; opacity: .7; transform: translateY(-50%); }
 
 .dag-toast-slot { min-height: 58px; display: flex; }
+.dag-toast[data-off] { visibility: hidden; animation: none; }
 .dag-toast { flex: 1; display: flex; align-items: center; gap: 12px; text-align: left; border: 1px solid color-mix(in srgb, var(--teal) 30%, #fff); background: var(--teal-soft); border-radius: 16px; padding: 10px 14px; cursor: pointer; font-family: var(--font); color: var(--ink); min-height: 44px; animation: dag-pop .5s ease-out; }
 .dag-toast:hover { filter: brightness(.97); }
 .dag-sofi { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 50%; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }

@@ -170,7 +170,7 @@ export default function ValueCalc({ prices }: { prices: ValuePrices }) {
                 <span className="vdock-nw">Pierdes {usd(r.withoutUs)} ·</span>{" "}
                 <span className="vdock-nw">pagas {usd(r.withUs)}</span>
               </span>
-              <span>{r.worthIt ? "Recuperas por cada dólar que pagas" : "Con estos números todavía no conviene"}</span>
+              <span>{r.worthIt ? "Por cada dólar que pagas, dejas de perder" : "Con estos números todavía no conviene"}</span>
             </span>
             <strong className="vdock-n">{r.worthIt ? `USD ${ratio}` : "—"}</strong>
           </div>
@@ -225,12 +225,11 @@ export default function ValueCalc({ prices }: { prices: ValuePrices }) {
                 <span className="vfill" style={{ width: conPct, background: "#4fc3d7" }}></span>
               </div>
             </div>
+            {/* Lo que pierdes sin agentes dividido por lo que pagas, dicho en palabras de todos los días. */}
             <div className="vratio">
               <span className="vrl">
-                <span className="vr1">Recuperas</span>
-                <span className="vr3">
-                  {r.worthIt ? "por cada dólar que pagas" : "con estos números todavía no conviene"}
-                </span>
+                <span className="vr1">{r.worthIt ? "Por cada dólar que pagas," : "Con estos números"}</span>
+                <span className="vr3">{r.worthIt ? "dejas de perder" : "todavía no conviene"}</span>
                 <span className="vdiff">
                   {r.worthIt ? (
                     <>

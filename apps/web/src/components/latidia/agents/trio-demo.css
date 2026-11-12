@@ -42,6 +42,8 @@
 .tr-btns { display: flex; gap: 8px; }
 .tr-b { min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: var(--on-night); font-family: var(--font); font-weight: 700; font-size: 14px; cursor: pointer; }
 .tr-b:hover { border-color: rgba(255, 255, 255, .7); }
+/* Terminada la escena, «Pausar» queda en su sitio pero apagado. */
+.tr-b:disabled { opacity: .45; cursor: default; border-color: rgba(255, 255, 255, .3); }
 .tr-replay { border: 0; background: rgba(183, 156, 240, .2); }
 .tr-b:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
 

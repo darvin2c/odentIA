@@ -43,6 +43,8 @@ import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_ARRIVAL_KEY,
   APPOINTMENT_DATA_NOTICE_KEY,
+  cleanVariable,
+  MOVED_TO_CONFIRM_KEY,
   REMINDER_CONFIRMED_KEY,
   REMINDER_DATA_KEY,
   REMINDER_PENDING_KEY,
@@ -66,8 +68,10 @@ import {
   type ComposedMessage,
   clinicName,
   composeJobMessage,
+  dayPhrase,
   previewMessageRoute,
   routeMessage,
+  timePhrase,
 } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { patientTodo, remoteTodoCount } from "./patient-todo.js"
@@ -114,6 +118,7 @@ import { createTask, settleTask } from "./tasks.js"
 import {
   appointmentServesControlSql,
   awaitsBookedSql,
+  dayKeyIn,
   planItemSql,
   TO_SCHEDULE_STATUSES,
   toScheduleSql,
@@ -238,6 +243,13 @@ export interface JobPayload {
   dueAt?: string
   /** La tarea de la oportunidad que se retoma: la misma que queda si el agente no puede escribir. */
   taskId?: string
+  /**
+   * La fecha de la cita que dijo el mensaje al salir (ISO). Su «Confirmar» vale para esa fecha: si
+   * la cita pasó a otro día después, no confirma la nueva (ADR 0180).
+   */
+  announcedStartsAt?: string
+  /** Su mensaje pidió confirmar (traía «Confirmar»): un «sí» escrito le responde a él (ADR 0180). */
+  asksToConfirm?: boolean
 }
 
 /** Lee el payload JSONB de un caso campo por campo (sin casts ciegos). */
@@ -251,6 +263,9 @@ export function jobPayloadOf(value: unknown): JobPayload {
   if ("once" in value && value.once === true) payload.once = true
   if ("dueAt" in value && typeof value.dueAt === "string" && Number.isFinite(Date.parse(value.dueAt))) payload.dueAt = value.dueAt
   if ("taskId" in value && typeof value.taskId === "string") payload.taskId = value.taskId
+  if ("announcedStartsAt" in value && typeof value.announcedStartsAt === "string" && Number.isFinite(Date.parse(value.announcedStartsAt)))
+    payload.announcedStartsAt = value.announcedStartsAt
+  if ("asksToConfirm" in value && value.asksToConfirm === true) payload.asksToConfirm = true
   return payload
 }
 
@@ -1159,23 +1174,44 @@ export async function restartAppointmentReminders(tx: Db, orgId: string, appoint
 }
 
 /**
- * A la persona se le recordó esta cita, después la cita pasó a otro día y por esta conversación
- * todavía no se le escribió nada: su «sí» (el botón del recordatorio o un mensaje) responde a la
- * fecha anterior. No se confirma: se le dice la fecha nueva y se le pregunta.
+ * A la persona se le escribió por esta cita (el recordatorio, o el aviso de que se reservó o
+ * cambió) con una fecha que ya no es la de la cita, y por esta conversación no se le escribió
+ * nada después del último movimiento: su «sí» responde a la fecha anterior. No se confirma: se le
+ * dice la fecha nueva y se le pregunta. Cada mensaje dice su fecha (`announcedStartsAt`, por día en
+ * la zona de la sede, ADR 0180); los que salieron antes de guardarla se miden por el movimiento:
+ * el recordatorio marcado como de la fecha anterior, o el aviso que salió antes del último cambio
+ * de día.
  */
 export async function answersEarlierDate(tx: Db, orgId: string, appointmentId: string, conversationId: string): Promise<boolean> {
+  const [appt] = await tx
+    .select({ startsAt: appointment.startsAt, branchId: appointment.branchId })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  if (!appt) return false
+  const zone = await timezoneOf(tx, orgId, appt.branchId)
   const rows = await tx.execute<{ stale: boolean }>(sql`
+    with last_move as (
+      select max(a.created_at) as at,
+        max(a.created_at) filter (where a.metadata->>'remindersMark' is not null) as day_at
+      from audit_event a
+      where a.organization_id = ${orgId} and a.entity = 'appointment' and a.entity_id = ${appointmentId}
+        and a.action = 'appointment.moved')
     select exists (
-      select 1 from automation_job j
-      where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.kind = 'recordatorio_cita'
-        and j.status = 'enviado' and j.dedupe_key like ${`%${EARLIER_DATE_MARK}%`}
+      select 1 from automation_job j, last_move
+      where j.organization_id = ${orgId} and j.appointment_id = ${appointmentId} and j.status = 'enviado'
+        and j.kind in ('recordatorio_cita', 'aviso_cita_reservada', 'aviso_cita_movida')
+        and case
+          when j.payload->>'announcedStartsAt' is not null then
+            ((j.payload->>'announcedStartsAt')::timestamptz at time zone ${zone})::date
+              <> (${appt.startsAt.toISOString()}::timestamptz at time zone ${zone})::date
+          when j.kind = 'recordatorio_cita' then j.dedupe_key like ${`%${EARLIER_DATE_MARK}%`}
+          else j.created_at < last_move.day_at
+        end
         and not exists (
           select 1 from message m
           where m.organization_id = ${orgId} and m.conversation_id = ${conversationId} and m.direction = 'out'
-            and m.created_at > (
-              select max(a.created_at) from audit_event a
-              where a.organization_id = ${orgId} and a.entity = 'appointment' and a.entity_id = ${appointmentId}
-                and a.action = 'appointment.moved' and a.metadata->>'remindersMark' is not null))
+            and m.created_at > last_move.at)
     ) as stale`)
   return rows[0]?.stale === true
 }
@@ -1188,15 +1224,11 @@ export async function newDateQuestion(tx: Db, orgId: string, appointmentId: stri
     .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
     .limit(1)
   if (!appt) return null
-  const when = new Intl.DateTimeFormat((await findOrgLocale(tx, orgId)).locale, {
-    timeZone: await timezoneOf(tx, orgId, appt.branchId),
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(appt.startsAt)
-  return `Tu cita cambió de fecha después de ese recordatorio: ahora es el ${when}. ¿Te queda bien? Responde «sí» y la confirmo.`
+  const zone = await timezoneOf(tx, orgId, appt.branchId)
+  const { locale } = await findOrgLocale(tx, orgId)
+  // Como la dice el aviso («viernes 13 de noviembre, a las 4:00 p. m.»), sin el punto doble de «p. m.».
+  const when = cleanVariable(`${dayPhrase(appt.startsAt, new Date(), zone, locale)}, a las ${timePhrase(appt.startsAt, zone, locale)}`)
+  return `Ojo: tu cita cambió de fecha. Ahora es ${when}. ¿Te queda bien? Responde «sí» y la confirmo.`
 }
 
 /** «Deshacer» ese movimiento: los recordatorios de la fecha a la que vuelve cuentan otra vez. */
@@ -2131,6 +2163,38 @@ async function confirmedReminderFor(
   return { spec, link }
 }
 
+/**
+ * El aviso de cambio con «Confirmar» cuando todas sus citas quedaron por confirmar (ADR 0180): la
+ * fecha nueva la eligió el equipo. Nulo: sale el de siempre. Por WhatsApp, a quien no escribió en
+ * las últimas 24 horas, sale solo con su plantilla aprobada; por correo, solo si la clínica tiene
+ * su página, donde está «Confirmar», y si el de siempre tampoco sale por plantilla.
+ */
+async function movedToConfirmFor(
+  tx: Db,
+  orgId: string,
+  group: JobRow[],
+  contactId: string,
+  usual: AutomationMessage,
+  deps: DeliverDeps,
+): Promise<AutomationMessage | null> {
+  const ids = group.map((item) => item.appointmentId).filter((id): id is string => !!id)
+  if (ids.length === 0 || ids.length !== group.length) return null
+  const rows = await tx
+    .select({ status: appointment.status })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), inArray(appointment.id, ids)))
+  if (rows.length !== new Set(ids).size || rows.some((row) => row.status !== "programada")) return null
+  const spec = await currentAutomationMessage(tx, orgId, MOVED_TO_CONFIRM_KEY)
+  const route = await previewMessageRoute(tx, orgId, contactId, spec)
+  if (!("via" in route)) return null
+  if (route.via === "correo") {
+    if (!((await clinicOriginOf(tx, orgId)) ?? deps.publicBaseUrl)) return null
+    const usualRoute = await previewMessageRoute(tx, orgId, contactId, usual)
+    if ("via" in usualRoute && usualRoute.via === "plantilla") return null
+  }
+  return spec
+}
+
 export interface DeliverDeps {
   secretsKey: Buffer
   /** Para adjuntar la invitación de calendario a los avisos de cita por correo; sin él, va solo el texto. */
@@ -2860,6 +2924,10 @@ export async function deliverJob(
   const confirmed =
     spec && job.kind === "recordatorio_cita" ? await confirmedReminderFor(tx, orgId, group, contactId, spec, deps) : null
   if (confirmed) spec = confirmed.spec
+  // La cita quedó por confirmar en una fecha que eligió el equipo: el aviso del cambio pide confirmarla.
+  const askConfirm =
+    spec && job.kind === "aviso_cita_movida" ? await movedToConfirmFor(tx, orgId, group, contactId, spec, deps) : null
+  if (askConfirm) spec = askConfirm
   // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
   // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
   // Igual el recordatorio de la cita: lleva «Completar mis datos» mientras falten (fase 3)
@@ -2932,7 +3000,7 @@ export async function deliverJob(
       // (`/c/` y `/baja/`), en el dominio de su producto; el panel no las tiene.
       const base = (await clinicOriginOf(tx, orgId)) ?? deps.publicBaseUrl
       if (base) {
-        if (job.kind === "recordatorio_cita") {
+        if (job.kind === "recordatorio_cita" || askConfirm) {
           for (const item of group) {
             if (!item.appointmentId) continue
             const link = { jobId: item.id, appointmentId: item.appointmentId, contactId, ttlHours: 72, now }
@@ -3010,6 +3078,18 @@ export async function deliverJob(
         updatedAt: now,
       })
       .where(inArray(automationJob.id, ids()))
+    // La fecha que dijo el mensaje, por cita, y si pidió confirmar: su «Confirmar» y el «sí» escrito
+    // valen para esa fecha y no para otra (ADR 0180).
+    const asksToConfirm = spec.buttons.some((button) => button.action === "confirmar")
+    for (const item of group) {
+      const announced = item.appointmentId ? composed.announced[item.appointmentId] : undefined
+      if (!announced) continue
+      const kept = item.payload && typeof item.payload === "object" ? item.payload : {}
+      await tx
+        .update(automationJob)
+        .set({ payload: { ...kept, announcedStartsAt: announced, ...(asksToConfirm ? { asksToConfirm: true } : {}) } })
+        .where(eq(automationJob.id, item.id))
+    }
     await audit(tx, orgId, null, "automation_job.sent", job.id, {
       kind: job.kind,
       messageId: sent.id,
@@ -3328,8 +3408,32 @@ export async function appointmentConfirmationPlan(
   if (!rule?.agentPart) return null
   const runtime = await adminRuntime(tx, orgId)
   if (!runtime.adminOn || !runtime.receptionOn) return null
+  // El aviso del cambio con «Confirmar» de la fecha que tiene ahora también se lo pidió (ADR 0180). Es un aviso:
+  // sale aunque haya apagado los recordatorios, así que se mira antes de su permiso (QA del 11 nov).
+  // Por día, como su botón: movida dentro del día, ese aviso sigue valiendo.
+  const notices = await tx
+    .select({ updatedAt: automationJob.updatedAt, payload: automationJob.payload })
+    .from(automationJob)
+    .where(
+      and(
+        eq(automationJob.organizationId, orgId),
+        eq(automationJob.appointmentId, appt.id),
+        eq(automationJob.kind, "aviso_cita_movida"),
+        eq(automationJob.status, "enviado"),
+        sql`${automationJob.payload}->>'asksToConfirm' = 'true'`,
+      ),
+    )
+    .orderBy(desc(automationJob.updatedAt))
+  const zone = notices.length > 0 ? await timezoneOf(tx, orgId, appt.branchId) : null
+  const notice = zone
+    ? notices.find((row) => {
+        const announced = jobPayloadOf(row.payload).announcedStartsAt
+        return !!announced && dayKeyIn(new Date(announced), zone) === dayKeyIn(appt.startsAt, zone)
+      })
+    : undefined
   const contactId = await preferredContact(tx, orgId, appt.patientId)
-  if (!contactId || !(await mayWriteFirst(tx, orgId, contactId, "recordatorio"))) return null
+  if (!contactId || !(await mayWriteFirst(tx, orgId, contactId, "recordatorio")))
+    return notice ? { askAt: null, askedAt: notice.updatedAt.toISOString() } : null
   const jobs = await tx
     .select({ status: automationJob.status, scheduledFor: automationJob.scheduledFor, updatedAt: automationJob.updatedAt })
     .from(automationJob)
@@ -3344,7 +3448,8 @@ export async function appointmentConfirmationPlan(
     )
     .orderBy(asc(automationJob.scheduledFor))
   const sent = jobs.find((job) => job.status === "enviado")
-  if (sent) return { askAt: null, askedAt: sent.updatedAt.toISOString() }
+  const asked = [sent?.updatedAt, notice?.updatedAt].filter((at): at is Date => !!at).sort((a, b) => b.getTime() - a.getTime())[0]
+  if (asked) return { askAt: null, askedAt: asked.toISOString() }
   const pending = jobs.find((job) => job.status === "pendiente")
   if (pending) return { askAt: pending.scheduledFor.toISOString(), askedAt: null }
   // Aún sin programar (falta para la cita): el primero que llegue a tiempo.
@@ -3879,7 +3984,7 @@ export async function handleAutomationReply(
     return true
   }
   const together = await tx
-    .select({ appointmentId: automationJob.appointmentId })
+    .select({ appointmentId: automationJob.appointmentId, payload: automationJob.payload })
     .from(automationJob)
     .where(
       and(
@@ -3890,6 +3995,13 @@ export async function handleAutomationReply(
     )
   const appointmentIds = [...new Set(together.map((row) => row.appointmentId).filter((id): id is string => !!id))]
   if (appointmentIds.length === 0) return false
+  // La fecha que dijo el mensaje de cada cita, si la guardó al salir (ADR 0180).
+  const announcedOf = new Map(
+    together.flatMap((row) => {
+      const announced = jobPayloadOf(row.payload).announcedStartsAt
+      return row.appointmentId && announced ? [[row.appointmentId, new Date(announced)] as const] : []
+    }),
+  )
   const items: ConfirmedItem[] = []
   const changed: string[] = []
   for (const appointmentId of appointmentIds) {
@@ -3897,6 +4009,7 @@ export async function handleAutomationReply(
       .select({
         status: appointment.status,
         startsAt: appointment.startsAt,
+        branchId: appointment.branchId,
         patientName: patientPerson.displayName,
         self: sql<boolean>`${patient.personId} = ${thread.contactId}`,
       })
@@ -3909,17 +4022,40 @@ export async function handleAutomationReply(
     if (!appt || appt.startsAt.getTime() < Date.now()) continue
     if (appt.status === "confirmada") items.push({ patientName: appt.patientName, self: appt.self, was: "ya_confirmada", startsAt: appt.startsAt })
     if (appt.status !== "programada") continue
-    // El botón es del recordatorio de la fecha anterior: no confirma la nueva sin habérsela dicho.
-    if (await answersEarlierDate(tx, orgId, appointmentId, input.conversationId)) {
+    // El botón vale para la fecha que dijo su mensaje: si la cita pasó a otro día después, no
+    // confirma la nueva sin habérsela dicho. Un mensaje de antes, sin su fecha, se mide como un «sí».
+    const announced = announcedOf.get(appointmentId)
+    let earlier: boolean
+    if (announced) {
+      const dayZone = await timezoneOf(tx, orgId, appt.branchId)
+      earlier = dayKeyIn(announced, dayZone) !== dayKeyIn(appt.startsAt, dayZone)
+    } else earlier = await answersEarlierDate(tx, orgId, appointmentId, input.conversationId)
+    if (earlier) {
       changed.push(appointmentId)
       continue
     }
     await setAppointmentStatus(tx, orgId, null, appointmentId, "confirmada", { via: "respuesta" })
     items.push({ patientName: appt.patientName, self: appt.self, was: "confirmada", startsAt: appt.startsAt })
   }
-  // La cita cambió de día después de ese recordatorio: se le dice la fecha nueva y se le pregunta.
+  // La cita cambió de día después de ese mensaje: se le dice la fecha nueva y se le pregunta.
   // Con varias citas en el mismo mensaje lo sigue el agente, que ve la conversación.
   if (items.length === 0 && changed.length === 1) {
+    // Si el aviso del cambio está por salir ahora, él le dice la fecha nueva y trae «Confirmar»:
+    // no se le pregunta dos veces lo mismo (QA del 11 nov).
+    const [coming] = await tx
+      .select({ id: automationJob.id })
+      .from(automationJob)
+      .where(
+        and(
+          eq(automationJob.organizationId, orgId),
+          eq(automationJob.appointmentId, changed[0]!),
+          eq(automationJob.kind, "aviso_cita_movida"),
+          eq(automationJob.status, "pendiente"),
+          lte(automationJob.scheduledFor, new Date()),
+        ),
+      )
+      .limit(1)
+    if (coming) return true
     const text = await newDateQuestion(tx, orgId, changed[0]!)
     if (text) {
       await sendOutbound(tx, orgId, { conversationId: input.conversationId, senderKind: "agent", content: { type: "text", text } })
@@ -3943,7 +4079,7 @@ export async function handleAutomationReply(
       conversationId: input.conversationId,
       kind: "cita",
       title: "confirmó una cita",
-      detail: "desde el recordatorio",
+      detail: origin.kind === "aviso_cita_movida" ? "desde el aviso del cambio" : "desde el recordatorio",
     })
   }
   await audit(tx, orgId, null, "automation_job.confirmed", origin.id, {
