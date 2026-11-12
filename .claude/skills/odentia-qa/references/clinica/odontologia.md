@@ -331,6 +331,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 - [ ] Si una sesión termina en «Falta otra sesión» y lo que va después ya tiene cita, el cierre lo avisa para revisar esa cita.
 - [ ] El cierre dice lo que se cargó hoy y una sola cifra de lo que debe, que sigue siendo cierta después de cobrar ahí mismo.
+- [ ] Un tratamiento cuyo cobro se devolvió entero no se carga otra vez al firmar la sesión siguiente: el cierre lo dice y por qué, sin pedirle a quien atiende que cobre (ADR 0068).
 - [ ] La periodontitis apical o el absceso periapical no se proponen resueltos al terminar la endodoncia: sanan en su control con radiografía. La pulpitis sí.
 - [ ] El consentimiento de una corona sobre la propia pieza es el de la corona, no el de prótesis para reponer piezas ausentes.
 

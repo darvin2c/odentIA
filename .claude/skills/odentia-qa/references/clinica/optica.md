@@ -162,6 +162,9 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] Emitida no cambia: solo se verifica (la externa, una vez) o se anula con motivo.
 - [ ] El PDF tiene el membrete, la firma dibujada y un QR que dice si está vigente, vencida o anulada. OD y OI no se confunden en el papel. La externa no lleva QR (`SO/lens-prescription-pdf.ts`).
 - [ ] El cliente la ve en «Tus documentos» del portal; la externa, solo después de verificada.
+- [ ] Anular la atención anula la receta que se emitió en ella, con su motivo: la ficha la muestra anulada, su QR dice «Documento anulado» y la venta no la ofrece. La externa transcrita no cambia.
+- [ ] «Emitir otra desde su examen» no se ofrece si la receta se anuló con su atención.
+- [ ] En el PDF, cada signo de la graduación sale igual que en la pantalla («−2,00», «+1,50»), nunca «?» ni sin signo.
 
 **Huecos conocidos:** cuánto dura de verdad la receta (adulto, niño, lentes de contacto) se confirma con la primera óptica real.
 **Fuentes:** ISO 21987; HL7 FHIR VisionPrescription; ADR 0170.
@@ -200,6 +203,7 @@ Común con los demás productos (P-ODO-01, P-MED-01).
 - [ ] **Rehacer por un error de la receta toma la receta nueva.** Hoy rehacer copia la receta y las medidas del original (`job-orders.ts`): el taller volvería a hacer los mismos números.
 - [ ] Anular anula en la caja lo que no se cobró y deja lo cobrado en su cuenta.
 - [ ] Anular y rehacer los hace quien lleva la caja, no el Taller.
+- [ ] Un pedido hecho con una receta que después se anula lo dice en el pedido y a quien lo lleva, con su salida («Rehacer con otra receta» o «Anular»), y el diálogo de anular la atención nombra ese pedido. No frena: avisa.
 
 ## P-OPT-08 «Tus lentes están listos» y la entrega
 
@@ -345,6 +349,7 @@ vistIA está hecho para ópticas. Si una óptica trabaja con un oftalmólogo, o 
 | CO12 | Un señor trae su receta del oftalmólogo, elige montura y quiere los lentes para el lunes. | 04, 06 | Transcribir la receta sin errores de ojo; venta y adelanto; fecha prometida en el pedido. |
 | CO13 | Campaña en un colegio: 40 niños medidos en una mañana. | 16, 01 | Hasta dónde llega la app hoy, cuánto cuesta cada niño y qué pasa con la autorización de su representante. |
 | CO14 | Una persona se mide, recibe su receta y se va sin comprar. | 14, 17 | Queda como posible venta y se le puede ofrecer después. |
+| CO18 | El optómetra emite la receta en la atención, Ventas vende los lentes y el optómetra anula la atención porque repitió la refracción. | 04, 06, 07 | La receta queda anulada con su motivo y el QR lo dice; el pedido avisa que su receta se anuló y ofrece rehacerlo con otra; la venta ya no la ofrece; la externa anterior sigue vigente y la venta la ofrece con su fecha. |
 
 ### El recorrido largo
 
