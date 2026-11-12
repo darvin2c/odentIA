@@ -30,7 +30,7 @@ export function clinicAppAliases() {
 export function clinicAppWorkerStubs(): Plugin {
   // También la ruta de pnpm (`@cornerstonejs+codec-…`) a la que lleva el alias del códec de 12 bits.
   // El visor 3D (NiiVue, ADR 0147) también dibuja solo en el navegador, y pdf.js, que dibuja la
-  // hoja membretada al subirla (ADR 0181).
+  // hoja membretada al subirla (ADR 0182).
   const codec = /@cornerstonejs[\\/+]codec-|@niivue[\\/+]niivue|pdfjs-dist/
   const empty = "\0codec-dicom-vacio"
   return {

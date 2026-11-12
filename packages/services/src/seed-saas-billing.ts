@@ -15,29 +15,34 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import {
+  type SaasWaitlistStatus,
   saasAction,
   saasCharge,
   saasCommercialTerms,
+  saasFollowUp,
   saasPayment,
   saasPaymentMethod,
   saasPlan,
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm"
+import { addDays as addCivilDays, dayStart, reportDayOf } from "./report-periods.js"
 import {
   confirmSaasPayment,
   createSaasCharge,
   monthEndUTC,
   monthKeyUTC,
   monthStartUTC,
+  rejectSaasReceipt,
   settleSaasCommissions,
   startSaasTrial,
   submitSaasReceipt,
   upsertSaasSeller,
 } from "./saas-billing.js"
 import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
-import { invitationTokenHash } from "./saas-founders.js"
+import { FOUNDER_INVITATION_DAYS, invitationTokenHash } from "./saas-founders.js"
+import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID } from "./seed-admin-core.js"
 import type { Storage } from "./storage.js"
 
 /**
@@ -269,6 +274,8 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
 
 const DEMO_ACTOR = "seed-saas-demo"
 const DEMO_SELLER_USER = "seed-saas-demo-seller"
+const DAY = 86_400_000
+const HOUR = 3_600_000
 
 /** PNG 1x1 real para el comprobante demo (pasa la verificación por bytes). */
 const DEMO_PNG = Buffer.from(
@@ -281,6 +288,38 @@ async function ensureDemoOrg(db: Db, id: string, name: string, slug: string): Pr
     .insert(organization)
     .values({ id, name, slug, createdAt: new Date() })
     .onConflictDoNothing({ target: organization.id })
+}
+
+/**
+ * Una clínica de la semilla que ya terminó su alta: con su perfil y sus sedes,
+ * así no cuenta en «Altas por completar» (sin perfil o sin sede). Pone solo lo
+ * que falta: una base sembrada antes, con la clínica sin perfil ni sede, los
+ * recibe en la corrida siguiente, y lo que alguien editó no se toca.
+ */
+async function ensureFinishedSignupOrg(
+  db: Db,
+  clinic: { id: string; name: string; slug: string; branches: readonly string[] },
+): Promise<void> {
+  await ensureDemoOrg(db, clinic.id, clinic.name, clinic.slug)
+  await db
+    .insert(orgProfile)
+    .values({
+      organizationId: clinic.id,
+      legalName: `${clinic.name} S.A.C.`,
+      tradeName: clinic.name,
+      countryCode: "PE",
+      currency: "PEN",
+      locale: "es-PE",
+      timezone: "America/Lima",
+      diagnosisSystem: "ICD-10",
+    })
+    .onConflictDoNothing({ target: orgProfile.organizationId })
+  const [anyBranch] = await db
+    .select({ id: branch.id })
+    .from(branch)
+    .where(eq(branch.organizationId, clinic.id))
+    .limit(1)
+  if (!anyBranch) await db.insert(branch).values(clinic.branches.map((name) => ({ organizationId: clinic.id, name })))
 }
 
 /**
@@ -318,13 +357,17 @@ export async function seedSaasBillingDemo(
   await ensureDemoOrg(db, "seed-saas-prueba", "Demo Prueba (ficticia)", "saas-demo-prueba")
   await startSaasTrial(db, "seed-saas-prueba", { planCode: ACTION_PLAN.code }, now)
 
-  await ensureDemoOrg(db, "seed-saas-deuda", "Demo Deuda (ficticia)", "saas-demo-deuda")
+  // Las dos que pagan ya terminaron su alta: la que sigue incompleta es «Demo Prueba», con la
+  // propietaria sin aceptar (`seed-admin-organizations.ts`).
+  await ensureFinishedSignupOrg(db, { id: "seed-saas-deuda", name: "Demo Deuda (ficticia)", slug: "saas-demo-deuda", branches: ["Sede Principal"] })
   await startSaasTrial(
     db,
     "seed-saas-deuda",
     { planCode: ACTION_PLAN.code, sellerId: seller.id, billingStart: "now" },
     now,
   )
+  // El comprobante pendiente demo.png es el que rechaza la QA. Si ya lo rechazó, la semilla
+  // vuelve a dejar uno en el cargo del mes que sigue sin pagar, sin abrir otro cargo.
   const dueCharge = await db
     .select({ id: saasPayment.id })
     .from(saasPayment)
@@ -333,11 +376,31 @@ export async function seedSaasBillingDemo(
     )
     .limit(1)
   if (dueCharge.length === 0) {
-    const charge = await createSaasCharge(db, "seed-saas-deuda", DEMO_ACTOR, {
-      planCode: ACTION_PLAN.code,
-      periodStart: monthStartUTC(now),
-      periodEnd: monthEndUTC(now),
-    })
+    const [open] = await db
+      .select({ id: saasCharge.id, amountCents: saasCharge.amountCents, paidCents: saasCharge.paidCents })
+      .from(saasCharge)
+      .where(
+        and(
+          eq(saasCharge.organizationId, "seed-saas-deuda"),
+          eq(saasCharge.periodStart, monthStartUTC(now)),
+          inArray(saasCharge.status, ["pendiente", "parcial"]),
+          isNull(saasCharge.voidedAt),
+        ),
+      )
+      .orderBy(desc(saasCharge.createdAt))
+      .limit(1)
+    const charge =
+      open ??
+      (await createSaasCharge(db, "seed-saas-deuda", DEMO_ACTOR, {
+        planCode: ACTION_PLAN.code,
+        periodStart: monthStartUTC(now),
+        periodEnd: monthEndUTC(now),
+      }))
+    const [earlier] = await db
+      .select({ total: count() })
+      .from(saasPayment)
+      .where(and(eq(saasPayment.organizationId, "seed-saas-deuda"), eq(saasPayment.chargeId, charge.id)))
+    const tries = earlier?.total ?? 0
     await submitSaasReceipt(
       db,
       { storage },
@@ -346,19 +409,20 @@ export async function seedSaasBillingDemo(
       {
         chargeId: charge.id,
         methodCode: "transferencia-ficticia",
-        amountCents: charge.amountCents,
+        amountCents: charge.amountCents - charge.paidCents,
         receipt: {
           bytes: new Uint8Array(DEMO_PNG),
           contentType: "image/png",
           filename: "demo.png",
         },
-        idempotencyKey: `demo-deuda-${monthKey}`,
+        // La clave del primero no cambia: con ella, volver a sembrar no repite el comprobante.
+        idempotencyKey: tries === 0 ? `demo-deuda-${monthKey}` : `demo-deuda-${monthKey}-${tries + 1}`,
       },
       now,
     )
   }
 
-  await ensureDemoOrg(db, "seed-saas-cobrada", "Demo Cobrada (ficticia)", "saas-demo-cobrada")
+  await ensureFinishedSignupOrg(db, { id: "seed-saas-cobrada", name: "Demo Cobrada (ficticia)", slug: "saas-demo-cobrada", branches: ["Sede Principal"] })
   await startSaasTrial(
     db,
     "seed-saas-cobrada",
@@ -381,6 +445,39 @@ export async function seedSaasBillingDemo(
       periodStart: monthStartUTC(now),
       periodEnd: monthEndUTC(now),
     })
+    // Hace dos días subió una captura donde no se leía la operación; Ada la rechazó ayer y la
+    // clínica subió otra, que se confirmó: «Rechazado: …» en los dos historiales.
+    const blurry = await submitSaasReceipt(
+      db,
+      { storage },
+      "seed-saas-cobrada",
+      DEMO_ACTOR,
+      {
+        chargeId: charge.id,
+        methodCode: "transferencia-ficticia",
+        amountCents: charge.amountCents,
+        receipt: {
+          bytes: new Uint8Array(DEMO_PNG),
+          contentType: "image/png",
+          filename: "captura-transferencia.png",
+        },
+        idempotencyKey: `demo-cobrada-rechazado-${monthKey}`,
+      },
+      new Date(now.getTime() - 2 * DAY),
+    )
+    // La fecha de subida va antes de rechazarlo: un comprobante rechazado ya no cambia.
+    await db
+      .update(saasPayment)
+      .set({ createdAt: new Date(now.getTime() - 2 * DAY) })
+      .where(and(eq(saasPayment.id, blurry.id), eq(saasPayment.status, "pendiente")))
+    await rejectSaasReceipt(
+      db,
+      "seed-saas-cobrada",
+      SEED_STAFF_ADMIN_ID,
+      blurry.id,
+      "La captura no muestra el número de operación ni la fecha.",
+      new Date(now.getTime() - DAY),
+    )
     const receipt = await submitSaasReceipt(
       db,
       { storage },
@@ -417,47 +514,188 @@ export async function seedSaasBillingDemo(
  * en el panel con el correo `fundadora-demo@example.test`. Solo desarrollo.
  */
 export const DEMO_FOUNDER_TOKEN = "fundadores-demo"
+/** El enlace de la invitación que ya venció: no abre nada; da la etapa «Invitación vencida». */
+const DEMO_EXPIRED_TOKEN = "fundadores-demo-vencida"
 
-const DEMO_WAITLIST = [
+/** Los seguimientos vuelven un día de Lima, el de la administración. */
+const LIMA = "America/Lima"
+
+/** El día de Lima a `offset` días de hoy (`YYYY-MM-DD`). */
+function limaDay(now: Date, offset: number): string {
+  return addCivilDays(reportDayOf(LIMA, now), offset)
+}
+
+/** Hace `daysAgo` días de Lima, a esa hora de Lima; nunca después de ahora. */
+function limaAt(now: Date, daysAgo: number, hour: number): Date {
+  const [year, month, day] = limaDay(now, -daysAgo).split("-").map(Number) as [number, number, number]
+  return new Date(Math.min(dayStart(LIMA, year, month, day).getTime() + hour * HOUR, now.getTime() - 60_000))
+}
+
+interface DemoRequest {
+  email: string
+  firstName: string
+  lastName: string
+  clinicName: string
+  countryCode: string
+  city: string
+  professionals: string
+  currentTool: string
+  phone: string
+  product?: "medical"
+  status: SaasWaitlistStatus
+  /** Hace cuántos días llegó. La que entró: cuántos días antes de entrar. */
+  ageDays: number
+  /** Invitada: su enlace y en cuántas horas vence (negativas: ya venció). */
+  invite?: { token: string; expiresInHours: number }
+  /** Entró: la clínica de la semilla que abrió (entró el día en que se creó) y el plan con que se la invitó. */
+  entered?: { organizationId: string; planCode: string }
+  discardReason?: string
+}
+
+const DEMO_WAITLIST: readonly DemoRequest[] = [
   { email: "sonrisa-demo@example.test", firstName: "Ana", lastName: "Quispe (ficticia)", clinicName: "Clínica Sonrisa (ficticia)", countryCode: "PE", city: "Arequipa", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+51987654321", status: "por_revisar", ageDays: 0 },
-  { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", professionals: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 1 },
+  { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", professionals: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 2 },
   { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", professionals: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
-  { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 3 },
+  // Vence dentro de 3 días: Inicio la muestra, y el cajón ofrece «Reenviar por correo…».
+  { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 12, invite: { token: DEMO_FOUNDER_TOKEN, expiresInHours: 3 * 24 - 1 } },
+  { email: "piura-demo@example.test", firstName: "Jorge", lastName: "Paredes (ficticio)", clinicName: "Dental Piura (ficticia)", countryCode: "PE", city: "Piura", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+51934567890", status: "invitada", ageDays: 20, invite: { token: DEMO_EXPIRED_TOKEN, expiresInHours: -4 * 24 } },
   // Una de latidIA: se invita con Fundadores latidIA y gasta sus propios lugares (ADR 0093).
-  { email: "latido-demo@example.test", firstName: "Elena", lastName: "Torres (ficticia)", clinicName: "Consultorio Latido (ficticio)", countryCode: "PE", city: "Lima", professionals: "1", currentTool: "cuaderno_excel", phone: "+51923456789", status: "por_revisar", ageDays: 2, product: "medical" },
-  { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", professionals: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8 },
-] as const
+  { email: "latido-demo@example.test", firstName: "Elena", lastName: "Torres (ficticia)", clinicName: "Consultorio Latido (ficticio)", countryCode: "PE", city: "Lima", professionals: "1", currentTool: "cuaderno_excel", phone: "+51923456789", status: "por_revisar", ageDays: 3, product: "medical" },
+  { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", professionals: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8, discardReason: "Vende insumos dentales, no es una clínica (ficticio)." },
+  // Cora, la dueña de Clínica Norte (`dental/seed-demo.ts`), entró con su invitación y sigue en
+  // prueba: la etapa «Entró». Esa demo borra y recrea la clínica; aquí se vuelve a unir.
+  { email: "cora@odentia.dev", firstName: "Cora", lastName: "Vega", clinicName: "Clínica Norte", countryCode: "PE", city: "Lima", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+51956789012", status: "entro", ageDays: 5, entered: { organizationId: "seed-org-clinica-norte", planCode: FOUNDERS_PLAN.code } },
+  // Entró con el plan de lista y ya tiene un pago confirmado: la etapa «Paga».
+  { email: "cobrada-demo@example.test", firstName: "Marta", lastName: "Quiroz (ficticia)", clinicName: "Demo Cobrada (ficticia)", countryCode: "PE", city: "Lima", professionals: "4-9", currentTool: "otro_software", phone: "+51945678901", status: "entro", ageDays: 6, entered: { organizationId: "seed-saas-cobrada", planCode: ACTION_PLAN.code } },
+]
 
 /**
- * Fundadores en desarrollo: solicitudes de la lista de espera en cada estado
- * (por revisar, invitada con el enlace de la semilla, descartada) y un precio
- * negociado que vence en 6 días en «Demo Deuda» (issue 168). Idempotente por
- * correo; no envía correos.
+ * Lo anotado en el seguimiento de las solicitudes por Ada (administración) y
+ * Sofía (soporte): hace `daysAgo` días, a `hour` de Lima, y para volver a
+ * `followUpIn` días de hoy (nulo: sin fecha). Ids fijos: cada corrida lo
+ * vuelve a escribir.
+ */
+const DEMO_FOLLOW_UPS = [
+  { id: "00000000-0000-4000-8000-00000000f501", email: "latido-demo@example.test", authorUserId: SEED_STAFF_SUPPORT_ID, daysAgo: 2, hour: 10, followUpIn: -1, adminOnly: false, body: "No contestó. Volver a llamar por la tarde." },
+  { id: "00000000-0000-4000-8000-00000000f502", email: "fundadora-demo@example.test", authorUserId: SEED_STAFF_ADMIN_ID, daysAgo: 1, hour: 11, followUpIn: 0, adminOnly: false, body: "Lo ve con su socia y avisa esta semana." },
+  { id: "00000000-0000-4000-8000-00000000f503", email: "andes-demo@example.test", authorUserId: SEED_STAFF_SUPPORT_ID, daysAgo: 1, hour: 16, followUpIn: null, adminOnly: false, body: "Escribió por WhatsApp: usa otro programa y pregunta si podemos traer sus pacientes." },
+  { id: "00000000-0000-4000-8000-00000000f504", email: "andes-demo@example.test", authorUserId: SEED_STAFF_ADMIN_ID, daysAgo: 0, hour: 9, followUpIn: 1, adminOnly: false, body: "Le conté que cargamos sus pacientes desde lo que exporta su programa. Lo habla con su equipo y me confirma mañana." },
+  // Un precio es de Administración: soporte ve que hay una entrada y su fecha, no el texto.
+  { id: "00000000-0000-4000-8000-00000000f505", email: "cobrada-demo@example.test", authorUserId: SEED_STAFF_ADMIN_ID, daysAgo: 1, hour: 15, followUpIn: 0, adminOnly: true, body: "Pide precio especial si suma una segunda sede: responderle antes del próximo cobro." },
+  // La «Nota del equipo» de antes, sin autor (la trasladó la migración 0101): no es un contacto,
+  // así que OdontoVida sigue en «Prospectos por responder» con su plazo.
+  { id: "00000000-0000-4000-8000-00000000f506", email: "odontovida-demo@example.test", authorUserId: null, daysAgo: 4, hour: 12, followUpIn: null, adminOnly: false, fromNote: true, body: "Pedirle a Ada que la llame: pregunta por el plan anual." },
+] as const
+
+/** Las fechas de una solicitud, relativas a hoy; las de la que entró, a su clínica. */
+function requestDates(row: DemoRequest, now: Date, enteredAt: Date | null) {
+  if (enteredAt) {
+    const invitedAt = new Date(enteredAt.getTime() - 2 * DAY)
+    return {
+      createdAt: new Date(enteredAt.getTime() - row.ageDays * DAY),
+      updatedAt: enteredAt,
+      invitedAt,
+      inviteExpiresAt: new Date(invitedAt.getTime() + FOUNDER_INVITATION_DAYS * DAY),
+      enteredAt,
+    }
+  }
+  const createdAt = new Date(now.getTime() - row.ageDays * DAY)
+  if (!row.invite) return { createdAt, updatedAt: createdAt }
+  const inviteExpiresAt = new Date(now.getTime() + row.invite.expiresInHours * HOUR)
+  return {
+    createdAt,
+    updatedAt: createdAt,
+    invitedAt: new Date(inviteExpiresAt.getTime() - FOUNDER_INVITATION_DAYS * DAY),
+    inviteExpiresAt,
+  }
+}
+
+/**
+ * Fundadores en desarrollo: solicitudes de la lista de espera en cada etapa
+ * (por revisar, invitada con el enlace de la semilla y por vencer, invitación
+ * vencida, entró, paga y descartada), su seguimiento y un precio negociado que
+ * vence en 6 días en «Demo Deuda» (issue 168). Idempotente por correo: lo ya
+ * sembrado vuelve a tener fechas de hoy mientras siga como lo dejó la semilla.
+ * No envía correos.
  */
 export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> {
-  const [plan] = await db.select({ id: saasPlan.id }).from(saasPlan).where(eq(saasPlan.code, FOUNDERS_PLAN.code)).limit(1)
-  if (!plan) return
+  const plans = await db
+    .select({ id: saasPlan.id, code: saasPlan.code })
+    .from(saasPlan)
+    .where(inArray(saasPlan.code, [FOUNDERS_PLAN.code, ACTION_PLAN.code]))
+  const planOf = (code: string) => plans.find((plan) => plan.code === code)?.id
+  const foundersPlanId = planOf(FOUNDERS_PLAN.code)
+  if (!foundersPlanId) return
+  const orgs = await db
+    .select({ id: organization.id, createdAt: organization.createdAt })
+    .from(organization)
+    .where(inArray(organization.id, DEMO_WAITLIST.flatMap((row) => (row.entered ? [row.entered.organizationId] : []))))
   for (const row of DEMO_WAITLIST) {
-    const [found] = await db.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, row.email)).limit(1)
-    if (found) continue
-    const createdAt = new Date(now.getTime() - row.ageDays * 86_400_000)
-    const { ageDays: _ageDays, status, ...data } = row
-    await db.insert(saasWaitlistRequest).values({
-      ...data,
-      status,
-      createdAt,
-      updatedAt: createdAt,
-      ...(status === "invitada"
-        ? {
-            planId: plan.id,
-            tokenHash: invitationTokenHash(DEMO_FOUNDER_TOKEN),
-            invitedAt: createdAt,
-            inviteExpiresAt: new Date(createdAt.getTime() + 14 * 86_400_000),
-          }
-        : {}),
-      ...(status === "descartada" ? { discardReason: "Vende insumos dentales, no es una clínica (ficticio)." } : {}),
-    })
+    const { ageDays: _ageDays, invite, entered, discardReason, status, ...data } = row
+    const org = entered ? orgs.find((item) => item.id === entered.organizationId) : undefined
+    const planId = entered ? planOf(entered.planCode) : invite ? foundersPlanId : undefined
+    // Sin su clínica (la semilla corrió sin la demo de la clínica) no entró a ninguna.
+    if (entered && (!org || !planId)) continue
+    const tokenHash = invite ? invitationTokenHash(invite.token) : undefined
+    const state = {
+      ...requestDates(row, now, org?.createdAt ?? null),
+      ...(planId ? { planId } : {}),
+      ...(tokenHash ? { tokenHash } : {}),
+      ...(org ? { organizationId: org.id } : {}),
+    }
+    const [found] = await db
+      .select({ id: saasWaitlistRequest.id })
+      .from(saasWaitlistRequest)
+      .where(eq(saasWaitlistRequest.email, row.email))
+      .limit(1)
+    if (!found) {
+      await db.insert(saasWaitlistRequest).values({ ...data, status, ...state, ...(discardReason ? { discardReason } : {}) })
+      continue
+    }
+    // Ya sembrada: solo si sigue como la dejó la semilla (la invitación, con su enlace).
+    await db
+      .update(saasWaitlistRequest)
+      .set(state)
+      .where(
+        and(
+          eq(saasWaitlistRequest.id, found.id),
+          eq(saasWaitlistRequest.status, status),
+          tokenHash ? eq(saasWaitlistRequest.tokenHash, tokenHash) : undefined,
+        ),
+      )
   }
+
+  // El seguimiento solo se agrega (`saas_follow_up_append_only`): lo de la semilla se borra
+  // por su id y se vuelve a escribir con las fechas de hoy; lo que anotó una persona queda.
+  const staff = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(inArray(user.id, [SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID]))
+  if (staff.length === 2) {
+    const requests = await db
+      .select({ id: saasWaitlistRequest.id, email: saasWaitlistRequest.email })
+      .from(saasWaitlistRequest)
+      .where(inArray(saasWaitlistRequest.email, DEMO_FOLLOW_UPS.map((entry) => entry.email)))
+    await db.delete(saasFollowUp).where(inArray(saasFollowUp.id, DEMO_FOLLOW_UPS.map((entry) => entry.id)))
+    const entries = DEMO_FOLLOW_UPS.flatMap((entry) => {
+      const requestId = requests.find((request) => request.email === entry.email)?.id
+      if (!requestId) return []
+      return [
+        {
+          id: entry.id,
+          requestId,
+          authorUserId: entry.authorUserId,
+          body: entry.body,
+          followUpOn: entry.followUpIn === null ? null : limaDay(now, entry.followUpIn),
+          adminOnly: entry.adminOnly,
+          fromNote: "fromNote" in entry ? entry.fromNote : false,
+          createdAt: limaAt(now, entry.daysAgo, entry.hour),
+        },
+      ]
+    })
+    if (entries.length > 0) await db.insert(saasFollowUp).values(entries)
+  }
+
   // Precio negociado que vence pronto: la etiqueta roja de Clínicas y el aviso de Inicio.
   await db
     .update(saasSubscription)
@@ -486,18 +724,7 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
   for (const clinic of clinics) {
     const [exists] = await db.select({ id: organization.id }).from(organization).where(eq(organization.id, clinic.id)).limit(1)
     if (!exists) {
-      await ensureDemoOrg(db, clinic.id, clinic.name, clinic.slug)
-      await db.insert(orgProfile).values({
-        organizationId: clinic.id,
-        legalName: `${clinic.name} S.A.C.`,
-        tradeName: clinic.name,
-        countryCode: "PE",
-        currency: "PEN",
-        locale: "es-PE",
-        timezone: "America/Lima",
-        diagnosisSystem: "ICD-10",
-      })
-      await db.insert(branch).values(clinic.branches.map((name) => ({ organizationId: clinic.id, name })))
+      await ensureFinishedSignupOrg(db, clinic)
       await startSaasTrial(db, clinic.id, { planCode: "odentia-ficticio", billingStart: "now" }, now)
     }
     // También en una clínica que ya existía: Ana y Luis se recrean en cada corrida.

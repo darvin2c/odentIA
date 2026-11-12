@@ -401,7 +401,7 @@ async function storeConsentPdf(
   const { run, storage, orgId, userId, consentId } = input
   const doc = data.document
   // La hoja membretada de cuando se firmó (por enlace, cuando firmó la persona); la de
-  // la revocación, la de cuando se revocó: cada papel, la de su momento (ADR 0181).
+  // la revocación, la de cuando se revocó: cada papel, la de su momento (ADR 0182).
   const at = kind === "revocado" ? doc.revokedAt : (doc.personSignedAt ?? doc.signedAt)
   const { clinic, checkUrl } = await run(async (tx) => ({
     clinic: await loadDocumentClinic(tx, orgId, { at }),

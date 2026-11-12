@@ -1,5 +1,5 @@
 /**
- * La hoja membretada de una clínica de demostración (ADR 0181), inventada aquí: su
+ * La hoja membretada de una clínica de demostración (ADR 0182), inventada aquí: su
  * nombre arriba con una línea de color, una marca de agua clara en el centro y su
  * web abajo, sin datos de una persona. Se arma con el mismo dibujo en PDF (lo que va
  * de fondo en los papeles) y en PNG (sus franjas para la hoja que se firma en

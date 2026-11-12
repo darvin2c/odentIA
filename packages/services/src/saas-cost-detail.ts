@@ -80,8 +80,11 @@ export interface CostActionList {
   professionals: Array<{ id: string; name: string; count: number }>
   channels: Array<{ channel: string; count: number }>
   askers: Array<{ name: string; count: number }>
-  /** El costo de IA de cada día del tramo, en la zona de la clínica; `ahead`: aún no llega. */
-  days: Array<{ day: string; costMicros: number; ahead: boolean }>
+  /**
+   * El costo de IA de cada día del tramo, en la zona de la clínica; `ahead`: aún no
+   * llega; `today`: es hoy, el único que va «hasta hoy».
+   */
+  days: Array<{ day: string; costMicros: number; ahead: boolean; today: boolean }>
   /** Preguntas del mes que cuentan y las incluidas en el plan. */
   questions: { counted: number; included: number; free: number }
 }
@@ -673,11 +676,11 @@ export async function listClinicCostActions(
   ) {
     const day = dayOf(new Date(at))
     if (days.at(-1)?.day === day) continue
-    days.push({ day, costMicros: cost.get(day) ?? 0, ahead: day > today })
+    days.push({ day, costMicros: cost.get(day) ?? 0, ahead: day > today, today: day === today })
   }
   const last = dayOf(new Date(context.period.end.getTime() - 1))
   if (days.at(-1)?.day !== last)
-    days.push({ day: last, costMicros: cost.get(last) ?? 0, ahead: last > today })
+    days.push({ day: last, costMicros: cost.get(last) ?? 0, ahead: last > today, today: last === today })
 
   // Una página que ya no existe (otro mes, otro filtro) muestra la última.
   const page = Math.min(

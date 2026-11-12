@@ -7,11 +7,13 @@ import type { AdminActor } from "./admin-core.js"
 import {
   createAccessSupportCase,
   getMySupportCase,
+  grantSupportAccess,
   listMySupportCases,
   markSupportCaseSeen,
   replyToAccountSupportCase,
   replyToMySupportCase,
   replyToSupportCase,
+  requestSupportAccess,
   setSupportCaseStatus,
 } from "./admin-support.js"
 import { sendHelpRequest } from "./help.js"
@@ -102,6 +104,92 @@ describe("a soporte", () => {
     expect(rows.map((row) => row.kind).sort()).toEqual(["caso_nuevo"])
     const claimed = await claimSupportNotice(ownerDb, rows[0]!.id)
     expect(claimed).toMatchObject({ kind: "caso_nuevo", to: null, clinicName: null, caseKind: "acceso" })
+  })
+})
+
+describe("cuando soporte pide el acceso de diagnóstico", () => {
+  it("«necesita algo» sale a quien abrió y a quienes lo autorizan, uno por persona", async () => {
+    const kase = await ask("No puedo imprimir el ticket desde Caja", LUIS)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const t0 = await lastAnswerOf(kase.id)
+    await tickSupportNotices(ownerDb, new Date(t0 + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    const rows = await personNoticesOf(kase.id)
+    expect(rows.map((row) => `${row.kind}:${row.recipientUserId}`).sort()).toEqual(
+      [`necesita_algo:${ANA}`, `necesita_algo:${LUIS}`, `necesita_algo:${OWNER}`].sort(),
+    )
+    // Otra vuelta, horas después, no le repite a nadie el mismo pedido.
+    await tickSupportNotices(ownerDb, new Date(t0 + 3 * SUPPORT_REPLY_NOTICE_GAP_MS))
+    expect(await personNoticesOf(kase.id)).toHaveLength(3)
+    // La propietaria lo recibe aunque no haya abierto el caso.
+    const forOwner = rows.find((row) => row.recipientUserId === OWNER)
+    // Su correo pide la autorización y nombra a quien abrió el caso; el de quien abrió no.
+    expect(await claimSupportNotice(ownerDb, forOwner!.id)).toMatchObject({
+      kind: "necesita_algo",
+      to: "duena@notice.test",
+      who: "Luis Caja",
+      toGranter: true,
+    })
+    const forLuis = rows.find((row) => row.recipientUserId === LUIS)
+    expect(await claimSupportNotice(ownerDb, forLuis!.id)).toMatchObject({ kind: "necesita_algo", to: "luis@notice.test", toGranter: false })
+  })
+
+  it("«La clínica respondió» dice quién actuó y qué hizo: la propietaria que autoriza no es quien abrió", async () => {
+    const kase = await ask("La agenda no me deja mover citas", LUIS)
+    const sendInbox = async () => {
+      for (const row of (await noticesOf(kase.id)).filter((notice) => notice.recipientUserId === null && notice.emailState === "pendiente")) {
+        const claimed = await claimSupportNotice(ownerDb, row.id)
+        await completeSupportNotice(ownerDb, row.id, true)
+        if (row.kind === "clinica_respondio") return claimed
+      }
+      return null
+    }
+    // El de «Caso nuevo» es de quien abrió y no dice ningún hecho.
+    expect(await sendInbox()).toBeNull()
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const grant = await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
+    const granted = await sendInbox()
+    expect(granted).toMatchObject({
+      kind: "clinica_respondio",
+      who: "Luis Caja",
+      acted: { who: "Dueña", role: "Propietario", act: { kind: "autorizo", until: new Date(grant.expiresAt) } },
+    })
+    // Luis escribe después: el aviso lo nombra a él.
+    await run((tx) => replyToMySupportCase(tx, ORG, LUIS, kase.id, "Ya pueden entrar"))
+    expect(await sendInbox()).toMatchObject({ acted: { who: "Luis Caja", act: { kind: "escribio" } } })
+  })
+
+  it("autorizado el acceso, lo que soporte pida después es solo de quien preguntó", async () => {
+    const kase = await ask("El ticket sale sin el logo", LUIS)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const t0 = await lastAnswerOf(kase.id)
+    await tickSupportNotices(ownerDb, new Date(t0 + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    expect(await personNoticesOf(kase.id)).toHaveLength(3)
+    // La propietaria autoriza: el aviso que aún no salió a la administradora ya no sale.
+    await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
+    const forAna = (await personNoticesOf(kase.id)).find((row) => row.recipientUserId === ANA)
+    expect(await claimSupportNotice(ownerDb, forAna!.id)).toBeNull()
+    expect((await run((tx) => getMySupportCase(tx, ORG, LUIS, kase.id))).accessRequestPending).toBe(false)
+
+    // Días después soporte le pide una captura a Luis: no es un pedido para quienes autorizan.
+    await setSupportCaseStatus(ownerDb, staff, kase.id, "esperando_clinica")
+    const t2 = await lastAnswerOf(kase.id)
+    // Pasada la hora del aviso anterior, así el tope por persona no frena a nadie.
+    await tickSupportNotices(ownerDb, new Date(t2 + SUPPORT_REPLY_NOTICE_GAP_MS + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    const after = (await personNoticesOf(kase.id)).filter((row) => row.dedupeKey.includes(`:${t2}`))
+    expect(after.map((row) => `${row.kind}:${row.recipientUserId}`)).toEqual([`necesita_algo:${LUIS}`])
+  })
+
+  it("si la propietaria abre el caso, quien preguntó no pierde su no leído ni su correo", async () => {
+    const kase = await ask("No me deja guardar el horario", LUIS)
+    await requestSupportAccess(ownerDb, staff, kase.id)
+    const t0 = await lastAnswerOf(kase.id)
+    await run((tx) => getMySupportCase(tx, ORG, OWNER, kase.id))
+    await run((tx) => markSupportCaseSeen(tx, ORG, OWNER, kase.id))
+    expect((await run((tx) => listMySupportCases(tx, ORG, LUIS))).find((item) => item.id === kase.id)?.unread).toBe(true)
+
+    await tickSupportNotices(ownerDb, new Date(t0 + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))
+    const forLuis = (await personNoticesOf(kase.id)).find((row) => row.recipientUserId === LUIS)
+    expect(await claimSupportNotice(ownerDb, forLuis!.id)).toMatchObject({ kind: "necesita_algo", to: "luis@notice.test" })
   })
 })
 

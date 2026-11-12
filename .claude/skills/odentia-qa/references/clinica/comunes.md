@@ -250,8 +250,8 @@ No tiene camino en el código.
 - [ ] Si la hoja dice el nombre o la colegiatura de una persona, la receta de otro profesional no deja dudas de quién receta (riesgo aceptado: una sola hoja por clínica; se avisa al subirla).
 
 **Ya falló:** con 45 mm a cada lado, el bloque de firma salía letra por letra en la página 2; el odontograma impreso dejaba la parte de abajo de la hoja a media página (QA del 11 nov, corregidos antes de unir).
-**Huecos conocidos:** no hay hoja por profesional (ADR 0181).
-**Fuentes:** ADR 0115, 0132, 0148 y 0181; Manual de Buenas Prácticas de Prescripción (DIGEMID-MINSA) para los datos del prescriptor.
+**Huecos conocidos:** no hay hoja por profesional (ADR 0182).
+**Fuentes:** ADR 0115, 0132, 0148 y 0182; Manual de Buenas Prácticas de Prescripción (DIGEMID-MINSA) para los datos del prescriptor.
 
 ---
 

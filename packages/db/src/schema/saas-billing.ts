@@ -4,6 +4,7 @@ import {
   boolean,
   char,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -60,7 +61,7 @@ export const SAAS_CHARGE_STATUSES = [
 ] as const
 export type SaasChargeStatus = (typeof SAAS_CHARGE_STATUSES)[number]
 
-export const SAAS_PAYMENT_STATUSES = ["pendiente", "confirmado", "reversado", "devuelto"] as const
+export const SAAS_PAYMENT_STATUSES = ["pendiente", "confirmado", "reversado", "devuelto", "rechazado"] as const
 export type SaasPaymentStatus = (typeof SAAS_PAYMENT_STATUSES)[number]
 
 /** Plan comercial por moneda. Lo configura admin; sin valores productivos en código. */
@@ -344,6 +345,11 @@ export const saasCharge = pgTable(
  * Pago/comprobante de un cargo. `pendiente` = comprobante aportado por la
  * clínica a la espera de confirmación admin. El objeto del comprobante vive
  * en el bucket PRIVADO de adjuntos (URL firmada, nunca pública).
+ *
+ * `rechazado` = la administración no pudo confirmar el comprobante: guarda
+ * quién, cuándo y el motivo que ve la clínica. Tiene su propio estado y no
+ * reutiliza `reversado`, que es dinero que entró y se deshizo. Es final
+ * (`saas_payment_immutable`): corregirlo es registrar el pago en el cargo.
  */
 export const saasPayment = pgTable(
   "saas_payment",
@@ -367,6 +373,9 @@ export const saasPayment = pgTable(
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
     reversedBy: text("reversed_by"),
     reverseReason: text("reverse_reason"),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+    rejectedBy: text("rejected_by"),
+    rejectReason: text("reject_reason"),
     ...timestamps,
   },
   (table) => [
@@ -376,6 +385,7 @@ export const saasPayment = pgTable(
     foreignKey({ name: "saas_payment_created_by_fkey", columns: [table.createdBy], foreignColumns: [user.id] }),
     foreignKey({ name: "saas_payment_confirmed_by_fkey", columns: [table.confirmedBy], foreignColumns: [user.id] }),
     foreignKey({ name: "saas_payment_reversed_by_fkey", columns: [table.reversedBy], foreignColumns: [user.id] }),
+    foreignKey({ name: "saas_payment_rejected_by_fkey", columns: [table.rejectedBy], foreignColumns: [user.id] }),
     index("saas_payment_org_charge_idx").on(table.organizationId, table.chargeId),
     index("saas_payment_org_status_idx").on(table.organizationId, table.status),
     foreignKey({
@@ -386,7 +396,15 @@ export const saasPayment = pgTable(
     check("saas_payment_amount_check", sql`${table.amountCents} > 0`),
     check(
       "saas_payment_status_check",
-      sql`${table.status} IN ('pendiente','confirmado','reversado','devuelto')`,
+      sql`${table.status} IN ('pendiente','confirmado','reversado','devuelto','rechazado')`,
+    ),
+    // Rechazado lleva quién, cuándo y un motivo de 1 a 500 caracteres; los demás estados, nada de eso.
+    check(
+      "saas_payment_rejection_check",
+      sql`CASE WHEN ${table.status} = 'rechazado'
+        THEN ${table.rejectedAt} IS NOT NULL AND ${table.rejectedBy} IS NOT NULL
+          AND length(trim(coalesce(${table.rejectReason}, ''))) BETWEEN 1 AND 500
+        ELSE ${table.rejectedAt} IS NULL AND ${table.rejectedBy} IS NULL AND ${table.rejectReason} IS NULL END`,
     ),
   ],
 )
@@ -964,5 +982,43 @@ export const saasWaitlistRequest = adminSchema.table(
         OR (${table.status} = 'entro' AND ${table.planId} IS NOT NULL AND ${table.enteredAt} IS NOT NULL)
         OR (${table.status} = 'descartada' AND ${table.organizationId} IS NULL AND length(trim(coalesce(${table.discardReason}, ''))) > 0)`,
     ),
+  ],
+)
+
+/**
+ * Bitácora del seguimiento de un prospecto: cada contacto con la clínica es
+ * una entrada, de una solicitud de la lista de espera o (en la entrega
+ * siguiente) de una clínica, nunca de las dos. Las entradas solo se agregan
+ * (`saas_follow_up_append_only`): lo único que cambia después es
+ * `admin_only`, de no a sí, y el autor a nulo cuando se borra a esa persona.
+ * La próxima acción es la fecha de la última entrada: `follow_up_on` es el
+ * día de Lima en que hay que volver a contactar; nula, no hay que volver.
+ * Autor nulo es «Nota anterior, sin autor registrado». Global y solo de
+ * `ownerDb`: sin `GRANT` al rol de la aplicación.
+ */
+export const saasFollowUp = adminSchema.table(
+  "saas_follow_up",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    requestId: uuid("request_id").references(() => saasWaitlistRequest.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id").references(() => organization.id, { onDelete: "cascade" }),
+    authorUserId: text("author_user_id").references(() => user.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    followUpOn: date("follow_up_on"),
+    /** Solo la ve el rol Administración, no Soporte. */
+    adminOnly: boolean("admin_only").notNull().default(false),
+    /**
+     * Viene de la «Nota del equipo» de antes (la migración 0101 o la ruta vieja
+     * de la nota): es una nota, no el registro de un contacto, así que no
+     * cuenta como haberle respondido.
+     */
+    fromNote: boolean("from_note").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("saas_follow_up_request_idx").on(table.requestId, table.createdAt),
+    index("saas_follow_up_org_idx").on(table.organizationId, table.createdAt),
+    check("saas_follow_up_subject_check", sql`num_nonnulls(${table.requestId}, ${table.organizationId}) = 1`),
+    check("saas_follow_up_body_check", sql`length(trim(${table.body})) BETWEEN 1 AND 2000`),
   ],
 )

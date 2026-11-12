@@ -3228,7 +3228,7 @@ export async function getConsentSheetFrame(
 export async function getBudgetSignFrame(
   tx: Db,
   orgId: string,
-  /** Con el presupuesto, la hoja membretada de cuando se entregó: la misma de su PDF (ADR 0181). */
+  /** Con el presupuesto, la hoja membretada de cuando se entregó: la misma de su PDF (ADR 0182). */
   budgetId?: string,
 ): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
   const [budget] = budgetId

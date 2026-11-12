@@ -86,7 +86,7 @@ test("la administración distingue el producto de cada clínica y filtra por él
     ["/commissions", "Comisiones"],
     ["/support", "Soporte"],
     ["/complaints", "Libro de Reclamaciones"],
-    ["/team", "Equipo y actividad"],
+    ["/team", "Equipo"],
   ] as const) {
     for (const dark of [false, true]) {
       await page.goto(`${ADMIN}${path}`)

@@ -19,7 +19,7 @@ function initialsOf(name: string): string {
 
 /**
  * El papel en pantalla: claro siempre, también con la app en oscuro (`theme-light`). Con
- * la hoja membretada de la clínica (ADR 0181) lleva su parte de arriba y la de abajo de
+ * la hoja membretada de la clínica (ADR 0182) lleva su parte de arriba y la de abajo de
  * borde a borde, como el PDF; el papel ya va centrado y del ancho de una hoja.
  */
 export function SheetPaper({

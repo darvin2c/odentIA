@@ -356,6 +356,36 @@ describe("cada acción con lo que nos costó", () => {
   })
 })
 
+describe("el costo por día", () => {
+  it("solo hoy, en la zona de la clínica, va «hasta hoy»; los que vienen todavía no llegan", async () => {
+    // Otra clínica con su mes fijo: 1 al 30 de noviembre en Lima. Son las 22:00 del 11 en
+    // Lima y ya es 12 en UTC.
+    const [plan] = await ownerDb.select().from(saasPlan).where(eq(saasPlan.code, "detalle"))
+    const month = {
+      status: "activa",
+      isDemo: false,
+      planId: plan!.id,
+      activatedAt: new Date("2026-11-01T05:00:00Z"),
+      currentPeriodStart: new Date("2026-11-01T05:00:00Z"),
+      currentPeriodEnd: new Date("2026-12-01T05:00:00Z"),
+    }
+    await ownerDb
+      .insert(saasSubscription)
+      .values({ organizationId: "org_b", ...month })
+      .onConflictDoUpdate({ target: saasSubscription.organizationId, set: month })
+    const { days } = await listClinicCostActions(ownerDb, "org_b", {
+      now: new Date("2026-11-12T03:00:00Z"),
+    })
+    const of = (day: string) => days.find((entry) => entry.day === day)
+    expect(days).toHaveLength(30)
+    expect(of("2026-11-10")).toMatchObject({ today: false, ahead: false })
+    expect(of("2026-11-11")).toMatchObject({ today: true, ahead: false })
+    expect(of("2026-11-12")).toMatchObject({ today: false, ahead: true })
+    expect(of("2026-11-30")).toMatchObject({ today: false, ahead: true })
+    expect(days.filter((entry) => entry.today).map((entry) => entry.day)).toEqual(["2026-11-11"])
+  })
+})
+
 describe("de qué se compone una acción", () => {
   it("Clío: cada pausa con lo que sugirió y lo que quedó confirmado", async () => {
     const detail = await getClinicCostActionDetail(ownerDb, ORG, { key: `a:${ids.clio}`, now })

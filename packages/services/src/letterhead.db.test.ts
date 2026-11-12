@@ -1,5 +1,5 @@
 /**
- * La hoja membretada (ADR 0181) en la base: cada cambio es una versión, cada papel usa
+ * La hoja membretada (ADR 0182) en la base: cada cambio es una versión, cada papel usa
  * la vigente cuando se emitió, «Deshacer» vuelve a ponerla y otra clínica no la ve.
  */
 import { randomUUID } from "node:crypto"

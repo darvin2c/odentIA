@@ -1,5 +1,5 @@
 /**
- * La hoja membretada de la clínica (ADR 0181). Se sube una vez y va de fondo en todos
+ * La hoja membretada de la clínica (ADR 0182). Se sube una vez y va de fondo en todos
  * sus papeles en hoja; cada vez que se sube, se ajusta o se quita queda una versión, y
  * cada papel usa la que la clínica tenía cuando se emitió o se firmó (`getLetterheadAt`).
  *

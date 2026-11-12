@@ -73,7 +73,7 @@ async function bytesOf(file: File): Promise<Uint8Array> {
 }
 
 /**
- * La hoja membretada de la clínica (ADR 0181), en Configuración › Datos de la clínica.
+ * La hoja membretada de la clínica (ADR 0182), en Configuración › Datos de la clínica.
  * La cambia quien configura la clínica (`settings.write`), como el logo.
  */
 export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {

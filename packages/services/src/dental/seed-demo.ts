@@ -634,7 +634,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, orgs))
   await db.delete(member).where(inArray(member.organizationId, orgs))
   await db.delete(invitation).where(inArray(invitation.organizationId, orgs))
-  // La hoja membretada (ADR 0181): sus versiones nombran a la clínica y a quien la subió.
+  // La hoja membretada (ADR 0182): sus versiones nombran a la clínica y a quien la subió.
   const previousLetterheads = await db
     .select({ key: clinicLetterhead.pdfKey })
     .from(clinicLetterhead)
@@ -948,7 +948,7 @@ const [miraflores] = await db
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
 await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", country: "PE" }])
-// Su hoja membretada (ADR 0181): la demo muestra la tarjeta con una hoja puesta y sus papeles sobre ella.
+// Su hoja membretada (ADR 0182): la demo muestra la tarjeta con una hoja puesta y sus papeles sobre ella.
 await seedDemoLetterhead(db, storage, {
   orgId: ORG_B,
   userId: CORA_ID,

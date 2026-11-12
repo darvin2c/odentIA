@@ -1,4 +1,4 @@
--- La hoja membretada de la clínica (ADR 0180): lo que TS no declara. Cada versión solo se
+-- La hoja membretada de la clínica (ADR 0182): lo que TS no declara. Cada versión solo se
 -- agrega; la aplicación solo puede marcarla como quitada (quién y cuándo), nunca borrarla
 -- ni cambiar su archivo o sus márgenes: un papel ya emitido la sigue leyendo.
 ALTER TABLE public.clinic_letterhead ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

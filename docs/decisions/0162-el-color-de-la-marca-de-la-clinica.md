@@ -25,7 +25,7 @@ Todas las clínicas se veían iguales: turquesa en odentIA y morado en latidIA. 
 
 - *Un tono legible para todo, también los botones.* Más simple, pero un amarillo o un celeste de marca quedaban mostaza o gris azulado: no se parecían a la marca.
 - *Solo muestras fijas.* No alcanzan el color real de una marca. Quedan como sugeridos, junto con los colores del logo, la paleta y el código.
-- *Que la clínica suba su membrete* (retomada en la [0181](0181-la-hoja-membretada-de-la-clinica.md), con los datos puestos desde Configuración). Dos fuentes de verdad para la dirección y el RUC, alturas que chocan con la hoja y un paso más en el alta. Se pide como referencia para sacar el color y los datos. La mesa de los pendientes (2026-11-08) lo volvió a dejar fuera: una imagen subida podía contradecir el RUC o la dirección en recetas, comprobantes y consentimientos firmados.
+- *Que la clínica suba su membrete* (retomada en la [0182](0182-la-hoja-membretada-de-la-clinica.md), con los datos puestos desde Configuración). Dos fuentes de verdad para la dirección y el RUC, alturas que chocan con la hoja y un paso más en el alta. Se pide como referencia para sacar el color y los datos. La mesa de los pendientes (2026-11-08) lo volvió a dejar fuera: una imagen subida podía contradecir el RUC o la dirección en recetas, comprobantes y consentimientos firmados.
 - *Un color por sede.* El color llega antes del primer pintado por el nombre de la clínica, que no dice la sede: habría que repintar al cambiar de sede y decidir el color de un papel de varias sedes. Ninguna clínica lo pidió.
 - *El color de la clínica en todos los correos.* Los de la cuenta no saben de qué clínica son y los de seguridad tienen que verse siempre iguales.
 - *Teñir los grises con el tono de la marca.* Se publicó: los dejaba rosados con naranja y café en oscuro. *Calmar el color de los nombres* (un tono más sobrio de la marca) sacaba un naranja café y otro rosa malva, y seguía habiendo color en cada fila. *Rellenar el menú del color de la marca* lo ponía a la vista todo el día y en oscuro deslumbraba.
@@ -35,7 +35,7 @@ Todas las clínicas se veían iguales: turquesa en odentIA y morado en latidIA. 
 
 - Las capturas de soporte se ven distintas en cada clínica.
 - Un color parecido al turquesa de odentIA se distingue menos del de fábrica; no es un error.
-- Revisar si una clínica real pide un segundo color (el membrete propio lo pidió: [0181](0181-la-hoja-membretada-de-la-clinica.md)).
+- Revisar si una clínica real pide un segundo color (el membrete propio lo pidió: [0182](0182-la-hoja-membretada-de-la-clinica.md)).
 
 ## Referencias
 

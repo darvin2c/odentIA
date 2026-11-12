@@ -1,6 +1,6 @@
 {
-  "id": "663f6859-9e82-4de6-808e-d562da98e05a",
-  "prevId": "cd868280-1c42-4575-a28e-96cafc20856d",
+  "id": "830c7e43-3fc1-4e40-9a9a-cb9baa6d746d",
+  "prevId": "0a0146cc-397a-4412-a832-5fb1d0fbb488",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2122,6 +2122,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "access_requested_at": {
+          "name": "access_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2331,6 +2337,82 @@
           "value": "\"support_case\".\"status\" in ('abierto','en_atencion','esperando_clinica','resuelto')"
         }
       },
+      "isRLSEnabled": false
+    },
+    "admin.support_guide_gap": {
+      "name": "support_guide_gap",
+      "schema": "admin",
+      "columns": {
+        "case_id": {
+          "name": "case_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "marked_at": {
+          "name": "marked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "marked_by": {
+          "name": "marked_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "support_guide_gap_marked_idx": {
+          "name": "support_guide_gap_marked_idx",
+          "columns": [
+            {
+              "expression": "marked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "support_guide_gap_case_id_support_case_id_fk": {
+          "name": "support_guide_gap_case_id_support_case_id_fk",
+          "tableFrom": "support_guide_gap",
+          "columnsFrom": [
+            "case_id"
+          ],
+          "tableTo": "support_case",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "support_guide_gap_marked_by_user_id_fk": {
+          "name": "support_guide_gap_marked_by_user_id_fk",
+          "tableFrom": "support_guide_gap",
+          "columnsFrom": [
+            "marked_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.support_message": {
@@ -32517,223 +32599,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.clinic_letterhead": {
-      "name": "clinic_letterhead",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pdf_key": {
-          "name": "pdf_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "top_band_url": {
-          "name": "top_band_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bottom_band_url": {
-          "name": "bottom_band_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "thumbnail_url": {
-          "name": "thumbnail_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "page_width_pt": {
-          "name": "page_width_pt",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "page_height_pt": {
-          "name": "page_height_pt",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "top_mm": {
-          "name": "top_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bottom_mm": {
-          "name": "bottom_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "left_mm": {
-          "name": "left_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "right_mm": {
-          "name": "right_mm",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "has_contact": {
-          "name": "has_contact",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "file_name": {
-          "name": "file_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by": {
-          "name": "removed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "clinic_letterhead_current_uidx": {
-          "name": "clinic_letterhead_current_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "where": "\"clinic_letterhead\".\"removed_at\" is null",
-          "concurrently": false
-        },
-        "clinic_letterhead_org_created_idx": {
-          "name": "clinic_letterhead_org_created_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "clinic_letterhead_organization_id_organization_id_fk": {
-          "name": "clinic_letterhead_organization_id_organization_id_fk",
-          "tableFrom": "clinic_letterhead",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "tableTo": "organization",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "clinic_letterhead_created_by_user_id_fk": {
-          "name": "clinic_letterhead_created_by_user_id_fk",
-          "tableFrom": "clinic_letterhead",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "clinic_letterhead_removed_by_user_id_fk": {
-          "name": "clinic_letterhead_removed_by_user_id_fk",
-          "tableFrom": "clinic_letterhead",
-          "columnsFrom": [
-            "removed_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "clinic_letterhead_page_check": {
-          "name": "clinic_letterhead_page_check",
-          "value": "\"clinic_letterhead\".\"page_width_pt\" > 0 and \"clinic_letterhead\".\"page_height_pt\" > 0"
-        },
-        "clinic_letterhead_margins_check": {
-          "name": "clinic_letterhead_margins_check",
-          "value": "\"clinic_letterhead\".\"top_mm\" >= 0 and \"clinic_letterhead\".\"bottom_mm\" >= 0 and \"clinic_letterhead\".\"left_mm\" >= 0 and \"clinic_letterhead\".\"right_mm\" >= 0"
-        },
-        "clinic_letterhead_removed_check": {
-          "name": "clinic_letterhead_removed_check",
-          "value": "(\"clinic_letterhead\".\"removed_at\" is null) = (\"clinic_letterhead\".\"removed_by\" is null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.org_profile": {
       "name": "org_profile",
       "schema": "",
@@ -41027,6 +40892,171 @@
       },
       "isRLSEnabled": false
     },
+    "admin.saas_follow_up": {
+      "name": "saas_follow_up",
+      "schema": "admin",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "author_user_id": {
+          "name": "author_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "follow_up_on": {
+          "name": "follow_up_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_only": {
+          "name": "admin_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "from_note": {
+          "name": "from_note",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "saas_follow_up_request_idx": {
+          "name": "saas_follow_up_request_idx",
+          "columns": [
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "saas_follow_up_org_idx": {
+          "name": "saas_follow_up_org_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "saas_follow_up_request_id_saas_waitlist_request_id_fk": {
+          "name": "saas_follow_up_request_id_saas_waitlist_request_id_fk",
+          "tableFrom": "saas_follow_up",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "tableTo": "saas_waitlist_request",
+          "schemaTo": "admin",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "saas_follow_up_organization_id_organization_id_fk": {
+          "name": "saas_follow_up_organization_id_organization_id_fk",
+          "tableFrom": "saas_follow_up",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "saas_follow_up_author_user_id_user_id_fk": {
+          "name": "saas_follow_up_author_user_id_user_id_fk",
+          "tableFrom": "saas_follow_up",
+          "columnsFrom": [
+            "author_user_id"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "saas_follow_up_subject_check": {
+          "name": "saas_follow_up_subject_check",
+          "value": "num_nonnulls(\"admin\".\"saas_follow_up\".\"request_id\", \"admin\".\"saas_follow_up\".\"organization_id\") = 1"
+        },
+        "saas_follow_up_body_check": {
+          "name": "saas_follow_up_body_check",
+          "value": "length(trim(\"admin\".\"saas_follow_up\".\"body\")) BETWEEN 1 AND 2000"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "admin.saas_negotiation": {
       "name": "saas_negotiation",
       "schema": "admin",
@@ -41427,6 +41457,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "rejected_at": {
+          "name": "rejected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rejected_by": {
+          "name": "rejected_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reject_reason": {
+          "name": "reject_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -41542,6 +41590,20 @@
           "onUpdate": "no action",
           "onDelete": "no action"
         },
+        "saas_payment_rejected_by_fkey": {
+          "name": "saas_payment_rejected_by_fkey",
+          "tableFrom": "saas_payment",
+          "columnsFrom": [
+            "rejected_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
         "saas_payment_organization_id_charge_id_fkey": {
           "name": "saas_payment_organization_id_charge_id_fkey",
           "tableFrom": "saas_payment",
@@ -41585,7 +41647,11 @@
         },
         "saas_payment_status_check": {
           "name": "saas_payment_status_check",
-          "value": "\"saas_payment\".\"status\" IN ('pendiente','confirmado','reversado','devuelto')"
+          "value": "\"saas_payment\".\"status\" IN ('pendiente','confirmado','reversado','devuelto','rechazado')"
+        },
+        "saas_payment_rejection_check": {
+          "name": "saas_payment_rejection_check",
+          "value": "CASE WHEN \"saas_payment\".\"status\" = 'rechazado'\n        THEN \"saas_payment\".\"rejected_at\" IS NOT NULL AND \"saas_payment\".\"rejected_by\" IS NOT NULL\n          AND length(trim(coalesce(\"saas_payment\".\"reject_reason\", ''))) BETWEEN 1 AND 500\n        ELSE \"saas_payment\".\"rejected_at\" IS NULL AND \"saas_payment\".\"rejected_by\" IS NULL AND \"saas_payment\".\"reject_reason\" IS NULL END"
         }
       },
       "isRLSEnabled": false

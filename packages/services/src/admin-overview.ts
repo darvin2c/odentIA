@@ -1,13 +1,19 @@
 import type { Db } from "@odentia/db"
 import type { AdminActor } from "./admin-core.js"
-import { getOrganizationPendingCounts } from "./admin-organizations.js"
-import { getAdminSupportAttention } from "./admin-support.js"
+import { getOrganizationPendingCounts, type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
+import { getAdminSupportAttention, type SupportHomeRow, supportHomeRows } from "./admin-support.js"
 import { consumerComplaintSummary } from "./consumer-complaints.js"
 import { addressSearchesToday } from "./address-suggestions.js"
 import { backupHealth, backupProblemWords } from "./platform-backups.js"
 import { getSaasAdminAttention } from "./saas-billing.js"
 import { businessDaysWords, currentSaasTerms } from "./saas-commercial-terms.js"
-import { countWaitlistToReview, type ExpiringTermRow, listExpiringTerms } from "./saas-founders.js"
+import {
+  countWaitlistToReview,
+  type ExpiringTermRow,
+  listExpiringTerms,
+  type WaitlistHomeRow,
+  waitlistHomeRows,
+} from "./saas-founders.js"
 
 export interface AdminAttentionItem {
   key: string
@@ -24,6 +30,9 @@ export interface AdminOverview {
 
 /**
  * Inicio interno: soporte no recibe ningún importe ni pendiente de cobros.
+ * «waitlist» y «support-open» ya son listas con nombre en Inicio
+ * (`getBackofficeToday`): siguen aquí para el número del menú («Lista de
+ * espera» y «Soporte»), que es el mismo que el de su sección.
  * `geoapifyDailyLimit`: las búsquedas de direcciones de pacientes que da el plan
  * de Geoapify al día (decisión 7 del lienzo del issue 36). `expectBackups`:
  * producción, donde sin backups verificados en 26 horas se avisa.
@@ -31,19 +40,21 @@ export interface AdminOverview {
 export async function getBackofficeOverview(
   tx: Db,
   actor: AdminActor,
-  options: { geoapifyDailyLimit?: number; expectBackups?: boolean } = {},
+  options: { geoapifyDailyLimit?: number; expectBackups?: boolean; now?: Date } = {},
 ): Promise<AdminOverview> {
-  const support = await getAdminSupportAttention(tx)
+  const now = options.now ?? new Date()
+  // Con el actor: soporte no cuenta los casos de cobro, que no ve en ningún lado.
+  const support = await getAdminSupportAttention(tx, actor)
   const organizations = await getOrganizationPendingCounts(tx, actor)
   const complaints = await consumerComplaintSummary(tx, actor)
-  const waitlist = await countWaitlistToReview(tx)
-  const { waitlistAnswerDays } = await currentSaasTerms(tx)
+  const waitlist = await countWaitlistToReview(tx, now)
+  const { waitlistAnswerDays } = await currentSaasTerms(tx, now)
   const items: AdminAttentionItem[] = [
     {
       key: "waitlist",
-      label: "Lista de espera por revisar",
+      label: "Prospectos por responder",
       count: waitlist,
-      description: `Clínicas que pidieron entrar: se responde en ${businessDaysWords(waitlistAnswerDays)}`,
+      description: `Sin respuesta todavía o con la invitación por vencer: se responde en ${businessDaysWords(waitlistAnswerDays)}`,
       path: "/waitlist",
     },
     {
@@ -62,7 +73,7 @@ export async function getBackofficeOverview(
       key: "support-open",
       label: "Casos de soporte por atender",
       count: support.openCount,
-      description: "Preguntas y problemas abiertos o en atención",
+      description: "Casos que nos esperan: nadie les respondió o la clínica hizo algo después de nuestra respuesta",
       path: "/support",
     },
     {
@@ -76,7 +87,7 @@ export async function getBackofficeOverview(
       key: "onboarding",
       label: "Altas por completar",
       count: organizations.incompleteProvisioning,
-      description: "Organizaciones que aún no terminaron su puesta en marcha",
+      description: "Sin perfil o sin sede",
       path: "/organizations",
     },
   ]
@@ -86,6 +97,7 @@ export async function getBackofficeOverview(
     const addressSearches = options.geoapifyDailyLimit ? await addressSearchesToday(tx, "paciente") : 0
     const addressesSpent = options.geoapifyDailyLimit !== undefined && addressSearches >= options.geoapifyDailyLimit
     const backup = backupProblemWords(await backupHealth(tx, options.expectBackups ? { expectedSince: new Date(0) } : {}))
+    // Sin «Pruebas por terminar»: repetía con otra regla las pruebas por vencer de más abajo.
     items.push(
       {
         key: "payments",
@@ -100,13 +112,6 @@ export async function getBackofficeOverview(
         count: billing.overdueCount,
         description: "Cobros con saldo pendiente después del vencimiento",
         path: "/billing",
-      },
-      {
-        key: "trials",
-        label: "Pruebas por terminar",
-        count: billing.trialEndingCount,
-        description: "Terminan dentro de los próximos tres días",
-        path: "/organizations",
       },
       {
         key: "commissions",
@@ -138,5 +143,36 @@ export async function getBackofficeOverview(
       },
     )
   }
-  return { items, expiring: actor.role === "admin" ? await listExpiringTerms(tx) : [] }
+  return { items, expiring: actor.role === "admin" ? await listExpiringTerms(tx, now) : [] }
+}
+
+/** Lo que Inicio nombra fila por fila: a quién responder hoy. */
+export interface BackofficeToday {
+  /**
+   * Prospectos: con `reason` van en «Prospectos por responder» (con su
+   * seguimiento como segunda línea, si toca); sin `reason`, en «Seguimientos
+   * de hoy». Una fila por solicitud.
+   */
+  prospects: WaitlistHomeRow[]
+  /** Los casos que nos esperan, en el orden de la cola; a soporte, sin los de cobro. */
+  support: SupportHomeRow[]
+  /** Clínicas con la propietaria sin aceptar, con la invitación por vencer o vencida. */
+  owners: OwnerPendingRow[]
+  /** «2 días hábiles»: el plazo que la web promete para responder una solicitud. */
+  answerWithin: string
+}
+
+/**
+ * Inicio de la administración, fila por fila. Solo lee: nada se envía ni se
+ * decide aquí. Lo ven administración y soporte igual, salvo lo que la regla de
+ * cada lista le quita a soporte (los casos de cobro y las notas solo de
+ * administración). Sin la pregunta de ningún caso ni importes, y sin
+ * auditoría: son metadatos, como los conteos.
+ */
+export async function getBackofficeToday(tx: Db, actor: AdminActor, now = new Date()): Promise<BackofficeToday> {
+  const prospects = await waitlistHomeRows(tx, actor, now)
+  const support = await supportHomeRows(tx, actor, now)
+  const owners = await ownersPendingRows(tx, now)
+  const { waitlistAnswerDays } = await currentSaasTerms(tx, now)
+  return { prospects, support, owners, answerWithin: businessDaysWords(waitlistAnswerDays) }
 }

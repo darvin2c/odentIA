@@ -142,7 +142,9 @@ function estadoClinica(status: BillingStatus): { insignia: string; tono: Tono; d
     case "activa":
       return null
     case "gracia": {
-      const fecha = status.graceEndsAt ? fechaCorta(status.graceEndsAt) : null
+      // El mismo día que dicen la franja y Plan y pagos: con la prórroga de un comprobante, el de la prórroga.
+      const hasta = status.readOnlyAt ?? status.graceEndsAt
+      const fecha = hasta ? fechaCorta(hasta) : null
       return { insignia: "Pago pendiente", tono: "plazo", detalle: fecha ? `Se puede usar hasta el ${fecha}` : null }
     }
     case "restringida":

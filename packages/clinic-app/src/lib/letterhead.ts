@@ -1,5 +1,5 @@
 /**
- * La hoja membretada de la clínica (ADR 0181), del lado del navegador: dibujarla para
+ * La hoja membretada de la clínica (ADR 0182), del lado del navegador: dibujarla para
  * medir dónde va el texto y recortar sus franjas, y hablar con la API. El PDF se dibuja
  * con pdf.js, que se carga solo al abrir el cajón (y no entra al servidor:
  * `clinicAppWorkerStubs`); el servidor vuelve a leer y normaliza todo lo que recibe.

@@ -418,13 +418,15 @@ export async function decideActionReview(
 /**
  * La conversación de una revisión, solo con el permiso de la clínica y
  * mientras dure (decisión 11). Sin adjuntos; queda en la auditoría del
- * personal. Con owner.
+ * personal. Con owner. La revisión vive en un caso de cobro, que para el rol
+ * Soporte no existe: el mismo 404 que la ficha del caso (ADR 0094 y 0180).
  */
 export async function readReviewConversation(
   db: Db,
   actor: AdminActor,
   caseId: string,
 ): Promise<Array<{ direction: string; senderKind: string; body: string | null; createdAt: Date }>> {
+  if (actor.role !== "admin") throw notFound("Caso")
   const [row] = await db
     .select({ review: saasActionReview, conversationId: saasAction.conversationId })
     .from(saasActionReview)

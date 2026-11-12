@@ -531,7 +531,7 @@ it("avisos en este equipo: cada persona activa y apaga los suyos, y el servidor 
   expect(await data(await request("reception", "POST", "/push/subscriptions/state", { endpoint }))).toEqual({ active: false })
 })
 
-it("la hoja membretada: solo quien configura la sube, la ve sobre una receta de ejemplo, la quita y la vuelve a poner (ADR 0181)", async () => {
+it("la hoja membretada: solo quien configura la sube, la ve sobre una receta de ejemplo, la quita y la vuelve a poner (ADR 0182)", async () => {
   const sharp = (await import("sharp")).default
   // Una hoja A4 mínima, escrita a mano: su diseño es un rectángulo arriba.
   const content = "0.1 0.3 0.5 rg 40 760 515 40 re f"

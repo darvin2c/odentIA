@@ -265,7 +265,7 @@ export interface ConsentLetterhead {
   /** El color de la marca en el papel (ADR 0162): la línea y las iniciales. Sin él, tinta. */
   brandInk?: string | null
   /**
-   * La hoja membretada de la clínica (ADR 0181): su parte de arriba y la de abajo, de
+   * La hoja membretada de la clínica (ADR 0182): su parte de arriba y la de abajo, de
    * borde a borde del papel. Con ella no van el logo ni el nombre: los dice su diseño.
    */
   sheet?: { topBand: string; bottomBand: string; hasContact: boolean } | null

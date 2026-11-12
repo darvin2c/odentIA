@@ -239,12 +239,15 @@ export function invitationTemplate({
   url,
   brand,
   accent,
+  expires,
 }: {
   organizationName: string
   inviterName: string
   url: string
   /** El color de la clínica que invita, si eligió uno: el botón lo lleva. */
   accent?: MailAccent | undefined
+  /** Hasta cuándo vale el enlace, en la zona de la clínica: el correo lo dice. */
+  expires?: { at: Date; timeZone: string } | undefined
 } & Branded): MailTemplate {
   const name = mailBrandName(brand)
   return renderEmail({
@@ -255,9 +258,24 @@ export function invitationTemplate({
     title: `Te invitaron a ${organizationName}`,
     paragraphs: [`Hola. ${inviterName} te invitó a unirte al equipo de ${organizationName} en ${name}.`],
     action: { label: "Aceptar invitación", url },
-    note: "Entras con tu correo y eliges tu contraseña. Si no conoces a esta clínica, ignora este correo.",
+    note: `${expires ? `El enlace vale hasta el ${expiresWords(expires.at, expires.timeZone)}. ` : ""}Entras con tu correo y eliges tu contraseña. Si no conoces a esta clínica, ignora este correo.`,
     reason: `Te escribimos porque ${inviterName} te invitó desde ${name}.`,
   })
+}
+
+/** «jueves 18 de noviembre a las 22:32», en la zona dada (la de la clínica). */
+function expiresWords(at: Date, timeZone: string): string {
+  const zone = (() => {
+    try {
+      new Intl.DateTimeFormat("es", { timeZone })
+      return timeZone
+    } catch {
+      return "America/Lima"
+    }
+  })()
+  const day = new Intl.DateTimeFormat("es", { timeZone: zone, weekday: "long", day: "numeric", month: "long" }).format(at)
+  const time = new Intl.DateTimeFormat("es", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at)
+  return `${day.replace(",", "")} a las ${time}`
 }
 
 /**
@@ -351,6 +369,19 @@ export type SupportCaseKindLabel = keyof typeof SUPPORT_KIND_LABEL
  * pantalla, quién y el enlace a Soporte; el texto de la clínica se queda en la
  * plataforma.
  */
+/** Lo que hizo la clínica en su caso: escribió, adjuntó o autorizó el acceso de diagnóstico hasta `until`. */
+export type SupportClinicActWords = { kind: "escribio" } | { kind: "adjunto" } | { kind: "autorizo"; until: Date }
+
+// El equipo de odentIA trabaja en la hora de Lima, como la administración.
+const supportTimeFormat = new Intl.DateTimeFormat("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+
+/** «Dra. Ana Torres (propietario) autorizó el acceso de diagnóstico hasta las 15:30». */
+function clinicActLine(by: string, act: SupportClinicActWords): string {
+  if (act.kind === "autorizo") return `${by} autorizó el acceso de diagnóstico hasta las ${supportTimeFormat.format(act.until)}`
+  if (act.kind === "adjunto") return `${by} adjuntó un archivo`
+  return `${by} escribió`
+}
+
 export function supportInboxNoticeTemplate({
   kind,
   clinic,
@@ -358,6 +389,7 @@ export function supportInboxNoticeTemplate({
   screen,
   who,
   role,
+  acted,
   url,
 }: {
   kind: "caso_nuevo" | "clinica_respondio"
@@ -365,24 +397,44 @@ export function supportInboxNoticeTemplate({
   clinic: string | null
   caseKind: SupportCaseKindLabel
   screen: string
+  /** Quien abrió el caso, con el rol con que lo abrió. */
   who: string
   role: string
+  /**
+   * «La clínica respondió»: quién actuó y qué hizo. La propietaria que
+   * autoriza no es quien abrió el caso; sin él, el correo no nombra a nadie
+   * como autor de la respuesta.
+   */
+  acted?: { who: string; role: string; act: SupportClinicActWords } | null
   url: string
 }): MailTemplate {
   const clinicName = clinic ?? "Sin clínica"
   const label = SUPPORT_KIND_LABEL[caseKind]
-  const by = role ? `${who} (${role.toLowerCase()})` : who
+  const nameWithRole = (name: string, roleText: string) => (roleText ? `${name} (${roleText.toLowerCase()})` : name)
+  const by = nameWithRole(who, role)
+  const done = acted ? clinicActLine(nameWithRole(acted.who, acted.role), acted.act) : null
   const line =
-    kind === "caso_nuevo" ? `${label} desde ${screen}, por ${by}.` : `${by} respondió en su caso: ${label} desde ${screen}.`
+    kind === "caso_nuevo"
+      ? `${label} desde ${screen}, por ${by}.`
+      : done
+        ? `${done} en el caso: ${label} desde ${screen}.`
+        : `La clínica respondió en el caso de ${by}: ${label} desde ${screen}.`
   return renderEmail({
     subject: kind === "caso_nuevo" ? `Caso nuevo · ${clinicName} · ${label}` : `La clínica respondió · ${clinicName}`,
     preview: line,
     internal: "Soporte",
     title: kind === "caso_nuevo" ? `Caso nuevo: ${label.toLowerCase()}` : "La clínica respondió",
-    paragraphs: [kind === "caso_nuevo" ? `Se abrió un caso desde ${screen}.` : `${by} respondió en su caso.`],
+    paragraphs: [
+      kind === "caso_nuevo" ? `Se abrió un caso desde ${screen}.` : done ? `${done} en el caso.` : `La clínica respondió en el caso de ${by}.`,
+    ],
     facts: [
       { label: "Clínica", value: clinicName },
-      { label: "Quién", value: by },
+      ...(kind === "clinica_respondio" && acted
+        ? [
+            { label: "Quién", value: nameWithRole(acted.who, acted.role) },
+            ...(acted.who === who ? [] : [{ label: "Abrió el caso", value: by }]),
+          ]
+        : [{ label: kind === "caso_nuevo" ? "Quién" : "Abrió el caso", value: by }]),
       { label: "Pantalla", value: screen },
       { label: "Tipo", value: label },
     ],
@@ -401,15 +453,39 @@ export function supportReplyNoticeTemplate({
   topic,
   url,
   brand,
+  granter,
 }: {
   kind: "respuesta" | "necesita_algo"
   caseKind: SupportCaseKindLabel
   /** El nombre corto de la pantalla del caso: «Automatizaciones». */
   topic: string
   url: string
+  /**
+   * El correo va a quien autoriza el acceso de diagnóstico (la propietaria o
+   * un administrador) y no a quien abrió el caso: pide su autorización y dice
+   * quién lo abrió (ADR 0181).
+   */
+  granter?: { clinic: string | null; openerName: string; openerRole: string } | null
 } & Branded): MailTemplate {
   const name = mailBrandName(brand)
   const about = `«${SUPPORT_KIND_LABEL[caseKind]} · ${topic}»`
+  if (granter) {
+    const clinic = granter.clinic ?? "tu clínica"
+    const opener = granter.openerRole ? `${granter.openerName} (${granter.openerRole})` : granter.openerName
+    const first = `Soporte pide tu autorización para ver la configuración de ${clinic}, por el caso ${about} que abrió ${opener}.`
+    return renderEmail({
+      brand,
+      subject: `Soporte de ${name} pide tu autorización`,
+      preview: first,
+      title: "Soporte pide tu autorización",
+      paragraphs: [
+        `Hola. ${first} Lo autorizas desde ${name}, en el caso: ahí está lo que pide, eliges por cuánto tiempo y lo puedes quitar cuando quieras.`,
+        "Soporte solo lee la configuración: no abre la agenda, los pacientes, las historias, las conversaciones ni las exportaciones.",
+      ],
+      action: { label: "Ver el pedido", url },
+      reason: `Te escribimos porque eres propietario o administrador de ${clinic} en ${name}, quienes autorizan el acceso de soporte, y nadie lo autorizó todavía.`,
+    })
+  }
   const subject =
     kind === "necesita_algo" ? `Soporte de ${name} necesita algo de ti` : `Soporte de ${name} respondió tu caso`
   const first =

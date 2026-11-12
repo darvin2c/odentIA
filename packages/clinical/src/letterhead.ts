@@ -1,5 +1,5 @@
 /**
- * La hoja membretada de la clínica (ADR 0181): la cuenta que comparten el servidor (que
+ * La hoja membretada de la clínica (ADR 0182): la cuenta que comparten el servidor (que
  * la guarda y la dibuja en los papeles) y la pantalla (que dibuja el recuadro y recorta
  * sus franjas). Una sola, para que lo que se ve al subirla sea lo que sale en el papel.
  */
