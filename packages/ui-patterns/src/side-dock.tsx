@@ -1,4 +1,4 @@
-import { cn, useSidebarOptional } from "@odentia/ui"
+import { cn, Tooltip, TooltipContent, TooltipTrigger, useSidebarOptional } from "@odentia/ui"
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { common } from "./common.js"
@@ -345,47 +345,57 @@ export function SideColumn({
       // columna desbordaría en ventanas justas.
       style={{ ...style, width: `${shown}px` }}
     >
-      {/* biome-ignore lint/a11y/useSemanticElements: separador interactivo (patrón «window splitter» de ARIA); <hr> no admite foco ni valor. */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={resizeLabel}
-        aria-valuenow={shown}
-        aria-valuetext={common.sidePanel.width(shown)}
-        aria-valuemin={Math.min(bounds.min, max)}
-        aria-valuemax={max}
-        title={common.sidePanel.resizeHint}
-        tabIndex={0}
-        className="group absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-transparent hover:after:bg-border focus-visible:after:bg-ring active:after:bg-ring"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          event.currentTarget.setPointerCapture(event.pointerId)
-        }}
-        onPointerMove={(event) => {
-          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-          // La columna termina en el borde derecho de la ventana.
-          apply(viewport - event.clientX)
-        }}
-        // Guarda el de siempre tal cual: si hoy no cabe, lo recorta lo que se ve,
-        // y en una ventana más grande vuelve entero.
-        onDoubleClick={() => onResize(bounds.initial)}
-        onKeyDown={(event) => {
-          // Desde el ancho que se ve, calculado y no medido: dos flechas seguidas
-          // no parten ambas del ancho anterior.
-          const next = keyTargets[event.key]
-          if (next === undefined) return
-          event.preventDefault()
-          apply(next)
-        }}
-      >
-        {/* El asa: dice a la vista que el borde se arrastra, como el `withHandle`
-            de `ResizableHandle` (`packages/ui`), con el borde de los campos para
-            el contraste 3:1 de un control (WCAG 1.4.11). */}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 left-1/2 h-8 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-input-border transition-colors group-hover:bg-ring group-focus-visible:bg-ring group-active:bg-ring motion-reduce:transition-none"
-        />
-      </div>
+      {/* La pista sale al pasar y al enfocar el borde (un `title` no sale con
+          teclado ni en pantallas táctiles); al apretar para arrastrar se cierra. */}
+      <Tooltip>
+        <TooltipTrigger
+          // biome-ignore lint/a11y/useSemanticElements: separador interactivo (patrón «window splitter» de ARIA); <hr> no admite foco ni valor.
+          render={<div role="separator" />}
+          aria-orientation="vertical"
+          aria-label={resizeLabel}
+          aria-valuenow={shown}
+          aria-valuetext={common.sidePanel.width(shown)}
+          aria-valuemin={Math.min(bounds.min, max)}
+          aria-valuemax={max}
+          tabIndex={0}
+          className="group absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-transparent hover:after:bg-border focus-visible:after:bg-ring active:after:bg-ring"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            // La columna termina en el borde derecho de la ventana.
+            apply(viewport - event.clientX)
+          }}
+          // Guarda el de siempre tal cual: si hoy no cabe, lo recorta lo que se
+          // ve, y en una ventana más grande vuelve entero.
+          onDoubleClick={() => onResize(bounds.initial)}
+          onKeyDown={(event) => {
+            // Enter es el doble clic del teclado: el ancho de siempre.
+            if (event.key === "Enter") {
+              event.preventDefault()
+              onResize(bounds.initial)
+              return
+            }
+            // Desde el ancho que se ve, calculado y no medido: dos flechas
+            // seguidas no parten ambas del ancho anterior.
+            const next = keyTargets[event.key]
+            if (next === undefined) return
+            event.preventDefault()
+            apply(next)
+          }}
+        >
+          {/* El asa: dice a la vista que el borde se arrastra, como el `withHandle`
+              de `ResizableHandle` (`packages/ui`), con el borde de los campos para
+              el contraste 3:1 de un control (WCAG 1.4.11). */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-1/2 h-8 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-input-border transition-colors group-hover:bg-ring group-focus-visible:bg-ring group-active:bg-ring motion-reduce:transition-none"
+          />
+        </TooltipTrigger>
+        <TooltipContent side="left">{common.sidePanel.resizeHint}</TooltipContent>
+      </Tooltip>
       <SideDockScopeProvider value="column">{children}</SideDockScopeProvider>
     </aside>
   )

@@ -60,6 +60,10 @@ describe("SideColumn", () => {
     const { onResize, handle } = column(700)
     fireEvent.doubleClick(handle)
     expect(onResize).toHaveBeenLastCalledWith(512)
+    onResize.mockClear()
+    // Enter es lo mismo con el teclado.
+    fireEvent.keyDown(handle, { key: "Enter" })
+    expect(onResize).toHaveBeenLastCalledWith(512)
   })
 
   it("el borde lleva un asa a la vista", () => {
