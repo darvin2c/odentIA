@@ -36,6 +36,7 @@ import { SupportHelpVideos } from "../../components/support-help-videos"
 import { caseReview, SupportCaseReview } from "../../components/support-review"
 import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { type SupportSearch, supportSearchOf } from "../../lib/list-search"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import {
   accessUntilWords,
@@ -83,29 +84,11 @@ const CHANNEL_STATUS_WORDS: Record<string, string> = {
 /** Desde cuántos días esperando a la clínica se sugiere cerrar (lo cierra una persona). */
 const CLOSE_HINT_DAYS = 7
 
-type Who = "mios" | "sin"
 type SupportTab = "cola" | "conocimiento" | "metricas"
 
-interface SupportSearch {
-  /** El caso abierto: lo usa también el enlace del aviso por correo. */
-  caso?: string
-  clinica?: string
-  tipo?: SupportKind
-  quien?: Who
-  /** Sin estado: los que no están resueltos. */
-  estado?: SupportStatus
-  pestana?: Exclude<SupportTab, "cola">
-}
-
 export const Route = createFileRoute("/_app/support")({
-  validateSearch: (search: Record<string, unknown>): SupportSearch => ({
-    ...(typeof search.caso === "string" && search.caso ? { caso: search.caso } : {}),
-    ...(typeof search.clinica === "string" && search.clinica ? { clinica: search.clinica } : {}),
-    ...(KINDS.includes(search.tipo as SupportKind) ? { tipo: search.tipo as SupportKind } : {}),
-    ...(search.quien === "mios" || search.quien === "sin" ? { quien: search.quien } : {}),
-    ...(STATUSES.includes(search.estado as SupportStatus) ? { estado: search.estado as SupportStatus } : {}),
-    ...(search.pestana === "conocimiento" || search.pestana === "metricas" ? { pestana: search.pestana } : {}),
-  }),
+  // Cada filtro va siempre, vacío si su valor no sirve: «?estado=todos» se ignora en vez de llegar a la API.
+  validateSearch: (search: Record<string, unknown>): SupportSearch => supportSearchOf(search),
   pendingComponent: SupportPageSkeleton,
   component: SupportPage,
 })

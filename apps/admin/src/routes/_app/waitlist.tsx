@@ -33,7 +33,7 @@ import {
   useFormSubmitError,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords, upperFirst } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords, upperFirst } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable, type VisibilityState } from "@tanstack/react-table"
@@ -45,6 +45,15 @@ import { countByProduct, matchesProduct, perProduct, type ProductChoice, Product
 import { webUrl } from "../../lib/host"
 import { FOLLOW_UP_CHOICES, type FollowUpChoice, followUpHint, openingFollowUpChoice } from "../../lib/follow-up-choice"
 import { invitationDueWords } from "../../lib/invitation-words"
+import {
+  isWaitlistStageFilter,
+  WAITLIST_STAGE_FILTERS,
+  WAITLIST_STAGES,
+  type WaitlistSearch,
+  waitlistSearchOf,
+  type WaitlistStageFilter,
+  type WaitlistStageName,
+} from "../../lib/list-search"
 import { KpiSkeleton } from "../../components/skeletons/page-loading"
 import { WaitlistPageSkeleton, WaitlistSkeleton } from "../../components/skeletons/waitlist"
 
@@ -57,36 +66,15 @@ const discardSchema = z.object({
   reason: z.string().trim().min(1, "Escribe por qué se descarta").max(500, "Usa como máximo 500 caracteres"),
 })
 
-/**
- * Las etapas las calcula el servidor al leer (nadie las mueve a mano): la
- * invitación que vence pasa sola a «Invitación vencida» y la clínica con un
- * pago confirmado, a «Paga».
- */
-const STAGES = ["por_revisar", "invitada", "invitacion_vencida", "entro", "paga", "descartada"] as const
-type Stage = (typeof STAGES)[number]
-type StageFilter = Stage | "todas"
-const STAGE_FILTERS: StageFilter[] = [...STAGES, "todas"]
-const isStageFilter = (value: unknown): value is StageFilter => typeof value === "string" && (STAGE_FILTERS as string[]).includes(value)
-
-interface WaitlistSearch {
-  etapa?: StageFilter
-  producto?: ClinicalProduct
-  q?: string
-  solicitud?: string
-}
+const STAGES = WAITLIST_STAGES
+type Stage = WaitlistStageName
+type StageFilter = WaitlistStageFilter
+const STAGE_FILTERS = WAITLIST_STAGE_FILTERS
+const isStageFilter = isWaitlistStageFilter
 
 export const Route = createFileRoute("/_app/waitlist")({
-  validateSearch: (search: Record<string, unknown>): WaitlistSearch => {
-    // `estado` es el nombre de antes: un enlace guardado con «?estado=entro» abre esa etapa.
-    const etapa = isStageFilter(search.etapa) ? search.etapa : isStageFilter(search.estado) ? search.estado : undefined
-    return {
-      ...(etapa && etapa !== "por_revisar" ? { etapa } : {}),
-      ...(isClinicalProduct(search.producto) ? { producto: search.producto } : {}),
-      // Un enlace con «?q=987654321» llega como número: también es una búsqueda.
-      ...((typeof search.q === "string" && search.q) || typeof search.q === "number" ? { q: String(search.q) } : {}),
-      ...(typeof search.solicitud === "string" ? { solicitud: search.solicitud } : {}),
-    }
-  },
+  // Cada filtro va siempre, vacío si su valor no sirve: «?etapa=xyz» o «?producto=xyz» se ignoran.
+  validateSearch: (search: Record<string, unknown>): WaitlistSearch => waitlistSearchOf(search),
   pendingComponent: WaitlistPageSkeleton,
   component: WaitlistPage,
 })
