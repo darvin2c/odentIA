@@ -142,7 +142,7 @@ Pendiente fuera del código, en la cuenta de cada servicio:
 2. Google OAuth: la dirección de vuelta `https://api.latidia72.com/api/auth/callback/google`.
 3. Meta: el dominio `https://app.latidia72.com/` en la app de «Conectar con Facebook».
 4. R2: `https://*.latidia72.com` en el CORS del bucket de adjuntos.
-5. Correo: `hola@` y `privacidad@latidia72.com` (Email Routing) y el remitente de los correos.
+5. Correo: `hola@`, `privacidad@` y `soporte@latidia72.com` (Email Routing) y el remitente de los correos. `soporte@` recibe los datos de la carga inicial y lo publican el contrato de encargo y la página de subencargados.
 
 El panel de `app.latidia72.com` y la app de sus clínicas (`apps/medical-clinic`) son
 los Workers `latidia-panel` y `latidia-clinicas`, armados con `VITE_BASE_DOMAIN=latidia72.com`,
@@ -175,7 +175,7 @@ Pendiente fuera del código, como con latidIA:
 3. Meta: el dominio `https://app.vistia20.com/` en la app de «Conectar con Facebook», y la
    plantillas `vistia_invitar_a_volver_v1` y `vistia_lentes_listos_v1` («Tus lentes están listos», ADR 0172) cuando una óptica conecte su WhatsApp.
 4. R2: `https://*.vistia20.com` en el CORS del bucket de adjuntos.
-5. Correo: `hola@` y `privacidad@vistia20.com` (Email Routing) y el remitente.
+5. Correo: `hola@`, `privacidad@` y `soporte@vistia20.com` (Email Routing) y el remitente.
 6. Administración: «Plan vistIA» y «Fundadores vistIA», empezando con los precios de los de
    latidIA, y el alta de vistIA («Solo con invitación» hasta decidir otra cosa).
 

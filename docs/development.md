@@ -30,8 +30,8 @@ El correo de liquidación incluye una fila por clínica y otra por ajuste antes
 del total. `mail:preview --html <carpeta>` permite revisar ese detalle sin
 enviar correos ni ejecutar una liquidación.
 
-Los correos públicos `hola@` y `privacidad@` se derivan de `VITE_BASE_DOMAIN`,
-sin puerto. Antes de publicar, configurar ambas direcciones en Cloudflare
+Los correos públicos `hola@`, `privacidad@` y `soporte@` se derivan de `VITE_BASE_DOMAIN`,
+sin puerto. Antes de publicar, configurar las tres direcciones en Cloudflare
 Email Routing hacia un buzón supervisado y comprobar la recepción desde una
 cuenta externa. Cambiar el código no crea los buzones ni acredita su entrega.
 
