@@ -22,7 +22,6 @@ const FOLDER = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle")
 let container: StartedTestContainer
 let ownerDb: Db
 let before: string
-let beforeNotes: string
 
 const ADA = "staff-ada"
 const BETO = "staff-beto"
@@ -48,7 +47,7 @@ const OLD_GRANT = "c0000000-0000-4000-8000-000000000009"
 
 /**
  * Copia de las migraciones hasta antes de la que termina en `suffix`: la base como estaba
- * en producción (antes de las reglas) o como la deja un despliegue que ya corrió la 0101.
+ * en producción, antes de las reglas.
  */
 function migrationsBefore(suffix: string): string {
   const journal = JSON.parse(readFileSync(join(FOLDER, "meta", "_journal.json"), "utf8")) as {
@@ -194,23 +193,19 @@ beforeAll(async () => {
   await insertCase(OLD_GRANT, "esperando_clinica", "2026-11-10T14:00:00Z")
   await insertGrant(OLD_GRANT, "2026-11-10T13:00:00Z")
 
-  // Hasta la 0101, como una base que ya la corrió: después se anotan contactos de verdad,
-  // uno con el mismo texto de la nota. La marca de nota (0103) no los toca.
-  beforeNotes = migrationsBefore("_nota_no_es_contacto")
-  await migrate(ownerDb, { migrationsFolder: beforeNotes })
+  // El resto de las migraciones, como en el despliegue.
+  await migrate(ownerDb, { migrationsFolder: FOLDER })
+
+  // Después se anotan contactos de verdad, uno con el mismo texto de la nota: no son notas.
   await ownerDb.execute(sql`
     insert into "saas_follow_up" ("request_id", "author_user_id", "body", "follow_up_on", "created_at") values
       (${UNAUDITED}::uuid, ${ADA}, 'Le escribí por WhatsApp', null, '2026-11-12T10:00:00Z'),
       (${NOTED}::uuid, ${ADA}, 'Llamé: quiere ver la demo el jueves', null, '2026-11-12T11:00:00Z')`)
-
-  // El resto de las migraciones, como en el despliegue.
-  await migrate(ownerDb, { migrationsFolder: FOLDER })
 })
 
 afterAll(async () => {
   await container?.stop()
   if (before) rmSync(before, { recursive: true, force: true })
-  if (beforeNotes) rmSync(beforeNotes, { recursive: true, force: true })
 })
 
 describe("al desplegar", () => {
@@ -221,8 +216,9 @@ describe("al desplegar", () => {
           to_char("created_at" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as "created_at"
         from "saas_follow_up" order by "created_at"`),
     )
-    // Una nota no es un contacto (`from_note`): no cuenta como haberle respondido. Los
-    // contactos anotados después de la 0101, aunque repitan el texto de la nota, sí lo son.
+    // Una nota no es un contacto: el traslado la deja con `from_note` y no cuenta como
+    // haberle respondido. Los contactos anotados después, aunque repitan el texto de la
+    // nota, sí lo son.
     expect(entries).toEqual([
       { request_id: UNAUDITED, author_user_id: null, body: "Nota de antes de auditar", follow_up_on: null, admin_only: false, from_note: true, created_at: "2026-10-20T14:00:00Z" },
       { request_id: ORPHAN_AUDIT, author_user_id: null, body: "La anotó alguien que ya no está", follow_up_on: null, admin_only: false, from_note: true, created_at: "2026-10-26T11:00:00Z" },

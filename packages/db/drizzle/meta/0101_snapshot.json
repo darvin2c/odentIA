@@ -1,6 +1,6 @@
 {
-  "id": "3ccdab73-d5da-4474-83c3-f8a00b8beb17",
-  "prevId": "b75766b9-e5e1-4e64-b19e-fe82346b943d",
+  "id": "830c7e43-3fc1-4e40-9a9a-cb9baa6d746d",
+  "prevId": "0a0146cc-397a-4412-a832-5fb1d0fbb488",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -40935,6 +40935,13 @@
         },
         "admin_only": {
           "name": "admin_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "from_note": {
+          "name": "from_note",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

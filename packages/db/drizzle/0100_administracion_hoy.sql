@@ -12,6 +12,7 @@ CREATE TABLE "admin"."saas_follow_up" (
 	"body" text NOT NULL,
 	"follow_up_on" date,
 	"admin_only" boolean DEFAULT false NOT NULL,
+	"from_note" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "saas_follow_up_subject_check" CHECK (num_nonnulls("admin"."saas_follow_up"."request_id", "admin"."saas_follow_up"."organization_id") = 1),
 	CONSTRAINT "saas_follow_up_body_check" CHECK (length(trim("admin"."saas_follow_up"."body")) BETWEEN 1 AND 2000)

@@ -1,5 +1,5 @@
 {
-  "id": "b75766b9-e5e1-4e64-b19e-fe82346b943d",
+  "id": "0a0146cc-397a-4412-a832-5fb1d0fbb488",
   "prevId": "a4235020-218d-47d1-8835-5cf1101240f8",
   "version": "7",
   "dialect": "postgresql",
@@ -40935,6 +40935,13 @@
         },
         "admin_only": {
           "name": "admin_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "from_note": {
+          "name": "from_note",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

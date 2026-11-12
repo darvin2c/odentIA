@@ -49,14 +49,18 @@ $$;--> statement-breakpoint
 -- La nota de cada solicitud pasa a ser su primera entrada. Autor y fecha salen de la última
 -- auditoría de la nota (`saas.waitlist_note`), si su autor sigue existiendo; sin auditoría,
 -- autor nulo («Nota anterior, sin autor registrado») y la fecha de la solicitud. Sin fecha
--- para volver y visible para soporte, como hasta hoy. La columna `note` se borra en la
--- entrega siguiente: una pestaña o una instancia vieja puede seguir escribiéndola.
-INSERT INTO saas_follow_up (request_id, author_user_id, body, follow_up_on, admin_only, created_at)
+-- para volver y visible para soporte, como hasta hoy. Entra marcada como nota (`from_note`):
+-- una nota no es un contacto y no cuenta como haberle respondido; sin la marca, la solicitud
+-- dejaría de estar «por responder» y pasaría a «Contactada el…» aunque la nota dijera
+-- «Pedirle a Ada que la llame». La columna `note` se borra en la entrega siguiente: una
+-- pestaña o una instancia vieja puede seguir escribiéndola.
+INSERT INTO saas_follow_up (request_id, author_user_id, body, follow_up_on, admin_only, from_note, created_at)
 SELECT r.id,
   CASE WHEN EXISTS (SELECT 1 FROM "user" u WHERE u.id = a.actor_user_id) THEN a.actor_user_id END,
   r.note,
   NULL,
   false,
+  true,
   coalesce(a.created_at, r.created_at)
 FROM saas_waitlist_request r
 LEFT JOIN LATERAL (

@@ -705,29 +705,15 @@
     {
       "idx": 100,
       "version": "7",
-      "when": 1794431901375,
+      "when": 1794446513759,
       "tag": "0100_administracion_hoy",
       "breakpoints": true
     },
     {
       "idx": 101,
       "version": "7",
-      "when": 1794431919564,
+      "when": 1794446528334,
       "tag": "0101_administracion_hoy_reglas",
-      "breakpoints": true
-    },
-    {
-      "idx": 102,
-      "version": "7",
-      "when": 1794441634157,
-      "tag": "0102_nota_no_es_contacto",
-      "breakpoints": true
-    },
-    {
-      "idx": 103,
-      "version": "7",
-      "when": 1794441642499,
-      "tag": "0103_nota_no_es_contacto_reglas",
       "breakpoints": true
     }
   ]
