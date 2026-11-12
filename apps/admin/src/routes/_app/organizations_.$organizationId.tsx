@@ -24,6 +24,8 @@ import { useState } from "react"
 import { z } from "zod"
 import { OrgBillingSection } from "../../components/org-billing"
 import { OrgImport } from "../../components/org-import"
+import { OrgReport } from "../../components/org-report"
+import { OrgSetup } from "../../components/org-setup"
 import { OrgSpending, type SpendingAgent, type SpendingSearch } from "../../components/org-spending"
 import { type BillingSummary, OrgSummary } from "../../components/org-summary"
 import { ProductMark } from "../../components/product"
@@ -348,7 +350,13 @@ function OrganizationPage() {
         />
       ) : null}
       {tab === "precio" ? <OrgBillingSection organizationId={org.id} /> : null}
-      {tab === "carga" ? <OrgImport organizationId={org.id} organizationName={org.name} /> : null}
+      {tab === "carga" ? (
+        <div className="flex flex-col gap-4">
+          <OrgSetup organizationId={org.id} organizationName={org.name} />
+          <OrgImport organizationId={org.id} organizationName={org.name} />
+          <OrgReport organizationId={org.id} />
+        </div>
+      ) : null}
       {tab === "equipo" ? (
         <div className="flex flex-col gap-4">
           <section

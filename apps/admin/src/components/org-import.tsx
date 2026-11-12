@@ -129,7 +129,7 @@ export function OrgImport({ organizationId, organizationName }: { organizationId
     <section className="flex flex-col gap-4 rounded-xl border bg-card p-4" aria-labelledby="cargar-datos">
       <div className="flex flex-col gap-1">
         <h2 id="cargar-datos" className="text-base font-medium">
-          Cargar los datos de la clínica
+          Pacientes
         </h2>
         <p className="max-w-prose text-sm text-muted-foreground">
           Elige el plan que preparó la skill de carga con los archivos de la clínica. Primero se ensaya: nada se guarda

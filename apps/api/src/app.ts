@@ -42,6 +42,7 @@ import {
   startSaasTrial,
   trustedOriginsOn,
   refreshSuggestedNotice,
+  saveOrgProfile,
   setUpNewClinic,
   updateBranch,
   updateOrgRegion,
@@ -453,7 +454,7 @@ export function createApp(deps: AppDeps) {
   )
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/demos", createAdminDemosRoute(deps))
-  app.route("/api/admin/imports", createAdminImportsRoute(deps))
+  app.route("/api/admin/imports", createAdminImportsRoute({ ...deps, panelUrlOf }))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route(
@@ -839,79 +840,9 @@ export function createApp(deps: AppDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const input = parsed.data
 
+    // La misma operación que la carga de la configuración desde la administración.
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, async (tx) => {
-        const [current] = await tx
-          .select({ id: orgProfile.organizationId })
-          .from(orgProfile)
-          .where(eq(orgProfile.organizationId, orgId))
-          .for("update")
-        const {
-          countryCode,
-          currency,
-          timezone,
-          locale,
-          receiptWidth,
-          sheetSize,
-          ticketFooter,
-          applyCountryPreset,
-          taxes,
-          secondCurrency,
-          exchangeRate,
-          ...identity
-        } = input
-        if (current) {
-          await tx
-            .update(orgProfile)
-            .set({ ...identity, updatedAt: new Date() })
-            .where(eq(orgProfile.organizationId, orgId))
-        } else {
-          if (!identity.legalName) throw invalidField("legalName", "Escribe la razón social")
-          // El perfil nace con su región explícita: la base no asume ningún país. Y
-          // con el producto del dominio donde se creó la clínica, que ya no cambia.
-          await tx.insert(orgProfile).values({
-            organizationId: orgId,
-            product: productOfRequest(c),
-            ...identity,
-            legalName: identity.legalName,
-            ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
-          })
-        }
-        const updated = await updateOrgRegion(tx, orgId, userId, {
-          countryCode,
-          currency,
-          timezone,
-          locale,
-          receiptWidth,
-          sheetSize,
-          ticketFooter,
-          taxes,
-          secondCurrency,
-          exchangeRate,
-          applyCountryPreset: applyCountryPreset ?? !current,
-        })
-        // Una clínica que nace (todavía sin ninguna sede, ni archivada) viene con todo encendido, a
-        // nombre de quien la crea (ADR 0141, que sustituye al 0026). Vale también para el alta
-        // asistida, cuyo perfil ya existía: allí antes no nacía ni «Recordar la cita».
-        const [anyBranch] = await tx.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId)).limit(1)
-        if (!anyBranch) await setUpNewClinic(tx, orgId, userId)
-        // Y su aviso sugerido, mientras nadie lo revisó, dice los datos nuevos (también si el alta
-        // se repite antes de crear la sede).
-        await refreshSuggestedNotice(tx, orgId, userId)
-        // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
-        if (!current) await ensureClinicSpecialties(tx, orgId)
-        // Y con sus consentimientos activos, para firmar por la web desde el primer día.
-        if (!current) await ensureClinicConsents(tx, orgId, userId)
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: userId,
-          action: "org_profile.upsert",
-          entity: "org_profile",
-          entityId: orgId,
-          metadata: input,
-        })
-        return updated
-      }),
+      withOrgContext(db, orgId, (tx) => saveOrgProfile(tx, orgId, userId, input, productOfRequest(c))),
     )
   })
 

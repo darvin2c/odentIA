@@ -10,17 +10,29 @@
  *   pnpm --filter @odentia/services import:carta -- <carta.json>
  *     La carta de bienvenida en PDF, junto al JSON: le pide a la clínica su lista
  *     de pacientes por correo (`clinic-import-letter.ts`).
+ *   pnpm --filter @odentia/services import:clinica -- <clinica.fuente.json> [--numero N]
+ *     La configuración de la clínica: de la fuente (con rutas a su logo y su hoja), el plan
+ *     que carga la administración (`clinica.json`, con los archivos dentro) y el plan de
+ *     carga en PDF para aprobarlo (`clinic-setup-source.ts`). Busca cada servicio en la
+ *     biblioteca con su código del país.
+ *   pnpm --filter @odentia/services import:informe -- <informe.json>
+ *     El informe de avance de una etapa en PDF, junto al JSON, para revisarlo
+ *     (`clinic-progress-report.ts`). Se envía desde la administración («Cargar
+ *     datos» › «Informe a la clínica»), por el correo de producción y una sola vez.
  *
  * Las rutas relativas se leen desde la carpeta donde se escribió el comando.
  */
 import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { isZip, readXlsxRows, readZipEntries, xlsxSheetNames } from "@odentia/db/xlsx"
 import { configureZodMessages } from "@odentia/clinical"
 import { ZodError } from "zod"
 import { WELCOME_LETTER_MAX_PAGES, welcomeLetterPdf } from "./clinic-import-letter.js"
 import { checkClinicImportPlan, type ClinicImportCheck, type ClinicImportPlan } from "./clinic-import-plan.js"
+import { PROGRESS_REPORT_MAX_PAGES, progressReportEmail, progressReportPdf } from "./clinic-progress-report.js"
+import { buildClinicSetupPlan, clinicSetupPlanPdf } from "./clinic-setup-source.js"
 import {
   clinicImportMapSchema,
   detectDelimiter,
@@ -127,6 +139,20 @@ function report(plan: ClinicImportPlan, check: ClinicImportCheck, notes: Prepare
   return lines.join("\n")
 }
 
+/** El informe de avance en PDF, para revisarlo antes de enviarlo desde la administración. */
+async function progressReport(reportPath: string): Promise<void> {
+  const { bytes, pages, content } = await progressReportPdf(JSON.parse(readFileSync(reportPath, "utf-8")))
+  if (pages > PROGRESS_REPORT_MAX_PAGES) {
+    console.log(JSON.stringify({ escrito: null, paginas: pages, aviso: `Salió en ${pages} páginas: acorta las listas` }, null, 2))
+    process.exitCode = 1
+    return
+  }
+  const out = reportPath.replace(/\.json$/, "") + ".pdf"
+  writeFileSync(out, bytes)
+  const mail = progressReportEmail(content)
+  console.log(JSON.stringify({ escrito: out, paginas: pages, para: content.email, asunto: mail.subject, respondeA: content.replyTo }, null, 2))
+}
+
 function arg(name: string): string | undefined {
   const at = process.argv.indexOf(name)
   return at >= 0 ? process.argv[at + 1] : undefined
@@ -154,6 +180,38 @@ async function main(): Promise<void> {
     if (!aviso) writeFileSync(out, bytes)
     console.log(JSON.stringify({ escrito: aviso ? null : out, paginas: pages, hojasDeLaCarta: letterPages, buzon: content.inbox, marca: content.brandName, aviso }, null, 2))
     if (aviso) process.exitCode = 1
+    return
+  }
+  if (command === "setup" && target) {
+    const sourcePath = resolve(cwd, target)
+    const seeds = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/seeds")
+    const { plan, review, library, problems } = buildClinicSetupPlan(sourcePath, seeds)
+    const folder = dirname(sourcePath)
+    const planPath = resolve(folder, "clinica.json")
+    writeFileSync(planPath, `${JSON.stringify(plan)}\n`)
+    const number = Number(arg("--numero") ?? 1)
+    const pdf = await clinicSetupPlanPdf(plan, review, library, { number, date: clinicToday() })
+    const pdfPath = resolve(folder, `plan-de-carga-${number}.pdf`)
+    writeFileSync(pdfPath, pdf.bytes)
+    console.log(
+      JSON.stringify(
+        {
+          escritos: [planPath, pdfPath],
+          paginas: pdf.pages,
+          sedes: plan.branches.length,
+          servicios: plan.services.length,
+          equipo: plan.team.length,
+          problemas: problems,
+        },
+        null,
+        2,
+      ),
+    )
+    if (problems.length) process.exitCode = 1
+    return
+  }
+  if (command === "report" && target) {
+    await progressReport(resolve(cwd, target))
     return
   }
   if (command === "peek" && target) {
@@ -197,7 +255,7 @@ async function main(): Promise<void> {
     return
   }
   console.error(
-    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>",
+    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>  |  import:clinica -- <clinica.fuente.json>  |  import:informe -- <informe.json>",
   )
   process.exitCode = 2
 }
@@ -205,7 +263,13 @@ async function main(): Promise<void> {
 // Lo que no se puede leer se dice con su motivo, sin la traza y en español.
 configureZodMessages()
 main().catch((error: unknown) => {
-  const what = process.argv.includes("letter") ? "La carta" : "El mapa"
+  const what = process.argv.includes("letter")
+    ? "La carta"
+    : process.argv.includes("report")
+      ? "El informe"
+      : process.argv.includes("setup")
+        ? "La fuente de la clínica"
+        : "El mapa"
   if (error instanceof ZodError)
     for (const issue of error.issues) console.error(`${what}: ${issue.path.join(".") || "(raíz)"}: ${issue.message}`)
   else console.error(error instanceof Error ? error.message : String(error))

@@ -1,11 +1,19 @@
 ---
 name: odentia-carga
-description: Cargar los pacientes de una clínica nueva desde los archivos que ya tiene (su Excel o lo que exporta su sistema), sin plantilla nuestra. Pedirle los datos con la carta de bienvenida en PDF con la marca, leerlos con un mapa de columnas, revisar lo dudoso con quien acompaña el alta y dejar el plan listo para «Cargar datos» en la administración. Usar cuando el equipo trae los datos de una clínica que empieza o pide la carta, el documento o el mensaje para pedírselos a una clínica nueva.
+description: Cargar todo lo de una clínica nueva desde lo que ya tiene, sin plantilla nuestra: su configuración (empresa, marca, hoja membretada, sedes, servicios de la biblioteca con su código, caja, inventario, asistente, formatos y equipo) y sus pacientes (su Excel o lo que exporta su sistema). Pedirle los datos con la carta de bienvenida en PDF, estudiarlos, presentar el plan de carga en PDF para aprobarlo, dejar los planes listos para «Cargar datos» en la administración y, después de cargar, el informe a la clínica en PDF, que se envía desde la administración con aprobación. Usar cuando el equipo trae los datos de una clínica que empieza o pide la carta, el documento o el mensaje para pedírselos a una clínica nueva.
 ---
 
 # Cargar los datos de una clínica nueva
 
-El motivo y los límites están en `docs/decisions/0104-cargar-los-datos-de-una-clinica-nueva.md`. Esta skill prepara el plan y no escribe en ninguna base: la carga la hace una persona de administración en la ficha de la clínica.
+El motivo y los límites están en `docs/decisions/0104-cargar-los-datos-de-una-clinica-nueva.md`. Esta skill prepara los planes y no escribe en ninguna base: la carga la hace una persona de administración en la ficha de la clínica.
+
+## El proceso, cada vez que la clínica envía algo
+
+1. **Se estudia todo lo que envió**: el correo entero, cada adjunto y los demás correos del hilo. Con eso se trabaja: no se le pregunta a quien acompaña lo que ya está ahí.
+2. **Se presenta el plan de carga en PDF** (`import:clinica` para la configuración, el informe de `import:prepare` para los pacientes): lo que llegó, lo que se carga y dónde, lo que no y por qué, y lo que hay que decidir, con una recomendación. Nada se carga sin aprobación.
+3. **Aprobado, se carga** en la administración: ficha de la clínica › «Cargar datos».
+4. **Se presenta el informe a la clínica en PDF** (`import:informe`): lo que recibimos, lo que usamos, lo que hicimos, dónde lo ve y lo que sigue. Es informativo: no habla del contrato ni de la ley, no promete nada y no pide respuesta. El comando rechaza un texto que lo haga.
+5. **Aprobado, se envía** desde la administración, «Cargar datos» › «Informe a la clínica»: sale por el correo de producción con el PDF adjunto, una sola vez por número de informe.
 
 ## No hace falta una plantilla nuestra
 
@@ -25,7 +33,7 @@ Primero va lo que otra cosa necesita: una cita necesita al profesional y la sede
 
 | Etapa | Qué se pide | Cuándo | Cómo se carga |
 |---|---|---|---|
-| 1 · La clínica | Todo lo que se configura, por área: empresa (razón social, RUC, dirección fiscal, logo, teléfono de urgencias, monedas); sedes y unidades dentales o consultorios; equipo (rol, título, especialidad, colegiatura) y horarios y ausencias de cada profesional; servicios y precios, especialidades y promociones; inventario y proveedores; caja (medios de pago, gastos fijos, comisiones, ticket y vigencia del presupuesto); lo que el asistente responde a los pacientes y sus formatos propios; canales | Semana del alta, en la carta | A mano en el alta, con lo que enviaron, y se revisa con la dueña en la reunión: Datos de la clínica y Sedes; Equipo invita a cada persona y cada profesional completa su perfil; Horarios y ausencias; Servicios parte de la biblioteca del país; Inventario con «Pegar tu lista»; medios de pago, gastos que se repiten y comisiones; «Lo que solo tú sabes» del asistente; los canales se conectan con ella en la reunión, nunca con contraseñas por correo |
+| 1 · La clínica | Todo lo que se configura, por área: empresa (razón social, RUC, dirección fiscal, logo, teléfono de urgencias, monedas); sedes y unidades dentales o consultorios; equipo (rol, título, especialidad, colegiatura) y horarios y ausencias de cada profesional; servicios y precios, especialidades y promociones; inventario y proveedores; caja (medios de pago, gastos fijos, comisiones, ticket y vigencia del presupuesto); lo que el asistente responde a los pacientes y sus formatos propios; canales | Semana del alta, en la carta | Con esta skill (`import:clinica`, abajo) y «Cargar datos» › «Configuración de la clínica». Lo de cada profesional (perfil, horario, comisión) se carga con el mismo plan cuando esa persona ya es parte de la clínica. Los canales se conectan con ella, nunca con contraseñas por correo |
 | 2 · Pacientes | La lista de pacientes tal como la tienen, con los apoderados de los menores | Semana del alta, en la carta | Con esta skill |
 | 3 · Día de corte | Citas de las próximas 2 a 4 semanas (fecha, hora, paciente, profesional, sede y motivo); saldos y deudas a esa fecha | La víspera de empezar a agendar en odentIA | Todavía no: las citas se registran a mano la primera semana |
 | 4 · Después | Historia anterior en PDF o fotos, con el número de historia o el DNI en el nombre o en una lista; alergias y antecedentes; radiografías y documentos; tratamientos en curso y presupuestos | Sin apuro | Todavía no |
@@ -123,6 +131,37 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
    - **«Faltan datos»** en Personas: los que entraron incompletos, para completarlos con la clínica.
    - **Los datos de la clínica** (sedes, unidades dentales, equipo, servicios y precios) se repasan pantalla por pantalla en la reunión de alta, contra lo que envió.
 8. **Al terminar**, borra los archivos de la clínica, `mapa.json` (sus `overrides` llevan datos de personas), `plan.json` e `informe.md`, la conversación de Claude Code de esa carga (su archivo en `projects/` de la carpeta de configuración de Claude Code), y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista: lo promete el contrato de encargo. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
+
+## La configuración de la clínica
+
+Se escribe `clinica.fuente.json` en la carpeta privada de la clínica con lo que envió, y el comando arma el plan y su PDF:
+
+```bash
+pnpm --filter @odentia/services import:clinica -- <carpeta>/clinica.fuente.json --numero 1
+```
+
+Deja `clinica.json` (el plan, con el logo y la hoja dentro) y `plan-de-carga-<n>.pdf`. Falla si un servicio no está en la biblioteca o no tiene el código del país que es obligatorio. El formato es `clinicSetupPlanSchema` (`packages/services/src/clinic-setup-plan.ts`); en la fuente, el logo y la hoja van como `{ "path": "mejoradas/logo.png" }` y se agrega `review` (lo que llegó, las imágenes, lo que no se carga y lo que hay que decidir), que solo va al PDF.
+
+- **Servicios: de la biblioteca** (`template`, la clave de `packages/db/seeds/biblioteca*.csv`), con el nombre que usa la clínica en `name`. Su código oficial sale de la biblioteca y va en el plan. Un servicio que la biblioteca no tiene es una **excepción**: lleva `name`, `specialty` (una de la clínica), `scope` y `officialCode`, y el plan lo dice. «Desde $700» es `priceDisclosure: "desde"` con el mínimo, no el nombre. Una moneda que no es la de la clínica necesita `identity.secondCurrency`.
+- **Imágenes: se revisan y se mejoran si hace falta**, y el plan dice qué se hizo con cada una. El logo en JPG con fondo blanco pasa a PNG transparente. La hoja membretada va como imagen A4 sin el bloque de contacto (razón social, RUC, dirección, teléfono, nombre y colegiatura de una persona): cada papel los pone desde Configuración y lleva la firma de quien lo emite. Al cargar, el servidor la mide como el navegador.
+- **Medios de pago** con su tipo: `10` efectivo, `48` tarjeta, `30` transferencia, `68` billetera (Yape, Plin). Los del país ya existen: no se duplican.
+- **Gastos fijos** con su `key`: volver a cargar no los anota dos veces. Sin día de pago en lo que envió, se propone en «Para decidir».
+- **Asistente**: las de «Lo que solo tú sabes» por su `basicKey` (`KNOWLEDGE_BASICS`); se cargan publicadas.
+- **Equipo**: la propietaria ya está invitada desde el alta; a los demás la carga los invita (les llega un correo). Horarios con `weekday` 0 domingo … 6 sábado.
+- **Formatos propios** (consentimientos y formularios): se cargan en borrador; la clínica los revisa y los publica.
+- **`slug`**: la dirección de la clínica en odentIA («dra-marialicia-calderon»). La administración no carga el plan en otra clínica.
+
+En la administración: ficha de la clínica › «Cargar datos» › «Configuración de la clínica» › «Elegir el plan». El ensayo dice, área por área, qué se crea, qué se actualiza, qué ya está, qué espera a una persona y qué no entra y por qué. «Cargar» lo guarda y envía las invitaciones. Con la primera sede, la clínica se enciende como en su alta. Cuando una persona del equipo acepta su invitación, se vuelve a ensayar y a cargar el mismo plan.
+
+## El informe a la clínica
+
+Se escribe `informe-<n>.json` (formato `progressReportSchema`, `packages/services/src/clinic-progress-report.ts`) solo con lo hecho y comprobado, y se arma el PDF para revisarlo:
+
+```bash
+pnpm --filter @odentia/services import:informe -- <carpeta>/informe-1.json
+```
+
+Va a alguien del equipo de la clínica o con su invitación, y responde a quien acompaña, con su correo de odentia32.com (o del producto). Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Aprobado, se envía en «Cargar datos» › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
 
 ## El mapa
 
