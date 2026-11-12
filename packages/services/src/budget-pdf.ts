@@ -530,7 +530,8 @@ function paymentNotes(line: BudgetPrintLine, money: Money): Block[] {
   if ((line.discountCents ?? 0) > 0) {
     const reason = line.promotionName ? `Promoción ${line.promotionName}` : "Descuento"
     notes.push({
-      inlines: `${reason}: − ${money(line.discountCents, line.currency)} (de ${money(line.listTotalCents, line.currency)})`,
+      // El signo pegado al importe, como en el ticket: un nombre largo no lo deja solo al final de la línea.
+      inlines: `${reason}: −${money(line.discountCents, line.currency)} (de ${money(line.listTotalCents, line.currency)})`,
       ...small,
     })
   }

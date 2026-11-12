@@ -241,8 +241,10 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] La pantalla promete el canal por el que de verdad saldrá, y dice «no tiene por dónde» solo si es cierto.
 - [ ] Fuera de las 24 horas de WhatsApp sale con la plantilla aprobada, y lo que se escribió junto al envío no se pierde.
 - [ ] «Se ve en su portal» lo decide el servidor, con la misma regla que arma su lista.
+- [ ] Ningún papel cambia un carácter por «?». La letra de los PDF no tiene «−», «≥», «≤», «≈», «→», «←», «∆» ni «✓»: `printable` (`S/document-kit.ts`, `STAND_INS`) escribe su equivalente, salvo en «✓». Un carácter nuevo en el texto de un papel se prueba ahí.
+- [ ] Un signo y su importe no se separan al final de una línea: el signo va pegado («‒S/ 410.00»).
 
-**Ya falló:** un documento se mandó como enlace en vez del PDF; enviar la orden dijo «no tiene WhatsApp ni correo» a quien tenía los dos; el resultado de una orden desapareció del portal y la ficha decía que se veía; «se ve en su portal» se calculaba en la pantalla con otra regla; el cajón prometió que el mensaje escrito «queda en la conversación» y con la plantilla se perdía.
+**Ya falló:** el signo menos salía «?» en la receta de lentes («?2,00»), en el descuento del presupuesto y en el saldo a favor del ticket, y en la primera versión del arreglo el «–» del descuento podía quedar solo al final de la línea; un documento se mandó como enlace en vez del PDF; enviar la orden dijo «no tiene WhatsApp ni correo» a quien tenía los dos; el resultado de una orden desapareció del portal y la ficha decía que se veía; «se ve en su portal» se calculaba en la pantalla con otra regla; el cajón prometió que el mensaje escrito «queda en la conversación» y con la plantilla se perdía.
 
 ## O-ENV-02 «Su enlace»
 
