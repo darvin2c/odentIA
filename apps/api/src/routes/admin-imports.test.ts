@@ -22,6 +22,9 @@ const KEY = secretsKeyFromEnv("ee".repeat(32))
 const ADMIN = "https://admin.odentia.localhost"
 const ORG = "org-carga"
 
+/** Lo que salió por correo en estas pruebas. */
+const sent: Array<{ to: string; subject: string; attachments?: ReadonlyArray<{ filename: string }> }> = []
+
 let container: StartedTestContainer
 let ownerDb: Db
 let app: Hono
@@ -105,7 +108,11 @@ beforeAll(async () => {
     cookieDomain: "odentia.localhost",
     webURL: "https://app.odentia.localhost",
     adminURL: ADMIN,
-    mailer: { send: async () => {} },
+    mailer: {
+      send: async (message) => {
+        sent.push(message)
+      },
+    },
     listenUrl: "postgres://localhost:5432/dentalagent",
   })
   await staff("u-admin", "admin")
@@ -151,4 +158,80 @@ it("la administración ensaya, carga y repetir no duplica", async () => {
     sql`select count(*)::int as n from admin_audit where action = 'org.data_import' and organization_id = ${ORG}`,
   )
   expect(audit?.n).toBe(2)
+})
+
+const setup = {
+  kind: "clinica",
+  version: 1,
+  product: "dental",
+  countryCode: "PE",
+  clinic: "Clínica Carga",
+  identity: { tradeName: "Clínica Carga", legalName: "Clínica Carga S.A.C." },
+  papers: { budgetValidDays: 120 },
+  branches: [{ key: "principal", name: "Principal", addressLine1: "Av. Larco 100", district: "Miraflores", city: "Lima" }],
+  knowledge: [{ basicKey: "cuotas", body: "No: los pagos son al contado." }],
+  team: [{ email: "recepcion.carga@example.com", role: "reception" }],
+}
+
+it("soporte no ensaya ni carga la configuración ni envía informes", async () => {
+  expect((await call("/setup/preview", "u-soporte", setup)).status).toBe(403)
+  expect((await call("/setup/apply", "u-soporte", setup)).status).toBe(403)
+  expect((await call("/report/preview", "u-soporte", report)).status).toBe(403)
+  expect((await call("/report/send", "u-soporte", report)).status).toBe(403)
+})
+
+it("la configuración se ensaya sin guardar, se carga con su invitación y repetir no duplica", async () => {
+  const preview = await call("/setup/preview", "u-admin", setup)
+  expect(preview.status).toBe(200)
+  const rehearsal = ((await preview.json()) as { data: { totals: Record<string, number> } }).data
+  expect(rehearsal.totals.error).toBe(0)
+  const [none] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from branch where organization_id = ${ORG}`)
+  expect(none?.n).toBe(0)
+  expect(sent).toHaveLength(0)
+
+  const first = await call("/setup/apply", "u-admin", setup)
+  expect(first.status).toBe(200)
+  const loaded = ((await first.json()) as { data: { totals: Record<string, number>; emails: Array<{ email: string; sent: boolean }> } }).data
+  expect(loaded.totals.error).toBe(0)
+  expect(loaded.emails).toEqual([{ email: "recepcion.carga@example.com", sent: true }])
+  expect(sent.map((message) => message.to)).toEqual(["recepcion.carga@example.com"])
+
+  const again = await call("/setup/apply", "u-admin", setup)
+  const repeated = ((await again.json()) as { data: { totals: Record<string, number>; emails: unknown[] } }).data
+  expect(repeated.totals.nueva).toBe(0)
+  expect(repeated.emails).toEqual([])
+  const [branches] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from branch where organization_id = ${ORG}`)
+  expect(branches?.n).toBe(1)
+})
+
+const report = {
+  clinic: "Clínica Carga",
+  to: "Dra. Carga",
+  email: "dra.carga@example.com",
+  number: 1,
+  stage: "Alta de su cuenta",
+  date: "2026-11-12",
+  companion: { name: "Implementación", email: "implementacion@odentia32.com" },
+  done: ["Creamos su cuenta."],
+  where: ["Con el enlace de la invitación."],
+}
+
+it("el informe se ve antes, sale con su PDF por el correo de producción y no se envía dos veces", async () => {
+  sent.length = 0
+  const preview = await call("/report/preview", "u-admin", report)
+  expect(preview.status).toBe(200)
+  const shown = ((await preview.json()) as { data: { to: string; pages: number; sent: unknown } }).data
+  expect(shown).toMatchObject({ to: "dra.carga@example.com", pages: 1, sent: null })
+  expect(sent).toHaveLength(0)
+
+  const first = await call("/report/send", "u-admin", report)
+  expect(first.status).toBe(200)
+  expect(sent).toHaveLength(1)
+  expect(sent[0]?.attachments?.map((file) => file.filename)).toEqual(["informe-1.pdf"])
+
+  const again = await call("/report/send", "u-admin", report)
+  expect(again.status).toBe(409)
+  expect(sent).toHaveLength(1)
+  const after = ((await (await call("/report/preview", "u-admin", report)).json()) as { data: { sent: { to: string } } }).data
+  expect(after.sent.to).toBe("dra.carga@example.com")
 })
