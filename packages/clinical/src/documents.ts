@@ -55,6 +55,13 @@ export const DENTAL_IMAGING_TYPES: readonly ImagingType[] = IMAGE_TYPES.map((val
   category: imageTypeCategory(value),
 }))
 
+/** Las categorías de imagen: su fecha es la de toma; la de los demás papeles, la del documento. */
+export const IMAGE_DOCUMENT_CATEGORIES = ["radiografia", "foto_clinica"] as const
+
+export function isImageDocumentCategory(category: string): boolean {
+  return (IMAGE_DOCUMENT_CATEGORIES as readonly string[]).includes(category)
+}
+
 export function isImageType(value: unknown): value is ImageType {
   return typeof value === "string" && (IMAGE_TYPES as readonly string[]).includes(value)
 }

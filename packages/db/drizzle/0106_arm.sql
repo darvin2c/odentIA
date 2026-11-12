@@ -36,6 +36,15 @@ CREATE TABLE "admin"."kairos_item" (
 	CONSTRAINT "kairos_item_text_check" CHECK (length(trim("admin"."kairos_item"."title")) BETWEEN 1 AND 200 AND length(trim("admin"."kairos_item"."reason")) BETWEEN 1 AND 1000)
 );
 --> statement-breakpoint
+CREATE TABLE "admin"."kairos_weekly" (
+	"week_start" date PRIMARY KEY NOT NULL,
+	"text" text NOT NULL,
+	"figures" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "kairos_weekly_monday_check" CHECK (extract(isodow from "admin"."kairos_weekly"."week_start") = 1),
+	CONSTRAINT "kairos_weekly_text_check" CHECK (char_length(btrim("admin"."kairos_weekly"."text")) BETWEEN 1 AND 4000)
+);
+--> statement-breakpoint
 CREATE TABLE "admin"."saas_client" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
@@ -124,6 +133,9 @@ CREATE TABLE "admin"."saas_import_draft" (
 	"approved_by" text,
 	"approved_at" timestamp with time zone,
 	"returned_note" text,
+	"payload_uploaded_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"payload_deleted_at" timestamp with time zone,
+	"stale_payload_keys" text[] DEFAULT '{}'::text[] NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "saas_import_draft_kind_check" CHECK ("admin"."saas_import_draft"."kind" IN ('plan_configuracion','plan_pacientes','informe')),

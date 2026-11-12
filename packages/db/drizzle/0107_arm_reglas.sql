@@ -1,17 +1,17 @@
 -- El ARM de la administración (12 nov, ADR 0183): lo que TS no declara y el traslado de lo que
 -- ya había. Las tablas nuevas (`saas_client`, `saas_client_contact`, `saas_task`,
 -- `saas_opportunity`, `saas_proposal`, `saas_outreach`, `kairos_item`, `saas_client_file`,
--- `saas_inbound_email`, `saas_skill_key`, `saas_import_draft` y `kairos_ai_usage`) son de odentIA
+-- `saas_inbound_email`, `saas_skill_key`, `saas_import_draft`, `kairos_ai_usage` y `kairos_weekly`) son de odentIA
 -- y viven en `admin` (ADR 0064): nacen cerradas al rol de la aplicación (ADR 0063) y no reciben
 -- ningún GRANT; solo la administración las usa con la conexión propietaria.
 --
 -- El check de sujeto de `saas_follow_up` (con cliente, o una solicitud o una clínica) ya lo
--- cambió 0104, que generó drizzle-kit desde el esquema.
+-- cambió 0106, que generó drizzle-kit desde el esquema.
 --
 -- El traslado va en este orden: clientes de las organizaciones, clientes de las solicitudes,
 -- personas, bitácora, fechas vigentes y oportunidades. En una base nueva no hace nada. Mientras
 -- tanto la bitácora acepta que se le llenen el cliente y la fecha en que pasó cada entrada, que
--- 0104 dejó en la hora del despliegue; al final vuelve a solo agregar.
+-- 0106 dejó en la hora del despliegue; al final vuelve a solo agregar.
 ALTER TABLE saas_follow_up DISABLE TRIGGER saas_follow_up_append_only;--> statement-breakpoint
 
 -- 1. Cada organización que no es una demo para presentar (ni marcada demo en su suscripción ni

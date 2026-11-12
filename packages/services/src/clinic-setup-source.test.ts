@@ -28,6 +28,7 @@ it("arma el plan con el logo dentro, dice lo que la biblioteca no tiene y sale e
       countryCode: "PE",
       clinic: "Dra. Prueba",
       slug: "dra-prueba",
+      identity: { secondCurrency: "USD", exchangeRate: "3.75" },
       brand: { color: "#CE6921", logo: { path: "logo.png" } },
       branches: [{ key: "principal", name: "Principal" }],
       services: [
@@ -48,4 +49,21 @@ it("arma el plan con el logo dentro, dice lo que la biblioteca no tiene y sale e
   ])
   const pdf = await clinicSetupPlanPdf(plan, review, library, { number: 1, date: "2026-11-12" })
   expect(pdf.pages).toBe(1)
+})
+
+it("dice antes lo que la administración rechazaría: la dirección según el país y las monedas", () => {
+  const folder = mkdtempSync(join(tmpdir(), "carga-"))
+  const write = (data: Record<string, unknown>) => {
+    writeFileSync(join(folder, "clinica.fuente.json"), JSON.stringify({ product: "dental", countryCode: "PE", clinic: "Dra. Prueba", slug: "dra-prueba", ...data }))
+    return buildClinicSetupPlan(join(folder, "clinica.fuente.json"), SEEDS).problems
+  }
+  // En el Perú el departamento va de la lista (PE-LMA), no escrito a mano.
+  expect(write({ branches: [{ key: "p", name: "Miraflores", addressLine1: "Av. Larco 100", city: "Miraflores", district: "Lima", region: "Lima" }] })).toEqual([
+    "Sede «Miraflores»: Elige el departamento de la lista",
+  ])
+  expect(write({ branches: [{ key: "p", name: "Miraflores", addressLine1: "Av. Larco 100", city: "Miraflores", district: "Lima", region: "PE-LMA" }] })).toEqual([])
+  const dollars = { services: [{ template: "control-de-ortodoncia", name: "Control", priceCents: 10_000, currency: "USD" }] }
+  expect(write(dollars)).toEqual(["Servicio 1 («Control»): cobra en USD y la clínica cobra en PEN: agrega identity.secondCurrency"])
+  expect(write({ ...dollars, identity: { secondCurrency: "USD" } })).toEqual(["Para cobrar en USD hace falta el cambio de hoy (identity.exchangeRate)"])
+  expect(write({ ...dollars, identity: { secondCurrency: "USD", exchangeRate: "3.75" } })).toEqual([])
 })

@@ -5,13 +5,14 @@ import { apiFetch } from "../../lib/api"
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
 
-export function useDocumentUrl(patientId: string, documentId: string) {
+export function useDocumentUrl(patientId: string, documentId: string, enabled = true) {
   return useQuery({
     queryKey: ["patient-document-url", patientId, documentId],
     queryFn: () =>
       apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
     staleTime: SIGNED_URL_STALE_MS,
     gcTime: 30 * 60 * 1000,
+    enabled,
   })
 }
 

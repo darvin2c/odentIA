@@ -374,3 +374,35 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] A 390 px no hay asa ni desplazamiento lateral.
 **Ya falló:** un tope fijo que no dejaba ensanchar aunque sobrara espacio; un borde sin señal de que se arrastra; la lista de atrás partida letra por letra; «Hecha» fuera de la vista sin aviso (QA del 12 nov, corregidos antes de unir).
 **Patrones:** el asa de `ResizableHandle` (`UI/resizable.tsx`); `Tooltip` (`UI/tooltip.tsx`); `wrap` y la columna de acciones fija de `DataTable`.
+
+## Papeles del paciente
+
+### M-DOC-01 Subir varios papeles con su fecha
+**Quién:** el clínico o quien sube por él; al recibir a un paciente de otra clínica y con cada papel que trae (supuesto).
+**Dónde:** `CA/document-upload-dialog.tsx` («Para todos», una fila por archivo), `CA/documentos-panel.tsx`.
+**Medida (390 px):** seis papeles con la misma fecha y una radiografía, con «Para todos» 14 clics; fila por fila 42 antes de abrir cada calendario en la fecha común. Uno sin fecha, 6; uno con fecha de la semana, 8. 38 paradas de Tab hasta «Subir» con seis archivos (QA del 12 nov).
+- [ ] «Para todos» copia a las filas que no tienen una propia y no pisa lo hecho a mano (fecha, categoría, tipo de imagen).
+- [ ] Cada calendario abre cerca de la fecha ya elegida, no en el mes de hoy.
+- [ ] La ayuda de la fecha sale una vez con varios archivos, no una por archivo.
+- [ ] Se elige un día del calendario solo con teclado (Tab al día, flechas, Enter).
+- [ ] Cerrar a medias (Escape, ×) pregunta o conserva el borrador; al terminar, el pie dice «Listo» (hoy no).
+**Ya falló:** «Para todos» pisó la fecha propia de una fila; el calendario no se manejaba con flechas (el día enfocado no recibía el foco); la ayuda de la fecha se repetía en cada fila (QA del 12 nov, corregidos antes de unir).
+**Patrones:** `DatePickerButton` con `openAt`; `useDraftBlocker` para el borrador.
+
+### M-DOC-02 Corregir la fecha de un papel
+**Quién:** quien atiende; alguna vez a la semana (supuesto).
+**Dónde:** `CA/document-viewer.tsx` («Corregir la fecha», «Cambios del archivo»).
+**Medida:** desde la lista de Documentos, 7 clics y 1 tecleo a 1440; 8 y 1 a 390. Con teclado, unas 20 paradas desde «Anterior» hasta el botón, 15 dentro del PDF (Chromium sin interfaz).
+- [ ] El diálogo pide la fecha y el motivo, y dice que la anterior queda con su nombre.
+- [ ] Si otra pestaña cambió el archivo, avisa, conserva fecha y motivo y pide guardar de nuevo.
+- [ ] Se llega a «Corregir la fecha» con teclado sin recorrer el visor del PDF (hoy no).
+- [ ] El visor no salta de «1 de 6» a «6 de 6» sin decirlo cuando el papel cambia de sitio.
+**Ya falló:** guardó encima de otra corrección sin avisar (QA del 12 nov, corregido antes de unir).
+
+### M-DOC-03 Leer la Historia con papeles viejos
+**Quién:** el clínico; con cada paciente que trae historia de otra clínica (supuesto).
+**Dónde:** `CA/timeline.tsx`.
+- [ ] Cada papel va el día de su fecha y dice «Subido el …» cuando entró otro día, entero a 390 px.
+- [ ] Lo retirado queda plegado, con su motivo legible y sin «Abrir».
+- [ ] Los papeles del mismo día salen en el mismo orden en Documentos y en la Historia (hoy no siempre).
+**Ya falló:** «Subido el …» y el motivo del retiro se cortaban a 390 px (QA del 12 nov, corregido antes de unir).

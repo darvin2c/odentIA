@@ -47,7 +47,8 @@ export interface RegionDefaults {
 }
 
 /** Moneda de curso legal por país (CLDR `currencyData`, vigente). */
-const COUNTRY_CURRENCY: Record<string, string> = {
+/** La moneda de cada país: la que una clínica nueva usa si no dice otra. */
+export const COUNTRY_CURRENCY: Record<string, string> = {
   // América
   AR: "ARS",
   BB: "BBD",

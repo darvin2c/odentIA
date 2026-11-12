@@ -12,23 +12,19 @@
  *     de pacientes por correo (`clinic-import-letter.ts`).
  *   pnpm --filter @odentia/services import:clinica -- <clinica.fuente.json> [--numero N]
  *     La configuración de la clínica: de la fuente (con rutas a su logo y su hoja), el plan
- *     que carga la administración (`clinica.json`, con los archivos dentro) y el plan de
+ *     que se carga con `import:produccion` (`clinica.json`, con los archivos dentro) y el plan de
  *     carga en PDF para aprobarlo (`clinic-setup-source.ts`). Busca cada servicio en la
  *     biblioteca con su código del país.
- *   pnpm --filter @odentia/services import:informe -- <informe.json>
- *     El informe de avance de una etapa en PDF, junto al JSON, para revisarlo
- *     (`clinic-progress-report.ts`). Se envía desde la administración («Cargar
- *     datos» › «Informe a la clínica»), por el correo de producción y una sola vez.
- *   pnpm --filter @odentia/services import:dejar -- <archivo.json> --clinica <slug> [--numero N] [--pdf <archivo.pdf>]
- *     Deja `clinica.json`, `plan.json` o `informe-N.json` (con su PDF; si no se da, lo arma)
- *     como borrador en la administración, ficha del cliente › Alta, para que una persona
- *     de Administración lo apruebe (`clinic-import-drop.ts`). Con la llave de la skill,
- *     que solo deposita.
+ *   pnpm --filter @odentia/services import:informe -- <informe.json> [--plan <clinica.json>]
+ *     El informe de avance de una etapa en PDF, junto al JSON, para revisarlo. Con
+ *     `--plan`, escribe en el informe el detalle de lo que ese plan cargó (`sections`)
+ *     (`clinic-progress-report.ts`). Se envía con `import:produccion` (`clinic-import-remote.ts`),
+ *     por el correo de producción y una sola vez.
  *
  * Las rutas relativas se leen desde la carpeta donde se escribió el comando.
  */
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isZip, readXlsxRows, readZipEntries, xlsxSheetNames } from "@odentia/db/xlsx"
@@ -36,22 +32,9 @@ import { configureZodMessages } from "@odentia/clinical"
 import { ZodError } from "zod"
 import { WELCOME_LETTER_MAX_PAGES, welcomeLetterPdf } from "./clinic-import-letter.js"
 import { checkClinicImportPlan, type ClinicImportCheck, type ClinicImportPlan } from "./clinic-import-plan.js"
-import { PROGRESS_REPORT_MAX_PAGES, progressReportEmail, progressReportPdf } from "./clinic-progress-report.js"
-import {
-  checkDraftClinic,
-  checkDraftPayload,
-  DRAFT_KIND_WORDS,
-  DRAFT_PDF_MAX_BYTES,
-  detectDraftKind,
-  draftNumber,
-  draftRequestBody,
-  draftsUrl,
-  isPdf,
-  postDraft,
-  readAdminKey,
-} from "./clinic-import-drop.js"
+import { PROGRESS_REPORT_MAX_PAGES, type ProgressReportInput, progressReportEmail, progressReportPdf } from "./clinic-progress-report.js"
 import { clinicSetupPlanSchema } from "./clinic-setup-plan.js"
-import { buildClinicSetupPlan, clinicSetupPlanPdf, clinicSetupReview, loadLibrary } from "./clinic-setup-source.js"
+import { buildClinicSetupPlan, clinicSetupPlanPdf, clinicSetupReportSections, loadLibrary } from "./clinic-setup-source.js"
 import {
   clinicImportMapSchema,
   detectDelimiter,
@@ -158,9 +141,18 @@ function report(plan: ClinicImportPlan, check: ClinicImportCheck, notes: Prepare
   return lines.join("\n")
 }
 
-/** El informe de avance en PDF, para revisarlo antes de enviarlo desde la administración. */
+/** El informe de avance en PDF, para revisarlo antes de enviarlo con `import:produccion`. */
 async function progressReport(reportPath: string): Promise<void> {
-  const { bytes, pages, content } = await progressReportPdf(JSON.parse(readFileSync(reportPath, "utf-8")))
+  const report = JSON.parse(readFileSync(reportPath, "utf-8")) as Record<string, unknown>
+  const planPath = arg("--plan")
+  if (planPath) {
+    // El detalle sale del plan que se cargó, no se escribe a mano: queda en el informe que se envía.
+    const plan = clinicSetupPlanSchema.parse(JSON.parse(readFileSync(resolve(cwd, planPath), "utf-8")))
+    const seeds = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/seeds")
+    report.sections = clinicSetupReportSections(plan, loadLibrary(seeds, plan.product, plan.countryCode))
+    writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+  }
+  const { bytes, pages, content } = await progressReportPdf(report as ProgressReportInput)
   if (pages > PROGRESS_REPORT_MAX_PAGES) {
     console.log(JSON.stringify({ escrito: null, paginas: pages, aviso: `Salió en ${pages} páginas: acorta las listas` }, null, 2))
     process.exitCode = 1
@@ -188,86 +180,8 @@ function fileSlug(value: string): string {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "clinica"
 }
 
-const pagesWords = (pages: number) => `${pages} ${pages === 1 ? "página" : "páginas"}`
-
-const seedsDir = () => resolve(dirname(fileURLToPath(import.meta.url)), "../../db/seeds")
-
-/**
- * El PDF que acompaña el borrador cuando no se da con `--pdf`: el del plan de configuración
- * con lo de revisar de `clinica.fuente.json` (si está al lado), el del informe tal cual. El
- * plan de pacientes no lleva PDF: su informe (`informe.md`) tiene datos de personas.
- */
-async function draftPdf(kind: ReturnType<typeof detectDraftKind>, payload: unknown, path: string, number: number) {
-  if (kind === "plan_pacientes") return { bytes: null, note: "sin PDF" }
-  if (kind === "informe") {
-    const { bytes, pages } = await progressReportPdf(payload as Parameters<typeof progressReportPdf>[0])
-    if (pages > PROGRESS_REPORT_MAX_PAGES) throw new Error(`El informe salió en ${pages} páginas: acorta las listas`)
-    return { bytes, note: `PDF armado, ${pagesWords(pages)}` }
-  }
-  const plan = clinicSetupPlanSchema.parse(payload)
-  const fuente = resolve(dirname(path), "clinica.fuente.json")
-  const review = clinicSetupReview(existsSync(fuente) ? JSON.parse(readFileSync(fuente, "utf-8")) : {})
-  const library = loadLibrary(seedsDir(), plan.product, plan.countryCode)
-  const { bytes, pages } = await clinicSetupPlanPdf(plan, review, library, { number, date: clinicToday() })
-  return {
-    bytes,
-    note: existsSync(fuente)
-      ? `PDF armado, ${pagesWords(pages)}`
-      : `PDF armado, ${pagesWords(pages)}, sin «Lo que llegó» ni «Para decidir» (no hay clinica.fuente.json al lado)`,
-  }
-}
-
-/** `import:dejar`: sube el borrador a la administración con la llave de la skill. */
-async function drop(target: string): Promise<void> {
-  const slug = arg("--clinica")
-  if (!slug) throw new Error("Falta --clinica <dirección de la clínica en odentIA>")
-  const path = resolve(cwd, target)
-  const payload: unknown = JSON.parse(readFileSync(path, "utf-8"))
-  const kind = detectDraftKind(payload)
-  const problems = checkDraftPayload(kind, payload)
-  const otherClinic = checkDraftClinic(kind, payload, slug)
-  if (otherClinic) problems.unshift(otherClinic)
-  if (problems.length) {
-    console.error(`${basename(path)} no se puede dejar:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`)
-    process.exitCode = 1
-    return
-  }
-  const number = draftNumber(kind, payload, arg("--numero"))
-  const pdfArg = arg("--pdf")
-  let pdf: { bytes: Uint8Array | null; note: string; filename?: string }
-  if (pdfArg) {
-    const bytes = readFileSync(resolve(cwd, pdfArg))
-    if (!isPdf(bytes)) throw new Error(`${basename(pdfArg)} no es un PDF`)
-    pdf = { bytes, note: `PDF ${basename(pdfArg)}`, filename: basename(pdfArg) }
-  } else pdf = await draftPdf(kind, payload, path, number)
-  if (pdf.bytes && pdf.bytes.byteLength > DRAFT_PDF_MAX_BYTES)
-    throw new Error(`El PDF pasa de ${DRAFT_PDF_MAX_BYTES / 1024 / 1024} MB: achica sus imágenes`)
-  // La llave se lee al final, cuando ya se sabe que el archivo sirve; nunca se imprime.
-  const key = readAdminKey(process.env)
-  if (key.warning) console.warn(`Aviso: ${key.warning}`)
-  const url = draftsUrl(process.env)
-  const result = await postDraft(url, key.key, draftRequestBody({ organizationSlug: slug, kind, number, payload, pdf: pdf.bytes, pdfFilename: pdf.filename }))
-  if (!result.ok) {
-    console.error(result.message)
-    process.exitCode = 1
-    return
-  }
-  console.log(
-    [
-      `Dejé ${DRAFT_KIND_WORDS[kind]} N.º ${number} de «${slug}» (${pdf.note}) en ${new URL(url).origin}.`,
-      ...(result.data.replaced === true ? ["Reemplazó al borrador devuelto con ese mismo número."] : []),
-      "Queda como borrador: nada se aprobó, cargó ni envió.",
-      "Apruébalo en la administración: Clientes › ficha de la clínica › Alta («La skill dejó…»). Ahí se aprueba, se ensaya, se carga y se envía.",
-    ].join("\n"),
-  )
-}
-
 async function main(): Promise<void> {
   const [command, target] = process.argv.slice(2).filter((value) => value !== "--")
-  if (command === "drop" && target) {
-    await drop(target)
-    return
-  }
   if (command === "letter" && target) {
     const letterPath = resolve(cwd, target)
     const { bytes, pages, letterPages, content } = await welcomeLetterPdf(JSON.parse(readFileSync(letterPath, "utf-8")))
@@ -281,7 +195,8 @@ async function main(): Promise<void> {
   }
   if (command === "setup" && target) {
     const sourcePath = resolve(cwd, target)
-    const { plan, review, library, problems } = buildClinicSetupPlan(sourcePath, seedsDir())
+    const seeds = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/seeds")
+    const { plan, review, library, problems } = buildClinicSetupPlan(sourcePath, seeds)
     const folder = dirname(sourcePath)
     const planPath = resolve(folder, "clinica.json")
     writeFileSync(planPath, `${JSON.stringify(plan)}\n`)
@@ -351,7 +266,7 @@ async function main(): Promise<void> {
     return
   }
   console.error(
-    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>  |  import:clinica -- <clinica.fuente.json>  |  import:informe -- <informe.json>  |  import:dejar -- <archivo.json> --clinica <slug> [--numero N] [--pdf <archivo.pdf>]",
+    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>  |  import:clinica -- <clinica.fuente.json>  |  import:informe -- <informe.json> [--plan <clinica.json>]",
   )
   process.exitCode = 2
 }
@@ -359,9 +274,7 @@ async function main(): Promise<void> {
 // Lo que no se puede leer se dice con su motivo, sin la traza y en español.
 configureZodMessages()
 main().catch((error: unknown) => {
-  const what = process.argv.includes("drop")
-    ? "El borrador"
-    : process.argv.includes("letter")
+  const what = process.argv.includes("letter")
     ? "La carta"
     : process.argv.includes("report")
       ? "El informe"

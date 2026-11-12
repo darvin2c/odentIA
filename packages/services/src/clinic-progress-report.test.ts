@@ -73,4 +73,26 @@ describe("informe de avance", () => {
     expect(mail.text).toContain("para su información")
     expect(mail.text).not.toMatch(/contrato|garantiz/i)
   })
+
+  it("lleva el detalle de lo cargado: los números de la clínica sí, los de una persona no", async () => {
+    const detailed = {
+      ...base,
+      sections: [
+        {
+          title: "Empresa",
+          rows: [
+            { label: "RUC", value: "20542830752" },
+            { label: "Teléfono de urgencias", value: "+51925133499" },
+          ],
+        },
+        { title: "Lo que responde su asistente a los pacientes", rows: [{ label: "¿Tienen estacionamiento?", value: "Sí, en el sótano." }] },
+      ],
+    }
+    const { pages } = await progressReportPdf(detailed)
+    expect(pages).toBeLessThanOrEqual(PROGRESS_REPORT_MAX_PAGES)
+    // El teléfono de una persona, aunque vaya en el detalle, no.
+    expect(() =>
+      progressReportContent({ ...base, sections: [{ title: "Equipo", rows: [{ label: "Celular de la doctora", value: "987 654 321" }] }] }),
+    ).toThrow(/no lleva documentos ni teléfonos/)
+  })
 })

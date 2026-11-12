@@ -11,7 +11,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createOwnerDb, type Db } from "./client.js"
 
-// El ARM de la administración (0104 y 0105): los clientes, su gente, su venta y sus envíos. La
+// El ARM de la administración (0106 y 0107): los clientes, su gente, su venta y sus envíos. La
 // base se migra primero hasta antes de las reglas, con datos como los de producción
 // (organizaciones, demos, solicitudes y su bitácora), para ver el traslado; después, las reglas.
 
@@ -481,7 +481,7 @@ describe("al desplegar", () => {
     expect(reach).toEqual(tables.map((tabla) => ({ tabla, alcanza: false })))
   })
 
-  it("las columnas del borrado del JSON de la skill (0107) tampoco se abren a la aplicación", async () => {
+  it("las columnas del borrado del JSON de la skill (0106) tampoco se abren a la aplicación", async () => {
     const columns = ["payload_deleted_at", "payload_uploaded_at", "stale_payload_keys"]
     const reach = rows<{ columna: string; alcanza: boolean }>(
       await ownerDb.execute(sql`

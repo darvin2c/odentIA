@@ -10,7 +10,7 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
  * Main la monta bajo /patients, por eso los paths son /:id/...
  * - GET /:id/documents/:documentId/context → documento fusionado + historial
  * - POST /:id/documents/:documentId/context → corrección versionada
- *   { expectedVersion, encounterId?, planItemId?, toothNumbers?, tags? }.
+ *   { expectedVersion, encounterId?, planItemId?, toothNumbers?, tags?, capturedAt?, dateReason? }.
  *   `null` libera el vínculo, `undefined` conserva el valor vigente.
  *   Versión desactualizada → 409 STALE_VERSION sin pérdida.
  */
@@ -27,6 +27,9 @@ const correctionInput = z
     toothNumbers: z.array(z.number().int()).max(52).optional(),
     // Etiquetas crudas como contacts (máx 100; el servicio normaliza a 20 únicas canónicas).
     tags: z.array(z.string().min(1).max(200)).max(100).optional(),
+    // La fecha del documento corregida; `null` vuelve a la de subida. Cambiarla pide su motivo.
+    capturedAt: z.iso.datetime({ offset: true }).nullish(),
+    dateReason: z.string().max(500).nullish(),
   })
   .strict()
 

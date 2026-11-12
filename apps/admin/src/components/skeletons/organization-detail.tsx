@@ -1,10 +1,11 @@
 /**
  * La ficha de una clínica (`routes/_app/organizations_.$organizationId.tsx`):
  * cabecera, pestañas y una zona por pestaña (Resumen, Gastos, Precio y prueba,
- * Equipo, Actividad y Cargar datos). Pestañas e importes, los del rol de quien
+ * Equipo, Actividad y Carga). Pestañas e importes, los del rol de quien
  * mira, con la misma regla que la pantalla (`lib/organization-tabs.ts`).
  */
 import { ScrollArea, Skeleton, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { OrgLoadRecordSkeleton } from "../org-load-record"
 import { PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { getRouteApi } from "@tanstack/react-router"
 import type { JSX } from "react"
@@ -321,19 +322,6 @@ function OrgActivitySkeleton() {
   )
 }
 
-function OrgImportSkeleton() {
-  return (
-    <section className="flex flex-col gap-4 rounded-xl border bg-card p-4">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-base font-medium">Cargar los datos de la clínica</h2>
-        <TextSm className="w-full" />
-        <TextSm className="w-3/4" />
-      </div>
-      <ControlSkeleton className="w-44" />
-    </section>
-  )
-}
-
 /** Cabecera, pestañas y la zona de la pestaña que abre la dirección, si ese rol la abre. */
 export function OrganizationDetailSkeleton({
   wanted,
@@ -372,7 +360,7 @@ export function OrganizationDetailSkeleton({
       {tab === "precio" ? <OrgBillingSkeleton /> : null}
       {tab === "equipo" ? <OrgTeamSkeleton /> : null}
       {tab === "actividad" ? <OrgActivitySkeleton /> : null}
-      {tab === "carga" ? <OrgImportSkeleton /> : null}
+      {tab === "carga" ? <OrgLoadRecordSkeleton /> : null}
     </SkeletonRegion>
   )
 }

@@ -116,6 +116,8 @@ export interface RelatedDocument {
   id: string
   label: string
   category: string
+  /** Su fecha propia (la de toma, en una imagen), que puede ser de otro día que la atención. */
+  capturedAt: Date | null
 }
 
 interface LastVisit {
@@ -146,7 +148,7 @@ async function loadDocsForEncounters(
   for (const doc of docs) {
     if (!doc.encounterId || !ids.has(doc.encounterId)) continue
     const items = grouped.get(doc.encounterId) ?? []
-    items.push({ id: doc.id, label: doc.label, category: doc.category })
+    items.push({ id: doc.id, label: doc.label, category: doc.category, capturedAt: doc.capturedAt })
     grouped.set(doc.encounterId, items)
   }
   return grouped
@@ -695,8 +697,10 @@ export interface TimelineItemBase {
   statusText?: string | null
   /** Vencimiento de un control, para leerlo sin consultar otra pantalla. */
   dueAt?: Date | null
-  /** Motivo de una atención anulada: la historia la muestra con él. */
+  /** Motivo de una atención anulada (o de un archivo retirado): la historia la muestra con él. */
   voidReason?: string | null
+  /** Un documento: cuándo se subió, que puede ser otro día que el de su fecha (`createdAt`). */
+  uploadedAt?: Date
   /** Quién atendió, y en una anulada quién la anuló y cuándo. */
   professionalName?: string | null
   /** Quién firmó la atención y cuándo. */
@@ -1047,9 +1051,10 @@ export async function getTimeline(
         : sql`and exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.site_system = ${site.system} and ${toothCode} = any(c.site_codes))`
     // En la historia completa viven dentro de su atención; al filtrar documentos
     // deben seguir visibles aunque no se estén solicitando las atenciones.
+    // Lo retirado ya no está en la tarjeta de su atención: sale suelto, plegado como retirado.
     const linkedFilter =
       types.includes("encounter") && !input.documentCategory
-        ? sql`and not exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.encounter_id is not null)`
+        ? sql`and (patient_document.retired_at is not null or not exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.encounter_id is not null))`
         : sql``
     // El PDF de un consentimiento no es otro hecho: «Firmó: …» ya lo dice y
     // lleva a Documentos (QA de la ficha del 8 nov: el consentimiento salía dos veces).
@@ -1057,8 +1062,10 @@ export async function getTimeline(
       ? sql`and not exists (select 1 from consent_document paper where paper.organization_id = ${orgId} and paper.patient_id = ${patientId}::uuid
           and patient_document.id in (paper.pdf_document_id, paper.revoke_pdf_document_id, paper.paper_document_id))`
       : sql``
+    // Cada papel va el día de su fecha (la de toma, en una imagen), aunque se haya subido
+    // después: la historia de otra clínica no se amontona en el día en que se cargó.
     branches.push(
-      sql`select id, 'document'::text as kind, created_at from patient_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${linkedFilter} ${consentPaper} ${toothFilter} ${input.documentCategory ? sql`and category = ${input.documentCategory}` : sql``}`,
+      sql`select id, 'document'::text as kind, coalesce(captured_at, created_at) as created_at from patient_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${linkedFilter} ${consentPaper} ${toothFilter} ${input.documentCategory ? sql`and category = ${input.documentCategory}` : sql``}`,
     )
   }
   const journeySources = [
@@ -1278,7 +1285,10 @@ export async function getTimeline(
         id: row.id,
         refId: row.id,
         type: "document",
-        createdAt: row.createdAt,
+        createdAt: row.capturedAt ?? row.createdAt,
+        uploadedAt: row.createdAt,
+        // Lo retirado queda en su día, plegado y con su motivo, no como vigente.
+        ...(row.retiredAt ? { status: "retirado", voidReason: row.retireReason } : {}),
         title: row.label,
         category: row.category,
         toothNumbers: ctx?.toothNumbers ?? [],

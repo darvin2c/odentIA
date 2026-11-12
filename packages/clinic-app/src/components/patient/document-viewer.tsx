@@ -19,8 +19,10 @@ import {
 } from "@odentia/ui"
 import {
   ConfirmDialog,
+  DatePickerButton,
   FormDrawer,
   LoadingState,
+  regionToday,
   submitErrorMessage,
   submitForm,
   useAppForm,
@@ -34,7 +36,7 @@ import { useEffect, useId, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { formatDate, formatDateTime } from "../../lib/clinical-journey"
-import { timeAgo, usePermission } from "../../lib/crm"
+import { timeAgo, useMemberName, usePermission } from "../../lib/crm"
 import { isImageCategory } from "../../lib/document-list"
 import type {
   Encounter,
@@ -43,7 +45,10 @@ import type {
   PlanItem,
 } from "../../lib/patients"
 import {
+  capturedDay,
+  capturedInstant,
   categoryLabel,
+  documentDateLabel,
   encounterLabel,
   formatTakenAt,
   imageTypeLabel,
@@ -74,6 +79,27 @@ const retireSchema = z.object({
     .min(1, "Escribe el motivo del retiro.")
     .max(MAX_RETIRE_REASON, `El motivo admite hasta ${MAX_RETIRE_REASON} caracteres.`),
 })
+
+/** Mismo tope que el motivo de una fecha corregida en `POST …/documents/:documentId/context`. */
+const MAX_DATE_REASON = 500
+/** Corregir la fecha de un archivo: otro día (o ninguno, la de subida), nunca futuro, con su motivo. */
+function dateCorrectionSchema(current: string) {
+  return z
+    .object({
+      day: z.string(),
+      reason: z
+        .string()
+        .trim()
+        .min(1, "Escribe por qué cambias la fecha.")
+        .max(MAX_DATE_REASON, `El motivo admite hasta ${MAX_DATE_REASON} caracteres.`),
+    })
+    .superRefine((value, ctx) => {
+      if (value.day && value.day > regionToday())
+        ctx.addIssue({ code: "custom", path: ["day"], message: "La fecha no puede ser futura." })
+      else if (value.day === current)
+        ctx.addIssue({ code: "custom", path: ["day"], message: "Es la misma fecha que ya tiene." })
+    })
+}
 
 /** Los topes de `POST …/documents/:documentId/context`; los vínculos se eligen de listas. */
 const contextSchema = z.object({
@@ -546,6 +572,45 @@ function DocumentViewer({
   })
   const retireError = useFormSubmitError(retireForm)
   const retirePending = useStore(retireForm.store, (state) => state.isSubmitting)
+  const queryClient = useQueryClient()
+  // «Corregir la fecha»: una versión nueva del archivo, con su motivo; la anterior queda en su historial.
+  const [dateOpen, setDateOpen] = useState(false)
+  // La versión que se corrige es la que se veía al abrir: si otra persona cambió el archivo
+  // mientras tanto, el servidor lo dice (409) en vez de pisar su corrección.
+  const [dateVersion, setDateVersion] = useState(doc.contextVersion)
+  const dateForm = useAppForm({
+    defaultValues: { day: capturedDay(doc.capturedAt), reason: "" },
+    validators: { onSubmit: dateCorrectionSchema(capturedDay(doc.capturedAt)) },
+    onSubmit: async ({ value }) => {
+      try {
+        await apiFetch(`/api/patients/${patientId}/documents/${doc.id}/context`, {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: dateVersion,
+            capturedAt: capturedInstant(value.day),
+            dateReason: value.reason.trim(),
+          }),
+        })
+      } catch (err) {
+        // Otra persona cambió el archivo: se trae su versión vigente y lo escrito se conserva.
+        if (isStaleVersion(err)) {
+          const fresh = await apiFetch<{ data: { document: PatientDocument } }>(
+            `/api/patients/${patientId}/documents/${doc.id}/context`,
+          ).catch(() => null)
+          if (fresh) setDateVersion(fresh.data.document.contextVersion)
+          await queryClient.invalidateQueries({ queryKey: ["patient-document-context", patientId, doc.id] })
+          await onChanged()
+        }
+        throw err
+      }
+      setDateOpen(false)
+      await queryClient.invalidateQueries({ queryKey: ["patient-document-context", patientId, doc.id] })
+      await onChanged()
+    },
+  })
+  const memberName = useMemberName()
+  const dateError = useFormSubmitError(dateForm)
+  const datePending = useStore(dateForm.store, (state) => state.isSubmitting)
   const compareSelectId = useId()
   // biome-ignore lint/correctness/useExhaustiveDependencies: otro archivo empieza sin ajustes.
   useEffect(() => {
@@ -735,16 +800,33 @@ function DocumentViewer({
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">
-              {doc.capturedAt ? "Tomada" : "Subida"}
+              {doc.capturedAt ? documentDateLabel(doc.category) : "Subida"}
             </dt>
-            <dd>
-              {formatDateTime(doc.capturedAt ?? doc.createdAt)}
-              {doc.capturedAt ? (
-                <span className="text-muted-foreground">
-                  {" "}
-                  (subida {formatDateTime(doc.createdAt)})
-                </span>
-              ) : null}
+            <dd className="flex flex-wrap items-center gap-x-2">
+              {/* Un día elegido se dice como día: sin una hora que nadie puso. */}
+              <span>
+                {doc.capturedAt ? formatDate(doc.capturedAt) : formatDateTime(doc.createdAt)}
+                {doc.capturedAt ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    (subida {formatDateTime(doc.createdAt)})
+                  </span>
+                ) : null}
+              </span>
+              {canEdit && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    dateForm.reset({ day: capturedDay(doc.capturedAt), reason: "" })
+                    setDateVersion(doc.contextVersion)
+                    setDateOpen(true)
+                  }}
+                >
+                  Corregir la fecha
+                </Button>
+              )}
             </dd>
           </div>
           {doc.source && (
@@ -932,15 +1014,17 @@ function DocumentViewer({
       {historyQuery.data && historyQuery.data.length > 1 && (
         <details className="rounded-md border px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium">
-            Cambios de piezas y vínculos ({historyQuery.data.length} versiones)
+            Cambios del archivo ({historyQuery.data.length} versiones)
           </summary>
           <ul className="flex flex-col gap-2 pt-2">
             {[...historyQuery.data]
               .sort((a, b) => b.version - a.version)
-              .map((rev) => (
+              .map((rev, _, all) => (
                 <li key={rev.version} className="text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">v{rev.version}</span> ·{" "}
                   {timeAgo(rev.createdAt)}
+                  {rev.dateReason &&
+                    ` · ${memberName(rev.authorUserId)} cambió la fecha a ${rev.capturedAt ? formatDate(rev.capturedAt) : "la de subida"} (antes ${dateBefore(all, rev.version)}) · Motivo: ${rev.dateReason}`}
                   {rev.toothNumbers.length > 0 && ` · Piezas ${rev.toothNumbers.join(", ")}`}
                   {rev.tags.length > 0 && ` · ${rev.tags.join(", ")}`}
                   {rev.encounterId && " · Atención"}
@@ -1025,7 +1109,7 @@ function DocumentViewer({
     <ConfirmDialog
       open={retireOpen}
       title="Retirar archivo"
-      description={`Sale de Documentos, ${productUi().site ? "de la historia por pieza" : "de la historia"} y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer.`}
+      description={`Sale de Documentos${productUi().site ? ", de la historia por pieza" : ""} y del resumen; en la Historia queda plegado como retirado. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer.`}
       confirmLabel="Retirar"
       pending={retirePending}
       error={retireError}
@@ -1047,12 +1131,70 @@ function DocumentViewer({
     </ConfirmDialog>
   )
 
+  const dateDialog = (
+    <ConfirmDialog
+      open={dateOpen}
+      title="Corregir la fecha"
+      description="Se guarda como una versión nueva del archivo: la fecha anterior queda en sus cambios, con tu nombre y el motivo. La historia lo pone en el día nuevo."
+      confirmLabel="Guardar"
+      // Corregir no es terminal: el botón no se pinta como una acción que borra.
+      variant="default"
+      pending={datePending}
+      error={dateError}
+      onClose={() => {
+        if (!datePending) setDateOpen(false)
+      }}
+      onConfirm={() =>
+        void submitForm(dateForm, {
+          fieldMap: (field) => (field === "capturedAt" ? "day" : field === "dateReason" ? "reason" : undefined),
+          formMessage: (err) =>
+            isStaleVersion(err)
+              ? "Otra persona cambió este archivo mientras corregías: ya está al día y tu fecha y tu motivo siguen aquí. Vuelve a guardar."
+              : undefined,
+        })
+      }
+    >
+      <dateForm.AppField name="day">
+        {(field) => (
+          <field.Control
+            label={documentDateLabel(doc.category)}
+            description="Vacía, vale la de subida."
+          >
+            {(control) => (
+              <DatePickerButton
+                {...control.props}
+                className="w-full"
+                value={field.state.value}
+                disabled={datePending}
+                min="1900-01-01"
+                max={regionToday()}
+                emptyLabel="La de subida"
+                onChange={(next) => field.handleChange(next)}
+              />
+            )}
+          </field.Control>
+        )}
+      </dateForm.AppField>
+      <dateForm.AppField name="reason">
+        {(field) => (
+          <field.TextareaField
+            label="Motivo"
+            aria-required
+            maxLength={MAX_DATE_REASON}
+            placeholder="p. ej. Puse el año equivocado"
+          />
+        )}
+      </dateForm.AppField>
+    </ConfirmDialog>
+  )
+
   if (detailsOpen === undefined) {
     return (
       <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
         {stage}
         {panel}
         {retireDialog}
+        {dateDialog}
       </div>
     )
   }
@@ -1069,8 +1211,17 @@ function DocumentViewer({
         </aside>
       )}
       {retireDialog}
+      {dateDialog}
     </div>
   )
+}
+
+/** La fecha que el archivo tenía antes de una versión: la de la versión anterior, o la de subida. */
+function dateBefore(history: PatientDocumentContext[], version: number): string {
+  const previous = history
+    .filter((rev) => rev.version < version)
+    .sort((a, b) => b.version - a.version)[0]
+  return previous?.capturedAt ? formatDate(previous.capturedAt) : "la de subida"
 }
 
 function ContextDrawer({

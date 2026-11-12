@@ -38,13 +38,14 @@ import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
-import { instantFromClinicValue } from "../../lib/clinical-journey"
 import { orgSlugFromHostname } from "../../lib/host"
 import { mayHoldStudy, type SelectedFile } from "../../lib/imaging-scan"
 import type { Encounter, PlanItem } from "../../lib/patients"
 import {
   basenameWithoutExtension,
+  capturedInstant,
   categoryLabel,
+  documentDateLabel,
   encounterLabel,
   imageTypeLabel,
   imageTypesFor,
@@ -75,7 +76,7 @@ interface RowValues {
   category: string
   /** Subtipo de imagen (radiografía o foto clínica). */
   imageType: string
-  /** Día de toma (`yyyy-mm-dd`, en la zona de la clínica); vacío = el de subida. */
+  /** Día del documento, o de toma en una imagen (`yyyy-mm-dd`, en la zona de la clínica); vacío = el de subida. */
   capturedAt: string
   source: string
   teeth: number[]
@@ -96,6 +97,9 @@ interface RowFile {
 
 interface UploadValues {
   encounterId: string
+  /** «Para todos»: lo que se elige aquí se copia a cada fila, y cada fila lo puede cambiar. */
+  allCategory: string
+  allCapturedAt: string
   rows: RowValues[]
 }
 
@@ -107,7 +111,7 @@ const NO_LINKS: DocumentLinkValue = {
   encounterProcedureId: "",
 }
 
-const EMPTY_UPLOAD: UploadValues = { encounterId: "", rows: [] }
+const EMPTY_UPLOAD: UploadValues = { encounterId: "", allCategory: "", allCapturedAt: "", rows: [] }
 
 const UNCONFIRMED_ROW =
   "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar."
@@ -115,7 +119,7 @@ const UNCONFIRMED_ROW =
 /**
  * Lo que se comprueba de cada fila antes de subirla: los mismos límites que
  * `POST /api/patients/:id/documents` (título 1–200, categoría, tipo de imagen
- * de esa categoría, toma no futura, origen hasta 120).
+ * de esa categoría, fecha no futura, origen hasta 120).
  */
 const rowSchema = z
   .object({
@@ -130,13 +134,17 @@ const rowSchema = z
     source: z.string(),
   })
   .superRefine((row, ctx) => {
-    // Tipo, fecha de toma y origen solo se piden (y se envían) en las categorías de imagen.
+    // El día se elige en la zona de la clínica, no en la del navegador. Vale para todo archivo.
+    if (row.capturedAt && row.capturedAt > regionToday())
+      ctx.addIssue({
+        code: "custom",
+        path: ["capturedAt"],
+        message: `La ${documentDateLabel(row.category).toLowerCase()} no puede ser futura.`,
+      })
+    // Tipo y origen solo se piden (y se envían) en las categorías de imagen.
     if (imageTypesFor(row.category).length === 0) return
     if (!row.imageType)
       ctx.addIssue({ code: "custom", path: ["imageType"], message: "Elige el tipo de imagen." })
-    // El día de toma se elige en la zona de la clínica, no en la del navegador.
-    if (row.capturedAt && row.capturedAt > regionToday())
-      ctx.addIssue({ code: "custom", path: ["capturedAt"], message: "La fecha de toma no puede ser futura." })
     if (row.source.trim().length > 120)
       ctx.addIssue({ code: "custom", path: ["source"], message: "El origen admite hasta 120 caracteres." })
   })
@@ -188,17 +196,6 @@ export interface DocumentUploadDialogProps {
   onOpenDocument?: (documentId: string) => void
 }
 
-/**
- * Instante de toma de un día elegido en la clínica: hoy, ahora (nunca en el
- * futuro); otro día, su mediodía, que no se corre de fecha en ningún formato.
- * Sin día, `null`: vale la fecha de subida.
- */
-function capturedInstant(day: string): string | null {
-  if (!day) return null
-  if (day === regionToday()) return new Date().toISOString()
-  return instantFromClinicValue(`${day}T12:00`)
-}
-
 /** Solo borradores admiten vínculo directo al subir; lo cerrado se vincula por revisión auditada. */
 function draftEncounters(encounters: Encounter[]): Encounter[] {
   return encounters.filter((e) => e.status === "borrador")
@@ -210,6 +207,7 @@ function toRow(
   file: File,
   initialTeeth: number[],
   defaultPlanItemId?: string,
+  common: { category: string; capturedAt: string } = { category: "", capturedAt: "" },
 ): { values: RowValues; meta: RowFile } | { fileError: string } {
   if (!isAcceptedFile(file)) return { fileError: unsupportedFormatMessage(file.name) }
   if (file.size === 0) return { fileError: "El archivo está vacío." }
@@ -225,9 +223,9 @@ function toRow(
     values: {
       key: `${Date.now()}-${rowSeq}`,
       title: basenameWithoutExtension(file.name),
-      category: "",
+      category: common.category,
       imageType: "",
-      capturedAt: "",
+      capturedAt: common.capturedAt,
       source: "",
       teeth: [...initialTeeth],
       tags: [],
@@ -299,11 +297,12 @@ export function DocumentUploadDialog({
       body.append("file", file)
       body.append("category", row.category)
       body.append("label", row.title.trim())
+      // La fecha propia vale para todo archivo: la historia lo pone en ese día.
+      const capturedAt = capturedInstant(row.capturedAt)
+      if (capturedAt) body.append("capturedAt", capturedAt)
       const types = imageTypesFor(row.category)
       if (types.length > 0) {
         if (types.includes(row.imageType)) body.append("imageType", row.imageType)
-        const capturedAt = capturedInstant(row.capturedAt)
-        if (capturedAt) body.append("capturedAt", capturedAt)
         if (row.source.trim()) body.append("source", row.source.trim())
       }
       if (encounterId) body.append("encounterId", encounterId)
@@ -347,6 +346,8 @@ export function DocumentUploadDialog({
   const form = useAppForm({
     defaultValues: {
       encounterId: defaultIsDraft ? (defaultEncounterId ?? "") : "",
+      allCategory: "",
+      allCapturedAt: "",
       rows: [],
     } as UploadValues,
     validators: {
@@ -424,6 +425,7 @@ export function DocumentUploadDialog({
     for (const meta of Object.values(files)) if (meta.previewUrl) URL.revokeObjectURL(meta.previewUrl)
     setFiles({})
     setRejected([])
+    lastCommon.current = { category: "", capturedAt: "" }
     form.reset()
     tomography.reset()
     setNoStudy(false)
@@ -453,12 +455,34 @@ export function DocumentUploadDialog({
     .map((row) => row.key)
   const unconfirmedCount = rows.filter((row) => statusOf(row.key) === "unconfirmed").length
 
+  /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
+  const lastCommon = useRef({ category: "", capturedAt: "" })
+  /**
+   * «Para todos»: copia la categoría o la fecha a cada fila por subir que no tenga una
+   * propia (vacía o la que se copió antes); la que se cambió a mano se respeta.
+   */
+  const applyToAll = (name: "category" | "capturedAt", value: string) => {
+    const previous = lastCommon.current[name]
+    lastCommon.current = { ...lastCommon.current, [name]: value }
+    form.getFieldValue("rows").forEach((row, index) => {
+      const status = statusOf(row.key)
+      if (status !== "pending" && status !== "error") return
+      if (row[name] !== "" && row[name] !== previous) return
+      form.setFieldValue(`rows[${index}].${name}`, value)
+      // Otro tipo de archivo: el tipo de imagen elegido deja de valer si no es de esa categoría.
+      if (name === "category" && row.imageType && !imageTypesFor(value).includes(row.imageType))
+        form.setFieldValue(`rows[${index}].imageType`, "")
+    })
+  }
+
   const addFiles = (list: File[]) => {
     if (disabled || !list.length) return
     const bad: string[] = []
     const added: Record<string, RowFile> = {}
+    // Lo elegido en «Para todos» vale también para los archivos que se agregan después.
+    const common = { category: form.getFieldValue("allCategory"), capturedAt: form.getFieldValue("allCapturedAt") }
     for (const file of list) {
-      const row = toRow(file, initialTeeth ?? [], defaultPlanItemId)
+      const row = toRow(file, initialTeeth ?? [], defaultPlanItemId, common)
       if ("fileError" in row) {
         bad.push(`${file.name}: ${row.fileError}`)
         continue
@@ -706,6 +730,51 @@ export function DocumentUploadDialog({
                 )}
               </rowsField.Group>
 
+              {pendingKeys.length > 1 && (
+                <fieldset className="flex flex-col gap-2 rounded-lg border border-dashed p-3">
+                  <legend className="px-1 text-sm font-medium">Para todos</legend>
+                  <p className="text-xs text-muted-foreground">
+                    Se copia a los archivos que no tienen una propia; después puedes cambiar la de cualquiera.
+                    La fecha de un papel es la que tiene escrita; si abarca varios años, la de su última anotación.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <form.AppField
+                      name="allCategory"
+                      listeners={{ onChange: ({ value }) => applyToAll("category", value) }}
+                    >
+                      {(field) => (
+                        <field.SelectField
+                          label="Categoría de todos"
+                          placeholder="Elige la categoría"
+                          options={UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))}
+                        />
+                      )}
+                    </form.AppField>
+                    <form.AppField
+                      name="allCapturedAt"
+                      listeners={{ onChange: ({ value }) => applyToAll("capturedAt", value) }}
+                    >
+                      {(field) => (
+                        <field.Control label="Fecha de todos">
+                          {(control) => (
+                            <DatePickerButton
+                              {...control.props}
+                              className="w-full"
+                              value={field.state.value}
+                              disabled={uploading}
+                              min="1900-01-01"
+                              max={regionToday()}
+                              emptyLabel="La de subida"
+                              onChange={(next) => field.handleChange(next)}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                  </div>
+                </fieldset>
+              )}
+
               {rows.length > 0 && (
                 <ol className="flex flex-col gap-3">
                   {rows.map((row, index) => {
@@ -724,6 +793,7 @@ export function DocumentUploadDialog({
                         onToggle={(expanded) => patchFile(row.key, { expanded })}
                         onRemove={() => removeRow(index)}
                         onRetry={() => retryRow(row.key)}
+                        several={pendingKeys.length > 1}
                       />
                     ) : null
                   })}
@@ -804,6 +874,8 @@ interface QueuedRowProps {
   onToggle: (expanded: boolean) => void
   onRemove: () => void
   onRetry: () => void
+  /** Varios archivos: la ayuda de la fecha va una vez, en «Para todos», no en cada fila. */
+  several: boolean
 }
 
 const QueuedRow = withForm({
@@ -821,9 +893,12 @@ const QueuedRow = withForm({
     onToggle,
     onRemove,
     onRetry,
+    several,
   }) {
     const id = useId()
     const row = useStore(form.store, (state) => state.values.rows[index])
+    // El calendario de una fila abre en la fecha de «Para todos», no en el mes de hoy.
+    const commonDate = useStore(form.store, (state) => state.values.allCapturedAt)
     if (!row) return null
     const name = meta.file.name
     const forFile = <span className="sr-only"> de {name}</span>
@@ -902,8 +977,8 @@ const QueuedRow = withForm({
                 )}
               </form.AppField>
             </div>
-            {types.length > 0 && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {types.length > 0 && (
                 <form.AppField name={`${at}.imageType`}>
                   {(field) => (
                     <field.SelectField
@@ -914,29 +989,40 @@ const QueuedRow = withForm({
                     />
                   )}
                 </form.AppField>
-                <form.AppField name={`${at}.capturedAt`}>
-                  {(field) => (
-                    <field.Control
-                      id={`${id}-taken`}
-                      label="Fecha de toma"
-                      description="Si queda vacía se usa la fecha de subida."
-                    >
-                      {(control) => (
-                        <DatePickerButton
-                          {...control.props}
-                          className="w-full"
-                          value={field.state.value}
-                          disabled={busy}
-                          max={regionToday()}
-                          emptyLabel="La de subida"
-                          onChange={(next) => field.handleChange(next)}
-                        />
-                      )}
-                    </field.Control>
-                  )}
-                </form.AppField>
-              </div>
-            )}
+              )}
+              <form.AppField name={`${at}.capturedAt`}>
+                {(field) => (
+                  <field.Control
+                    id={`${id}-taken`}
+                    label={
+                      <>
+                        {documentDateLabel(row.category)}
+                        {forFile}
+                      </>
+                    }
+                    description={
+                      types.length > 0 || several
+                        ? "Si queda vacía se usa la fecha de subida."
+                        : "La que tiene el papel; si abarca varios años, la de su última anotación. Vacía, vale la de subida."
+                    }
+                  >
+                    {(control) => (
+                      <DatePickerButton
+                        {...control.props}
+                        className="w-full"
+                        value={field.state.value}
+                        disabled={busy}
+                        openAt={commonDate || undefined}
+                        min="1900-01-01"
+                        max={regionToday()}
+                        emptyLabel="La de subida"
+                        onChange={(next) => field.handleChange(next)}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            </div>
 
             <details open={meta.expanded} onToggle={(e) => onToggle((e.currentTarget as HTMLDetailsElement).open)}>
               <summary className="cursor-pointer text-xs font-medium text-muted-foreground">

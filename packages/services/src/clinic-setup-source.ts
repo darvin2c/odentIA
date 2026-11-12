@@ -11,13 +11,14 @@
  */
 import { readFileSync } from "node:fs"
 import { extname, resolve } from "node:path"
-import { type ClinicalProduct, clinicalProfileFor } from "@odentia/clinical"
+import { type ClinicalProduct, clinicalProfileFor, postalAddressErrors } from "@odentia/clinical"
 import { brandPaper, type MailBrand } from "@odentia/mail"
 import { z } from "zod"
 import { type ClinicSetupPlan, clinicSetupPlanSchema } from "./clinic-setup-plan.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
 import { KNOWLEDGE_BASICS } from "./knowledge.js"
+import { COUNTRY_CURRENCY } from "./organization-profile.js"
 
 const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }
 
@@ -131,8 +132,34 @@ export function buildClinicSetupPlan(
     letterhead: letterhead ? { ...letterhead, file: embed(letterhead.file) } : undefined,
   })
   const library = loadLibrary(seedsDir, plan.product, plan.countryCode)
-  const required = clinicalProfileFor(plan.countryCode).services?.required ?? false
+  const profile = clinicalProfileFor(plan.countryCode)
+  const required = profile.services?.required ?? false
   const problems: string[] = []
+  // Lo que la administración rechazaría, dicho aquí: la dirección de cada sede según el país.
+  for (const branch of plan.branches) {
+    const errors = postalAddressErrors(profile, {
+      line: branch.addressLine1,
+      city: branch.city,
+      district: branch.district,
+      region: branch.region,
+      postalCode: branch.postalCode,
+      country: plan.countryCode,
+    })
+    for (const message of Object.values(errors)) problems.push(`Sede «${branch.name}»: ${message}`)
+  }
+  // Y las monedas: la del país y, si cobra en otra, esa con su cambio de hoy.
+  const base = COUNTRY_CURRENCY[plan.countryCode]
+  const second = plan.identity?.secondCurrency ?? null
+  if (second && !plan.identity?.exchangeRate) problems.push(`Para cobrar en ${second} hace falta el cambio de hoy (identity.exchangeRate)`)
+  const charges = (currency: string) => currency === base || currency === second
+  const currencies = [base, second].filter(Boolean).join(" y ")
+  plan.services.forEach((service, index) => {
+    if (!charges(service.currency))
+      problems.push(`Servicio ${index + 1} («${service.name ?? service.template}»): cobra en ${service.currency} y la clínica cobra en ${currencies}: agrega identity.secondCurrency`)
+  })
+  for (const expense of plan.recurringExpenses)
+    if (expense.currency && !charges(expense.currency))
+      problems.push(`Gasto «${expense.concept}»: va en ${expense.currency} y la clínica cobra en ${currencies}`)
   plan.services.forEach((service, index) => {
     if (!service.template) {
       if (required && !service.officialCode) problems.push(`Servicio ${index + 1} («${service.name}»): uno propio lleva su código oficial`)
@@ -143,6 +170,75 @@ export function buildClinicSetupPlan(
     else if (required && !entry.code) problems.push(`Servicio ${index + 1} («${entry.name}»): no tiene código en la lista del país`)
   })
   return { plan, review, library, problems }
+}
+
+/**
+ * El detalle de lo que el plan carga, por área, para el informe a la clínica: cada dato con
+ * su valor, tal como quedó. Lo que espera a una persona (su perfil, su horario) no va: va en
+ * «Aún no usamos».
+ */
+export function clinicSetupReportSections(
+  plan: ClinicSetupPlan,
+  library: Map<string, LibraryEntry>,
+): Array<{ title: string; rows: Array<{ label: string; value: string }> }> {
+  const sections: Array<{ title: string; rows: Array<{ label: string; value: string }> }> = []
+  const add = (title: string, rows: Array<[string, string | null | undefined]>) => {
+    const kept = rows.filter((row): row is [string, string] => !!row[1]).map(([label, value]) => ({ label, value }))
+    if (kept.length) sections.push({ title, rows: kept })
+  }
+  const id = plan.identity ?? {}
+  const base = COUNTRY_CURRENCY[plan.countryCode]
+  add("Empresa", [
+    ["Nombre comercial", id.tradeName],
+    ["Razón social", id.legalName],
+    [id.fiscalDocType === "RUC" || !id.fiscalDocType ? "RUC" : id.fiscalDocType, id.fiscalDocNumber],
+    ["Dirección fiscal", id.fiscalAddress],
+    ["Teléfono de urgencias", id.emergencyPhone],
+    ["Monedas", id.secondCurrency ? `${base} y ${id.secondCurrency}${id.exchangeRate ? ` (cambio de hoy: ${id.exchangeRate})` : ""}` : base],
+    ["Vigencia del presupuesto", plan.papers?.budgetValidDays ? `${plan.papers.budgetValidDays} días` : null],
+    ["Ticket", plan.papers?.receiptWidth ? `${plan.papers.receiptWidth} mm` : null],
+  ])
+  add("Marca y papeles", [
+    ["Color de la marca", plan.brand?.color],
+    ["Logo", plan.brand?.logo ? "Su logo, en PNG transparente" : null],
+    ["Hoja membretada", plan.letterhead ? "Su hoja, en la que salen recetas, presupuestos y demás papeles" : null],
+  ])
+  for (const branch of plan.branches)
+    add(`Sede ${branch.name}`, [
+      ["Dirección", [branch.addressLine1, branch.city].filter(Boolean).join(", ")],
+      ["Teléfono de la sede", branch.phone],
+      ["Unidades", branch.rooms.length ? branch.rooms.join(", ") : null],
+      ["Cita regular", branch.appointmentMinutes ? `${branch.appointmentMinutes} minutos` : null],
+    ])
+  const system = clinicalProfileFor(plan.countryCode).services?.label ?? "código"
+  add(
+    "Servicios y precios",
+    plan.services.map((service) => {
+      const entry = service.template ? library.get(service.template) : undefined
+      const name = service.name ?? entry?.name ?? "Servicio"
+      const code = entry?.code ?? service.officialCode
+      return [
+        `${name}${code ? ` (${system} ${code})` : ""}`,
+        `${service.priceDisclosure === "desde" ? "desde " : ""}${money(service.priceCents, service.currency)}${entry ? "" : " · servicio propio"}`,
+      ]
+    }),
+  )
+  add("Caja", [
+    ["Medios de pago", plan.paymentMethods.map((m) => m.name).join(", ") || null],
+    ...plan.recurringExpenses.map((e): [string, string] => [
+      `Gasto fijo: ${e.concept}`,
+      `${money(e.amountCents, e.currency ?? base ?? "PEN")}, ${e.everyMonths === 1 ? "cada mes" : `cada ${e.everyMonths} meses`}, el día ${e.day}`,
+    ]),
+  ])
+  add(
+    "Lo que responde su asistente a los pacientes",
+    plan.knowledge.map((k): [string, string] => [k.title ?? KNOWLEDGE_BASICS.find((b) => b.key === k.basicKey)?.question ?? "Pregunta", k.body]),
+  )
+  add("Formatos propios (en borrador, para que los revise)", [
+    ...plan.consents.map((c): [string, string] => ["Consentimiento", c.title]),
+    ...plan.forms.map((f): [string, string] => ["Formulario", f.title]),
+  ])
+  return sections
 }
 
 const money = (cents: number, currency: string) =>

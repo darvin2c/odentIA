@@ -24,6 +24,7 @@ import {
   FAMILY_KINSHIP,
   type HealthAuthorship,
   healthReviewPending,
+  isImageDocumentCategory,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -1662,6 +1663,13 @@ export interface DocumentContextInput {
 export interface CorrectDocumentContextInput extends DocumentContextInput {
   /** Versión vigente esperada (bloqueo optimista). */
   expectedVersion: number
+  /**
+   * Fecha del documento corregida (ISO 8601); `null` vuelve a la de subida y
+   * `undefined` conserva la vigente. Cambiarla pide `dateReason`.
+   */
+  capturedAt?: string | Date | null
+  /** Por qué se corrige la fecha (hasta 500 caracteres). */
+  dateReason?: string | null
 }
 
 /** Documento fusionado con su contexto vigente. */
@@ -2004,14 +2012,7 @@ function normalizeImageInput(category: string, input: DocumentImageInput, imagin
       throw invalidField("imageType", `${type.label} no corresponde a la categoría ${category}`)
     imageType = type.value
   }
-  let capturedAt: Date | null = null
-  if (input.capturedAt) {
-    capturedAt = input.capturedAt instanceof Date ? input.capturedAt : new Date(input.capturedAt)
-    if (Number.isNaN(capturedAt.getTime())) throw invalidField("capturedAt", "La fecha de toma no es válida")
-    // Margen de cinco minutos por relojes de equipos desfasados.
-    if (capturedAt.getTime() > Date.now() + 5 * 60_000)
-      throw invalidField("capturedAt", "La fecha de toma no puede ser futura")
-  }
+  const capturedAt = input.capturedAt ? documentDate(input.capturedAt, category) : null
   const source = input.source?.trim() || null
   if (source && source.length > 120) throw invalidField("source", "El origen debe tener hasta 120 caracteres")
   let reportStatus: ReportStatus | null = null
@@ -2089,6 +2090,8 @@ export async function registerPatientDocument(
       ...extendedDocumentLinks(input),
       ...siteCodesColumns(site, toothNumbers),
       tags,
+      // La fecha con que nace: el historial la tiene desde la primera versión.
+      capturedAt: image.capturedAt,
       authorUserId: actorUserId,
     })
     .returning()
@@ -2186,7 +2189,8 @@ export async function listPatientDocuments(
     .select()
     .from(patientDocument)
     .where(and(...conditions))
-    .orderBy(desc(takenAt), desc(patientDocument.id))
+    // Con la misma fecha («Para todos»), lo último que se subió primero, y siempre en el mismo orden.
+    .orderBy(desc(takenAt), desc(patientDocument.createdAt), desc(patientDocument.id))
   if (!docs.length) return []
   const latest = await latestDocumentContexts(
     tx,
@@ -2421,7 +2425,8 @@ export async function getPatientDocumentWithHistory(
 
 /** Corrección documental versionada: inserta una versión completa nueva con
  * bloqueo optimista. Nunca muta el blob, la clasificación original ni la
- * clínica de la atención (ni siquiera si está cerrada). */
+ * clínica de la atención (ni siquiera si está cerrada). La fecha del documento
+ * se corrige aquí, con su motivo: la versión guarda la nueva y el archivo la copia. */
 export async function correctDocumentContext(
   tx: Db,
   orgId: string,
@@ -2460,6 +2465,27 @@ export async function correctDocumentContext(
   if (planItemId) await requirePatientPlanItem(tx, orgId, patientId, planItemId)
   const extended = extendedDocumentLinks(input, current)
   await validateExtendedDocumentLinks(tx, orgId, patientId, extended)
+  const date = correctedDocumentDate(row.capturedAt, row.category, input)
+  if (date.changed) {
+    // El PDF que genera la firma (o la revocación) lleva la fecha de ese hecho: no se corrige
+    // a mano. La hoja escaneada sí, porque la fecha la dice quien la sube. La base también lo impide.
+    const [generated] = await tx
+      .select({ id: consentDocument.id })
+      .from(consentDocument)
+      .where(
+        and(
+          eq(consentDocument.organizationId, orgId),
+          or(eq(consentDocument.pdfDocumentId, documentId), eq(consentDocument.revokePdfDocumentId, documentId)),
+        ),
+      )
+      .limit(1)
+    if (generated)
+      throw new ServiceError(
+        "DOCUMENT_DATE_FIXED",
+        409,
+        "Este papel lo generó la firma del consentimiento: su fecha es la de la firma y no se cambia.",
+      )
+  }
   let inserted: typeof patientDocumentContext.$inferSelect | undefined
   try {
     ;[inserted] = await tx
@@ -2474,6 +2500,8 @@ export async function correctDocumentContext(
         ...extended,
         ...siteCodesColumns(site, toothNumbers),
         tags,
+        capturedAt: date.capturedAt,
+        dateReason: date.reason,
         authorUserId: actorUserId,
       })
       .returning()
@@ -2489,6 +2517,17 @@ export async function correctDocumentContext(
   }
   if (!inserted) throw new Error("No se pudo corregir el contexto del documento")
   const next = withTeeth(site, inserted)
+  let document = row
+  if (date.changed) {
+    // La vigente se copia en el archivo: todo lo que lee la fecha la ve igual (la base exige que coincida).
+    const [updated] = await tx
+      .update(patientDocument)
+      .set({ capturedAt: date.capturedAt })
+      .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+      .returning()
+    if (!updated) throw new Error("No se pudo corregir la fecha del documento")
+    document = updated
+  }
   await audit(
     tx,
     orgId,
@@ -2503,9 +2542,46 @@ export async function correctDocumentContext(
       toVersion: next.version,
       encounterId,
       planItemId,
+      ...(date.changed
+        ? { capturedFrom: row.capturedAt?.toISOString() ?? null, capturedTo: date.capturedAt?.toISOString() ?? null, dateReason: date.reason }
+        : {}),
     },
   )
-  return mergeDocumentContext(row, next)
+  return mergeDocumentContext(document, next)
+}
+
+/**
+ * La fecha propia de un documento (la de toma, en una imagen): válida, desde 1900 y
+ * nunca futura, con cinco minutos de margen por relojes de equipos desfasados.
+ */
+function documentDate(value: string | Date, category: string): Date {
+  const words = isImageDocumentCategory(category) ? "La fecha de toma" : "La fecha del documento"
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) throw invalidField("capturedAt", `${words} no es válida`)
+  if (date.getTime() < EARLIEST_DOCUMENT_DATE) throw invalidField("capturedAt", `${words} no puede ser anterior a 1900`)
+  if (date.getTime() > Date.now() + 5 * 60_000) throw invalidField("capturedAt", `${words} no puede ser futura`)
+  return date
+}
+
+/** Un papel clínico anterior a 1900 es un error al escribir el año. */
+const EARLIEST_DOCUMENT_DATE = Date.UTC(1900, 0, 1)
+
+/**
+ * La fecha de una corrección: la vigente si no se toca; la nueva, con su motivo,
+ * si cambia.
+ */
+function correctedDocumentDate(
+  current: Date | null,
+  category: string,
+  input: Pick<CorrectDocumentContextInput, "capturedAt" | "dateReason">,
+): { capturedAt: Date | null; reason: string | null; changed: boolean } {
+  if (input.capturedAt === undefined) return { capturedAt: current, reason: null, changed: false }
+  const next = input.capturedAt === null ? null : documentDate(input.capturedAt, category)
+  if ((next?.getTime() ?? null) === (current?.getTime() ?? null)) return { capturedAt: current, reason: null, changed: false }
+  const reason = input.dateReason?.trim() ?? ""
+  if (!reason) throw invalidField("dateReason", "Escribe por qué cambias la fecha.")
+  if (reason.length > 500) throw invalidField("dateReason", "El motivo admite hasta 500 caracteres.")
+  return { capturedAt: next, reason, changed: true }
 }
 
 /** Contextos vigentes por lote para hidratar historia/timeline sin leer las

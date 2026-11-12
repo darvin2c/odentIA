@@ -2999,7 +2999,48 @@ if (erradaRef) {
     storageKey: ref.objectKey,
     contentType: ref.mimeType,
     sizeBytes: bytes.byteLength,
+    // El laboratorio lo emitió hace 6 días: la historia lo pone ese día, no el de subida.
+    capturedAt: new Date(Date.now() - 6 * 86_400_000),
     source: "Laboratorio de demostración",
+  })
+}
+// La historia que trajo de otra clínica, escaneada: lleva la fecha de su última anotación,
+// así la Historia la pone hace dos años y dice cuándo se subió. Se corrigió una vez la fecha
+// (el año estaba mal): «Cambios del archivo» guarda la anterior con el motivo.
+{
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const lines = [
+    "Historia clínica odontológica (copia de otra clínica, demostración)",
+    "Primera consulta: caries en 16 y 26, profilaxis.",
+    "Resina en 16. Control sin novedad.",
+    "Endodoncia de 36 en tres sesiones; corona de 36.",
+    "Última anotación: control anual, periapical de 36 sin lesión.",
+  ]
+  const sheet = pdf.addPage([595, 842])
+  lines.forEach((text, i) => sheet.drawText(text, { x: 56, y: 770 - i * 24, size: i === 0 ? 14 : 11, font }))
+  const bytes = Buffer.from(await pdf.save())
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes,
+    contentType: "application/pdf",
+    ext: "pdf",
+  })
+  const lastNote = new Date(Date.now() - 730 * 86_400_000)
+  const previous = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "informe",
+    label: "[DEMO] Historia de la clínica anterior",
+    storageKey: ref.objectKey,
+    contentType: ref.mimeType,
+    sizeBytes: bytes.byteLength,
+    capturedAt: new Date(lastNote.getTime() - 365 * 86_400_000),
+    source: "Clínica anterior (demostración)",
+  })
+  await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, previous.id, {
+    expectedVersion: previous.contextVersion,
+    capturedAt: lastNote,
+    dateReason: "Puse el año equivocado: la última anotación es de un año después.",
   })
 }
 // Cierre con datos útiles: evolución e indicaciones. Lo que sigue lo dice el plan.

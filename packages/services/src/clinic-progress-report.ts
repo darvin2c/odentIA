@@ -13,6 +13,7 @@
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { adminAudit } from "@odentia/db/schema/admin-core"
+import { user } from "@odentia/db/schema/auth"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { brandPaper, type MailBrand, type MailTemplate, renderEmail } from "@odentia/mail"
 import { z } from "zod"
@@ -22,7 +23,8 @@ import { ServiceError } from "./errors.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
 
 /** Hojas del informe como máximo: si pasa, el comando falla para que se acorte. */
-export const PROGRESS_REPORT_MAX_PAGES = 2
+/** Con el detalle de lo cargado, hasta tres hojas. */
+export const PROGRESS_REPORT_MAX_PAGES = 3
 
 const PRODUCT = {
   dental: { brand: "odentia", domain: "odentia32.com" },
@@ -46,11 +48,18 @@ export const REPORT_LIMITS: ReadonlyArray<{ pattern: RegExp; reason: string }> =
   { pattern: /garantiz|asegur(amos|a que)|promet/i, reason: "no promete: cuenta lo hecho" },
   { pattern: /\bcontrato|\bley\b|\bleyes\b|\blegal|\bnorma|\bcumpl/i, reason: "no habla del contrato ni de la ley" },
   {
-    pattern: /respond|respuesta|confirm|aprueb|aprobaci|su visto bueno|revise y/i,
+    // Lo que se le pide a ella; «lo que responde su asistente» no es un pedido.
+    pattern: /\bresp[oó]nd(a|anos|ernos)\b|\bsu respuesta|\bconfirme|\baprueb|\baprobaci|su visto bueno|\brevise y/i,
     reason: "es informativo: no pide respuesta ni aprobación",
   },
   { pattern: /\d{7,}|\d{3}[ -]\d{3}[ -]\d{3}/, reason: "no lleva documentos ni teléfonos" },
 ]
+
+/**
+ * En el detalle de lo cargado, los datos de la propia clínica sí llevan sus números: su RUC
+ * y sus teléfonos son de la empresa, no de una persona.
+ */
+const CLINIC_NUMBER_LABELS = /^(RUC|Teléfono de urgencias|Teléfono de la sede)$/i
 
 const isoDate = z.iso.date({ error: "Fecha AAAA-MM-DD que exista en el calendario" })
 const line = z.string().trim().min(2).max(200)
@@ -88,6 +97,19 @@ export const progressReportSchema = z.strictObject({
   where: z.array(line).min(1).max(5),
   /** Lo que sigue: lo puede hacer ella misma o escribirnos. */
   next: z.array(line).max(5).default([]),
+  /**
+   * El detalle de lo que quedó cargado, por área: cada dato con su valor (cada servicio con
+   * su código y su precio, cada gasto con su monto…). Lo arma la skill desde el plan cargado.
+   */
+  sections: z
+    .array(
+      z.strictObject({
+        title: z.string().trim().min(2).max(60),
+        rows: z.array(z.strictObject({ label: z.string().trim().min(1).max(160), value: z.string().trim().min(1).max(400) })).min(1).max(40),
+      }),
+    )
+    .max(10)
+    .default([]),
 })
 export type ProgressReportInput = z.input<typeof progressReportSchema>
 
@@ -107,6 +129,7 @@ export interface ProgressReportContent {
   done: string[]
   where: string[]
   next: string[]
+  sections: Array<{ title: string; rows: Array<{ label: string; value: string }> }>
   /** Cierre: lo que sigue lo puede hacer ella o escribirnos, sin pedirle nada. */
   closing: string
   signature: { name: string; role: string | null; brand: string; contact: string }
@@ -130,6 +153,14 @@ function freeTexts(report: z.output<typeof progressReportSchema>): Array<[string
     ...report.done.map((text, i): [string, string] => [`done.${i}`, text]),
     ...report.where.map((text, i): [string, string] => [`where.${i}`, text]),
     ...report.next.map((text, i): [string, string] => [`next.${i}`, text]),
+    ...report.sections.flatMap((section, i): Array<[string, string]> => [
+      [`sections.${i}.title`, section.title],
+      ...section.rows.flatMap((row, j): Array<[string, string]> => [
+        [`sections.${i}.rows.${j}.label`, row.label],
+        // El valor de un dato de la clínica (su RUC, su teléfono) lleva sus números.
+        [`sections.${i}.rows.${j}.value`, CLINIC_NUMBER_LABELS.test(row.label) ? row.value.replace(/\d/g, "") : row.value],
+      ]),
+    ]),
   ]
 }
 
@@ -161,6 +192,7 @@ export function progressReportContent(raw: ProgressReportInput): ProgressReportC
     done: report.done,
     where: report.where,
     next: report.next,
+    sections: report.sections,
     closing: `Lo que sigue puede hacerlo usted desde ${brandName} o, si lo prefiere, lo vemos juntos: puede escribirnos cuando guste.`,
     signature: {
       name: companion.name,
@@ -221,23 +253,36 @@ export async function progressReportPdf(raw: ProgressReportInput): Promise<{
     kit.subheading("Lo que recibimos", section)
     kit.bullets(content.received, body)
   }
-  if (content.used.length || content.notYet.length) {
+  if (content.used.length) {
     kit.subheading("Lo que usamos", section)
-    if (content.used.length)
+    kit.table({
+      columns: [{ label: "Dato", width: 160 }, { label: "Dónde quedó" }],
+      rows: content.used.map((u) => [u.data, u.where]),
+      size: SIZE.dense,
+      rowPad: 2,
+    })
+  }
+  if (content.sections.length) {
+    kit.subheading("Lo que quedó cargado", section)
+    for (const part of content.sections) {
+      kit.gap(2)
+      // El título no queda solo al pie de una hoja: va con sus primeras filas.
+      kit.ensure(SIZE.dense * 1.45 * 4)
+      kit.text({ text: part.title, face: "sansSemi" }, body)
       kit.table({
-        columns: [{ label: "Dato", width: 160 }, { label: "Dónde quedó" }],
-        rows: content.used.map((u) => [u.data, u.where]),
+        columns: [{ label: "Dato", width: 190 }, { label: "Valor" }],
+        rows: part.rows.map((row) => [row.label, row.value]),
         size: SIZE.dense,
         rowPad: 2,
       })
-    if (content.notYet.length) {
-      kit.gap(4)
-      kit.text({ text: "Aún no usamos", face: "sansSemi" }, body)
-      kit.bullets(
-        content.notYet.map((u) => `${u.data}: ${u.why}`),
-        body,
-      )
     }
+  }
+  if (content.notYet.length) {
+    kit.subheading("Aún no usamos", section)
+    kit.bullets(
+      content.notYet.map((u) => `${u.data}: ${u.why}`),
+      body,
+    )
   }
   kit.subheading("Lo que hicimos", section)
   kit.bullets(content.done, body)
@@ -342,7 +387,7 @@ export async function reserveProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { number: number; to: string; subject: string },
+  input: { number: number; to: string; subject: string; stage: string; pdfKey: string },
 ): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('informe:' || ${orgId} || ':' || ${input.number}))`)
   const before = await progressReportSent(tx, orgId, input.number)
@@ -358,7 +403,7 @@ export async function reserveProgressReport(
     action: PROGRESS_REPORT_ACTIONS.enviando,
     organizationId: orgId,
     entityId: `informe-${input.number}`,
-    metadata: { to: input.to, subject: input.subject },
+    metadata: { to: input.to, subject: input.subject, stage: input.stage, pdfKey: input.pdfKey },
   })
 }
 
@@ -367,12 +412,149 @@ export async function finishProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { number: number; to: string; subject: string; state: "enviado" | "desconocido" },
+  input: {
+    number: number
+    to: string
+    subject: string
+    stage: string
+    pdfKey: string
+    state: "enviado" | "desconocido"
+    /** Cuándo salió, si fue por otra vía antes de registrarlo (ISO 8601). */
+    sentAt?: string
+    /** Salió por otra vía y se registra después: el sistema no lo envió. */
+    registered?: boolean
+  },
 ): Promise<void> {
   await writeAdminAudit(tx, actor, {
     action: PROGRESS_REPORT_ACTIONS[input.state],
     organizationId: orgId,
     entityId: `informe-${input.number}`,
-    metadata: { to: input.to, subject: input.subject },
+    metadata: {
+      to: input.to,
+      subject: input.subject,
+      stage: input.stage,
+      pdfKey: input.pdfKey,
+      ...(input.sentAt ? { sentAt: input.sentAt } : {}),
+      ...(input.registered ? { registered: true } : {}),
+    },
   })
+}
+
+/** Dónde queda el PDF de un informe enviado: en el almacenamiento privado, en la carpeta de la clínica. */
+export function progressReportPdfKey(orgId: string, number: number): string {
+  return `clinics/${orgId}/informes/informe-${number}-${crypto.randomUUID()}.pdf`
+}
+
+export interface ProgressReportRecord {
+  number: number
+  state: ProgressReportState
+  at: string
+  to: string | null
+  subject: string | null
+  stage: string | null
+  /** Quién lo envió o lo registró. */
+  by: string | null
+  /** Salió por otra vía y se registró después: el sistema no lo envió. */
+  registeredLater: boolean
+  /** La clave del PDF tal como salió; sin ella, el informe se envió antes de guardarlos. */
+  pdfKey: string | null
+}
+
+/** Los informes de esa clínica, el último estado de cada número, del más nuevo al más viejo. */
+export async function listProgressReports(tx: Db, orgId: string): Promise<ProgressReportRecord[]> {
+  const rows = await tx
+    .select({
+      at: adminAudit.createdAt,
+      action: adminAudit.action,
+      entityId: adminAudit.entityId,
+      metadata: adminAudit.metadata,
+      by: user.name,
+    })
+    .from(adminAudit)
+    .leftJoin(user, eq(user.id, adminAudit.actorUserId))
+    .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), eq(adminAudit.organizationId, orgId)))
+    .orderBy(desc(adminAudit.createdAt))
+  const seen = new Map<number, ProgressReportRecord>()
+  for (const row of rows) {
+    const number = Number(row.entityId?.replace("informe-", ""))
+    if (!Number.isInteger(number) || seen.has(number)) continue
+    const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
+    const meta = row.metadata ?? {}
+    const sentAt = meta.sentAt as string | undefined
+    seen.set(number, {
+      number,
+      state,
+      at: sentAt ?? row.at.toISOString(),
+      to: (meta.to as string | undefined) ?? null,
+      subject: (meta.subject as string | undefined) ?? null,
+      stage: (meta.stage as string | undefined) ?? null,
+      by: row.by ?? null,
+      registeredLater: meta.registered === true,
+      pdfKey: (meta.pdfKey as string | undefined) ?? null,
+    })
+  }
+  return [...seen.values()].sort((a, b) => b.number - a.number)
+}
+
+/** Una carga en el registro de la clínica: la configuración o los pacientes de un plan. */
+export interface ClinicLoadRecord {
+  kind: "configuracion" | "pacientes"
+  at: string
+  by: string | null
+  /** Lo que quedó, en una frase: «20 nuevos · 2 cambiaron · 7 ya estaban». */
+  summary: string
+}
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+
+/** Las cifras de una carga en palabras; lo que es cero no se dice. */
+function loadSummary(kind: ClinicLoadRecord["kind"], totals: Record<string, number>): string {
+  const n = (key: string) => totals[key] ?? 0
+  const parts =
+    kind === "configuracion"
+      ? [
+          n("nueva") && plural(n("nueva"), "nuevo", "nuevos"),
+          n("cambia") && plural(n("cambia"), "cambió", "cambiaron"),
+          n("igual") && `${n("igual")} ya estaba${n("igual") === 1 ? "" : "n"}`,
+          n("espera") && `${n("espera")} espera${n("espera") === 1 ? "" : "n"} a que acepten su invitación`,
+          n("error") && `${n("error")} no ${n("error") === 1 ? "entró" : "entraron"}`,
+        ]
+      : [
+          n("creadas") && plural(n("creadas"), "persona creada", "personas creadas"),
+          n("existentes") && `${n("existentes")} ya estaba${n("existentes") === 1 ? "" : "n"}`,
+          n("yaCargadas") && `${n("yaCargadas")} ya ${n("yaCargadas") === 1 ? "se había" : "se habían"} cargado`,
+          n("errores") && `${n("errores")} no ${n("errores") === 1 ? "entró" : "entraron"}`,
+        ]
+  return parts.filter(Boolean).join(" · ") || "Nada que cargar"
+}
+
+/**
+ * Las cargas de esa clínica, de la más nueva a la más vieja, con quién las hizo. Los
+ * pacientes se cargan por tandas: las tandas seguidas del mismo plan son una sola carga.
+ */
+export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoadRecord[]> {
+  const rows = await tx.execute<{ action: string; created_at: Date | string; metadata: Record<string, unknown> | null; name: string | null }>(sql`
+    select a.action, a.created_at, a.metadata, u.name
+    from admin_audit a left join "user" u on u.id = a.actor_user_id
+    where a.organization_id = ${orgId} and a.action in ('org.setup_import', 'org.data_import')
+    order by a.created_at desc
+    limit 500`)
+  // `open`: las tandas llegan de la más nueva a la más vieja, y la tanda 0 es el comienzo de
+  // esa pasada; la anterior a ella (otra pasada del mismo plan) va en su propia fila.
+  const loads: Array<{ kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; open: boolean; totals: Record<string, number> }> = []
+  for (const row of rows) {
+    const meta = row.metadata ?? {}
+    const kind = row.action === "org.setup_import" ? "configuracion" : "pacientes"
+    const numbers = Object.fromEntries(Object.entries(meta).filter(([, value]) => typeof value === "number")) as Record<string, number>
+    const { from, to: _to, total: _total, invitations: _invitations, ...totals } = numbers
+    const first = kind === "pacientes" && from === 0
+    const last = loads.at(-1)
+    if (kind === "pacientes" && last?.kind === "pacientes" && last.open && last.plan === meta.planSha256) {
+      for (const [key, value] of Object.entries(totals)) last.totals[key] = (last.totals[key] ?? 0) + value
+      if (first) last.open = false
+      continue
+    }
+    loads.push({ kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, open: kind === "pacientes" && !first, totals })
+  }
+  return loads.slice(0, 100).map(({ kind, at, by, totals }) => ({ kind, at, by, summary: loadSummary(kind, totals) }))
 }

@@ -226,6 +226,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 - [ ] Se pide **solo por lo que se hace hoy o por la opción elegida**, no por lo indicado para dentro de semanas.
 - [ ] «Firmar ahora» abre el documento que se pulsó.
+- [ ] «Firmado en papel» pregunta cuándo se firmó; el consentimiento, su PDF y la Historia dicen esa fecha y, aparte, cuándo se registró (hoy dice la del registro). Caso: CC17.
 - [ ] El texto corresponde al procedimiento, la pieza y el diagnóstico de hoy: la corona no dice «reponer piezas ausentes» ni lleva «Pulpitis» como motivo.
 - [ ] Tiene procedimiento, beneficios, riesgos, alternativas y consecuencias de no hacerlo.
 - [ ] La tablet, el enlace, el papel y el PDF muestran lo mismo, con la misma declaración.
@@ -319,6 +320,8 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] El informe queda pendiente, informado o «no requiere», y ligado a su orden.
 - [ ] Recepción puede subir una tomografía sin verla.
 - [ ] Las órdenes de laboratorio también existen en odentIA: el INR antes de una exodoncia, la glucemia de un diabético y la biopsia vuelven con su resultado a su orden.
+- [ ] Una radiografía o un INR subidos días después dicen su fecha de toma o de examen, y la Historia los pone ese día (P-COM-24).
+- [ ] En la Historia, la imagen dice su tipo (panorámica, periapical…), no solo «Radiografía».
 
 **Ya falló:** terceras molares, la arcada de la medida y guardar la vista en otro borrador (PR 481).
 **Fuentes:** DICOM; ADR 0055, 0056, 0057, 0147 y 0148.
@@ -363,6 +366,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 **Dónde:** la Historia (`CA/historia-tab.tsx`, `encounter-history-card.tsx`; `S/patient-history.ts`), la hoja para el seguro (`S/attention-sheet.ts`) y el odontograma impreso.
 
 - [ ] Una tarjeta por atención, con lo que se hizo, los hallazgos bajo el odontograma, el precio acordado y quién firmó.
+- [ ] «Piezas tratadas» cuenta solo lo hecho o hallado hoy, no las piezas de una imagen adjunta.
 - [ ] Se lee sin abrir cada cosa: el diagnóstico con su nombre, la sesión y el estado.
 - [ ] Una atención en curso no queda suelta ni se confunde con una firmada.
 - [ ] El PDF, el odontograma impreso y la hoja del seguro dicen lo mismo que la pantalla.
