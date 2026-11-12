@@ -43,6 +43,8 @@ export interface MailMessage {
   replyTo?: string
   /** La marca del correo: decide el remitente. Sin ella, odentIA. */
   brand?: MailBrand
+  /** Archivos adjuntos (el informe de avance en PDF); los logos van solos. */
+  attachments?: ReadonlyArray<{ filename: string; content: Uint8Array; contentType: string }>
 }
 
 /** «odentIA <no-reply@…>» con el nombre de otra marca: «latidIA <no-reply@…>». */
@@ -66,7 +68,7 @@ export function createMailer(env: MailerEnv): Mailer {
     auth: env.user ? { user: env.user, pass: env.pass ?? "" } : undefined,
   })
   return {
-    async send({ to, subject, html, text, replyTo, brand = BASE_MAIL_BRAND }) {
+    async send({ to, subject, html, text, replyTo, brand = BASE_MAIL_BRAND, attachments = [] }) {
       await transporter.sendMail({
         from: env.fromByBrand?.[brand] ?? senderFor(env.from, brand),
         to,
@@ -74,7 +76,10 @@ export function createMailer(env: MailerEnv): Mailer {
         html,
         text,
         ...(replyTo ? { replyTo } : {}),
-        attachments: logoAttachments(html),
+        attachments: [
+          ...logoAttachments(html),
+          ...attachments.map((file) => ({ ...file, content: Buffer.from(file.content) })),
+        ],
       })
     },
   }
