@@ -111,8 +111,15 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "inicio-soporte-acceso",
         q: "¿Cómo le doy acceso a soporte para que revise mi clínica?",
-        a: "En Ayuda › «Tus casos con soporte», abre el caso y en «Acceso diagnóstico de soporte» elige la «Duración» (15 minutos, 30 minutos o 1 hora) y «Autorizar acceso». Soporte ve entonces el diagnóstico de la clínica: configuración, nunca pacientes ni secretos. «Revocar ahora» lo corta antes de tiempo. Lo autoriza el propietario o el administrador; en un caso resuelto, primero hay que reabrirlo.",
+        a: "En Ayuda › «Tus casos con soporte», abre el caso y en «Acceso diagnóstico de soporte» elige la «Duración» (15 minutos, 30 minutos o 1 hora) y «Autorizar acceso». Soporte ve entonces el diagnóstico de la clínica: configuración, nunca pacientes ni secretos. «Revocar ahora» lo corta antes de tiempo. Lo autorizan el propietario y los administradores. Si soporte lo pide en un caso que abrió otra persona del equipo, desde ese momento ellos también ven el caso en «Tus casos con soporte» y les llega un correo de que soporte necesita algo; quien abrió el caso y no puede autorizarlo lee ahí a quién pedírselo. En un caso resuelto, primero hay que reabrirlo.",
         forms: ["autorizar a soporte a ver mi clinica", "soporte puede ver a mis pacientes", "quitarle el acceso a soporte"],
+        general: true,
+      },
+      {
+        id: "inicio-soporte-pidio-acceso",
+        q: "Soporte me pidió acceso de diagnóstico, ¿qué hago?",
+        a: "Para revisar tu caso, soporte necesita ver la configuración de tu clínica; nunca ve pacientes ni secretos. Si eres propietario o administrador, en Ayuda › «Tus casos con soporte» abre el caso, en «Acceso diagnóstico de soporte» elige la «Duración» y pulsa «Autorizar acceso»: no hace falta escribir nada, el caso pasa a «En atención» y soporte se entera. «Revocar ahora» lo corta cuando quieras. Si no puedes autorizarlo, el caso te dice que lo autorizan el propietario o un administrador, que ya lo ven en su Ayuda: avísales.",
+        forms: ["soporte me pide que autorice el acceso", "me llego un correo de que soporte necesita algo", "no puedo autorizar el acceso que pide soporte"],
         general: true,
       },
       {

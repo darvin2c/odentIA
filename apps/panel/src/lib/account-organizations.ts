@@ -31,6 +31,8 @@ export const billingStatusSchema = z.object({
   status: z.enum(["prueba", "activa", "gracia", "restringida", "pausada", "cancelada", "sin_suscripcion"]),
   isDemo: z.boolean(), restricted: z.boolean(), restrictReason: z.string().nullable(),
   pauseReason: z.string().nullable(), trialEndsAt: z.string().nullable(), graceEndsAt: z.string().nullable(),
+  /** El día en que pasa a solo lectura (el fin de la gracia o la prórroga vigente); opcional mientras la API anterior siga viva. */
+  readOnlyAt: z.string().nullable().optional(),
   currentPeriodEnd: z.string().nullable(), planCode: z.string().nullable(), planName: z.string().nullable(), currency: z.string().nullable(),
 })
 export type AccountBillingStatus = z.infer<typeof billingStatusSchema>

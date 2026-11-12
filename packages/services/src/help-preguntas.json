@@ -243,7 +243,9 @@
     {"q":"y como se la mando por whatsapp","expected":["pacientes"],"producto":"vistia","antes":{"q":"como emito la receta de lentes","donde":"Pacientes"},"faqs":["¿Cómo le mando su receta de lentes por WhatsApp?"]},
     {"q":"y le avisa al cliente cuando esta listo","expected":["pedidos"],"producto":"vistia","antes":{"q":"como marco como va un pedido","donde":"Pedidos"},"faqs":["¿Se le avisa cuando sus lentes están listos?"]},
     {"q":"y por que me sale lo del oftalmologo","expected":["pacientes"],"producto":"vistia","antes":{"q":"como anoto el examen de la vista","donde":"Pacientes"},"faqs":["¿Por qué me dice que conviene que lo vea un oftalmólogo?"]},
-    {"q":"y donde le pongo la marca","expected":["inventario"],"producto":"vistia","antes":{"q":"como agrego un producto nuevo","donde":"Inventario"},"faqs":["¿Dónde pongo la marca y el modelo de una montura?"]}
+    {"q":"y donde le pongo la marca","expected":["inventario"],"producto":"vistia","antes":{"q":"como agrego un producto nuevo","donde":"Inventario"},"faqs":["¿Dónde pongo la marca y el modelo de una montura?"]},
+    {"q":"soporte me escribio que necesita acceso a la clinica, que tengo que hacer","expected":["inicio"],"producto":"odentia","faqs":["Soporte me pidió acceso de diagnóstico, ¿qué hago?"]},
+    {"q":"subi el comprobante del pago y me sale rechazado","expected":["plan-y-pagos"],"producto":"odentia","faqs":["Mi comprobante dice Rechazado, ¿qué hago?"]}
   ],
   "control": [
     {"q":"como le contesto a un paciente que escribio por wasap","expected":["bandeja"],"producto":"odentia","faqs":["¿Cómo respondo yo en vez de Sofi?"],"temas":["bandeja"]},

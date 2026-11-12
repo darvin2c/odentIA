@@ -77,21 +77,42 @@ function AdminLayout() {
         .parse(await api<unknown>("/api/admin/consumer-complaints/summary")),
     staleTime: 60_000,
   })
-  // Solicitudes por revisar de la lista de espera (Fundadores, issue 165).
-  const waitlist = useQuery({
+  // Los números de «Lista de espera» y «Soporte»: los mismos de «Prospectos por responder» y
+  // «Casos de soporte por atender» en Inicio (los cuenta el servidor con la misma regla).
+  const queues = useQuery({
     queryKey: ["admin", "overview", "nav"],
     queryFn: async () => api<{ items: { key: string; count: number }[] }>("/api/admin/overview"),
-    select: (data) => data.items.find((item) => item.key === "waitlist")?.count ?? 0,
+    select: (data) => ({
+      waitlist: data.items.find((item) => item.key === "waitlist")?.count ?? 0,
+      support: data.items.find((item) => item.key === "support-open")?.count ?? 0,
+    }),
     staleTime: 60_000,
   })
   return (
-    <AdminFrame session={{ role: adminSession.actor.role, user: adminSession.user }} waitlist={waitlist.data} complaints={complaints.data?.pending}>
+    <AdminFrame
+      session={{ role: adminSession.actor.role, user: adminSession.user }}
+      waitlist={queues.data?.waitlist}
+      support={queues.data?.support}
+      complaints={complaints.data?.pending}
+    >
       <Outlet />
     </AdminFrame>
   )
 }
 
-function AdminFrame({ session, waitlist, complaints, children }: { session: SeenSession; waitlist?: number; complaints?: number; children: ReactNode }) {
+function AdminFrame({
+  session,
+  waitlist,
+  support,
+  complaints,
+  children,
+}: {
+  session: SeenSession
+  waitlist?: number
+  support?: number
+  complaints?: number
+  children: ReactNode
+}) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const queryClient = useQueryClient()
   const items: AppShellNavEntry[] = [
@@ -105,7 +126,7 @@ function AdminFrame({ session, waitlist, complaints, children }: { session: Seen
           { label: "Comisiones", to: "/commissions", icon: Coins },
         ]
       : []),
-    { label: "Soporte", to: "/support", icon: CircleHelp },
+    { label: "Soporte", to: "/support", icon: CircleHelp, badge: support || undefined },
     {
       label: "Libro de Reclamaciones",
       to: "/complaints",
@@ -113,7 +134,7 @@ function AdminFrame({ session, waitlist, complaints, children }: { session: Seen
       badge: complaints || undefined,
     },
     ...(session.role === "admin"
-      ? [{ label: "Equipo y actividad", to: "/team", icon: ShieldCheck }]
+      ? [{ label: "Equipo", to: "/team", icon: ShieldCheck }]
       : []),
   ]
   return (

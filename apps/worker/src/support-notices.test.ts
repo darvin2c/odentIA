@@ -1,7 +1,14 @@
 import { withOrgContext } from "@odentia/db"
 import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
-import { configurePublicLinks, replyToSupportCase, sendHelpRequest, SUPPORT_REPLY_NOTICE_DELAY_MS } from "@odentia/services"
+import {
+  configurePublicLinks,
+  grantSupportAccess,
+  replyToSupportCase,
+  requestSupportAccess,
+  sendHelpRequest,
+  SUPPORT_REPLY_NOTICE_DELAY_MS,
+} from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { runSupportNoticesTick } from "./support-notices.js"
@@ -18,6 +25,8 @@ beforeAll(async () => {
     { id: "w-staff", name: "Soporte", email: "staff@worker.test", emailVerified: true },
   ])
   await ownerDb.insert(member).values({ id: "m-w-ana", userId: "w-ana", organizationId: "org_a", role: "owner", createdAt: new Date() })
+  await ownerDb.insert(user).values({ id: "w-lucia", name: "Lucía Paredes", email: "lucia@worker.test", emailVerified: true })
+  await ownerDb.insert(member).values({ id: "m-w-lucia", userId: "w-lucia", organizationId: "org_a", role: "reception", createdAt: new Date() })
 })
 
 const statesOf = async (caseId: string) =>
@@ -72,4 +81,28 @@ it("reclama antes de SMTP, no lleva el texto del caso y no reintenta un envío i
   expect(sent[1]!.html).toContain(`https://norte.odentia.test/home?ayuda=casos&amp;caso=${kase.id}`)
   expect(sent[1]!.text).not.toContain(answer)
   expect((await statesOf(kase.id)).sort()).toEqual([["caso_nuevo", "incierto"], ["respuesta", "enviado"]])
+})
+
+it("el pedido de acceso le pide la autorización a la propietaria, y su autorización llega a soporte con su nombre", async () => {
+  const kase = await withOrgContext(appDb, "org_a", (tx) =>
+    sendHelpRequest(tx, "org_a", { userId: "w-lucia", roleLabel: "Recepción" }, { question: "No puedo imprimir el ticket", screen: "/home" }),
+  )
+  const sent: Array<{ to: string; subject: string; text: string }> = []
+  const mailer = { async send(message: { to: string; subject: string; text: string }) { sent.push(message) } }
+  const deps = { ownerDb, mailer, supportInbox: "soporte@odentia.test", ...urls }
+  await runSupportNoticesTick(deps)
+  await requestSupportAccess(ownerDb, { userId: "w-staff", role: "support" }, kase.id)
+  const [row] = await ownerDb.select({ at: supportCase.lastPublicMessageAt }).from(supportCase).where(eq(supportCase.id, kase.id))
+  await runSupportNoticesTick({ ...deps, now: new Date(row!.at!.getTime() + SUPPORT_REPLY_NOTICE_DELAY_MS + 60_000) })
+  const toAna = sent.find((mail) => mail.to === "ana@worker.test")
+  expect(toAna).toMatchObject({ subject: "Soporte de odentIA pide tu autorización" })
+  expect(toAna!.text).toContain("que abrió Lucía Paredes (Recepción)")
+  expect(toAna!.text).not.toContain("abriste un caso")
+  expect(sent.find((mail) => mail.to === "lucia@worker.test")!.text).toContain("abriste un caso")
+
+  await withOrgContext(appDb, "org_a", (tx) => grantSupportAccess(tx, "org_a", "w-ana", true, kase.id, 30))
+  await runSupportNoticesTick(deps)
+  const answered = sent.find((mail) => mail.subject === "La clínica respondió · Clínica")
+  expect(answered!.text).toContain("Ana Torres (propietario) autorizó el acceso de diagnóstico hasta las")
+  expect(answered!.text).toContain("Abrió el caso: Lucía Paredes (recepción)")
 })

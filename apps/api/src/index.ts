@@ -67,6 +67,9 @@ for (const [product, domain] of Object.entries(env.productDomains) as [DomainPro
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
 }
+if (env.NODE_ENV === "production" && !env.FOUNDERS_EMAIL) {
+  console.warn("FOUNDERS_EMAIL vacío: el equipo no recibe las solicitudes nuevas (docs/deployment.md).")
+}
 
 const app = createApp({
   auth,

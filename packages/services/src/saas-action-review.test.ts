@@ -127,6 +127,10 @@ it("odentIA devuelve o mantiene con su respuesta; la conversación solo con perm
   // Con permiso, odentIA lee la conversación mientras no responda; sin permiso, no.
   const read = await ownerDb.transaction((tx) => readReviewConversation(tx as Db, STAFF, asked.caseId!))
   expect(read.map((row) => row.body)).toEqual(["¿Atienden los domingos?"])
+  // Para el rol Soporte el caso de cobro no existe: tampoco su conversación, aunque tenga el id.
+  await expect(
+    ownerDb.transaction((tx) => readReviewConversation(tx as Db, { userId: STAFF.userId, role: "support" }, asked.caseId!)),
+  ).rejects.toMatchObject({ status: 404 })
   await expect(ownerDb.transaction((tx) => readReviewConversation(tx as Db, STAFF, other.caseId!))).rejects.toMatchObject({ status: 404 })
 
   await ownerDb.transaction((tx) => decideActionReview(tx as Db, STAFF, { caseId: asked.caseId!, accept: true, answer: "Tienen razón: el agente leyó el horario de verano." }))

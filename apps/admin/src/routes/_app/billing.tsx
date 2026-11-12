@@ -115,7 +115,45 @@ interface HistoryPayment {
   methodCode: string
   status: string
   receiptFilename: string | null
+  rejectedAt: string | null
+  rejectReason: string | null
+  rejectedByName: string | null
   createdAt: string
+}
+
+/** El estado de un pago en palabras, el mismo que lee la clínica en Plan y pagos. */
+const PAYMENT_STATUS: Record<string, string> = {
+  pendiente: "Pendiente de confirmación",
+  confirmado: "Confirmado",
+  reversado: "Reversado",
+  devuelto: "Devuelto",
+  rechazado: "Rechazado",
+}
+
+/** «mié 11 nov, 15:30», en la hora de Lima, donde trabaja la administración. */
+function dayTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  const parts = new Intl.DateTimeFormat(LOCALE, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "America/Lima",
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value.replace(/\./g, "") ?? ""
+  return `${part("weekday")} ${part("day")} ${part("month")}, ${part("hour")}:${part("minute")}`
+}
+
+/** «Rechazado: No se ve el número de operación · por Ada el mié 11 nov, 15:30». */
+function paymentStatusLine(payment: HistoryPayment): string {
+  const label = PAYMENT_STATUS[payment.status] ?? payment.status
+  if (payment.status !== "rechazado") return label
+  const who = payment.rejectedByName ? ` · por ${payment.rejectedByName.split(" ")[0]}` : ""
+  const when = payment.rejectedAt ? ` el ${dayTime(payment.rejectedAt)}` : ""
+  return `${label}${payment.rejectReason ? `: ${payment.rejectReason}` : ""}${who || when ? `${who || " ·"}${when}` : ""}`
 }
 
 interface ChargeOption {
@@ -172,7 +210,9 @@ function BillingPage() {
   const [planDrawer, setPlanDrawer] = useState<null | { plan?: Plan; product?: ClinicalProduct }>(null)
   const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string }>(null)
   const [methodDrawer, setMethodDrawer] = useState(false)
-  const [reverseTarget, setReverseTarget] = useState<PendingPayment | null>(null)
+  // «Reversar» es solo de lo confirmado (Historial); lo pendiente se «Rechaza», con su propio diálogo.
+  const [reverseTarget, setReverseTarget] = useState<{ id: string; organizationId: string } | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<PendingPayment | null>(null)
 
   const overview = useQuery({
     queryKey: ["admin", "billing", "overview", statusFilter],
@@ -201,6 +241,13 @@ function BillingPage() {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin", "billing"] })
   }
+  // Confirmar o rechazar un comprobante cambia también lo que cuenta Inicio.
+  const refreshPending = () => {
+    refresh()
+    void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
+  }
+  /** El medio por su nombre, no por su código. */
+  const methodName = (code: string) => methods.data?.find((method) => method.code === code)?.name ?? code
 
   const [manualOpen, setManualOpen] = useState(false)
   const [historyOrgId, setHistoryOrgId] = useState("")
@@ -237,16 +284,26 @@ function BillingPage() {
         method: "POST",
         body: JSON.stringify({ organizationId: payment.organizationId }),
       }),
-    onSuccess: refresh,
+    onSuccess: refreshPending,
   })
   const reversePayment = useMutation({
-    mutationFn: ({ target, reason }: { target: PendingPayment; reason: string }) =>
+    mutationFn: ({ target, reason }: { target: { id: string; organizationId: string }; reason: string }) =>
       api(`/api/admin/billing/payments/${target.id}/reverse`, {
         method: "POST",
         body: JSON.stringify({ organizationId: target.organizationId, reason }),
       }),
     onSuccess: refresh,
   })
+  // Si otra persona ya lo confirmó o lo rechazó, el 409 lo dice en el diálogo y la lista se pone al día.
+  const rejectPayment = useMutation({
+    mutationFn: ({ target, reason }: { target: PendingPayment; reason: string }) =>
+      api(`/api/admin/billing/payments/${target.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ organizationId: target.organizationId, reason }),
+      }),
+    onSettled: refreshPending,
+  })
+  const rejectClinic = rejectTarget ? (rejectTarget.organizationName ?? "la clínica") : ""
 
   return (
     <PageShell className="flex flex-col gap-6">
@@ -294,7 +351,7 @@ function BillingPage() {
                 <div className="min-w-0 flex-1 basis-56">
                   <p className="text-sm font-medium">{payment.receiptFilename ?? "Comprobante"}</p>
                   <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                    {payment.organizationName ?? payment.organizationId} · {payment.methodCode}
+                    {payment.organizationName ?? payment.organizationId} · {methodName(payment.methodCode)}
                     {products[payment.organizationId] ? <ProductMark product={products[payment.organizationId]} /> : null}
                   </p>
                 </div>
@@ -318,8 +375,8 @@ function BillingPage() {
                   >
                     Confirmar
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setReverseTarget(payment)}>
-                    Reversar
+                  <Button size="sm" variant="ghost" onClick={() => setRejectTarget(payment)}>
+                    Rechazar
                   </Button>
                 </div>
               </li>
@@ -562,6 +619,22 @@ function BillingPage() {
         <MethodDrawer onClose={() => setMethodDrawer(false)} onSaved={refresh} />
       ) : null}
       <ReasonDialog
+        open={rejectTarget !== null}
+        id="reject-reason"
+        title={
+          rejectTarget
+            ? `Rechazar ${rejectTarget.receiptFilename ?? "el comprobante"} · ${money(rejectTarget.amountCents, rejectTarget.currency)} de ${rejectClinic}`
+            : "Rechazar comprobante"
+        }
+        description={`El comprobante se cierra y no suma al cargo; ${rejectClinic} podrá registrar otro. Verá este motivo en Plan y pagos y en el aviso de su pantalla. No le llega correo. Si fue un error, registra el pago en el cargo.`}
+        confirmLabel="Rechazar"
+        placeholder="Por qué no se puede confirmar, como lo leerá la clínica"
+        onConfirm={(reason) =>
+          rejectTarget ? rejectPayment.mutateAsync({ target: rejectTarget, reason }) : Promise.resolve()
+        }
+        onClose={() => setRejectTarget(null)}
+      />
+      <ReasonDialog
         open={reverseTarget !== null}
         id="reverse-reason"
         title="Reversar pago"
@@ -604,15 +677,8 @@ function BillingPage() {
         onSelectOrg={setHistoryOrgId}
         onOpenReceipt={(organizationId, paymentId) => void openReceipt(organizationId, paymentId)}
         receiptBusy={receiptBusy}
-        onReverseRequest={(payment) =>
-          setReverseTarget({
-            ...payment,
-            organizationName: null,
-            chargeId: null,
-            receiptFilename: payment.receiptFilename,
-            createdAt: "",
-          })
-        }
+        methodName={methodName}
+        onReverseRequest={setReverseTarget}
         onRefundRequest={setRefundTarget}
       />
     </PageShell>
@@ -1068,6 +1134,7 @@ function HistorySection({
   onSelectOrg,
   onOpenReceipt,
   receiptBusy,
+  methodName,
   onReverseRequest,
   onRefundRequest,
 }: {
@@ -1076,7 +1143,8 @@ function HistorySection({
   onSelectOrg: (orgId: string) => void
   onOpenReceipt: (organizationId: string, paymentId: string) => void
   receiptBusy: string | null
-  onReverseRequest: (payment: HistoryPayment) => void
+  methodName: (code: string) => string
+  onReverseRequest: (payment: { id: string; organizationId: string }) => void
   onRefundRequest: (payment: { id: string; organizationId: string }) => void
 }) {
   const payments = useQuery({
@@ -1114,7 +1182,7 @@ function HistorySection({
       </div>
       {selectedOrgId === "" ? (
         <p className="text-sm text-muted-foreground">
-          Elige una clínica para ver sus pagos confirmados, reversos y devoluciones.
+          Elige una clínica para ver sus comprobantes y pagos: pendientes, confirmados, rechazados, reversos y devoluciones.
         </p>
       ) : payments.isPending ? (
         <SkeletonRegion message="Cargando pagos…">
@@ -1136,9 +1204,9 @@ function HistorySection({
               className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
             >
               <div className="min-w-0 flex-1 basis-56">
-                <p className="text-sm font-medium">{payment.receiptFilename ?? "Comprobante"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {payment.status} · {payment.methodCode}
+                <p className="text-sm font-medium [overflow-wrap:anywhere]">{payment.receiptFilename ?? "Comprobante"}</p>
+                <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                  {paymentStatusLine(payment)} · {methodName(payment.methodCode)}
                 </p>
               </div>
               <p className="text-sm font-semibold tabular-nums">

@@ -11,8 +11,11 @@ import {
   readReviewConversation,
   listSupportAccessAudit,
   listSupportAssignees,
+  listGuideGaps,
   listSupportCasesForStaff,
+  markGuideGap,
   readSupportDiagnostic,
+  requestSupportAccess,
   replyToSupportCase,
   replyToSupportCasesMany,
   revokeSupportGrantAsStaff,
@@ -29,6 +32,7 @@ import {
   listHelpVideos,
   supportHelpStats,
   supportMetrics,
+  unmarkGuideGap,
 } from "@odentia/services"
 import type { Context } from "hono"
 import { Hono } from "hono"
@@ -44,9 +48,12 @@ export interface AdminSupportDeps {
 }
 
 const listQuery = z.object({
-  status: z.enum(["abierto", "en_atencion", "esperando_clinica", "resuelto"]).optional(),
+  /** Por omisión, los que no están resueltos. */
+  status: z.enum(["sin_resolver", "abierto", "en_atencion", "esperando_clinica", "resuelto"]).optional(),
   kind: z.enum(["pregunta", "problema", "acceso", "cobro"]).optional(),
-  assignee: z.string().optional(),
+  /** «me»: los míos; «none»: sin responsable; o el id de alguien del equipo. */
+  assignee: z.string().min(1).max(200).optional(),
+  organizationId: z.string().min(1).max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 })
@@ -102,7 +109,8 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
       listSupportCasesForStaff(deps.ownerDb, staffOf(c), {
         status: query.status,
         kind: query.kind,
-        assigneeStaffId: query.assignee,
+        assignee: query.assignee,
+        organizationId: query.organizationId,
         limit: query.limit,
         offset: query.offset,
       }),
@@ -211,6 +219,35 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
     )
   })
 
+  /**
+   * «Pedir acceso de diagnóstico…»: deja el mensaje fijo, pasa el caso a
+   * «Esperando a la clínica» y desde ahí lo leen la propietaria y los
+   * administradores (ADR 0181). Pedirlo dos veces deja un solo pedido.
+   */
+  app.post("/cases/:id/request-access", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) => requestSupportAccess(tx as Db, staffOf(c), c.req.param("id"))),
+    ),
+  )
+
+  /** «Falta en la guía»: la marca del equipo en el caso (encender y apagar). */
+  app.put("/cases/:id/guide-gap", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        await markGuideGap(tx as Db, staffOf(c), c.req.param("id"))
+        return { ok: true }
+      }),
+    ),
+  )
+  app.delete("/cases/:id/guide-gap", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        await unmarkGuideGap(tx as Db, staffOf(c), c.req.param("id"))
+        return { ok: true }
+      }),
+    ),
+  )
+
   app.post("/cases/:id/attachments", async (c) => {
     const caseId = c.req.param("id")
     const declaredSize = Number(c.req.header("content-length") ?? 0)
@@ -235,7 +272,7 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
     const messageId =
       typeof rawMessageId === "string" && rawMessageId.length > 0 ? rawMessageId : undefined
     try {
-      await assertStaffAttachmentTarget(deps.ownerDb, caseId, messageId)
+      await assertStaffAttachmentTarget(deps.ownerDb, actor, caseId, messageId)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
@@ -327,6 +364,11 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
   /** Agrupación para conocimiento: agregado sin datos de organizaciones. */
   app.get("/knowledge", async (c) => {
     return runService(c, 200, () => supportKnowledgeGroups(deps.ownerDb, staffOf(c)))
+  })
+
+  /** «Para llevar a la guía»: los casos marcados, con su tema y la fecha, sin clínica ni conversación. */
+  app.get("/knowledge/guide-gaps", async (c) => {
+    return runService(c, 200, () => listGuideGaps(deps.ownerDb, staffOf(c)))
   })
 
   /** Métricas: conteos y tiempos; nunca texto de preguntas sin enviar. */

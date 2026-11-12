@@ -40,8 +40,14 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   que es el panel. El Libro de Reclamaciones y la solicitud de Fundadores envían desde el
   navegador a `api.`: el origen raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y
   `COMPLAINTS_EMAIL` es el correo de odentIA que recibe el aviso de cada hoja.
-  `FOUNDERS_EMAIL` es el buzón que lee las respuestas a los correos de Fundadores; sin él,
-  esos correos no prometen que alguien las lea.
+  `FOUNDERS_EMAIL` es el buzón de Fundadores: lee las respuestas a sus correos y recibe
+  «Solicitud nueva en la lista de espera» por cada solicitud nueva, con la clínica, el
+  producto, la ciudad y el país (nunca el correo ni el celular de quien pidió) y el botón
+  a esa solicitud en `ADMIN_URL`. El aviso sale una vez por solicitud, aparte de la copia a
+  quien pidió, sin reintentos y con un tope de 20 por hora por proceso; lo que no sale queda
+  en el registro con el id de la solicitud, que igual se ve en Inicio de la administración.
+  Sin `FOUNDERS_EMAIL` no sale ningún aviso, esos correos no prometen que alguien lea las
+  respuestas y la API lo advierte al arrancar en producción.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 
@@ -360,6 +366,16 @@ contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el cor
 `SUPPORT_INBOX_EMAIL` es el buzón de soporte de odentIA: el worker le envía
 «Caso nuevo» y «La clínica respondió», con el botón a Soporte en `ADMIN_URL`.
 Vacío, esos avisos quedan pendientes y el caso sigue en la bandeja de Soporte.
+
+Al buzón de soporte de cada marca (`soporte@` de su dominio, el que nombra la carta de
+bienvenida) llegan además, por correo y fuera del sistema, los archivos de pacientes que
+la carta le pide a una clínica nueva para cargarlos (ADR 0104). Dentro de la app esos datos
+son solo del rol Administración, así que el buzón lo lee solo quien tiene ese rol; si entra
+alguien con solo el rol Soporte, `SUPPORT_INBOX_EMAIL` pasa a otra dirección que lea esa
+persona. Cada archivo recibido se anota a mano con el día en que llegó y su fecha de
+borrado; el correo y su adjunto se borran al terminar la carga y, como máximo, a los 30 días
+de recibidos, a mano: nada los borra solo. Es la constancia interna de cómo se cumple lo
+que promete la carta, no una evaluación de cumplimiento legal.
 
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT` (`mailto:` de odentIA) son
 las claves de los avisos en el equipo (ADR 0177): la API sirve la pública y el worker

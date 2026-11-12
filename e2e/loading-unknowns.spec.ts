@@ -135,7 +135,7 @@ test("Admin al recargar muestra su marco y el esqueleto de la pantalla abierta",
   const gate = await holdApi(page, (url) => url.pathname === "/api/admin/access/session")
   await page.reload({ waitUntil: "commit" })
   // Con la sesión sin confirmar: el menú de quien entró y el título de esta pantalla, no una lista genérica.
-  await expect(page.getByRole("link", { name: "Equipo y actividad" }).first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole("link", { name: "Equipo", exact: true }).first()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole("heading", { level: 1, name: /Equipo/ })).toBeVisible()
   gate.resolve()
   await expect(page.locator("[data-slot=skeleton]:visible")).toHaveCount(0, { timeout: 15_000 })
