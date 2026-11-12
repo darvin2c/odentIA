@@ -16,7 +16,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { helpAsk } from "@odentia/db/schema/workspace"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
-import { branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { saasActionReview } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
@@ -854,6 +854,15 @@ export async function grantSupportAccess(
     staffUserId: userId,
     action: "autorizado",
   })
+  // También en «Actividad del equipo», donde la clínica revisa lo que pasó.
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: userId,
+    action: "support.access_granted",
+    entity: "support_access",
+    entityId: grant.id,
+    metadata: { rol: viewRole, minutos: minutesNumber, caso: kase.id },
+  })
   // Autorizar es la respuesta de la clínica: el caso vuelve a nosotros.
   await clinicActed(tx, kase, grant.id, await seesForOpener(tx, kase, orgId, userId))
   return toGrant(grant)
@@ -897,7 +906,15 @@ export async function revokeSupportAccess(
       staffUserId: userId,
       action: "revocado",
     })
-
+  if (!expired)
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId: userId,
+      action: "support.access_revoked",
+      entity: "support_access",
+      entityId: grant.id,
+      metadata: { caso: grant.caseId },
+    })
 }
 
 /**

@@ -170,7 +170,7 @@ function AccountGrantBox({
             disabled={revoke.isPending}
             onClick={() => revoke.mutate(activeGrant.id)}
           >
-            Revocar ahora
+            Quitar acceso
           </Button>
           {revoke.isError ? (
             <p role="alert" className="text-sm text-destructive">

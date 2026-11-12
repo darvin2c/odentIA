@@ -248,7 +248,7 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
     runService(c, 201, async () => {
       const pass = await deps.ownerDb.transaction((tx) => createSupportPass(tx as Db, staffOf(c), c.req.param("id")))
       return {
-        url: deps.clinicUrlOf(pass.slug, pass.product, `/soporte/entrar#pase=${encodeURIComponent(pass.token)}`),
+        url: deps.clinicUrlOf(pass.slug, pass.product, `/soporte#pase=${encodeURIComponent(pass.token)}`),
         expiresAt: pass.expiresAt,
       }
     }),

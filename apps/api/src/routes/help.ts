@@ -195,11 +195,10 @@ export function createHelpRoute(deps: HelpRouteDeps) {
 
   /* ---------- Casos de soporte: conversación, reapertura, adjuntos y consentimiento ---------- */
   /**
-   * Permisos diagnóstico vigentes de la clínica: solo metadatos para el aviso
-   * global, sin textos del caso. Cualquier miembro puede verlos.
+   * Permisos de soporte vigentes de la clínica: solo metadatos, sin textos del
+   * caso, para quien puede darlos o quitarlos. El resto del equipo se entera por
+   * la franja de avisos (`getClinicNotices`), que ve todo el equipo.
    */
-  // Solo quien puede dar o quitar el acceso lo ve (ADR 0065): soporte no ve
-  // pacientes, así que al resto del equipo no le cambia nada.
   app.get("/grants/active", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (memberRole !== "owner" && memberRole !== "admin") return c.json({ data: [] })
