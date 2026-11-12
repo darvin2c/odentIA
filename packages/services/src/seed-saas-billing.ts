@@ -619,7 +619,9 @@ function requestDates(row: DemoRequest, now: Date, enteredAt: Date | null) {
  * Fundadores en desarrollo: solicitudes de la lista de espera en cada etapa
  * (por revisar, invitada con el enlace de la semilla y por vencer, invitación
  * vencida, entró, paga y descartada), su seguimiento y un precio negociado que
- * vence en 6 días en «Demo Deuda» (issue 168). Idempotente por correo: lo ya
+ * vence en 6 días en «Demo Deuda» (issue 168). Cada solicitud tiene su cliente
+ * del ARM (`linkDemoRequestsToClients`); el resto del ARM lo siembra
+ * `seedAdminArm` al final de la semilla. Idempotente por correo: lo ya
  * sembrado vuelve a tener fechas de hoy mientras siga como lo dejó la semilla.
  * No envía correos.
  */

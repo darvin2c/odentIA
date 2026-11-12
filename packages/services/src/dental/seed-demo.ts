@@ -206,6 +206,7 @@ import { decideActionReview, requestActionReview } from "../saas-action-review.j
 import { CLIO_DETAIL, SOFI_DETAIL } from "../saas-actions.js"
 import { secretsKeyFromEnv } from "../secrets.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
+import { seedAdminArm } from "../seed-admin-arm.js"
 import { seedAdminOrganizations } from "../seed-admin-organizations.js"
 import { seedAdminSupport } from "../seed-admin-support.js"
 import { seedAgent } from "../seed-agent.js"
@@ -5456,6 +5457,11 @@ await db.transaction(async (tx) => {
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
 await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash, storage })
 
+// --- El ARM de la administración (ADR 0183): clientes en cada etapa, tareas, propuestas,
+// envíos, correos que llegan y lo que prepara Kairós. Al final: necesita las cuentas de
+// la semilla y las demos para presentar ya armadas.
+const arm = await db.transaction((tx) => seedAdminArm(tx, storage))
+
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
   const tables = [
@@ -5482,6 +5488,9 @@ async function summary(orgId: string, label: string): Promise<string> {
   return `org ${label} (${orgId}): ${counts.join(" ")}`
 }
 console.log("seed-dev ok")
+console.log(
+  `ARM de la administración: ${arm.clients} clientes de la semilla; Kairós puso ${arm.kairos.tasks} tareas, preparó ${arm.kairos.items} cosas y redactó ${arm.kairos.drafted} borradores`,
+)
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
 console.log(await summary(MEDICAL_DEMO_ORG, "consultorio-san-martin (latidIA)"))
