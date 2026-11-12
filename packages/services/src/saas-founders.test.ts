@@ -614,7 +614,8 @@ describe("el seguimiento de un prospecto", () => {
 
   it("la fila dice si su fecha es de una entrada solo de administración y si su invitación la tiene en Inicio", async () => {
     const id = await waiting("fecha-admin@andes.test")
-    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Precio especial", followUpOn: "2026-11-12", adminOnly: true }, WED)
+    // La de administración, un día antes: con la misma hora, la última la decidiría el id al azar.
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Precio especial", followUpOn: "2026-11-12", adminOnly: true }, TUE)
     expect((await getWaitlistRequest(ownerDb, support, id, WED)).request).toMatchObject({ nextFollowUpOn: "2026-11-12", nextFollowUpAdminOnly: true })
     await addWaitlistFollowUp(ownerDb, support, id, { body: "Le escribí", followUpOn: "2026-11-12" }, WED)
     expect((await getWaitlistRequest(ownerDb, support, id, WED)).request).toMatchObject({ nextFollowUpAdminOnly: false, invitationSoon: false })
