@@ -1,17 +1,30 @@
 import {
   Button,
+  cn,
   FieldLabel,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, ExpandableText, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
+import { Switch } from "@odentia/ui/components/switch"
+import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  ExpandableText,
+  PageHeader,
+  PageShell,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import { ProductMark, useOrgProducts } from "../../components/product"
 import {
   SupportCaseSkeleton,
   SupportCasesSkeleton,
@@ -23,18 +36,26 @@ import { SupportHelpVideos } from "../../components/support-help-videos"
 import { caseReview, SupportCaseReview } from "../../components/support-review"
 import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { type SupportSearch, supportSearchOf } from "../../lib/list-search"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
-
-export const Route = createFileRoute("/_app/support")({
-  // `?caso=<id>`: el enlace del aviso por correo abre ese caso.
-  validateSearch: (search: Record<string, unknown>): { caso?: string } =>
-    typeof search.caso === "string" && search.caso ? { caso: search.caso } : {},
-  pendingComponent: SupportPageSkeleton,
-  component: SupportPage,
-})
+import {
+  accessUntilWords,
+  agoWords,
+  daysSince,
+  grantWords,
+  SUPPORT_KIND_LABEL,
+  supportDay,
+  supportDayTime,
+  supportWaitWords,
+} from "../../lib/support-words"
 
 const supportStatus = z.enum(["abierto", "en_atencion", "esperando_clinica", "resuelto"])
 type SupportStatus = z.infer<typeof supportStatus>
+const supportKind = z.enum(["pregunta", "problema", "acceso", "cobro"])
+type SupportKind = z.infer<typeof supportKind>
+
+const STATUSES: SupportStatus[] = ["abierto", "en_atencion", "esperando_clinica", "resuelto"]
+const KINDS: SupportKind[] = ["pregunta", "problema", "acceso", "cobro"]
 
 const STATUS_LABEL: Record<SupportStatus, string> = {
   abierto: "Abierto",
@@ -43,19 +64,55 @@ const STATUS_LABEL: Record<SupportStatus, string> = {
   resuelto: "Resuelto",
 }
 
-const STATUSES: SupportStatus[] = ["abierto", "en_atencion", "esperando_clinica", "resuelto"]
+/** Lo que dice el botón que lleva el caso a cada estado. */
+const STATUS_ACTION: Record<SupportStatus, string> = {
+  abierto: "Volver a abierto",
+  en_atencion: "Pasar a en atención",
+  esperando_clinica: "Esperar a la clínica",
+  resuelto: "Resolver",
+}
+
+/** El estado de un canal de la clínica, en palabras (el diagnóstico). */
+const CHANNEL_STATUS_WORDS: Record<string, string> = {
+  active: "conectado",
+  pending: "conectándose",
+  error: "con error",
+  disabled: "desactivado",
+  revoked: "desconectado",
+}
+
+/** Desde cuántos días esperando a la clínica se sugiere cerrar (lo cierra una persona). */
+const CLOSE_HINT_DAYS = 7
+
+type SupportTab = "cola" | "conocimiento" | "metricas"
+
+export const Route = createFileRoute("/_app/support")({
+  // Cada filtro va siempre, vacío si su valor no sirve: «?estado=todos» se ignora en vez de llegar a la API.
+  validateSearch: (search: Record<string, unknown>): SupportSearch => supportSearchOf(search),
+  pendingComponent: SupportPageSkeleton,
+  component: SupportPage,
+})
 
 const caseItem = z.object({
   id: z.string(),
   organizationId: z.string().nullable(),
   organizationName: z.string().nullable(),
-  kind: z.enum(["pregunta", "problema", "acceso", "cobro"]),
+  kind: supportKind,
   question: z.string(),
   status: supportStatus,
   assigneeStaffId: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
+
+const queueItem = caseItem.extend({
+  waitingOnUs: z.boolean(),
+  waitingSince: z.string().nullable(),
+  answerBy: z.string().nullable(),
+  lastStaffReplyAt: z.string().nullable(),
+  accessUntil: z.string().nullable(),
+})
+type QueueItem = z.infer<typeof queueItem>
 
 const caseMessage = z.object({
   id: z.string(),
@@ -85,7 +142,20 @@ const caseDetail = caseItem.extend({
   ),
   /** Solo en «Revisión de cobro»: la fila que la clínica pidió revisar (ADR 0054). */
   review: caseReview.nullable().optional(),
+  accessRequestedAt: z.string().nullable(),
+  /** Quien abrió y su rol de hoy (nulo en los automáticos de odentIA). */
+  opener: z.object({ name: z.string(), roleLabel: z.string() }).nullable(),
+  openerCanGrant: z.boolean(),
+  /** La propietaria y los administradores de hoy. */
+  granters: z.array(z.object({ name: z.string(), roleLabel: z.string() })),
+  accessRequestPending: z.boolean(),
+  /** El mensaje que deja el pedido, tal cual lo verá la clínica. */
+  accessRequestText: z.string().nullable(),
+  /** Por qué no se ofrece pedir el acceso. */
+  accessRequestBlocked: z.string().nullable(),
+  guideGapMarkedAt: z.string().nullable(),
 })
+type CaseDetail = z.infer<typeof caseDetail>
 
 const diagnosticPayload = z.object({
   caseId: z.string(),
@@ -113,7 +183,6 @@ const diagnosticPayload = z.object({
   agent: z
     .object({
       enabled: z.boolean(),
-
       decisionProvider: z.string(),
       decisionRoutingEnabled: z.boolean(),
       clinicalAssistantEnabled: z.boolean(),
@@ -128,7 +197,8 @@ const diagnosticPayload = z.object({
     }),
   ),
   services: z.object({ total: z.number() }),
-  membersByRole: z.array(z.object({ role: z.string(), total: z.number() })),
+  /** `label`: el rol en español, en el producto de la clínica (lo dice el servidor). */
+  membersByRole: z.array(z.object({ role: z.string(), label: z.string(), total: z.number() })),
 })
 
 const knowledgeGroup = z.object({
@@ -158,35 +228,83 @@ const helpStatsPayload = z.object({
   notHelpfulByTopic: z.array(helpStatsRow),
 })
 
-const casesPayload = z.object({ items: z.array(caseItem), total: z.number() })
+const guideGapItem = z.object({
+  caseId: z.string(),
+  question: z.string(),
+  kind: z.string(),
+  topic: z.string().nullable(),
+  markedAt: z.string(),
+})
+
+const casesPayload = z.object({ items: z.array(queueItem), total: z.number(), resolvedCount: z.number() })
 const assigneePayload = z.object({
   userId: z.string(),
   name: z.string(),
   role: z.enum(["admin", "support"]),
 })
 
+/** A quién le llega el pedido y quién lo autoriza: «Le llega a Rosa (Recepción). Lo autoriza: Ana Torres (Propietario) o un administrador.». */
+function accessRecipientsWords(kase: CaseDetail): string {
+  const person = (who: { name: string; roleLabel: string }) => `${who.name} (${who.roleLabel})`
+  const opener = kase.opener ? person(kase.opener) : "quien abrió el caso"
+  if (kase.openerCanGrant) return `Le llega a ${opener}, que puede autorizarlo.`
+  const owner = kase.granters[0]
+  return owner
+    ? `Le llega a ${opener}. Lo autoriza: ${person(owner)} o un administrador.`
+    : `Le llega a ${opener}. Lo autoriza la propietaria o un administrador de la clínica.`
+}
+
+/** Dónde está la espera de una fila de la cola, en una línea. */
+function queueLine(item: QueueItem, now: Date): { text: string; urgent: boolean; closeHint: boolean } {
+  if (item.waitingOnUs && item.waitingSince)
+    return {
+      ...supportWaitWords({ waitingSince: item.waitingSince, answerBy: item.answerBy, accessUntil: item.accessUntil }, now),
+      closeHint: false,
+    }
+  const since = item.lastStaffReplyAt ?? item.updatedAt
+  if (item.status === "esperando_clinica")
+    return {
+      text: `Espera a la clínica desde ${agoWords(since, now)}`,
+      urgent: false,
+      closeHint: daysSince(since, now) >= CLOSE_HINT_DAYS,
+    }
+  if (item.status === "resuelto") return { text: `Resuelto, ${agoWords(item.updatedAt, now)}`, urgent: false, closeHint: false }
+  return { text: `Ya respondimos, ${agoWords(since, now)}`, urgent: false, closeHint: false }
+}
+
 function SupportPage() {
   const queryClient = useQueryClient()
-  const [status, setStatus] = useState<string>("")
+  const search = Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const setSearch = (patch: Partial<SupportSearch>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true })
+  const tab: SupportTab = search.pestana ?? "cola"
+  const selectedId = search.caso ?? null
   const [page, setPage] = useState(0)
-  const linkedCase = Route.useSearch().caso ?? null
-  const [selectedId, setSelectedId] = useState<string | null>(linkedCase)
   const [checked, setChecked] = useState<string[]>([])
-  const [tab, setTab] = useState<"cola" | "conocimiento" | "metricas">("cola")
   // Borradores por caso: cambiar de ficha conserva cada texto y nunca envía
   // el borrador de un caso en otro. Solo se limpian al enviarse con éxito.
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
   const [manyBody, setManyBody] = useState("")
+  const [askingAccess, setAskingAccess] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const rowButtons = useRef(new Map<string, HTMLButtonElement>())
+  /** La fila desde la que se abrió la ficha: «Cerrar ficha» devuelve ahí el foco. */
+  const openedFrom = useRef<string | null>(null)
+  const focusedCase = useRef<string | null>(null)
+  const now = new Date()
 
   const PAGE_SIZE = 20
-  const listQuery =
-    `/api/admin/support/cases?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}` +
-    (status === "" ? "" : `&status=${status}`)
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
+  if (search.estado) params.set("status", search.estado)
+  if (search.tipo) params.set("kind", search.tipo)
+  if (search.quien) params.set("assignee", search.quien === "mios" ? "me" : "none")
+  if (search.clinica) params.set("organizationId", search.clinica)
   const cases = useQuery({
-    queryKey: ["admin-support-cases", status, page],
-    queryFn: () => api(listQuery).then((body: unknown) => casesPayload.parse(body)),
+    queryKey: ["admin-support-cases", search.estado ?? "sin_resolver", search.tipo ?? null, search.quien ?? null, search.clinica ?? null, page],
+    queryFn: () => api(`/api/admin/support/cases?${params.toString()}`).then((body: unknown) => casesPayload.parse(body)),
   })
   const detail = useQuery({
     queryKey: ["admin-support-case", selectedId],
@@ -217,6 +335,12 @@ function SupportPage() {
       api("/api/admin/support/help-stats").then((body: unknown) => helpStatsPayload.parse(body)),
     enabled: tab === "conocimiento",
   })
+  const guideGaps = useQuery({
+    queryKey: ["admin-support-guide-gaps"],
+    queryFn: () =>
+      api("/api/admin/support/knowledge/guide-gaps").then((body: unknown) => z.array(guideGapItem).parse(body)),
+    enabled: tab === "conocimiento",
+  })
   const metrics = useQuery({
     queryKey: ["admin-support-metrics"],
     queryFn: () =>
@@ -225,6 +349,7 @@ function SupportPage() {
   })
   const myUserId = useAdminUserId()
   const isAdmin = useIsAdmin()
+  const products = useOrgProducts().data ?? {}
   const assignees = useQuery({
     queryKey: ["admin-support-assignees"],
     queryFn: () =>
@@ -235,11 +360,52 @@ function SupportPage() {
     retry: false,
   })
 
+  const items = cases.data?.items ?? []
+  // El nombre de la clínica del filtro: de sus filas o, sin filas, de su ficha.
+  const clinicFromRows = items.find((item) => item.organizationId === search.clinica)?.organizationName ?? null
+  const clinic = useQuery({
+    queryKey: ["admin-support-clinic", search.clinica],
+    queryFn: () => api<{ name: string }>(`/api/admin/organizations/${search.clinica}`).then((body) => body.name),
+    enabled: Boolean(search.clinica) && cases.isSuccess && clinicFromRows === null,
+    staleTime: 300_000,
+  })
+  const clinicName = clinicFromRows ?? clinic.data ?? null
+
+  // Abrir un caso (con clic o con `?caso=`) lleva la ficha a la vista y el foco a su título.
+  useEffect(() => {
+    if (!selectedId || detail.data?.id !== selectedId || focusedCase.current === selectedId) return
+    focusedCase.current = selectedId
+    titleRef.current?.scrollIntoView({ block: "start" })
+    titleRef.current?.focus({ preventScroll: true })
+  }, [selectedId, detail.data?.id])
+
+  function openCase(id: string) {
+    openedFrom.current = id
+    focusedCase.current = null
+    setSearch({ caso: id })
+  }
+
+  function closeCase() {
+    const from = openedFrom.current ?? selectedId
+    focusedCase.current = null
+    setSearch({ caso: undefined })
+    requestAnimationFrame(() => {
+      if (from) rowButtons.current.get(from)?.focus()
+    })
+  }
+
+  function changeFilter(patch: Partial<SupportSearch>) {
+    setPage(0)
+    setChecked([])
+    setSearch(patch)
+  }
+
   // Invalida por prefijo: si cambia la ficha a mitad de una mutación, la
-  // respuesta igual refresca la lista y el detalle que corresponda.
+  // respuesta igual refresca la lista, el detalle e Inicio con el menú.
   function invalidate() {
     void queryClient.invalidateQueries({ queryKey: ["admin-support-cases"] })
     void queryClient.invalidateQueries({ queryKey: ["admin-support-case"] })
+    void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
   }
 
   const sendReply = useMutation({
@@ -303,6 +469,40 @@ function SupportPage() {
       invalidate()
     },
   })
+  // Un segundo clic antes de que se pinte «Pidiendo…» no manda otro pedido: la
+  // marca es inmediata; `isPending` llega a la pantalla después.
+  const requestingAccess = useRef(false)
+  const requestAccess = useMutation({
+    mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/request-access`, { method: "POST" }),
+    onSuccess: () => {
+      setAskingAccess(false)
+      toast.success("Pediste el acceso: el caso espera a la clínica")
+      invalidate()
+    },
+    onSettled: () => {
+      requestingAccess.current = false
+    },
+  })
+  const guideGap = useMutation({
+    mutationFn: (input: { id: string; on: boolean }) =>
+      api(`/api/admin/support/cases/${input.id}/guide-gap`, { method: input.on ? "PUT" : "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-support-guide-gaps"] })
+      void queryClient.invalidateQueries({ queryKey: ["admin-support-case"] })
+    },
+  })
+  /** «Ya está en la guía» desde Conocimiento: se quita al momento y el aviso ofrece «Deshacer». */
+  function inGuide(id: string) {
+    guideGap.mutate(
+      { id, on: false },
+      {
+        onSuccess: () =>
+          toast.success("Quitado de «Para llevar a la guía»", {
+            action: { label: "Deshacer", onClick: () => guideGap.mutate({ id, on: true }) },
+          }),
+      },
+    )
+  }
   const revokeGrant = useMutation({
     mutationFn: (grantId: string) =>
       api(`/api/admin/support/grants/revoke`, {
@@ -312,16 +512,19 @@ function SupportPage() {
     onSuccess: invalidate,
   })
 
-  const items = cases.data?.items ?? []
   const total = cases.data?.total ?? 0
+  const resolvedCount = cases.data?.resolvedCount ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const kase = detail.data ?? null
+  const kaseProduct = kase?.organizationId ? products[kase.organizationId] : undefined
   const checkedCases = items.filter((item) => checked.includes(item.id))
   const recipientOrgs = checkedCases.map((item) => item.organizationId)
   const assigneeName = (userId: string | null): string | null =>
     userId === null
       ? null
       : ((assignees.data ?? []).find((item) => item.userId === userId)?.name ?? null)
+  const orgNameOf = (item: { organizationName: string | null }) => item.organizationName ?? "Cuenta sin clínica"
+  const kindItems = KINDS.filter((value) => value !== "cobro" || isAdmin)
 
   function toggleCheck(id: string) {
     setChecked((current) =>
@@ -344,7 +547,7 @@ function SupportPage() {
             aria-pressed={tab === view}
             variant={tab === view ? "default" : "outline"}
             className="min-h-11 sm:min-h-9"
-            onClick={() => setTab(view)}
+            onClick={() => setSearch({ pestana: view === "cola" ? undefined : view })}
           >
             {view === "cola" ? "Cola" : view === "conocimiento" ? "Conocimiento" : "Métricas"}
           </Button>
@@ -440,6 +643,61 @@ function SupportPage() {
       ) : null}
 
       {tab === "conocimiento" ? (
+        <section aria-labelledby="soporte-para-la-guia" className="flex flex-col gap-2">
+          <h2 id="soporte-para-la-guia" className="font-heading text-base font-semibold">
+            Para llevar a la guía
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Casos que el equipo marcó con «Falta en la guía». Se quedan aquí hasta que alguien los quite.
+          </p>
+          {guideGaps.isPending ? (
+            <SkeletonRegion message="Cargando lo que falta en la guía…">
+              <SupportKnowledgeSkeleton />
+            </SkeletonRegion>
+          ) : guideGaps.isError ? (
+            <ErrorState message="No pude cargar lo que falta en la guía." onRetry={() => void guideGaps.refetch()} />
+          ) : (guideGaps.data ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nada marcado por ahora.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {(guideGaps.data ?? []).map((gap) => (
+                <li key={gap.caseId} className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
+                  <p className="font-semibold [overflow-wrap:anywhere]">«{gap.question}»</p>
+                  <p className="text-muted-foreground">
+                    Tema: {gap.topic ?? "sin tema en la guía"} · marcado el {supportDay(gap.markedAt)}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-9"
+                      onClick={() => {
+                        focusedCase.current = null
+                        setSearch({ pestana: undefined, caso: gap.caseId })
+                      }}
+                    >
+                      Abrir caso
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-9"
+                      disabled={guideGap.isPending}
+                      onClick={() => inGuide(gap.caseId)}
+                    >
+                      Ya está en la guía
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "conocimiento" ? (
         <section aria-label="Agrupación para conocimiento" className="flex flex-col gap-2">
           <p className="text-sm text-muted-foreground">
             Preguntas iguales entre clínicas, solo agregado: sirve para preparar respuestas comunes
@@ -480,31 +738,107 @@ function SupportPage() {
 
       {tab === "cola" ? (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <FieldLabel htmlFor="soporte-estado">Estado</FieldLabel>
-            <Select
-              value={status === "" ? "__all__" : status}
-              items={{
-                __all__: "Todos",
-                ...Object.fromEntries(STATUSES.map((value) => [value, STATUS_LABEL[value]])),
-              }}
-              onValueChange={(value) => {
-                setStatus(!value || value === "__all__" ? "" : value)
-                setPage(0)
-              }}
-            >
-              <SelectTrigger id="soporte-estado" className="w-56">
-                <SelectValue placeholder="Todos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Todos</SelectItem>
-                {STATUSES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {STATUS_LABEL[value]}
-                  </SelectItem>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+            <div className="flex flex-col gap-1">
+              <FieldLabel htmlFor="soporte-estado">Estado</FieldLabel>
+              <Select
+                value={search.estado ?? "__open__"}
+                items={{
+                  __open__: "Sin resolver",
+                  ...Object.fromEntries(STATUSES.map((value) => [value, STATUS_LABEL[value]])),
+                }}
+                onValueChange={(value) =>
+                  changeFilter({ estado: !value || value === "__open__" ? undefined : (value as SupportStatus) })
+                }
+              >
+                <SelectTrigger id="soporte-estado" className="w-52 max-w-full">
+                  <SelectValue placeholder="Sin resolver" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__open__">Sin resolver</SelectItem>
+                  {STATUSES.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {STATUS_LABEL[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <FieldLabel htmlFor="soporte-tipo">Tipo</FieldLabel>
+              <Select
+                value={search.tipo ?? "__all__"}
+                items={{
+                  __all__: "Todos",
+                  ...Object.fromEntries(kindItems.map((value) => [value, SUPPORT_KIND_LABEL[value]])),
+                }}
+                onValueChange={(value) =>
+                  changeFilter({ tipo: !value || value === "__all__" ? undefined : (value as SupportKind) })
+                }
+              >
+                <SelectTrigger id="soporte-tipo" className="w-48 max-w-full">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todos</SelectItem>
+                  {kindItems.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {SUPPORT_KIND_LABEL[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span id="soporte-quien" className="text-sm leading-snug font-medium">
+                Quién
+              </span>
+              <ToggleGroup
+                aria-labelledby="soporte-quien"
+                value={[search.quien ?? "todos"]}
+                onValueChange={(next: unknown[]) => {
+                  const picked = next[0]
+                  // Tocar otra vez lo elegido no deja el filtro vacío.
+                  if (picked === "todos") changeFilter({ quien: undefined })
+                  else if (picked === "mios" || picked === "sin") changeFilter({ quien: picked })
+                }}
+                spacing={1}
+                className="flex-wrap rounded-3xl border bg-muted p-1"
+              >
+                {(
+                  [
+                    ["todos", "Todos"],
+                    ["mios", "Míos"],
+                    ["sin", "Sin responsable"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <ToggleGroupItem
+                    key={value}
+                    value={value}
+                    className="h-auto min-h-9 rounded-3xl px-3.5 py-1.5 font-semibold text-foreground hover:bg-background/60 aria-pressed:bg-background aria-pressed:shadow-xs aria-pressed:hover:bg-background"
+                  >
+                    {label}
+                  </ToggleGroupItem>
                 ))}
-              </SelectContent>
-            </Select>
+              </ToggleGroup>
+            </div>
+            {search.clinica ? (
+              <p className="flex min-h-9 flex-wrap items-center gap-2 rounded-3xl border bg-card px-3 py-1 text-sm">
+                <span className="[overflow-wrap:anywhere]">
+                  Clínica: <b>{clinicName ?? "la elegida"}</b>
+                </span>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  aria-label={`Quitar el filtro de la clínica ${clinicName ?? ""}`.trim()}
+                  onClick={() => changeFilter({ clinica: undefined })}
+                >
+                  Quitar
+                </Button>
+              </p>
+            ) : null}
           </div>
 
           {cases.isPending ? (
@@ -518,48 +852,65 @@ function SupportPage() {
           ) : (
             <>
               <ul className="flex flex-col gap-2">
-                {items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex min-w-0 items-start gap-2 rounded-xl border px-3 py-2.5"
-                  >
-                    {isAdmin ? (
-                      <input
-                        type="checkbox"
-                        aria-label={`Elegir caso: ${item.question}`}
-                        checked={checked.includes(item.id)}
-                        onChange={() => toggleCheck(item.id)}
-                        className="mt-1.5 size-5 shrink-0"
-                      />
-                    ) : null}
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <span className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
-                          {STATUS_LABEL[item.status]}
+                {items.map((item) => {
+                  const line = queueLine(item, now)
+                  const product = item.organizationId ? products[item.organizationId] : undefined
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex min-w-0 items-start gap-2 rounded-xl border px-3 py-2.5"
+                    >
+                      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                        <span className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
+                            {STATUS_LABEL[item.status]}
+                          </span>
+                          <span className="text-xs font-semibold text-muted-foreground">{SUPPORT_KIND_LABEL[item.kind]}</span>
+                          <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{orgNameOf(item)}</span>
+                          {product ? <ProductMark product={product} /> : null}
                         </span>
-                        <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">
-                          {item.organizationName ?? "Sin clínica (acceso)"}
-                        </span>
-                      </span>
-                      <ExpandableText
-                        text={`«${item.question}»`}
-                        label="Consulta del caso"
-                        className="min-w-0 text-sm [overflow-wrap:anywhere]"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="min-h-11 self-start sm:min-h-9"
-                        onClick={() => setSelectedId(item.id)}
-                        aria-expanded={selectedId === item.id}
-                        aria-label={`Abrir caso de ${item.organizationName ?? "sin clínica"}: ${item.question.slice(0, 80)}`}
-                      >
-                        Abrir caso
-                      </Button>
-                    </div>
-                  </li>
-                ))}
+                        <ExpandableText
+                          text={`«${item.question}»`}
+                          label="Consulta del caso"
+                          className="min-w-0 text-sm [overflow-wrap:anywhere]"
+                        />
+                        <p className={cn("text-sm", line.urgent ? "font-semibold text-destructive" : "text-muted-foreground")}>
+                          {line.text}
+                          {line.closeHint ? <span className="text-foreground"> · ¿Lo cerramos?</span> : null}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{assigneeName(item.assigneeStaffId) ?? "Sin asignar"}</p>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                          <Button
+                            ref={(node) => {
+                              if (node) rowButtons.current.set(item.id, node)
+                              else rowButtons.current.delete(item.id)
+                            }}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="min-h-11 self-start sm:min-h-9"
+                            onClick={() => openCase(item.id)}
+                            aria-expanded={selectedId === item.id}
+                            aria-label={`Abrir caso de ${orgNameOf(item)}: ${item.question.slice(0, 80)}`}
+                          >
+                            Abrir caso
+                          </Button>
+                          {isAdmin ? (
+                            <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-9">
+                              <input
+                                type="checkbox"
+                                checked={checked.includes(item.id)}
+                                onChange={() => toggleCheck(item.id)}
+                                className="size-5 shrink-0"
+                              />
+                              Elegir para responder a varios
+                            </label>
+                          ) : null}
+                        </div>
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
               {pages > 1 ? (
                 <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -588,6 +939,14 @@ function SupportPage() {
               ) : null}
             </>
           )}
+          {!search.estado && resolvedCount > 0 && cases.isSuccess ? (
+            <p className="text-sm text-muted-foreground">
+              {resolvedCount === 1 ? "1 caso resuelto no se muestra." : `${resolvedCount} casos resueltos no se muestran.`}{" "}
+              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => changeFilter({ estado: "resuelto" })}>
+                Ver resueltos
+              </Button>
+            </p>
+          ) : null}
 
           {isAdmin && checkedCases.length > 1 ? (
             <section
@@ -599,7 +958,7 @@ function SupportPage() {
               </h3>
               <p className="text-sm text-muted-foreground">
                 Destinatarias:{" "}
-                {checkedCases.map((item) => item.organizationName ?? "sin clínica").join(" · ")}.
+                {checkedCases.map((item) => orgNameOf(item)).join(" · ")}.
                 Cada caso recibe su propio mensaje privado.
               </p>
               <label className="flex flex-col gap-1 text-sm" htmlFor="soporte-varios">
@@ -631,33 +990,48 @@ function SupportPage() {
 
           {kase ? (
             <section
-              aria-label="Ficha del caso"
-              className="flex flex-col gap-3 rounded-xl border px-3 py-3"
+              aria-labelledby="soporte-ficha-titulo"
+              className="flex scroll-mt-4 flex-col gap-3 rounded-xl border px-3 py-3"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="link"
                   className="h-auto p-0 text-sm"
-                  onClick={() => setSelectedId(null)}
+                  onClick={closeCase}
                 >
                   ← Cerrar ficha
                 </Button>
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
                   {STATUS_LABEL[kase.status]}
                 </span>
-                <span className="text-sm font-semibold">
-                  {kase.organizationName ?? "Sin clínica (acceso)"}
-                </span>
+                <span className="text-xs font-semibold text-muted-foreground">{SUPPORT_KIND_LABEL[kase.kind]}</span>
+                {kase.organizationId ? (
+                  <Link
+                    to="/organizations/$organizationId"
+                    params={{ organizationId: kase.organizationId }}
+                    search={{ tab: "equipo" }}
+                    className="text-sm font-semibold underline-offset-4 hover:underline"
+                  >
+                    {orgNameOf(kase)}
+                  </Link>
+                ) : (
+                  <span className="text-sm font-semibold">{orgNameOf(kase)}</span>
+                )}
+                {kaseProduct ? <ProductMark product={kaseProduct} /> : null}
               </div>
-              <ExpandableText
-                text={`«${kase.question}»`}
-                label="Consulta inicial del caso"
-                className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
-              />
+              {/* La consulta entera (500 caracteres como mucho): es el título de la ficha y recibe el foco al abrirla. */}
+              <h2
+                id="soporte-ficha-titulo"
+                ref={titleRef}
+                tabIndex={-1}
+                className="scroll-mt-4 rounded-md text-sm font-semibold whitespace-pre-wrap outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                «{kase.question}»
+              </h2>
               <p className="text-sm text-muted-foreground">
                 Pantalla: {kase.screen} · Rol: {kase.role || "—"} · Versión:{" "}
-                {kase.appVersion ?? "—"} · Reaperturas: {kase.reopenedCount} · Responsable:{" "}
+                {kase.appVersion ?? "—"} · Abierto el {supportDayTime(kase.createdAt)} · Reaperturas: {kase.reopenedCount} · Responsable:{" "}
                 {assigneeName(kase.assigneeStaffId) ?? "sin asignar"}
               </p>
               {kase.review ? (
@@ -681,7 +1055,8 @@ function SupportPage() {
                         ? "Nota interna (solo equipo)"
                         : message.authorKind === "staff"
                           ? "Staff → clínica"
-                          : "Clínica"}
+                          : "Clínica"}{" "}
+                      · {supportDayTime(message.createdAt)}
                     </p>
                     <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
                   </li>
@@ -805,7 +1180,7 @@ function SupportPage() {
                   }
                   disabled={assign.isPending}
                 >
-                  <SelectTrigger id="soporte-responsable" className="w-56">
+                  <SelectTrigger id="soporte-responsable" className="w-56 max-w-full">
                     <SelectValue placeholder="Sin asignar" />
                   </SelectTrigger>
                   <SelectContent>
@@ -826,6 +1201,20 @@ function SupportPage() {
                 >
                   Asignarme
                 </Button>
+                <span className="flex min-h-11 items-center gap-2 sm:min-h-9">
+                  <Switch
+                    id="soporte-falta-guia"
+                    checked={kase.guideGapMarkedAt !== null}
+                    disabled={guideGap.isPending}
+                    onCheckedChange={(on) =>
+                      guideGap.mutate(
+                        { id: kase.id, on },
+                        { onSuccess: () => toast.success(on ? "Marcado: falta en la guía" : "Quitado de «Para llevar a la guía»") },
+                      )
+                    }
+                  />
+                  <FieldLabel htmlFor="soporte-falta-guia">Falta en la guía</FieldLabel>
+                </span>
                 {/* Una «Revisión de cobro» se resuelve al decidirla (ADR 0054). */}
                 {STATUSES.filter((value) => value !== kase.status && !(value === "resuelto" && kase.review?.status === "pendiente")).map((value) => (
                   <Button
@@ -836,7 +1225,7 @@ function SupportPage() {
                     disabled={setCaseStatus.isPending}
                     onClick={() => setCaseStatus.mutate(value)}
                   >
-                    {value === "resuelto" ? "Resolver" : `A ${STATUS_LABEL[value].toLowerCase()}`}
+                    {STATUS_ACTION[value]}
                   </Button>
                 ))}
               </div>
@@ -844,17 +1233,12 @@ function SupportPage() {
               <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
                 <p className="font-bold">Acceso diagnóstico</p>
                 {(kase.grants ?? []).length === 0 ? (
-                  <p className="text-muted-foreground">
-                    Sin permisos: pide a un owner/admin de la clínica que lo autorice.
-                  </p>
+                  <p className="text-muted-foreground">Sin permisos todavía.</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {kase.grants.map((grant) => (
                       <li key={grant.id} className="flex flex-wrap items-center gap-2">
-                        <span>
-                          Vence el {new Date(grant.expiresAt).toLocaleString()} ·{" "}
-                          {grant.active ? "vigente" : grant.revokedAt ? "revocado" : "vencido"}
-                        </span>
+                        <span>{grantWords(grant, now)}</span>
                         {grant.active ? (
                           <Button
                             type="button"
@@ -871,7 +1255,22 @@ function SupportPage() {
                     ))}
                   </ul>
                 )}
+                <AccessRequestLine kase={kase} now={now} />
                 <div className="flex flex-wrap gap-2">
+                  {kase.accessRequestText ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-9"
+                      onClick={() => {
+                        requestAccess.reset()
+                        setAskingAccess(true)
+                      }}
+                    >
+                      Pedir acceso de diagnóstico…
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -898,7 +1297,7 @@ function SupportPage() {
                     <p>
                       <strong>{diagnostic.data.organization.name}</strong> (
                       {diagnostic.data.organization.slug}) · permiso hasta el{" "}
-                      {new Date(diagnostic.data.grantExpiresAt).toLocaleString()}
+                      {supportDayTime(diagnostic.data.grantExpiresAt)}
                     </p>
                     <p>
                       Perfil:{" "}
@@ -928,7 +1327,7 @@ function SupportPage() {
                       {diagnostic.data.channels.length === 0
                         ? "ninguno"
                         : diagnostic.data.channels
-                            .map((channel) => `${channel.displayName} (${channel.status})`)
+                            .map((channel) => `${channel.displayName} (${CHANNEL_STATUS_WORDS[channel.status] ?? channel.status})`)
                             .join(" · ")}
                     </p>
                     <p>
@@ -936,7 +1335,7 @@ function SupportPage() {
                       {diagnostic.data.membersByRole.length === 0
                         ? "—"
                         : diagnostic.data.membersByRole
-                            .map((row) => `${row.role}: ${row.total}`)
+                            .map((row) => `${row.label}: ${row.total}`)
                             .join(" · ")}
                     </p>
                     <p className="text-muted-foreground">
@@ -946,6 +1345,32 @@ function SupportPage() {
                   </div>
                 ) : null}
               </div>
+              {kase.accessRequestText ? (
+                <ConfirmDialog
+                  open={askingAccess}
+                  title="¿Pedir el acceso de diagnóstico?"
+                  description={accessRecipientsWords(kase)}
+                  confirmLabel="Pedir acceso"
+                  cancelLabel="Volver"
+                  variant="default"
+                  pending={requestAccess.isPending}
+                  error={requestAccess.isError ? (requestAccess.error instanceof Error ? requestAccess.error.message : "No se pudo pedir el acceso.") : null}
+                  onConfirm={() => {
+                    if (requestingAccess.current) return
+                    requestingAccess.current = true
+                    requestAccess.mutate(kase.id)
+                  }}
+                  onClose={() => setAskingAccess(false)}
+                >
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <p className="font-semibold">Este mensaje queda en el caso:</p>
+                    <blockquote className="rounded-xl bg-primary-soft px-3 py-2 whitespace-pre-wrap">{kase.accessRequestText}</blockquote>
+                    <p className="text-muted-foreground">
+                      El caso pasa a «Esperando a la clínica». Si no lo ven en 15 minutos, les llega el correo de que soporte necesita algo.
+                    </p>
+                  </div>
+                </ConfirmDialog>
+              ) : null}
             </section>
           ) : selectedId !== null ? (
             <section
@@ -957,7 +1382,7 @@ function SupportPage() {
                   type="button"
                   variant="link"
                   className="h-auto p-0 text-sm"
-                  onClick={() => setSelectedId(null)}
+                  onClick={closeCase}
                 >
                   ← Cerrar ficha
                 </Button>
@@ -978,4 +1403,29 @@ function SupportPage() {
       ) : null}
     </PageShell>
   )
+}
+
+/**
+ * Cómo va el pedido de acceso: «Pediste acceso el mié 11 nov, 10:40 · esperando
+ * a la clínica», o «Acceso autorizado hasta las 15:30» con un permiso vigente.
+ */
+function AccessRequestLine({ kase, now }: { kase: CaseDetail; now: Date }) {
+  const active = kase.grants.find((grant) => grant.active)
+  if (active) return <p className="font-semibold">{accessUntilWords(active.expiresAt, now)}</p>
+  if (kase.accessRequestPending && kase.accessRequestedAt)
+    return (
+      <p>
+        Pediste acceso el {supportDayTime(kase.accessRequestedAt)}
+        {kase.status === "esperando_clinica" ? " · esperando a la clínica" : ""}
+      </p>
+    )
+  if (kase.accessRequestText)
+    return (
+      <p className="text-muted-foreground">
+        {kase.openerCanGrant
+          ? `Lo puede autorizar quien abrió el caso: es ${kase.opener?.roleLabel ?? "de la clínica"}.`
+          : "Lo autoriza la propietaria o un administrador de la clínica: al pedirlo, ellos también ven el caso."}
+      </p>
+    )
+  return null
 }

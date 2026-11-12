@@ -6,7 +6,7 @@ import { saasAction, saasCharge, saasNotice, saasPayment, saasPlan, saasSubscrip
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { callName, getClinicNotices } from "./clinic-notices.js"
-import { createSaasPlan, tickSaasBilling } from "./saas-billing.js"
+import { createSaasPlan, rejectSaasReceipt, tickSaasBilling } from "./saas-billing.js"
 import { setSaasSpendCap } from "./saas-terms.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -129,6 +129,43 @@ describe("franja de avisos: el pago del mes", () => {
     expect(owner[0]).toMatchObject({ id: "cobro:en-revision", tone: "aviso" })
   })
 
+  it("tras un rechazo, quien paga lee por qué en el aviso del cargo; con otro comprobante, vuelve «revisando tu pago»", async () => {
+    const { orgId, people, read } = await clinic()
+    const row = await charge(orgId, 6)
+    const proof = (values: Partial<typeof saasPayment.$inferInsert>) =>
+      ownerDb
+        .insert(saasPayment)
+        .values({
+          organizationId: orgId,
+          chargeId: row.id,
+          amountCents: row.amountCents,
+          currency: "USD",
+          methodCode: "transferencia",
+          status: "pendiente",
+          createdBy: people.owner,
+          idempotencyKey: randomUUID(),
+          ...values,
+        })
+        .returning()
+        .then((rows) => rows[0]!)
+    const first = await proof({ receiptFilename: "demo.png" })
+    expect((await read("owner"))[0]).toMatchObject({ id: "cobro:en-revision" })
+    await rejectSaasReceipt(ownerDb, orgId, "avisos-admin", first.id, "No se ve el número de operación.")
+    const owner = await read("owner")
+    expect(owner).toHaveLength(1)
+    expect(owner[0]).toMatchObject({ topic: "cobro", action: { kind: "pagar" } })
+    expect(owner[0]?.message).toContain("No pudimos confirmar tu comprobante «demo.png»: No se ve el número de operación.")
+    expect(owner[0]?.message).not.toContain("..")
+    expect(owner[0]?.message).not.toContain("correo")
+    // Otro id: si la persona había cerrado el aviso del cargo, el rechazo se vuelve a ver.
+    expect(owner[0]?.id).toContain(`rechazo:${first.id}`)
+    // Quien no paga no ve montos ni motivos.
+    expect(await read("reception")).toEqual([])
+    // Con otro comprobante en revisión, el rechazo anterior ya no es lo que pasa.
+    await proof({ receiptFilename: "otro.png" })
+    expect(await read("owner")).toMatchObject([{ id: "cobro:en-revision" }])
+  })
+
   it("el día antes de pasar a solo lectura avisa a todo el equipo, sin montos y con a quién avisar", async () => {
     const { orgId, read } = await clinic({ status: "gracia", graceEndsAt: new Date(Date.now() + 20 * 3_600_000) })
     await charge(orgId, -6)
@@ -157,6 +194,80 @@ describe("franja de avisos: el pago del mes", () => {
     const { read } = await clinic({ status: "pausada", pauseReason: "revisión de la cuenta" })
     expect((await read("owner"))[0]).toMatchObject({ tone: "limite", action: { kind: "escribir_soporte" } })
     expect((await read("owner"))[0]?.message).toContain("revisión de la cuenta")
+  })
+})
+
+describe("franja de avisos: el día real de solo lectura", () => {
+  // C6: la gracia termina el dom 15 nov a las 10:00 de Lima y el comprobante del sáb 14 dio prórroga hasta el mar 17.
+  const graceEndsAt = new Date("2026-11-15T15:00:00Z")
+  const proofExtensionUntil = new Date("2026-11-17T15:00:00Z")
+
+  async function graceClinic() {
+    const made = await clinic({ status: "gracia", graceEndsAt, proofExtensionUntil, proofExtensionCount: 1 })
+    const row = await charge(made.orgId, -8)
+    const at = (who: keyof typeof made.people, now: Date) =>
+      withOrgContext(appDb, made.orgId, (tx) =>
+        getClinicNotices(tx, made.orgId, { userId: made.people[who], role: { owner: "owner", reception: "reception", clinician: "clinician", cashier: "cashier" }[who] }, now),
+      )
+    const proof = (values: Partial<typeof saasPayment.$inferInsert>) =>
+      ownerDb
+        .insert(saasPayment)
+        .values({
+          organizationId: made.orgId,
+          chargeId: row.id,
+          amountCents: row.amountCents,
+          currency: "USD",
+          methodCode: "transferencia",
+          status: "pendiente",
+          createdBy: made.people.owner,
+          idempotencyKey: randomUUID(),
+          ...values,
+        })
+        .returning()
+        .then((rows) => rows[0]!)
+    return { ...made, at, proof }
+  }
+
+  it("con la prórroga vigente, el día es el de la prórroga y «Mañana» solo cuando faltan menos de 24 horas", async () => {
+    const { at } = await graceClinic()
+    // Sáb 14 a mediodía: la gracia termina mañana, pero la prórroga sigue hasta el martes.
+    const saturday = await at("owner", new Date("2026-11-14T17:00:00Z"))
+    expect(saturday[0]?.short).toMatch(/^Pasa a solo lectura el mar,? 17 nov$/)
+    expect(saturday[0]?.message).not.toContain("Mañana")
+    expect(saturday[0]?.message).toContain("martes, 17 de noviembre")
+    expect(await at("clinician", new Date("2026-11-14T17:00:00Z"))).toEqual([])
+    // Lun 16: faltan 22 horas para el martes.
+    const monday = await at("owner", new Date("2026-11-16T17:00:00Z"))
+    expect(monday[0]?.short).toMatch(/^Pasa a solo lectura el mar,? 17 nov$/)
+    expect(monday[0]?.message).toContain("Mañana la clínica pasa a solo lectura")
+    expect(monday[0]?.message).not.toMatch(/dom,? 15|domingo/)
+    expect((await at("clinician", new Date("2026-11-16T17:00:00Z")))[0]?.message).toContain("Mañana la clínica pasa a solo lectura")
+    // Pasada la hora y antes de que corra el ciclo: nunca una fecha que ya pasó.
+    const late = await at("owner", new Date("2026-11-17T15:00:30Z"))
+    expect(late[0]?.short).not.toMatch(/mar,? 17|dom,? 15/)
+    expect(late[0]?.message).not.toContain("Mañana")
+    expect(late[0]?.message).toContain("Hoy la clínica pasa a solo lectura")
+  })
+
+  it("tras el rechazo, la franja dice por qué y el día de la prórroga; con otro comprobante en revisión, que igual pasa a solo lectura ese día", async () => {
+    const { orgId, at, proof } = await graceClinic()
+    const first = await proof({ receiptFilename: "demo.png", createdAt: new Date("2026-11-14T15:00:00Z") })
+    await rejectSaasReceipt(ownerDb, orgId, "avisos-admin", first.id, "No se ve el número de operación", new Date("2026-11-16T14:00:00Z"))
+    const monday = new Date("2026-11-16T17:00:00Z")
+    const owner = await at("owner", monday)
+    expect(owner[0]?.short).toMatch(/^Pasa a solo lectura el mar,? 17 nov$/)
+    expect(owner[0]?.message).toContain("No pudimos confirmar tu comprobante «demo.png»: No se ve el número de operación.")
+    expect(owner[0]?.message).not.toMatch(/dom,? 15|domingo/)
+    // Un comprobante nuevo ya no aplaza nada: la franja no dice que la clínica sigue igual.
+    await proof({ receiptFilename: "otro.png", createdAt: new Date("2026-11-16T15:00:00Z") })
+    const review = await at("owner", monday)
+    expect(review).toHaveLength(1)
+    expect(review[0]?.message).toContain("está revisando tu pago")
+    expect(review[0]?.message).not.toContain("sigue igual")
+    expect(review[0]?.message).toContain("Mañana la clínica pasa a solo lectura")
+    expect(review[0]?.short).toMatch(/mar,? 17 nov/)
+    // El resto del equipo se entera el día antes, con o sin comprobante en revisión.
+    expect((await at("clinician", monday))[0]?.message).toContain("Mañana la clínica pasa a solo lectura")
   })
 })
 

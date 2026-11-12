@@ -79,6 +79,7 @@ export async function runSupportNoticesTick(deps: SupportNoticeWorkerDeps): Prom
               screen: claimed.screen,
               who: claimed.who,
               role: claimed.role,
+              acted: claimed.acted,
               url,
             })
           : supportReplyNoticeTemplate({
@@ -88,6 +89,10 @@ export async function runSupportNoticesTick(deps: SupportNoticeWorkerDeps): Prom
               url,
               // La marca de la clínica del caso (issue 229).
               brand: productWords(claimed.clinicProduct ?? "dental").brand,
+              // A la propietaria o a un administrador: pide su autorización y nombra a quien abrió.
+              granter: claimed.toGranter
+                ? { clinic: claimed.clinicName, openerName: claimed.who, openerRole: claimed.role }
+                : null,
             })
       const to = claimed.to ?? deps.supportInbox
       await deps.mailer.send({ to, ...mail })

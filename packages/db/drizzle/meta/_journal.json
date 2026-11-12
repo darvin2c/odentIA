@@ -701,6 +701,20 @@
       "when": 1794418194972,
       "tag": "0099_mensaje_intento_de_envio_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1794446513759,
+      "tag": "0100_administracion_hoy",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1794446528334,
+      "tag": "0101_administracion_hoy_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,8 @@ export interface BillingSummary {
   pauseReason: string | null
   outstandingByCurrency: Array<{ currency: string; cents: number }>
   proofExtensionUntil: string | null
+  /** En gracia, el día en que pasa a solo lectura: el fin de la gracia o la prórroga vigente (el de la franja y el correo). */
+  readOnlyAt?: string | null
   /** Fundadores: hasta cuándo valen sus condiciones (el plan no se cambia desde aquí). */
   guaranteedUntil?: string | null
   usage30d: {
@@ -48,6 +50,16 @@ function dateLabel(iso: string | null): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "—"
   return new Intl.DateTimeFormat(activeOrgLocale(), { dateStyle: "medium", timeZone: activeOrgTimeZone() }).format(date)
+}
+
+/**
+ * ¿La prórroga de un comprobante corre la solo lectura más allá del fin de la
+ * gracia? Lo decide el servidor (`readOnlyAt`): aquí solo se compara con el
+ * fin de la gracia, sin mirar la prórroga por su cuenta.
+ */
+export function extendedReadOnlyAt(summary: Pick<BillingSummary, "status" | "graceEndsAt" | "readOnlyAt">): boolean {
+  if (summary.status !== "gracia" || !summary.readOnlyAt || !summary.graceEndsAt) return false
+  return new Date(summary.readOnlyAt).getTime() > new Date(summary.graceEndsAt).getTime()
 }
 
 export function SubscriptionStatusCard({ summary }: { summary: BillingSummary }) {
@@ -111,9 +123,11 @@ export function SubscriptionStatusCard({ summary }: { summary: BillingSummary })
           para reanudarla.
         </p>
       ) : null}
-      {summary.proofExtensionUntil ? (
+      {/* Solo cuando la prórroga de un comprobante es el día que manda: lo dice como la franja, sin
+          «pendiente» (el comprobante pudo rechazarse y la prórroga dada se queda). Vencida, no se dice. */}
+      {extendedReadOnlyAt(summary) ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          Prórroga por comprobante pendiente hasta el {dateLabel(summary.proofExtensionUntil)}.
+          Con la prórroga de tu comprobante, la clínica pasa a solo lectura el {dateLabel(summary.readOnlyAt ?? null)}.
         </p>
       ) : null}
     </section>

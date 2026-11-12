@@ -10,8 +10,9 @@ import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, beforeAll, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createApp } from "../app.js"
+import { createPublicFoundersRoute } from "./public-founders.js"
 
 /**
  * Fundadores contra la app real (`createApp`, issue 165): la solicitud de la
@@ -165,6 +166,93 @@ it("la solicitud de la web se guarda, envía su copia una vez y valida lo que ll
   const bad = await send({ ...request("x@y.test"), professionals: "muchos" })
   expect(bad.status).toBe(400)
   expect(((await bad.json()) as { error: { message: string } }).error.message).toBe("Elige cuántos odontólogos atienden")
+})
+
+describe("el aviso al equipo de cada solicitud nueva", () => {
+  const TEAM = "fundadores@odentia.test"
+  let ip = 0
+  /** La ruta sola, con la dirección de la administración y el buzón del equipo que le pasa `createApp`. */
+  function foundersRoute(mailer: { send: (m: MailMessage) => Promise<void> }, teamEmail: string | null = TEAM) {
+    return createPublicFoundersRoute({
+      ownerDb,
+      mailer,
+      // Una dirección por envío: el límite por dirección no entra en estas pruebas.
+      remoteAddress: () => `10.9.${Math.floor(ip / 250)}.${ip++ % 250}`,
+      adminURL: "https://admin.odentia.localhost/",
+      teamEmail: teamEmail ?? undefined,
+    })
+  }
+  const post = (route: ReturnType<typeof foundersRoute>, payload: unknown) =>
+    route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
+  const idOf = async (email: string) =>
+    (await ownerDb.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.id
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("una solicitud nueva envía la copia y el aviso, sin el correo ni el celular y con el enlace a esa solicitud", async () => {
+    const mailer = recordingMailer()
+    const res = await post(foundersRoute(mailer), request("aviso@norte.test"))
+    expect(res.status).toBe(201)
+    expect(mailer.sent.map((m) => m.to)).toEqual(["aviso@norte.test", TEAM])
+    const notice = mailer.sent[1]!
+    expect(notice.subject).toBe("Solicitud nueva en la lista de espera: Clínica Sonrisa (odentIA)")
+    const url = `https://admin.odentia.localhost/waitlist?solicitud=${await idOf("aviso@norte.test")}`
+    expect(notice.text).toContain(`Abrir la solicitud: ${url}`)
+    expect(notice.html).toContain(`href="${url}"`)
+    for (const body of [notice.subject, notice.text, notice.html]) {
+      expect(body).not.toContain("aviso@norte.test")
+      expect(body).not.toMatch(/987\D?654\D?321/)
+    }
+
+    // La misma solicitud otra vez (el formulario enviado dos veces): ni otra copia ni otro aviso.
+    expect((await post(foundersRoute(mailer), request("aviso@norte.test"))).status).toBe(201)
+    expect(mailer.sent).toHaveLength(2)
+  })
+
+  it("sin el buzón del equipo, solo sale la copia", async () => {
+    const mailer = recordingMailer()
+    expect((await post(foundersRoute(mailer, null), request("sin-buzon@norte.test"))).status).toBe(201)
+    expect(mailer.sent.map((m) => m.to)).toEqual(["sin-buzon@norte.test"])
+  })
+
+  it("si la copia no sale, el aviso sale igual; si el aviso no sale, solo su id va al registro y no se reintenta", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const sent: MailMessage[] = []
+    const failing = (to: string) => ({
+      send: async (m: MailMessage) => {
+        if (m.to === to) throw new Error(`rebotó ${m.to}`)
+        sent.push(m)
+      },
+    })
+    expect((await post(foundersRoute(failing("rebota@tacna.test")), request("rebota@tacna.test"))).status).toBe(201)
+    expect(sent.map((m) => m.to)).toEqual([TEAM])
+
+    const res = await post(foundersRoute(failing(TEAM)), request("sin-aviso@tacna.test"))
+    expect(res.status).toBe(201)
+    expect(sent.map((m) => m.to)).toEqual([TEAM, "sin-aviso@tacna.test"])
+    const id = await idOf("sin-aviso@tacna.test")
+    const logged = errors.mock.calls.map((call) => call.join(" "))
+    expect(logged).toContain(`Fundadores: no salió el aviso al equipo de la solicitud ${id}`)
+    expect(logged.join("\n")).not.toContain("sin-aviso@tacna.test")
+  })
+
+  it("pasado el tope de 20 avisos por hora no sale otro, y la solicitud se guarda igual", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const mailer = recordingMailer()
+    const route = foundersRoute(mailer)
+    for (let n = 1; n <= 20; n++) expect((await post(route, request(`tope-${n}@lima.test`))).status).toBe(201)
+    expect(mailer.sent.filter((m) => m.to === TEAM)).toHaveLength(20)
+
+    const res = await post(route, request("tope-21@lima.test"))
+    expect(res.status).toBe(201)
+    expect(mailer.sent.filter((m) => m.to === TEAM)).toHaveLength(20)
+    // La copia sí sale, y la solicitud queda para Inicio.
+    expect(mailer.sent.at(-1)?.to).toBe("tope-21@lima.test")
+    const id = await idOf("tope-21@lima.test")
+    expect(errors.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(id)
+  })
 })
 
 it("los precios publicados: solo lo que se muestra en la web y nunca los lugares", async () => {

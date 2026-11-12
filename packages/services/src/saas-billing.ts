@@ -17,6 +17,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import {
   type SaasChargeStatus,
+  type SaasPaymentStatus,
   type SaasSubscriptionStatus,
   saasCharge,
   saasCommissionAdjustment,
@@ -82,9 +83,13 @@ function assertCents(value: number, field: string, positive: boolean): number {
   return value
 }
 
-function reason(value: string, field = "El motivo"): string {
+/** El motivo recortado, de 1 a `max` caracteres; con `key`, el error va junto a ese campo del cuerpo. */
+function reason(value: string, field = "El motivo", max = 2000, key?: string): string {
   const text = value?.trim() ?? ""
-  if (!text || text.length > 2000) throw validation(`${field} debe tener 1–2000 caracteres`)
+  if (!text || text.length > max) {
+    const message = `${field} debe tener 1–${max} caracteres`
+    throw validation(message, key ? { [key]: `Escribe el motivo en 1 a ${max} caracteres` } : undefined)
+  }
   return text
 }
 
@@ -1549,15 +1554,31 @@ export interface OrganizationBillingSummary {
   pauseReason: string | null
   outstandingByCurrency: SaasMoneyByCurrency[]
   proofExtensionUntil: Date | null
+  /** En gracia, el día en que pasa a solo lectura (`readOnlyAtOf`); si no, nulo. */
+  readOnlyAt: Date | null
   usage30d: SaasUsageSummary
   /** Entró por invitación (Fundadores): hasta cuándo valen sus condiciones; null si no aplica o ya terminaron. */
   guaranteedUntil: Date | null
+}
+
+/**
+ * El día en que la clínica en gracia pasa a solo lectura (C6): el fin de la
+ * gracia o, si la prórroga de un comprobante sigue vigente y termina después,
+ * el de la prórroga. Un comprobante pendiente no aplaza nada por sí solo: la
+ * prórroga ya exige cubrir todo el saldo y respeta el tope. Una sola fecha para
+ * la franja, el correo de la víspera, Plan y pagos y el ciclo. Sin gracia, nula.
+ */
+export function readOnlyAtOf(sub: { graceEndsAt: Date | null; proofExtensionUntil: Date | null }, now: Date): Date | null {
+  if (!sub.graceEndsAt) return null
+  const extension = sub.proofExtensionUntil && sub.proofExtensionUntil > now ? sub.proofExtensionUntil : null
+  return extension && extension > sub.graceEndsAt ? extension : sub.graceEndsAt
 }
 
 /** Resumen de suscripción + saldo + uso para ficha de clínica, panel y banner. */
 export async function getOrganizationBillingSummary(
   tx: Db,
   organizationId: string,
+  now = new Date(),
 ): Promise<OrganizationBillingSummary> {
   const sub = await getSaasSubscription(tx, organizationId)
   let plan: SaasPlanSummary | null = null
@@ -1591,8 +1612,9 @@ export async function getOrganizationBillingSummary(
     pauseReason: sub?.pauseReason ?? null,
     outstandingByCurrency: outstanding,
     proofExtensionUntil: sub?.proofExtensionUntil ?? null,
+    readOnlyAt: sub && !sub.isDemo && sub.status === "gracia" ? readOnlyAtOf(sub, now) : null,
     usage30d,
-    guaranteedUntil: sub?.guaranteedUntil && sub.guaranteedUntil > new Date() ? sub.guaranteedUntil : null,
+    guaranteedUntil: sub?.guaranteedUntil && sub.guaranteedUntil > now ? sub.guaranteedUntil : null,
   }
 }
 
@@ -1711,7 +1733,7 @@ export interface SaasPaymentRow {
   amountCents: number
   currency: string
   methodCode: string
-  status: "pendiente" | "confirmado" | "reversado" | "devuelto"
+  status: SaasPaymentStatus
   receiptFilename: string | null
   receiptMime: string | null
   receiptSize: number | null
@@ -1720,10 +1742,15 @@ export interface SaasPaymentRow {
   confirmedAt: Date | null
   reversedAt: Date | null
   reverseReason: string | null
+  /** Rechazado: cuándo y el motivo, que la clínica lee en Plan y pagos y en su franja. */
+  rejectedAt: Date | null
+  rejectReason: string | null
+  /** Quién lo rechazó: solo en las lecturas de la administración (`staffNames`); la clínica no lo recibe. */
+  rejectedByName: string | null
   createdAt: Date
 }
 
-function toPaymentRow(row: typeof saasPayment.$inferSelect): SaasPaymentRow {
+function toPaymentRow(row: typeof saasPayment.$inferSelect, rejectedByName: string | null = null): SaasPaymentRow {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -1740,6 +1767,9 @@ function toPaymentRow(row: typeof saasPayment.$inferSelect): SaasPaymentRow {
     confirmedAt: row.confirmedAt,
     reversedAt: row.reversedAt,
     reverseReason: row.reverseReason,
+    rejectedAt: row.rejectedAt,
+    rejectReason: row.rejectReason,
+    rejectedByName: row.status === "rechazado" ? rejectedByName : null,
     createdAt: row.createdAt,
   }
 }
@@ -1784,8 +1814,9 @@ export interface ReceiptUpload {
 }
 
 /**
- * La clínica registra su comprobante: queda `pendiente` de confirmación admin
- * y otorga prórroga acotada (una vez por cargo). Disponible en restricción.
+ * La clínica registra su comprobante: queda `pendiente` de confirmación admin.
+ * Se registra también en restricción, pero la prórroga acotada solo la da en
+ * gracia, con el comprobante que cubre todo el saldo (ver abajo).
  */
 /**
  * Secuencia de bloqueo consistente por cargo (confirm/reverse/refund): lee el
@@ -1946,14 +1977,18 @@ export async function submitSaasReceipt(
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo registrar el comprobante")
-  // Prórroga acotada por comprobante pendiente (condiciones comerciales).
+  // Prórroga acotada por comprobante pendiente (condiciones comerciales): solo
+  // en gracia, que es lo único que aplaza (la fecha de solo lectura). Antes de
+  // vencer el cargo no sirve de nada y gastaría la vez: el contador vuelve a
+  // cero al abrirse cada gracia (paso 6 del ciclo), así es una vez por cargo
+  // vencido. Solo si el comprobante cubre TODO el saldo (un parcial no aplaza)
+  // y las veces que dicen las condiciones.
   const sub = await getSaasSubscription(tx, orgId)
-  // Prórroga acotada solo si el comprobante cubre TODO el saldo (un parcial no
-  // aplaza) y las veces que dicen las condiciones.
   const terms = await saasTermsAt(tx, now)
   if (
     sub &&
     !sub.isDemo &&
+    sub.status === "gracia" &&
     amount === outstanding &&
     terms.proofExtensionDays > 0 &&
     sub.proofExtensionCount < terms.proofExtensionMax
@@ -2049,8 +2084,9 @@ export async function confirmSaasPayment(
       .limit(1)
     return { payment: toPaymentRow(payment), charge, commissionId: existing?.id ?? null }
   }
+  // Reversado, devuelto o rechazado: ya no se confirma (un rechazado es final; corregirlo es registrar el pago).
   if (payment.status !== "pendiente")
-    throw conflict("SAAS_PAYMENT_STATE", "Solo se confirma un comprobante pendiente")
+    throw conflict("SAAS_PAYMENT_STATE", "Ese comprobante ya no está pendiente")
   // Sobrepago: lo ya confirmado para el cargo más este pago no supera el cargo.
   if (lockedCharge) {
     const confirmed = await tx
@@ -2068,7 +2104,7 @@ export async function confirmSaasPayment(
     if (confirmedTotal + payment.amountCents > lockedCharge.amountCents) {
       throw conflict(
         "SAAS_OVERPAYMENT",
-        "Confirmarlo supera el cargo: reversa primero el comprobante duplicado",
+        "Confirmarlo supera el cargo: rechaza primero el comprobante duplicado",
       )
     }
   }
@@ -2252,6 +2288,57 @@ export async function reverseSaasPayment(
   return { payment: toPaymentRow(row), adjustmentId }
 }
 
+/** Nombre de quien rechazó, para las lecturas de la administración. */
+async function staffName(tx: Db, userId: string | null): Promise<string | null> {
+  if (!userId) return null
+  const [row] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
+  return row?.name ?? null
+}
+
+/**
+ * Admin rechaza un comprobante pendiente que no pudo confirmar (C11): queda
+ * `rechazado` con quién, cuándo y el motivo que lee la clínica en Plan y
+ * pagos y en su franja. No es dinero que entró: no toca el cargo (`paidCents`),
+ * ni comisiones, ni la prórroga que ese comprobante ya dio (decisión del
+ * tablero 5: no se retira). El cargo queda libre para otro comprobante o para
+ * registrar el pago a mano. Rechazar otra vez con el mismo motivo (un
+ * reintento) devuelve lo mismo con `repeated` y no deja otra auditoría; con
+ * otro motivo es un 409 que dice quién lo rechazó y con cuál, porque la clínica
+ * lee el primero. Lo confirmado, reversado o devuelto ya no se rechaza, y un
+ * rechazado no cambia más (`saas_payment_immutable`).
+ */
+export async function rejectSaasReceipt(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  paymentId: string,
+  rejectReason: string,
+  now = new Date(),
+): Promise<{ payment: SaasPaymentRow; repeated: boolean }> {
+  // De 1 a 500, como el check de la base (`saas_payment_rejection_check`): la clínica lo lee en una línea.
+  const motive = reason(rejectReason, "El motivo del rechazo", 500, "reason")
+  const { payment } = await lockChargePayment(tx, orgId, paymentId)
+  if (payment.status === "rechazado") {
+    const by = await staffName(tx, payment.rejectedBy)
+    if (payment.rejectReason === motive) return { payment: toPaymentRow(payment, by), repeated: true }
+    throw conflict("SAAS_PAYMENT_STATE", `Ese comprobante ya lo rechazó ${by ?? "otra persona"}: «${payment.rejectReason ?? ""}»`)
+  }
+  if (payment.status !== "pendiente") throw conflict("SAAS_PAYMENT_STATE", "Ese comprobante ya no está pendiente")
+  const [row] = await tx
+    .update(saasPayment)
+    .set({ status: "rechazado", rejectedAt: now, rejectedBy: actorUserId, rejectReason: motive, updatedAt: now })
+    .where(and(eq(saasPayment.id, paymentId), eq(saasPayment.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Pago")
+  await audit(tx, orgId, actorUserId, "saas_payment", row.id, "saas.payment_rejected", {
+    chargeId: row.chargeId,
+    reason: motive,
+  })
+  // Como al confirmar: la franja y Plan y pagos de la clínica se refrescan.
+  await notifyOrg(tx, orgId, "saas.payment.updated")
+  return { payment: toPaymentRow(row, await staffName(tx, actorUserId)), repeated: false }
+}
+
 /** Admin registra una devolución (dinero que vuelve a la clínica): contabiliza igual que el reverso. */
 export async function refundSaasPayment(
   tx: Db,
@@ -2297,18 +2384,35 @@ export async function registerManualSaasPayment(
   return confirmSaasPayment(tx, orgId, actorUserId, submitted.id, input.paidAt ?? now)
 }
 
+/**
+ * Pagos de una clínica, del más nuevo al más viejo. `staffNames` (solo la
+ * administración) suma quién rechazó cada comprobante; la clínica lee el
+ * motivo, no a la persona del equipo de odentIA.
+ */
 export async function listSaasPayments(
   tx: Db,
   orgId: string,
   limit = 50,
+  options: { staffNames?: boolean } = {},
 ): Promise<SaasPaymentRow[]> {
+  const max = Math.min(Math.max(limit, 1), 200)
+  if (!options.staffNames) {
+    const rows = await tx
+      .select()
+      .from(saasPayment)
+      .where(eq(saasPayment.organizationId, orgId))
+      .orderBy(desc(saasPayment.createdAt), desc(saasPayment.id))
+      .limit(max)
+    return rows.map((row) => toPaymentRow(row))
+  }
   const rows = await tx
-    .select()
+    .select({ payment: saasPayment, rejectedByName: user.name })
     .from(saasPayment)
+    .leftJoin(user, eq(user.id, saasPayment.rejectedBy))
     .where(eq(saasPayment.organizationId, orgId))
     .orderBy(desc(saasPayment.createdAt), desc(saasPayment.id))
-    .limit(Math.min(Math.max(limit, 1), 200))
-  return rows.map(toPaymentRow)
+    .limit(max)
+  return rows.map((row) => toPaymentRow(row.payment, row.rejectedByName))
 }
 
 export interface SaasPendingPaymentRow extends SaasPaymentRow {
@@ -3072,32 +3176,40 @@ export async function tickSaasBilling(
     )
   }
 
-  // 1d. Mañana termina la gracia (ADR 0065): último correo antes de solo
-  // lectura. Con un comprobante en revisión no se avisa: el servidor espera.
-  const gracesEndingTomorrow = await tx
+  // 1d. Mañana pasa a solo lectura (ADR 0065): último correo antes, con el
+  // mismo día que dice la franja (`readOnlyAtOf`: el fin de la gracia o la
+  // prórroga vigente). Un comprobante en revisión que no dio prórroga ya no lo
+  // detiene: tampoco aplaza la solo lectura.
+  const dayAhead = new Date(now.getTime() + 86_400_000)
+  const readOnlySoon = await tx
     .select()
     .from(saasSubscription)
     .where(
       and(
         eq(saasSubscription.status, "gracia"),
         eq(saasSubscription.isDemo, false),
-        gt(saasSubscription.graceEndsAt, now),
-        lte(saasSubscription.graceEndsAt, new Date(now.getTime() + 86_400_000)),
+        or(
+          and(gt(saasSubscription.graceEndsAt, now), lte(saasSubscription.graceEndsAt, dayAhead)),
+          and(gt(saasSubscription.proofExtensionUntil, now), lte(saasSubscription.proofExtensionUntil, dayAhead)),
+        ),
       ),
     )
-  for (const sub of gracesEndingTomorrow) {
+  for (const sub of readOnlySoon) {
+    const readOnlyAt = readOnlyAtOf(sub, now)
+    if (!readOnlyAt || readOnlyAt <= now || readOnlyAt > dayAhead) continue
+    const emailTo = await orgEmail(sub.organizationId)
+    const day = readOnlyAt.toISOString().slice(0, 10)
+    const locale = await getOrgLocale(tx, sub.organizationId).catch(() => null)
+    const amounts = (await outstandingByCurrency(tx, sub.organizationId))
+      .filter((entry) => entry.cents > 0)
+      .map((entry) => new Intl.NumberFormat(locale?.locale ?? "es", { style: "currency", currency: entry.currency }).format(entry.cents / 100))
+    // Con un comprobante en revisión (el que dio la prórroga u otro), el correo no pide
+    // registrar uno: el cargo no lo acepta mientras ese espera. Dice lo que dice la franja.
     const [inReview] = await tx
       .select({ id: saasPayment.id })
       .from(saasPayment)
       .where(and(eq(saasPayment.organizationId, sub.organizationId), eq(saasPayment.status, "pendiente")))
       .limit(1)
-    if (inReview || !sub.graceEndsAt) continue
-    const emailTo = await orgEmail(sub.organizationId)
-    const day = sub.graceEndsAt.toISOString().slice(0, 10)
-    const locale = await getOrgLocale(tx, sub.organizationId).catch(() => null)
-    const amounts = (await outstandingByCurrency(tx, sub.organizationId))
-      .filter((entry) => entry.cents > 0)
-      .map((entry) => new Intl.NumberFormat(locale?.locale ?? "es", { style: "currency", currency: entry.currency }).format(entry.cents / 100))
     await recordNotice(
       sub.organizationId,
       "restriccion_manana",
@@ -3105,7 +3217,9 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            ...mailParts(saasRestrictionSoonEmail({ ...(await clinicFields(sub.organizationId)), amounts })),
+            ...mailParts(
+              saasRestrictionSoonEmail({ ...(await clinicFields(sub.organizationId)), amounts, inReview: inReview !== undefined }),
+            ),
             dedupeKey: `restriccion-manana:${sub.organizationId}:${day}`,
             organizationId: sub.organizationId,
             kind: "restriccion_manana",
@@ -3210,14 +3324,11 @@ export async function tickSaasBilling(
     )
   for (const sub of gracesOver) {
     gracesEnded += 1
-    if (sub.proofExtensionUntil && sub.proofExtensionUntil > now) continue
-    // Con comprobante pendiente reciente se espera la confirmación admin: los
-    // días que regían cuando llegó.
-    const pendingProofs = await tx
-      .select({ createdAt: saasPayment.createdAt })
-      .from(saasPayment)
-      .where(and(eq(saasPayment.organizationId, sub.organizationId), eq(saasPayment.status, "pendiente")))
-    if (pendingProofs.some((proof) => addDays(proof.createdAt, terms.at(proof.createdAt).proofExtensionDays) > now)) continue
+    // Solo protege una prórroga vigente (`readOnlyAtOf`), que ya exige cubrir todo el saldo
+    // y respeta el tope. Un comprobante pendiente no aplaza por sí solo: subir uno tras otro
+    // (y que se rechacen) ya no encadena días. La prórroga ya dada no se retira.
+    const readOnlyAt = readOnlyAtOf(sub, now)
+    if (readOnlyAt && readOnlyAt > now) continue
     const due = await outstandingCents(tx, sub.organizationId)
     // Sin plan no se reactiva gratis aunque no haya saldo: falta elegir plan.
     if (due <= 0 && sub.planId) {
@@ -3274,11 +3385,13 @@ export async function tickSaasBilling(
   const { issued: chargesEnsured } = await closeSaasPeriods(tx, now)
 
   // 6. Cargo vencido sin pagar → los días de gracia que rigen, antes de restringir.
+  // Cada gracia empieza con su prórroga por estrenar: la de una gracia anterior
+  // que terminó sin pago confirmado (un cargo anulado, por ejemplo) no la gasta.
   for (const orgId of await overdueChargeOrgs(tx, now)) {
     const graceEndsAt = addDays(now, terms.at(now).graceDays)
     await tx
       .update(saasSubscription)
-      .set({ status: "gracia", graceEndsAt, updatedAt: now })
+      .set({ status: "gracia", graceEndsAt, proofExtensionUntil: null, proofExtensionCount: 0, updatedAt: now })
       .where(eq(saasSubscription.organizationId, orgId))
     await audit(tx, orgId, "system", "saas_subscription", orgId, "saas.period_over")
     await notifyOrg(tx, orgId, "saas.subscription.updated")
@@ -3526,7 +3639,6 @@ export interface SaasAdminAttention {
   overdueCount: number
   overdueCentsByCurrency: SaasMoneyByCurrency[]
   trialCount: number
-  trialEndingCount: number
   graceCount: number
   restrictedCount: number
   pausedCount: number
@@ -3596,17 +3708,6 @@ export async function getSaasAdminAttention(tx: Db, now = new Date()): Promise<S
     }
     return 0
   }
-  const trialEndingRows = await tx
-    .select({ total: sql<number>`count(*)` })
-    .from(saasSubscription)
-    .where(
-      and(
-        eq(saasSubscription.status, "prueba"),
-        eq(saasSubscription.isDemo, false),
-        lte(saasSubscription.trialEndsAt, addDays(now, 3)),
-        gte(saasSubscription.trialEndsAt, now),
-      ),
-    )
   const pendingCommissions = await tx
     .select({
       currency: saasSellerCommission.currency,
@@ -3622,14 +3723,12 @@ export async function getSaasAdminAttention(tx: Db, now = new Date()): Promise<S
     pendingCommissionCount += Number(row.count)
     pendingCommissionCentsByCurrency.push({ currency: row.currency, cents: Number(row.total) })
   }
-  const trialEndingCount = trialEndingRows.length > 0 ? Number(trialEndingRows[0]?.total ?? 0) : 0
   return {
     pendingPaymentCount,
     pendingPaymentCentsByCurrency,
     overdueCount,
     overdueCentsByCurrency,
     trialCount: statusOf("prueba"),
-    trialEndingCount,
     graceCount: statusOf("gracia"),
     restrictedCount: statusOf("restringida"),
     pausedCount: statusOf("pausada"),
