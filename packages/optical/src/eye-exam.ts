@@ -491,6 +491,25 @@ export function readEyeExam(value: unknown): EyeExam | null {
   return parsed.ok ? parsed.value : null
 }
 
+/**
+ * El signo de un número negativo como puede llegar escrito o pegado: el signo menos,
+ * la raya de cifra con que lo imprimen los papeles («‒1,25»), la raya corta y los guiones.
+ */
+const MINUS_SIGN = /^[−‒–‐‑]/
+
+/**
+ * Un número como se escribe en la graduación («−1,25», «‒1,25» copiado de una receta
+ * impresa, «+2», «1.5»); vacío → undefined; lo que no es número vuelve como texto, para
+ * que el servidor lo señale junto a su campo.
+ */
+export function typedNumber(text: string | undefined): number | string | undefined {
+  if (text === undefined) return undefined
+  const clean = text.trim().replace(MINUS_SIGN, "-").replace(",", ".").replace(/^\+/, "")
+  if (!clean) return undefined
+  const value = Number(clean)
+  return Number.isFinite(value) ? value : text
+}
+
 /** Una dioptría como se escribe en una receta: con signo y dos decimales («+1,25», «−0,50», «Neutro»). */
 export function diopterText(value: number | undefined): string {
   if (value === undefined) return ""
