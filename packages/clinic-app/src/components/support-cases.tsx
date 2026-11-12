@@ -10,6 +10,14 @@ import { API_URL } from "../lib/auth-client"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
 import { useMyRole } from "../lib/crm"
 import { appWords } from "../lib/product-words"
+import {
+  SupportAccessForm,
+  type SupportAccessValues,
+  SupportGrantHistory,
+  supportViewWords,
+  untilWords,
+  useSupportAccessRefresh,
+} from "./support-access"
 
 /** Lo que admite `POST /api/help/cases/:id/attachments` (`SUPPORT_ATTACHMENT_MAX_BYTES`). */
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
@@ -27,15 +35,6 @@ const replySchema = z.object({
   body: z.string().trim().min(1, "Escribe tu respuesta.").max(4000, "Escribe como mucho 4000 caracteres."),
 })
 
-/** Cuánto dura el acceso diagnóstico: las opciones que admite la ruta (5 a 60 minutos). */
-const MINUTES_OPTIONS = [
-  { value: "15", label: "15 minutos" },
-  { value: "30", label: "30 minutos" },
-  { value: "60", label: "1 hora" },
-] as const
-const grantSchema = z.object({
-  minutes: z.enum(["15", "30", "60"], "Elige por cuánto tiempo."),
-})
 
 /**
  * Responder en un caso abierto. Cada caso guarda su borrador (`drafts`): no se
@@ -146,9 +145,17 @@ const supportAttachmentItem = z.object({
 
 const supportGrantItem = z.object({
   id: z.string(),
+  grantedBy: z.string(),
+  scope: z.enum(["diagnostico", "rol"]),
+  viewRole: z.string().nullable(),
+  staffName: z.string().nullable(),
   expiresAt: z.string(),
   revokedAt: z.string().nullable(),
+  endReason: z.string().nullable(),
+  revokedBy: z.string().nullable(),
   active: z.boolean(),
+  createdAt: z.string(),
+  reads: z.array(z.object({ patientName: z.string(), resource: z.string(), at: z.string() })),
 })
 
 const supportCaseDetail = supportCaseItem.extend({
@@ -159,6 +166,9 @@ const supportCaseDetail = supportCaseItem.extend({
   accessRequestedAt: z.string().nullable().optional(),
   /** El pedido sigue en pie: nadie de la clínica hizo nada después. */
   accessRequestPending: z.boolean().optional(),
+  /** Lo que pidió soporte: el rol con que mirar (nulo = la configuración) y cuántos minutos. */
+  accessRequestedRole: z.string().nullable().optional(),
+  accessRequestedMinutes: z.number().nullable().optional(),
   /** A quien lee un caso que no abrió (la propietaria, por el pedido de acceso): quién lo abrió. */
   openedByOther: z.object({ name: z.string(), roleLabel: z.string() }).nullable().optional(),
 })
@@ -226,25 +236,16 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
     },
     onSuccess: invalidate,
   })
+  const refreshAccess = useSupportAccessRefresh()
   const grant = useMutation({
     retry: false,
-    mutationFn: (minutes: number) =>
+    mutationFn: (values: SupportAccessValues) =>
       apiFetch(`/api/help/cases/${selectedId}/grants`, {
         method: "POST",
-        body: JSON.stringify({ minutes }),
+        body: JSON.stringify(values),
       }),
-    onSuccess: invalidate,
+    onSuccess: refreshAccess,
   })
-  const grantForm = useAppForm({
-    defaultValues: { minutes: "30" as string },
-    validators: { onSubmit: grantSchema },
-    onSubmit: async ({ value }) => {
-      await grant.mutateAsync(Number.parseInt(value.minutes, 10))
-    },
-  })
-  const onGrantSubmit = useFormSubmit(grantForm)
-  const grantError = useFormSubmitError(grantForm)
-  const granting = useStore(grantForm.store, (state) => state.isSubmitting)
   const revoke = useMutation({
     retry: false,
     mutationFn: (grantId: string) =>
@@ -252,7 +253,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
         method: "POST",
         body: JSON.stringify({ grantId }),
       }),
-    onSuccess: invalidate,
+    onSuccess: refreshAccess,
   })
   const markSeen = useMutation({
     retry: false,
@@ -273,7 +274,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
     markedRef.current = null
     setFileProblem(null)
     upload.reset()
-    grantForm.reset()
+    grant.reset()
     setSelectedId(id)
   }
 
@@ -489,84 +490,53 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                 </p>
               ) : null}
 
-              {!canGrant ? (
-                <p className="text-sm text-muted-foreground">
-                  {kase.accessRequestPending && kase.status === "esperando_clinica" && !activeGrant
-                    ? "Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda."
-                    : "Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte."}
-                </p>
-              ) : resolved && !activeGrant ? (
-                <p className="text-sm text-muted-foreground">
-                  El caso está resuelto: si soporte necesita ver el diagnóstico de tu clínica, reábrelo y autoriza el acceso.
-                </p>
-              ) : (
+              {/* El acceso de soporte de este caso: el vigente, el pedido sin responder y el rastro de los anteriores. */}
+              {activeGrant ? (
                 <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
-                  <p className="font-bold">Acceso diagnóstico de soporte</p>
-                  {activeGrant ? (
-                    <>
-                      <p>
-                        Soporte puede ver el diagnóstico de tu clínica hasta el{" "}
-                        {new Date(activeGrant.expiresAt).toLocaleString()}. Solo configuración operacional, nunca tus
-                        pacientes ni secretos.
-                      </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="min-h-11 self-start sm:min-h-9"
-                        disabled={revoke.isPending}
-                        onClick={() => revoke.mutate(activeGrant.id)}
-                      >
-                        Revocar ahora
-                      </Button>
-                      {revoke.isError ? (
-                        <p role="alert" className="text-sm text-destructive">
-                          {submitErrorMessage(revoke.error)}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-muted-foreground">
-                        Si soporte lo necesita, puedes autorizar que vea el diagnóstico de tu clínica (configuración,
-                        nunca pacientes ni secretos). Eliges por cuánto tiempo, máximo 1 hora, y lo revocas cuando
-                        quieras. Solo quien es propietario o administra la clínica puede autorizarlo.
-                      </p>
-                      <form noValidate onSubmit={onGrantSubmit} className="flex flex-col gap-1.5">
-                        <div className="flex flex-wrap items-end gap-2">
-                          <grantForm.AppField name="minutes">
-                            {(field) => (
-                              <field.SelectField
-                                label="Duración"
-                                id="soporte-minutos"
-                                className="w-auto"
-                                triggerClassName="w-44"
-                                options={MINUTES_OPTIONS}
-                                placeholder="30 minutos"
-                              />
-                            )}
-                          </grantForm.AppField>
-                          <Button
-                            type="submit"
-                            variant="outline"
-                            size="sm"
-                            className="min-h-11 sm:min-h-9"
-                            disabled={granting}
-                            aria-busy={granting}
-                          >
-                            Autorizar acceso
-                          </Button>
-                        </div>
-                        {grantError ? (
-                          <p role="alert" className="text-sm text-destructive">
-                            {grantError}
-                          </p>
-                        ) : null}
-                      </form>
-                    </>
-                  )}
+                  <p className="font-bold">Acceso de soporte</p>
+                  <p>
+                    Soporte puede mirar {supportViewWords(activeGrant.viewRole)} hasta las {untilWords(activeGrant.expiresAt)}. No puede cambiar
+                    nada.
+                  </p>
+                  {canGrant ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 self-start sm:min-h-9"
+                      disabled={revoke.isPending}
+                      onClick={() => revoke.mutate(activeGrant.id)}
+                    >
+                      Quitar acceso
+                    </Button>
+                  ) : null}
+                  {revoke.isError ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      No pude quitar el acceso. {submitErrorMessage(revoke.error)}
+                    </p>
+                  ) : null}
                 </div>
-              )}
+              ) : kase.accessRequestPending && !resolved ? (
+                canGrant ? (
+                  <div className="flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-sm">
+                    <p className="font-bold">Soporte pide mirar {supportViewWords(kase.accessRequestedRole)}</p>
+                    <p className="text-muted-foreground">Revisa lo que pide; puedes cambiar el rol o el tiempo, y quitarlo cuando quieras.</p>
+                    <SupportAccessForm
+                      id={`pedido-${kase.id}`}
+                      initialViewRole={kase.accessRequestedRole ?? null}
+                      initialMinutes={kase.accessRequestedMinutes ?? 30}
+                      askReason={false}
+                      onSubmit={(values) => grant.mutateAsync(values)}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Soporte pidió mirar {supportViewWords(kase.accessRequestedRole)}. Lo autoriza la propietaria o un administrador de la clínica: ya
+                    les avisamos.
+                  </p>
+                )
+              ) : null}
+              <SupportGrantHistory grants={kase.grants.filter((item) => item.id !== activeGrant?.id || item.reads.length > 0)} />
             </>
           )}
         </div>

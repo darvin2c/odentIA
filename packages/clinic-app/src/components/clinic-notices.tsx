@@ -19,6 +19,7 @@ import { SpendCapDrawer } from "./billing/spend-cap"
 export type ClinicNoticeAction =
   | { kind: "pagar" | "elegir_plan" | "ver_plan" | "ver_consumo" | "subir_tope" | "escribir_soporte"; label: string; shortLabel: string }
   | { kind: "quitar_acceso"; label: string; shortLabel: string; grantId: string; caseId: string }
+  | { kind: "revisar_acceso"; label: string; shortLabel: string; caseId: string }
 
 export interface ClinicNotice {
   id: string
@@ -140,7 +141,11 @@ function Strip({ userId }: { userId: string }) {
         method: "POST",
         body: JSON.stringify({ grantId: action.grantId }),
       }),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: noticesKey(org.id) }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: noticesKey(org.id) })
+      void queryClient.invalidateQueries({ queryKey: ["support-case"] })
+      void queryClient.invalidateQueries({ queryKey: ["support-cases"] })
+    },
   })
 
   const items = useMemo<StripNotice[]>(() => {
@@ -167,6 +172,11 @@ function Strip({ userId }: { userId: string }) {
           const base = { label: action.label, shortLabel: action.shortLabel }
           if (action.kind === "subir_tope") stripAction = { ...base, onSelect: raiseCap }
           else if (action.kind === "quitar_acceso") stripAction = { ...base, onSelect: () => revoke.mutate(action) }
+          else if (action.kind === "revisar_acceso")
+            stripAction = {
+              ...base,
+              onSelect: () => void navigate({ to: pathname, search: { ayuda: "casos", caso: action.caseId } as never }),
+            }
           else if (action.kind === "escribir_soporte")
             stripAction = { ...base, onSelect: () => void navigate({ to: pathname, search: { ayuda: "casos" } as never }) }
           else stripAction = { ...base, to: PLAN_PATH }

@@ -1,6 +1,7 @@
 import { authClient } from "./auth-client"
 import type { SessionInfo } from "./guards"
 import type { ssrFetchOptions } from "./guards"
+import type { SupportMode } from "./support-mode"
 
 /**
  * Formato regional de la clínica, conocido antes del primer render para que
@@ -27,6 +28,8 @@ export interface OrgAccess {
   at: number
   session: SessionInfo
   org: FullOrganization
+  /** Soporte de odentIA mirando con permiso (solo lectura); nulo para el equipo de la clínica. */
+  support: SupportMode | null
 }
 
 /**
@@ -40,8 +43,20 @@ export const orgChecks: { access: OrgAccess | null; region: OrgRegion | null } =
  * Lo comprobado en el servidor al armar la página vale también en el navegador:
  * sin esto, el primer clic tras cargar repetía sesión, términos, clínica y perfil.
  */
-export function rememberServerChecks(checked: { session: SessionInfo; org: FullOrganization; region: OrgRegion; checkedAt: number }): void {
+export function rememberServerChecks(checked: {
+  session: SessionInfo
+  org: FullOrganization
+  region: OrgRegion
+  checkedAt: number
+  support: SupportMode | null
+}): void {
   if (typeof window === "undefined" || checked.region.twoFactorRequired) return
-  orgChecks.access ??= { slug: checked.org.slug, at: Math.min(checked.checkedAt, Date.now()), session: checked.session, org: checked.org }
+  orgChecks.access ??= {
+    slug: checked.org.slug,
+    at: Math.min(checked.checkedAt, Date.now()),
+    session: checked.session,
+    org: checked.org,
+    support: checked.support,
+  }
   if (checked.region.timeZone) orgChecks.region ??= checked.region
 }
