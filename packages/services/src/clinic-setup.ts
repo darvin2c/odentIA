@@ -36,7 +36,11 @@ import { createScheduleBlock, setProfessionalSchedule, zonedTimeToUtc } from "./
 import { createBranch, updateBranch } from "./branches.js"
 import { setClinicBrandColor, setClinicLogo } from "./clinic-identity.js"
 import { type ClinicSetupPlan, clinicSetupPlanSha256 } from "./clinic-setup-plan.js"
-import { createConsentTemplate, createFormTemplate, setProfessionalSpecialties } from "./clinical-forms.js"
+import {
+  createConsentTemplate,
+  createFormTemplate,
+  setProfessionalSpecialties,
+} from "./clinical-forms.js"
 import { ServiceError, validation } from "./errors.js"
 import { noteRecurringExpense } from "./expense-recurring.js"
 import { setCommissionRate } from "./finance.js"
@@ -102,7 +106,8 @@ function fileSha(file: { base64: string }): string {
 
 function requireSetupAdmin(actor: AdminActor | null): AdminActor {
   if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
-  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo un administrador carga datos de una clínica")
+  if (actor.role !== "admin")
+    throw new ServiceError("FORBIDDEN", 403, "Solo un administrador carga datos de una clínica")
   return actor
 }
 
@@ -136,7 +141,24 @@ export async function runClinicSetup(
   // Una carga a la vez por clínica: dos a la vez leerían lo mismo y duplicarían.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('clinic-setup:' || ${orgId}))`)
   const [profile] = await tx
-    .select({ product: orgProfile.product, country: orgProfile.countryCode, tradeName: orgProfile.tradeName, timezone: orgProfile.timezone })
+    .select({
+      product: orgProfile.product,
+      country: orgProfile.countryCode,
+      timezone: orgProfile.timezone,
+      tradeName: orgProfile.tradeName,
+      legalName: orgProfile.legalName,
+      fiscalDocType: orgProfile.fiscalDocType,
+      fiscalDocNumber: orgProfile.fiscalDocNumber,
+      fiscalAddress: orgProfile.fiscalAddress,
+      emergencyPhone: orgProfile.emergencyPhone,
+      secondCurrency: orgProfile.secondCurrency,
+      exchangeRate: orgProfile.exchangeRate,
+      receiptWidth: orgProfile.receiptWidth,
+      sheetSize: orgProfile.sheetSize,
+      ticketFooter: orgProfile.ticketFooter,
+      budgetValidDays: orgProfile.budgetValidDays,
+      brandColor: orgProfile.brandColor,
+    })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
@@ -147,15 +169,23 @@ export async function runClinicSetup(
     .limit(1)
   if (!org) throw new ServiceError("NOT_FOUND", 404, "Clínica no encontrada")
   // El plan dice de qué clínica es: el de otra no se carga aquí.
-  if (plan.slug !== org.slug) throw validation(`Este plan es de «${plan.slug}» y la clínica es «${org.slug}»: elige el plan de esta clínica`)
+  if (plan.slug !== org.slug)
+    throw validation(
+      `Este plan es de «${plan.slug}» y la clínica es «${org.slug}»: elige el plan de esta clínica`,
+    )
   const product: ClinicalProduct = (profile?.product as ClinicalProduct | undefined) ?? plan.product
-  if (product !== plan.product) throw validation("El plan es de otro producto que la clínica: prepáralo con el de la clínica")
+  if (product !== plan.product)
+    throw validation("El plan es de otro producto que la clínica: prepáralo con el de la clínica")
   if (profile && profile.country !== plan.countryCode)
-    throw validation(`El plan es para ${plan.countryCode} y la clínica es de ${profile.country}: prepáralo con el país de la clínica`)
+    throw validation(
+      `El plan es para ${plan.countryCode} y la clínica es de ${profile.country}: prepáralo con el país de la clínica`,
+    )
 
   const timezone = profile?.timezone ?? "America/Lima"
   // Lo último que cargó la administración en esta clínica: así se reconoce el mismo logo y la misma hoja.
-  const [last] = await tx.execute<{ metadata: { logoSha?: string; letterheadSha?: string } | null }>(
+  const [last] = await tx.execute<{
+    metadata: { logoSha?: string; letterheadSha?: string } | null
+  }>(
     sql`select metadata from admin_audit where action = 'org.setup_import' and organization_id = ${orgId} order by created_at desc limit 1`,
   )
   const logoSha = plan.brand?.logo ? fileSha(plan.brand.logo) : null
@@ -166,10 +196,18 @@ export async function runClinicSetup(
   const needs = { logo: false, letterhead: false }
 
   /** Cada cosa en su punto de guardado: si falla, se dice y las demás siguen. */
-  const step = async (area: ClinicSetupArea, label: string, run: (sp: Db) => Promise<ClinicSetupStatus | { status: ClinicSetupStatus; detail?: string }>) => {
+  const step = async (
+    area: ClinicSetupArea,
+    label: string,
+    run: (sp: Db) => Promise<ClinicSetupStatus | { status: ClinicSetupStatus; detail?: string }>,
+  ) => {
     try {
       const outcome = await tx.transaction(run)
-      items.push(typeof outcome === "string" ? { area, label, status: outcome } : { area, label, ...outcome })
+      items.push(
+        typeof outcome === "string"
+          ? { area, label, status: outcome }
+          : { area, label, ...outcome },
+      )
     } catch (error) {
       if (!(error instanceof ServiceError)) throw error
       const fields = error.fields ? Object.values(error.fields).filter(Boolean) : []
@@ -180,38 +218,59 @@ export async function runClinicSetup(
   // --- Empresa y papeles: «Datos de la clínica» (enciende la clínica si aún no tiene sede) ---
   if (plan.identity || plan.papers) {
     const { secondCurrency, exchangeRate, ...identity } = plan.identity ?? {}
-    await step("Empresa", "Datos de la clínica", async (sp) => {
-      await saveOrgProfile(
-        sp,
-        orgId,
-        by,
-        {
-          ...identity,
-          ...(profile ? {} : { countryCode: plan.countryCode }),
-          ...(secondCurrency !== undefined ? { secondCurrency, exchangeRate } : {}),
-          ...(plan.papers ?? {}),
-        },
-        product,
-      )
-      return profile ? "cambia" : "nueva"
-    })
+    // Lo mismo que ya tiene: no se vuelve a guardar.
+    const wanted: Record<string, unknown> = {
+      ...identity,
+      ...(plan.papers ?? {}),
+      ...(secondCurrency !== undefined ? { secondCurrency } : {}),
+    }
+    const same =
+      !!profile &&
+      Object.entries(wanted).every(
+        ([key, value]) => (profile as Record<string, unknown>)[key] === value,
+      ) &&
+      (exchangeRate === undefined ||
+        exchangeRate === null ||
+        Number(profile.exchangeRate) === Number(exchangeRate))
+    if (same) items.push({ area: "Empresa", label: "Datos de la clínica", status: "igual" })
+    else
+      await step("Empresa", "Datos de la clínica", async (sp) => {
+        await saveOrgProfile(
+          sp,
+          orgId,
+          by,
+          {
+            ...identity,
+            ...(profile ? {} : { countryCode: plan.countryCode }),
+            ...(secondCurrency !== undefined ? { secondCurrency, exchangeRate } : {}),
+            ...(plan.papers ?? {}),
+          },
+          product,
+        )
+        return profile ? "cambia" : "nueva"
+      })
   }
 
   // --- Marca ---
   if (plan.brand?.color) {
     const color = plan.brand.color
-    await step("Marca", `Color ${color}`, async (sp) => {
-      await setClinicBrandColor(sp, orgId, by, color)
-      return "cambia"
-    })
+    if (profile?.brandColor?.toLowerCase() === color.toLowerCase())
+      items.push({ area: "Marca", label: `Color ${color}`, status: "igual" })
+    else
+      await step("Marca", `Color ${color}`, async (sp) => {
+        await setClinicBrandColor(sp, orgId, by, color)
+        return "cambia"
+      })
   }
   if (plan.brand?.logo) {
     const label = `Logo (${plan.brand.logo.name})`
-    if (org.logo && last?.metadata?.logoSha === logoSha) items.push({ area: "Marca", label, status: "igual" })
+    if (org.logo && last?.metadata?.logoSha === logoSha)
+      items.push({ area: "Marca", label, status: "igual" })
     else {
       needs.logo = true
       await step("Marca", label, async (sp) => {
-        if (!files.logoUrl) return { status: org.logo ? "cambia" : "nueva", detail: "Se sube al cargar" }
+        if (!files.logoUrl)
+          return { status: org.logo ? "cambia" : "nueva", detail: "Se sube al cargar" }
         replacedLogo = (await setClinicLogo(sp, orgId, by, files.logoUrl)).previous
         return org.logo ? "cambia" : "nueva"
       })
@@ -220,11 +279,17 @@ export async function runClinicSetup(
   if (plan.letterhead) {
     const sheet = plan.letterhead
     const current = await getCurrentLetterhead(tx, orgId)
-    if (current && last?.metadata?.letterheadSha === letterheadSha) items.push({ area: "Papeles", label: `Hoja membretada (${sheet.file.name})`, status: "igual" })
+    if (current && last?.metadata?.letterheadSha === letterheadSha)
+      items.push({
+        area: "Papeles",
+        label: `Hoja membretada (${sheet.file.name})`,
+        status: "igual",
+      })
     else {
       needs.letterhead = true
       await step("Papeles", `Hoja membretada (${sheet.file.name})`, async (sp) => {
-        if (!files.letterhead) return { status: current ? "cambia" : "nueva", detail: "Se mide y se sube al cargar" }
+        if (!files.letterhead)
+          return { status: current ? "cambia" : "nueva", detail: "Se mide y se sube al cargar" }
         await saveLetterhead(sp, orgId, by, files.letterhead, current?.id ?? null)
         return current ? "cambia" : "nueva"
       })
@@ -233,12 +298,27 @@ export async function runClinicSetup(
 
   // --- Sedes y sus unidades ---
   const branchIdOf = new Map<string, string>()
-  const existingBranches = await tx.select({ id: branch.id, name: branch.name }).from(branch).where(eq(branch.organizationId, orgId))
+  const existingBranches = await tx
+    .select({
+      id: branch.id,
+      name: branch.name,
+      addressLine1: branch.addressLine1,
+      district: branch.district,
+      city: branch.city,
+      region: branch.region,
+      postalCode: branch.postalCode,
+      phone: branch.phone,
+      email: branch.email,
+    })
+    .from(branch)
+    .where(eq(branch.organizationId, orgId))
   for (const wanted of plan.branches) {
     // La sede que la clínica ya creó en su alta: si tiene una sola y el plan trae una sola, es esa.
     const same =
       existingBranches.find((b) => fold(b.name) === fold(wanted.name)) ??
-      (existingBranches.length === 1 && plan.branches.length === 1 ? existingBranches[0] : undefined)
+      (existingBranches.length === 1 && plan.branches.length === 1
+        ? existingBranches[0]
+        : undefined)
     const address = {
       name: wanted.name,
       addressLine1: wanted.addressLine1,
@@ -249,19 +329,32 @@ export async function runClinicSetup(
       phone: wanted.phone,
       email: wanted.email,
     }
-    await step("Sedes", wanted.name, async (sp) => {
-      if (same) {
-        await updateBranch(sp, orgId, by, same.id, address)
-        branchIdOf.set(wanted.key, same.id)
-        return "cambia"
-      }
-      const created = await createBranch(sp, orgId, by, address)
-      branchIdOf.set(wanted.key, created.id)
-      return "nueva"
-    })
+    const unchanged =
+      !!same &&
+      (Object.entries(address) as Array<[keyof typeof address, string | null | undefined]>).every(
+        ([key, value]) =>
+          value === undefined || (same as Record<string, unknown>)[key] === (value ?? null),
+      )
+    if (same && unchanged) {
+      branchIdOf.set(wanted.key, same.id)
+      items.push({ area: "Sedes", label: wanted.name, status: "igual" })
+    } else
+      await step("Sedes", wanted.name, async (sp) => {
+        if (same) {
+          await updateBranch(sp, orgId, by, same.id, address)
+          branchIdOf.set(wanted.key, same.id)
+          return "cambia"
+        }
+        const created = await createBranch(sp, orgId, by, address)
+        branchIdOf.set(wanted.key, created.id)
+        return "nueva"
+      })
     const branchId = branchIdOf.get(wanted.key)
     if (!branchId) continue
-    const rooms = await tx.select({ name: scheduleRoom.name }).from(scheduleRoom).where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.branchId, branchId)))
+    const rooms = await tx
+      .select({ name: scheduleRoom.name })
+      .from(scheduleRoom)
+      .where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.branchId, branchId)))
     for (const room of wanted.rooms) {
       if (rooms.some((r) => fold(r.name) === fold(room))) {
         items.push({ area: "Sedes", label: `${wanted.name} · ${room}`, status: "igual" })
@@ -289,9 +382,17 @@ export async function runClinicSetup(
     .from(treatmentTemplate)
     .where(eq(treatmentTemplate.product, product))
   const templateOf = new Map(templates.map((t) => [t.key, t]))
-  const specialties = await tx.select({ id: orgSpecialty.id, name: orgSpecialty.name }).from(orgSpecialty).where(eq(orgSpecialty.organizationId, orgId))
+  const specialties = await tx
+    .select({ id: orgSpecialty.id, name: orgSpecialty.name })
+    .from(orgSpecialty)
+    .where(eq(orgSpecialty.organizationId, orgId))
   const services = await tx
-    .select({ id: serviceCatalog.id, name: serviceCatalog.name, priceCents: serviceCatalog.priceCents, currency: serviceCatalog.currency })
+    .select({
+      id: serviceCatalog.id,
+      name: serviceCatalog.name,
+      priceCents: serviceCatalog.priceCents,
+      currency: serviceCatalog.currency,
+    })
     .from(serviceCatalog)
     .where(eq(serviceCatalog.organizationId, orgId))
   for (const wanted of plan.services) {
@@ -299,10 +400,15 @@ export async function runClinicSetup(
     const name = wanted.name ?? template?.name ?? wanted.template ?? "Servicio"
     const price = `${wanted.currency} ${(wanted.priceCents / 100).toFixed(2)}${wanted.priceDisclosure === "desde" ? " (desde)" : ""}`
     await step("Servicios", `${name} · ${price}`, async (sp) => {
-      if (wanted.template && !template) return { status: "error", detail: `«${wanted.template}» no está en la biblioteca de este producto` }
+      if (wanted.template && !template)
+        return {
+          status: "error",
+          detail: `«${wanted.template}» no está en la biblioteca de este producto`,
+        }
       const same = services.find((s) => fold(s.name) === fold(name))
       if (same) {
-        if (same.priceCents === wanted.priceCents && same.currency === wanted.currency) return "igual"
+        if (same.priceCents === wanted.priceCents && same.currency === wanted.currency)
+          return "igual"
         await updateService(sp, orgId, by, same.id, {
           priceCents: wanted.priceCents,
           currency: wanted.currency,
@@ -310,8 +416,14 @@ export async function runClinicSetup(
         })
         return "cambia"
       }
-      const specialtyId = wanted.specialty ? specialties.find((s) => fold(s.name) === fold(wanted.specialty!))?.id : undefined
-      if (wanted.specialty && !specialtyId) return { status: "error", detail: `La especialidad «${wanted.specialty}» no está en la clínica` }
+      const specialtyId = wanted.specialty
+        ? specialties.find((s) => fold(s.name) === fold(wanted.specialty!))?.id
+        : undefined
+      if (wanted.specialty && !specialtyId)
+        return {
+          status: "error",
+          detail: `La especialidad «${wanted.specialty}» no está en la clínica`,
+        }
       await createService(sp, orgId, by, {
         templateId: template?.id ?? null,
         name,
@@ -330,14 +442,21 @@ export async function runClinicSetup(
   }
 
   // --- Caja: medios de pago y gastos que se repiten ---
-  const methods = await tx.select({ name: organizationPaymentMethod.name }).from(organizationPaymentMethod).where(eq(organizationPaymentMethod.organizationId, orgId))
+  const methods = await tx
+    .select({ name: organizationPaymentMethod.name })
+    .from(organizationPaymentMethod)
+    .where(eq(organizationPaymentMethod.organizationId, orgId))
   for (const wanted of plan.paymentMethods) {
     if (methods.some((m) => fold(m.name) === fold(wanted.name))) {
       items.push({ area: "Caja", label: `Medio de pago: ${wanted.name}`, status: "igual" })
       continue
     }
     await step("Caja", `Medio de pago: ${wanted.name}`, async (sp) => {
-      await createPaymentMethod(sp, orgId, by, { name: wanted.name, typeCode: wanted.typeCode ?? null, atEnd: true })
+      await createPaymentMethod(sp, orgId, by, {
+        name: wanted.name,
+        typeCode: wanted.typeCode ?? null,
+        atEnd: true,
+      })
       return "nueva"
     })
   }
@@ -348,13 +467,23 @@ export async function runClinicSetup(
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
     .where(eq(member.organizationId, orgId))
-  const memberOf = (email: string) => members.find((m) => m.email.toLowerCase() === email.toLowerCase())
+  const memberOf = (email: string) =>
+    members.find((m) => m.email.toLowerCase() === email.toLowerCase())
 
   for (const expense of plan.recurringExpenses) {
-    const label = `Gasto fijo: ${expense.concept} · ${expense.currency ?? ""} ${(expense.amountCents / 100).toFixed(2)}`.replace("·  ", "· ")
+    const label =
+      `Gasto fijo: ${expense.concept} · ${expense.currency ?? ""} ${(expense.amountCents / 100).toFixed(2)}`.replace(
+        "·  ",
+        "· ",
+      )
     const person = expense.person ? memberOf(expense.person) : undefined
     if (expense.person && !person) {
-      items.push({ area: "Caja", label, status: "espera", detail: `Espera a que ${expense.person} sea parte de la clínica` })
+      items.push({
+        area: "Caja",
+        label,
+        status: "espera",
+        detail: `Espera a que ${expense.person} sea parte de la clínica`,
+      })
       continue
     }
     const branchId = branchFor(expense.branch)
@@ -362,7 +491,9 @@ export async function runClinicSetup(
     const [noted] = await tx
       .select({ id: expenseRecurring.id })
       .from(expenseRecurring)
-      .where(and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.requestId, requestId)))
+      .where(
+        and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.requestId, requestId)),
+      )
       .limit(1)
     if (noted) {
       items.push({ area: "Caja", label, status: "igual" })
@@ -393,9 +524,16 @@ export async function runClinicSetup(
   }
 
   // --- Inventario y proveedores ---
-  const suppliers = await tx.select({ name: supplier.name, docNumber: supplier.docNumber }).from(supplier).where(eq(supplier.organizationId, orgId))
+  const suppliers = await tx
+    .select({ name: supplier.name, docNumber: supplier.docNumber })
+    .from(supplier)
+    .where(eq(supplier.organizationId, orgId))
   for (const wanted of plan.suppliers) {
-    const same = suppliers.find((s) => (wanted.docNumber && s.docNumber === wanted.docNumber) || fold(s.name) === fold(wanted.name))
+    const same = suppliers.find(
+      (s) =>
+        (wanted.docNumber && s.docNumber === wanted.docNumber) ||
+        fold(s.name) === fold(wanted.name),
+    )
     if (same) {
       items.push({ area: "Inventario", label: `Proveedor: ${wanted.name}`, status: "igual" })
       continue
@@ -405,7 +543,10 @@ export async function runClinicSetup(
       return "nueva"
     })
   }
-  const products = await tx.select({ name: productTable.name }).from(productTable).where(eq(productTable.organizationId, orgId))
+  const products = await tx
+    .select({ name: productTable.name })
+    .from(productTable)
+    .where(eq(productTable.organizationId, orgId))
   for (const wanted of plan.products) {
     if (products.some((p) => fold(p.name) === fold(wanted.name))) {
       items.push({ area: "Inventario", label: wanted.name, status: "igual" })
@@ -419,7 +560,8 @@ export async function runClinicSetup(
         ...(wanted.minQuantity !== undefined ? { minQuantity: wanted.minQuantity } : {}),
         idempotencyKey: `carga-${fold(wanted.name)}`,
       })
-      if (wanted.onHand && !branchId) return { status: "error", detail: "Sus existencias necesitan una sede en el plan" }
+      if (wanted.onHand && !branchId)
+        return { status: "error", detail: "Sus existencias necesitan una sede en el plan" }
       if (wanted.onHand && branchId)
         await addStock(sp, orgId, by, {
           productId: created.id,
@@ -441,7 +583,9 @@ export async function runClinicSetup(
     .from(agentKnowledgeEntry)
     .where(eq(agentKnowledgeEntry.organizationId, orgId))
   for (const wanted of plan.knowledge) {
-    const basic = wanted.basicKey ? KNOWLEDGE_BASICS.find((b) => b.key === wanted.basicKey) : undefined
+    const basic = wanted.basicKey
+      ? KNOWLEDGE_BASICS.find((b) => b.key === wanted.basicKey)
+      : undefined
     const title = wanted.title ?? basic?.question
     const label = basic?.label ?? title ?? "Pregunta"
     if (!title) {
@@ -453,29 +597,51 @@ export async function runClinicSetup(
       continue
     }
     await step("Asistente", label, async (sp) => {
-      const entry = await createKnowledgeEntry(sp, orgId, by, { kind: "faq", title, body: wanted.body, basicKey: basic?.key ?? null })
+      const entry = await createKnowledgeEntry(sp, orgId, by, {
+        kind: "faq",
+        title,
+        body: wanted.body,
+        basicKey: basic?.key ?? null,
+      })
       await setKnowledgeStatus(sp, orgId, by, entry.id, "publicada")
       return "nueva"
     })
   }
 
   // --- Formatos propios: consentimientos y formularios ---
-  const consents = await tx.select({ title: consentTemplate.title }).from(consentTemplate).where(eq(consentTemplate.organizationId, orgId))
+  const consents = await tx
+    .select({ title: consentTemplate.title })
+    .from(consentTemplate)
+    .where(eq(consentTemplate.organizationId, orgId))
   for (const wanted of plan.consents) {
     if (consents.some((c) => fold(c.title) === fold(wanted.title))) {
-      items.push({ area: "Formatos propios", label: `Consentimiento: ${wanted.title}`, status: "igual" })
+      items.push({
+        area: "Formatos propios",
+        label: `Consentimiento: ${wanted.title}`,
+        status: "igual",
+      })
       continue
     }
     await step("Formatos propios", `Consentimiento: ${wanted.title}`, async (sp) => {
       // En borrador: la clínica lo revisa y lo publica; no sale a nombre de odentIA.
-      await createConsentTemplate(sp, orgId, by, { title: wanted.title, sections: wanted.sections } as Parameters<typeof createConsentTemplate>[3])
+      await createConsentTemplate(sp, orgId, by, {
+        title: wanted.title,
+        sections: wanted.sections,
+      } as Parameters<typeof createConsentTemplate>[3])
       return { status: "nueva", detail: "En borrador: la clínica lo revisa y lo publica" }
     })
   }
-  const forms = await tx.select({ title: clinicalFormTemplate.title }).from(clinicalFormTemplate).where(eq(clinicalFormTemplate.organizationId, orgId))
+  const forms = await tx
+    .select({ title: clinicalFormTemplate.title })
+    .from(clinicalFormTemplate)
+    .where(eq(clinicalFormTemplate.organizationId, orgId))
   for (const wanted of plan.forms) {
     if (forms.some((f) => fold(f.title) === fold(wanted.title))) {
-      items.push({ area: "Formatos propios", label: `Formulario: ${wanted.title}`, status: "igual" })
+      items.push({
+        area: "Formatos propios",
+        label: `Formulario: ${wanted.title}`,
+        status: "igual",
+      })
       continue
     }
     await step("Formatos propios", `Formulario: ${wanted.title}`, async (sp) => {
@@ -494,7 +660,13 @@ export async function runClinicSetup(
   const pending = await tx
     .select({ email: invitation.email })
     .from(invitation)
-    .where(and(eq(invitation.organizationId, orgId), eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date())))
+    .where(
+      and(
+        eq(invitation.organizationId, orgId),
+        eq(invitation.status, "pending"),
+        gt(invitation.expiresAt, new Date()),
+      ),
+    )
   for (const person of plan.team) {
     const label = person.name ? `${person.name} (${person.email})` : person.email
     const joined = memberOf(person.email)
@@ -502,9 +674,23 @@ export async function runClinicSetup(
       if (pending.some((p) => p.email.toLowerCase() === person.email.toLowerCase()))
         items.push({ area: "Equipo", label, status: "igual", detail: "Ya tiene su invitación" })
       else if (person.role === "owner")
-        items.push({ area: "Equipo", label, status: "espera", detail: "La propietaria se invita en el alta; su invitación no está pendiente" })
-      else if (!PRODUCT_ROLES[product].includes(person.role as (typeof PRODUCT_ROLES)[ClinicalProduct][number]))
-        items.push({ area: "Equipo", label, status: "error", detail: `«${person.role}» no es un rol de este producto` })
+        items.push({
+          area: "Equipo",
+          label,
+          status: "espera",
+          detail: "La propietaria se invita en el alta; su invitación no está pendiente",
+        })
+      else if (
+        !PRODUCT_ROLES[product].includes(
+          person.role as (typeof PRODUCT_ROLES)[ClinicalProduct][number],
+        )
+      )
+        items.push({
+          area: "Equipo",
+          label,
+          status: "error",
+          detail: `«${person.role}» no es un rol de este producto`,
+        })
       else
         await step("Equipo", label, async (sp) => {
           const id = randomUUID()
@@ -528,7 +714,12 @@ export async function runClinicSetup(
         person.commissionBps !== undefined ? "su comisión" : null,
       ].filter(Boolean)
       if (waits.length)
-        items.push({ area: "Profesionales", label, status: "espera", detail: `Espera a que entre: ${waits.join(", ")}` })
+        items.push({
+          area: "Profesionales",
+          label,
+          status: "espera",
+          detail: `Espera a que entre: ${waits.join(", ")}`,
+        })
       continue
     }
     items.push({ area: "Equipo", label, status: "igual", detail: "Ya es parte de la clínica" })
@@ -541,9 +732,12 @@ export async function runClinicSetup(
       })
     }
     if (person.specialties.length) {
-      const ids = person.specialties.map((name) => specialties.find((s) => fold(s.name) === fold(name))?.id)
+      const ids = person.specialties.map(
+        (name) => specialties.find((s) => fold(s.name) === fold(name))?.id,
+      )
       await step("Profesionales", `${label} · especialidades`, async (sp) => {
-        if (ids.some((id) => !id)) return { status: "error", detail: "Una especialidad no está en la clínica" }
+        if (ids.some((id) => !id))
+          return { status: "error", detail: "Una especialidad no está en la clínica" }
         await setProfessionalSpecialties(sp, orgId, by, userId, ids as string[])
         return "cambia"
       })
@@ -552,11 +746,18 @@ export async function runClinicSetup(
     for (const rule of person.schedule) {
       const branchId = branchFor(rule.branch)
       if (!branchId) continue
-      byBranch.set(branchId, [...(byBranch.get(branchId) ?? []), { weekday: rule.weekday, startMin: minutes(rule.start), endMin: minutes(rule.end) }])
+      byBranch.set(branchId, [
+        ...(byBranch.get(branchId) ?? []),
+        { weekday: rule.weekday, startMin: minutes(rule.start), endMin: minutes(rule.end) },
+      ])
     }
     for (const [branchId, rules] of byBranch)
       await step("Profesionales", `${label} · horario (${rules.length} turnos)`, async (sp) => {
-        await setProfessionalSchedule(sp, orgId, by, { branchId, professionalUserId: userId, rules })
+        await setProfessionalSchedule(sp, orgId, by, {
+          branchId,
+          professionalUserId: userId,
+          rules,
+        })
         return "cambia"
       })
     for (const absence of person.absences) {
@@ -603,7 +804,10 @@ export async function runClinicSetup(
     }
   }
 
-  const totals = { nueva: 0, cambia: 0, igual: 0, espera: 0, error: 0 } satisfies Record<ClinicSetupStatus, number>
+  const totals = { nueva: 0, cambia: 0, igual: 0, espera: 0, error: 0 } satisfies Record<
+    ClinicSetupStatus,
+    number
+  >
   for (const item of items) totals[item.status]++
   const planSha256 = clinicSetupPlanSha256(plan)
   if (mode === "carga")

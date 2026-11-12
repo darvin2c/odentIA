@@ -167,6 +167,75 @@ export function buildClinicSetupPlan(
   return { plan, review, library, problems }
 }
 
+/**
+ * El detalle de lo que el plan carga, por área, para el informe a la clínica: cada dato con
+ * su valor, tal como quedó. Lo que espera a una persona (su perfil, su horario) no va: va en
+ * «Aún no usamos».
+ */
+export function clinicSetupReportSections(
+  plan: ClinicSetupPlan,
+  library: Map<string, LibraryEntry>,
+): Array<{ title: string; rows: Array<{ label: string; value: string }> }> {
+  const sections: Array<{ title: string; rows: Array<{ label: string; value: string }> }> = []
+  const add = (title: string, rows: Array<[string, string | null | undefined]>) => {
+    const kept = rows.filter((row): row is [string, string] => !!row[1]).map(([label, value]) => ({ label, value }))
+    if (kept.length) sections.push({ title, rows: kept })
+  }
+  const id = plan.identity ?? {}
+  const base = COUNTRY_CURRENCY[plan.countryCode]
+  add("Empresa", [
+    ["Nombre comercial", id.tradeName],
+    ["Razón social", id.legalName],
+    [id.fiscalDocType === "RUC" || !id.fiscalDocType ? "RUC" : id.fiscalDocType, id.fiscalDocNumber],
+    ["Dirección fiscal", id.fiscalAddress],
+    ["Teléfono de urgencias", id.emergencyPhone],
+    ["Monedas", id.secondCurrency ? `${base} y ${id.secondCurrency}${id.exchangeRate ? ` (cambio de hoy: ${id.exchangeRate})` : ""}` : base],
+    ["Vigencia del presupuesto", plan.papers?.budgetValidDays ? `${plan.papers.budgetValidDays} días` : null],
+    ["Ticket", plan.papers?.receiptWidth ? `${plan.papers.receiptWidth} mm` : null],
+  ])
+  add("Marca y papeles", [
+    ["Color de la marca", plan.brand?.color],
+    ["Logo", plan.brand?.logo ? "Su logo, en PNG transparente" : null],
+    ["Hoja membretada", plan.letterhead ? "Su hoja, en la que salen recetas, presupuestos y demás papeles" : null],
+  ])
+  for (const branch of plan.branches)
+    add(`Sede ${branch.name}`, [
+      ["Dirección", [branch.addressLine1, branch.city].filter(Boolean).join(", ")],
+      ["Teléfono de la sede", branch.phone],
+      ["Unidades", branch.rooms.length ? branch.rooms.join(", ") : null],
+      ["Cita regular", branch.appointmentMinutes ? `${branch.appointmentMinutes} minutos` : null],
+    ])
+  const system = clinicalProfileFor(plan.countryCode).services?.label ?? "código"
+  add(
+    "Servicios y precios",
+    plan.services.map((service) => {
+      const entry = service.template ? library.get(service.template) : undefined
+      const name = service.name ?? entry?.name ?? "Servicio"
+      const code = entry?.code ?? service.officialCode
+      return [
+        `${name}${code ? ` (${system} ${code})` : ""}`,
+        `${service.priceDisclosure === "desde" ? "desde " : ""}${money(service.priceCents, service.currency)}${entry ? "" : " · servicio propio"}`,
+      ]
+    }),
+  )
+  add("Caja", [
+    ["Medios de pago", plan.paymentMethods.map((m) => m.name).join(", ") || null],
+    ...plan.recurringExpenses.map((e): [string, string] => [
+      `Gasto fijo: ${e.concept}`,
+      `${money(e.amountCents, e.currency ?? base ?? "PEN")}, ${e.everyMonths === 1 ? "cada mes" : `cada ${e.everyMonths} meses`}, el día ${e.day}`,
+    ]),
+  ])
+  add(
+    "Lo que responde su asistente a los pacientes",
+    plan.knowledge.map((k): [string, string] => [k.title ?? KNOWLEDGE_BASICS.find((b) => b.key === k.basicKey)?.question ?? "Pregunta", k.body]),
+  )
+  add("Formatos propios (en borrador, para que los revise)", [
+    ...plan.consents.map((c): [string, string] => ["Consentimiento", c.title]),
+    ...plan.forms.map((f): [string, string] => ["Formulario", f.title]),
+  ])
+  return sections
+}
+
 const money = (cents: number, currency: string) =>
   `${currency === "PEN" ? "S/" : currency === "USD" ? "$" : `${currency} `}${(cents / 100).toLocaleString("es-PE", { minimumFractionDigits: cents % 100 ? 2 : 0 })}`
 
