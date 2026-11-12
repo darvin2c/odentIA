@@ -22,7 +22,8 @@ import { ServiceError } from "./errors.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
 
 /** Hojas del informe como máximo: si pasa, el comando falla para que se acorte. */
-export const PROGRESS_REPORT_MAX_PAGES = 2
+/** Con el detalle de lo cargado, hasta tres hojas. */
+export const PROGRESS_REPORT_MAX_PAGES = 3
 
 const PRODUCT = {
   dental: { brand: "odentia", domain: "odentia32.com" },
@@ -46,11 +47,18 @@ export const REPORT_LIMITS: ReadonlyArray<{ pattern: RegExp; reason: string }> =
   { pattern: /garantiz|asegur(amos|a que)|promet/i, reason: "no promete: cuenta lo hecho" },
   { pattern: /\bcontrato|\bley\b|\bleyes\b|\blegal|\bnorma|\bcumpl/i, reason: "no habla del contrato ni de la ley" },
   {
-    pattern: /respond|respuesta|confirm|aprueb|aprobaci|su visto bueno|revise y/i,
+    // Lo que se le pide a ella; «lo que responde su asistente» no es un pedido.
+    pattern: /\bresp[oó]nd(a|anos|ernos)\b|\bsu respuesta|\bconfirme|\baprueb|\baprobaci|su visto bueno|\brevise y/i,
     reason: "es informativo: no pide respuesta ni aprobación",
   },
   { pattern: /\d{7,}|\d{3}[ -]\d{3}[ -]\d{3}/, reason: "no lleva documentos ni teléfonos" },
 ]
+
+/**
+ * En el detalle de lo cargado, los datos de la propia clínica sí llevan sus números: su RUC
+ * y sus teléfonos son de la empresa, no de una persona.
+ */
+const CLINIC_NUMBER_LABELS = /^(RUC|Teléfono de urgencias|Teléfono de la sede)$/i
 
 const isoDate = z.iso.date({ error: "Fecha AAAA-MM-DD que exista en el calendario" })
 const line = z.string().trim().min(2).max(200)
@@ -88,6 +96,19 @@ export const progressReportSchema = z.strictObject({
   where: z.array(line).min(1).max(5),
   /** Lo que sigue: lo puede hacer ella misma o escribirnos. */
   next: z.array(line).max(5).default([]),
+  /**
+   * El detalle de lo que quedó cargado, por área: cada dato con su valor (cada servicio con
+   * su código y su precio, cada gasto con su monto…). Lo arma la skill desde el plan cargado.
+   */
+  sections: z
+    .array(
+      z.strictObject({
+        title: z.string().trim().min(2).max(60),
+        rows: z.array(z.strictObject({ label: z.string().trim().min(1).max(160), value: z.string().trim().min(1).max(400) })).min(1).max(40),
+      }),
+    )
+    .max(10)
+    .default([]),
 })
 export type ProgressReportInput = z.input<typeof progressReportSchema>
 
@@ -107,6 +128,7 @@ export interface ProgressReportContent {
   done: string[]
   where: string[]
   next: string[]
+  sections: Array<{ title: string; rows: Array<{ label: string; value: string }> }>
   /** Cierre: lo que sigue lo puede hacer ella o escribirnos, sin pedirle nada. */
   closing: string
   signature: { name: string; role: string | null; brand: string; contact: string }
@@ -130,6 +152,14 @@ function freeTexts(report: z.output<typeof progressReportSchema>): Array<[string
     ...report.done.map((text, i): [string, string] => [`done.${i}`, text]),
     ...report.where.map((text, i): [string, string] => [`where.${i}`, text]),
     ...report.next.map((text, i): [string, string] => [`next.${i}`, text]),
+    ...report.sections.flatMap((section, i): Array<[string, string]> => [
+      [`sections.${i}.title`, section.title],
+      ...section.rows.flatMap((row, j): Array<[string, string]> => [
+        [`sections.${i}.rows.${j}.label`, row.label],
+        // El valor de un dato de la clínica (su RUC, su teléfono) lleva sus números.
+        [`sections.${i}.rows.${j}.value`, CLINIC_NUMBER_LABELS.test(row.label) ? row.value.replace(/\d/g, "") : row.value],
+      ]),
+    ]),
   ]
 }
 
@@ -161,6 +191,7 @@ export function progressReportContent(raw: ProgressReportInput): ProgressReportC
     done: report.done,
     where: report.where,
     next: report.next,
+    sections: report.sections,
     closing: `Lo que sigue puede hacerlo usted desde ${brandName} o, si lo prefiere, lo vemos juntos: puede escribirnos cuando guste.`,
     signature: {
       name: companion.name,
@@ -221,23 +252,36 @@ export async function progressReportPdf(raw: ProgressReportInput): Promise<{
     kit.subheading("Lo que recibimos", section)
     kit.bullets(content.received, body)
   }
-  if (content.used.length || content.notYet.length) {
+  if (content.used.length) {
     kit.subheading("Lo que usamos", section)
-    if (content.used.length)
+    kit.table({
+      columns: [{ label: "Dato", width: 160 }, { label: "Dónde quedó" }],
+      rows: content.used.map((u) => [u.data, u.where]),
+      size: SIZE.dense,
+      rowPad: 2,
+    })
+  }
+  if (content.sections.length) {
+    kit.subheading("Lo que quedó cargado", section)
+    for (const part of content.sections) {
+      kit.gap(2)
+      // El título no queda solo al pie de una hoja: va con sus primeras filas.
+      kit.ensure(SIZE.dense * 1.45 * 4)
+      kit.text({ text: part.title, face: "sansSemi" }, body)
       kit.table({
-        columns: [{ label: "Dato", width: 160 }, { label: "Dónde quedó" }],
-        rows: content.used.map((u) => [u.data, u.where]),
+        columns: [{ label: "Dato", width: 190 }, { label: "Valor" }],
+        rows: part.rows.map((row) => [row.label, row.value]),
         size: SIZE.dense,
         rowPad: 2,
       })
-    if (content.notYet.length) {
-      kit.gap(4)
-      kit.text({ text: "Aún no usamos", face: "sansSemi" }, body)
-      kit.bullets(
-        content.notYet.map((u) => `${u.data}: ${u.why}`),
-        body,
-      )
     }
+  }
+  if (content.notYet.length) {
+    kit.subheading("Aún no usamos", section)
+    kit.bullets(
+      content.notYet.map((u) => `${u.data}: ${u.why}`),
+      body,
+    )
   }
   kit.subheading("Lo que hicimos", section)
   kit.bullets(content.done, body)

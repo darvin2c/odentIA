@@ -158,10 +158,10 @@ En la administración: ficha de la clínica › «Cargar datos» › «Configura
 Se escribe `informe-<n>.json` (formato `progressReportSchema`, `packages/services/src/clinic-progress-report.ts`) solo con lo hecho y comprobado, y se arma el PDF para revisarlo:
 
 ```bash
-pnpm --filter @odentia/services import:informe -- <carpeta>/informe-1.json
+pnpm --filter @odentia/services import:informe -- <carpeta>/informe-2.json --plan <carpeta>/clinica.json
 ```
 
-Va a alguien del equipo de la clínica o con su invitación, y responde a quien acompaña, con su correo de odentia32.com (o del producto). Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Aprobado, se envía en «Cargar datos» › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
+Va a alguien del equipo de la clínica o con su invitación, y responde a quien acompaña, con su correo de odentia32.com (o del producto). Después de cargar la configuración, `--plan` escribe en el informe el detalle de lo que se cargó (`sections`): la empresa con su RUC, cada sede, cada servicio con su código y su precio, cada gasto, cada medio de pago y lo que responde el asistente. Ese detalle sale del plan cargado, no se escribe a mano, y reemplaza la tabla «Lo que usamos». Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Los números de la propia clínica (su RUC, su teléfono de urgencias y el de su sede) sí van, en el detalle. Aprobado, se envía en «Cargar datos» › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
 
 ## El mapa
 

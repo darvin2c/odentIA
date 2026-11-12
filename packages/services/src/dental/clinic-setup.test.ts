@@ -128,6 +128,11 @@ describe("carga de la configuración de una clínica", () => {
     const again = await run("carga")
     expect(again.invitations).toHaveLength(0)
     expect(again.items.filter((item) => item.status === "nueva")).toEqual([])
+    // Y lo que no cambió se dice «igual», no «se actualiza».
+    expect(again.items.filter((item) => ["Empresa", "Marca", "Sedes"].includes(item.area)).map((item) => item.status)).toEqual(
+      expect.arrayContaining(["igual"]),
+    )
+    expect(again.items.filter((item) => item.status === "cambia")).toEqual([])
     expect(await ownerDb.select().from(serviceCatalog).where(eq(serviceCatalog.organizationId, ORG))).toHaveLength(2)
     expect(await ownerDb.select().from(invitation).where(eq(invitation.organizationId, ORG))).toHaveLength(1)
   })

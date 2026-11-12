@@ -15,8 +15,9 @@
  *     que carga la administración (`clinica.json`, con los archivos dentro) y el plan de
  *     carga en PDF para aprobarlo (`clinic-setup-source.ts`). Busca cada servicio en la
  *     biblioteca con su código del país.
- *   pnpm --filter @odentia/services import:informe -- <informe.json>
- *     El informe de avance de una etapa en PDF, junto al JSON, para revisarlo
+ *   pnpm --filter @odentia/services import:informe -- <informe.json> [--plan <clinica.json>]
+ *     El informe de avance de una etapa en PDF, junto al JSON, para revisarlo. Con
+ *     `--plan`, escribe en el informe el detalle de lo que ese plan cargó (`sections`)
  *     (`clinic-progress-report.ts`). Se envía desde la administración («Cargar
  *     datos» › «Informe a la clínica»), por el correo de producción y una sola vez.
  *
@@ -31,8 +32,9 @@ import { configureZodMessages } from "@odentia/clinical"
 import { ZodError } from "zod"
 import { WELCOME_LETTER_MAX_PAGES, welcomeLetterPdf } from "./clinic-import-letter.js"
 import { checkClinicImportPlan, type ClinicImportCheck, type ClinicImportPlan } from "./clinic-import-plan.js"
-import { PROGRESS_REPORT_MAX_PAGES, progressReportEmail, progressReportPdf } from "./clinic-progress-report.js"
-import { buildClinicSetupPlan, clinicSetupPlanPdf } from "./clinic-setup-source.js"
+import { PROGRESS_REPORT_MAX_PAGES, type ProgressReportInput, progressReportEmail, progressReportPdf } from "./clinic-progress-report.js"
+import { clinicSetupPlanSchema } from "./clinic-setup-plan.js"
+import { buildClinicSetupPlan, clinicSetupPlanPdf, clinicSetupReportSections, loadLibrary } from "./clinic-setup-source.js"
 import {
   clinicImportMapSchema,
   detectDelimiter,
@@ -141,7 +143,16 @@ function report(plan: ClinicImportPlan, check: ClinicImportCheck, notes: Prepare
 
 /** El informe de avance en PDF, para revisarlo antes de enviarlo desde la administración. */
 async function progressReport(reportPath: string): Promise<void> {
-  const { bytes, pages, content } = await progressReportPdf(JSON.parse(readFileSync(reportPath, "utf-8")))
+  const report = JSON.parse(readFileSync(reportPath, "utf-8")) as Record<string, unknown>
+  const planPath = arg("--plan")
+  if (planPath) {
+    // El detalle sale del plan que se cargó, no se escribe a mano: queda en el informe que se envía.
+    const plan = clinicSetupPlanSchema.parse(JSON.parse(readFileSync(resolve(cwd, planPath), "utf-8")))
+    const seeds = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/seeds")
+    report.sections = clinicSetupReportSections(plan, loadLibrary(seeds, plan.product, plan.countryCode))
+    writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+  }
+  const { bytes, pages, content } = await progressReportPdf(report as ProgressReportInput)
   if (pages > PROGRESS_REPORT_MAX_PAGES) {
     console.log(JSON.stringify({ escrito: null, paginas: pages, aviso: `Salió en ${pages} páginas: acorta las listas` }, null, 2))
     process.exitCode = 1
@@ -255,7 +266,7 @@ async function main(): Promise<void> {
     return
   }
   console.error(
-    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>  |  import:clinica -- <clinica.fuente.json>  |  import:informe -- <informe.json>",
+    "Uso: import:peek -- <archivo.xlsx|.csv> [--sheet <hoja>] [--header <fila>]  |  import:prepare -- <mapa.json> [--today AAAA-MM-DD]  |  import:carta -- <carta.json>  |  import:clinica -- <clinica.fuente.json>  |  import:informe -- <informe.json> [--plan <clinica.json>]",
   )
   process.exitCode = 2
 }
