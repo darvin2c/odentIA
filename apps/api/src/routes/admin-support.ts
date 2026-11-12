@@ -1,4 +1,4 @@
-import { CLINICAL_PRODUCTS } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { AdminActor, Storage } from "@odentia/services"
 import {
@@ -15,6 +15,7 @@ import {
   listSupportCasesForStaff,
   markGuideGap,
   readSupportDiagnostic,
+  createSupportPass,
   requestSupportAccess,
   replyToSupportCase,
   replyToSupportCasesMany,
@@ -45,6 +46,8 @@ export interface AdminSupportDeps {
   /** Conexión propietaria (bypass RLS): el equipo lee entre organizaciones; cada acción audita al actor. */
   ownerDb: Db
   storage: Storage
+  /** La dirección de una pantalla de la app de una clínica, en el dominio de su producto. */
+  clinicUrlOf: (slug: string, product: ClinicalProduct, path: string) => string
 }
 
 const listQuery = z.object({
@@ -224,10 +227,31 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
    * «Esperando a la clínica» y desde ahí lo leen la propietaria y los
    * administradores (ADR 0181). Pedirlo dos veces deja un solo pedido.
    */
-  app.post("/cases/:id/request-access", (c) =>
-    runService(c, 200, () =>
-      deps.ownerDb.transaction((tx) => requestSupportAccess(tx as Db, staffOf(c), c.req.param("id"))),
-    ),
+  app.post("/cases/:id/request-access", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { viewRole?: unknown; minutes?: unknown } | null
+    return runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) =>
+        requestSupportAccess(tx as Db, staffOf(c), c.req.param("id"), new Date(), {
+          viewRole: body?.viewRole ?? null,
+          minutes: body?.minutes ?? 30,
+        }),
+      ),
+    )
+  })
+
+  /**
+   * «Abrir la clínica (solo mirar)»: un pase de un solo uso (1 minuto) para la
+   * persona de soporte a quien se dio el permiso; la dirección lleva el pase en
+   * el fragmento, que no viaja a ningún servidor.
+   */
+  app.post("/cases/:id/pass", (c) =>
+    runService(c, 201, async () => {
+      const pass = await deps.ownerDb.transaction((tx) => createSupportPass(tx as Db, staffOf(c), c.req.param("id")))
+      return {
+        url: deps.clinicUrlOf(pass.slug, pass.product, `/soporte/entrar#pase=${encodeURIComponent(pass.token)}`),
+        expiresAt: pass.expiresAt,
+      }
+    }),
   )
 
   /** «Falta en la guía»: la marca del equipo en el caso (encender y apagar). */

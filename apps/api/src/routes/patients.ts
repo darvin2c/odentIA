@@ -107,7 +107,8 @@ import {
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
-import { traceClinicalRead } from "../lib/clinical-trace.js"
+import { traceClinicalRead, traceClinicalReadOrFail } from "../lib/clinical-trace.js"
+import { isSupportRequest } from "../lib/support-session.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { canonicalUuid, personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
@@ -732,12 +733,20 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       const blocked = await lockRefusal(c, write)
       if (blocked) return blocked
     }
+    const patientId = c.req.path.match(/\/patients\/([0-9a-f-]{36})\//i)?.[1]
+    const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
+    // Soporte mirando la clínica: lo que abre queda anotado ANTES de mostrarse, y si
+    // no se puede anotar no se muestra (el contrato promete que cada acceso queda).
+    if (isSupportRequest(c) && domain === "clinical" && !write && patientId && resource) {
+      const { orgId, userId } = orgContextOf(c)
+      const traced = await traceClinicalReadOrFail(deps.db, { orgId, userId, patientId, resource })
+      if (!traced) return c.json(errorBody(c, "TRACE_FAILED", "No pudimos anotar esta consulta: inténtalo de nuevo"), 503)
+      return next()
+    }
     await next()
     // Toda lectura clínica atendida deja traza de quién consultó qué parte de
     // la ficha (`traceClinicalRead`: solo tras responder bien).
     if (domain !== "clinical" || write || c.res.status !== 200) return
-    const patientId = c.req.path.match(/\/patients\/([0-9a-f-]{36})\//i)?.[1]
-    const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
     if (!patientId || !resource) return
     const { orgId, userId } = orgContextOf(c)
     await traceClinicalRead(deps.db, { orgId, userId, patientId, resource })

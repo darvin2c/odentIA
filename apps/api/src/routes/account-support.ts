@@ -47,6 +47,8 @@ const messageInput = z.object({
 const grantInput = z.object({
   organizationId: z.string(),
   minutes: z.number().int("El acceso se autoriza entre 5 y 60 minutos.").min(5, "El acceso se autoriza entre 5 y 60 minutos.").max(60, "El acceso se autoriza entre 5 y 60 minutos.").optional(),
+  viewRole: z.string().max(40).nullish(),
+  reason: z.string().max(500, "Escríbelo en 500 caracteres o menos.").nullish(),
 })
 const revokeInput = z.object({ grantId: z.uuid() })
 
@@ -217,7 +219,10 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
         throw new ServiceError("TWO_FACTOR_REQUIRED", 403, "Esta clínica pide verificación en dos pasos")
       }
       return withOrgContext(deps.ownerDb, orgId, (tx) =>
-        grantSupportAccess(tx, orgId, userId, canGrant, kase.id, input.minutes ?? 30),
+        grantSupportAccess(tx, orgId, userId, canGrant, kase.id, input.minutes ?? 30, {
+          viewRole: input.viewRole ?? null,
+          reason: input.reason ?? null,
+        }),
       )
     })
   })

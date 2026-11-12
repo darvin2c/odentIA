@@ -73,6 +73,14 @@ import { createAdminFoundersRoute } from "./routes/admin-founders.js"
 import { createAdminImportsRoute } from "./routes/admin-imports.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
+import {
+  createSupportSessionRoute,
+  supportFileSecret,
+  supportGuard,
+  supportOrgContext,
+  supportSessionGate,
+  supportSessionOf,
+} from "./lib/support-session.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
@@ -455,7 +463,17 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/demos", createAdminDemosRoute(deps))
   app.route("/api/admin/imports", createAdminImportsRoute({ ...deps, panelUrlOf }))
-  app.route("/api/admin/support", createAdminSupportRoute(deps))
+  app.route(
+    "/api/admin/support",
+    createAdminSupportRoute({
+      ...deps,
+      // En el dominio del producto, con el puerto del panel si lo tiene (el proxy de e2e).
+      clinicUrlOf: (slug, product, path) => {
+        const port = new URL(deps.webURL).port
+        return `https://${slug}.${(domains[product] ?? deps.cookieDomain).replace(/^\./, "")}${port ? `:${port}` : ""}${path}`
+      },
+    }),
+  )
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route(
     "/api/admin/waitlist",
@@ -675,6 +693,19 @@ export function createApp(deps: AppDeps) {
     }),
   )
 
+  // Soporte mirando una clínica con su permiso: canjear el pase, salir y sus archivos.
+  const supportSecret = supportFileSecret(deps.secretsKey)
+  app.route(
+    "/api/support-session",
+    createSupportSessionRoute({
+      ownerDb: deps.ownerDb,
+      storage: deps.storage,
+      secret: supportSecret,
+      cookieDomainOf: (c) => domains[productOfRequest(c)] ?? deps.cookieDomain,
+      isClinicOrigin: (origin) => tenantOrigins.some((pattern) => pattern.test(origin)),
+    }),
+  )
+
   app.route("/api", userScoped)
 
   // Guards para el resto de /api/*.
@@ -685,12 +716,20 @@ export function createApp(deps: AppDeps) {
     c.req.path.startsWith("/api/webhooks/") || c.req.path.startsWith("/webhooks/")
   guarded.use("*", async (c, next) => {
     if (isWebhook(c)) return next()
+    // Con la cookie de soporte, el pedido es de soporte en solo lectura o de nadie.
+    const support = await supportSessionGate(c, deps.ownerDb)
+    if (support) return support
+    if (support === null) return next()
     return requireSession(deps)(c, next)
   })
   guarded.use("*", async (c, next) => {
     if (isWebhook(c)) return next()
+    const support = supportSessionOf(c)
+    if (support) return (await supportOrgContext(c, db, support)) ?? next()
     return requireOrgContext(deps)(c, next)
   })
+  // Soporte solo mira: nada que no sea leer, la base en solo lectura y sin descargas.
+  guarded.use("*", supportGuard(supportSecret))
   // La historia bloqueada (ADR 0080) en toda ruta que nombra a la ficha o a la
   // persona en la consulta o en el cuerpo, no solo en su dirección.
   const lockGuard = lockedRecordGuard(db)
