@@ -89,7 +89,7 @@ import {
   planItemFinding,
 } from "@odentia/db/schema/dental"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
+import { auditEvent, branch, clinicLetterhead, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { TREATMENT_KIND_KEYS } from "@odentia/dental"
@@ -246,6 +246,7 @@ import { seedWorkspace } from "../seed-workspace.js"
 import { createService, quickAddServices, updateService } from "../service-catalog.js"
 import { librarySpecialtyIds } from "../specialties.js"
 import { createStorage } from "../storage.js"
+import { seedDemoLetterhead } from "../seed-letterhead.js"
 import { completeTask, createTask, settleTask, updateTask } from "../tasks.js"
 import { makeImageThumbnail } from "../thumbnails.js"
 import {
@@ -633,6 +634,12 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, orgs))
   await db.delete(member).where(inArray(member.organizationId, orgs))
   await db.delete(invitation).where(inArray(invitation.organizationId, orgs))
+  // La hoja membretada (ADR 0182): sus versiones nombran a la clínica y a quien la subió.
+  const previousLetterheads = await db
+    .select({ key: clinicLetterhead.pdfKey })
+    .from(clinicLetterhead)
+    .where(inArray(clinicLetterhead.organizationId, orgs))
+  await db.delete(clinicLetterhead).where(inArray(clinicLetterhead.organizationId, orgs))
   await db.delete(organization).where(inArray(organization.id, orgs))
   await db.execute(
     sql`delete from "verification" where "identifier" ilike ${`%@${SEED_EMAIL_DOMAIN}%`}`,
@@ -649,6 +656,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(user).where(inArray(user.id, users))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
   for (const paper of previousPapers) await storage.deleteAttachment(paper.storageKey)
+  for (const sheet of previousLetterheads) await storage.deleteAttachment(sheet.key).catch(() => undefined)
   for (const row of previousMessages) {
     if (!Array.isArray(row.attachments)) continue
     for (const attachment of row.attachments) {
@@ -940,6 +948,14 @@ const [miraflores] = await db
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
 await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", country: "PE" }])
+// Su hoja membretada (ADR 0182): la demo muestra la tarjeta con una hoja puesta y sus papeles sobre ella.
+await seedDemoLetterhead(db, storage, {
+  orgId: ORG_B,
+  userId: CORA_ID,
+  name: "Clínica Norte",
+  web: "www.clinicanorte.example",
+  color: "#0f766e",
+})
 
 // --- CRM con servicios ---
 const pipeA = await ensureDefaultPipeline(db, ORG_A)

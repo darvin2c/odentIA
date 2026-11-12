@@ -63,6 +63,7 @@
     "fflate": "0.8.2",
     "jpeg-lossless-decoder-js": "2.1.2",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "6.4.299",
     "qrcode": "1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

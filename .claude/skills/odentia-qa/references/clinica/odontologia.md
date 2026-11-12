@@ -93,6 +93,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Lo que el paciente declara en el enlace queda pendiente de revisión, no como confirmado.
 - [ ] Tabaco y alcohol se preguntan. Importan en periodoncia, cirugía e implantes, y hoy solo los pregunta latidIA.
 - [ ] El documento del representante escrito al firmar se guarda en su ficha (sin pisar otro distinto) y, mientras falte, entra en «Faltan datos» del menor.
+- [ ] Registrar a un menor cuyo responsable no tiene teléfono deja escribirlo ahí mismo, sin salir del registro.
 
 **Ya falló:** el +44 se abría como Perú; «Es esta persona» se movía bajo el cursor y cambiaba el formulario (8 nov, PR 550); al menor le faltaba el DNI del responsable.
 **Fuentes:** NTS 139-MINSA; Ley 29414; ADR 0001, 0029, 0044, 0058 y 0109.
@@ -214,6 +215,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Decide la persona o su representante, y la respuesta se puede anotar en el sillón sin imprimir ni enviar.
 - [ ] Una revisión pregunta solo lo que cambió.
 - [ ] Las dos monedas: lo que está en dólares se debe en dólares hasta que se paga.
+- [ ] El odontograma de «Lo que encontramos» muestra la dentición del paciente (temporal o mixta en un niño) y la pieza tratada está en el gráfico.
 
 **Ya falló:** «Aceptó todo» cuando eligió la opción A; la franja con un conteo y un monto que no cuadraban (8 nov); la opción no elegida dentro de lo pendiente (9 nov).
 **Fuentes:** ADR 0144, 0145, 0153 y 0159.
@@ -232,6 +234,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Cerrar sin consentimiento pide escribir por qué, y no traba la atención.
 - [ ] Lo firmado por enlace queda pendiente hasta que el profesional lo confirma. Lo firmado se revoca, no se borra.
 - [ ] Hay plantilla para lo que se hace a menudo: anestesia local, exodoncia, endodoncia, periodoncia, implante, ortodoncia, blanqueamiento, prótesis, odontopediatría y radiografías.
+- [ ] Un consentimiento ya firmado desde Documentos para el mismo procedimiento y la misma pieza cuenta para el tratamiento indicado después; no pide otro.
 
 **Ya falló:** se pedía el consentimiento del camino no elegido (PR 539); «Firmar ahora» de la endodoncia abría la prótesis (8 nov); la declaración no se veía en el enlace (PR 479).
 **Fuentes:** Ley 29414 y su reglamento; Ley 26842 (Ley General de Salud); ADR 0033, 0117, 0131 y 0148.
@@ -297,6 +300,10 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] En un niño, la dosis por peso.
 - [ ] La profilaxis antibiótica, cuando corresponde, se puede recetar con su dosis y momento (antes del procedimiento).
 - [ ] Lo emitido no cambia: se anula y se emite otra. El PDF es legible para la farmacia.
+- [ ] Los medicamentos salen en el orden en que se escribieron (el principal primero), en la pantalla y en el PDF.
+- [ ] Un colutorio o un gel se receta con su vía (bucal o tópica), no «vía oral».
+
+**Ya falló:** la receta imprimía los ítems en un orden al azar (QA del 11 nov).
 
 **Huecos conocidos:** sin aviso de embarazo ni interacciones en odentIA (latidIA sí avisa del embarazo).
 **Fuentes:** Manual de Buenas Prácticas de Prescripción (DIGEMID-MINSA); profilaxis de endocarditis de la AHA (2021); ADR 0132 y 0143.
@@ -331,6 +338,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 - [ ] Si una sesión termina en «Falta otra sesión» y lo que va después ya tiene cita, el cierre lo avisa para revisar esa cita.
 - [ ] El cierre dice lo que se cargó hoy y una sola cifra de lo que debe, que sigue siendo cierta después de cobrar ahí mismo.
+- [ ] Un tratamiento cuyo cobro se devolvió entero no se carga otra vez al firmar la sesión siguiente: el cierre lo dice y por qué, sin pedirle a quien atiende que cobre (ADR 0068).
 - [ ] La periodontitis apical o el absceso periapical no se proponen resueltos al terminar la endodoncia: sanan en su control con radiografía. La pulpitis sí.
 - [ ] El consentimiento de una corona sobre la propia pieza es el de la corona, no el de prótesis para reponer piezas ausentes.
 

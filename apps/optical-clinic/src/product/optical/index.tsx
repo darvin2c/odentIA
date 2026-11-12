@@ -66,6 +66,8 @@ export const opticalUi: ProductUi = {
   orders: opticalOrders,
   documents: {
     ...bare.documents,
+    // Anular la atención anula la receta de lentes que se emitió en ella.
+    voidedWithEncounter: ["recetas de lentes"],
     imaging: {
       types: OPTICAL_IMAGING_TYPES,
       categoryLabels: OPTICAL_CATEGORY_LABELS,

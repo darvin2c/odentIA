@@ -8,7 +8,7 @@ import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { findingWords } from "../../components/dental/odontogram-notation"
-import { SheetLetterhead, SheetPageStyle } from "../../components/dental/odontogram-sheet"
+import { SheetArticle, SheetLetterhead, SheetPageStyle } from "../../components/dental/odontogram-sheet"
 import { fetchOdontogramPrint, type OdontogramEntry } from "../../lib/dental/odontogram"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/print")({
@@ -61,7 +61,7 @@ function OdontogramPrintPage() {
   const teeth = [...byTooth.keys()].sort((a, b) => (ORDER.get(a) ?? 99) - (ORDER.get(b) ?? 99))
   return (
     <PageShell className="flex flex-col gap-4">
-      <SheetPageStyle />
+      <SheetPageStyle establishment={establishment} />
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <p className="text-sm text-muted-foreground">
           Hoja con la numeración internacional (FDI) y los hallazgos de hoy por pieza.
@@ -70,7 +70,7 @@ function OdontogramPrintPage() {
           Imprimir
         </Button>
       </div>
-      <article className="odontogram-sheet mx-auto flex w-full max-w-[210mm] flex-col gap-5 rounded-lg border bg-white p-8 text-sm text-black">
+      <SheetArticle establishment={establishment} className="flex flex-col gap-5 p-8">
         <SheetLetterhead establishment={establishment} />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <h1 className="text-base font-semibold">Odontograma</h1>
@@ -137,7 +137,7 @@ function OdontogramPrintPage() {
             </ul>
           )}
         </section>
-      </article>
+      </SheetArticle>
     </PageShell>
   )
 }

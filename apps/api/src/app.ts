@@ -132,6 +132,7 @@ import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
 import { createPushRoute } from "./routes/push.js"
+import { createLetterheadRoute } from "./routes/letterhead.js"
 
 export interface AppDeps {
   auth: Auth
@@ -815,6 +816,9 @@ export function createApp(deps: AppDeps) {
       withOrgContext(db, orgId, (tx) => setClinicBrandColor(tx, orgId, userId, null)),
     )
   })
+
+  // La hoja membretada de la clínica (ADR 0182): se sube, se ajusta y se quita aparte.
+  guarded.route("/org-profile/letterhead", createLetterheadRoute({ db, storage: deps.storage }))
 
   // «De tu logo»: los colores del logo ya subido, para elegir sin saber el código.
   guarded.get("/org-profile/logo-colors", async (c) => {

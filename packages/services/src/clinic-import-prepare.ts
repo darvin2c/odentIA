@@ -194,11 +194,16 @@ export function parseCsv(text: string, delimiter: string): string[][] {
  * se muestran solo cuando se repiten mucho (sexo, tipo de documento), nunca
  * nombres ni números de una persona.
  */
-export function profileColumns(table: string[][], headerRow = guessHeaderRow(table)) {
+export function profileColumns(table: string[][], given?: number) {
+  // Sin una fila que parezca de encabezados, la primera es una persona: se muestra su forma, no su texto.
+  const found = given ?? likelyHeaderRow(table)
+  const headerRow = found ?? 1
   const header = table[headerRow - 1] ?? []
   const body = table.slice(headerRow).filter((cells) => cells.some((value) => value.trim() !== ""))
   return {
     headerRow,
+    /** Falso si ninguna fila parece de encabezados: indícala con `--header` después de mirar el archivo. */
+    headerFound: found !== null,
     /** Lo que hay arriba del encabezado (el título de un reporte), sin datos de personas. */
     above: table.slice(0, headerRow - 1).map((cells) => cells.filter((value) => value.trim() !== "").length),
     rows: body.length,
@@ -213,7 +218,7 @@ export function profileColumns(table: string[][], headerRow = guessHeaderRow(tab
       }
       const repeated = distinct.size <= 12 && distinct.size * 5 <= values.length
       return {
-        name: name.trim(),
+        name: found !== null ? name.trim() : `Columna ${index + 1} (${shapeOf(name.trim())})`,
         filled: values.length,
         distinct: distinct.size,
         shapes: [...shapes].sort((a, b) => b[1] - a[1]).slice(0, 4),
@@ -227,13 +232,13 @@ export function profileColumns(table: string[][], headerRow = guessHeaderRow(tab
  * La fila que parece el encabezado, para mirar un archivo antes de tener mapa:
  * entre las 30 primeras, la primera con tantas celdas llenas como la más
  * llena y todas con letras (un título o una fecha de reporte tienen menos
- * celdas; una fila de datos trae números).
+ * celdas; una fila de datos trae números). Nula si ninguna lo parece.
  */
-export function guessHeaderRow(table: string[][]): number {
+function likelyHeaderRow(table: string[][]): number | null {
   const top = table.slice(0, 30).map((cells) => cells.filter((value) => value.trim() !== ""))
   const widest = Math.max(0, ...top.map((cells) => cells.length))
   const at = top.findIndex((cells) => cells.length === widest && cells.every((value) => /\p{L}/u.test(value)))
-  return at >= 0 ? at + 1 : 1
+  return at >= 0 ? at + 1 : null
 }
 
 /**

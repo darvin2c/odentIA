@@ -69,6 +69,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] El QR del papel abre su comprobación sin cuenta. Un código falso y uno que no existe dicen lo mismo, sin revelar nada.
 - [ ] Lo impreso dice lo mismo que la pantalla: pieza, diagnóstico, dosis, fechas y quién firmó.
 - [ ] Un papel anulado se ve anulado al comprobarlo.
+- [ ] Al anular una atención, el diálogo nombra lo que cae en ese producto (la receta de lentes en vistIA; descansos solo donde se emiten) y lo que lo usa (un pedido).
 
 **Fuentes:** ADR 0115, 0132 y 0133.
 
@@ -235,6 +236,24 @@ No tiene camino en el código.
 
 - [ ] Una alarma de un paciente fuera de horario tiene un destinatario explícito, o queda dicho que nadie la verá hasta que la clínica abra (hoy no existe la guardia: lo de la noche llega al abrir).
 
+## P-COM-23 La hoja membretada de la clínica en los papeles
+
+**Dónde:** Configuración › Datos de la clínica › «Hoja membretada» (`CA/settings/clinic-letterhead.tsx`); el dibujo en `S/document-kit.ts` (`embedSheet`, `sheetLetterhead`) y la hoja de cada momento en `S/letterhead.ts` (`getLetterheadAt`), tabla `clinic_letterhead`.
+
+- [ ] Receta, orden, descanso, hoja de atención, consentimiento, presupuesto, historia y comprobante en A4 salen sobre la hoja en **todas** sus páginas; el ticket térmico, sin ella.
+- [ ] Cada papel lleva la firma dibujada y el sello (nombre, título y colegiatura) de quien lo emite, y la razón social y el RUC en la línea chica bajo la hoja.
+- [ ] Con «Mi hoja ya trae la dirección y el teléfono», no se repiten; el comprobante dice siempre una dirección (la fiscal o la de la sede que cobró).
+- [ ] Con los márgenes más anchos y más altos que se permiten, una receta de un ítem sale en una hoja con la firma, el sello y el QR enteros y legibles.
+- [ ] Lo emitido o firmado antes de cambiar la hoja sale igual al abrirlo después, también si nunca se había abierto (la hoja es la de su fecha de emisión o firma).
+- [ ] La hoja que se firma en la tablet o en el enlace muestra su parte de arriba y la de abajo, centrada como un papel.
+- [ ] El odontograma impreso lleva la hoja sin marca de agua bajo el gráfico, y su parte de arriba y la de abajo de borde a borde en cada página, sin tapar texto.
+- [ ] En una receta de varias páginas, la alergia y el nombre del paciente se leen en la página de la firma.
+- [ ] Si la hoja dice el nombre o la colegiatura de una persona, la receta de otro profesional no deja dudas de quién receta (riesgo aceptado: una sola hoja por clínica; se avisa al subirla).
+
+**Ya falló:** con 45 mm a cada lado, el bloque de firma salía letra por letra en la página 2; el odontograma impreso dejaba la parte de abajo de la hoja a media página (QA del 11 nov, corregidos antes de unir).
+**Huecos conocidos:** no hay hoja por profesional (ADR 0182).
+**Fuentes:** ADR 0115, 0132, 0148 y 0182; Manual de Buenas Prácticas de Prescripción (DIGEMID-MINSA) para los datos del prescriptor.
+
 ---
 
 ## Casos
@@ -255,3 +274,4 @@ No tiene camino en el código.
 | CC12 | La familia avisa que el paciente falleció. | 16 | Se marca; no salen más mensajes; la historia queda. |
 | CC13 | Fin de mes en una clínica de dos sedes: se paga la luz por otro importe, la factura del laboratorio y los honorarios del endodoncista visitante; se corrige un RUC mal escrito y se le entrega la lista al contador. | 20 | Todo con su comprobante y RUC; la corrección dice qué cambió; la lista se descarga; Gastos y Reportes cuadran. |
 | CC14 | A las 22:30 una paciente escribe «se me hinchó la cara y no puedo tragar» tres días después de una exodoncia, mientras otra paciente firma en la tablet de la unidad. | 09, 21, 22 | La paciente recibe el número de emergencias; el aviso al equipo no lleva su nombre y llega al abrir (no hay guardia); la tablet no muestra nada. |
+| CC15 | La clínica sube una hoja con el nombre y la colegiatura de una doctora; otro odontólogo emite una receta de 5 ítems a una paciente alérgica a penicilinas, y después la clínica ajusta los márgenes. | 01, 05, 23 | La receta pasa a 2 páginas con la hoja en ambas, la firma y el sello de quien receta; lo emitido antes del ajuste sale igual; una receta nueva con márgenes al máximo deja la firma entera. |

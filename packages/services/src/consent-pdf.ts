@@ -166,8 +166,9 @@ export async function renderConsentPdf(
   }
   const method = (doc.signatureMethod ?? "clinica") as keyof typeof CONSENT_SIGNATURE_WORDS
   const signerHeading = doc.signerKind === "representante" ? "Representante legal" : "Paciente"
-  // Por enlace, `signedAt` es cuando el profesional confirmó: la persona firmó antes.
-  const signerSignedAt = doc.personSignedAt ?? doc.signedAt
+  // Por enlace, `signedAt` es cuando el profesional confirmó: la persona firmó antes. Si después
+  // lo firmó de nuevo en la clínica («Firmar de nuevo aquí»), vale esa firma, no la del enlace.
+  const signerSignedAt = method === "enlace" ? (doc.personSignedAt ?? doc.signedAt) : doc.signedAt
   const signedAt = signerSignedAt ? `Firmó el ${dayTimeWords(signerSignedAt, zone)}` : ""
   const signerLines = [
     { text: doc.signerName, strong: true },
@@ -400,10 +401,21 @@ async function storeConsentPdf(
 ): Promise<ConsentDocumentRow> {
   const { run, storage, orgId, userId, consentId } = input
   const doc = data.document
+  // La hoja membretada de cuando se firmó (por enlace, cuando firmó la persona); la de
+  // la revocación, la de cuando se revocó: cada papel, la de su momento (ADR 0182).
+  const at = kind === "revocado" ? doc.revokedAt : (doc.personSignedAt ?? doc.signedAt)
   const { clinic, checkUrl } = await run(async (tx) => ({
-    clinic: await loadDocumentClinic(tx, orgId),
+    clinic: await loadDocumentClinic(tx, orgId, { at }),
     checkUrl: await documentCheckUrl(tx, orgId, "consent", consentId),
   }))
+  // Sin poder leer su hoja no se guarda: quedaría para siempre con nuestro membrete. Se
+  // reintenta como cuando falla el guardado (el firmado sigue registrado).
+  if (clinic.sheetUnavailable)
+    throw new ServiceError(
+      "LETTERHEAD_UNAVAILABLE",
+      503,
+      "No se pudo leer la hoja membretada: el PDF se guardará en un momento.",
+    )
   const bytes = await renderConsentPdf(data, clinic, { revocation: kind === "revocado", checkUrl })
   const sha256 = createHash("sha256").update(bytes).digest("hex")
   const ref = await storage.putPatientDocument({

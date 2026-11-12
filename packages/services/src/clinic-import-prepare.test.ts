@@ -42,6 +42,15 @@ describe("leer el archivo de la clínica", () => {
     expect(sex!.values).toEqual([["F", 5], ["M", 5]])
   })
 
+  it("sin fila de encabezados no muestra la primera fila como nombres de columna: es una persona", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => `Persona ${i};4567890${i};0${i}/04/1985`)
+    const profile = profileColumns(csv(rows.join("\n")))
+    expect(profile.headerFound).toBe(false)
+    expect(profile.columns.map((column) => column.name)).toEqual(["Columna 1 (Aa 9)", "Columna 2 (99999999)", "Columna 3 (99/99/9999)"])
+    // Con la fila indicada a mano, sí: quien la indicó vio que son encabezados.
+    expect(profileColumns(csv(rows.join("\n")), 1).headerFound).toBe(true)
+  })
+
   it("lee fechas sin adivinar el siglo ni días que no existen", () => {
     expect(readDate("3/4/1985", "DD/MM/YYYY")).toEqual({ value: "1985-04-03" })
     expect(readDate("04/03/1985", "MM/DD/YYYY")).toEqual({ value: "1985-04-03" })
@@ -181,7 +190,7 @@ describe("revisar el plan", () => {
       TODAY,
     )
     expect(check.blocked.sort()).toEqual(["2", "3"])
-    expect(check.issues).toContainEqual({ key: "2", level: "error", field: "docNumber", message: "Ese documento ya está en la fila de Ana Soto («1»)" })
+    expect(check.issues).toContainEqual({ key: "2", level: "error", field: "docNumber", message: "Ese documento ya está en la fila de «Ana Soto» («1»)" })
   })
 
   it("carga primero a quien habla por otra persona y bloquea a quien depende de una fila con errores", () => {

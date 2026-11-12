@@ -74,6 +74,8 @@ export interface DataProtectionView {
     inUse: DataProtectionProcessor[]
     /** Siempre, porque odentIA funciona así. */
     always: DataProtectionProcessor[]
+    /** Solo si la clínica pide cargar sus datos, y hasta que se eliminan (cláusula 3 del contrato de encargo). */
+    forImport: DataProtectionProcessor[]
     /** Los canales que no conectó: «Instagram, Telegram». */
     notUsed: string[]
   }
@@ -229,6 +231,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
   const dictating = agent.clinicalAssistantEnabled && (await productDictation(tx, orgId)) !== null
   const inUse: DataProtectionProcessor[] = []
   const always: DataProtectionProcessor[] = []
+  const forImport: DataProtectionProcessor[] = []
   const usedProviders = new Set<string>()
   for (const p of DATA_PROCESSORS) {
     switch (p.use.kind) {
@@ -249,6 +252,12 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         break
       case "dictado":
         if (dictating) inUse.push(processorRow(p, "dictado encendido"))
+        break
+      // La carga la pide la clínica fuera de la app (la carta de bienvenida) y su
+      // rastro es de la administración (`admin.clinic_import_row`, sin GRANT al rol
+      // app): se lista con su condición, sin decir si ya ocurrió.
+      case "carga":
+        forImport.push(processorRow(p, null))
         break
       case "canal": {
         const mine = p.use.providers.filter((provider) => connected.has(provider))
@@ -303,7 +312,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         }
       : null,
     activities,
-    processors: { inUse, always, notUsed },
+    processors: { inUse, always, forImport, notUsed },
     requests: {
       year,
       received: stats?.received ?? 0,
@@ -359,6 +368,13 @@ export async function renderDataProtectionPdf(
     ),
     { size: SIZE.dense },
   )
+  if (view.processors.forImport.length)
+    kit.text(
+      `Solo si la clínica envió sus datos para cargarlos al empezar, y hasta eliminar esos archivos (al terminar la carga o, a más tardar, a los 30 días): ${view.processors.forImport
+        .map((p) => `${p.name} (${p.country})`)
+        .join(", ")}.`,
+      { size: SIZE.dense },
+    )
   kit.text(
     "Los que están fuera del país son una transferencia internacional autorizada en el contrato de encargo.",
     {

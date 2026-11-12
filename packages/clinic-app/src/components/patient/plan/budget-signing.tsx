@@ -13,7 +13,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch, apiFetchBytes } from "../../../lib/api"
 import { budgetNumberLabel, budgetPdfUrl } from "../../../lib/budgets"
 import type { ConsentLetterhead } from "../../../lib/clinical-forms"
-import { SheetLetterhead } from "../consent-sheet"
+import { SheetLetterhead, SheetPaper } from "../consent-sheet"
 import { FirmaPad } from "../firma-pad"
 
 /** Un tratamiento de la hoja: como la tabla de «Su decisión» del PDF. */
@@ -131,11 +131,7 @@ export function BudgetSigningScreen({
               // Sin la hoja no se firma: la declaración es parte de lo que acepta.
               <ErrorState title="No se pudo preparar la hoja" onRetry={() => void frame.refetch()} />
             ) : step === "sign" ? (
-              <article
-                aria-labelledby={`${ids}-title`}
-                // Es el papel: claro siempre, también con la app en oscuro.
-                className="theme-light flex flex-col rounded-sm border bg-card px-5 py-6 text-card-foreground shadow-sm sm:px-10 sm:py-10"
-              >
+              <SheetPaper clinic={frame.data?.data.clinic} aria-labelledby={`${ids}-title`}>
                 {frame.data ? <SheetLetterhead clinic={frame.data.data.clinic} /> : null}
                 <p className="mt-5 text-sm font-semibold text-muted-foreground">{budgetNumberLabel(budgetNumber)}</p>
                 <h2
@@ -225,7 +221,7 @@ export function BudgetSigningScreen({
                     <p>{frame.data.data.signatureNote}</p>
                   </footer>
                 ) : null}
-              </article>
+              </SheetPaper>
             ) : (
               <div className="flex flex-col gap-3">
                 <p>

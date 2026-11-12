@@ -26,6 +26,10 @@ it("lista lo que la clínica usa, lo que odentIA usa siempre y los pedidos del a
     // Jev, siempre: la Ayuda le pregunta en toda clínica (ADR 0146).
     expect.arrayContaining(["servidor", "cloudflare", "correo", "geoapify", "jev"]),
   )
+  // Los de la carga van aparte, con su condición: nunca entre los de siempre ni entre los que usa.
+  expect(before.processors.forImport.map((p) => p.id)).toEqual(["carga-correo", "carga-buzon", "carga-claude"])
+  expect(before.processors.always.some((p) => p.id.startsWith("carga-"))).toBe(false)
+  expect(before.processors.inUse.some((p) => p.id.startsWith("carga-"))).toBe(false)
   expect(before.activities.map((a) => a.id)).toEqual(
     expect.arrayContaining(["atender", "citas", "cobrar", "novedades"]),
   )

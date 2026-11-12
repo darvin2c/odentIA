@@ -74,11 +74,11 @@ El comando dice cuántas páginas salió: tres como máximo, y si pasan, falla. 
 ## Antes de empezar
 
 - La clínica ya existe (alta asistida) y tiene su país. El plan se prepara con ese país.
-- La lista llega por correo a soporte. Antes de abrir el adjunto, la clínica tiene que haber aceptado el contrato de encargo: odentIA se lo pide a la propietaria al entrar y no la deja seguir sin él. Que haya aceptado la invitación no basta, y la administración todavía no muestra el contrato: confírmalo con ella. Si no lo aceptó, no se abre: se le recuerda entrar.
+- La lista llega por correo a soporte. Antes de abrir el adjunto, la clínica tiene que haber aceptado el contrato de encargo vigente, desde la versión 2026-11-12, la que nombra a los proveedores de la carga: odentIA se lo pide a la propietaria al entrar y no la deja seguir sin él. Que haya aceptado la invitación no basta, y la administración todavía no muestra el contrato: confírmalo con ella. Si no lo aceptó, no se abre: se le recuerda entrar.
 - Anota el día en que llegó el correo: desde ese día corren los 30 días que promete la carta.
 - Los archivos van en una carpeta privada fuera del repositorio (por ejemplo `~/odentia-cargas/<clinica>/`). Nunca se suben al repositorio ni se pegan en el chat.
 - El mapa se escribe con `import:peek` (las hojas y la forma de cada columna): no hace falta leer filas de personas. Lo dudoso se revisa con la persona sobre el `informe.md`.
-- Pendiente legal antes de cargar la primera clínica real: que Anthropic y el proveedor del buzón de soporte, que recibe la lista, figuren en `packages/auth/src/data-processors.ts`, avisando a la clínica como pide el contrato de encargo.
+- Lo que promete el contrato de encargo (cláusula 3) se cumple aquí: los archivos se usan solo para la carga y se eliminan, con el correo y sus copias, al terminar o, a más tardar, a los 30 días de recibidos. Claude trabaja con los comandos, que no muestran nombres ni números; no hace falta pegarle la lista. Si `import:peek` dice `headerFound: false`, la persona mira el archivo y da la fila con `--header`. Los proveedores de la carga (el correo de soporte y Claude) están en `packages/auth/src/data-processors.ts`; uno nuevo se suma ahí y se avisa a las clínicas con la antelación del contrato.
 
 ## Pasos
 
@@ -122,7 +122,7 @@ Los comandos se escriben desde la raíz del repositorio, con el archivo primero;
    - **Una muestra a mano**, comparada con el archivo: unas diez fichas elegidas a propósito. Entre ellas, un menor con quien habla por él, un DNI al que se le devolvió el cero, una celda con dos teléfonos, una persona repetida en el archivo y la última fila. Se revisan con la propietaria en la reunión de alta, mirando su pantalla: ni la administración ni el acceso de soporte abren pacientes.
    - **«Faltan datos»** en Personas: los que entraron incompletos, para completarlos con la clínica.
    - **Los datos de la clínica** (sedes, unidades dentales, equipo, servicios y precios) se repasan pantalla por pantalla en la reunión de alta, contra lo que envió.
-8. **Al terminar**, borra los archivos de la clínica, `plan.json` e `informe.md`, y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
+8. **Al terminar**, borra los archivos de la clínica, `mapa.json` (sus `overrides` llevan datos de personas), `plan.json` e `informe.md`, la conversación de Claude Code de esa carga (su archivo en `projects/` de la carpeta de configuración de Claude Code), y en el buzón de soporte el correo con su adjunto, también de la papelera. Si la carga se demora, se borra igual a los 30 días de recibido y se vuelve a pedir la lista: lo promete el contrato de encargo. Informa las cifras: cuántas personas se crearon, cuántas ya estaban, cuántas no entraron y por qué.
 
 ## El mapa
 

@@ -796,6 +796,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "receta-sale-hoja-clinica",
+        q: "¿Por qué mi receta sale en la hoja de la clínica si la firmé yo?",
+        forms: ["mi receta sale con la hoja de la clinica", "sale el nombre de otro doctor en mi receta", "hoja membretada de la clinica en mi receta", "por que sale otra colegiatura en mi receta"],
+        a: "Porque la clínica subió su hoja membretada y la usan los papeles de todo el equipo. Quien recetó es quien firma: tu nombre, tu título y tu colegiatura van en tu firma y tu sello, abajo. Si la hoja dice el nombre o la colegiatura de otra persona, avísale a quien administra la clínica: puede pedir a quien la diseñó una versión sin esos datos y cambiarla en «Datos de la clínica» › «Hoja membretada». Lo ya emitido queda con la hoja que tenía.",
+        area: "clinica",
+      },
+      {
         id: "firma-persona-consentimiento",
         q: "¿Cómo firma la persona su consentimiento?",
         a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si está en la clínica, «Firmar en su teléfono» muestra un código para que lo escanee (o «Copiar enlace» para pegarlo en su chat), sin enviarle ningún mensaje. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, no se firma desde el teléfono: en la atención no se ofrece enviarlo ni el código, y la fila dice qué falta («falta el documento de…»); desde su página, «Enviar para que lo lea» le llega para leerlo antes y lo firma en la cita. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención, aunque la atención sea de otro día: queda el día real y a quién informaste. Confírmalo con quien firmó delante; si vino otra persona, o si firmó hace meses, «Firmar de nuevo aquí» lo firma en la tablet y lo del enlace queda en su historia. El consentimiento va con su tratamiento: el Plan y «Hoy viene a…» dicen si falta, si falta firmarlo o si ya está, en cualquier atención donde se haga. Si cambias dónde se hace, el servicio o el diagnóstico, lo firmado deja de contar y se prepara con el texto nuevo. Al pie de la hoja dice cómo se firma («Firma en la clínica», «Firma en papel» o «Firma por enlace») y que queda en la historia clínica con la fecha y la hora, sin advertencias; el PDF firmado dice el nivel real en letra chica: firma electrónica simple (en el Perú, Ley 27269), no firma digital. Si es menor, «Falta la firma de…» nombra a su representante; «Firmar en su teléfono» no se ofrece si su enlace no lo dejaría firmar (menor, sin fecha de nacimiento o sin su documento en la ficha).",
@@ -1828,12 +1835,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Datos de la clínica",
     parent: SETTINGS,
     purpose:
-      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo y el color de su marca, la razón social, el documento fiscal, el país, la moneda y la zona horaria, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
+      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo, su hoja membretada y el color de su marca, la razón social, el documento fiscal, el país, la moneda y la zona horaria, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
     terms: [
       "organización",
       "nombre de la clínica",
       "nombre comercial",
       "logo",
+      "hoja membretada",
+      "membrete",
+      "papel membretado",
+      "hoja de la clínica",
+      "encabezado de los papeles",
+      "pie de página",
+      "plantilla de los papeles",
       "color de la marca",
       "colores de la clínica",
       "color",
@@ -1862,12 +1876,18 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "nombre-clinica-ven-mis-pacientes",
         q: "¿Qué nombre de la clínica ven mis pacientes?",
-        a: "El nombre comercial, en todo: WhatsApp, «Su enlace», el portal, el registro, el chat de la web y los PDF. La razón social va solo en el comprobante y en los papeles legales. El nombre comercial es obligatorio y se cambia en «Datos de la clínica»; ahí mismo subes el logo, que ven al abrir su registro y su enlace.",
+        a: "El nombre comercial, en todo: WhatsApp, «Su enlace», el portal, el registro, el chat de la web y los PDF. La razón social va en el comprobante y en los papeles legales y, si subiste tu hoja membretada, en la línea chica bajo su diseño en todos tus papeles. El nombre comercial es obligatorio y se cambia en «Datos de la clínica»; ahí mismo subes el logo, que ven al abrir su registro y su enlace.",
       },
       {
         id: "poner-color-clinica",
         q: "¿Puedo poner el color de mi clínica?",
-        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos; «Elegir otro color» abre la paleta o recibe el código de tu marca, y «Sacar de una foto» toma el color de una foto de tu letrero (tócala donde está tu color; la foto no se guarda). Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Tu color va donde actúas: los botones principales, el menú en el que estás y lo que eliges; los nombres, las iniciales y los fondos quedan en negro y gris, para que la pantalla no se cargue. La invitación a tu equipo y el resumen del lunes también llevan tu color en el botón; los correos de tu cuenta, como el de la contraseña, siguen con el de la app. Los colores de error, listo y aviso no cambian, y las recetas, órdenes y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
+        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos; «Elegir otro color» abre la paleta o recibe el código de tu marca, y «Sacar de una foto» toma el color de una foto de tu letrero (tócala donde está tu color; la foto no se guarda). Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales; si subiste tu hoja membretada, tus papeles llevan su diseño en vez de esa línea. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Tu color va donde actúas: los botones principales, el menú en el que estás y lo que eliges; los nombres, las iniciales y los fondos quedan en negro y gris, para que la pantalla no se cargue. La invitación a tu equipo y el resumen del lunes también llevan tu color en el botón; los correos de tu cuenta, como el de la contraseña, siguen con el de la app. Los colores de error, listo y aviso no cambian, y las recetas, órdenes y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
+      },
+      {
+        id: "poner-hoja-membretada",
+        q: "¿Cómo pongo mi hoja membretada en las recetas?",
+        forms: ["hoja membretada", "papel membretado", "poner mi membrete", "subir mi hoja", "mi hoja en los papeles", "encabezado de las recetas", "mi hoja en los documentos"],
+        a: "En «Datos de la clínica» › «Hoja membretada», debajo de «Logo», toca «Subir la hoja» y elige tu hoja en PDF (mejor) o en PNG o JPG, de hasta 5 MB; si trae varias páginas se usa la primera, y si la tienes en Word, guárdala como PDF. Antes de guardarla ves una receta de ejemplo sobre ella, firmada por un profesional de tu equipo (otro que tú, si lo hay), con un recuadro que marca dónde va el texto: entre tu diseño de arriba y el de abajo, y encima de la marca de agua si la tiene. Mejor súbela sin RUC, dirección ni teléfono: la razón social y el RUC salen siempre en una línea chica bajo tu diseño; con una sola sede, también su dirección y su teléfono, y con varias, la dirección fiscal si la tienes en tus datos, salvo que marques «Mi hoja ya trae la dirección y el teléfono». El comprobante en hoja dice siempre una dirección: la fiscal o, sin ella, la de la sede que cobró. Si el texto pisa tu diseño, «Ajustar dónde va el texto» deja mover los bordes del recuadro o escribir los milímetros de cada lado. Se guarda con «Usar esta hoja» y desde ahí tus papeles nuevos en hoja salen sobre ella (receta, orden, hoja de atención, consentimiento, presupuesto, historia y comprobante en hoja), y la hoja que se firma en la tablet o en su enlace muestra su parte de arriba y la de abajo; el ticket de caja no cambia. Es una sola hoja para todo el equipo: cada papel lleva además la firma y el sello de quien lo emite, así que si tu hoja dice el nombre o la colegiatura de un profesional, pide a quien la diseñó una versión sin esos datos. Lo ya emitido queda con la hoja que tenía. «Cambiar la hoja» la abre para corregirla o subir otra, y «Quitar la hoja» vuelve al membrete de antes (tu nombre, tu logo si lo subiste y tus datos); el aviso trae «Deshacer». Lo cambia quien administra la clínica.",
       },
       {
         id: "saco-color-letrero",
@@ -2064,12 +2084,12 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "entrego-autoridad-pide-registro-mis-datos",
         q: "¿Qué le entrego a la autoridad si me pide el registro de mis datos?",
-        a: "En Configuración › Protección de datos, «Descargar para la autoridad» arma un PDF con lo que la clínica usa ese día.",
+        a: "En Configuración › Protección de datos, «Descargar para la autoridad» arma un PDF con lo que la clínica usa ese día y, aparte, los proveedores que solo intervienen si pidió la carga de sus datos.",
       },
       {
         id: "aparece-proveedor-contrate",
         q: "¿Por qué aparece un proveedor que no contraté?",
-        a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes.",
+        a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes. Los de la carga de datos van aparte: solo intervienen si la clínica envía sus datos para cargarlos, y esos archivos se eliminan al terminar o, a más tardar, a los 30 días.",
       },
     ],
   },

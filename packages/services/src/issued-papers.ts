@@ -81,6 +81,8 @@ export async function issuedPaperBytes(
     documentId: string
     /** La palabra y el motivo, si está anulado. */
     voided: { word: string; reason: string | null } | null
+    /** Cuándo se emitió: lleva la hoja membretada que la clínica tenía entonces (ADR 0182). */
+    issuedAt: Date | string
     draw: (context: PaperContext) => Promise<Uint8Array>
   },
   storage: PaperStorage,
@@ -92,9 +94,10 @@ export async function issuedPaperBytes(
   if (stored) return voided ? stampVoidedPdf(stored, voided) : stored
 
   const checkUrl = await documentCheckUrl(tx, orgId, type, documentId)
-  const clinic = await loadDocumentClinic(tx, orgId)
+  const clinic = await loadDocumentClinic(tx, orgId, { at: input.issuedAt })
   const bytes = await draw({ clinic, checkUrl })
-  if (voided || !checkUrl || !storage.putPatientDocument) return bytes
+  // Sin su hoja membretada (no se pudo leer) tampoco se guarda: quedaría así para siempre.
+  if (voided || !checkUrl || clinic.sheetUnavailable || !storage.putPatientDocument) return bytes
 
   let objectKey: string
   try {
