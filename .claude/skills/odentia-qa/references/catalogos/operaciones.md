@@ -305,6 +305,20 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** «Pagar» pagó al instante con el importe de siempre; anotar un sueldo «todavía no» lo dio por pagado hoy; «Dejar de repetir» borró el mes vencido sin pagar; el sueldo del mes anterior salió vencido el día en que se paga; «Cambiar lo que se repite» al importe de siempre no cambió nada; lo que se repite dejó de poder anotarse en dólares; «Ver el reporte» abrió otro mes y «Pagar en Gastos» otra sede.
 
+## O-CFG-01 Cambiar un archivo de la clínica (hoja membretada, logo)
+
+**Dónde:** `S/letterhead.ts`, `API/letterhead.ts`, `S/document-clinic.ts` (la hoja que lleva cada papel).
+
+- [ ] La vista previa usa el archivo que la persona tiene abierto, no «el de hoy» del servidor: si otra persona lo cambió o lo quitó, se dice, no se muestra el ajeno.
+- [ ] Un archivo rechazado no deja activo guardar el anterior sin decirlo.
+- [ ] Cada motivo de rechazo sale con su texto (clave o protección, dañado, peso, formato), comprobado con el archivo de verdad, no con `instanceof` de la librería.
+- [ ] Lo que dibuja el navegador (franjas, miniatura) y lo que guarda el servidor (el PDF) dicen lo mismo, o el servidor lo rehace.
+- [ ] Quitar, cambiar y deshacer llevan la versión que se tenía a la vista; el conflicto se dice.
+- [ ] Los márgenes extremos dejan lugar a un papel corto entero en una hoja, o la vista previa lo avisa.
+- [ ] Lo emitido conserva su versión; lo que se rehace al vuelo (anulados, comprobantes) usa la de su fecha, también los márgenes.
+
+**Ya falló:** la vista previa de «Cambiar la hoja» mostró la hoja que otra persona acababa de subir y, quitada en otra pestaña, decía «Elige la hoja»; el aviso de PDF con clave nunca salía porque pdf-lib no lanza su clase; con 200 mm, una receta de un medicamento salió en dos hojas (QA del 11 nov, corregidos antes de unir).
+
 ## Casos
 
 Un caso por operación, dicho como estado del dato. Se recorren en el código y, lo que se pueda, en la pantalla.
@@ -334,3 +348,4 @@ Un caso por operación, dicho como estado del dato. Se recorren en el código y,
 | CO21 | En el borde: una cita de hoy a las 16:30 se estira o se mueve a las 12:00 cuando son las 13:00, y después «Vino». | AGE-02 | El cambio se rechaza o avisa que ya pasó; «Vino» deja quién y se deshace. |
 | CO22 | Otro estado: recepción cancela y, con el cajón viejo en otra pestaña, alguien pulsa «Confirmar cita». | AGE-02 | La segunda recibe «la cita cambió»; la cita sigue cancelada. |
 | CO23 | A medias: cita 17:30–18:00 al final del turno; «Editar detalles» le pone un servicio de 90 minutos. | AGE-02 | Avisa que sale del horario, como al mover, y queda rastro de qué cambió. |
+| CO24 | Otro rol, a la vez: la dueña abre «Cambiar la hoja» y otra persona la reemplaza o la quita. | CFG-01 | La vista previa dice que la hoja cambió y no muestra la ajena; guardar o quitar no pisa la de la otra persona. |

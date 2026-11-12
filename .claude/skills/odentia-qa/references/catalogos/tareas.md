@@ -229,6 +229,18 @@ En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (
 
 ---
 
+## Quien administra la clínica
+
+### T-ADM-01 Poner la hoja membretada de la clínica en las recetas
+**Dónde:** Configuración › Datos de la clínica › «Hoja membretada» (`CA/settings/clinic-letterhead.tsx`).
+- [ ] La encuentro desde Configuración y, antes de guardarla, veo cómo sale una receta sobre ella.
+- [ ] Error propio: marqué mal la casilla o un margen y lo corrijo sin volver a subirla.
+- [ ] Quitarla y volver a ponerla con «Deshacer», también en el celular.
+- [ ] La Ayuda me contesta con mis palabras («papel con el diseño de la clínica»).
+- [ ] Una receta ya emitida dice con qué hoja salió.
+
+---
+
 ## Ventas en óptica
 
 Todavía sin tareas: ninguna ronda recorrió vistIA con la voz novato. La primera que lo haga suma aquí `T-VEN-01` y las que sigan (venta al paso, medida de la vista, montura y adelanto), con lo que vio en pantalla.

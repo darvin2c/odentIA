@@ -315,3 +315,20 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Quien vende sabe a quién le toca sin salir de la venta.
 - [ ] Un valor fuera de rango avisa sin frenar.
 **Patrones:** `Field` y `FieldGroup` (`UI/field.tsx`); `UI/input-group.tsx`.
+
+## Configuración
+
+### M-CFG-01 Poner la hoja membretada de la clínica
+**Quién:** la dueña o quien administra; una vez al alta y rara vez después (supuesto).
+**Dónde:** `CA/settings/clinic-letterhead.tsx`, `packages/clinic-app/src/lib/letterhead.ts`.
+**Medida:** 5 clics, 1 cajón, 0 saltos (1 si se comprueba con «Ver en grande»), 2 decisiones y unas 130 palabras; corregir la casilla o un margen, 3 clics sin volver a subirla (1440 px). El logo, para comparar: 4 clics y unas 25 palabras.
+
+- [ ] La vista previa se lee, o se amplía ahí mismo, sin otra pestaña.
+- [ ] Al ajustar los milímetros, la vista previa se ve mientras se escribe, también a 390 px.
+- [ ] Un campo vacío no se vuelve 0, la coma decimal vale y el error se dice junto al campo.
+- [ ] La casilla de dirección y teléfono sale solo si hay dirección o teléfono que agregar.
+- [ ] Quitarla deja cómo volver a ponerla después del aviso, y el foco no se pierde.
+- [ ] «¿Salir sin guardar?» no pregunta si lo tocado volvió a como estaba.
+- [ ] Un solo tope de teclado para elegir el archivo.
+**Ya falló:** una receta de ejemplo a 5 px de letra; «45,5» escrito como 455 mm (QA del 11 nov, corregidos antes de unir).
+**Patrones:** `FormDrawer`; `Dialog` (`UI/`) para ampliar; `Field` (`UI/field.tsx`); `useFormSurface` como el logo.
