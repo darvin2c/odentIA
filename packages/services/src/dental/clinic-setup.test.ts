@@ -1,5 +1,5 @@
 /**
- * Cargar la configuración de una clínica nueva (ADR 0104): el ensayo no guarda nada,
+ * Cargar la configuración de una clínica de odentIA (ADR 0104), con la biblioteca dental: el ensayo no guarda nada,
  * la carga crea con las operaciones de siempre, volver a cargar no duplica y lo de
  * una persona espera a que sea parte de la clínica.
  */
@@ -13,11 +13,11 @@ import { orgSpecialty, serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import type { AdminActor } from "./admin-core.js"
-import { ClinicSetupRehearsal, runClinicSetup } from "./clinic-setup.js"
-import { type ClinicSetupPlanInput, clinicSetupPlanSchema } from "./clinic-setup-plan.js"
+import type { AdminActor } from "../admin-core.js"
+import { ClinicSetupRehearsal, runClinicSetup } from "../clinic-setup.js"
+import { type ClinicSetupPlanInput, clinicSetupPlanSchema } from "../clinic-setup-plan.js"
 import { seedOdentiaCatalog } from "@odentia/db/dental"
-import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertOrg, ownerDb, setupTestDb } from "../test-setup.js"
 
 setupTestDb()
 
