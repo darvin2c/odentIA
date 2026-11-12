@@ -51,6 +51,14 @@ export const supportCase = pgTable(
      * los administradores leen el caso aunque no lo hayan abierto (ADR 0181).
      */
     accessRequestedAt: timestamp("access_requested_at", { withTimezone: true }),
+    /**
+     * Lo que pidió soporte con ese pedido: el rol de la clínica con que necesita
+     * mirar (nulo = solo la configuración), cuántos minutos y quién lo pidió, a
+     * quien se le da el permiso si la clínica lo autoriza.
+     */
+    accessRequestedRole: text("access_requested_role"),
+    accessRequestedMinutes: integer("access_requested_minutes"),
+    accessRequestedBy: text("access_requested_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -168,10 +176,13 @@ export const supportAttachment = pgTable(
 )
 
 /**
- * Acceso delegado de diagnóstico: un owner/admin de la clínica autoriza a
- * soporte a ver la configuración operacional (no clínica) de su organización,
- * ligado a un caso, con vencimiento máximo de 1 hora y revocable. El actor
- * sigue siendo el staff: nunca suplanta al owner.
+ * Acceso delegado de soporte: un owner/admin de la clínica autoriza a soporte,
+ * ligado a un caso, con vencimiento máximo de 1 hora y revocable. Dos alcances:
+ * `diagnostico`, la lista de configuración que se lee desde la administración, y
+ * `rol`, la app de la clínica en solo lectura con lo que ve `viewRole`. El actor
+ * sigue siendo el staff: nunca suplanta al owner ni es miembro de la clínica.
+ * Uno solo vigente por clínica (`support_access_grant_one_open_uidx`): dar otro
+ * cierra el anterior, así el tope de 1 hora no se encadena abriendo casos.
  */
 export const supportAccessGrant = pgTable(
   "support_access_grant",
@@ -185,14 +196,39 @@ export const supportAccessGrant = pgTable(
       .notNull()
       .references(() => user.id),
     scope: text("scope").notNull().default("diagnostico"),
+    /** Con alcance `rol`: el rol de la clínica cuyo permiso de lectura usa soporte. */
+    viewRole: text("view_role"),
+    /** La persona de soporte que puede usarlo; nulo hasta que alguien de soporte tome el caso. */
+    staffUserId: text("staff_user_id").references(() => user.id),
+    /** Para qué, con las palabras de quien lo dio o lo pidió. */
+    reason: text("reason"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Quién lo cerró antes de tiempo (la clínica o el equipo); nulo si terminó solo. */
+    revokedBy: text("revoked_by").references(() => user.id),
+    /** Por qué terminó: lo quitaron, otro lo reemplazó, venció, se resolvió el caso o quien lo dio ya no puede darlo. */
+    endReason: text("end_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("support_access_grant_case_idx").on(table.caseId, table.expiresAt),
     index("support_access_grant_org_idx").on(table.organizationId, table.expiresAt),
-    check("support_access_grant_scope_check", sql`${table.scope} = 'diagnostico'`),
+    uniqueIndex("support_access_grant_one_open_uidx")
+      .on(table.organizationId)
+      .where(sql`${table.revokedAt} is null`),
+    check("support_access_grant_scope_check", sql`${table.scope} in ('diagnostico','rol')`),
+    check(
+      "support_access_grant_role_check",
+      sql`(${table.scope} = 'rol') = (${table.viewRole} is not null)`,
+    ),
+    check(
+      "support_access_grant_reason_check",
+      sql`${table.reason} is null or char_length(${table.reason}) between 1 and 500`,
+    ),
+    check(
+      "support_access_grant_end_check",
+      sql`(${table.revokedAt} is null) = (${table.endReason} is null) and (${table.endReason} is null or ${table.endReason} in ('quitado','reemplazado','vencido','caso_resuelto','sin_quien_lo_dio'))`,
+    ),
     check("support_access_grant_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
     // Tope exacto de 1 h: el servicio crea expiresAt desde el mismo createdAt explícito.
     check(
@@ -215,8 +251,11 @@ export const supportAccessGrant = pgTable(
 )
 
 /**
- * Auditoría de accesos delegados: cada lectura diagnóstica, denegación y
- * revocación. Append-only: ningún rol de app puede actualizar ni borrar.
+ * Auditoría de accesos delegados: autorizar, quitar, cada lectura diagnóstica,
+ * cada entrada con pase y cada denegación. `staffUserId` es quien actuó: alguien
+ * de soporte, o la persona de la clínica que autorizó o quitó. Las fichas que
+ * abre soporte en solo lectura quedan además en `clinical_access_log`, que la
+ * clínica ve. Append-only: ningún rol de app puede actualizar ni borrar.
  */
 export const supportAccessAudit = pgTable(
   "support_access_audit",
@@ -238,7 +277,7 @@ export const supportAccessAudit = pgTable(
     index("support_access_audit_case_idx").on(table.caseId, table.createdAt),
     check(
       "support_access_audit_action_check",
-      sql`${table.action} in ('vista_diagnostica','denegado_sin_permiso','revocado')`,
+      sql`${table.action} in ('vista_diagnostica','denegado_sin_permiso','revocado','autorizado','pase','entrada','denegado_pase')`,
     ),
     foreignKey({ name: "support_access_audit_case_id_case_id_fk", columns: [table.caseId], foreignColumns: [supportCase.id] })
       .onDelete("cascade"),
@@ -262,6 +301,41 @@ export const supportAccessAudit = pgTable(
         supportAccessGrant.organizationId,
       ],
     }),
+  ],
+)
+
+/**
+ * La entrada de soporte a la app de una clínica con un permiso de alcance `rol`.
+ * La administración crea un pase de un solo uso (60 s, solo su hash); la app de la
+ * clínica lo canjea por la sesión de solo mirar (su hash en `sessionHash`), que
+ * vale mientras valga el permiso. Es de odentIA: sin `GRANT` al rol de la app;
+ * solo la API la lee, con el dueño.
+ */
+export const supportAccessSession = adminSchema.table(
+  "support_access_session",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    grantId: uuid("grant_id")
+      .notNull()
+      .references(() => supportAccessGrant.id, { onDelete: "cascade" }),
+    staffUserId: text("staff_user_id")
+      .notNull()
+      .references(() => user.id),
+    passHash: text("pass_hash").notNull(),
+    passExpiresAt: timestamp("pass_expires_at", { withTimezone: true }).notNull(),
+    sessionHash: text("session_hash"),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("support_access_session_pass_uidx").on(table.passHash),
+    uniqueIndex("support_access_session_session_uidx").on(table.sessionHash),
+    index("support_access_session_grant_idx").on(table.grantId),
+    check(
+      "support_access_session_redeem_check",
+      sql`(${table.redeemedAt} is null) = (${table.sessionHash} is null)`,
+    ),
   ],
 )
 
