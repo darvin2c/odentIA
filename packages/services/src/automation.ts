@@ -3297,21 +3297,26 @@ export interface AppointmentNotice {
   why?: string
   /** No le llegará por algo de la persona (no hay por dónde, o pidió no recibir mensajes): hay que avisarle a mano. */
   byHand?: boolean
-}
-
-/** El mensaje que puede salir en lugar del aviso de siempre, si tiene por dónde (el de «Confirmar», el de los datos). */
-const NOTICE_INSTEAD: Partial<Record<AppointmentNoticeKey, AutomationMessageKey[]>> = {
-  aviso_cita_movida: [MOVED_TO_CONFIRM_KEY],
-  aviso_cita_reservada: [APPOINTMENT_DATA_NOTICE_KEY],
+  /** Quien recibe sus avisos, si no es el paciente (su madre, quien habla por él): el aviso a mano es para ella. */
+  to?: string
 }
 
 /**
- * Por qué no hay por dónde escribirle el aviso, con las palabras del envío (`noRoute`); nulo si el
- * de siempre o el que sale en su lugar tienen vía. Lo mismo que decidirá la entrega.
+ * Por qué no hay por dónde escribirle el aviso, con las palabras del envío (`noRoute`); nulo si tiene
+ * vía. Como la entrega: el de «Confirmar» sale en lugar del de siempre solo si la cita queda por
+ * confirmar (`movedToConfirmFor`). El de los datos depende de lo que le falte al salir y no se
+ * cuenta: así nunca se dice que le avisa cuando no saldría (revisión del 11 nov).
  */
-async function noticeUnreachable(tx: Db, orgId: string, contactId: string, kind: AppointmentNoticeKey): Promise<string | null> {
+async function noticeUnreachable(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  kind: AppointmentNoticeKey,
+  status: string,
+): Promise<string | null> {
+  const keys: AutomationMessageKey[] = kind === "aviso_cita_movida" && status === "programada" ? [kind, MOVED_TO_CONFIRM_KEY] : [kind]
   let first: string | null = null
-  for (const key of [kind, ...(NOTICE_INSTEAD[kind] ?? [])]) {
+  for (const key of keys) {
     const route = await previewMessageRoute(tx, orgId, contactId, await currentAutomationMessage(tx, orgId, key))
     if (!("cause" in route)) return null
     first ??= route.detail
@@ -3346,17 +3351,32 @@ export async function enqueueAppointmentNotice(
   if (!runtime.adminOn) return { queued: false, why: "Argos está apagado" }
   const contactId = await preferredContact(tx, orgId, appt.patientId)
   if (!contactId) return { queued: false, why: "No tiene un teléfono ni un correo para avisarle", byHand: true }
+  // Quien recibe sus avisos puede no ser el paciente: lo que hay que avisarle a mano es a ella.
+  const [own] = await tx
+    .select({ personId: patient.personId })
+    .from(patient)
+    .where(and(eq(patient.id, appt.patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  const [recipient] =
+    own?.personId === contactId
+      ? []
+      : await tx
+          .select({ name: contact.displayName })
+          .from(contact)
+          .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+          .limit(1)
+  const to = recipient ? { to: recipient.name } : {}
   const kind = NOTICE_OF[change]
   // Si pidió no recibir mensajes de la clínica, no se dice que el agente le avisa: no saldría.
   if (!(await mayWriteFirst(tx, orgId, contactId, purposeOfKind(kind))))
-    return { queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true }
+    return { queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true, ...to }
   // En pausa, el aviso queda como tarea del equipo (`deliverJob`); si no, sale si tiene por dónde.
-  const unreachable = runtime.agentsPaused ? null : await noticeUnreachable(tx, orgId, contactId, kind)
+  const unreachable = runtime.agentsPaused ? null : await noticeUnreachable(tx, orgId, contactId, kind, appt.status)
   const told = (queued: boolean): AppointmentNotice =>
     runtime.agentsPaused
       ? { queued, why: "Los agentes están en pausa: queda una tarea para avisarle" }
       : unreachable
-        ? { queued: false, why: unreachable, byHand: true }
+        ? { queued: false, why: unreachable, byHand: true, ...to }
         : { queued }
   if (change === "movida") {
     // Un aviso que aún no sale dice la fecha nueva al salir: no hace falta otro.

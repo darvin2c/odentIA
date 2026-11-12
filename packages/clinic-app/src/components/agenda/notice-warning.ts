@@ -6,7 +6,8 @@ import { type AgendaAppointment, noticeWarning } from "../../lib/agenda"
  * mensajes), lo dice aparte y queda a la vista hasta cerrarlo, como lo demás que no debe perderse
  * al reservar: el aviso flotante de siempre dura unos segundos.
  */
-export function warnUnsentNotice(appointment: Pick<AgendaAppointment, "notice" | "patientName">): void {
+export function warnUnsentNotice(appointment: Pick<AgendaAppointment, "id" | "notice" | "patientName">): void {
   const text = noticeWarning(appointment)
-  if (text) toast.warning(text, { duration: Number.POSITIVE_INFINITY, closeButton: true })
+  // Uno por cita: «Deshacer» o mover otra vez lo reemplaza, no apila otro igual.
+  if (text) toast.warning(text, { id: `aviso-sin-llegar-${appointment.id}`, duration: Number.POSITIVE_INFINITY, closeButton: true })
 }

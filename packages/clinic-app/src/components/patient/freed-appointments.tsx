@@ -13,10 +13,11 @@ import {
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { type ComponentProps, useId, useState } from "react"
-import { invalidateAppointmentQueries } from "../../lib/agenda"
+import { type AgendaAppointment, invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { PLAN_QUERY_KEYS } from "../../lib/budgets"
 import { activeOrgTimeZone } from "../../lib/locale"
+import { warnUnsentNotice } from "../agenda/notice-warning"
 import { whenSaid } from "../agenda/shared"
 
 /** Una cita por venir que se reservó para lo que hoy quedó hecho (el servidor la dice al firmar). */
@@ -152,10 +153,12 @@ export function FinalizedFreedAppointments({
  * marque (mesa de la entrega 12: ningún mensaje sale sin que el equipo lo elija), y se dice.
  */
 async function releaseAppointment(id: string, notify: boolean): Promise<void> {
-  await apiFetch(`/api/appointments/${id}/status`, {
+  const result = await apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${id}/status`, {
     method: "POST",
     body: JSON.stringify({ status: "cancelada", cancelReason: "clinica", ...(notify ? {} : { notice: false }) }),
   })
+  // Marcó avisarle y no le llegará: se dice aparte y queda a la vista.
+  if (notify) warnUnsentNotice(result.data)
 }
 
 function ReleaseDialog({

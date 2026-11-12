@@ -89,7 +89,7 @@ export interface AgendaAppointment {
    * Solo al reservar, mover o cancelar: si el agente le avisará a la persona y, si no le llegará,
    * por qué (`why`, una frase sin punto) y si hay que avisarle a mano (`byHand`).
    */
-  notice?: { queued: boolean; why?: string; byHand?: boolean }
+  notice?: { queued: boolean; why?: string; byHand?: boolean; to?: string }
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   visit: AppointmentVisit
@@ -415,5 +415,7 @@ export function noticeLine(notice: AgendaAppointment["notice"], sent: string): s
 export function noticeWarning(appointment: Pick<AgendaAppointment, "notice" | "patientName">): string | null {
   const notice = appointment.notice
   if (!notice?.byHand || !notice.why) return null
-  return `${appointment.patientName} no recibirá el aviso. ${notice.why}. Avísale tú.`
+  // A quien recibe sus avisos, si no es el paciente (su madre): no se confunde con el paciente.
+  const who = notice.to ? `${notice.to}, que recibe los avisos de ${appointment.patientName},` : appointment.patientName
+  return `${who} no recibirá el aviso. ${notice.why}. Avísale tú.`
 }

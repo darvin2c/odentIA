@@ -397,6 +397,12 @@ describe("al cambiar la cita, el agente le avisa", () => {
       moveAppointment(tx, only.orgId, only.ownerId, first.id, { expectedVersion: first.version, startsAt: later(5 * DAY).toISOString(), outsideSchedule: true }),
     )
     expect(moved.notice).toEqual({ queued: true })
+    // Pero si sigue confirmada sale el de siempre, que no tiene por dónde: no le llegará.
+    const confirmed = await run(only, (tx) => setAppointmentStatus(tx, only.orgId, only.ownerId, first.id, "confirmada"))
+    const kept = await run(only, (tx) =>
+      moveAppointment(tx, only.orgId, only.ownerId, first.id, { expectedVersion: confirmed.version, startsAt: later(6 * DAY).toISOString(), outsideSchedule: true, stillConfirmed: true }),
+    )
+    expect(kept).toMatchObject({ status: "confirmada", notice: { queued: false, byHand: true } })
   })
 
   it("mover una cita cuyo aviso aún no sale no deja otro aviso, y sus recordatorios cuentan desde la hora nueva", async () => {
