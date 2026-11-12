@@ -9,14 +9,17 @@
 
 /**
  * Cuándo interviene: siempre, si la clínica usa los agentes, si usa el
- * dictado en la atención o si conecta uno de esos canales (`provider` de su
- * conexión).
+ * dictado en la atención, si conecta uno de esos canales (`provider` de su
+ * conexión) o si nos envía sus datos para cargarlos (skill `odentia-carga`):
+ * en ese caso, solo hasta que se eliminan, al terminar la carga o a los 30
+ * días de recibirlos (cláusula 3 del contrato de encargo).
  */
 export type DataProcessorUse =
   | { kind: "siempre" }
   | { kind: "agentes" }
   | { kind: "dictado" }
   | { kind: "canal"; providers: readonly string[] }
+  | { kind: "carga" }
 
 export interface DataProcessor {
   id: string
@@ -184,9 +187,48 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
     country: "Estados Unidos",
     use: { kind: "canal", providers: ["microsoft365"] },
   },
+  // La carga de los datos de una clínica nueva (ADR 0104): la clínica envía su
+  // lista al correo de soporte, que entra por Cloudflare y se lee en Gmail, y la
+  // carga se prepara con Claude, que corre los comandos de la skill y ve cómo es
+  // el archivo: `clinic-import-cli.ts` tapa lo que va entre «» y, sin fila de
+  // encabezados, `profileColumns` muestra la forma de la primera fila, no su texto.
+  {
+    id: "carga-correo",
+    name: "Cloudflare, Inc. (Cloudflare Email Routing)",
+    short: "Cloudflare (correo de soporte)",
+    purpose:
+      "Recibir en el correo de soporte los archivos que la clínica envía para cargar sus datos y pasarlos al buzón.",
+    data: "El correo y sus archivos adjuntos, solo de paso.",
+    receives: "El correo con los archivos de la carga, de paso",
+    country: "Estados Unidos",
+    use: { kind: "carga" },
+  },
+  {
+    id: "carga-buzon",
+    name: "Google LLC (Gmail, buzón de soporte)",
+    short: "Gmail (buzón de soporte)",
+    purpose:
+      "Guardar el correo con los archivos de la carga hasta eliminarlo: al terminar la carga o, a más tardar, a los 30 días de recibido.",
+    data: "El correo y sus archivos adjuntos: la lista de pacientes y los datos de la clínica.",
+    receives: "El correo con los archivos de la carga, 30 días como máximo",
+    country: "Estados Unidos",
+    use: { kind: "carga" },
+  },
+  {
+    id: "carga-claude",
+    name: "Anthropic, PBC (Claude)",
+    short: "Claude (Anthropic)",
+    purpose: "Ayudar al equipo de odentIA a preparar la carga de los datos que la clínica envía.",
+    data: "Lo necesario para preparar la carga.",
+    receives: "Lo necesario para preparar la carga",
+    country: "Estados Unidos",
+    use: { kind: "carga" },
+  },
 ]
 
 /** Los que intervienen siempre, para todas las clínicas. */
 export const ALWAYS_PROCESSORS = DATA_PROCESSORS.filter((p) => p.use.kind === "siempre")
 /** Los que dependen de lo que la clínica conecta o enciende. */
-export const OPTIONAL_PROCESSORS = DATA_PROCESSORS.filter((p) => p.use.kind !== "siempre")
+export const OPTIONAL_PROCESSORS = DATA_PROCESSORS.filter((p) => p.use.kind !== "siempre" && p.use.kind !== "carga")
+/** Los de la carga de sus datos: solo si la clínica nos la pide, y hasta que se eliminan. */
+export const IMPORT_PROCESSORS = DATA_PROCESSORS.filter((p) => p.use.kind === "carga")

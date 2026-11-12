@@ -183,7 +183,8 @@ export function checkClinicImportPlan(plan: ClinicImportPlan, today: string): Cl
     if (!docType || !docNumber) continue
     const doc = `${documentIssuerCountry(profile, docType, docCountry) ?? ""}|${docType}|${docNumber.trim().toUpperCase()}`
     const first = documents.get(doc)
-    if (first) error(person.key, `Ese documento ya está en la fila de ${nameOf(byKey.get(first)!)} («${first}»)`, "docNumber")
+    // El nombre va entre «», como todo dato de una persona: la terminal lo tapa (`withoutData` de la CLI).
+    if (first) error(person.key, `Ese documento ya está en la fila de «${nameOf(byKey.get(first)!)}» («${first}»)`, "docNumber")
     else documents.set(doc, person.key)
   }
 
