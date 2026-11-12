@@ -9,6 +9,7 @@ import {
   PRISM_BASES,
   type PrismBase,
   type Refraction,
+  typedNumber,
 } from "@odentia/optical"
 import { Field, FieldError, FieldLabel, Input } from "@odentia/ui"
 
@@ -34,14 +35,8 @@ export interface LensDraft {
 export type LensDrafts = Record<Eye, LensDraft>
 export const EMPTY_LENSES: LensDrafts = { od: {}, oi: {} }
 
-/** «−1,25», «+2», «1.5» → número; vacío → undefined; lo demás, el texto, para que el servidor lo señale. */
-export function numberOf(text: string | undefined): number | string | undefined {
-  if (text === undefined) return undefined
-  const clean = text.trim().replace("−", "-").replace(",", ".").replace(/^\+/, "")
-  if (!clean) return undefined
-  const value = Number(clean)
-  return Number.isFinite(value) ? value : text
-}
+/** «−1,25», «‒1,25» pegado de una receta impresa, «+2», «1.5» → número (`typedNumber`). */
+export const numberOf = typedNumber
 
 /** Un número guardado como se escribe: con coma y, en las dioptrías, con signo. */
 export function textOf(value: number | undefined, signed = false): string | undefined {
