@@ -1,10 +1,10 @@
 # Tareas de cada rol en su día
 
-El catálogo de la voz novato: lo que recepción, caja, ventas, el paciente y nuestro equipo en la administración hacen en un día, y dónde tropieza quien lo hace por primera vez.
+El catálogo de la voz novato: lo que recepción, caja, ventas y el paciente hacen en un día, y dónde tropieza quien lo hace por primera vez.
 Es el piso, no el techo: el novato revisa las comprobaciones de las tareas que el área toca, una por una, y además arma sus propias tareas y hace sus giras.
 Crece con lo que cada recorrido devuelve en «Para mi catálogo», y se poda: lo que ya no existe se quita y lo repetido se une.
 Cada comprobación se mira en la pantalla, sin leer el código. «Ya falló» dice cómo tropezó alguien antes; no es una sospecha sobre el cambio de hoy.
-Rutas: `R` = `packages/clinic-app/src/routes/`, `C` = `packages/clinic-app/src/components/`, `A` = `apps/admin/src/`.
+Rutas: `R` = `packages/clinic-app/src/routes/`, `C` = `packages/clinic-app/src/components/`.
 
 En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (dejarla a medias y volver), **error propio** (equivocarse y corregir), **«¿se guardó?»** y **otro día** (lo que quedó de ayer).
 
@@ -290,64 +290,6 @@ Todavía sin tareas: ninguna ronda recorrió vistIA con la voz novato. La primer
 
 ---
 
-## Administración (equipo interno)
-
-Lo que hacen las cuentas de odentIA en la administración: el rol Administración y el rol Soporte. La administración no tiene Ayuda: quien llega nuevo solo tiene lo que dice la pantalla, así que cada comprobación se mira ahí.
-
-### T-ADM-01 Saber a quién responder hoy y abrirlo
-**Dónde:** Inicio (`A/routes/_app/index.tsx`), el menú (`A/routes/_app.tsx`) y la frase de los casos (`A/lib/support-words.ts`).
-- [ ] Al entrar veo con nombre a quién responder: prospectos, casos de soporte, seguimientos de hoy y propietarias que no aceptan, cada uno con su plazo.
-- [ ] Lo vencido va arriba y dice desde cuándo. «Vence» se dice solo de una invitación; una solicitud dice «Responder hasta…».
-- [ ] Cada botón abre ese elemento (la solicitud, el caso o la clínica en Equipo), no la lista entera, y la lista de detrás conserva sus filtros.
-- [ ] El número de «Lista de espera» y el de «Soporte» en el menú son los de su sección en Inicio.
-- [ ] Con un producto elegido, la pantalla dice qué colas siguen contando todos.
-- [ ] Con el rol Soporte veo lo mío sin importes ni casos de cobro, y ninguna parte de la pantalla falla por permisos.
-- [ ] Sin nada pendiente hay un solo vacío; si una parte no carga, dice el error con «Reintentar» y lo demás sigue.
-- [ ] Otro día: lo que resolví ayer ya no sale, sin haberlo marcado «Hecho».
-
-**Ya falló:** Inicio solo contaba («Lista de espera por revisar 4») y había que buscar el elemento en la lista; una invitación vencida o una propietaria que no aceptaba no salían en ningún lado; «Soporte» no tenía número en el menú; el texto decía «los dos productos» cuando ya eran tres; con el rol Soporte, una parte de Inicio fallaba por permisos.
-
-### T-ADM-02 Hacer el seguimiento de un prospecto
-**Dónde:** Lista de espera (`A/routes/_app/waitlist.tsx`) y su cajón, en «Seguimiento».
-- [ ] Anoto qué pasó y cuándo volver a llamar en el mismo lugar, con un toque para la fecha.
-- [ ] Si ya había una fecha, al abrir viene elegido «Mantener ‹fecha›», y el botón dice qué va a pasar antes de pulsarlo.
-- [ ] ¿Se guardó? La entrada sale arriba con mi nombre y la hora, y ese día la solicitud aparece en Inicio, en «Seguimientos de hoy».
-- [ ] Una entrada no se edita ni se borra: si me equivoqué, anoto otra.
-- [ ] La etapa dice dónde va: «Por revisar», «Invitada», «Invitación vencida», «Entró», «Paga» o «Descartada».
-- [ ] Con el rol Soporte puedo anotar, y la pantalla dice que invitar y descartar lo hace Administración.
-- [ ] Interrupción: escribo, voy a otra pantalla y al volver lo escrito sigue ahí, o me avisó antes de perderlo.
-- [ ] Otro día: la nota que dejé sin tocar la fecha no me borró la que había.
-
-**Ya falló:** la «Nota del equipo» era una sola caja que se reemplazaba, sin quién ni cuándo, y no había dónde poner cuándo volver a llamar; la invitación vencida seguía como «Invitada»; abrir una solicitud desde un enlace no la encontraba si la lista miraba otra etapa.
-
-### T-ADM-03 Atender un caso de soporte y pedir el acceso de diagnóstico
-**Dónde:** Soporte › Cola y la ficha del caso (`A/routes/_app/support.tsx`); del lado de la clínica, Ayuda › «Tus casos con soporte» (`C/support-cases.tsx`).
-- [ ] La cola pone primero lo que más nos espera, con la misma frase que Inicio: «Espera desde hace… · Responder hasta…».
-- [ ] Filtro por estado, tipo y quién lo lleva; la clínica sale como una etiqueta que se quita, y al recargar los filtros siguen.
-- [ ] «Abrir caso» deja la ficha a la vista, con el foco en su título, y «Cerrar ficha» me devuelve a la fila.
-- [ ] Antes de pedir el acceso veo el texto exacto, a quién le llega y quién puede autorizarlo, con los roles en español.
-- [ ] Pedirlo dos veces deja un solo pedido. El botón no sale en un caso de cobro, de entrar a su cuenta, resuelto o con un acceso vigente.
-- [ ] ¿Se guardó? El caso dice «Esperando a la clínica»; cuando la clínica autoriza o responde, vuelve arriba en la cola y en Inicio.
-- [ ] Del lado de la clínica, quien abrió el caso y no puede autorizar lee quién puede, y la propietaria ya ve el caso en su Ayuda.
-- [ ] Las fechas se leen como en el resto de la administración, nunca «9/1/2026, 7:30:00 a. m.».
-- [ ] «Falta en la guía» guarda al momento, y «Ya está en la guía» se deshace.
-- [ ] Interrupción: el borrador de mi respuesta sigue ahí al cambiar de caso.
-
-**Ya falló:** la respuesta de la clínica dejaba el caso en «Esperando a la clínica» y no volvía a la cola; la cola no decía qué iba primero; el acceso se leía con la fecha y la hora del navegador; si quien abrió el caso no podía autorizar, nadie más de la clínica lo veía.
-
-### T-ADM-04 Confirmar o rechazar un comprobante
-**Dónde:** Cobros y planes › «Comprobantes por confirmar» (`A/routes/_app/billing.tsx`); del lado de la clínica, Configuración › Plan y pagos (`R/_org/settings.plan.index.tsx`).
-- [ ] Veo el archivo, el importe y la clínica antes de decidir.
-- [ ] «Rechazar» pide el motivo, nombra el archivo, el importe y la clínica, y dice que a la clínica no le llega correo.
-- [ ] ¿Se guardó? La fila sale de la lista sin error, el número de Inicio baja y el historial dice «Rechazado: motivo · por ‹quién› el ‹día›».
-- [ ] La clínica lee el motivo en su historial, en «Próximo cobro» y en el aviso de arriba, y puede registrar otro comprobante en el mismo cargo.
-- [ ] Error propio: rechacé uno que sí había entrado, y la pantalla me dice que se corrige registrando el pago en el cargo.
-- [ ] Con el rol Soporte esta lista no aparece.
-
-**Ya falló:** sobre un comprobante pendiente solo había «Confirmar» y «Reversar», y «Reversar» siempre daba error.
-
----
-
 ### T-WEB-01 Visitante: decidir si pide una invitación
 **Dónde:** las tres webs públicas (`apps/web`), en el teléfono primero.
 - [ ] Ya soy cliente: entro a mi cuenta desde cualquier punto de la página, en un toque.
@@ -384,7 +326,3 @@ Lo que hacen las cuentas de odentIA en la administración: el rol Administració
 | CT20 | «Llama: no puede a las 10, ¿a las 11?» Mientras tanto, otra recepcionista reserva las 11. | REC-04 | La cita queda a las 11, o la pantalla avisa que se ocupó antes de mover. |
 | CT21 | La paciente cancela por error desde su enlace y lo vuelve a abrir. | PAC-02, REC-06 | Puede reservar otra o ve a quién escribir; recepción ve la cancelación en Inicio. |
 | CT22 | «¿A qué hora venía la señora Dora?» Su cita de hoy ya empezó. | REC-12 | La encuentra por su nombre, primera, con su cita de hoy. |
-| CT23 | Primer día en la administración, con el rol Soporte: «Mira qué hay que atender hoy y empieza por lo que más espera.» | ADM-01, ADM-03 | Abre desde Inicio el mismo caso que encabeza la cola, con la misma frase; nada de cobros, nada falla por permisos. |
-| CT24 | «Llamé a Dental Andes, pide que la llame el jueves.» El miércoles anota otra cosa sin tocar la fecha; el jueves la llama y no contesta. | ADM-02, ADM-01 | El jueves sale una sola vez en Inicio; la nota del miércoles no borró la fecha; «Mañana» la saca hasta el viernes. |
-| CT25 | Un caso que abrió recepción necesita ver la configuración de la clínica; la propietaria autoriza 30 minutos sin escribir nada. | ADM-03 | Un solo pedido; la propietaria lo ve en su Ayuda; el caso vuelve arriba con «Acceso autorizado hasta las…». |
-| CT26 | «Ese comprobante no se lee, recházalo.» Al día siguiente, el banco muestra que el pago sí entró. | ADM-04 | La clínica lee el motivo y puede subir otro; el error se corrige registrando el pago en el cargo. |
