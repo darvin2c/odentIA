@@ -22,6 +22,7 @@ const FOLDER = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle")
 let container: StartedTestContainer
 let ownerDb: Db
 let before: string
+let beforeNotes: string
 
 const ADA = "staff-ada"
 const BETO = "staff-beto"
@@ -45,13 +46,16 @@ const LOOSE_FILE = "c0000000-0000-4000-8000-000000000007"
 const STAFF_FILE = "c0000000-0000-4000-8000-000000000008"
 const OLD_GRANT = "c0000000-0000-4000-8000-000000000009"
 
-/** Copia de las migraciones hasta antes de la de reglas: la base como estaba en producción. */
-function migrationsBeforeRules(): string {
+/**
+ * Copia de las migraciones hasta antes de la que termina en `suffix`: la base como estaba
+ * en producción (antes de las reglas) o como la deja un despliegue que ya corrió la 0101.
+ */
+function migrationsBefore(suffix: string): string {
   const journal = JSON.parse(readFileSync(join(FOLDER, "meta", "_journal.json"), "utf8")) as {
     entries: { tag: string }[]
   }
-  const position = journal.entries.findIndex((entry) => entry.tag.endsWith("_administracion_hoy_reglas"))
-  if (position < 0) throw new Error("falta la migración de reglas de la administración de hoy en el journal")
+  const position = journal.entries.findIndex((entry) => entry.tag.endsWith(suffix))
+  if (position < 0) throw new Error(`falta la migración «${suffix}» en el journal`)
   const entries = journal.entries.slice(0, position)
   const dir = mkdtempSync(join(tmpdir(), "odentia-administracion-hoy-"))
   mkdirSync(join(dir, "meta"))
@@ -135,7 +139,7 @@ beforeAll(async () => {
   ownerDb = createOwnerDb(
     `postgres://dentalagent:dentalagent@${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`,
   )
-  before = migrationsBeforeRules()
+  before = migrationsBefore("_administracion_hoy_reglas")
   await migrate(ownerDb, { migrationsFolder: before })
 
   await ownerDb.execute(sql`
@@ -190,6 +194,15 @@ beforeAll(async () => {
   await insertCase(OLD_GRANT, "esperando_clinica", "2026-11-10T14:00:00Z")
   await insertGrant(OLD_GRANT, "2026-11-10T13:00:00Z")
 
+  // Hasta la 0101, como una base que ya la corrió: después se anotan contactos de verdad,
+  // uno con el mismo texto de la nota. La marca de nota (0103) no los toca.
+  beforeNotes = migrationsBefore("_nota_no_es_contacto")
+  await migrate(ownerDb, { migrationsFolder: beforeNotes })
+  await ownerDb.execute(sql`
+    insert into "saas_follow_up" ("request_id", "author_user_id", "body", "follow_up_on", "created_at") values
+      (${UNAUDITED}::uuid, ${ADA}, 'Le escribí por WhatsApp', null, '2026-11-12T10:00:00Z'),
+      (${NOTED}::uuid, ${ADA}, 'Llamé: quiere ver la demo el jueves', null, '2026-11-12T11:00:00Z')`)
+
   // El resto de las migraciones, como en el despliegue.
   await migrate(ownerDb, { migrationsFolder: FOLDER })
 })
@@ -197,21 +210,30 @@ beforeAll(async () => {
 afterAll(async () => {
   await container?.stop()
   if (before) rmSync(before, { recursive: true, force: true })
+  if (beforeNotes) rmSync(beforeNotes, { recursive: true, force: true })
 })
 
 describe("al desplegar", () => {
-  it("la nota de cada solicitud pasa a ser su primera entrada, con autor solo si está auditada y existe", async () => {
-    const entries = rows<{ request_id: string; author_user_id: string | null; body: string; follow_up_on: string | null; admin_only: boolean; created_at: string }>(
+  it("la nota de cada solicitud pasa a ser su primera entrada, con autor solo si está auditada y existe, y queda marcada como nota", async () => {
+    const entries = rows<{ request_id: string; author_user_id: string | null; body: string; follow_up_on: string | null; admin_only: boolean; from_note: boolean; created_at: string }>(
       await ownerDb.execute(sql`
-        select "request_id", "author_user_id", "body", "follow_up_on", "admin_only",
+        select "request_id", "author_user_id", "body", "follow_up_on", "admin_only", "from_note",
           to_char("created_at" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as "created_at"
         from "saas_follow_up" order by "created_at"`),
     )
+    // Una nota no es un contacto (`from_note`): no cuenta como haberle respondido. Los
+    // contactos anotados después de la 0101, aunque repitan el texto de la nota, sí lo son.
     expect(entries).toEqual([
-      { request_id: UNAUDITED, author_user_id: null, body: "Nota de antes de auditar", follow_up_on: null, admin_only: false, created_at: "2026-10-20T14:00:00Z" },
-      { request_id: ORPHAN_AUDIT, author_user_id: null, body: "La anotó alguien que ya no está", follow_up_on: null, admin_only: false, created_at: "2026-10-26T11:00:00Z" },
-      { request_id: NOTED, author_user_id: ADA, body: "Llamé: quiere ver la demo el jueves", follow_up_on: null, admin_only: false, created_at: "2026-11-04T16:30:00Z" },
+      { request_id: UNAUDITED, author_user_id: null, body: "Nota de antes de auditar", follow_up_on: null, admin_only: false, from_note: true, created_at: "2026-10-20T14:00:00Z" },
+      { request_id: ORPHAN_AUDIT, author_user_id: null, body: "La anotó alguien que ya no está", follow_up_on: null, admin_only: false, from_note: true, created_at: "2026-10-26T11:00:00Z" },
+      { request_id: NOTED, author_user_id: ADA, body: "Llamé: quiere ver la demo el jueves", follow_up_on: null, admin_only: false, from_note: true, created_at: "2026-11-04T16:30:00Z" },
+      { request_id: UNAUDITED, author_user_id: ADA, body: "Le escribí por WhatsApp", follow_up_on: null, admin_only: false, from_note: false, created_at: "2026-11-12T10:00:00Z" },
+      { request_id: NOTED, author_user_id: ADA, body: "Llamé: quiere ver la demo el jueves", follow_up_on: null, admin_only: false, from_note: false, created_at: "2026-11-12T11:00:00Z" },
     ])
+    // La marca no abre la bitácora: una entrada sigue sin poder cambiarla.
+    await expect(
+      ownerDb.execute(sql`update "saas_follow_up" set "from_note" = false where "request_id" = ${UNAUDITED}::uuid and "from_note"`),
+    ).rejects.toMatchObject(violates("saas_follow_up_append_only"))
     // La columna vieja sigue: la ruta de la nota vive durante este despliegue.
     const [noted] = rows<{ note: string }>(
       await ownerDb.execute(sql`select "note" from "saas_waitlist_request" where "id" = ${NOTED}::uuid`),

@@ -588,6 +588,41 @@ describe("el seguimiento de un prospecto", () => {
     expect(stored?.note).toBeNull()
   })
 
+  it("una «Nota del equipo» de antes no es un contacto: la solicitud sigue por responder y no se dice «Contactada»", async () => {
+    // Como la deja la migración 0101: sin autor, sin fecha para volver, con la fecha en que pidió.
+    const createdAt = new Date("2026-11-06T15:00:00Z")
+    const id = await waiting("nota-de-antes@andes.test", createdAt)
+    const before = await countWaitlistToReview(ownerDb, THU)
+    await ownerDb.insert(saasFollowUp).values({ requestId: id, authorUserId: null, body: "Pedirle a Ada que la llame: pregunta por el plan anual", fromNote: true, createdAt })
+    expect(await countWaitlistToReview(ownerDb, THU)).toBe(before)
+    expect(await homeOf(admin, THU, id)).toEqual([
+      expect.objectContaining({ reason: "por_responder", answer: expect.objectContaining({ due: "vencida", day: "2026-11-10" }) }),
+    ])
+    const detail = await getWaitlistRequest(ownerDb, admin, id, THU)
+    expect(detail.request.answer).toMatchObject({ kind: "por_responder", due: "vencida" })
+    expect(detail.entries).toEqual([expect.objectContaining({ authorName: null, fromNote: true })])
+    // La nota de una pestaña vieja tampoco es un contacto.
+    await setWaitlistNote(ownerDb, support, id, "Pregunta si hay plan anual", THU)
+    expect((await getWaitlistRequest(ownerDb, admin, id, THU)).entries[0]).toMatchObject({ fromNote: true })
+    expect(await homeOf(admin, THU, id)).toHaveLength(1)
+    // Anotar un contacto sí: sale de «Prospectos por responder» y el plazo dice el día del contacto, no el de la nota.
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "La llamé, lo piensa" }, THU)
+    expect(await homeOf(admin, THU, id)).toEqual([])
+    expect(await countWaitlistToReview(ownerDb, THU)).toBe(before - 1)
+    expect((await getWaitlistRequest(ownerDb, admin, id, THU)).request.answer).toEqual({ kind: "contactada", day: "2026-11-12" })
+  })
+
+  it("la fila dice si su fecha es de una entrada solo de administración y si su invitación la tiene en Inicio", async () => {
+    const id = await waiting("fecha-admin@andes.test")
+    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Precio especial", followUpOn: "2026-11-12", adminOnly: true }, WED)
+    expect((await getWaitlistRequest(ownerDb, support, id, WED)).request).toMatchObject({ nextFollowUpOn: "2026-11-12", nextFollowUpAdminOnly: true })
+    await addWaitlistFollowUp(ownerDb, support, id, { body: "Le escribí", followUpOn: "2026-11-12" }, WED)
+    expect((await getWaitlistRequest(ownerDb, support, id, WED)).request).toMatchObject({ nextFollowUpAdminOnly: false, invitationSoon: false })
+    // Invitada hace 12 de sus 14 días: está en Inicio por su invitación.
+    await inviteFromWaitlist(ownerDb, admin, id, {}, new Date(WED.getTime() - 12 * DAY))
+    expect((await getWaitlistRequest(ownerDb, support, id, WED)).request).toMatchObject({ invitationSoon: true })
+  })
+
   it("la base no deja reescribir una entrada", async () => {
     const id = await waiting("inmutable@andes.test")
     const entry = await addWaitlistFollowUp(ownerDb, admin, id, { body: "La llamé" }, WED)

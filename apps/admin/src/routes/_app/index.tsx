@@ -288,7 +288,7 @@ function AdminHome() {
                     </Link>
                   }
                   lead={isAdmin ? null : "Invitar o descartar lo hace Administración; tú puedes anotar el seguimiento."}
-                  note={`Se responde en ${today.data.answerWithin}. La fila se va sola al anotar un contacto, invitar, reenviar o descartar.`}
+                  note={prospectsNote(today.data.answerWithin, isAdmin)}
                 >
                   <ul className="divide-y rounded-xl border bg-card">
                     {toAnswer.map((row) => (
@@ -473,6 +473,18 @@ function AdminHome() {
       {isAdmin ? <TodayBilling product={product} /> : null}
     </PageShell>
   )
+}
+
+/**
+ * Cuándo se va una fila de «Prospectos por responder», según por qué está y lo
+ * que puede hacer quien mira (`waitlistHomeRows`): una sin responder se va al
+ * anotar un contacto; una invitación por vencer o vencida no, porque sigue
+ * esperando que entre, y reenviarla o descartarla es de la administración.
+ */
+function prospectsNote(answerWithin: string, isAdmin: boolean): string {
+  return isAdmin
+    ? `Se responde en ${answerWithin}. Una sin responder se va al anotar un contacto, invitar o descartar; una invitación, al reenviarla, cuando entra o al descartarla.`
+    : `Se responde en ${answerWithin}. Una sin responder se va al anotar un contacto; una invitación sigue hasta que Administración la reenvíe o entre la clínica.`
 }
 
 /** «Abrir solicitud»: el cajón de esa solicitud en la lista de espera, no la lista. */

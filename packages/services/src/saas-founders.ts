@@ -277,8 +277,10 @@ export function followUpChoices(now = new Date()): FollowUpChoices {
  * Qué le toca al equipo con una solicitud, para la columna Plazo, la cabecera
  * del cajón e Inicio (el mismo dato en los tres):
  * - `por_responder`: nadie le respondió todavía; su plazo vencido, de hoy o
- *   hasta un día. Anotar un contacto cuenta como haberle respondido.
- * - `contactada`: ya se anotó un contacto y no hay fecha para volver.
+ *   hasta un día. Anotar un contacto cuenta como haberle respondido; una nota
+ *   de antes (`from_note`) no.
+ * - `contactada`: ya se anotó un contacto y no hay fecha para volver; el día
+ *   es el del último contacto.
  * - `volver`: el día (de Lima) en que hay que volver a contactarla.
  * La invitación no va aquí: su vencimiento lo dice `inviteExpiresAt`.
  */
@@ -288,14 +290,14 @@ export type WaitlistAnswer =
   | { kind: "volver"; day: string }
 
 export function waitlistAnswer(
-  row: { status: string; answerBy: Date | null; lastEntryAt: Date | null; nextFollowUpOn: string | null },
+  row: { status: string; answerBy: Date | null; lastContactAt: Date | null; nextFollowUpOn: string | null },
   now: Date,
 ): WaitlistAnswer | null {
   // Descartar cierra el seguimiento.
   if (row.status === "descartada") return null
   if (row.nextFollowUpOn) return { kind: "volver", day: row.nextFollowUpOn }
   if (row.status !== "por_revisar") return null
-  if (row.lastEntryAt) return { kind: "contactada", day: limaDate(row.lastEntryAt) }
+  if (row.lastContactAt) return { kind: "contactada", day: limaDate(row.lastContactAt) }
   if (!row.answerBy) return null
   const day = limaDate(row.answerBy)
   return { kind: "por_responder", due: row.answerBy < now ? "vencida" : day === limaDate(now) ? "hoy" : "hasta", by: row.answerBy, day }
@@ -307,14 +309,24 @@ const lastAuthor = alias(user, "last_follow_up_author")
 const isLastEntry = sql`${lastEntry.id} = (select f.id from ${saasFollowUp} f where f.request_id = ${saasWaitlistRequest.id}
   order by f.created_at desc, f.id desc limit 1)`
 
-/** Nadie le respondió: por revisar y sin ninguna entrada (anotar un contacto ya es responderle). */
+/**
+ * El último contacto anotado: una entrada que no es una nota de antes
+ * (`from_note`: la «Nota del equipo» trasladada o la de la ruta vieja).
+ */
+const lastContactAtSql = sql<Date | null>`(select max(f.created_at) from ${saasFollowUp} f
+  where f.request_id = ${saasWaitlistRequest.id} and not f.from_note)`.mapWith(saasFollowUp.createdAt)
+
+/** Nadie le respondió: por revisar y sin ningún contacto anotado (anotar un contacto ya es responderle; una nota, no). */
 const toAnswerSql = and(
   eq(saasWaitlistRequest.status, "por_revisar"),
-  sql`not exists (select 1 from ${saasFollowUp} f where f.request_id = ${saasWaitlistRequest.id})`,
+  sql`not exists (select 1 from ${saasFollowUp} f where f.request_id = ${saasWaitlistRequest.id} and not f.from_note)`,
 )
 /** Invitada con el enlace que vence en 3 días o ya venció. */
 const invitationSoonSql = (now: Date) =>
   and(eq(saasWaitlistRequest.status, "invitada"), lte(saasWaitlistRequest.inviteExpiresAt, new Date(now.getTime() + INVITE_SOON_DAYS * DAY)))
+/** La misma regla de `invitationSoonSql`, para una fila ya leída. */
+const invitationSoon = (row: { status: string; inviteExpiresAt: Date | null }, now: Date) =>
+  row.status === "invitada" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() <= now.getTime() + INVITE_SOON_DAYS * DAY
 
 /* ---------- La lista en la administración ---------- */
 
@@ -350,6 +362,18 @@ export interface WaitlistRow {
   answer: WaitlistAnswer | null
   /** El día de Lima para volver a contactarla: el de su última entrada. Nulo sin fecha o descartada. */
   nextFollowUpOn: string | null
+  /**
+   * Esa fecha la dejó una entrada solo de administración: a soporte no le sale
+   * en su Inicio (`waitlistHomeRows`), así que su lista y su cajón no la dicen
+   * como algo que le toca.
+   */
+  nextFollowUpAdminOnly: boolean
+  /**
+   * Invitada con el enlace que vence en 3 días o ya venció: sale en Inicio, en
+   * «Prospectos por responder», haya o no seguimiento, hasta reenviarla, que
+   * entre o descartarla.
+   */
+  invitationSoon: boolean
 }
 
 export interface WaitlistFilter {
@@ -427,8 +451,9 @@ async function readWaitlistRows(
       organizationName: organization.name,
       decidedByName: decider,
       paid: paidSql,
-      lastEntryAt: lastEntry.createdAt,
+      lastContactAt: lastContactAtSql,
       lastFollowUpOn: lastEntry.followUpOn,
+      lastAdminOnly: lastEntry.adminOnly,
     })
     .from(saasWaitlistRequest)
     .leftJoin(saasPlan, eq(saasPlan.id, saasWaitlistRequest.planId))
@@ -496,8 +521,9 @@ function toWaitlistRow(
     organizationName: string | null
     decidedByName: string | null
     paid: boolean
-    lastEntryAt: Date | null
+    lastContactAt: Date | null
     lastFollowUpOn: string | null
+    lastAdminOnly: boolean | null
   },
   timeline: SaasTermsTimeline,
   now: Date,
@@ -531,8 +557,10 @@ function toWaitlistRow(
     decidedByName: found.decidedByName,
     createdAt: row.createdAt,
     answerBy,
-    answer: waitlistAnswer({ status: row.status, answerBy, lastEntryAt: found.lastEntryAt, nextFollowUpOn }, now),
+    answer: waitlistAnswer({ status: row.status, answerBy, lastContactAt: found.lastContactAt, nextFollowUpOn }, now),
     nextFollowUpOn,
+    nextFollowUpAdminOnly: nextFollowUpOn !== null && found.lastAdminOnly === true,
+    invitationSoon: invitationSoon(row, now),
   }
 }
 
@@ -553,6 +581,8 @@ export interface WaitlistFollowUpEntry {
   /** El día de Lima para volver a contactar que dejó esta entrada. */
   followUpOn: string | null
   adminOnly: boolean
+  /** Una «Nota del equipo» de antes: no es un contacto ni cuenta como haberle respondido. */
+  fromNote: boolean
   createdAt: Date
 }
 
@@ -582,6 +612,7 @@ export async function getWaitlistRequest(tx: Db, actor: AdminActor, id: string, 
       body: saasFollowUp.body,
       followUpOn: saasFollowUp.followUpOn,
       adminOnly: saasFollowUp.adminOnly,
+      fromNote: saasFollowUp.fromNote,
       createdAt: saasFollowUp.createdAt,
     })
     .from(saasFollowUp)
@@ -620,12 +651,20 @@ async function insertFollowUp(
   tx: Db,
   actor: AdminActor,
   requestId: string,
-  entry: { body: string; followUpOn: string | null; adminOnly: boolean },
+  entry: { body: string; followUpOn: string | null; adminOnly: boolean; fromNote?: boolean },
   now: Date,
 ): Promise<WaitlistFollowUpEntry> {
   const [row] = await tx
     .insert(saasFollowUp)
-    .values({ requestId, authorUserId: actor.userId, body: entry.body, followUpOn: entry.followUpOn, adminOnly: entry.adminOnly, createdAt: now })
+    .values({
+      requestId,
+      authorUserId: actor.userId,
+      body: entry.body,
+      followUpOn: entry.followUpOn,
+      adminOnly: entry.adminOnly,
+      fromNote: entry.fromNote ?? false,
+      createdAt: now,
+    })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo anotar el seguimiento")
   await tx.update(saasWaitlistRequest).set({ updatedAt: now }).where(eq(saasWaitlistRequest.id, requestId))
@@ -642,6 +681,7 @@ async function insertFollowUp(
     body: row.body,
     followUpOn: row.followUpOn,
     adminOnly: row.adminOnly,
+    fromNote: row.fromNote,
     createdAt: row.createdAt,
   }
 }
@@ -697,7 +737,9 @@ export async function hideWaitlistFollowUp(tx: Db, actor: AdminActor, entryId: s
  * La ruta vieja de la nota (`PUT /:id/note`), que sigue usando una pestaña
  * abierta antes de este despliegue. Ya no escribe `note`: agrega una entrada
  * con el texto y le copia la fecha pendiente, para no cerrar el recordatorio.
- * Sin texto, o con el mismo texto de la última entrada, no hace nada. Se borra
+ * Es una nota, como la de antes (`fromNote`): no cuenta como haberle
+ * respondido. Sin texto, o con el mismo texto de la última entrada, no hace
+ * nada. Se borra
  * en la entrega siguiente, junto con la columna.
  */
 export async function setWaitlistNote(tx: Db, actor: AdminActor, id: string, note: string | null, now = new Date()): Promise<void> {
@@ -712,7 +754,7 @@ export async function setWaitlistNote(tx: Db, actor: AdminActor, id: string, not
     .orderBy(desc(saasFollowUp.createdAt), desc(saasFollowUp.id))
     .limit(1)
   if (last?.body === value) return
-  await insertFollowUp(tx, actor, id, { body: value, followUpOn: last?.followUpOn ?? null, adminOnly: false }, now)
+  await insertFollowUp(tx, actor, id, { body: value, followUpOn: last?.followUpOn ?? null, adminOnly: false, fromNote: true }, now)
 }
 
 /* ---------- Prospectos en Inicio de la administración ---------- */
@@ -774,6 +816,7 @@ export async function waitlistHomeRows(tx: Db, actor: AdminActor, now = new Date
     .select({
       row: saasWaitlistRequest,
       paid: paidSql,
+      lastContactAt: lastContactAtSql,
       entryId: lastEntry.id,
       entryBody: lastEntry.body,
       entryOn: lastEntry.followUpOn,
@@ -786,17 +829,17 @@ export async function waitlistHomeRows(tx: Db, actor: AdminActor, now = new Date
     .leftJoin(lastAuthor, eq(lastAuthor.id, lastEntry.authorUserId))
     .where(or(toAnswerSql, invitationSoonSql(now), followUpDue))
   const timeline = await loadSaasTermsTimeline(tx)
-  const soon = new Date(now.getTime() + INVITE_SOON_DAYS * DAY)
   const out: { item: WaitlistHomeRow; dueAt: number }[] = []
   for (const found of rows) {
     const { row } = found
-    const toAnswer = row.status === "por_revisar" && found.entryId === null
-    const invitation = row.status === "invitada" && row.inviteExpiresAt !== null && row.inviteExpiresAt <= soon
+    // Una nota de antes no es haberle respondido: sigue por responder.
+    const toAnswer = row.status === "por_revisar" && found.lastContactAt === null
+    const invitation = invitationSoon(row, now)
     const readable = found.entryId !== null && (readsAll || !found.entryAdminOnly)
     const due = readable && row.status !== "descartada" && found.entryOn !== null && found.entryOn <= today
     if (!toAnswer && !invitation && !due) continue
     const answerBy = toAnswer ? addBusinessDays(row.createdAt, timeline.at(row.createdAt).waitlistAnswerDays) : null
-    const answer = waitlistAnswer({ status: row.status, answerBy, lastEntryAt: null, nextFollowUpOn: null }, now)
+    const answer = waitlistAnswer({ status: row.status, answerBy, lastContactAt: null, nextFollowUpOn: null }, now)
     const followUp: WaitlistHomeFollowUp | null =
       due && found.entryOn && found.entryBody !== null && found.entryAt
         ? { on: found.entryOn, overdue: found.entryOn < today, body: found.entryBody, authorName: found.entryAuthor, createdAt: found.entryAt }

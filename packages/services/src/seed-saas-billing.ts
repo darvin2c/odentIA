@@ -548,6 +548,9 @@ const DEMO_FOLLOW_UPS = [
   { id: "00000000-0000-4000-8000-00000000f504", email: "andes-demo@example.test", authorUserId: SEED_STAFF_ADMIN_ID, daysAgo: 0, hour: 9, followUpIn: 1, adminOnly: false, body: "Le conté que cargamos sus pacientes desde lo que exporta su programa. Lo habla con su equipo y me confirma mañana." },
   // Un precio es de Administración: soporte ve que hay una entrada y su fecha, no el texto.
   { id: "00000000-0000-4000-8000-00000000f505", email: "cobrada-demo@example.test", authorUserId: SEED_STAFF_ADMIN_ID, daysAgo: 1, hour: 15, followUpIn: 0, adminOnly: true, body: "Pide precio especial si suma una segunda sede: responderle antes del próximo cobro." },
+  // La «Nota del equipo» de antes, sin autor (la trasladó la migración 0101): no es un contacto,
+  // así que OdontoVida sigue en «Prospectos por responder» con su plazo.
+  { id: "00000000-0000-4000-8000-00000000f506", email: "odontovida-demo@example.test", authorUserId: null, daysAgo: 4, hour: 12, followUpIn: null, adminOnly: false, fromNote: true, body: "Pedirle a Ada que la llame: pregunta por el plan anual." },
 ] as const
 
 /** Las fechas de una solicitud, relativas a hoy; las de la que entró, a su clínica. */
@@ -651,6 +654,7 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
           body: entry.body,
           followUpOn: entry.followUpIn === null ? null : limaDay(now, entry.followUpIn),
           adminOnly: entry.adminOnly,
+          fromNote: "fromNote" in entry ? entry.fromNote : false,
           createdAt: limaAt(now, entry.daysAgo, entry.hour),
         },
       ]

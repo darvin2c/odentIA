@@ -1007,6 +1007,12 @@ export const saasFollowUp = adminSchema.table(
     followUpOn: date("follow_up_on"),
     /** Solo la ve el rol Administración, no Soporte. */
     adminOnly: boolean("admin_only").notNull().default(false),
+    /**
+     * Viene de la «Nota del equipo» de antes (la migración 0101 o la ruta vieja
+     * de la nota): es una nota, no el registro de un contacto, así que no
+     * cuenta como haberle respondido.
+     */
+    fromNote: boolean("from_note").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

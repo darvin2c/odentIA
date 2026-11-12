@@ -1,0 +1,1 @@
+ALTER TABLE "admin"."saas_follow_up" ADD COLUMN "from_note" boolean DEFAULT false NOT NULL;

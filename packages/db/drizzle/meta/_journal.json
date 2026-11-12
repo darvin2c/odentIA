@@ -715,6 +715,20 @@
       "when": 1794431919564,
       "tag": "0101_administracion_hoy_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1794441634157,
+      "tag": "0102_nota_no_es_contacto",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1794441642499,
+      "tag": "0103_nota_no_es_contacto_reglas",
+      "breakpoints": true
     }
   ]
 }

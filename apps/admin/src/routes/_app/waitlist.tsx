@@ -43,7 +43,7 @@ import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { countByProduct, matchesProduct, perProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { webUrl } from "../../lib/host"
-import { FOLLOW_UP_CHOICES, type FollowUpChoice, openingFollowUpChoice } from "../../lib/follow-up-choice"
+import { FOLLOW_UP_CHOICES, type FollowUpChoice, followUpHint, openingFollowUpChoice } from "../../lib/follow-up-choice"
 import { invitationDueWords } from "../../lib/invitation-words"
 import { KpiSkeleton } from "../../components/skeletons/page-loading"
 import { WaitlistPageSkeleton, WaitlistSkeleton } from "../../components/skeletons/waitlist"
@@ -150,6 +150,9 @@ const row = z.object({
   answerBy: z.string().nullable(),
   answer: answerShape,
   nextFollowUpOn: z.string().nullable(),
+  // Con su valor si falta: mientras se despliega, la API anterior aún no los dice.
+  nextFollowUpAdminOnly: z.boolean().default(false),
+  invitationSoon: z.boolean().default(false),
 })
 type Row = z.infer<typeof row>
 const seatsShape = z.object({ planId: z.string(), planName: z.string(), used: z.number(), limit: z.number().nullable() }).nullable()
@@ -173,6 +176,7 @@ const entryShape = z.object({
   body: z.string().nullable(),
   followUpOn: z.string().nullable(),
   adminOnly: z.boolean(),
+  fromNote: z.boolean().default(false),
   createdAt: z.string(),
 })
 type Entry = z.infer<typeof entryShape>
@@ -220,7 +224,7 @@ function whenText(iso: string, now: Date): string {
  * las invitaciones, que se dicen con `invitationDueWords` (en Lima, con
  * «vence hoy» y el mismo rojo que Inicio).
  */
-function deadlineOf(item: Row, today: string, now: Date): { text: string; tone: "destructive" | "warning" | "muted" } {
+function deadlineOf(item: Row, today: string, now: Date, isAdmin: boolean): { text: string; tone: "destructive" | "warning" | "muted" } {
   if (item.status === "invitada" && item.inviteExpiresAt) {
     const due = invitationDueWords(item.inviteExpiresAt, now)
     const left = Math.ceil((new Date(item.inviteExpiresAt).getTime() - now.getTime()) / 86_400_000)
@@ -233,6 +237,8 @@ function deadlineOf(item: Row, today: string, now: Date): { text: string; tone: 
     return { text: `Responder hasta el ${formatLimaDay(answer.day)}`, tone: "muted" }
   }
   if (answer?.kind === "volver") {
+    // A soporte no le sale en Inicio la fecha que dejó una entrada solo de administración: la lleva Administración.
+    if (!isAdmin && item.nextFollowUpAdminOnly) return { text: `Volver a contactar: ${formatLimaDay(answer.day)} · lo lleva Administración`, tone: "muted" }
     return { text: `Volver a contactar: ${formatLimaDay(answer.day)}`, tone: answer.day <= today ? "destructive" : "muted" }
   }
   if (answer?.kind === "contactada") return { text: `Contactada el ${formatLimaDay(answer.day)}`, tone: "muted" }
@@ -240,8 +246,8 @@ function deadlineOf(item: Row, today: string, now: Date): { text: string; tone: 
   return { text: "—", tone: "muted" }
 }
 
-function Deadline({ item, today, now }: { item: Row; today: string; now: Date }) {
-  const deadline = deadlineOf(item, today, now)
+function Deadline({ item, today, now, isAdmin }: { item: Row; today: string; now: Date; isAdmin: boolean }) {
+  const deadline = deadlineOf(item, today, now, isAdmin)
   if (deadline.tone === "muted") return <span className="text-sm text-muted-foreground">{deadline.text}</span>
   return (
     <Badge variant={deadline.tone}>
@@ -302,11 +308,11 @@ function WaitlistPage() {
       {
         id: "deadline",
         header: "Plazo",
-        cell: ({ row: r }) => <Deadline item={r.original} today={today} now={new Date()} />,
+        cell: ({ row: r }) => <Deadline item={r.original} today={today} now={new Date()} isAdmin={isAdmin} />,
         meta: { view: { primary: true } },
       },
     ],
-    [today],
+    [today, isAdmin],
   )
   const columnVisibility = React.useMemo<VisibilityState>(
     (): VisibilityState =>
@@ -572,6 +578,7 @@ function RequestDrawer({ id, isAdmin, onClose }: { id: string; isAdmin: boolean;
   const followUpError = useFormSubmitError(followUpForm)
   const followUpSaving = useStore(followUpForm.store, (state) => state.isSubmitting)
   const body = useStore(followUpForm.store, (state) => state.values.body)
+  const adminOnly = useStore(followUpForm.store, (state) => state.values.adminOnly)
 
   const hide = useMutation({
     mutationFn: async (entryId: string) =>
@@ -662,10 +669,11 @@ function RequestDrawer({ id, isAdmin, onClose }: { id: string; isAdmin: boolean;
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <Badge variant="outline">{STAGE_LABEL[item.stage]}</Badge>
             <span>Pidió {askedText(item.createdAt, now)}</span>
-            <Deadline item={item} today={today} now={now} />
+            <Deadline item={item} today={today} now={now} isAdmin={isAdmin} />
             {item.nextFollowUpOn && item.answer?.kind !== "volver" ? (
-              <Badge variant={item.nextFollowUpOn <= today ? "destructive" : "outline"}>
+              <Badge variant={item.nextFollowUpOn <= today && (isAdmin || !item.nextFollowUpAdminOnly) ? "destructive" : "outline"}>
                 Volver a contactar: {formatLimaDay(item.nextFollowUpOn)}
+                {!isAdmin && item.nextFollowUpAdminOnly ? " · lo lleva Administración" : ""}
               </Badge>
             ) : null}
           </div>
@@ -768,14 +776,18 @@ function RequestDrawer({ id, isAdmin, onClose }: { id: string; isAdmin: boolean;
                     </p>
                   ) : null}
                   <p className="text-xs text-muted-foreground">
-                    {nextDay ? "Ese día aparece en Inicio, en «Seguimientos de hoy»." : "Sin fecha, no vuelve a salir en Inicio."}
+                    {followUpHint({ nextDay, invitationSoon: item.invitationSoon, adminOnly: isAdmin && adminOnly })}
                   </p>
                 </div>
               ) : null}
               {isAdmin ? (
                 <followUpForm.AppField name="adminOnly">
                   {(field) => (
-                    <field.CheckboxField id="espera-solo-admin" label="Solo administración" description="Soporte verá la fecha, no lo escrito." />
+                    <field.CheckboxField
+                      id="espera-solo-admin"
+                      label="Solo administración"
+                      description="Soporte verá que hay una entrada y su fecha, no lo escrito; ese día no le sale en su Inicio."
+                    />
                   )}
                 </followUpForm.AppField>
               ) : null}
@@ -944,6 +956,9 @@ function FollowUpEntry({ entry, now, isAdmin, onHide }: { entry: Entry; now: Dat
         <span className="text-muted-foreground">{whenText(entry.createdAt, now)}</span>
       </div>
       <p className="text-sm whitespace-pre-wrap">{entry.body}</p>
+      {entry.fromNote ? (
+        <p className="text-xs text-muted-foreground">«Nota del equipo» de antes: no cuenta como contacto.</p>
+      ) : null}
       {entry.followUpOn ? <p className="text-sm text-muted-foreground">Volver a contactar: {formatLimaDay(entry.followUpOn)}</p> : null}
       {isAdmin ? (
         entry.adminOnly ? (
