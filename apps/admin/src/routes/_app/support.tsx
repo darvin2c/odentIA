@@ -517,9 +517,9 @@ function SupportPage() {
   }
   // «Abrir la clínica (solo mirar)»: un pase de un minuto, en otra pestaña.
   const openClinic = useMutation({
-    mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/pass`, { method: "POST" }) as Promise<{ data: { url: string } }>,
+    mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/pass`, { method: "POST" }) as Promise<{ url: string }>,
     onSuccess: (body) => {
-      window.open(body.data.url, "_blank", "noopener")
+      window.open(body.url, "_blank", "noopener")
     },
   })
   const revokeGrant = useMutation({

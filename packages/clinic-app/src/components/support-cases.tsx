@@ -15,6 +15,7 @@ import {
   type SupportAccessValues,
   SupportGrantHistory,
   supportViewWords,
+  untilSentence,
   untilWords,
   useSupportAccessRefresh,
 } from "./support-access"
@@ -495,7 +496,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                 <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
                   <p className="font-bold">Acceso de soporte</p>
                   <p>
-                    Soporte puede mirar {supportViewWords(activeGrant.viewRole)} hasta las {untilWords(activeGrant.expiresAt)}. No puede cambiar
+                    Soporte puede mirar {supportViewWords(activeGrant.viewRole)} hasta las {untilSentence(activeGrant.expiresAt)} No puede cambiar
                     nada.
                   </p>
                   {canGrant ? (

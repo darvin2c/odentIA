@@ -40,7 +40,10 @@ const accessSchema = z.object({
 /** Los roles con que soporte puede mirar: los del producto, menos propietario y «miembro». */
 export function supportViewOptions(): { value: string; label: string }[] {
   const product = productUi().product
-  const roles = PRODUCT_ROLES[product].filter((role) => role !== "owner" && role !== "member")
+  // Administrador al final: es lo más amplio (toda la clínica).
+  const roles = PRODUCT_ROLES[product]
+    .filter((role) => role !== "owner" && role !== "member")
+    .sort((a, b) => Number(a === "admin") - Number(b === "admin"))
   return [
     { value: CONFIG, label: "Solo la configuración (ningún paciente)" },
     ...roles.map((role) => ({
@@ -62,6 +65,12 @@ export function supportViewWords(viewRole: string | null | undefined): string {
 /** «hasta las 4:40 p. m.» en la hora de este equipo. */
 export function untilWords(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+}
+
+/** La hora al final de una frase: «6:34 p. m.» ya trae su punto; «18:34» lo recibe. */
+export function untilSentence(iso: string): string {
+  const time = untilWords(iso)
+  return time.endsWith(".") ? time : `${time}.`
 }
 
 export interface SupportAccessValues {
@@ -241,7 +250,7 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
         >
           <p>
             Listo. Soporte puede mirar {supportViewWords(given.grant.viewRole)} hasta las{" "}
-            {untilWords(given.grant.expiresAt)}.
+            {untilSentence(given.grant.expiresAt)}
           </p>
           <Button
             type="button"
@@ -328,7 +337,7 @@ export function SupportGrantHistory({ grants }: { grants: ClinicGrant[] }) {
           <li key={grant.id} className="flex flex-col gap-1 rounded-xl bg-muted/60 px-3 py-2">
             <span>
               {untilWords(grant.createdAt)} · {nameOf(grant.grantedBy)} dio acceso a soporte para
-              mirar {supportViewWords(grant.viewRole)} hasta las {untilWords(grant.expiresAt)}.
+              mirar {supportViewWords(grant.viewRole)} hasta las {untilSentence(grant.expiresAt)}
             </span>
             {ended ? (
               <span>

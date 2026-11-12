@@ -467,10 +467,11 @@ export function createApp(deps: AppDeps) {
     "/api/admin/support",
     createAdminSupportRoute({
       ...deps,
-      // En el dominio del producto, con el puerto del panel si lo tiene (el proxy de e2e).
+      // La app de la clínica vive junto al panel de su producto: `app.odentia32.com` →
+      // `<slug>.odentia32.com` (en local, con el prefijo de la rama y el puerto del proxy).
       clinicUrlOf: (slug, product, path) => {
-        const port = new URL(deps.webURL).port
-        return `https://${slug}.${(domains[product] ?? deps.cookieDomain).replace(/^\./, "")}${port ? `:${port}` : ""}${path}`
+        const panel = new URL(panelUrlOf(product))
+        return `${panel.protocol}//${slug}.${panel.host.replace(/(^|\.)app\./, "$1")}${path}`
       },
     }),
   )
@@ -713,7 +714,8 @@ export function createApp(deps: AppDeps) {
       storage: deps.storage,
       secret: supportSecret,
       cookieDomainOf: (c) => domains[productOfRequest(c)] ?? deps.cookieDomain,
-      isClinicOrigin: (origin) => tenantOrigins.some((pattern) => pattern.test(origin)),
+      // Los mismos orígenes que CORS deja llamar con credenciales.
+      isClinicOrigin: (origin) => trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)),
     }),
   )
 

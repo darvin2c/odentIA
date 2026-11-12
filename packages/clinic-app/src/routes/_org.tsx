@@ -353,7 +353,7 @@ function OrgSwitcher() {
  * color que los avisos de la clínica, con hasta cuándo y «Salir».
  */
 function SupportStrip({ support }: { support: SupportMode }) {
-  const until = new Date(support.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  const until = new Date(support.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }).replace(/\.$/, "")
   return (
     <NoticeStrip
       label="Soporte de odentIA"

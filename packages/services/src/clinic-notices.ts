@@ -325,7 +325,8 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
       id: `soporte:${grant.id}`,
       topic: "soporte",
       tone: "aviso",
-      message: `Soporte de ${brand} puede ${what} hasta las ${hour(grant.expiresAt)}. ${who}; no puede cambiar nada.`,
+      // «6:34 p. m.» ya termina en punto: no se agrega otro.
+      message: `Soporte de ${brand} puede ${what} hasta las ${hour(grant.expiresAt).replace(/\.$/, "")}. ${who}; no puede cambiar nada.`,
       short: `Soporte: ${what.replace("mirar ", "")} · hasta ${hour(grant.expiresAt)}`,
       action: canManage
         ? { kind: "quitar_acceso", label: "Quitar acceso", shortLabel: "Quitar", grantId: grant.id, caseId: grant.caseId }
