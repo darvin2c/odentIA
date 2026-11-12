@@ -52,6 +52,8 @@ interface LensPrescription {
   verifiedAt: string | null
   voidedAt: string | null
   voidReason: string | null
+  /** La atención en que se emitió se anuló: no se vuelve a emitir desde ella. */
+  encounterVoided?: boolean
   notices: string[]
 }
 
@@ -475,12 +477,14 @@ export function PrescriptionsSection({ patientId }: RecordSectionProps) {
   const current = PRESCRIPTION_KINDS.map((kind) => data.current[kind.key]).filter((item): item is LensPrescription => Boolean(item))
   const currentIds = new Set(current.map((item) => item.id))
   const past = data.items.filter((item) => !currentIds.has(item.id))
-  // Una anulada de su examen se vuelve a emitir mientras ese examen no tenga otra viva de su tipo.
+  // Una anulada de su examen se vuelve a emitir mientras ese examen no tenga otra viva de su tipo,
+  // salvo que se haya anulado con su atención: esa atención ya no emite nada.
   const live = new Set(data.items.filter((item) => !item.voidedAt && item.encounterId).map((item) => `${item.encounterId}:${item.kind}`))
   const canIssueAgain = (item: LensPrescription) =>
     canWrite &&
     Boolean(item.voidedAt) &&
     item.source === "examen" &&
+    !item.encounterVoided &&
     item.prescriberUserId === myUserId &&
     !live.has(`${item.encounterId}:${item.kind}`)
   return (

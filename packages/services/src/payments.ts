@@ -45,6 +45,9 @@ import {
   sql,
 } from "drizzle-orm"
 import { budgetLineUnits, budgetValueOptionSql } from "./budgets.js"
+import { ADVANCE_KEY, wholeReturnedCharges } from "./charge-returns.js"
+
+export { ADVANCE_KEY, wholeReturnedCharges, type WholeReturnedCharge } from "./charge-returns.js"
 import {
   chargeTaxOf,
   orgTaxes,
@@ -394,11 +397,17 @@ export async function createCharge(
         ),
       )
     const agreed = source.line.priceCents ?? itemPrice ?? 0
-    const remaining = agreed - sum(generated)
+    // Lo devuelto entero también se cobró: no vuelve a quedar por generar.
+    const returnedWhole = (await wholeReturnedCharges(tx, orgId, patientId, [source.line.planItemId])).filter(
+      (charge) => charge.currency === unit,
+    )
+    const remaining = agreed - sum(generated) - returnedWhole.reduce((total, charge) => total + charge.chargedCents, 0)
     if (remaining <= 0)
       throw conflict(
         "CHARGE_EXCEEDS_BUDGET",
-        "El tratamiento ya tiene cargado el importe acordado",
+        returnedWhole.length > 0 && sum(generated) < agreed
+          ? "Un cobro de este tratamiento se devolvió entero, y lo devuelto no se vuelve a cargar solo: si corresponde cobrarlo otra vez, usa «Agregar otro concepto»"
+          : "El tratamiento ya tiene cargado el importe acordado",
       )
     amountCents ??= remaining
     if (amountCents > remaining)
@@ -1003,8 +1012,6 @@ export async function updateCharge(
 
 // --- Cobro atómico -----------------------------------------------------------------------
 
-/** La clave del cargo de un adelanto para un tratamiento (`advanceForBudgetItemId`), con la del cobro. */
-export const ADVANCE_KEY = "adelanto:"
 
 /** Medio efectivo que acepta la clínica (catálogo de Configuración, congelado al cobrar). */
 const CASH_TYPE_CODE = "10"
@@ -3642,9 +3649,13 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       }
     }
   }
+  // Lo devuelto entero cuenta como cobrado (ADR 0068): ocupa su visita y su tratamiento no se vuelve a cargar.
+  const returnedWhole = await wholeReturnedCharges(tx, orgId, patientId)
   // Cobro por sesión: visitas previstas del tratamiento y qué visita es cada concepto.
   const planItemIds = [
-    ...new Set(liveCharges.map((c) => c.planItemId).filter((v): v is string => !!v)),
+    ...new Set(
+      [...liveCharges, ...returnedWhole].map((c) => c.planItemId).filter((v): v is string => !!v),
+    ),
   ]
   const plannedByPlanItem: Record<string, number> = {}
   if (planItemIds.length) {
@@ -3668,12 +3679,16 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
   }
   const visitNumberByCharge: Record<string, number> = {}
   const visitasPorTratamiento: Record<string, number> = {}
-  for (const charge of liveCharges) {
-    // Una visita es un acto atendido de ese tratamiento (los cargos van del más antiguo al más nuevo).
+  const visitCharges = [
+    ...liveCharges.map((charge) => ({ ...charge, live: true })),
+    ...returnedWhole.map((charge) => ({ id: charge.chargeId, ...charge, live: false })),
+  ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  for (const charge of visitCharges) {
+    // Una visita es un acto atendido de ese tratamiento, del más antiguo al más nuevo.
     if (!charge.planItemId || !charge.encounterProcedureId) continue
     const next = (visitasPorTratamiento[charge.planItemId] ?? 0) + 1
     visitasPorTratamiento[charge.planItemId] = next
-    visitNumberByCharge[charge.id] = next
+    if (charge.live) visitNumberByCharge[charge.id] = next
   }
   const serviceByLine: Record<string, string | null> = {}
   if (lineIds.length) {
@@ -3913,10 +3928,15 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     aFavorOrigen,
     /** La moneda de lo aceptado de su plan; nula si no hay nada o hay en dos. */
     planCurrency: planCurrencies.length === 1 ? (planCurrencies[0]?.currency ?? null) : null,
-    /** Visitas atendidas por tratamiento (actos con cargo vivo): base de «ya realizado» en cobro por sesión. */
+    /** Visitas atendidas por tratamiento (actos con cargo vivo o devuelto entero): base de «ya realizado» en cobro por sesión. */
     visitasPorTratamiento,
     // Un adelanto para un tratamiento no lo da por cargado: al firmar se carga lo que falta.
-    conCargo: coveredPlanItems(liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY))),
+    // Lo devuelto entero también se cobró: al firmar no se vuelve a cargar (ADR 0068). Lo que se
+    // cobra por sesión no entra: cada visita se carga al firmarla, hasta las acordadas.
+    conCargo: coveredPlanItems([
+      ...liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY)),
+      ...returnedWhole,
+    ]).filter((planItemId) => plannedByPlanItem[planItemId] === undefined),
   }
 }
 
@@ -4011,6 +4031,8 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     : []
   const appliedTo = new Map<string, number>()
   for (const app of applications) appliedTo.set(app.chargeId, (appliedTo.get(app.chargeId) ?? 0) + app.amountCents)
+  // Lo devuelto entero también se cobró: no vuelve a quedar por cargar y se dice como devuelto.
+  const returnedWhole = await wholeReturnedCharges(tx, orgId, patientId, planItemIds)
   type Group = {
     budgetId: string
     budgetNumber: number
@@ -4055,7 +4077,10 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     groups.set(key, group)
     const agreed = (line.priceCents ?? 0) * budgetLineUnits(line)
     const own = charges.filter((charge) => charge.planItemId === line.planItemId && charge.currency === line.currency)
-    const generated = own.reduce((total, c) => total + c.amountCents + c.returnedCents + c.discountCents, 0)
+    const ownReturned = returnedWhole.filter((charge) => charge.planItemId === line.planItemId && charge.currency === line.currency)
+    const generated =
+      own.reduce((total, c) => total + c.amountCents + c.returnedCents + c.discountCents, 0) +
+      ownReturned.reduce((total, c) => total + c.chargedCents, 0)
     const paid = own.reduce((total, c) => total + (appliedTo.get(c.id) ?? 0), 0)
     const owing = own.reduce((total, c) => total + Math.max(0, c.amountCents - (appliedTo.get(c.id) ?? 0)), 0)
     const toCharge = Math.max(0, agreed - generated)
@@ -4063,8 +4088,11 @@ export async function acceptedTreatmentTotals(tx: Db, orgId: string, patientId: 
     group.paidCents += paid
     group.remainingCents += toCharge + owing
     group.owingCents += owing
-    group.discountCents += own.reduce((total, c) => total + c.discountCents, 0)
-    group.returnedCents += own.reduce((total, c) => total + c.returnedCents, 0)
+    group.discountCents +=
+      own.reduce((total, c) => total + c.discountCents, 0) +
+      ownReturned.reduce((total, c) => total + c.chargedCents - c.returnedCents, 0)
+    group.returnedCents +=
+      own.reduce((total, c) => total + c.returnedCents, 0) + ownReturned.reduce((total, c) => total + c.returnedCents, 0)
     group.lines.push({
       budgetItemId: line.lineId,
       planItemId: line.planItemId,

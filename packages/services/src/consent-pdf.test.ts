@@ -95,6 +95,46 @@ it("firmado en su enlace y sin confirmar: lleva su firma y dice que falta confir
   expect(written.join(" ")).toContain("IP 203.0.113.7")
 })
 
+it("firmado de nuevo en la clínica después del enlace: el PDF dice la fecha de la firma en la clínica", async () => {
+  const penSignatures = vi.spyOn(DocumentKit.prototype, "penSignatures")
+  const text = vi.spyOn(DocumentKit.prototype, "text")
+  await renderConsentPdf(
+    {
+      document: {
+        status: "firmado",
+        titleSnapshot: "Exodoncia",
+        procedureRef: null,
+        sectionsSnapshot: base,
+        bodySnapshot: "",
+        diagnosisCode: null,
+        declarationSnapshot: "He leído y comprendido la información.",
+        // Firmó en su enlace el 30 y, en la cita del 5, prefirió firmarlo de nuevo en la tablet.
+        signatureMethod: "clinica",
+        signerKind: "paciente",
+        signerName: "Rosa Rojas",
+        signerDoc: "DNI 40000004",
+        signatureData: { strokes: [[[10, 10], [200, 120]]] },
+        personSignedAt: new Date("2026-10-30T15:00:00Z"),
+        personSignedIp: "203.0.113.7",
+        personSignedUserAgent: "Mozilla/5.0 (Android)",
+        signedAt: new Date("2026-11-05T16:00:00Z"),
+        informerName: "Ana Torres",
+        informerTitle: "Cirujano dentista",
+        informerRegistration: "COP 12345",
+        informedAt: new Date("2026-11-05T16:00:00Z"),
+      },
+      patient: { displayName: "Rosa Rojas", docType: "DNI", docNumber: "40000004", patientNumber: 7 },
+      diagnosisDescription: null,
+      establishment: null,
+    } as never,
+    clinic,
+  )
+  const [signer] = penSignatures.mock.lastCall?.[0] ?? []
+  expect(signer?.lines.at(-1)?.text).toMatch(/^Firmó el 5 de noviembre de 2026/)
+  // La evidencia del enlace no se presenta como la firma que vale.
+  expect(text.mock.calls.map(([line]) => line).join(" ")).not.toContain("Firmó en su enlace")
+})
+
 it("firmado: la firma guardada del profesional sale dibujada y el papel sigue diciendo cómo se firmó", async () => {
   const penSignatures = vi.spyOn(DocumentKit.prototype, "penSignatures")
   const strokes = [[[10, 10], [200, 120]]]

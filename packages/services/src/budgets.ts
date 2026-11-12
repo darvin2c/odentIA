@@ -43,9 +43,10 @@ import { consentTemplate, consentTemplateService } from "@odentia/db/schema/clin
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { promotion as promotionTable } from "@odentia/db/schema/promotions"
-import { and, asc, desc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, or, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { livePersonalLinkToken } from "./booking-links.js"
 import { budgetAwaitsAnswer, OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
+import { wholeReturnedChargeSql } from "./charge-returns.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { settleBudgetCallback } from "./budget-callback.js"
@@ -3321,8 +3322,9 @@ async function insertRevisionLine(
 
 /**
  * Los tratamientos que ya se hicieron o se cobraron: tienen un procedimiento
- * vigente o un cargo o pago sin anular. Su precio ya no cambia en una revisión
- * ni se vuelve a preguntar.
+ * vigente o un cargo o pago sin anular, o lo cobrado se devolvió entero (cuenta
+ * como cobrado, ADR 0068). Su precio ya no cambia en una revisión ni se vuelve a
+ * preguntar.
  */
 export async function usedPlanItems(
   tx: Db,
@@ -3350,7 +3352,7 @@ export async function usedPlanItems(
         eq(patientCharge.organizationId, orgId),
         eq(patientCharge.patientId, patientId),
         inArray(patientCharge.planItemId, ids),
-        isNull(patientCharge.voidedAt),
+        or(isNull(patientCharge.voidedAt), wholeReturnedChargeSql(sql.raw('"patient_charge"'))),
       ),
     )
   return new Set(
