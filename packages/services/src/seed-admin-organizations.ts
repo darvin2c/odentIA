@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { accountRecoveryCase } from "@odentia/db/schema/admin-organizations"
 import { invitation, organization } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, desc, eq } from "drizzle-orm"
 import { writeAdminAudit } from "./admin-core.js"
 import { ensureClinicConsents } from "./clinical-forms.js"
@@ -130,6 +131,23 @@ async function seedAssistedSignup(db: Db): Promise<void> {
     Math.min(dayStart("America/Lima", year, month, day).getTime() - 60_000, now + 6 * 3_600_000),
   )
   const dates = { expiresAt, createdAt: new Date(expiresAt.getTime() - 7 * 86_400_000) }
+  // El alta asistida abre la clínica, su prueba y la invitación en el mismo momento
+  // (`createAssistedOrganization`): si la invitación es de hace 7 días, la clínica y su
+  // prueba también, con la duración que les dio la semilla de cobros. Si no, Inicio decía
+  // «invitada el mié 4 nov… la prueba empezó hoy».
+  await db.update(organization).set({ createdAt: dates.createdAt }).where(eq(organization.id, ASSISTED_ORG))
+  const [trial] = await db
+    .select({ startedAt: saasSubscription.trialStartedAt, endsAt: saasSubscription.trialEndsAt })
+    .from(saasSubscription)
+    .where(and(eq(saasSubscription.organizationId, ASSISTED_ORG), eq(saasSubscription.status, "prueba")))
+    .limit(1)
+  if (trial?.startedAt && trial.endsAt) {
+    const length = trial.endsAt.getTime() - trial.startedAt.getTime()
+    await db
+      .update(saasSubscription)
+      .set({ trialStartedAt: dates.createdAt, trialEndsAt: new Date(dates.createdAt.getTime() + length) })
+      .where(eq(saasSubscription.organizationId, ASSISTED_ORG))
+  }
   const [invite] = await db
     .select({ id: invitation.id, status: invitation.status })
     .from(invitation)
