@@ -1814,8 +1814,9 @@ export interface ReceiptUpload {
 }
 
 /**
- * La clínica registra su comprobante: queda `pendiente` de confirmación admin
- * y otorga prórroga acotada (una vez por cargo). Disponible en restricción.
+ * La clínica registra su comprobante: queda `pendiente` de confirmación admin.
+ * Se registra también en restricción, pero la prórroga acotada solo la da en
+ * gracia, con el comprobante que cubre todo el saldo (ver abajo).
  */
 /**
  * Secuencia de bloqueo consistente por cargo (confirm/reverse/refund): lee el
