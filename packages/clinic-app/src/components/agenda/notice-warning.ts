@@ -6,6 +6,8 @@ const warningId = (appointmentId: string) => `aviso-sin-llegar-${appointmentId}`
 /** Lo que dice ahora el aviso fijo de cada cita, y lo que decía antes de su último movimiento. */
 const shown = new Map<string, string>()
 const beforeMove = new Map<string, string | null>()
+/** Las citas a las que, al reservarlas, tampoco les llegaba el recordatorio: moverlas lo sigue diciendo. */
+const reminderToo = new Set<string>()
 
 function show(appointmentId: string, text: string): void {
   shown.set(appointmentId, text)
@@ -25,7 +27,8 @@ function show(appointmentId: string, text: string): void {
  */
 export function warnUnsentNotice(appointment: Pick<AgendaAppointment, "id" | "notice" | "patientName">, about: NoticeChange): void {
   if (about.change === "movida") beforeMove.set(appointment.id, shown.get(appointment.id) ?? null)
-  const text = noticeWarning(appointment, about)
+  if (about.reminderToo) reminderToo.add(appointment.id)
+  const text = noticeWarning(appointment, { ...about, reminderToo: about.reminderToo || reminderToo.has(appointment.id) })
   if (text) show(appointment.id, text)
 }
 
