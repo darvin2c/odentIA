@@ -255,7 +255,7 @@ async function grantsSeenByClinic(tx: Db, orgId: string, rows: (typeof supportAc
         join patient p on p.organization_id = l.organization_id and p.id = l.patient_id
         join contact c on c.organization_id = p.organization_id and c.id = p.person_id
         where l.organization_id = ${orgId} and l.user_id = ${row.staffUserId}
-          and l.first_at >= ${row.createdAt} and l.first_at <= ${until}
+          and l.first_at >= ${row.createdAt.toISOString()}::timestamptz and l.first_at <= ${until.toISOString()}::timestamptz
         order by l.first_at asc
         limit 200
       `)
