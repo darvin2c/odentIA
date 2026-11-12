@@ -30,7 +30,10 @@ export async function loadSupportSession(
   fetchOptions?: { headers?: Record<string, string> },
 ): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode } | null> {
   try {
-    const { data } = await apiFetch<{ data: SupportMe }>("/api/support-session/me", fetchOptions?.headers ? { headers: fetchOptions.headers } : undefined)
+    const { data } = await apiFetch<{ data: SupportMe }>(
+      "/api/support-session/me",
+      fetchOptions?.headers ? { headers: fetchOptions.headers } : undefined,
+    )
     if (data.organization.slug !== slug) return null
     const org = {
       id: data.organization.id,
@@ -54,7 +57,13 @@ export async function loadSupportSession(
       invitations: [],
     } as unknown as FullOrganization
     return {
-      session: { userId: data.staffUserId, email: "", name: data.staffName, image: null, emailVerified: true },
+      session: {
+        userId: data.staffUserId,
+        email: "",
+        name: data.staffName,
+        image: null,
+        emailVerified: true,
+      },
       org,
       support: {
         staffName: data.staffName,
@@ -86,13 +95,25 @@ export async function endSupportSession(): Promise<void> {
 }
 
 /** Por qué terminó el acceso: quién lo quitó, si venció o si salió. */
-export async function supportEnding(): Promise<{ at: string; reason: string; byName: string | null } | null> {
+export async function supportEnding(): Promise<{
+  at: string
+  reason: string
+  byName: string | null
+} | null> {
   const response = await fetch(`${API_URL}/api/support-session/ended`, { credentials: "include" })
   if (!response.ok) return null
-  return ((await response.json()) as { data: { at: string; reason: string; byName: string | null } | null }).data
+  return (
+    (await response.json()) as {
+      data: { at: string; reason: string; byName: string | null } | null
+    }
+  ).data
 }
 
 /** Con soporte mirando, ningún permiso de escritura: la pantalla no ofrece cambiar nada. */
 export function supportCan(permission: string): boolean {
-  return !permission.endsWith(".write") && !permission.endsWith(".decide") && !permission.endsWith(".send")
+  return (
+    !permission.endsWith(".write") &&
+    !permission.endsWith(".decide") &&
+    !permission.endsWith(".send")
+  )
 }

@@ -2,7 +2,12 @@ import { createHash, randomBytes } from "node:crypto"
 import { type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { supportAccessAudit, supportAccessGrant, supportAccessSession, supportCase } from "@odentia/db/schema/admin-support"
+import {
+  supportAccessAudit,
+  supportAccessGrant,
+  supportAccessSession,
+  supportCase,
+} from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, gt, isNull } from "drizzle-orm"
@@ -40,8 +45,16 @@ async function granterStillAllowed(db: Db, grant: Grant): Promise<boolean> {
  * El permiso, si sigue valiendo ahora. Si quien lo dio ya no puede darlo, se
  * cierra en ese momento y no vale; si venció, no vale.
  */
-export async function validSupportGrant(db: Db, grantId: string, now: Date = new Date()): Promise<Grant | null> {
-  const [grant] = await db.select().from(supportAccessGrant).where(eq(supportAccessGrant.id, grantId)).limit(1)
+export async function validSupportGrant(
+  db: Db,
+  grantId: string,
+  now: Date = new Date(),
+): Promise<Grant | null> {
+  const [grant] = await db
+    .select()
+    .from(supportAccessGrant)
+    .where(eq(supportAccessGrant.id, grantId))
+    .limit(1)
   if (!grant || grant.revokedAt !== null || grant.expiresAt.getTime() <= now.getTime()) return null
   if (!(await granterStillAllowed(db, grant))) {
     await db
@@ -58,11 +71,22 @@ export async function validSupportGrant(db: Db, grantId: string, now: Date = new
  * clínica lo dio sin pedido) pasa a ser de quien lo usa primero; el de otra
  * persona no sirve.
  */
-export async function claimSupportGrant(db: Db, actor: AdminActor, caseId: string, now: Date = new Date()): Promise<Grant | null> {
+export async function claimSupportGrant(
+  db: Db,
+  actor: AdminActor,
+  caseId: string,
+  now: Date = new Date(),
+): Promise<Grant | null> {
   const [open] = await db
     .select()
     .from(supportAccessGrant)
-    .where(and(eq(supportAccessGrant.caseId, caseId), isNull(supportAccessGrant.revokedAt), gt(supportAccessGrant.expiresAt, now)))
+    .where(
+      and(
+        eq(supportAccessGrant.caseId, caseId),
+        isNull(supportAccessGrant.revokedAt),
+        gt(supportAccessGrant.expiresAt, now),
+      ),
+    )
     .orderBy(desc(supportAccessGrant.createdAt))
     .limit(1)
   if (!open) return null
@@ -75,7 +99,11 @@ export async function claimSupportGrant(db: Db, actor: AdminActor, caseId: strin
       .where(and(eq(supportAccessGrant.id, grant.id), isNull(supportAccessGrant.staffUserId)))
       .returning()
     if (claimed) return claimed
-    const [again] = await db.select().from(supportAccessGrant).where(eq(supportAccessGrant.id, grant.id)).limit(1)
+    const [again] = await db
+      .select()
+      .from(supportAccessGrant)
+      .where(eq(supportAccessGrant.id, grant.id))
+      .limit(1)
     return again?.staffUserId === actor.userId ? again : null
   }
   return grant.staffUserId === actor.userId ? grant : null
@@ -103,7 +131,11 @@ export async function createSupportPass(
       staffUserId: actor.userId,
       action: "denegado_pase",
     })
-    throw new ServiceError("FORBIDDEN", 403, "Sin un acceso vigente para mirar la clínica dado a ti: pídelo a la clínica")
+    throw new ServiceError(
+      "FORBIDDEN",
+      403,
+      "Sin un acceso vigente para mirar la clínica dado a ti: pídelo a la clínica",
+    )
   }
   const token = newToken()
   await db.insert(supportAccessSession).values({
@@ -120,7 +152,11 @@ export async function createSupportPass(
     staffUserId: actor.userId,
     action: "pase",
   })
-  await writeAdminAudit(db, actor, { action: "support.access.pass", organizationId: grant.organizationId, entityId: caseId })
+  await writeAdminAudit(db, actor, {
+    action: "support.access.pass",
+    organizationId: grant.organizationId,
+    entityId: caseId,
+  })
   const [org] = await db
     .select({ slug: organization.slug, product: orgProfile.product })
     .from(organization)
@@ -146,7 +182,8 @@ export async function redeemSupportPass(
   pass: string,
   now: Date = new Date(),
 ): Promise<{ sessionToken: string; expiresAt: Date; organizationId: string }> {
-  const denied = () => new ServiceError("FORBIDDEN", 403, "El pase no sirve: pide otro desde la administración")
+  const denied = () =>
+    new ServiceError("FORBIDDEN", 403, "El pase no sirve: pide otro desde la administración")
   if (typeof pass !== "string" || pass.length < 20 || pass.length > 200) throw denied()
   const sessionToken = newToken()
   // Marcar el canje y comprobarlo es una sola escritura: dos canjes a la vez, uno gana.
@@ -164,7 +201,10 @@ export async function redeemSupportPass(
   if (!row) throw denied()
   const grant = await validSupportGrant(db, row.grantId, now)
   if (!grant || grant.scope !== "rol" || grant.staffUserId !== row.staffUserId) {
-    await db.update(supportAccessSession).set({ endedAt: now }).where(eq(supportAccessSession.id, row.id))
+    await db
+      .update(supportAccessSession)
+      .set({ endedAt: now })
+      .where(eq(supportAccessSession.id, row.id))
     throw denied()
   }
   await db.insert(supportAccessAudit).values({
@@ -190,17 +230,33 @@ export interface SupportSessionContext {
 }
 
 /** La sesión del token, si sigue valiendo: sin terminar y con su permiso vigente. */
-export async function resolveSupportSession(db: Db, sessionToken: string, now: Date = new Date()): Promise<SupportSessionContext | null> {
-  if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200) return null
+export async function resolveSupportSession(
+  db: Db,
+  sessionToken: string,
+  now: Date = new Date(),
+): Promise<SupportSessionContext | null> {
+  if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200)
+    return null
   const [row] = await db
     .select({ session: supportAccessSession, staffName: user.name })
     .from(supportAccessSession)
     .innerJoin(user, eq(user.id, supportAccessSession.staffUserId))
-    .where(and(eq(supportAccessSession.sessionHash, hashOf(sessionToken)), isNull(supportAccessSession.endedAt)))
+    .where(
+      and(
+        eq(supportAccessSession.sessionHash, hashOf(sessionToken)),
+        isNull(supportAccessSession.endedAt),
+      ),
+    )
     .limit(1)
   if (!row) return null
   const grant = await validSupportGrant(db, row.session.grantId, now)
-  if (!grant || grant.scope !== "rol" || !grant.viewRole || grant.staffUserId !== row.session.staffUserId) return null
+  if (
+    !grant ||
+    grant.scope !== "rol" ||
+    !grant.viewRole ||
+    grant.staffUserId !== row.session.staffUserId
+  )
+    return null
   return {
     sessionId: row.session.id,
     grantId: grant.id,
@@ -214,12 +270,22 @@ export async function resolveSupportSession(db: Db, sessionToken: string, now: D
 }
 
 /** «Salir»: la sesión termina aunque el permiso siga vigente. */
-export async function endSupportSession(db: Db, sessionToken: string, now: Date = new Date()): Promise<void> {
-  if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200) return
+export async function endSupportSession(
+  db: Db,
+  sessionToken: string,
+  now: Date = new Date(),
+): Promise<void> {
+  if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200)
+    return
   await db
     .update(supportAccessSession)
     .set({ endedAt: now })
-    .where(and(eq(supportAccessSession.sessionHash, hashOf(sessionToken)), isNull(supportAccessSession.endedAt)))
+    .where(
+      and(
+        eq(supportAccessSession.sessionHash, hashOf(sessionToken)),
+        isNull(supportAccessSession.endedAt),
+      ),
+    )
 }
 
 /** Por qué terminó el acceso de una sesión, para «El acceso terminó». */
@@ -227,7 +293,8 @@ export async function supportSessionEnding(
   db: Db,
   sessionToken: string,
 ): Promise<{ at: string; reason: string; byName: string | null } | null> {
-  if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200) return null
+  if (typeof sessionToken !== "string" || sessionToken.length < 20 || sessionToken.length > 200)
+    return null
   const [row] = await db
     .select({ grant: supportAccessGrant, endedAt: supportAccessSession.endedAt })
     .from(supportAccessSession)
@@ -236,8 +303,15 @@ export async function supportSessionEnding(
     .limit(1)
   if (!row) return null
   const { grant } = row
-  const [by] = grant.revokedBy ? await db.select({ name: user.name }).from(user).where(eq(user.id, grant.revokedBy)).limit(1) : []
-  if (grant.revokedAt) return { at: grant.revokedAt.toISOString(), reason: grant.endReason ?? "quitado", byName: by?.name ?? null }
+  const [by] = grant.revokedBy
+    ? await db.select({ name: user.name }).from(user).where(eq(user.id, grant.revokedBy)).limit(1)
+    : []
+  if (grant.revokedAt)
+    return {
+      at: grant.revokedAt.toISOString(),
+      reason: grant.endReason ?? "quitado",
+      byName: by?.name ?? null,
+    }
   if (row.endedAt) return { at: row.endedAt.toISOString(), reason: "salio", byName: null }
   return { at: grant.expiresAt.toISOString(), reason: "vencido", byName: null }
 }

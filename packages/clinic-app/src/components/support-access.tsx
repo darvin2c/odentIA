@@ -1,6 +1,11 @@
 import { type OrgRole, PRODUCT_ROLES, roleLabel } from "@odentia/auth/permissions"
 import { Button } from "@odentia/ui"
-import { submitErrorMessage, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import {
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -38,7 +43,13 @@ export function supportViewOptions(): { value: string; label: string }[] {
   const roles = PRODUCT_ROLES[product].filter((role) => role !== "owner" && role !== "member")
   return [
     { value: CONFIG, label: "Solo la configuración (ningún paciente)" },
-    ...roles.map((role) => ({ value: role, label: role === "admin" ? `${roleLabel(role, product)} (toda la clínica)` : roleLabel(role, product) })),
+    ...roles.map((role) => ({
+      value: role,
+      label:
+        role === "admin"
+          ? `${roleLabel(role, product)} (toda la clínica)`
+          : roleLabel(role, product),
+    })),
   ]
 }
 
@@ -100,7 +111,13 @@ export function SupportAccessForm({
   return (
     <form noValidate onSubmit={onFormSubmit} className="flex flex-col gap-3">
       <form.AppField name="view">
-        {(field) => <field.RadioGroupField legend="¿Con qué rol mira soporte?" id={`${id}-rol`} options={supportViewOptions()} />}
+        {(field) => (
+          <field.RadioGroupField
+            legend="¿Con qué rol mira soporte?"
+            id={`${id}-rol`}
+            options={supportViewOptions()}
+          />
+        )}
       </form.AppField>
       <p className="text-sm text-muted-foreground">
         {view === CONFIG
@@ -109,19 +126,36 @@ export function SupportAccessForm({
       </p>
       {askReason ? (
         <form.AppField name="reason">
-          {(field) => <field.TextField id={`${id}-para-que`} label="¿Qué quieres que revisen? (opcional)" maxLength={500} />}
+          {(field) => (
+            <field.TextField
+              id={`${id}-para-que`}
+              label="¿Qué quieres que revisen? (opcional)"
+              maxLength={500}
+            />
+          )}
         </form.AppField>
       ) : null}
       <div className="flex flex-wrap items-end gap-2">
         <form.AppField name="minutes">
           {(field) => (
-            <field.SelectField label="¿Por cuánto tiempo?" id={`${id}-minutos`} className="w-auto" triggerClassName="w-40" options={MINUTES} />
+            <field.SelectField
+              label="¿Por cuánto tiempo?"
+              id={`${id}-minutos`}
+              className="w-auto"
+              triggerClassName="w-40"
+              options={MINUTES}
+            />
           )}
         </form.AppField>
         <span className="pb-2 text-sm text-muted-foreground">hasta las {untilWords(until)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" className="min-h-11 sm:min-h-9" disabled={submitting} aria-busy={submitting}>
+        <Button
+          type="submit"
+          className="min-h-11 sm:min-h-9"
+          disabled={submitting}
+          aria-busy={submitting}
+        >
           Dar acceso por {label}
         </Button>
         {onCancel ? (
@@ -161,7 +195,10 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
   const give = useMutation({
     retry: false,
     mutationFn: (values: SupportAccessValues) =>
-      apiFetch<{ data: GivenGrant }>("/api/help/support-access", { method: "POST", body: JSON.stringify({ ...values, screen }) }),
+      apiFetch<{ data: GivenGrant }>("/api/help/support-access", {
+        method: "POST",
+        body: JSON.stringify({ ...values, screen }),
+      }),
     onSuccess: (body) => {
       setGiven(body.data)
       refresh()
@@ -170,7 +207,10 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
   const revoke = useMutation({
     retry: false,
     mutationFn: (current: GivenGrant) =>
-      apiFetch(`/api/help/cases/${current.caseId}/grants/revoke`, { method: "POST", body: JSON.stringify({ grantId: current.grant.id }) }),
+      apiFetch(`/api/help/cases/${current.caseId}/grants/revoke`, {
+        method: "POST",
+        body: JSON.stringify({ grantId: current.grant.id }),
+      }),
     onSuccess: () => {
       setGiven(null)
       refresh()
@@ -178,19 +218,30 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
   })
   return (
     <section aria-labelledby="dar-acceso-titulo" className="flex flex-col gap-3">
-      <Button type="button" variant="link" className="h-auto self-start p-0 text-sm" onClick={onClose}>
+      <Button
+        type="button"
+        variant="link"
+        className="h-auto self-start p-0 text-sm"
+        onClick={onClose}
+      >
         ← Volver a Ayuda
       </Button>
       <div>
         <h3 id="dar-acceso-titulo" tabIndex={-1} className="text-base font-bold">
           Dar acceso a soporte de {appWords().name}
         </h3>
-        <p className="text-sm text-muted-foreground">Soporte solo mira: no puede cambiar nada. Lo quitas cuando quieras.</p>
+        <p className="text-sm text-muted-foreground">
+          Soporte solo mira: no puede cambiar nada. Lo quitas cuando quieras.
+        </p>
       </div>
       {given ? (
-        <div role="status" className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary-soft px-3 py-2.5 text-sm">
+        <div
+          role="status"
+          className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary-soft px-3 py-2.5 text-sm"
+        >
           <p>
-            Listo. Soporte puede mirar {supportViewWords(given.grant.viewRole)} hasta las {untilWords(given.grant.expiresAt)}.
+            Listo. Soporte puede mirar {supportViewWords(given.grant.viewRole)} hasta las{" "}
+            {untilWords(given.grant.expiresAt)}.
           </p>
           <Button
             type="button"
@@ -209,9 +260,15 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
           ) : null}
         </div>
       ) : (
-        <SupportAccessForm id="dar-acceso" onSubmit={(values) => give.mutateAsync(values)} onCancel={onClose} />
+        <SupportAccessForm
+          id="dar-acceso"
+          onSubmit={(values) => give.mutateAsync(values)}
+          onCancel={onClose}
+        />
       )}
-      <p className="text-xs text-muted-foreground">Queda anotado quién lo dio y qué miró soporte: lo ves en «Tus casos con soporte».</p>
+      <p className="text-xs text-muted-foreground">
+        Queda anotado quién lo dio y qué miró soporte: lo ves en «Tus casos con soporte».
+      </p>
     </section>
   )
 }
@@ -270,24 +327,30 @@ export function SupportGrantHistory({ grants }: { grants: ClinicGrant[] }) {
         return (
           <li key={grant.id} className="flex flex-col gap-1 rounded-xl bg-muted/60 px-3 py-2">
             <span>
-              {untilWords(grant.createdAt)} · {nameOf(grant.grantedBy)} dio acceso a soporte para mirar {supportViewWords(grant.viewRole)} hasta las{" "}
-              {untilWords(grant.expiresAt)}.
+              {untilWords(grant.createdAt)} · {nameOf(grant.grantedBy)} dio acceso a soporte para
+              mirar {supportViewWords(grant.viewRole)} hasta las {untilWords(grant.expiresAt)}.
             </span>
             {ended ? (
               <span>
                 {untilWords(ended)} · El acceso terminó:{" "}
-                {grant.endReason === "quitado" && grant.revokedBy ? `lo quitó ${nameOf(grant.revokedBy)}` : (END_WORDS[grant.endReason ?? "vencido"] ?? "terminó")}.
+                {grant.endReason === "quitado" && grant.revokedBy
+                  ? `lo quitó ${nameOf(grant.revokedBy)}`
+                  : (END_WORDS[grant.endReason ?? "vencido"] ?? "terminó")}
+                .
               </span>
             ) : null}
             {grant.reads.length > 0 ? (
               <details>
                 <summary className="cursor-pointer">
-                  {grant.staffName ?? "Soporte"} miró {people === 1 ? "la ficha de 1 persona" : `las fichas de ${people} personas`}. Ver cuáles
+                  {grant.staffName ?? "Soporte"} miró{" "}
+                  {people === 1 ? "la ficha de 1 persona" : `las fichas de ${people} personas`}. Ver
+                  cuáles
                 </summary>
                 <ul className="mt-1 flex flex-col gap-0.5 text-muted-foreground">
                   {grant.reads.map((read) => (
                     <li key={`${read.patientName}-${read.resource}-${read.at}`}>
-                      {read.patientName} · {RESOURCE_WORDS[read.resource] ?? read.resource} · {untilWords(read.at)}
+                      {read.patientName} · {RESOURCE_WORDS[read.resource] ?? read.resource} ·{" "}
+                      {untilWords(read.at)}
                     </li>
                   ))}
                 </ul>

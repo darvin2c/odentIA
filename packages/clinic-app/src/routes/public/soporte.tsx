@@ -10,7 +10,8 @@ import { redeemSupportPass, supportEnding } from "../../lib/support-mode"
  * servidor ni queda en registros; se canjea una vez por la sesión de solo mirar.
  */
 export const Route = createFileRoute("/soporte")({
-  validateSearch: (search: Record<string, unknown>): { terminado?: 1 } => (search["terminado"] ? { terminado: 1 } : {}),
+  validateSearch: (search: Record<string, unknown>): { terminado?: 1 } =>
+    search["terminado"] ? { terminado: 1 } : {},
   head: () => ({ meta: [{ title: "Soporte de odentIA" }, { name: "robots", content: "noindex" }] }),
   component: SupportEntryPage,
 })
@@ -26,8 +27,14 @@ const REASONS: Record<string, string> = {
 
 function SupportEntryPage() {
   const { terminado } = Route.useSearch()
-  const [state, setState] = useState<"entrando" | "fallo" | "terminado">(terminado ? "terminado" : "entrando")
-  const [ending, setEnding] = useState<{ at: string; reason: string; byName: string | null } | null>(null)
+  const [state, setState] = useState<"entrando" | "fallo" | "terminado">(
+    terminado ? "terminado" : "entrando",
+  )
+  const [ending, setEnding] = useState<{
+    at: string
+    reason: string
+    byName: string | null
+  } | null>(null)
   const started = useRef(false)
 
   useEffect(() => {
@@ -51,10 +58,13 @@ function SupportEntryPage() {
   useEffect(() => {
     if (state !== "terminado") return
     orgChecks.access = null
-    void supportEnding().then(setEnding).catch(() => undefined)
+    void supportEnding()
+      .then(setEnding)
+      .catch(() => undefined)
   }, [state])
 
-  const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  const time = (iso: string) =>
+    new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-4">
@@ -66,7 +76,8 @@ function SupportEntryPage() {
         <>
           <h1 className="text-xl font-semibold">El pase no sirve</h1>
           <p className="text-muted-foreground">
-            Un pase sirve una sola vez y dura un minuto. Pide otro desde el caso en la administración.
+            Un pase sirve una sola vez y dura un minuto. Pide otro desde el caso en la
+            administración.
           </p>
         </>
       ) : (

@@ -619,7 +619,18 @@ export function createApp(deps: AppDeps) {
 
   // Rutas de usuario (sin contexto de organización).
   const userScoped = new Hono()
-  userScoped.use("*", requireSession(deps))
+  // Este `use("*")` corre en todo /api/*. Con la cookie de soporte no hay sesión de la
+  // clínica: soporte sigue a las rutas de la clínica (con sus frenos) o a nada.
+  userScoped.use("*", async (c, next) => {
+    const support = await supportSessionGate(c, deps.ownerDb)
+    if (support) return support
+    if (support === null) {
+      if (c.req.method !== "GET" && c.req.method !== "HEAD")
+        return c.json(errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"), 403)
+      return next()
+    }
+    return requireSession(deps)(c, next)
+  })
 
   const AVATAR_MIME: Record<string, string> = {
     "image/png": "png",

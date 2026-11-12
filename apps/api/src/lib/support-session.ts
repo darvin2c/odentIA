@@ -52,11 +52,16 @@ function cookieOf(c: Context): string | null {
  * de una persona de soporte que además es miembro de alguna clínica).
  * `undefined`: no hay cookie de soporte, sigue el camino de siempre.
  */
-export async function supportSessionGate(c: Context, ownerDb: Db): Promise<Response | null | undefined> {
+export async function supportSessionGate(
+  c: Context,
+  ownerDb: Db,
+): Promise<Response | null | undefined> {
+  if (supportSessionOf(c)) return null
   const token = cookieOf(c)
   if (!token) return undefined
   const session = await resolveSupportSession(ownerDb, token)
-  if (!session) return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
+  if (!session)
+    return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
   c.set("supportSession", session)
   c.set("userId", session.staffUserId)
   c.set("userImage", null)
@@ -66,10 +71,18 @@ export async function supportSessionGate(c: Context, ownerDb: Db): Promise<Respo
 }
 
 /** El contexto de organización de soporte: la clínica del permiso, con el rol de lectura elegido. */
-export async function supportOrgContext(c: Context, db: Db, session: SupportSessionContext): Promise<Response | null> {
+export async function supportOrgContext(
+  c: Context,
+  db: Db,
+  session: SupportSessionContext,
+): Promise<Response | null> {
   const slug = c.req.header("x-odentia-org") ?? c.req.query("org") ?? null
   if (slug) {
-    const [org] = await db.select({ id: organization.id }).from(organization).where(eq(organization.slug, slug)).limit(1)
+    const [org] = await db
+      .select({ id: organization.id })
+      .from(organization)
+      .where(eq(organization.slug, slug))
+      .limit(1)
     if (!org || org.id !== session.organizationId)
       return c.json(errorBody(c, "FORBIDDEN", "Este acceso de soporte es de otra clínica"), 403)
   }
@@ -79,7 +92,14 @@ export async function supportOrgContext(c: Context, db: Db, session: SupportSess
 }
 
 /** Lo que se descarga en vez de verse: soporte no se lleva nada. */
-const DOWNLOAD_TYPES = ["application/pdf", "text/csv", "application/zip", "application/vnd.", "application/octet-stream", "application/dicom"]
+const DOWNLOAD_TYPES = [
+  "application/pdf",
+  "text/csv",
+  "application/zip",
+  "application/vnd.",
+  "application/octet-stream",
+  "application/dicom",
+]
 function isDownload(response: Response): boolean {
   const disposition = response.headers.get("content-disposition") ?? ""
   if (/attachment/i.test(disposition)) return true
@@ -90,14 +110,18 @@ function isDownload(response: Response): boolean {
 /** El origen público de esta API, para nombrar los archivos de soporte. */
 function apiOriginOf(c: Context): string {
   const url = new URL(c.req.url)
-  const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.replace(":", "")
-  const host = c.req.header("x-forwarded-host")?.split(",")[0]?.trim() || c.req.header("host") || url.host
+  const proto =
+    c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.replace(":", "")
+  const host =
+    c.req.header("x-forwarded-host")?.split(",")[0]?.trim() || c.req.header("host") || url.host
   return `${proto}://${host}`
 }
 
 /** Firma de la dirección de un archivo para una sesión: vence con un minuto. */
 function signFile(secret: Buffer, sessionId: string, objectKey: string, expires: number): string {
-  const payload = Buffer.from(JSON.stringify({ s: sessionId, k: objectKey, e: expires })).toString("base64url")
+  const payload = Buffer.from(JSON.stringify({ s: sessionId, k: objectKey, e: expires })).toString(
+    "base64url",
+  )
   const mac = createHmac("sha256", secret).update(payload).digest("base64url")
   return `${payload}.${mac}`
 }
@@ -109,8 +133,17 @@ function readFileToken(secret: Buffer, token: string): { s: string; k: string; e
   const given = Buffer.from(mac, "base64url")
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { s?: unknown; k?: unknown; e?: unknown }
-    if (typeof parsed.s !== "string" || typeof parsed.k !== "string" || typeof parsed.e !== "number") return null
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      s?: unknown
+      k?: unknown
+      e?: unknown
+    }
+    if (
+      typeof parsed.s !== "string" ||
+      typeof parsed.k !== "string" ||
+      typeof parsed.e !== "number"
+    )
+      return null
     return { s: parsed.s, k: parsed.k, e: parsed.e }
   } catch {
     return null
@@ -127,13 +160,19 @@ export function supportGuard(secret: Buffer) {
     const session = supportSessionOf(c)
     if (!session) return next()
     if (c.req.method !== "GET" && c.req.method !== "HEAD")
-      return c.json(errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"), 403)
+      return c.json(
+        errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"),
+        403,
+      )
     const origin = apiOriginOf(c)
     const proxy = (objectKey: string) =>
       `${origin}/api/support-session/file?t=${encodeURIComponent(signFile(secret, session.sessionId, objectKey, Date.now() + 60_000))}`
     await runReadOnly(() => runWithFileProxy(proxy, () => next()))
     if (isDownload(c.res)) {
-      c.res = c.json(errorBody(c, "SUPPORT_NO_DOWNLOAD", "Soporte solo mira: no descarga ni imprime"), 403)
+      c.res = c.json(
+        errorBody(c, "SUPPORT_NO_DOWNLOAD", "Soporte solo mira: no descarga ni imprime"),
+        403,
+      )
     }
   }
 }
@@ -170,32 +209,54 @@ export function createSupportSessionRoute(deps: {
 
   app.post("/redeem", async (c) => {
     const origin = c.req.header("origin") ?? ""
-    if (!deps.isClinicOrigin(origin)) return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
+    if (!deps.isClinicOrigin(origin))
+      return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
     const body = (await c.req.json().catch(() => null)) as { pass?: unknown } | null
     try {
-      const redeemed = await redeemSupportPass(deps.ownerDb, typeof body?.pass === "string" ? body.pass : "")
+      const redeemed = await redeemSupportPass(
+        deps.ownerDb,
+        typeof body?.pass === "string" ? body.pass : "",
+      )
       setCookie(c, redeemed.sessionToken, (redeemed.expiresAt.getTime() - Date.now()) / 1000)
       return c.json({ data: { expiresAt: redeemed.expiresAt.toISOString() } })
     } catch {
-      return c.json(errorBody(c, "SUPPORT_PASS_INVALID", "El pase no sirve: pide otro desde la administración"), 403)
+      return c.json(
+        errorBody(c, "SUPPORT_PASS_INVALID", "El pase no sirve: pide otro desde la administración"),
+        403,
+      )
     }
   })
 
   app.get("/me", async (c) => {
     const token = cookieOf(c)
     const session = token ? await resolveSupportSession(deps.ownerDb, token) : null
-    if (!session) return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
+    if (!session)
+      return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
     const [org] = await deps.ownerDb
-      .select({ id: organization.id, name: organization.name, slug: organization.slug, logo: organization.logo, product: orgProfile.product })
+      .select({
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        logo: organization.logo,
+        product: orgProfile.product,
+      })
       .from(organization)
       .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id))
       .where(eq(organization.id, session.organizationId))
       .limit(1)
-    if (!org) return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
+    if (!org)
+      return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
     const product = isClinicalProduct(org.product) ? org.product : "dental"
     // El equipo, como lo ve cualquiera de la clínica (nombres y roles; sin correos).
     const team = await deps.ownerDb
-      .select({ id: member.id, userId: member.userId, role: member.role, createdAt: member.createdAt, name: user.name, image: user.image })
+      .select({
+        id: member.id,
+        userId: member.userId,
+        role: member.role,
+        createdAt: member.createdAt,
+        name: user.name,
+        image: user.image,
+      })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
       .where(eq(member.organizationId, session.organizationId))
@@ -221,7 +282,8 @@ export function createSupportSessionRoute(deps: {
 
   app.post("/end", async (c) => {
     const origin = c.req.header("origin") ?? ""
-    if (!deps.isClinicOrigin(origin)) return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
+    if (!deps.isClinicOrigin(origin))
+      return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
     const token = cookieOf(c)
     if (token) await endSupportSession(deps.ownerDb, token)
     setCookie(c, "", 0)
@@ -243,11 +305,22 @@ export function createSupportSessionRoute(deps: {
     // El archivo tiene que ser de esta clínica: su carpeta la nombra.
     if (!file.k.split("/").includes(session.organizationId))
       return c.json(errorBody(c, "FORBIDDEN", "Archivo de otra clínica"), 403)
-    if (!deps.storage.streamAttachment) return c.json(errorBody(c, "UNAVAILABLE", "No disponible"), 503)
+    if (!deps.storage.streamAttachment)
+      return c.json(errorBody(c, "UNAVAILABLE", "No disponible"), 503)
     const stream = await deps.storage.streamAttachment(file.k)
     const ext = file.k.split(".").at(-1)?.toLowerCase() ?? ""
     const type =
-      ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "application/octet-stream"
+      ext === "pdf"
+        ? "application/pdf"
+        : ext === "png"
+          ? "image/png"
+          : ext === "webp"
+            ? "image/webp"
+            : ext === "gif"
+              ? "image/gif"
+              : ext === "jpg" || ext === "jpeg"
+                ? "image/jpeg"
+                : "application/octet-stream"
     return new Response(stream, {
       headers: {
         "content-type": type,

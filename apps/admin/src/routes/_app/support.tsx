@@ -555,7 +555,7 @@ function SupportPage() {
     <PageShell className="flex flex-col gap-4">
       <PageHeader
         title="Soporte"
-        subtitle="Casos de las clínicas: conversación, responsable y acceso diagnóstico con permiso."
+        subtitle="Casos de las clínicas: conversación, responsable y acceso para mirar con permiso."
       />
 
       <div role="group" aria-label="Vistas de soporte" className="flex flex-wrap gap-2">
